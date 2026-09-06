@@ -5,7 +5,7 @@ import type {
   ModelProvider,
   ProjectSnapshot,
   Validator,
-} from "./types.js";
+} from "./types.ts";
 
 function revisionFor(snapshot: Omit<ProjectSnapshot, "revision">): string {
   const payload = JSON.stringify(snapshot.files);
