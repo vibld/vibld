@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   GenerationRequest,
   GenerationResult,
@@ -10,7 +9,12 @@ import type {
 
 function revisionFor(snapshot: Omit<ProjectSnapshot, "revision">): string {
   const payload = JSON.stringify(snapshot.files);
-  return createHash("sha256").update(payload).digest("hex").slice(0, 16);
+  let hash = 2166136261;
+  for (let index = 0; index < payload.length; index += 1) {
+    hash ^= payload.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `r${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export class GenerationMachine {
