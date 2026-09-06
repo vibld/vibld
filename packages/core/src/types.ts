@@ -1,11 +1,11 @@
 export type GenerationState =
-  | "idle"
-  | "planning"
-  | "staging"
-  | "validating"
-  | "accepted"
-  | "failed"
-  | "cancelled";
+  | 'idle'
+  | 'planning'
+  | 'staging'
+  | 'validating'
+  | 'accepted'
+  | 'failed'
+  | 'cancelled';
 
 export interface ProjectFile {
   path: string;
