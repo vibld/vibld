@@ -19,7 +19,7 @@ test("accepts a validated generated snapshot", async () => {
   assert.equal(result.state, "accepted");
   assert.equal(result.errors.length, 0);
   assert.equal(result.accepted?.files[0]?.path, "src/App.tsx");
-  assert.match(result.accepted?.revision ?? "", /^[a-f0-9]{16}$/);
+  assert.match(result.accepted?.revision ?? "", /^r[a-f0-9]{8}$/);
 });
 
 test("preserves the last accepted checkpoint when a later run fails validation", async () => {
