@@ -5,20 +5,20 @@ import type {
   ModelProvider,
   ProjectSnapshot,
   Validator,
-} from "./types.ts";
+} from './types.ts';
 
-function revisionFor(snapshot: Omit<ProjectSnapshot, "revision">): string {
+function revisionFor(snapshot: Omit<ProjectSnapshot, 'revision'>): string {
   const payload = JSON.stringify(snapshot.files);
   let hash = 2166136261;
   for (let index = 0; index < payload.length; index += 1) {
     hash ^= payload.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return `r${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  return `r${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
 export class GenerationMachine {
-  #state: GenerationState = "idle";
+  #state: GenerationState = 'idle';
   #accepted?: ProjectSnapshot;
   #staged?: ProjectSnapshot;
   #cancelled = false;
@@ -41,7 +41,7 @@ export class GenerationMachine {
     validator: Validator,
   ): Promise<GenerationResult> {
     this.#cancelled = false;
-    this.#state = "planning";
+    this.#state = 'planning';
 
     try {
       const plan = await provider.generate({
@@ -53,7 +53,7 @@ export class GenerationMachine {
         return this.#cancelledResult();
       }
 
-      this.#state = "staging";
+      this.#state = 'staging';
       const files = plan.files.map((file) => ({ ...file }));
       const stagedWithoutRevision = { files };
       this.#staged = {
@@ -65,7 +65,7 @@ export class GenerationMachine {
         return this.#cancelledResult();
       }
 
-      this.#state = "validating";
+      this.#state = 'validating';
       const validation = await validator(structuredClone(this.#staged));
 
       if (this.#cancelled) {
@@ -73,7 +73,7 @@ export class GenerationMachine {
       }
 
       if (!validation.ok) {
-        this.#state = "failed";
+        this.#state = 'failed';
         return {
           state: this.#state,
           accepted: this.accepted,
@@ -83,7 +83,7 @@ export class GenerationMachine {
       }
 
       this.#accepted = structuredClone(this.#staged);
-      this.#state = "accepted";
+      this.#state = 'accepted';
 
       return {
         state: this.#state,
@@ -92,7 +92,7 @@ export class GenerationMachine {
         errors: [],
       };
     } catch (error) {
-      this.#state = "failed";
+      this.#state = 'failed';
       return {
         state: this.#state,
         accepted: this.accepted,
@@ -103,7 +103,7 @@ export class GenerationMachine {
   }
 
   #cancelledResult(): GenerationResult {
-    this.#state = "cancelled";
+    this.#state = 'cancelled';
     return {
       state: this.#state,
       accepted: this.accepted,
