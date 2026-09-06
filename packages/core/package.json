@@ -12,5 +12,8 @@
     "lint": "tsc --noEmit",
     "test": "node --test --experimental-strip-types test/*.test.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
   }
 }
