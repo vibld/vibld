@@ -4,27 +4,29 @@
 
 Vibld is an open-source AI application builder for creating, editing, and shipping real web applications from natural language.
 
-The project is founded on a simple rule: **the application belongs to the user, not to Vibld**. Generated applications should be conventional, portable software projects that keep working without Vibld or Vibld Cloud.
+Generated applications should be conventional, portable software projects that keep working without Vibld or Vibld Cloud. Users can inspect and export the complete project, subject to its third-party license obligations.
 
 ## Status
 
-Vibld is in Phase 0: Foundation. The repository currently captures the product boundary, architecture direction, governance, and workspace conventions. Product implementation begins with M1: Hello Vibld.
+Vibld is in Phase 0: Foundation. This repository contains documentation and workspace configuration, not a runnable builder. M0 quality enforcement remains work to do. The [accepted decisions D1-D30](docs/decisions.md) define an invitation-only, Cloudflare-first hosted alpha for technical founders and small agencies creating marketing sites.
 
 ## The first loop
 
 The MVP will prove one workflow:
 
-> Describe → Plan → Build → Preview → Modify → Git
+> Describe, plan, build, preview, modify, and preserve changes in Git.
 
-The first implementation milestone is intentionally narrower:
+M1: Hello Vibld covers:
 
-> Prompt → generated files → runnable React application → live preview
+> Prompt, prerendered React site, private working preview, bounded repair, saved checkpoint, and portable export.
+
+Hosted identity, tenant isolation, GitHub branches/PRs, repository search, permissions and budgets are part of M1. M2 adds dependable conversational editing. See the [implementation plan](docs/implementation-plan.md) for sequencing and release gates.
 
 ## Principles
 
 - Users own and can export their code.
 - Git is the canonical project history.
-- The open-source core does not require Vibld Cloud.
+- The complete single-user OSS builder must work without Vibld Cloud; its alternate runtime and self-hosting path still need validation.
 - AI, sandbox, database, authentication, and deployment providers are replaceable.
 - Generated code is conventional, readable, and minimally dependent on Vibld.
 - Significant changes are explained before they are applied.
@@ -32,7 +34,7 @@ The first implementation milestone is intentionally narrower:
 - Generated code runs as untrusted code inside an isolated sandbox.
 - Complexity is progressive: approachable by default, inspectable throughout.
 
-See [VIBLD.md](VIBLD.md) for the product and architecture charter and [ROADMAP.md](ROADMAP.md) for milestone scope.
+See [VIBLD.md](VIBLD.md) for the product and architecture charter, [ROADMAP.md](ROADMAP.md) for milestone scope, and the [archived blueprint](docs/archive/README.md) for the original proposal.
 
 ## Repository layout
 
@@ -40,7 +42,7 @@ See [VIBLD.md](VIBLD.md) for the product and architecture charter and [ROADMAP.m
 apps/           Product applications (web and API)
 packages/       Reusable domain and platform packages
 examples/       Generated-app fixtures and demonstrations
-docs/adr/       Architecture decision records
+docs/           Decisions, implementation plan, ADRs and blueprint archive
 infrastructure/ Deployment and runtime configuration
 scripts/        Repository automation
 tests/          Cross-package and end-to-end tests
@@ -56,11 +58,11 @@ Prerequisites:
 - pnpm
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm format:check
 ```
 
-Build, lint, type-check, and test commands are wired through Turborepo. They become meaningful as workspaces are introduced.
+Build, lint, type-check, and test commands are wired through Turborepo, but currently run no workspace tasks. A green `pnpm check` is not product validation. [Issue #2](https://github.com/vibld/vibld/issues/2) tracks enforced checks before feature code.
 
 ## Contributing
 
@@ -68,4 +70,4 @@ Vibld is early and its interfaces will change. Read [CONTRIBUTING.md](CONTRIBUTI
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+The core is licensed under Apache-2.0. See [LICENSE](LICENSE). Future reusable starter-template source will carry an explicit MIT license at its own boundary; this does not relicense existing core files. See [ADR-0008](docs/adr/0008-portable-marketing-site-template.md).

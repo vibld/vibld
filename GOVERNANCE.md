@@ -8,13 +8,17 @@ Vibld is currently founder-led and uses a maintainer model appropriate for an ea
 - **Maintainers** review changes, manage releases, triage security reports, and steward project direction.
 - **Lead maintainers** resolve deadlocks and make final calls when consensus is not practical.
 
-Roles are earned through sustained, constructive participation. Maintainers may nominate contributors for additional responsibility. The maintainer roster will be published when the project has multiple active maintainers.
+Current lead maintainer: [Chris Brock (@cbrock84)](https://github.com/cbrock84). The project is founder-led. Additional maintainers may be appointed through a documented nomination and acceptance.
 
 ## Decision making
 
 Routine decisions happen through issues and pull requests. Maintainers seek rough consensus and favor reversible experiments when evidence is incomplete.
 
+Changes use pull requests and require human maintainer review before merge. Coding agents may propose changes and run checks but do not approve their own work or merge without human authorization. No coding-agent vendor is a permanent architectural dependency. Repository enforcement of these rules is tracked in [issue #2](https://github.com/vibld/vibld/issues/2); policy text alone does not mean protection is configured.
+
 Decisions that materially affect portability, security, public contracts, package boundaries, licensing, governance, or provider independence require an architecture decision record. The lead maintainers make a final decision only after the alternatives and objections have been documented.
+
+The initial [decision register](docs/decisions.md) records founder-approved D1-D30. Keep it synchronized with new ADRs and milestone changes. Contributors certify the [Developer Certificate of Origin](https://developercertificate.org/) with commit sign-off; the project does not require copyright assignment. Basic review and security duties apply now. Extensive community processes and brand work can wait until the product works.
 
 ## Project commitments
 
