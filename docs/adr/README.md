@@ -16,3 +16,9 @@ ADRs record consequential decisions and the reasoning behind them. They compleme
 - [ADR-0002: Preserve generated-application portability](0002-portable-generated-applications.md)
 - [ADR-0003: Use provider adapters at external boundaries](0003-provider-adapter-boundaries.md)
 - [ADR-0004: Execute generated code as untrusted](0004-untrusted-sandbox-execution.md)
+- [ADR-0005: Cloudflare-first hosted platform](0005-cloudflare-hosted-platform.md)
+- [ADR-0006: Scoped authority and broker-first credentials](0006-permissions-credentials-and-previews.md)
+- [ADR-0007: Durable generation, staged changes and revision-scoped context](0007-durable-generation-and-repository-context.md)
+- [ADR-0008: Prerendered marketing sites as the first generated project](0008-portable-marketing-site-template.md)
+
+ADRs 0001-0004 remain unchanged. ADRs 0005-0008 record the founder's accepted [D1-D30 choices](../decisions.md); acceptance of architecture is separate from implementation status and review of the documentation PR. The archived blueprint's suggested ADR filenames were proposals, not assigned numbers.

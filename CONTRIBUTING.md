@@ -13,11 +13,11 @@ Thank you for helping build Vibld. The project is in an early architectural stag
 Install Node.js 22 or newer and pnpm, then run:
 
 ```bash
-pnpm install
-pnpm check
+pnpm install --frozen-lockfile
+pnpm format:check
 ```
 
-Some commands are intentionally no-ops until the first application packages land.
+Root build/lint/typecheck/test/check commands currently run no workspace tasks. They are not evidence of product correctness. M0 [issue #2](https://github.com/vibld/vibld/issues/2) tracks meaningful, enforced checks before feature code. Use the pnpm version pinned in `package.json`.
 
 ## Working agreements
 
@@ -33,6 +33,10 @@ Some commands are intentionally no-ops until the first application packages land
 
 Use clear imperative commit subjects. Pull requests should explain the problem, the chosen approach, validation performed, and any follow-up work. Link the relevant issue and ADR where applicable.
 
+Sign off each contribution under the [Developer Certificate of Origin 1.1](https://developercertificate.org/), using `git commit -s` with an identity you are authorized to use. Sign-off certifies your right to contribute under the applicable license; it does not assign your copyright. Review generated or AI-assisted contributions for correctness, provenance and license compatibility before certifying them.
+
+A human maintainer reviews changes before merge. Agents must not approve their own changes or merge without human authorization.
+
 Maintainers may ask that a broad contribution be split into smaller changes. Early alignment is encouraged for architectural work.
 
 ## Architecture decisions
@@ -45,4 +49,4 @@ Be respectful, specific, and generous in technical discussion. A formal code of 
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the Apache License 2.0.
+Contributions use the license of their destination: Apache-2.0 for core, or the explicit license of a separately licensed component. The accepted policy for future reusable starter-template source is MIT; preserve its notices and those of dependencies. See [ADR-0008](docs/adr/0008-portable-marketing-site-template.md). Do not relicense copied core code as template code.
