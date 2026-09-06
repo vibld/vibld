@@ -1,5 +1,5 @@
-export { FakeModelProvider } from "./fake-provider.js";
-export { GenerationMachine } from "./generation-machine.js";
+export { FakeModelProvider } from "./fake-provider.ts";
+export { GenerationMachine } from "./generation-machine.ts";
 export type {
   GenerationPlan,
   GenerationRequest,
@@ -10,4 +10,4 @@ export type {
   ProjectSnapshot,
   ValidationResult,
   Validator,
-} from "./types.js";
+} from "./types.ts";
