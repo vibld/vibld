@@ -1,4 +1,4 @@
-import type { GenerationPlan, GenerationRequest, ModelProvider } from "./types.js";
+import type { GenerationPlan, GenerationRequest, ModelProvider } from "./types.ts";
 
 export class FakeModelProvider implements ModelProvider {
   readonly id = "fake";
