@@ -10,14 +10,14 @@ Thank you for helping build Vibld. The project is in an early architectural stag
 
 ## Development setup
 
-Install Node.js 22 or newer and pnpm, then run:
+Install Node.js 24.20.0 from `.node-version` and pnpm 11.15.0 from `package.json`, then run:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm format:check
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm ci:check
 ```
 
-Root build/lint/typecheck/test/check commands currently run no workspace tasks. They are not evidence of product correctness. M0 [issue #2](https://github.com/vibld/vibld/issues/2) tracks meaningful, enforced checks before feature code. Use the pnpm version pinned in `package.json`.
+Root lint, typecheck and test commands validate the repository tooling now. Product tasks run through Turborepo when workspaces exist. A new directory under `apps/`, `packages/` or `examples/` must contain a named package with lint, typecheck, test and build scripts. Keep shared test fixtures in `tests/`. See [repository checks](docs/repository-checks.md). Review and explicitly allow any required dependency install scripts before changing the CI install policy.
 
 ## Working agreements
 
@@ -36,6 +36,8 @@ Use clear imperative commit subjects. Pull requests should explain the problem, 
 Sign off each contribution under the [Developer Certificate of Origin 1.1](https://developercertificate.org/), using `git commit -s` with an identity you are authorized to use. Sign-off certifies your right to contribute under the applicable license; it does not assign your copyright. Review generated or AI-assisted contributions for correctness, provenance and license compatibility before certifying them.
 
 A human maintainer reviews changes before merge. Agents must not approve their own changes or merge without human authorization.
+
+During the single-maintainer phase, the maintainer's review and manual merge is the human gate. GitHub cannot distinguish an agent using a maintainer's account from that maintainer, and a PR author cannot supply an independent approval on their own PR. Require a separate approving reviewer once another maintainer is available; do not grant an agent bypass access to solve that limitation.
 
 Maintainers may ask that a broad contribution be split into smaller changes. Early alignment is encouraged for architectural work.
 

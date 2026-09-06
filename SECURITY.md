@@ -4,9 +4,11 @@ Vibld executes AI-generated and third-party code. Treat every generated project,
 
 ## Reporting a vulnerability
 
-Do not open a public issue containing vulnerability details. A working private reporting route has not yet been verified for this Phase 0 repository. [Issue #17](https://github.com/vibld/vibld/issues/17) tracks that setup; it is not a place to submit vulnerability details. Maintainer responsible for establishing the route: [Chris Brock (@cbrock84)](https://github.com/cbrock84). Hosted alpha admission is blocked until a reporter can use the verified private route and this policy links to it.
+Use [GitHub's private vulnerability-reporting form](https://github.com/vibld/vibld/security/advisories/new). Sign in to GitHub if prompted. You can also open the repository's [Security Advisories page](https://github.com/vibld/vibld/security/advisories) and select **Report a vulnerability**. Do not post vulnerability details in public issues, pull requests or discussions.
 
-Once that route is available, include impact, affected components or commits, reproduction steps and any suggested mitigation. Do not include live credentials or unrelated user data.
+Responsible maintainer: [Chris Brock (@cbrock84)](https://github.com/cbrock84). Include impact, affected components or commits, reproduction steps and any suggested mitigation. Do not include live credentials or unrelated user data. Reports remain private through GitHub's advisory workflow until coordinated publication.
+
+Private reporting is enabled, and the public reporting link was verified on 2026-09-06. No synthetic vulnerability report was submitted. Maintainers should enable repository security-alert notifications and verify their delivery preferences using [GitHub's notification guidance](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository#configuring-notifications-for-private-vulnerability-reporting).
 
 Please allow the maintainers reasonable time to investigate before public disclosure. We will acknowledge a complete report, assess severity, coordinate a fix, and credit reporters who want attribution.
 

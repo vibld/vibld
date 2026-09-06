@@ -8,7 +8,7 @@ Generated applications should be conventional, portable software projects that k
 
 ## Status
 
-Vibld is in Phase 0: Foundation. This repository contains documentation and workspace configuration, not a runnable builder. M0 quality enforcement remains work to do. The [accepted decisions D1-D30](docs/decisions.md) define an invitation-only, Cloudflare-first hosted alpha for technical founders and small agencies creating marketing sites.
+Vibld is in Phase 0: Foundation. This repository contains documentation, workspace configuration and tested repository checks, not a runnable builder. The [accepted decisions D1-D30](docs/decisions.md) define an invitation-only, Cloudflare-first hosted alpha for technical founders and small agencies creating marketing sites.
 
 ## The first loop
 
@@ -54,15 +54,15 @@ Directories contain short READMEs until their implementation milestone begins. T
 
 Prerequisites:
 
-- Node.js 22 or newer
-- pnpm
+- Node.js 24.20.0 (pinned in `.node-version`)
+- pnpm 11.15.0 (pinned in `package.json`)
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm format:check
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm ci:check
 ```
 
-Build, lint, type-check, and test commands are wired through Turborepo, but currently run no workspace tasks. A green `pnpm check` is not product validation. [Issue #2](https://github.com/vibld/vibld/issues/2) tracks enforced checks before feature code.
+`pnpm ci:check` runs formatting, ESLint, TypeScript checks on repository scripts, tooling tests, workspace-contract validation and Turborepo tasks. There are no product workspaces yet, so the build stage has no product to compile. Future workspaces must supply lint, typecheck, test and build commands. See [repository checks](docs/repository-checks.md) for CI, DCO and review requirements.
 
 ## Contributing
 

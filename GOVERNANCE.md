@@ -14,7 +14,7 @@ Current lead maintainer: [Chris Brock (@cbrock84)](https://github.com/cbrock84).
 
 Routine decisions happen through issues and pull requests. Maintainers seek rough consensus and favor reversible experiments when evidence is incomplete.
 
-Changes use pull requests and require human maintainer review before merge. Coding agents may propose changes and run checks but do not approve their own work or merge without human authorization. No coding-agent vendor is a permanent architectural dependency. Repository enforcement of these rules is tracked in [issue #2](https://github.com/vibld/vibld/issues/2); policy text alone does not mean protection is configured.
+Changes use pull requests and require human maintainer review before merge. Coding agents may propose changes and run checks but do not approve their own work or merge without human authorization. No coding-agent vendor is a permanent architectural dependency. [Repository checks](docs/repository-checks.md) document the technical enforcement and single-maintainer review limitation. Human review is the maintainer's responsibility, even when GitHub cannot enforce independent approval for a PR authored through that same account.
 
 Decisions that materially affect portability, security, public contracts, package boundaries, licensing, governance, or provider independence require an architecture decision record. The lead maintainers make a final decision only after the alternatives and objections have been documented.
 

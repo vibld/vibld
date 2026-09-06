@@ -6,21 +6,26 @@
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.15.0",
   "scripts": {
-    "build": "turbo run build",
-    "check": "turbo run check",
+    "build": "node scripts/check-workspaces.mjs && turbo run build",
+    "check": "pnpm ci:check",
+    "ci:check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "dev": "turbo run dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "turbo run lint",
-    "test": "turbo run test",
-    "typecheck": "turbo run typecheck"
+    "lint": "eslint . && node scripts/check-workspaces.mjs && turbo run lint",
+    "test": "node --test scripts/*.test.mjs && turbo run test",
+    "typecheck": "tsc -p tsconfig.tools.json && turbo run typecheck"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "eslint": "10.10.0",
+    "globals": "17.12.0",
     "prettier": "3.9.6",
     "turbo": "2.10.12",
     "typescript": "7.0.2"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24.20.0 <25"
   }
 }
