@@ -37,7 +37,9 @@ export interface ValidationResult {
   errors: string[];
 }
 
-export type Validator = (snapshot: ProjectSnapshot) => Promise<ValidationResult>;
+export type Validator = (
+  snapshot: ProjectSnapshot,
+) => Promise<ValidationResult>;
 
 export interface GenerationResult {
   state: GenerationState;
