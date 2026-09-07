@@ -1,0 +1,31 @@
+import { useMemo } from 'react';
+import type { BuilderState } from '../generation/session.ts';
+import { buildPreviewDocument } from '../generation/preview.ts';
+
+export function PreviewPanel({ state }: { state: BuilderState }) {
+  const document = useMemo(() => {
+    if (!state.acceptedBrief || !state.acceptedSnapshot) return null;
+    return buildPreviewDocument(state.acceptedBrief, state.acceptedSnapshot);
+  }, [state.acceptedBrief, state.acceptedSnapshot]);
+
+  return (
+    <div className="preview">
+      <p className="preview__notice">
+        <strong>Local mock preview.</strong> This is static HTML assembled from
+        the accepted plan and stylesheet, rendered in a fully restricted frame.
+        No dependencies are installed and no generated code is executed —
+        sandbox execution is not implemented yet.
+      </p>
+      {document ? (
+        <iframe
+          className="preview__frame"
+          title="Local mock preview of the generated application"
+          srcDoc={document}
+          sandbox=""
+        />
+      ) : (
+        <p className="empty">Accept a checkpoint to see the preview.</p>
+      )}
+    </div>
+  );
+}

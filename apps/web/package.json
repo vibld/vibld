@@ -1,0 +1,28 @@
+{
+  "name": "@vibld/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "check": "pnpm run typecheck && pnpm run test",
+    "dev": "vite",
+    "lint": "tsc --noEmit",
+    "preview": "vite preview",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vibld/core": "workspace:*",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "5.1.0",
+    "typescript": "7.0.2",
+    "vite": "7.2.2"
+  }
+}

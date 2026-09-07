@@ -23,6 +23,36 @@ The user can inspect changes and validation, save a checkpoint, reopen the proje
 
 The follow-up request, "Make the hero simpler and reduce pricing from three plans to two," is the M2 conversational-edit acceptance scenario. The M1 bounded repair path provides groundwork but does not count as completing M2.
 
+## Long-running generation streams
+
+Generation outlives a normal request, and a stream that carries only model
+output goes silent whenever the model is thinking. Browsers, mobile networks
+and intermediate proxies drop an idle connection long before a job runtime's
+own timeout, which surfaces to the user as a stream that "ended" with no error
+and no failed stage.
+
+Any transport that streams generation progress must therefore emit
+transport-level keepalive events on its own schedule, independent of model
+token activity, for as long as the run is active. Requirements:
+
+- The keepalive interval is configuration, not a literal in route code, and has
+  a documented default calibrated against the deployed edge and proxy timeouts.
+  Do not assume a value carried over from an earlier system.
+- Keepalives are driven by a timer over the whole run, not piggybacked on
+  progress events, so a long planning phase before the first token still keeps
+  the connection warm.
+- Keepalive frames carry no project content, prompt text or credentials, and a
+  client that ignores them must still parse the stream correctly.
+- Stopping the keepalive is part of stream teardown on success, failure,
+  cancellation and client disconnect; a leaked timer must not keep a run's
+  resources alive.
+- Reconnection and replay stay the mechanism for surviving a genuinely dropped
+  connection. A keepalive reduces spurious drops; it does not replace durable
+  run state (ADR-0007).
+
+Cover an idle-model run, a client disconnect and a cancelled run in the stream
+tests.
+
 ## Release evidence
 
 - Run a versioned prompt set covering different marketing layouts and content needs. Proposed initial target: ten prompts, three runs each, at least 27 of 30 successful within at most two repair attempts. Calibrate and record the gate before alpha admission; report uncertainty rather than generalizing from 30 runs.
