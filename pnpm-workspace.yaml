@@ -2,3 +2,9 @@ packages:
   - apps/*
   - packages/*
   - examples/*
+
+# esbuild is a Vite dependency whose install script fetches the platform
+# binary. pnpm blocks dependency build scripts by default; this allows that
+# one and nothing else.
+allowBuilds:
+  esbuild: true
