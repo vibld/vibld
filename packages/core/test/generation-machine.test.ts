@@ -1,9 +1,35 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FakeModelProvider, GenerationMachine } from '../src/index.ts';
-import type { Validator } from '../src/index.ts';
+import type {
+  GenerationPlan,
+  ModelProvider,
+  Validator,
+} from '../src/index.ts';
 
 const acceptAll: Validator = async () => ({ ok: true, errors: [] });
+
+function createDeferredProvider(): {
+  provider: ModelProvider;
+  release: (plan: GenerationPlan) => void;
+} {
+  let resolvePlan: ((plan: GenerationPlan) => void) | undefined;
+  const provider: ModelProvider = {
+    id: 'deferred',
+    generate: () =>
+      new Promise<GenerationPlan>((resolve) => {
+        resolvePlan = resolve;
+      }),
+  };
+
+  return {
+    provider,
+    release: (plan) => {
+      assert.ok(resolvePlan);
+      resolvePlan(plan);
+    },
+  };
+}
 
 test('accepts a validated generated snapshot', async () => {
   const provider = new FakeModelProvider([
@@ -73,4 +99,43 @@ test('reports scripted provider exhaustion as a failed run', async () => {
 
   assert.equal(result.state, 'failed');
   assert.match(result.errors[0] ?? '', /no scripted plan/i);
+});
+
+test('cancels an active run without promoting staged work', async () => {
+  const machine = new GenerationMachine();
+  const { provider, release } = createDeferredProvider();
+
+  const pending = machine.run({ prompt: 'Build' }, provider, acceptAll);
+  assert.equal(machine.running, true);
+  machine.cancel();
+  release({
+    summary: 'Late result',
+    files: [{ path: 'index.html', content: 'late' }],
+  });
+
+  const result = await pending;
+
+  assert.equal(result.state, 'cancelled');
+  assert.equal(result.accepted, undefined);
+  assert.equal(machine.running, false);
+});
+
+test('rejects a concurrent writer while another run is active', async () => {
+  const machine = new GenerationMachine();
+  const { provider, release } = createDeferredProvider();
+
+  const firstPending = machine.run({ prompt: 'First' }, provider, acceptAll);
+  const second = await machine.run({ prompt: 'Second' }, provider, acceptAll);
+
+  assert.equal(second.state, 'failed');
+  assert.deepEqual(second.errors, ['GenerationMachine already has an active run']);
+
+  release({
+    summary: 'First result',
+    files: [{ path: 'index.html', content: 'first' }],
+  });
+  const first = await firstPending;
+
+  assert.equal(first.state, 'accepted');
+  assert.equal(first.accepted?.files[0]?.content, 'first');
 });
