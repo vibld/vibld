@@ -17,23 +17,26 @@ test('enforces configured limits without built-in defaults', () => {
   );
 });
 
-test('reservations prevent concurrent work from double-spending remaining budget', () => {
-  const ledger = new RunBudgetLedger({ modelInputTokens: 100 });
+test(
+  'reservations prevent concurrent work from double-spending remaining budget',
+  () => {
+    const ledger = new RunBudgetLedger({ modelInputTokens: 100 });
 
-  const first = ledger.reserve({ modelInputTokens: 80 });
+    const first = ledger.reserve({ modelInputTokens: 80 });
 
-  assert.throws(
-    () => ledger.reserve({ modelInputTokens: 30 }),
-    BudgetExceededError,
-  );
+    assert.throws(
+      () => ledger.reserve({ modelInputTokens: 30 }),
+      BudgetExceededError,
+    );
 
-  first.release();
-  const second = ledger.reserve({ modelInputTokens: 30 });
-  second.commit();
+    first.release();
+    const second = ledger.reserve({ modelInputTokens: 30 });
+    second.commit();
 
-  assert.equal(ledger.report().used.modelInputTokens, 30);
-  assert.equal(ledger.report().reserved.modelInputTokens, 0);
-});
+    assert.equal(ledger.report().used.modelInputTokens, 30);
+    assert.equal(ledger.report().reserved.modelInputTokens, 0);
+  },
+);
 
 test(
   'committing less than reserved charges actual usage and releases the remainder',
@@ -74,7 +77,10 @@ test('usage reports separate committed and reserved resources', () => {
 test('rejects invalid negative or non-finite budget values', () => {
   assert.throws(() => new RunBudgetLedger({ toolCalls: -1 }), RangeError);
   assert.throws(
-    () => new RunBudgetLedger({ elapsedMilliseconds: Number.POSITIVE_INFINITY }),
+    () =>
+      new RunBudgetLedger({
+        elapsedMilliseconds: Number.POSITIVE_INFINITY,
+      }),
     RangeError,
   );
 });
