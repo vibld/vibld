@@ -1,0 +1,16 @@
+{
+  "name": "vibld-web-preview",
+  "compatibility_date": "2026-09-07",
+
+  // Static assets only — there is no Worker script. The builder shell is a
+  // client-side SPA with no backend, no credentials and no stored data, so
+  // nothing deployed here sits inside the trusted control plane (ADR-0006).
+  //
+  // This deploys the BUILDER UI. It is not the private, origin-isolated
+  // preview that ADR-0006 requires for running untrusted generated apps;
+  // that arrives with sandbox execution (#6).
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+  },
+}

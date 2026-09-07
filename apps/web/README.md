@@ -41,6 +41,38 @@ into newer state.
   execution.
 - No authentication, durable persistence, Git export or deployment.
 
+## Hosted preview (optional)
+
+The shell can be deployed to Cloudflare Workers static assets (ADR-0005) for a
+shareable URL. It is a client-side SPA with no backend, no credentials and no
+stored data, so nothing deployed here belongs to the trusted control plane.
+
+This deploys the **builder UI**. It is _not_ the private, origin-isolated
+preview ADR-0006 requires for running untrusted generated applications; that
+arrives with sandbox execution ([#6](https://github.com/vibld/vibld/issues/6)).
+
+Set two repository secrets:
+
+| Secret                  | Value                                                   |
+| ----------------------- | ------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | A token with **Workers Scripts: Edit** and nothing more |
+| `CLOUDFLARE_ACCOUNT_ID` | The target Cloudflare account                           |
+
+Then run the **Deploy web preview** workflow from the Actions tab. It is
+`workflow_dispatch` only, so it never runs on its own and costs nothing until
+you ask for it. The workflow fails fast with a clear message if either secret
+is missing.
+
+To deploy from a workstation instead, authenticate wrangler yourself and run:
+
+```bash
+pnpm --filter @vibld/web build
+pnpm --filter @vibld/web deploy:preview
+```
+
+The deployed URL is public on `workers.dev`. Put it behind Cloudflare Access if
+the work in progress should stay internal.
+
 ## Generated output
 
 Generated projects are conventional and portable (ADR-0002): React, TypeScript

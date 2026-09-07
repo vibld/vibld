@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "check": "pnpm run typecheck && pnpm run test",
+    "deploy:preview": "pnpm dlx wrangler@4.129.1 deploy",
     "dev": "vite",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
