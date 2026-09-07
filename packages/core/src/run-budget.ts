@@ -22,13 +22,20 @@ export interface BudgetReservation {
 }
 
 export class BudgetExceededError extends Error {
+  readonly resource: keyof RunResources;
+  readonly requested: number;
+  readonly remaining: number;
+
   constructor(
-    readonly resource: keyof RunResources,
-    readonly requested: number,
-    readonly remaining: number,
+    resource: keyof RunResources,
+    requested: number,
+    remaining: number,
   ) {
     super(`Run budget exceeded for ${resource}`);
     this.name = 'BudgetExceededError';
+    this.resource = resource;
+    this.requested = requested;
+    this.remaining = remaining;
   }
 }
 
@@ -67,9 +74,11 @@ function normalize(resources: Partial<RunResources>): RunResources {
 export class RunBudgetLedger {
   private readonly used = emptyResources();
   private readonly reserved = emptyResources();
+  private readonly limits: RunBudget;
 
-  constructor(private readonly limits: RunBudget) {
+  constructor(limits: RunBudget) {
     normalize(limits);
+    this.limits = structuredClone(limits);
   }
 
   reserve(resources: Partial<RunResources>): BudgetReservation {
