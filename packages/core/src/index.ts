@@ -1,3 +1,8 @@
+export { DurableGenerationRunner } from './durable-runner.ts';
+export type {
+  DurableGenerationRequest,
+  DurableGenerationResult,
+} from './durable-runner.ts';
 export { FakeModelProvider } from './fake-provider.ts';
 export { GenerationMachine } from './generation-machine.ts';
 export { InMemoryGenerationStore } from './memory-store.ts';
