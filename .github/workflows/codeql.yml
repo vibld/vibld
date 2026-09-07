@@ -3,8 +3,9 @@ name: CodeQL
 on:
   push:
     branches: [main]
+  # Deliberately unfiltered: a base-branch filter skips every pull request in
+  # a stack, since those target an intermediate branch rather than main.
   pull_request:
-    branches: [main]
   schedule:
     - cron: '17 6 * * 1'
 
