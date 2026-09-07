@@ -4,7 +4,6 @@ import type {
   GenerationRequest,
   GenerationResult,
   ModelProvider,
-  ProjectSnapshot,
   Validator,
 } from './types.ts';
 
@@ -25,7 +24,8 @@ export class DurableGenerationRunner {
     provider: ModelProvider,
     validator: Validator,
   ): Promise<DurableGenerationResult> {
-    const storedBase = request.base ?? (await this.store.loadAccepted(request.projectId));
+    const storedBase =
+      request.base ?? (await this.store.loadAccepted(request.projectId));
     const baseRevision = storedBase?.revision ?? null;
 
     await this.store.saveStage({
