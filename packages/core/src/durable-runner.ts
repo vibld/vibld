@@ -17,7 +17,11 @@ export interface DurableGenerationResult extends GenerationResult {
 }
 
 export class DurableGenerationRunner {
-  constructor(private readonly store: GenerationStore) {}
+  private readonly store: GenerationStore;
+
+  constructor(store: GenerationStore) {
+    this.store = store;
+  }
 
   async run(
     request: DurableGenerationRequest,
