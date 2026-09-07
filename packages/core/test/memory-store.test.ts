@@ -87,7 +87,10 @@ test('rejects a stale promotion and preserves the accepted checkpoint', async ()
 
   assert.equal(result.promoted, false);
   assert.equal(result.current?.revision, 'r22222222');
-  assert.equal((await store.loadAccepted('project-1'))?.files[0]?.content, 'second');
+  assert.equal(
+    (await store.loadAccepted('project-1'))?.files[0]?.content,
+    'second',
+  );
   assert.equal((await store.loadStage('run-stale'))?.state, 'validating');
 });
 
@@ -108,5 +111,8 @@ test('returns defensive copies from persisted state', async () => {
   assert.ok(loaded);
   loaded.files[0]!.content = 'mutated';
 
-  assert.equal((await store.loadAccepted('project-1'))?.files[0]?.content, 'first');
+  assert.equal(
+    (await store.loadAccepted('project-1'))?.files[0]?.content,
+    'first',
+  );
 });
