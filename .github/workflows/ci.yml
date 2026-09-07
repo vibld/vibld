@@ -28,11 +28,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Format diagnostic
-        run: |
-          pnpm exec prettier --write packages/core/test/run-budget.test.ts
-          git diff -- packages/core/test/run-budget.test.ts
-          exit 1
+      - name: Format check
+        run: pnpm format:check
 
       - name: Typecheck
         run: pnpm typecheck
