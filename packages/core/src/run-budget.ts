@@ -90,7 +90,11 @@ export class RunBudgetLedger {
 
       const remaining = limit - this.used[key] - this.reserved[key];
       if (requested[key] > remaining) {
-        throw new BudgetExceededError(key, requested[key], Math.max(0, remaining));
+        throw new BudgetExceededError(
+          key,
+          requested[key],
+          Math.max(0, remaining),
+        );
       }
     }
 
