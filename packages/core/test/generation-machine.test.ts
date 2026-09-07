@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FakeModelProvider, GenerationMachine } from '../src/index.ts';
-import type {
-  GenerationPlan,
-  ModelProvider,
-  Validator,
-} from '../src/index.ts';
+import type { GenerationPlan, ModelProvider, Validator } from '../src/index.ts';
 
 const acceptAll: Validator = async () => ({ ok: true, errors: [] });
 
@@ -128,7 +124,9 @@ test('rejects a concurrent writer while another run is active', async () => {
   const second = await machine.run({ prompt: 'Second' }, provider, acceptAll);
 
   assert.equal(second.state, 'failed');
-  assert.deepEqual(second.errors, ['GenerationMachine already has an active run']);
+  assert.deepEqual(second.errors, [
+    'GenerationMachine already has an active run',
+  ]);
 
   release({
     summary: 'First result',
