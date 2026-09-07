@@ -6,6 +6,13 @@ export type {
 export { FakeModelProvider } from './fake-provider.ts';
 export { GenerationMachine } from './generation-machine.ts';
 export { InMemoryGenerationStore } from './memory-store.ts';
+export { BudgetExceededError, RunBudgetLedger } from './run-budget.ts';
+export type {
+  BudgetReservation,
+  RunBudget,
+  RunResources,
+  RunUsageReport,
+} from './run-budget.ts';
 export type {
   GenerationStageRecord,
   GenerationStore,
