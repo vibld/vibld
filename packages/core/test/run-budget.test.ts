@@ -17,40 +17,34 @@ test('enforces configured limits without built-in defaults', () => {
   );
 });
 
-test(
-  'reservations prevent concurrent work from double-spending remaining budget',
-  () => {
-    const ledger = new RunBudgetLedger({ modelInputTokens: 100 });
+test('reservations prevent concurrent work from double-spending remaining budget', () => {
+  const ledger = new RunBudgetLedger({ modelInputTokens: 100 });
 
-    const first = ledger.reserve({ modelInputTokens: 80 });
+  const first = ledger.reserve({ modelInputTokens: 80 });
 
-    assert.throws(
-      () => ledger.reserve({ modelInputTokens: 30 }),
-      BudgetExceededError,
-    );
+  assert.throws(
+    () => ledger.reserve({ modelInputTokens: 30 }),
+    BudgetExceededError,
+  );
 
-    first.release();
-    const second = ledger.reserve({ modelInputTokens: 30 });
-    second.commit();
+  first.release();
+  const second = ledger.reserve({ modelInputTokens: 30 });
+  second.commit();
 
-    assert.equal(ledger.report().used.modelInputTokens, 30);
-    assert.equal(ledger.report().reserved.modelInputTokens, 0);
-  },
-);
+  assert.equal(ledger.report().used.modelInputTokens, 30);
+  assert.equal(ledger.report().reserved.modelInputTokens, 0);
+});
 
-test(
-  'committing less than reserved charges actual usage and releases the remainder',
-  () => {
-    const ledger = new RunBudgetLedger({ sandboxMilliseconds: 1000 });
-    const reservation = ledger.reserve({ sandboxMilliseconds: 800 });
+test('committing less than reserved charges actual usage and releases the remainder', () => {
+  const ledger = new RunBudgetLedger({ sandboxMilliseconds: 1000 });
+  const reservation = ledger.reserve({ sandboxMilliseconds: 800 });
 
-    reservation.commit({ sandboxMilliseconds: 250 });
+  reservation.commit({ sandboxMilliseconds: 250 });
 
-    const report = ledger.report();
-    assert.equal(report.used.sandboxMilliseconds, 250);
-    assert.equal(report.reserved.sandboxMilliseconds, 0);
-  },
-);
+  const report = ledger.report();
+  assert.equal(report.used.sandboxMilliseconds, 250);
+  assert.equal(report.reserved.sandboxMilliseconds, 0);
+});
 
 test('failed work can still be charged explicitly', () => {
   const ledger = new RunBudgetLedger({ modelCostMicros: 5000 });
