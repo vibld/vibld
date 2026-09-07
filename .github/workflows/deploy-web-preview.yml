@@ -1,0 +1,60 @@
+name: Deploy web preview
+
+# Manual only. An automatic deploy on every push to main would spend Actions
+# minutes on every merge; the builder shell is a review aid, not a product
+# users depend on being current. Run this from the Actions tab when you want
+# the hosted preview refreshed.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy the builder shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add both as repository secrets. The token needs the" >&2
+            echo "\"Workers Scripts: Edit\" permission and nothing more." >&2
+            exit 1
+          fi
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @vibld/web build
+
+      - name: Deploy to Cloudflare Workers
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm dlx wrangler@4.129.1 deploy
