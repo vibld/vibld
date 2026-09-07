@@ -22,9 +22,14 @@ export class GenerationMachine {
   #accepted?: ProjectSnapshot;
   #staged?: ProjectSnapshot;
   #cancelled = false;
+  #running = false;
 
   get state(): GenerationState {
     return this.#state;
+  }
+
+  get running(): boolean {
+    return this.#running;
   }
 
   get accepted(): ProjectSnapshot | undefined {
@@ -40,6 +45,16 @@ export class GenerationMachine {
     provider: ModelProvider,
     validator: Validator,
   ): Promise<GenerationResult> {
+    if (this.#running) {
+      return {
+        state: 'failed',
+        accepted: this.accepted,
+        staged: this.#staged ? structuredClone(this.#staged) : undefined,
+        errors: ['GenerationMachine already has an active run'],
+      };
+    }
+
+    this.#running = true;
     this.#cancelled = false;
     this.#state = 'planning';
 
@@ -99,6 +114,8 @@ export class GenerationMachine {
         staged: this.#staged ? structuredClone(this.#staged) : undefined,
         errors: [error instanceof Error ? error.message : String(error)],
       };
+    } finally {
+      this.#running = false;
     }
   }
 
