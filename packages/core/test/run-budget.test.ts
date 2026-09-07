@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  BudgetExceededError,
-  RunBudgetLedger,
-} from '../src/index.ts';
+import { BudgetExceededError, RunBudgetLedger } from '../src/index.ts';
 
 test('enforces configured limits without built-in defaults', () => {
   const ledger = new RunBudgetLedger({ toolCalls: 2 });
@@ -38,16 +35,19 @@ test('reservations prevent concurrent work from double-spending remaining budget
   assert.equal(ledger.report().reserved.modelInputTokens, 0);
 });
 
-test('committing less than reserved charges actual usage and releases the remainder', () => {
-  const ledger = new RunBudgetLedger({ sandboxMilliseconds: 1000 });
-  const reservation = ledger.reserve({ sandboxMilliseconds: 800 });
+test(
+  'committing less than reserved charges actual usage and releases the remainder',
+  () => {
+    const ledger = new RunBudgetLedger({ sandboxMilliseconds: 1000 });
+    const reservation = ledger.reserve({ sandboxMilliseconds: 800 });
 
-  reservation.commit({ sandboxMilliseconds: 250 });
+    reservation.commit({ sandboxMilliseconds: 250 });
 
-  const report = ledger.report();
-  assert.equal(report.used.sandboxMilliseconds, 250);
-  assert.equal(report.reserved.sandboxMilliseconds, 0);
-});
+    const report = ledger.report();
+    assert.equal(report.used.sandboxMilliseconds, 250);
+    assert.equal(report.reserved.sandboxMilliseconds, 0);
+  },
+);
 
 test('failed work can still be charged explicitly', () => {
   const ledger = new RunBudgetLedger({ modelCostMicros: 5000 });
