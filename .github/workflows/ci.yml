@@ -26,7 +26,11 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        # Frozen: a lockfile that does not match package.json is a failure, not
+        # something to paper over. The permissive install hid real drift --
+        # packages/core was missing from the lockfile across four merges and
+        # CI stayed green throughout.
+        run: pnpm install --frozen-lockfile
 
       - name: Format check
         run: pnpm format:check
