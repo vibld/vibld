@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@vibld/ai": "workspace:*",
     "@vibld/core": "workspace:*",
     "react": "19.2.0",
     "react-dom": "19.2.0"

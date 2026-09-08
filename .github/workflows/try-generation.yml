@@ -1,0 +1,115 @@
+name: Try a generation
+
+# Runs one real model generation and writes the result into the run summary,
+# so the adapter can be exercised from the GitHub UI on any device without a
+# terminal. Manual only: every run spends model tokens.
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: What should Vibld build?
+        required: true
+        default: A landing page for a cybersecurity SaaS with pricing, an FAQ and a contact form. Heavy animation. Navy, dark purple and neon yellow.
+      build:
+        description: Also install and build the generated project (proves portability)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: try-generation
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Generate and inspect
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require a model credential
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set on the 'preview' environment"
+            exit 1
+          fi
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate
+        id: generate
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          {
+            echo "## Prompt"
+            echo
+            echo "> ${{ inputs.prompt }}"
+            echo
+            echo '## Result'
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          pnpm --filter @vibld/ai plan "${{ inputs.prompt }}" --out "$RUNNER_TEMP/generated" \
+            2>&1 | tee "$RUNNER_TEMP/plan.log"
+
+          {
+            cat "$RUNNER_TEMP/plan.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the generated project
+        if: ${{ inputs.build }}
+        shell: bash
+        working-directory: ${{ runner.temp }}/generated
+        run: |
+          # ADR-0002: the output must build with ordinary npm commands and no
+          # Vibld package, account or service.
+          set +e
+          npm install --no-audit --no-fund > build.log 2>&1 && npm run build >> build.log 2>&1
+          status=$?
+          set -e
+          {
+            echo
+            if [ $status -eq 0 ]; then
+              echo '## Portability check: passed'
+              echo
+              echo 'The generated project installed and built with plain npm.'
+            else
+              echo '## Portability check: FAILED'
+              echo
+              echo 'The generated project did not build. Last 40 lines:'
+              echo
+              echo '```'
+              tail -40 build.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      - name: Upload the generated project
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-project
+          path: ${{ runner.temp }}/generated
+          if-no-files-found: ignore

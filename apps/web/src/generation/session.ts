@@ -6,11 +6,13 @@ import {
   RunBudgetLedger,
 } from '@vibld/core';
 import type {
+  GenerationPlan,
   GenerationState,
   ProjectFile,
   ProjectSnapshot,
   RunUsageReport,
 } from '@vibld/core';
+import type { ModelProvider } from '@vibld/core';
 import type { ProjectBrief } from './brief.ts';
 import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
@@ -21,6 +23,10 @@ import {
   ObservingModelProvider,
   withValidationDelay,
 } from './observers.ts';
+import {
+  RemoteModelProvider,
+  detectGenerationMode,
+} from './remote-provider.ts';
 
 export type BuilderStatus =
   'idle' | 'planning' | 'staging' | 'validating' | 'accepted' | 'failed';
@@ -45,6 +51,8 @@ export interface BuilderState {
   timeline: TimelineEntry[];
   runCount: number;
   budget: RunUsageReport;
+  /** Which provider produced the last plan, so the UI never implies AI. */
+  providerId: string | null;
 }
 
 export interface SessionOptions {
@@ -55,6 +63,11 @@ export interface SessionOptions {
   stageDelayMs?: number;
   projectId?: string;
   budget?: ConstructorParameters<typeof RunBudgetLedger>[0];
+  /**
+   * Resolve the provider for a run. Defaults to asking the deployment: the
+   * hosted Worker when it is configured, the deterministic fake otherwise.
+   */
+  resolveProvider?: (plan: GenerationPlan) => Promise<ModelProvider>;
 }
 
 const DEFAULT_BUDGET = {
@@ -84,7 +97,27 @@ function initialState(budget: RunUsageReport): BuilderState {
     timeline: [],
     runCount: 0,
     budget,
+    providerId: null,
   };
+}
+
+/**
+ * Ask the deployment which provider to use. A hosted Worker with credentials
+ * and Access configured serves real generation; anything else -- local dev,
+ * the static-only deploy -- gets the deterministic fake. The shell never
+ * carries a provider credential itself (ADR-0006).
+ */
+async function defaultResolveProvider(
+  plan: GenerationPlan,
+): Promise<ModelProvider> {
+  const mode = await detectGenerationMode();
+  return mode === 'model'
+    ? new RemoteModelProvider()
+    : new FakeModelProvider([plan]);
+}
+
+function isFakeProvider(provider: ModelProvider): boolean {
+  return provider.id === 'fake';
 }
 
 const STATUS_FROM_STAGE: Partial<Record<GenerationState, BuilderStatus>> = {
@@ -117,6 +150,7 @@ export class BuilderSession {
   readonly #now: () => number;
   readonly #stageDelayMs: number;
   readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
+  readonly #resolveProvider: (plan: GenerationPlan) => Promise<ModelProvider>;
 
   constructor(options: SessionOptions = {}) {
     this.#delay =
@@ -127,6 +161,7 @@ export class BuilderSession {
     this.#projectId = options.projectId ?? 'local-project';
     this.#budgetLimits = options.budget ?? DEFAULT_BUDGET;
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
+    this.#resolveProvider = options.resolveProvider ?? defaultResolveProvider;
     this.#state = initialState(this.#ledger.report());
   }
 
@@ -240,11 +275,24 @@ export class BuilderSession {
     };
 
     const store = new ObservingGenerationStore(this.#store, observer);
-    const provider = new ObservingModelProvider(
-      new FakeModelProvider([plan]),
-      observer,
-      pause,
-    );
+
+    let resolved: ModelProvider;
+    try {
+      resolved = await this.#resolveProvider(plan);
+    } catch (error) {
+      reservation.release();
+      const message = error instanceof Error ? error.message : String(error);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        status: 'failed',
+        running: false,
+        problems: [message],
+        timeline: this.#append(state.timeline, 'error', message),
+      }));
+      return;
+    }
+
+    const provider = new ObservingModelProvider(resolved, observer, pause);
     const validator = withValidationDelay(createValidator(), pause);
     const runner = new DurableGenerationRunner(store);
 
@@ -286,7 +334,11 @@ export class BuilderSession {
         status: 'accepted',
         running: false,
         acceptedSnapshot: accepted,
-        acceptedBrief: brief,
+        // The mock preview is rendered from this brief. It only describes the
+        // deterministic fake's own output, so a model-generated project must
+        // not reuse it -- that would show a preview of files nobody generated.
+        acceptedBrief: isFakeProvider(resolved) ? brief : null,
+        providerId: resolved.id,
         stagedFiles: accepted.files.map((file) => ({ ...file })),
         problems: [],
         runCount: state.runCount + 1,
@@ -311,6 +363,7 @@ export class BuilderSession {
       problems,
       runCount: state.runCount + 1,
       budget,
+      providerId: resolved.id,
       timeline: problems.reduce(
         (timeline, problem) => this.#append(timeline, 'error', problem),
         this.#append(

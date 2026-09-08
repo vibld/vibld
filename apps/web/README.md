@@ -88,6 +88,54 @@ pnpm --filter @vibld/web deploy:preview
 The deployed URL is public on `workers.dev`. Put it behind Cloudflare Access if
 the work in progress should stay internal.
 
+## Model generation (optional)
+
+The shell asks `/api/config` on load and uses whichever provider the
+deployment offers: the hosted Worker when it is fully configured, the
+deterministic fake otherwise. The footer names the provider that actually ran,
+so the UI never implies AI when it is running the stub.
+
+**The browser never holds a provider credential.** The key is a Worker secret,
+and `@vibld/ai` is imported only from `worker/`, never from `src/` — a build
+check confirms the model SDK stays out of the client bundle (ADR-0006).
+
+### Fail closed
+
+`/api/plan` serves a generation only when **all three** of `ANTHROPIC_API_KEY`,
+`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are present. Missing configuration means
+refused, never open: an unauthenticated endpoint on a public URL would let
+anyone spend the account's model budget.
+
+The Worker verifies the Cloudflare Access JWT itself rather than trusting the
+`Cf-Access-Jwt-Assertion` header. Access already checks at the edge, but a
+header is forgeable by anyone reaching the origin directly, and ADR-0006
+requires proving a raw URL cannot bypass access control. Verification pins
+RS256 (rejecting the `alg: none` downgrade), matches the application audience
+and team issuer, and honours expiry with a small skew allowance.
+
+### Setup
+
+1. Enable Access on the Worker: **Workers & Pages → the Worker → Settings →
+   Domains & Routes**, then **Enable Cloudflare Access** for the `workers.dev`
+   URL. This works on `workers.dev` directly — no custom domain needed.
+2. In **Zero Trust → Access → Applications**, open the generated application
+   and copy its **Application Audience (AUD) tag**.
+3. Set `ACCESS_TEAM_DOMAIN` (e.g. `yourteam.cloudflareaccess.com`) and
+   `ACCESS_AUD` in `wrangler.jsonc`, then redeploy.
+4. Add the key as a Worker secret — it must never be committed:
+   `wrangler secret put ANTHROPIC_API_KEY`
+
+Until all of that is in place the deployed shell keeps running the fake, which
+is the intended safe default.
+
+### Trying generation without a terminal
+
+The **Try a generation** workflow in the Actions tab runs one real generation
+from a prompt you type in the UI, prints the result to the run summary, and
+optionally installs and builds the generated project as the ADR-0002
+portability check. It needs `ANTHROPIC_API_KEY` on the `preview` environment
+and spends model tokens on each run.
+
 ## Generated output
 
 Generated projects are conventional and portable (ADR-0002): React, TypeScript
