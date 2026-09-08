@@ -12,9 +12,15 @@ export interface PromptPanelProps {
   state: BuilderState;
   onSubmit: (prompt: string, mode: PlanMode) => void;
   onReset: () => void;
+  onCancel: () => void;
 }
 
-export function PromptPanel({ state, onSubmit, onReset }: PromptPanelProps) {
+export function PromptPanel({
+  state,
+  onSubmit,
+  onReset,
+  onCancel,
+}: PromptPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [failNext, setFailNext] = useState(false);
   const promptId = useId();
@@ -81,6 +87,17 @@ export function PromptPanel({ state, onSubmit, onReset }: PromptPanelProps) {
               ? 'Generate again'
               : 'Generate'}
         </button>
+        {/*
+          A generation can run for a minute or more. Without this the only way
+          out is to close the tab, and the run keeps spending either way --
+          cancelling drops the connection, which is what tells the endpoint to
+          stop its own model call.
+        */}
+        {state.running ? (
+          <button type="button" className="button" onClick={onCancel}>
+            Cancel
+          </button>
+        ) : null}
         <button
           type="button"
           className="button"

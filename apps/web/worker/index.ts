@@ -136,17 +136,6 @@ async function handlePlan(
     return json({ error: parsed.error }, parsed.status);
   }
 
-  let usage: PlanUsage | undefined;
-  const provider = new AnthropicModelProvider(
-    createAnthropicPlanClient({ apiKey: env.ANTHROPIC_API_KEY }),
-    {
-      ...(env.VIBLD_MODEL ? { model: env.VIBLD_MODEL } : {}),
-      onUsage: (reported) => {
-        usage = reported;
-      },
-    },
-  );
-
   // Stream rather than buffer. A buffered response sends nothing until the
   // model finishes, and the client gives up first -- which surfaces as an
   // opaque network error, not a failed generation.
@@ -163,28 +152,62 @@ async function handlePlan(
     }
   };
 
+  // A run nobody is waiting for is still billed until the call to the model
+  // ends. `ctx.waitUntil` deliberately outlives the response, so without this
+  // a user who closes the tab -- or presses Cancel -- pays for a plan that is
+  // then thrown away.
+  const abort = new AbortController();
+  let cancelledBy: string | undefined;
+  const cancel = (reason: string) => {
+    if (abort.signal.aborted) return;
+    cancelledBy = reason;
+    stopKeepalive();
+    abort.abort();
+  };
+
+  // Two independent notices that the client is gone. The runtime aborts
+  // `request.signal` on disconnect; a failed write catches the same thing at
+  // the next keepalive, which is the backstop if the signal is unavailable.
+  request.signal?.addEventListener('abort', () => cancel('client-disconnect'));
+
   const write = (chunk: string) =>
-    writer.write(encoder.encode(chunk)).catch(() => {
-      // The client hung up. Stop the timer so it cannot outlive the request.
-      stopKeepalive();
-    });
+    writer.write(encoder.encode(chunk)).catch(() => cancel('write-failed'));
+
+  let usage: PlanUsage | undefined;
+  const provider = new AnthropicModelProvider(
+    createAnthropicPlanClient({ apiKey: env.ANTHROPIC_API_KEY }),
+    {
+      ...(env.VIBLD_MODEL ? { model: env.VIBLD_MODEL } : {}),
+      onUsage: (reported) => {
+        usage = reported;
+      },
+      signal: abort.signal,
+    },
+  );
 
   // First bytes immediately, so the connection is never idle from the start.
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
 
   const run = (async () => {
+    let outcome = 'ok';
     try {
       const plan = await provider.generate(parsed.value);
       await write(encodeEvent('plan', { providerId: provider.id, plan }));
     } catch (error) {
-      if (error instanceof ProviderError) {
+      if (abort.signal.aborted) {
+        // The caller left. Writing an error to a closed stream would fail
+        // anyway, and this is not a fault worth reporting as one.
+        outcome = 'cancelled';
+      } else if (error instanceof ProviderError) {
         // Expected, explainable outcomes, not server faults.
+        outcome = 'provider-error';
         await write(
           encodeEvent('error', { error: error.message, kind: error.name }),
         );
       } else {
         // Never forward an upstream error body: it can carry request details.
+        outcome = 'error';
         console.error('plan generation failed', error);
         await write(
           encodeEvent('error', { error: 'Generation failed unexpectedly.' }),
@@ -192,14 +215,16 @@ async function handlePlan(
       }
     } finally {
       stopKeepalive();
-      // Spend is recorded even when the run failed: a refusal or a truncation
-      // still consumed tokens, and a record that counts only successes
-      // under-reports the bill.
+      // Spend is recorded even when the run failed: a refusal, a truncation
+      // or a cancellation still consumed tokens, and a record that counts
+      // only successes under-reports the bill.
       console.log(
         JSON.stringify({
           event: 'generation.settled',
           email: access.email,
           model: provider.id,
+          outcome,
+          ...(cancelledBy ? { cancelledBy } : {}),
           inputTokens: usage?.inputTokens ?? 0,
           outputTokens: usage?.outputTokens ?? 0,
         }),
@@ -208,6 +233,10 @@ async function handlePlan(
     }
   })();
 
+  // `waitUntil` is safe here only because the run is now abortable. Without
+  // that it would guarantee an abandoned generation up to 30 more seconds of
+  // billable model time; with it, the window is used for the opposite -- the
+  // spend record still gets written after the caller has gone.
   ctx.waitUntil(run);
 
   return new Response(readable, { status: 200, headers: STREAM_HEADERS });

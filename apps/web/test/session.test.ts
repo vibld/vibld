@@ -166,3 +166,121 @@ describe('BuilderSession', () => {
     );
   });
 });
+
+/**
+ * A provider that never finishes on its own. `generate` settles only when the
+ * signal aborts, which is exactly the shape of a real run waiting on a model.
+ */
+function hangingProvider(signal: AbortSignal) {
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  return {
+    running,
+    provider: {
+      id: 'hanging',
+      generate: () =>
+        new Promise<never>((_resolve, reject) => {
+          started();
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    },
+  };
+}
+
+describe('BuilderSession cancellation', () => {
+  it('aborts the provider signal and reports the run as cancelled', async () => {
+    let handle!: ReturnType<typeof hangingProvider>;
+    const session = createSession({
+      resolveProvider: async (_plan, signal) => {
+        handle = hangingProvider(signal);
+        return handle.provider;
+      },
+    });
+
+    const run = session.submit('A landing page for a coffee roaster');
+    await handle.running;
+
+    session.cancel();
+    await run;
+
+    const state = session.getState();
+    assert.equal(state.status, 'cancelled');
+    assert.equal(state.running, false);
+    assert.deepEqual(state.problems, [], 'a cancellation is not a failure');
+    assert.ok(
+      state.timeline.some((entry) => entry.message.includes('cancelled')),
+    );
+  });
+
+  it('does not let the abandoned run write its failure over the cancellation', async () => {
+    let handle!: ReturnType<typeof hangingProvider>;
+    const session = createSession({
+      resolveProvider: async (_plan, signal) => {
+        handle = hangingProvider(signal);
+        return handle.provider;
+      },
+    });
+
+    const run = session.submit('A landing page for a coffee roaster');
+    await handle.running;
+    session.cancel();
+    await run;
+
+    const state = session.getState();
+    assert.equal(state.status, 'cancelled');
+    assert.equal(
+      state.acceptedSnapshot,
+      null,
+      'an abandoned run must not promote a checkpoint',
+    );
+    assert.ok(
+      state.timeline.every((entry) => entry.level !== 'error'),
+      'the abort must not surface as an error the user has to read',
+    );
+  });
+
+  it('keeps the accepted checkpoint from an earlier run', async () => {
+    // The first run uses the fake and accepts; the second hangs, so
+    // cancelling it is the only way out. The point is that the checkpoint the
+    // user already has survives the second run being abandoned.
+    let runs = 0;
+    let hanging!: ReturnType<typeof hangingProvider>;
+    const session = createSession({
+      resolveProvider: async (plan, signal) => {
+        runs += 1;
+        if (runs === 1) return new FakeModelProvider([plan]);
+        hanging = hangingProvider(signal);
+        return hanging.provider;
+      },
+    });
+
+    await session.submit('A landing page for a coffee roaster');
+    const accepted = session.getState().acceptedSnapshot;
+    assert.ok(accepted);
+
+    const run = session.submit('Add a testimonials section');
+    await hanging.running;
+    session.cancel();
+    await run;
+
+    const state = session.getState();
+    assert.equal(state.status, 'cancelled');
+    assert.deepEqual(
+      state.acceptedSnapshot,
+      accepted,
+      'an abandoned run must leave the previous checkpoint standing',
+    );
+  });
+
+  it('ignores cancel when no run is in flight', () => {
+    const session = createSession();
+    session.cancel();
+    assert.equal(session.getState().status, 'idle');
+  });
+});
