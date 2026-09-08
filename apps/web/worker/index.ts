@@ -5,6 +5,12 @@ import {
 } from '@vibld/ai';
 import type { GenerationRequest } from '@vibld/core';
 import { fetchAccessKeys, verifyAccessJwt } from './access.ts';
+import {
+  KEEPALIVE_COMMENT,
+  STREAM_HEADERS,
+  encodeEvent,
+  parseKeepaliveMs,
+} from './stream.ts';
 
 export interface Env {
   /** Worker secret. Never reaches the browser. */
@@ -14,6 +20,8 @@ export interface Env {
   /** The Access application's AUD tag. */
   ACCESS_AUD?: string;
   VIBLD_MODEL?: string;
+  /** Transport keepalive interval in ms. Configuration, not a literal. */
+  VIBLD_STREAM_KEEPALIVE_MS?: string;
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -97,7 +105,11 @@ function parseGenerationRequest(body: unknown): GenerationRequest | string {
   return { prompt, base: { revision: snapshot.revision, files } };
 }
 
-async function handlePlan(request: Request, env: Env): Promise<Response> {
+async function handlePlan(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   if (request.method !== 'POST') {
     return json({ error: 'Use POST.' }, 405);
   }
@@ -122,22 +134,71 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
     env.VIBLD_MODEL ? { model: env.VIBLD_MODEL } : {},
   );
 
-  try {
-    const plan = await provider.generate(parsed);
-    return json({ providerId: provider.id, plan });
-  } catch (error) {
-    if (error instanceof ProviderError) {
-      // These are expected, explainable outcomes, not server faults.
-      return json({ error: error.message, kind: error.name }, 422);
+  // Stream rather than buffer. A buffered response sends nothing until the
+  // model finishes, and the client gives up first -- which surfaces as an
+  // opaque network error, not a failed generation.
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const keepaliveMs = parseKeepaliveMs(env.VIBLD_STREAM_KEEPALIVE_MS);
+
+  let keepalive: ReturnType<typeof setInterval> | undefined;
+  const stopKeepalive = () => {
+    if (keepalive !== undefined) {
+      clearInterval(keepalive);
+      keepalive = undefined;
     }
-    // Never forward an upstream error body: it can carry request details.
-    console.error('plan generation failed', error);
-    return json({ error: 'Generation failed unexpectedly.' }, 502);
-  }
+  };
+
+  const write = (chunk: string) =>
+    writer.write(encoder.encode(chunk)).catch(() => {
+      // The client hung up. Stop the timer so it cannot outlive the request.
+      stopKeepalive();
+    });
+
+  // First bytes immediately, so the connection is never idle from the start.
+  void write(KEEPALIVE_COMMENT);
+  keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
+
+  const run = (async () => {
+    try {
+      const plan = await provider.generate(parsed);
+      await write(encodeEvent('plan', { providerId: provider.id, plan }));
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        // Expected, explainable outcomes, not server faults.
+        await write(
+          encodeEvent('error', { error: error.message, kind: error.name }),
+        );
+      } else {
+        // Never forward an upstream error body: it can carry request details.
+        console.error('plan generation failed', error);
+        await write(
+          encodeEvent('error', { error: 'Generation failed unexpectedly.' }),
+        );
+      }
+    } finally {
+      stopKeepalive();
+      await writer.close().catch(() => {});
+    }
+  })();
+
+  ctx.waitUntil(run);
+
+  return new Response(readable, { status: 200, headers: STREAM_HEADERS });
+}
+
+/** The slice of Cloudflare's ExecutionContext this Worker uses. */
+export interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     // Lets the shell show which provider is actually in use instead of
@@ -147,7 +208,7 @@ export default {
     }
 
     if (pathname === '/api/plan') {
-      return handlePlan(request, env);
+      return handlePlan(request, env, ctx);
     }
 
     return json({ error: 'Not found.' }, 404);
