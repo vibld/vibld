@@ -8,7 +8,13 @@ Generated applications should be conventional, portable software projects that k
 
 ## Status
 
-Vibld is in Phase 0: Foundation. This repository contains documentation and workspace configuration, not a runnable builder. M0 quality enforcement remains work to do. The [accepted decisions D1-D30](docs/decisions.md) define an invitation-only, Cloudflare-first hosted alpha for technical founders and small agencies creating marketing sites.
+Vibld is early, and the honest summary is narrower than the ambition above.
+
+**What runs today.** `apps/web` is a builder shell that takes a prompt through planning, staged files, validation and an accepted checkpoint, and shows a preview of the result. `packages/core` owns the generation contracts, the state machine and the run budget; `packages/ai` puts a model provider behind them. A hosted deployment can serve model-backed generation through an authenticated endpoint.
+
+**What does not exist yet.** Sandboxed execution of generated code, durable project storage, accounts and tenant isolation, GitHub branches and pull requests, repository search, permission grants and spend ceilings. Without those the builder is a demonstration of the loop, not a product anyone should trust with their work. By default it runs a deterministic fake provider, so nothing here implies a model wrote what you see.
+
+The [accepted decisions D1-D30](docs/decisions.md) define an invitation-only, Cloudflare-first hosted alpha for technical founders and small agencies creating marketing sites.
 
 ## The first loop
 
@@ -48,7 +54,7 @@ scripts/        Repository automation
 tests/          Cross-package and end-to-end tests
 ```
 
-Directories contain short READMEs until their implementation milestone begins. This keeps Phase 0 explicit without creating speculative packages.
+Directories that have not reached their implementation milestone contain a short README rather than a speculative package.
 
 ## Development
 
@@ -60,9 +66,10 @@ Prerequisites:
 ```bash
 pnpm install --frozen-lockfile
 pnpm format:check
+pnpm check        # lint, type-check and test every workspace
 ```
 
-Build, lint, type-check, and test commands are wired through Turborepo, but currently run no workspace tasks. A green `pnpm check` is not product validation. [Issue #2](https://github.com/vibld/vibld/issues/2) tracks enforced checks before feature code.
+Format, type and test checks run for real across `packages/core`, `packages/ai` and `apps/web`, and CI runs them on every pull request alongside CodeQL. A green `pnpm check` still is not product validation: it says the code compiles and its unit tests pass, not that a generated site is any good. [Issue #2](https://github.com/vibld/vibld/issues/2) tracks what is still missing — human-review and DCO enforcement through repository protections.
 
 ## Contributing
 
