@@ -73,6 +73,19 @@ importers:
 
   packages/core: {}
 
+  packages/eval:
+    dependencies:
+      '@vibld/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.1
+        version: 22.19.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
 packages:
 
   '@anthropic-ai/sdk@0.124.0':
