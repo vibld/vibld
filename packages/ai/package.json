@@ -1,0 +1,26 @@
+{
+  "name": "@vibld/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "check": "pnpm run typecheck && pnpm run test",
+    "lint": "tsc --noEmit",
+    "plan": "node --experimental-strip-types bin/plan.ts",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.124.0",
+    "@vibld/core": "workspace:*",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "typescript": "7.0.2"
+  }
+}
