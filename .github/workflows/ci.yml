@@ -36,3 +36,34 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # The marketing template is deliberately outside the pnpm workspace: it has
+  # to install and build on its own, with npm and no Vibld packages, because
+  # that is what a user who exports it will do. Building it here is the only
+  # way that claim stays true.
+  template:
+    name: Marketing template
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: templates/marketing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: templates/marketing/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
