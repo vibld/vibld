@@ -57,19 +57,24 @@ jobs:
         id: generate
         shell: bash
         env:
+          # The prompt is dispatch input, so it is untrusted text. It is passed
+          # through the environment and only ever referenced as "$PROMPT";
+          # interpolating ${{ inputs.prompt }} into this script would let a
+          # crafted prompt run shell commands in a step that holds the API key.
+          PROMPT: ${{ inputs.prompt }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           {
-            echo "## Prompt"
+            echo '## Prompt'
             echo
-            echo "> ${{ inputs.prompt }}"
+            printf '> %s\n' "$PROMPT"
             echo
             echo '## Result'
             echo
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          pnpm --filter @vibld/ai plan "${{ inputs.prompt }}" --out "$RUNNER_TEMP/generated" \
+          pnpm --filter @vibld/ai plan "$PROMPT" --out "$RUNNER_TEMP/generated" \
             2>&1 | tee "$RUNNER_TEMP/plan.log"
 
           {
@@ -77,6 +82,10 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Runs npm lifecycle scripts from a model-authored package.json. That is
+      # arbitrary code on the runner, so this step deliberately holds no
+      # secrets -- ANTHROPIC_API_KEY is scoped to the generate step above. The
+      # runner is ephemeral and GITHUB_TOKEN is read-only.
       - name: Build the generated project
         if: ${{ inputs.build }}
         shell: bash
