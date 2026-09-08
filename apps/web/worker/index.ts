@@ -1,16 +1,20 @@
 import {
   AnthropicModelProvider,
+  DEFAULT_MAX_TOKENS,
   ProviderError,
   createAnthropicPlanClient,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 
 import { fetchAccessKeys, verifyAccessJwt } from './access.ts';
+import { UserBudget } from './budget.ts';
 import {
+  DEFAULT_LIMITS,
   checkBodySize,
   checkRequestOrigin,
   parseGenerationRequest,
 } from './request-guard.ts';
+import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
@@ -28,6 +32,31 @@ export interface Env {
   VIBLD_MODEL?: string;
   /** Transport keepalive interval in ms. Configuration, not a literal. */
   VIBLD_STREAM_KEEPALIVE_MS?: string;
+  /** Per-user spend ledger. Without it the ceiling cannot be enforced. */
+  USER_BUDGET?: DurableObjectNamespace<UserBudget>;
+  /**
+   * Burst gates. Optional: they are per-location and documented as permissive,
+   * so they are a speed bump in front of the ledger rather than the limit.
+   */
+  PLAN_BURST?: RateLimit;
+  PLAN_SUSTAINED?: RateLimit;
+  /** Micro-USD one user may spend per UTC day. 4000000 == $4.00. */
+  VIBLD_DAILY_MICRO_USD?: string;
+  /** Runs one user may have in flight at once. */
+  VIBLD_MAX_IN_FLIGHT?: string;
+  VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
+  VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
+}
+
+/** Re-exported so Wrangler can find the class from the Worker's entrypoint. */
+export { UserBudget };
+
+const DEFAULT_DAILY_MICRO_USD = 4_000_000;
+const DEFAULT_MAX_IN_FLIGHT = 2;
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -44,7 +73,12 @@ function json(body: unknown, status = 200): Response {
  */
 function isConfigured(env: Env): boolean {
   return Boolean(
-    env.ANTHROPIC_API_KEY && env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD,
+    env.ANTHROPIC_API_KEY &&
+    env.ACCESS_TEAM_DOMAIN &&
+    env.ACCESS_AUD &&
+    // The ledger is part of the grant, not an optimisation: a deployment
+    // that cannot account for spend must not be able to spend.
+    env.USER_BUDGET,
   );
 }
 
@@ -93,6 +127,11 @@ async function requireAccess(
     });
     // The identity is carried forward so a run's cost is attributable to
     // someone. Spend with no name attached cannot be limited or explained.
+    //
+    // A token with no email claim falls into one shared 'unknown' bucket
+    // rather than getting its own. That is deliberately the strict reading:
+    // every such caller then competes for a single ceiling instead of each
+    // being handed a fresh one.
     return { denied: null, email: claims.email ?? 'unknown' };
   } catch {
     // Deliberately opaque: a verification failure should not tell a caller
@@ -134,6 +173,68 @@ async function handlePlan(
   const parsed = parseGenerationRequest(body);
   if (!parsed.ok) {
     return json({ error: parsed.error }, parsed.status);
+  }
+
+  // Layer one: a burst gate keyed on the caller. It is per-location and
+  // documented as permissive, so it stops a naive flood and nothing more --
+  // it is allowed to fail open only because the layer below fails closed.
+  try {
+    const key = `plan:${access.email}`;
+    const gates = [env.PLAN_BURST, env.PLAN_SUSTAINED].filter(
+      (gate): gate is RateLimit => gate !== undefined,
+    );
+    const results = await Promise.all(gates.map((gate) => gate.limit({ key })));
+    if (results.some((result) => !result.success)) {
+      return json(
+        { error: 'Too many generation requests. Try again shortly.' },
+        429,
+      );
+    }
+  } catch (error) {
+    console.error('rate limiter unavailable', error);
+  }
+
+  // Layer two: the ceiling. The worst case is charged before the run, because
+  // charging afterwards gives an accurate ledger and no limit -- concurrent
+  // callers would all read the same balance and all find headroom.
+  const prices = parsePrices(env);
+  const worstCase = worstCaseMicroUsd(
+    prices,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_LIMITS.maxPromptChars,
+  );
+  const ledger = env.USER_BUDGET!.getByName(access.email);
+
+  let reservation;
+  try {
+    reservation = await ledger.reserve(
+      worstCase,
+      positiveInt(env.VIBLD_DAILY_MICRO_USD, DEFAULT_DAILY_MICRO_USD),
+      positiveInt(env.VIBLD_MAX_IN_FLIGHT, DEFAULT_MAX_IN_FLIGHT),
+    );
+  } catch (error) {
+    // Fail closed. A retry costs the user a minute; an unbounded endpoint on
+    // a public URL costs real money. 503 rather than 429: this is the
+    // service's problem, and telling the user they did too much is a lie.
+    console.error('spend ledger unavailable', error);
+    return new Response(
+      JSON.stringify({
+        error: 'Usage accounting is unavailable; generation is paused.',
+      }),
+      { status: 503, headers: { ...JSON_HEADERS, 'retry-after': '30' } },
+    );
+  }
+
+  if (!reservation.verdict.allow) {
+    return json(
+      {
+        error:
+          reservation.verdict.reason === 'daily-ceiling'
+            ? 'Daily generation budget reached. It resets at 00:00 UTC.'
+            : 'A generation is already running. Wait for it to finish.',
+      },
+      429,
+    );
   }
 
   // Stream rather than buffer. A buffered response sends nothing until the
@@ -215,6 +316,19 @@ async function handlePlan(
       }
     } finally {
       stopKeepalive();
+      // Reconcile the pessimistic debit down to what the run really cost.
+      // A run that never reported usage settles at the full reservation
+      // rather than at zero: failing safe means over-counting, not under.
+      const actual = usage ? microUsdOf(usage, prices) : worstCase;
+      if (reservation.id !== undefined) {
+        ctx.waitUntil(
+          ledger
+            .settle(reservation.id, actual)
+            .catch((error: unknown) =>
+              console.error('spend settlement failed', error),
+            ),
+        );
+      }
       // Spend is recorded even when the run failed: a refusal, a truncation
       // or a cancellation still consumed tokens, and a record that counts
       // only successes under-reports the bill.
@@ -227,6 +341,7 @@ async function handlePlan(
           ...(cancelledBy ? { cancelledBy } : {}),
           inputTokens: usage?.inputTokens ?? 0,
           outputTokens: usage?.outputTokens ?? 0,
+          microUsd: actual,
         }),
       );
       await writer.close().catch(() => {});
