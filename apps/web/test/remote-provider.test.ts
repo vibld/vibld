@@ -3,6 +3,7 @@ import { beforeEach, describe, it } from 'node:test';
 import {
   RemoteModelProvider,
   detectGenerationMode,
+  readPlanEvents,
   resetGenerationModeProbe,
 } from '../src/generation/remote-provider.ts';
 
@@ -13,12 +14,66 @@ function jsonFetch(body: unknown, status = 200): typeof fetch {
     new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
 }
 
+/** Build an SSE response body, optionally split across arbitrary chunks. */
+function sseResponse(
+  frames: string[],
+  chunkSize?: number,
+  status = 200,
+): Response {
+  const text = frames.join('');
+  const bytes = new TextEncoder().encode(text);
+  const size = chunkSize ?? bytes.length;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let index = 0; index < bytes.length; index += size) {
+        controller.enqueue(bytes.slice(index, index + size));
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream, { status });
+}
+
+const PLAN_FRAME = `event: plan\ndata: ${JSON.stringify({ providerId: 'anthropic:x', plan: PLAN })}\n\n`;
+
+describe('readPlanEvents', () => {
+  it('skips keepalive comments and yields real events', async () => {
+    const body = sseResponse([
+      ': keepalive\n\n',
+      ': keepalive\n\n',
+      PLAN_FRAME,
+    ]).body!;
+    const events = [];
+    for await (const event of readPlanEvents(body)) events.push(event);
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.event, 'plan');
+  });
+
+  it('reassembles frames split across arbitrary chunk boundaries', async () => {
+    // One byte at a time: the parser must not assume a frame arrives whole.
+    const body = sseResponse([': keepalive\n\n', PLAN_FRAME], 1).body!;
+    const events = [];
+    for await (const event of readPlanEvents(body)) events.push(event);
+
+    assert.equal(events.length, 1);
+    assert.deepEqual((events[0]!.data as { plan: unknown }).plan, PLAN);
+  });
+
+  it('rejects a malformed data payload', async () => {
+    const body = sseResponse(['event: plan\ndata: {not json\n\n']).body!;
+    await assert.rejects(async () => {
+      for await (const _ of readPlanEvents(body)) void _;
+    }, /malformed event/);
+  });
+});
+
 describe('RemoteModelProvider', () => {
-  it('posts the request and returns the plan', async () => {
+  it('posts the request and returns the streamed plan', async () => {
     const calls: Array<[string, RequestInit | undefined]> = [];
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       calls.push([url, init]);
-      return new Response(JSON.stringify({ plan: PLAN }), { status: 200 });
+      return sseResponse([': keepalive\n\n', PLAN_FRAME]);
     }) as unknown as typeof fetch;
 
     const provider = new RemoteModelProvider({
@@ -37,25 +92,49 @@ describe('RemoteModelProvider', () => {
     assert.equal(JSON.parse(String(init?.body)).prompt, 'a landing page');
   });
 
-  it('surfaces the service error message rather than a bare status', async () => {
+  it('surfaces a streamed error event', async () => {
+    const frame = `event: error\ndata: ${JSON.stringify({ error: 'The model declined this request (cyber)' })}\n\n`;
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([': keepalive\n\n', frame])) as unknown as typeof fetch,
+    });
+    await assert.rejects(
+      () => provider.generate({ prompt: 'x' }),
+      /declined this request/,
+    );
+  });
+
+  it('surfaces an HTTP error body', async () => {
     const provider = new RemoteModelProvider({
       fetchImpl: jsonFetch(
-        { error: 'The model declined this request (cyber)' },
-        422,
+        { error: 'This endpoint requires Cloudflare Access sign-in.' },
+        401,
       ),
     });
     await assert.rejects(
       () => provider.generate({ prompt: 'x' }),
-      (error: unknown) => {
-        assert.match((error as Error).message, /declined this request/);
-        return true;
-      },
+      /Cloudflare Access sign-in/,
     );
   });
 
-  it('rejects a malformed success body instead of returning a broken plan', async () => {
+  it('names a connection that closes before a result, rather than failing opaquely', async () => {
     const provider = new RemoteModelProvider({
-      fetchImpl: jsonFetch({ plan: { summary: 'no files' } }),
+      fetchImpl: (async () =>
+        sseResponse([
+          ': keepalive\n\n',
+          ': keepalive\n\n',
+        ])) as unknown as typeof fetch,
+    });
+    await assert.rejects(
+      () => provider.generate({ prompt: 'x' }),
+      /connection closed before generation finished/,
+    );
+  });
+
+  it('rejects a malformed plan payload instead of returning a broken plan', async () => {
+    const frame = `event: plan\ndata: ${JSON.stringify({ plan: { summary: 'no files' } })}\n\n`;
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () => sseResponse([frame])) as unknown as typeof fetch,
     });
     await assert.rejects(
       () => provider.generate({ prompt: 'x' }),

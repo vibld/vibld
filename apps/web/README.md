@@ -99,6 +99,23 @@ so the UI never implies AI when it is running the stub.
 and `@vibld/ai` is imported only from `worker/`, never from `src/` — a build
 check confirms the model SDK stays out of the client bundle (ADR-0006).
 
+### Streaming
+
+`/api/plan` returns a server-sent event stream, not a buffered JSON body. A
+generation runs for a minute or more with no model output to forward, and a
+buffered response sends nothing until it finishes — long enough that browsers,
+mobile networks and intermediate proxies abandon the connection. The failure
+then surfaces as an opaque network error (Safari reports `Load failed`) rather
+than anything about the generation.
+
+The transport therefore emits keepalive comments on its own timer, independent
+of model activity, starting with the first byte. The interval is configuration,
+not a literal: set `VIBLD_STREAM_KEEPALIVE_MS` to override the documented
+10-second default. Values outside 1–60 seconds fall back to the default.
+
+The keepalive is cleared on success, failure and client disconnect, so a timer
+cannot outlive its request.
+
 ### Fail closed
 
 `/api/plan` serves a generation only when **all three** of `ANTHROPIC_API_KEY`,
