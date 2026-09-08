@@ -150,7 +150,10 @@ export async function verifyAccessJwt(
   if (typeof payload.exp !== 'number' || payload.exp + leeway < now) {
     throw new AccessVerificationError('Token has expired');
   }
-  if (typeof payload.iat === 'number' && payload.iat - leeway > now) {
+  if (typeof payload.iat !== 'number' || payload.iat - leeway > now) {
+    throw new AccessVerificationError('Token is not valid yet');
+  }
+  if (typeof payload.nbf === 'number' && payload.nbf - leeway > now) {
     throw new AccessVerificationError('Token is not valid yet');
   }
 
@@ -159,7 +162,7 @@ export async function verifyAccessJwt(
     email: typeof payload.email === 'string' ? payload.email : undefined,
     iss: payload.iss,
     exp: payload.exp,
-    iat: typeof payload.iat === 'number' ? payload.iat : 0,
+    iat: payload.iat,
   };
 }
 

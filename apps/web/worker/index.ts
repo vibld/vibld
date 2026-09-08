@@ -3,8 +3,14 @@ import {
   ProviderError,
   createAnthropicPlanClient,
 } from '@vibld/ai';
-import type { GenerationRequest } from '@vibld/core';
+import type { PlanUsage } from '@vibld/ai';
+
 import { fetchAccessKeys, verifyAccessJwt } from './access.ts';
+import {
+  checkBodySize,
+  checkRequestOrigin,
+  parseGenerationRequest,
+} from './request-guard.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
@@ -42,15 +48,25 @@ function isConfigured(env: Env): boolean {
   );
 }
 
+interface AccessDenied {
+  denied: Response;
+}
+interface AccessGranted {
+  denied: null;
+  email: string;
+}
+
 async function requireAccess(
   request: Request,
   env: Env,
-): Promise<Response | null> {
+): Promise<AccessDenied | AccessGranted> {
   if (!isConfigured(env)) {
-    return json(
-      { error: 'Model generation is not configured for this deployment.' },
-      403,
-    );
+    return {
+      denied: json(
+        { error: 'Model generation is not configured for this deployment.' },
+        403,
+      ),
+    };
   }
 
   const token =
@@ -60,49 +76,29 @@ async function requireAccess(
     )?.[1];
 
   if (!token) {
-    return json(
-      { error: 'This endpoint requires Cloudflare Access sign-in.' },
-      401,
-    );
+    return {
+      denied: json(
+        { error: 'This endpoint requires Cloudflare Access sign-in.' },
+        401,
+      ),
+    };
   }
 
   try {
     const keys = await fetchAccessKeys(env.ACCESS_TEAM_DOMAIN!);
-    await verifyAccessJwt(token, {
+    const claims = await verifyAccessJwt(token, {
       keys,
       audience: env.ACCESS_AUD!,
       issuer: `https://${env.ACCESS_TEAM_DOMAIN}`,
     });
-    return null;
+    // The identity is carried forward so a run's cost is attributable to
+    // someone. Spend with no name attached cannot be limited or explained.
+    return { denied: null, email: claims.email ?? 'unknown' };
   } catch {
     // Deliberately opaque: a verification failure should not tell a caller
     // which check failed.
-    return json({ error: 'Access verification failed.' }, 403);
+    return { denied: json({ error: 'Access verification failed.' }, 403) };
   }
-}
-
-function parseGenerationRequest(body: unknown): GenerationRequest | string {
-  if (typeof body !== 'object' || body === null)
-    return 'Body must be a JSON object';
-  const { prompt, base } = body as { prompt?: unknown; base?: unknown };
-  if (typeof prompt !== 'string' || prompt.trim().length === 0) {
-    return 'A non-empty "prompt" is required';
-  }
-  if (prompt.length > 4000) return 'Prompt is too long';
-  if (base === undefined) return { prompt };
-
-  const snapshot = base as { revision?: unknown; files?: unknown };
-  if (typeof snapshot.revision !== 'string' || !Array.isArray(snapshot.files)) {
-    return '"base" must be a project snapshot';
-  }
-  const files = snapshot.files.filter(
-    (file): file is { path: string; content: string } =>
-      typeof file === 'object' &&
-      file !== null &&
-      typeof (file as { path?: unknown }).path === 'string' &&
-      typeof (file as { content?: unknown }).content === 'string',
-  );
-  return { prompt, base: { revision: snapshot.revision, files } };
 }
 
 async function handlePlan(
@@ -114,8 +110,19 @@ async function handlePlan(
     return json({ error: 'Use POST.' }, 405);
   }
 
-  const denied = await requireAccess(request, env);
-  if (denied) return denied;
+  // Cheap rejections first, so a hostile request is refused before it costs
+  // anything: shape, then size, then identity, then content.
+  const origin = checkRequestOrigin(
+    request.headers,
+    new URL(request.url).origin,
+  );
+  if (!origin.ok) return json({ error: origin.error }, origin.status);
+
+  const size = checkBodySize(request.headers);
+  if (!size.ok) return json({ error: size.error }, size.status);
+
+  const access = await requireAccess(request, env);
+  if (access.denied) return access.denied;
 
   let body: unknown;
   try {
@@ -125,13 +132,19 @@ async function handlePlan(
   }
 
   const parsed = parseGenerationRequest(body);
-  if (typeof parsed === 'string') {
-    return json({ error: parsed }, 400);
+  if (!parsed.ok) {
+    return json({ error: parsed.error }, parsed.status);
   }
 
+  let usage: PlanUsage | undefined;
   const provider = new AnthropicModelProvider(
     createAnthropicPlanClient({ apiKey: env.ANTHROPIC_API_KEY }),
-    env.VIBLD_MODEL ? { model: env.VIBLD_MODEL } : {},
+    {
+      ...(env.VIBLD_MODEL ? { model: env.VIBLD_MODEL } : {}),
+      onUsage: (reported) => {
+        usage = reported;
+      },
+    },
   );
 
   // Stream rather than buffer. A buffered response sends nothing until the
@@ -162,7 +175,7 @@ async function handlePlan(
 
   const run = (async () => {
     try {
-      const plan = await provider.generate(parsed);
+      const plan = await provider.generate(parsed.value);
       await write(encodeEvent('plan', { providerId: provider.id, plan }));
     } catch (error) {
       if (error instanceof ProviderError) {
@@ -179,6 +192,18 @@ async function handlePlan(
       }
     } finally {
       stopKeepalive();
+      // Spend is recorded even when the run failed: a refusal or a truncation
+      // still consumed tokens, and a record that counts only successes
+      // under-reports the bill.
+      console.log(
+        JSON.stringify({
+          event: 'generation.settled',
+          email: access.email,
+          model: provider.id,
+          inputTokens: usage?.inputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
+        }),
+      );
       await writer.close().catch(() => {});
     }
   })();
