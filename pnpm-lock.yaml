@@ -20,6 +20,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@vibld/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@vibld/core':
         specifier: workspace:*
         version: link:../../packages/core

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { FakeModelProvider } from '@vibld/core';
 import { BuilderSession } from '../src/generation/session.ts';
 import type { BuilderState } from '../src/generation/session.ts';
 
@@ -11,6 +12,9 @@ function createSession(
     delay: async () => {},
     now: () => (tick += 1),
     stageDelayMs: 0,
+    // Pin the provider rather than letting the default probe /api/config:
+    // a test must not depend on a network call failing.
+    resolveProvider: async (plan) => new FakeModelProvider([plan]),
     ...overrides,
   });
 }

@@ -47,7 +47,8 @@ export function App() {
 
       <footer className="shell__footer">
         <span>
-          Runs: {state.runCount} · Model tokens: {usage.modelInputTokens} in /{' '}
+          Runs: {state.runCount} · Provider: {state.providerId ?? 'not run yet'}{' '}
+          · Model tokens: {usage.modelInputTokens} in /{' '}
           {usage.modelOutputTokens} out
         </span>
         <span>

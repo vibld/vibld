@@ -1,16 +1,25 @@
 {
   "name": "vibld-web-preview",
   "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat"],
 
-  // Static assets only — there is no Worker script. The builder shell is a
-  // client-side SPA with no backend, no credentials and no stored data, so
-  // nothing deployed here sits inside the trusted control plane (ADR-0006).
-  //
-  // This deploys the BUILDER UI. It is not the private, origin-isolated
-  // preview that ADR-0006 requires for running untrusted generated apps;
-  // that arrives with sandbox execution (#6).
+  // The Worker handles /api/* only; everything else is served straight from
+  // the built SPA. Explicit routing is used rather than the implicit
+  // Sec-Fetch-Mode heuristic so an API path can never fall through to
+  // index.html.
+  "main": "./worker/index.ts",
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+
+  // ANTHROPIC_API_KEY is a Worker secret, set out of band and never committed.
+  // Both Access values must also be present or /api/plan refuses every
+  // request: an open endpoint here would let anyone spend the model budget.
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
   },
 }
