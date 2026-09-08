@@ -4,9 +4,17 @@ Vibld executes AI-generated and third-party code. Treat every generated project,
 
 ## Reporting a vulnerability
 
-Do not open a public issue containing vulnerability details. A working private reporting route has not yet been verified for this Phase 0 repository. [Issue #17](https://github.com/vibld/vibld/issues/17) tracks that setup; it is not a place to submit vulnerability details. Maintainer responsible for establishing the route: [Chris Brock (@cbrock84)](https://github.com/cbrock84). Hosted alpha admission is blocked until a reporter can use the verified private route and this policy links to it.
+Do not open a public issue containing vulnerability details.
 
-Once that route is available, include impact, affected components or commits, reproduction steps and any suggested mitigation. Do not include live credentials or unrelated user data.
+**Report privately here: [github.com/vibld/vibld/security/advisories/new](https://github.com/vibld/vibld/security/advisories/new)**
+
+That form is GitHub's private vulnerability reporting. The draft advisory is visible only to you and to the maintainers of this repository; nothing about it is public until an advisory is deliberately published. You do not need a Vibld account, and there is no email address to find.
+
+Maintainer responsible for this route: [Chris Brock (@cbrock84)](https://github.com/cbrock84).
+
+Include impact, affected components or commits, reproduction steps and any suggested mitigation. Do not include live credentials or unrelated user data — a report does not need them, and sending them makes the report itself a liability.
+
+If the link above does not open a report form, the route is not working and that is itself worth telling us: say so in [issue #17](https://github.com/vibld/vibld/issues/17) **without any vulnerability details**, and wait for the route to be fixed rather than disclosing publicly.
 
 Please allow the maintainers reasonable time to investigate before public disclosure. We will acknowledge a complete report, assess severity, coordinate a fix, and credit reporters who want attribution.
 
