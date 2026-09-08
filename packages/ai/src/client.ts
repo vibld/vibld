@@ -15,6 +15,12 @@ export interface PlanRequest {
   model: string;
   maxTokens: number;
   effort: PlanEffort;
+  /**
+   * Abandons the call. A generation that nobody is waiting for is still
+   * billed until the request to the model ends, so the ability to end it is
+   * part of the contract rather than an SDK detail.
+   */
+  signal?: AbortSignal;
 }
 
 export interface PlanUsage {

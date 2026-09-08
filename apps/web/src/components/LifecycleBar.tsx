@@ -19,7 +19,9 @@ function stepState(
   step: BuilderStatus,
   status: BuilderStatus,
 ): 'done' | 'active' | 'todo' {
-  if (status === 'failed') return 'todo';
+  // Neither a failure nor a cancellation leaves the lifecycle part-finished:
+  // no checkpoint was produced, so no step claims to be complete.
+  if (status === 'failed' || status === 'cancelled') return 'todo';
   // 'accepted' is terminal: every step of the lifecycle is complete.
   if (status === 'accepted') return 'done';
   const current = ORDER.indexOf(status);

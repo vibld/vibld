@@ -29,7 +29,13 @@ import {
 } from './remote-provider.ts';
 
 export type BuilderStatus =
-  'idle' | 'planning' | 'staging' | 'validating' | 'accepted' | 'failed';
+  | 'idle'
+  | 'planning'
+  | 'staging'
+  | 'validating'
+  | 'accepted'
+  | 'failed'
+  | 'cancelled';
 
 export interface TimelineEntry {
   id: number;
@@ -67,7 +73,10 @@ export interface SessionOptions {
    * Resolve the provider for a run. Defaults to asking the deployment: the
    * hosted Worker when it is configured, the deterministic fake otherwise.
    */
-  resolveProvider?: (plan: GenerationPlan) => Promise<ModelProvider>;
+  resolveProvider?: (
+    plan: GenerationPlan,
+    signal: AbortSignal,
+  ) => Promise<ModelProvider>;
 }
 
 const DEFAULT_BUDGET = {
@@ -109,10 +118,11 @@ function initialState(budget: RunUsageReport): BuilderState {
  */
 async function defaultResolveProvider(
   plan: GenerationPlan,
+  signal: AbortSignal,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
-    ? new RemoteModelProvider()
+    ? new RemoteModelProvider({ signal })
     : new FakeModelProvider([plan]);
 }
 
@@ -150,7 +160,11 @@ export class BuilderSession {
   readonly #now: () => number;
   readonly #stageDelayMs: number;
   readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
-  readonly #resolveProvider: (plan: GenerationPlan) => Promise<ModelProvider>;
+  readonly #resolveProvider: (
+    plan: GenerationPlan,
+    signal: AbortSignal,
+  ) => Promise<ModelProvider>;
+  #abort: AbortController | null = null;
 
   constructor(options: SessionOptions = {}) {
     this.#delay =
@@ -227,6 +241,9 @@ export class BuilderSession {
       return;
     }
 
+    const controller = new AbortController();
+    this.#abort = controller;
+
     this.#patch(epoch, (state) => ({
       ...state,
       status: 'planning',
@@ -278,7 +295,7 @@ export class BuilderSession {
 
     let resolved: ModelProvider;
     try {
-      resolved = await this.#resolveProvider(plan);
+      resolved = await this.#resolveProvider(plan, controller.signal);
     } catch (error) {
       reservation.release();
       const message = error instanceof Error ? error.message : String(error);
@@ -373,6 +390,39 @@ export class BuilderSession {
         ),
       ),
     }));
+  }
+
+  /**
+   * Stop the active run and keep the accepted checkpoint.
+   *
+   * Aborting the request drops the connection, and the endpoint treats that
+   * as its signal to abort its own model call -- so this stops the spending,
+   * not merely the waiting.
+   *
+   * The abandoned run still settles its budget reservation at the full
+   * estimate. That over-charges a run cut short, which is the safe direction
+   * for a ceiling; the figure in the footer catches up on the next run, since
+   * the epoch bump below drops every later write from the run being left.
+   */
+  cancel(): void {
+    if (this.#disposed || !this.#state.running) return;
+
+    this.#abort?.abort();
+    this.#abort = null;
+    this.#epoch += 1;
+
+    this.#state = {
+      ...this.#state,
+      status: 'cancelled',
+      running: false,
+      problems: [],
+      timeline: this.#append(
+        this.#state.timeline,
+        'info',
+        `Run ${this.#state.runId ?? ''} cancelled; the accepted checkpoint is unchanged`.trim(),
+      ),
+    };
+    this.#emit();
   }
 
   #append(

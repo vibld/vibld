@@ -69,17 +69,30 @@ export async function* readPlanEvents(
   }
 }
 
+export interface RemoteModelProviderOptions {
+  id?: string;
+  endpoint?: string;
+  fetchImpl?: typeof fetch;
+  /**
+   * Aborts the request when the user cancels. Aborting the fetch also drops
+   * the connection, which is the signal the Worker uses to stop its own model
+   * call -- so cancelling here really does stop the spending, rather than
+   * merely stopping the waiting.
+   */
+  signal?: AbortSignal;
+}
+
 export class RemoteModelProvider implements ModelProvider {
   readonly id: string;
   readonly #endpoint: string;
   readonly #fetch: typeof fetch;
+  readonly #signal?: AbortSignal;
 
-  constructor(
-    options: { id?: string; endpoint?: string; fetchImpl?: typeof fetch } = {},
-  ) {
+  constructor(options: RemoteModelProviderOptions = {}) {
     this.id = options.id ?? 'remote';
     this.#endpoint = options.endpoint ?? '/api/plan';
     this.#fetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    this.#signal = options.signal;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
@@ -93,6 +106,7 @@ export class RemoteModelProvider implements ModelProvider {
       // Access uses a cookie; without this the browser omits it and every
       // request looks unauthenticated.
       credentials: 'same-origin',
+      signal: this.#signal,
     });
 
     if (!response.ok) {

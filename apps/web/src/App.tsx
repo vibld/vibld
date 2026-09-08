@@ -39,6 +39,7 @@ export function App() {
               void session.submit(prompt, mode);
             }}
             onReset={() => session.reset()}
+            onCancel={() => session.cancel()}
           />
         </section>
 

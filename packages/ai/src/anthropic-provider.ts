@@ -25,6 +25,11 @@ export interface ModelProviderOptions {
    * with it, `RunBudgetLedger` can be charged actual figures.
    */
   onUsage?: (usage: PlanUsage) => void;
+  /**
+   * Ends the run early. The caller owns the reason -- a cancelled request, a
+   * disconnected client -- and this adapter only forwards it to the client.
+   */
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -45,6 +50,7 @@ export class AnthropicModelProvider implements ModelProvider {
   readonly #maxTokens: number;
   readonly #effort: PlanEffort;
   readonly #onUsage?: (usage: PlanUsage) => void;
+  readonly #signal?: AbortSignal;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -52,6 +58,7 @@ export class AnthropicModelProvider implements ModelProvider {
     this.#maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.#effort = options.effort ?? DEFAULT_EFFORT;
     this.#onUsage = options.onUsage;
+    this.#signal = options.signal;
     this.id = `${client.id}:${this.#model}`;
   }
 
@@ -62,6 +69,7 @@ export class AnthropicModelProvider implements ModelProvider {
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,
+      ...(this.#signal ? { signal: this.#signal } : {}),
     });
 
     // Report usage even for a failed run: a refusal or a truncation still

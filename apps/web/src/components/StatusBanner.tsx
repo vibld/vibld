@@ -7,9 +7,12 @@ const MESSAGES: Record<BuilderStatus, string> = {
   validating: 'Validating the staged project…',
   accepted: 'Checkpoint accepted.',
   failed: 'This run failed. Your last accepted checkpoint is unchanged.',
+  cancelled: 'Run cancelled. Your last accepted checkpoint is unchanged.',
 };
 
 export function StatusBanner({ state }: { state: BuilderState }) {
+  // A cancellation is a choice the user made, not a fault: it reads as
+  // neutral rather than as an error they have to interpret.
   const tone =
     state.status === 'failed'
       ? 'error'

@@ -27,16 +27,19 @@ export function createAnthropicPlanClient(
   return {
     id: 'anthropic',
     async createPlan(request: PlanRequest): Promise<PlanCompletion> {
-      const response = await client.messages.parse({
-        model: request.model,
-        max_tokens: request.maxTokens,
-        system: request.system,
-        output_config: {
-          effort: request.effort,
-          format: zodOutputFormat(GenerationPlanSchema),
+      const response = await client.messages.parse(
+        {
+          model: request.model,
+          max_tokens: request.maxTokens,
+          system: request.system,
+          output_config: {
+            effort: request.effort,
+            format: zodOutputFormat(GenerationPlanSchema),
+          },
+          messages: [{ role: 'user', content: request.prompt }],
         },
-        messages: [{ role: 'user', content: request.prompt }],
-      });
+        request.signal ? { signal: request.signal } : undefined,
+      );
 
       return {
         plan: response.parsed_output ?? null,
