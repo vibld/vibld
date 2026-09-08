@@ -27,5 +27,44 @@
   "vars": {
     "ACCESS_TEAM_DOMAIN": "chris-brock-llc.cloudflareaccess.com",
     "ACCESS_AUD": "5d652184451045c3fde8eca6a09ebaa59fd4704666b94d839bebde5cf992d5d7",
+
+    // Micro-USD one user may spend per UTC day: 4000000 == $4.00, roughly ten
+    // worst-case runs. The per-user ceiling is also the aggregate one --
+    // (users x ceiling) is the most the account can be billed in a day, which
+    // works because Access keeps the user set small and enumerable.
+    "VIBLD_DAILY_MICRO_USD": "4000000",
+    "VIBLD_MAX_IN_FLIGHT": "2",
+
+    // List prices in micro-USD per token. They decide what the ceiling above
+    // actually means, so they live here to be corrected without a code change
+    // -- and they must be corrected if VIBLD_MODEL changes.
+    "VIBLD_USD_MICRO_PER_INPUT_TOKEN": "5",
+    "VIBLD_USD_MICRO_PER_OUTPUT_TOKEN": "25",
   },
+
+  // Per-location and permissive by design: a burst gate in front of the
+  // ledger, never the ceiling itself. No resource is provisioned -- the
+  // namespace_id is an identifier chosen here, and it is account-global, so
+  // two bindings sharing an id would share counters.
+  "ratelimits": [
+    {
+      "name": "PLAN_BURST",
+      "namespace_id": "1001",
+      "simple": { "limit": 2, "period": 10 },
+    },
+    {
+      "name": "PLAN_SUSTAINED",
+      "namespace_id": "1002",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
+
+  // The spend ceiling. Also not provisioned: the object is created on first
+  // access. SQLite storage is required rather than preferred -- it is the only
+  // backend available on the Workers Free plan, and the only one whose storage
+  // is not billed there.
+  "durable_objects": {
+    "bindings": [{ "name": "USER_BUDGET", "class_name": "UserBudget" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserBudget"] }],
 }
