@@ -37,14 +37,29 @@ function tagContent(html: string, attr: string, value: string): string | null {
   return match[1] ?? match[2] ?? null;
 }
 
+const ENTITIES: Record<string, string> = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#x27;': "'",
+  '&#39;': "'",
+};
+
+/**
+ * Decode HTML entities in one pass.
+ *
+ * Chained replacements decode twice: `&amp;lt;` becomes `&lt;` when the first
+ * one runs, and the next one then turns that into `<`. A title containing the
+ * literal text `&lt;` would compare wrong, and the test would be asserting
+ * against something the page never said. Matching each entity once, and never
+ * re-reading what a substitution produced, is the only version that is right.
+ */
 function decode(text: string): string {
-  return text
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&#x27;', "'")
-    .replaceAll('&#39;', "'");
+  return text.replace(
+    /&(?:amp|lt|gt|quot|#x27|#39);/g,
+    (entity) => ENTITIES[entity] ?? entity,
+  );
 }
 
 before(() => {
