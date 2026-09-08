@@ -16,12 +16,12 @@
   "dependencies": {
     "@vibld/ai": "workspace:*",
     "@vibld/core": "workspace:*",
-    "react": "19.2.0",
+    "react": "19.2.8",
     "react-dom": "19.2.0"
   },
   "devDependencies": {
     "@types/node": "22.19.1",
-    "@types/react": "19.2.2",
+    "@types/react": "19.2.18",
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "5.1.0",
     "typescript": "7.0.2",
