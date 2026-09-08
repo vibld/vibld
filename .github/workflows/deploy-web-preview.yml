@@ -1,9 +1,8 @@
 name: Deploy web preview
 
-# Manual only. An automatic deploy on every push to main would spend Actions
-# minutes on every merge; the builder shell is a review aid, not a product
-# users depend on being current. Run this from the Actions tab when you want
-# the hosted preview refreshed.
+# Manual only. An automatic deploy on every push to main would redeploy on
+# every merge; the builder shell is a review aid, not something users depend
+# on being current. Run this from the Actions tab to refresh the preview.
 on:
   workflow_dispatch:
 
@@ -19,6 +18,16 @@ jobs:
     name: Build and deploy the builder shell
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    # Credentials live on this environment rather than the repository, so they
+    # are reachable only from a job that names it, and any protection rule
+    # configured on it (a required reviewer) gates the run before a single
+    # step executes. Repository-level secrets of the same name still work as a
+    # fallback, so moving them is not a breaking change.
+    environment:
+      name: preview
+      url: ${{ steps.deploy.outputs.url }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,8 +41,8 @@ jobs:
           [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
           [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
           if [ "$missing" -ne 0 ]; then
-            echo "Add both as repository secrets. The token needs the" >&2
-            echo "\"Workers Scripts: Edit\" permission and nothing more." >&2
+            echo "Add both to the \"preview\" environment (Settings -> Environments)." >&2
+            echo "The token needs \"Workers Scripts: Edit\" and nothing more." >&2
             exit 1
           fi
 
@@ -53,8 +62,19 @@ jobs:
         run: pnpm --filter @vibld/web build
 
       - name: Deploy to Cloudflare Workers
+        id: deploy
+        shell: bash
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm dlx wrangler@4.129.1 deploy
+        run: |
+          log="$RUNNER_TEMP/wrangler-deploy.log"
+          pnpm dlx wrangler@4.129.1 deploy | tee "$log"
+          url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+          if [ -n "$url" ]; then
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            echo "Deployed the builder shell to $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Deploy succeeded but the URL could not be read from wrangler output"
+          fi

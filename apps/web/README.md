@@ -51,17 +51,32 @@ This deploys the **builder UI**. It is _not_ the private, origin-isolated
 preview ADR-0006 requires for running untrusted generated applications; that
 arrives with sandbox execution ([#6](https://github.com/vibld/vibld/issues/6)).
 
-Set two repository secrets:
+### One-time setup
+
+Create a **`preview`** environment under **Settings → Environments**, then add
+both secrets _to that environment_ rather than to the repository:
 
 | Secret                  | Value                                                   |
 | ----------------------- | ------------------------------------------------------- |
 | `CLOUDFLARE_API_TOKEN`  | A token with **Workers Scripts: Edit** and nothing more |
 | `CLOUDFLARE_ACCOUNT_ID` | The target Cloudflare account                           |
 
-Then run the **Deploy web preview** workflow from the Actions tab. It is
-`workflow_dispatch` only, so it never runs on its own and costs nothing until
-you ask for it. The workflow fails fast with a clear message if either secret
-is missing.
+Environment secrets are reachable only from a job that names the environment,
+and any protection rule on it gates the run before a single step executes. Add
+yourself as a **required reviewer** if the deploy should need approval each
+time. Repository-level secrets of the same name still work as a fallback.
+
+`Workers Scripts: Edit` cannot be scoped to one script, so the token can write
+to every Worker on the account it is issued for. Issue it against a Cloudflare
+account used only for Vibld to keep the blast radius to this preview.
+
+### Deploying
+
+Run the **Deploy web preview** workflow from the Actions tab. It is
+`workflow_dispatch` only, so it never runs on its own. The workflow fails fast
+with a clear message if either secret is missing, and on success records the
+deployed URL on the environment and in the run summary — so the current preview
+URL is always visible on the repository's Environments page.
 
 To deploy from a workstation instead, authenticate wrangler yourself and run:
 
