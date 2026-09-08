@@ -16,10 +16,13 @@
   },
 
   // ANTHROPIC_API_KEY is a Worker secret, set out of band and never committed.
-  // Both Access values must also be present or /api/plan refuses every
-  // request: an open endpoint here would let anyone spend the model budget.
+  //
+  // The two values below are public identifiers rather than secrets: the team
+  // domain is the Access login hostname and the AUD tag names the Access
+  // application. /api/plan verifies each request's Access token against them,
+  // and refuses every request unless all three are present.
   "vars": {
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": "",
+    "ACCESS_TEAM_DOMAIN": "chris-brock-llc.cloudflareaccess.com",
+    "ACCESS_AUD": "5d652184451045c3fde8eca6a09ebaa59fd4704666b94d839bebde5cf992d5d7",
   },
 }
