@@ -140,7 +140,13 @@ describe('the report', () => {
   it('says the stub is not a model wherever the score is printed', () => {
     const text = formatReport(summarise([], 'stub'));
     assert.match(text, /deterministic stub, not a model/);
-    assert.match(text, new RegExp(PROMPT_SET_VERSION.replace(/\./g, '\\.')));
+    // A plain substring check rather than a regex built from the version:
+    // escaping only dots leaves every other metacharacter live, so the
+    // assertion would quietly change meaning the day the version does.
+    assert.ok(
+      text.includes(PROMPT_SET_VERSION),
+      'the report must name the prompt set version it scored',
+    );
   });
 
   it('names every failed case and its reasons', () => {
