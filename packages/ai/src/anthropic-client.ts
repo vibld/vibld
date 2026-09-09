@@ -52,7 +52,13 @@ export function createAnthropicPlanClient(
   return {
     id: 'anthropic',
     async createPlan(request: PlanRequest): Promise<PlanCompletion> {
-      // `messages.create` rather than the `messages.parse` helper, on purpose.
+      // Streaming, and not the `messages.parse` helper, both on purpose.
+      //
+      // Streaming because the SDK refuses a non-streaming request whose
+      // max_tokens could run past ten minutes -- at a 64000-token ceiling it
+      // throws "Streaming is required for operations that may take longer than
+      // 10 minutes" before sending anything. A whole project needs that
+      // ceiling, so the request has to stream.
       //
       // `parse` validates the structured output and throws if it cannot. When
       // the model hits the output ceiling the JSON arrives cut off mid-string,
@@ -64,19 +70,21 @@ export function createAnthropicPlanClient(
       // Reading the raw response first means the stop reason is known before
       // anything is parsed, so a truncated plan is named as truncated. The
       // schema is still enforced -- the provider validates it a layer up.
-      const response = await client.messages.create(
-        {
-          model: request.model,
-          max_tokens: request.maxTokens,
-          system: request.system,
-          output_config: {
-            effort: request.effort,
-            format: zodOutputFormat(GenerationPlanSchema),
+      const response = await client.messages
+        .stream(
+          {
+            model: request.model,
+            max_tokens: request.maxTokens,
+            system: request.system,
+            output_config: {
+              effort: request.effort,
+              format: zodOutputFormat(GenerationPlanSchema),
+            },
+            messages: [{ role: 'user', content: request.prompt }],
           },
-          messages: [{ role: 'user', content: request.prompt }],
-        },
-        request.signal ? { signal: request.signal } : undefined,
-      );
+          request.signal ? { signal: request.signal } : undefined,
+        )
+        .finalMessage();
 
       return {
         plan: readStructuredOutput(response.content, response.stop_reason),
