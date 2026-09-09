@@ -61,6 +61,56 @@ jobs:
       - name: Build
         run: pnpm --filter @vibld/web build
 
+      # Model keys are Worker secrets, not build inputs, so they are pushed
+      # separately from the deploy. Doing it here rather than by hand means
+      # the key is pasted in exactly one place -- the `preview` environment --
+      # instead of once for CI and again in a terminal.
+      #
+      # Only a key that is actually configured is pushed: an unset secret is
+      # an empty string here, and writing that would replace a working Worker
+      # secret with nothing.
+      - name: Sync model credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          # The provider the deployment selects, read from the committed
+          # config rather than guessed, so this fails before a deploy that
+          # would leave the live site without the key it needs.
+          provider="$(node --experimental-strip-types scripts/wrangler-var.ts VIBLD_PROVIDER anthropic)"
+          echo "wrangler.jsonc selects: $provider"
+
+          put() {
+            # The value goes in on stdin so it never appears in a command line
+            # or in the run log.
+            printf '%s' "$2" | pnpm dlx wrangler@4.129.1 secret put "$1"
+          }
+
+          case "$provider" in
+            deepseek) required=DEEPSEEK_API_KEY ;;
+            *)        required=ANTHROPIC_API_KEY ;;
+          esac
+          if [ -z "${!required}" ]; then
+            echo "::error::$required is not set on the 'preview' environment, but wrangler.jsonc selects $provider. Add it before deploying, or the live site falls back to the deterministic fake."
+            exit 1
+          fi
+
+          # `[ -n "$x" ] && put ...` would abort the whole step under `set -e`
+          # the moment one key is unconfigured, which is the normal case.
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            put ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+          fi
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            put DEEPSEEK_API_KEY "$DEEPSEEK_API_KEY"
+          fi
+          echo "Synced the model credentials that are configured." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy to Cloudflare Workers
         id: deploy
         shell: bash

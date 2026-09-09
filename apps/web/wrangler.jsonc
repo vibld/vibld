@@ -25,6 +25,10 @@
   // application. /api/plan verifies each request's Access token against them,
   // and refuses every request unless all three are present.
   "vars": {
+    // Which model service answers /api/plan. "anthropic" or "deepseek".
+    // The deploy workflow reads this to decide which key must be present
+    // before it will deploy.
+    "VIBLD_PROVIDER": "deepseek",
     "ACCESS_TEAM_DOMAIN": "chris-brock-llc.cloudflareaccess.com",
     "ACCESS_AUD": "5d652184451045c3fde8eca6a09ebaa59fd4704666b94d839bebde5cf992d5d7",
 
