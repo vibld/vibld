@@ -186,3 +186,75 @@ describe('detectGenerationMode', () => {
     assert.equal(calls, 1);
   });
 });
+
+/**
+ * Cloudflare Access answers a signed-out request with a cross-origin 302.
+ * With `redirect: 'manual'` the browser hands back an opaque-redirect
+ * response: status 0, not ok, and unreadable. It cannot be built with the
+ * `Response` constructor, so it is described here rather than constructed.
+ */
+function accessRedirect(): typeof fetch {
+  return (async () =>
+    ({
+      type: 'opaqueredirect',
+      status: 0,
+      ok: false,
+      body: null,
+    }) as unknown as Response) as unknown as typeof fetch;
+}
+
+/** Records the init of the last call so the request shape can be asserted. */
+function capturingFetch(response: Response) {
+  const calls: RequestInit[] = [];
+  const impl = (async (_input: unknown, init: RequestInit) => {
+    calls.push(init);
+    return response;
+  }) as unknown as typeof fetch;
+  return { impl, calls };
+}
+
+describe('a lapsed Access session', () => {
+  beforeEach(() => resetGenerationModeProbe());
+
+  it('never follows the login redirect', async () => {
+    // Following it is what produced the browser's bare "Load failed": the
+    // hop is cross-origin, so CORS refuses it and the real cause is lost.
+    const { impl, calls } = capturingFetch(sseResponse([PLAN_FRAME]));
+    await new RemoteModelProvider({ fetchImpl: impl }).generate({
+      prompt: 'a landing page',
+    });
+    assert.equal(calls[0]?.redirect, 'manual');
+  });
+
+  it('names the expired session instead of failing opaquely', async () => {
+    const provider = new RemoteModelProvider({ fetchImpl: accessRedirect() });
+    await assert.rejects(
+      () => provider.generate({ prompt: 'a landing page' }),
+      (error: Error) => {
+        assert.equal(error.name, 'AccessSessionError');
+        assert.match(error.message, /session has expired/i);
+        assert.match(error.message, /reload/i, 'must say what to do next');
+        return true;
+      },
+    );
+  });
+
+  it('refuses to answer the provider probe with "fake" when signed out', async () => {
+    // Answering "fake" would run the deterministic provider and present its
+    // output as a finished project. A mock shown as a real result is worse
+    // than an error.
+    await assert.rejects(
+      () => detectGenerationMode(accessRedirect()),
+      /session has expired/i,
+    );
+  });
+
+  it('does not cache the failure, so reloading can recover', async () => {
+    await assert.rejects(() => detectGenerationMode(accessRedirect()));
+    // A cached rejection would outlive the sign-in that fixes it.
+    assert.equal(
+      await detectGenerationMode(jsonFetch({ generation: 'model' })),
+      'model',
+    );
+  });
+});

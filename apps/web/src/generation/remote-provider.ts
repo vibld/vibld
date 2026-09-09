@@ -23,6 +23,29 @@ interface PlanEvent {
 }
 
 /**
+ * The endpoint sits behind Cloudflare Access, which answers a request with no
+ * live session with a 302 to its own login host. `fetch` follows redirects by
+ * default, lands cross-origin, and is refused by CORS -- surfacing as a bare
+ * `TypeError: Load failed` that says nothing about the actual cause.
+ *
+ * So every call here uses `redirect: 'manual'`, which turns that bounce into
+ * an opaque-redirect response we can recognise and name.
+ */
+export class AccessSessionError extends Error {
+  constructor() {
+    super(
+      'Your sign-in session has expired. Reload the page to sign in again, then try once more.',
+    );
+    this.name = 'AccessSessionError';
+  }
+}
+
+/** An opaque redirect is the only shape a blocked cross-origin bounce takes. */
+function isAccessRedirect(response: Response): boolean {
+  return response.type === 'opaqueredirect' || response.status === 0;
+}
+
+/**
  * Read SSE frames from a response body.
  *
  * Comment lines (`:` prefixed, which is what a keepalive is) carry no data and
@@ -106,8 +129,15 @@ export class RemoteModelProvider implements ModelProvider {
       // Access uses a cookie; without this the browser omits it and every
       // request looks unauthenticated.
       credentials: 'same-origin',
+      // Never follow Access's login redirect: it is cross-origin, so following
+      // it produces an unreadable failure instead of a diagnosable one.
+      redirect: 'manual',
       signal: this.#signal,
     });
+
+    if (isAccessRedirect(response)) {
+      throw new AccessSessionError();
+    }
 
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as {
@@ -154,21 +184,42 @@ export function detectGenerationMode(
   fetchImpl?: typeof fetch,
 ): Promise<GenerationMode> {
   probe ??= (async () => {
+    const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis);
+    let response: Response;
     try {
-      const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis);
-      const response = await doFetch('/api/config', {
+      response = await doFetch('/api/config', {
         credentials: 'same-origin',
+        redirect: 'manual',
       });
-      if (!response.ok) return 'fake';
-      const body = (await response.json()) as { generation?: unknown };
-      return body.generation === 'model' ? 'model' : 'fake';
     } catch {
       // No endpoint at all (pnpm dev, or the static-only deploy): the fake is
       // the correct answer, not an error.
       return 'fake';
     }
+
+    // A signed-out probe must not quietly answer "fake". That would run the
+    // deterministic provider and present its output as a finished result,
+    // which is the one thing the shell must never do -- the user asked a
+    // model for a project and would be shown a mock of one instead.
+    if (isAccessRedirect(response)) {
+      throw new AccessSessionError();
+    }
+
+    if (!response.ok) return 'fake';
+    try {
+      const body = (await response.json()) as { generation?: unknown };
+      return body.generation === 'model' ? 'model' : 'fake';
+    } catch {
+      return 'fake';
+    }
   })();
-  return probe;
+
+  // A rejected probe must not be cached: the session can be renewed by
+  // reloading, and a cached rejection would outlive the problem it describes.
+  return probe.catch((error: unknown) => {
+    probe = undefined;
+    throw error;
+  });
 }
 
 export function resetGenerationModeProbe(): void {
