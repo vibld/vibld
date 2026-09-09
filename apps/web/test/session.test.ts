@@ -405,3 +405,122 @@ describe('BuilderSession progress', () => {
     assert.equal(session.getState().status, 'cancelled');
   });
 });
+
+describe('BuilderSession transcript', () => {
+  it('keeps every turn rather than letting each run replace the last', async () => {
+    const session = createSession();
+    await session.submit('A landing page for a coffee roaster');
+    await session.submit('Add a testimonials section');
+
+    const { transcript } = session.getState();
+    assert.equal(transcript.length, 2);
+    assert.deepEqual(
+      transcript.map((turn) => turn.prompt),
+      ['A landing page for a coffee roaster', 'Add a testimonials section'],
+    );
+    assert.deepEqual(
+      transcript.map((turn) => turn.status),
+      ['accepted', 'accepted'],
+    );
+  });
+
+  it('records what an accepted turn produced', async () => {
+    const session = createSession();
+    await session.submit('A landing page for a coffee roaster');
+
+    const turn = session.getState().transcript.at(-1)!;
+    assert.equal(turn.status, 'accepted');
+    assert.ok(turn.summary, 'the reply is the plan summary');
+    assert.ok(turn.fileCount > 0);
+    assert.equal(turn.revision, session.getState().acceptedSnapshot?.revision);
+    assert.equal(turn.providerId, 'fake');
+  });
+
+  it('records a failed turn with the problem that caused it', async () => {
+    const session = createSession({
+      resolveProvider: async () => ({
+        id: 'failing',
+        generate: async () => {
+          throw new Error('the model declined this request');
+        },
+      }),
+    });
+    await session.submit('A landing page for a coffee roaster');
+
+    const turn = session.getState().transcript.at(-1)!;
+    assert.equal(turn.status, 'failed');
+    assert.match(String(turn.problem), /declined/);
+  });
+
+  it('records a prompt that never ran because the budget was spent', async () => {
+    // The prompt was still made. Dropping it from the conversation would
+    // leave the reason for the refusal detached from what was refused.
+    const session = createSession({ budget: { modelOutputTokens: 10 } });
+    await session.submit('A landing page for a coffee roaster');
+
+    const turn = session.getState().transcript.at(-1)!;
+    assert.equal(turn.status, 'failed');
+    assert.match(String(turn.problem), /Run budget exceeded/);
+  });
+
+  it('closes a cancelled turn as cancelled, not as a failure', async () => {
+    let handle!: ReturnType<typeof hangingProvider>;
+    const session = createSession({
+      resolveProvider: async (_plan, signal) => {
+        handle = hangingProvider(signal);
+        return handle.provider;
+      },
+    });
+
+    const run = session.submit('A landing page for a coffee roaster');
+    await handle.running;
+    assert.equal(session.getState().transcript.at(-1)?.status, 'running');
+
+    session.cancel();
+    await run;
+
+    const turn = session.getState().transcript.at(-1)!;
+    assert.equal(turn.status, 'cancelled');
+    assert.equal(turn.problem, null, 'a cancellation is not a problem');
+  });
+
+  it('does not let an abandoned run rewrite a closed turn', async () => {
+    // The abandoned run keeps unwinding after cancel(). Without the guard in
+    // #closeTurn its AbortError would land on the cancelled turn and present
+    // itself as an error the user has to interpret.
+    let handle!: ReturnType<typeof hangingProvider>;
+    const session = createSession({
+      resolveProvider: async (_plan, signal) => {
+        handle = hangingProvider(signal);
+        return handle.provider;
+      },
+    });
+    const run = session.submit('A landing page for a coffee roaster');
+    await handle.running;
+    session.cancel();
+    await run;
+
+    assert.equal(session.getState().transcript.length, 1);
+    assert.equal(session.getState().transcript[0]?.status, 'cancelled');
+  });
+
+  it('starts over with an empty conversation', async () => {
+    const session = createSession();
+    await session.submit('A landing page for a coffee roaster');
+    session.reset();
+    assert.deepEqual(session.getState().transcript, []);
+  });
+
+  it('gives every turn a distinct id, including across a reset', async () => {
+    // React keys off these. Reused ids would make the list reorder wrongly.
+    const session = createSession();
+    await session.submit('A landing page for a coffee roaster');
+    await session.submit('Add a testimonials section');
+    const before = session.getState().transcript.map((turn) => turn.id);
+    assert.equal(new Set(before).size, before.length);
+
+    session.reset();
+    await session.submit('A shop for a bakery');
+    assert.equal(session.getState().transcript.length, 1);
+  });
+});

@@ -67,6 +67,32 @@ export interface BuilderState {
    * and did, for two days.
    */
   progress: GenerationProgress | null;
+  /**
+   * The conversation so far, oldest first.
+   *
+   * Building an application is a conversation, not a single request: the
+   * second prompt is where the value is. The run history used to survive
+   * only as flat log lines in a tab nobody opened, so each run visually
+   * replaced the last and the shell read as one-shot even though the engine
+   * has always iterated.
+   */
+  transcript: TranscriptTurn[];
+}
+
+/** One prompt and what became of it. */
+export interface TranscriptTurn {
+  id: number;
+  runId: string;
+  prompt: string;
+  at: number;
+  status: 'running' | 'accepted' | 'failed' | 'cancelled';
+  /** The model's own description of what it built. Null until the plan lands. */
+  summary: string | null;
+  fileCount: number;
+  revision: string | null;
+  /** The first problem, when the run failed. Cancellation is not a problem. */
+  problem: string | null;
+  providerId: string | null;
 }
 
 export interface GenerationProgress {
@@ -122,6 +148,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     budget,
     providerId: null,
     progress: null,
+    transcript: [],
   };
 }
 
@@ -170,6 +197,7 @@ export class BuilderSession {
   #epoch = 0;
   #runSeq = 0;
   #entrySeq = 0;
+  #turnSeq = 0;
   #disposed = false;
   readonly #projectId: string;
   readonly #delay: (ms: number) => Promise<void>;
@@ -218,6 +246,7 @@ export class BuilderSession {
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
     this.#entrySeq = 0;
+    this.#turnSeq = 0;
     this.#state = initialState(this.#ledger.report());
     this.#emit();
   }
@@ -253,6 +282,10 @@ export class BuilderSession {
         runId,
         prompt: trimmed,
         problems: [message],
+        transcript: this.#openTurn(state.transcript, runId, trimmed, {
+          status: 'failed',
+          problem: message,
+        }),
         timeline: this.#append(state.timeline, 'error', message),
       }));
       return;
@@ -270,6 +303,7 @@ export class BuilderSession {
       planSummary: null,
       stagedFiles: [],
       problems: [],
+      transcript: this.#openTurn(state.transcript, runId, trimmed),
       timeline: this.#append(
         state.timeline,
         'info',
@@ -299,6 +333,10 @@ export class BuilderSession {
           status: 'staging',
           planSummary: generated.summary,
           stagedFiles: generated.files.map((file) => ({ ...file })),
+          transcript: this.#closeTurn(state.transcript, {
+            summary: generated.summary,
+            fileCount: generated.files.length,
+          }),
           timeline: this.#append(
             state.timeline,
             'info',
@@ -328,6 +366,10 @@ export class BuilderSession {
         running: false,
         progress: null,
         problems: [message],
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'failed',
+          problem: message,
+        }),
         timeline: this.#append(state.timeline, 'error', message),
       }));
       return;
@@ -353,6 +395,10 @@ export class BuilderSession {
         running: false,
         progress: null,
         problems: [message],
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'failed',
+          problem: message,
+        }),
         timeline: this.#append(state.timeline, 'error', message),
       }));
       return;
@@ -386,6 +432,13 @@ export class BuilderSession {
         problems: [],
         runCount: state.runCount + 1,
         budget,
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'accepted',
+          summary: state.planSummary,
+          fileCount: accepted.files.length,
+          revision: accepted.revision,
+          providerId: resolved.id,
+        }),
         timeline: this.#append(
           state.timeline,
           'info',
@@ -408,6 +461,11 @@ export class BuilderSession {
       runCount: state.runCount + 1,
       budget,
       providerId: resolved.id,
+      transcript: this.#closeTurn(state.transcript, {
+        status: 'failed',
+        problem: problems[0] ?? null,
+        providerId: resolved.id,
+      }),
       timeline: problems.reduce(
         (timeline, problem) => this.#append(timeline, 'error', problem),
         this.#append(
@@ -444,6 +502,9 @@ export class BuilderSession {
       running: false,
       progress: null,
       problems: [],
+      transcript: this.#closeTurn(this.#state.transcript, {
+        status: 'cancelled',
+      }),
       timeline: this.#append(
         this.#state.timeline,
         'info',
@@ -451,6 +512,49 @@ export class BuilderSession {
       ),
     };
     this.#emit();
+  }
+
+  /** Start a turn. Its outcome is filled in later by `#closeTurn`. */
+  #openTurn(
+    transcript: TranscriptTurn[],
+    runId: string,
+    prompt: string,
+    patch: Partial<TranscriptTurn> = {},
+  ): TranscriptTurn[] {
+    this.#turnSeq += 1;
+    return [
+      ...transcript,
+      {
+        id: this.#turnSeq,
+        runId,
+        prompt,
+        at: this.#now(),
+        status: 'running',
+        summary: null,
+        fileCount: 0,
+        revision: null,
+        problem: null,
+        providerId: null,
+        ...patch,
+      },
+    ];
+  }
+
+  /**
+   * Update the turn still in flight.
+   *
+   * Only a running turn is touched. `cancel()` closes a turn and then bumps
+   * the epoch, but the abandoned run is still unwinding: without this guard a
+   * late failure from it would rewrite a cancellation as an error the user
+   * has to read.
+   */
+  #closeTurn(
+    transcript: TranscriptTurn[],
+    patch: Partial<TranscriptTurn>,
+  ): TranscriptTurn[] {
+    const last = transcript.at(-1);
+    if (!last || last.status !== 'running') return transcript;
+    return [...transcript.slice(0, -1), { ...last, ...patch }];
   }
 
   #append(
