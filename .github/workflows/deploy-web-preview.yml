@@ -78,3 +78,11 @@ jobs:
           else
             echo "::warning::Deploy succeeded but the URL could not be read from wrangler output"
           fi
+
+      # A green deploy only says the upload worked. This asserts what the
+      # running Worker actually does over HTTP, which is the layer where the
+      # "Load failed" bug lived while every source check stayed green.
+      - name: Smoke test the deployment
+        env:
+          VIBLD_SMOKE_ORIGIN: ${{ steps.deploy.outputs.url }}
+        run: node scripts/smoke.mjs
