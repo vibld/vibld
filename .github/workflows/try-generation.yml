@@ -14,6 +14,14 @@ on:
         description: Also install and build the generated project (proves portability)
         type: boolean
         default: true
+      follow_up:
+        description: >-
+          Optional second prompt. Runs a follow-up generation against the first
+          project and reports what it kept, changed, added and removed. This is
+          the only way to check ADR-0009 against a real model -- and it spends a
+          second generation's tokens.
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -82,6 +90,40 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # A second generation, given the first project. The point is the
+      # removed count: the generation machine promotes exactly the file set
+      # the model returns, so a file left out is a file deleted. Skipped
+      # unless a follow-up prompt was given, because it spends tokens.
+      - name: Iterate on the generated project
+        if: ${{ inputs.follow_up != '' }}
+        shell: bash
+        env:
+          # Dispatch input, so untrusted text. Passed through the environment
+          # and only ever referenced as "$FOLLOW_UP"; interpolating it into
+          # this script would let a crafted prompt run commands in a step
+          # that holds the API key.
+          FOLLOW_UP: ${{ inputs.follow_up }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          {
+            echo
+            echo '## Follow-up'
+            echo
+            printf '> %s\n' "$FOLLOW_UP"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          pnpm --filter @vibld/ai plan "$FOLLOW_UP" \
+            --base "$RUNNER_TEMP/generated" \
+            --out "$RUNNER_TEMP/iterated" \
+            2>&1 | tee "$RUNNER_TEMP/follow-up.log"
+
+          {
+            cat "$RUNNER_TEMP/follow-up.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Runs npm lifecycle scripts from a model-authored package.json. That is
       # arbitrary code on the runner, so this step deliberately holds no
       # secrets -- ANTHROPIC_API_KEY is scoped to the generate step above. The
@@ -121,4 +163,12 @@ jobs:
         with:
           name: generated-project
           path: ${{ runner.temp }}/generated
+          if-no-files-found: ignore
+
+      - name: Upload the iterated project
+        if: ${{ always() && inputs.follow_up != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: iterated-project
+          path: ${{ runner.temp }}/iterated
           if-no-files-found: ignore
