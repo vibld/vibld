@@ -13,6 +13,7 @@ import type {
   RunUsageReport,
 } from '@vibld/core';
 import type { ModelProvider } from '@vibld/core';
+import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { ProjectBrief } from './brief.ts';
 import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
@@ -116,6 +117,7 @@ export interface SessionOptions {
     plan: GenerationPlan,
     signal: AbortSignal,
     onProgress?: (progress: GenerationProgress) => void,
+    style?: StylePresetId | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -162,11 +164,18 @@ async function defaultResolveProvider(
   plan: GenerationPlan,
   signal: AbortSignal,
   onProgress?: (progress: GenerationProgress) => void,
+  style?: StylePresetId | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
-    ? new RemoteModelProvider({ signal, ...(onProgress ? { onProgress } : {}) })
-    : new FakeModelProvider([plan]);
+    ? new RemoteModelProvider({
+        signal,
+        ...(onProgress ? { onProgress } : {}),
+        ...(style ? { style } : {}),
+      })
+    : // The deterministic fake has no visual vocabulary at all, so a preset
+      // cannot change what it produces. Nothing here pretends otherwise.
+      new FakeModelProvider([plan]);
 }
 
 function isFakeProvider(provider: ModelProvider): boolean {
@@ -208,6 +217,7 @@ export class BuilderSession {
     plan: GenerationPlan,
     signal: AbortSignal,
     onProgress?: (progress: GenerationProgress) => void,
+    style?: StylePresetId | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -251,7 +261,11 @@ export class BuilderSession {
     this.#emit();
   }
 
-  async submit(prompt: string, mode: PlanMode = 'succeed'): Promise<void> {
+  async submit(
+    prompt: string,
+    mode: PlanMode = 'succeed',
+    style: StylePresetId | null = null,
+  ): Promise<void> {
     const trimmed = prompt.trim();
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
 
@@ -356,6 +370,7 @@ export class BuilderSession {
         (progress) => {
           this.#patch(epoch, (state) => ({ ...state, progress }));
         },
+        style,
       );
     } catch (error) {
       reservation.release();

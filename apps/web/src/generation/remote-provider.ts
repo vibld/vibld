@@ -3,6 +3,7 @@ import type {
   GenerationRequest,
   ModelProvider,
 } from '@vibld/core';
+import type { StylePresetId } from '@vibld/ai/style-presets';
 
 /**
  * Calls the Worker's /api/plan endpoint.
@@ -108,6 +109,11 @@ export interface RemoteModelProviderOptions {
    * merely stopping the waiting.
    */
   signal?: AbortSignal;
+  /**
+   * The chosen visual direction, by id. The Worker validates it against the
+   * closed set -- the browser is not trusted to have sent a real one.
+   */
+  style?: StylePresetId | null;
 }
 
 export class RemoteModelProvider implements ModelProvider {
@@ -116,6 +122,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #fetch: typeof fetch;
   readonly #signal?: AbortSignal;
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
+  readonly #style: StylePresetId | null;
 
   constructor(options: RemoteModelProviderOptions = {}) {
     this.id = options.id ?? 'remote';
@@ -123,6 +130,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#fetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
+    this.#style = options.style ?? null;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
@@ -132,7 +140,11 @@ export class RemoteModelProvider implements ModelProvider {
         'content-type': 'application/json',
         accept: 'text/event-stream',
       },
-      body: JSON.stringify({ prompt: request.prompt, base: request.base }),
+      body: JSON.stringify({
+        prompt: request.prompt,
+        base: request.base,
+        ...(this.#style ? { style: this.#style } : {}),
+      }),
       // Access uses a cookie; without this the browser omits it and every
       // request looks unauthenticated.
       credentials: 'same-origin',

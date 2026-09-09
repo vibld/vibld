@@ -38,8 +38,8 @@ export function App() {
             <LifecycleBar status={state.status} />
             <PromptPanel
               state={state}
-              onSubmit={(prompt, mode) => {
-                void session.submit(prompt, mode);
+              onSubmit={(prompt, mode, style) => {
+                void session.submit(prompt, mode, style);
               }}
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}

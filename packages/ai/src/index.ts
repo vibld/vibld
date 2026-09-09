@@ -29,3 +29,10 @@ export {
   ProjectFileSchema,
 } from './plan-schema.ts';
 export type { ParsedGenerationPlan } from './plan-schema.ts';
+export {
+  STYLE_PRESETS,
+  findStylePreset,
+  isStylePresetId,
+  styleDirection,
+} from './style-presets.ts';
+export type { StylePreset, StylePresetId } from './style-presets.ts';
