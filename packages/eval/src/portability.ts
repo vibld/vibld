@@ -54,6 +54,76 @@ function dependencyNames(pkg: Record<string, unknown>): string[] {
   return names;
 }
 
+/**
+ * A declared script whose tool has no configuration cannot run.
+ *
+ * The checks above ask whether the conventional scripts are *present*. That
+ * is not the same as whether they work, and the difference is not academic:
+ * the deterministic planner's own project declared `tsc --noEmit && vite
+ * build` and shipped no tsconfig.json, so `npm run build` on an exported
+ * project stopped at tsc printing its usage. It passed every check here.
+ *
+ * `tsc` with no project file does not compile the directory -- it prints
+ * help and exits. `tsc -p somewhere.json` names its own, so only an
+ * unqualified invocation needs the root file.
+ */
+function checkToolConfiguration(
+  pkg: Record<string, unknown>,
+  paths: Set<string>,
+): PortabilityProblem[] {
+  const problems: PortabilityProblem[] = [];
+  const scripts = pkg.scripts;
+  if (typeof scripts !== 'object' || scripts === null) return problems;
+
+  const hasTsconfig = paths.has('tsconfig.json');
+  for (const [name, command] of Object.entries(
+    scripts as Record<string, unknown>,
+  )) {
+    if (typeof command !== 'string') continue;
+    const callsBareTsc = /(^|&&|\|\||;)\s*(npx\s+)?tsc\b/.test(command);
+    const namesItsProject = /\s(-p|--project)\s/.test(command);
+    if (callsBareTsc && !namesItsProject && !hasTsconfig) {
+      problems.push({
+        check: 'runnable-scripts',
+        detail: `the "${name}" script runs tsc but the project has no tsconfig.json, so it prints usage instead of building`,
+      });
+    }
+  }
+
+  // React ships no types. A TypeScript project that renders JSX and does not
+  // depend on @types/react fails to typecheck on every element it contains --
+  // and `build` runs the typecheck first, so it never reaches the bundler.
+  const names = dependencyNames(pkg);
+  const usesReact = names.includes('react');
+  const typechecks = Object.values(scripts as Record<string, unknown>).some(
+    (command) => typeof command === 'string' && /\btsc\b/.test(command),
+  );
+  if (usesReact && typechecks && !names.includes('@types/react')) {
+    problems.push({
+      check: 'runnable-scripts',
+      detail:
+        'the project renders React with TypeScript but does not depend on @types/react, so every JSX element fails to typecheck',
+    });
+  }
+
+  // A build plugin nobody configures is a dependency the project installs
+  // and never uses, and it means JSX is transformed by whatever the bundler
+  // defaults to rather than by the tool the manifest names.
+  const usesReactPlugin = dependencyNames(pkg).includes('@vitejs/plugin-react');
+  const hasViteConfig = ['vite.config.ts', 'vite.config.js'].some((path) =>
+    paths.has(path),
+  );
+  if (usesReactPlugin && !hasViteConfig) {
+    problems.push({
+      check: 'runnable-scripts',
+      detail:
+        '@vitejs/plugin-react is a dependency but there is no vite config to use it',
+    });
+  }
+
+  return problems;
+}
+
 export function checkPortability(
   snapshot: ProjectSnapshot,
 ): PortabilityProblem[] {
@@ -110,6 +180,8 @@ export function checkPortability(
           });
         }
       }
+
+      problems.push(...checkToolConfiguration(parsed.value, paths));
     }
   }
 
