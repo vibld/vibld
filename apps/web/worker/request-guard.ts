@@ -1,4 +1,5 @@
 import type { GenerationRequest } from '@vibld/core';
+import { MAX_BASE_CONTENT_CHARS } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -17,6 +18,7 @@ export interface GuardLimits {
   maxFiles: number;
   maxPathChars: number;
   maxTotalPathChars: number;
+  maxTotalContentChars: number;
 }
 
 export const DEFAULT_LIMITS: GuardLimits = {
@@ -29,6 +31,11 @@ export const DEFAULT_LIMITS: GuardLimits = {
   // hundreds of KB of paths and multiply the cost of a request by orders of
   // magnitude while staying inside the prompt cap.
   maxTotalPathChars: 8000,
+  // The base project's file contents now go to the model, so this is the
+  // input-token ceiling that matters. Set to @vibld/ai's own budget: the
+  // guard refuses an oversized project before a run starts, rather than
+  // letting the provider throw after the request has been paid for.
+  maxTotalContentChars: MAX_BASE_CONTENT_CHARS,
 };
 
 export interface GuardFailure {
@@ -124,6 +131,7 @@ export function parseGenerationRequest(
 
   const files: { path: string; content: string }[] = [];
   let totalPathChars = 0;
+  let totalContentChars = 0;
   for (const entry of snapshot.files) {
     if (typeof entry !== 'object' || entry === null) {
       return fail(400, 'Every staged file must be an object.');
@@ -143,6 +151,13 @@ export function parseGenerationRequest(
       return fail(
         413,
         'The project has too many path characters to summarise.',
+      );
+    }
+    totalContentChars += path.length + content.length;
+    if (totalContentChars > limits.maxTotalContentChars) {
+      return fail(
+        413,
+        `A project sent with a follow-up request must be ${limits.maxTotalContentChars} characters or fewer.`,
       );
     }
     files.push({ path, content });

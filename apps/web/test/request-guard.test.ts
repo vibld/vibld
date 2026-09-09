@@ -257,3 +257,51 @@ describe('parseStylePreset', () => {
     assert.equal(parseStylePreset([{ style: 'dark' }]).ok, false);
   });
 });
+
+describe('the base project content budget', () => {
+  function projectOf(chars: number) {
+    return {
+      prompt: 'make the hero simpler',
+      base: {
+        revision: 'r1',
+        files: [{ path: 'a.txt', content: 'x'.repeat(chars - 'a.txt'.length) }],
+      },
+    };
+  }
+
+  it('accepts a project up to the budget', () => {
+    const result = parseGenerationRequest(
+      projectOf(DEFAULT_LIMITS.maxTotalContentChars),
+    );
+    assert.equal(result.ok, true);
+  });
+
+  it('refuses one past it, before a run is paid for', () => {
+    // The provider would throw on this too, but by then the request has been
+    // accepted and the spend reserved. Refusing here costs nothing.
+    const result = parseGenerationRequest(
+      projectOf(DEFAULT_LIMITS.maxTotalContentChars + 1),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 413);
+      assert.match(result.error, /characters or fewer/);
+    }
+  });
+
+  it('counts every file, not just the largest', () => {
+    const each = Math.ceil(DEFAULT_LIMITS.maxTotalContentChars / 3);
+    const result = parseGenerationRequest({
+      prompt: 'x',
+      base: {
+        revision: 'r1',
+        files: [
+          { path: 'a.txt', content: 'x'.repeat(each) },
+          { path: 'b.txt', content: 'x'.repeat(each) },
+          { path: 'c.txt', content: 'x'.repeat(each) },
+        ],
+      },
+    });
+    assert.equal(result.ok, false);
+  });
+});

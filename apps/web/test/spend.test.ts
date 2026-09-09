@@ -8,6 +8,8 @@ import {
   parsePrices,
   worstCaseMicroUsd,
 } from '../worker/spend.ts';
+import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
+import { DEFAULT_MAX_TOKENS } from '@vibld/ai';
 
 describe('spend pricing', () => {
   it('prices a run from its token counts', () => {
@@ -125,5 +127,39 @@ describe('spend day boundaries', () => {
   it('groups by UTC day, so a ceiling resets at 00:00 UTC', () => {
     assert.equal(dayKey(Date.UTC(2026, 8, 8, 23, 59, 59)), '2026-09-08');
     assert.equal(dayKey(Date.UTC(2026, 8, 9, 0, 0, 0)), '2026-09-09');
+  });
+});
+
+describe('the worst case counts the project sent with the prompt', () => {
+  it('grows with the base project, not just the typed prompt', () => {
+    // The base project's file contents go to the model now. Counting the
+    // prompt alone under-counted the input side of a follow-up run by about
+    // forty times, and a worst case that under-estimates is not a worst case.
+    const promptOnly = worstCaseMicroUsd(DEFAULT_PRICES, 64_000, 4_000);
+    const withProject = worstCaseMicroUsd(
+      DEFAULT_PRICES,
+      64_000,
+      4_000 + 160_000,
+    );
+    assert.ok(withProject > promptOnly);
+    assert.equal(withProject - promptOnly, Math.ceil(160_000 / 4) * 5);
+  });
+
+  it('is the ceiling the endpoint actually enforces', () => {
+    // Guard limits and provider cap in, dollars out. If either moves, this
+    // number moves with it rather than silently going stale.
+    assert.equal(
+      worstCaseMicroUsd(
+        DEFAULT_PRICES,
+        DEFAULT_MAX_TOKENS,
+        DEFAULT_LIMITS.maxPromptChars + DEFAULT_LIMITS.maxTotalContentChars,
+      ),
+      Math.ceil(
+        (DEFAULT_LIMITS.maxPromptChars + DEFAULT_LIMITS.maxTotalContentChars) /
+          4,
+      ) *
+        DEFAULT_PRICES.inputMicroUsd +
+        DEFAULT_MAX_TOKENS * DEFAULT_PRICES.outputMicroUsd,
+    );
   });
 });

@@ -124,6 +124,6 @@ describe('buildUserPrompt with a preset', () => {
       composed.indexOf('minimalist visual direction') >
         composed.indexOf('already exists at revision r1'),
     );
-    assert.match(composed, /preserving anything/);
+    assert.match(composed, /Preserve anything/);
   });
 });
