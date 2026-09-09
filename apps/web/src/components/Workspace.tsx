@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { BuilderState } from '../generation/session.ts';
 import { CodeViewer } from './CodeViewer.tsx';
+import { ExportButton } from './ExportButton.tsx';
 import { FileList } from './FileList.tsx';
 import { PreviewPanel } from './PreviewPanel.tsx';
 
@@ -98,6 +99,9 @@ export function Workspace({ state }: { state: BuilderState }) {
                   <span className="pill pill--staged">staged</span>
                 ) : null}
               </h2>
+              {state.acceptedSnapshot ? (
+                <ExportButton snapshot={state.acceptedSnapshot} />
+              ) : null}
               <FileList
                 files={files}
                 selectedPath={selected?.path ?? null}
