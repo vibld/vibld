@@ -2,7 +2,6 @@ import {
   PlanProvider,
   DEFAULT_MAX_TOKENS,
   ProviderError,
-  availableModels,
   configuredProviders,
   createPlanClient,
   findModel,
@@ -22,6 +21,7 @@ import {
   parseModel,
   parseStylePreset,
 } from './request-guard.ts';
+import { decideModel, grantedFor } from './model-access.ts';
 import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
 import {
   KEEPALIVE_COMMENT,
@@ -38,6 +38,13 @@ export interface Env {
   DEEPSEEK_API_KEY?: string;
   /** "anthropic" or "deepseek". Explicit beats inferred; see selectProvider. */
   VIBLD_PROVIDER?: string;
+  /**
+   * Worker secret. Which models each principal may use, as JSON -- see
+   * `parseModelPolicy`. A secret rather than a var because it names people
+   * and this repository is public. Absent means no policy: everyone may use
+   * whatever the deployment can serve.
+   */
+  VIBLD_MODEL_POLICY?: string;
   /** e.g. "yourteam.cloudflareaccess.com" */
   ACCESS_TEAM_DOMAIN?: string;
   /** The Access application's AUD tag. */
@@ -205,6 +212,17 @@ async function handlePlan(
     return json({ error: chosenModel.error }, chosenModel.status);
   }
 
+  // The picker only offers what this person may use, but the picker is a
+  // convenience and this endpoint is the boundary.
+  const decision = decideModel(
+    env,
+    access.email,
+    chosenModel.value,
+    resolveModel(env),
+  );
+  if (!decision.ok) return json({ error: decision.error }, decision.status);
+  const effectiveModel = decision.model;
+
   // Layer one: a burst gate keyed on the caller. It is per-location and
   // documented as permissive, so it stops a naive flood and nothing more --
   // it is allowed to fail open only because the layer below fails closed.
@@ -227,10 +245,10 @@ async function handlePlan(
   // Layer two: the ceiling. The worst case is charged before the run, because
   // charging afterwards gives an accurate ledger and no limit -- concurrent
   // callers would all read the same balance and all find headroom.
-  const chosen = chosenModel.value ? findModel(chosenModel.value) : null;
+  const chosen = findModel(effectiveModel);
   const prices = parsePrices(
     env,
-    providerForRequest(env, chosenModel.value),
+    providerForRequest(env, effectiveModel),
     chosen
       ? {
           inputMicroUsd: chosen.inputMicroUsd,
@@ -325,12 +343,11 @@ async function handlePlan(
   });
 
   let usage: PlanUsage | undefined;
-  const provider = new PlanProvider(createPlanClient(env, chosenModel.value), {
-    // The request's own choice wins; otherwise the deployment's. An unset or
-    // blank VIBLD_MODEL falls back to the selected provider's own model
-    // rather than to a single hard-coded one -- a model named for the other
-    // provider is a 400 that reads like an outage.
-    model: chosenModel.value ?? resolveModel(env),
+  const provider = new PlanProvider(createPlanClient(env, effectiveModel), {
+    // Always a model this person is granted: their own choice when they made
+    // one, otherwise the deployment default if they may use it, otherwise the
+    // first thing they may.
+    model: effectiveModel,
     onUsage: (reported) => {
       usage = reported;
     },
@@ -427,10 +444,18 @@ export default {
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
-      // The picker is built from what this deployment can actually serve.
-      // Offering a model whose provider has no key would produce a run that
-      // fails after the user has already waited for it.
-      const models = availableModels(configuredProviders(env));
+      // Identified before answered: the picker is per-person now, so this
+      // cannot be served to an anonymous caller without telling them what
+      // somebody else may use.
+      const access = await requireAccess(request, env);
+      if (access.denied) return access.denied;
+
+      // Two filters, in order. What the deployment can serve at all --
+      // offering a model whose provider has no key produces a run that fails
+      // after the user has waited for it. Then what this person is granted.
+      const models = grantedFor(env, access.email);
+      // The deployment default is only offered if this person may use it.
+      const decided = decideModel(env, access.email, null, resolveModel(env));
       return json({
         generation: isConfigured(env) ? 'model' : 'fake',
         models: models.map(({ id, label, note, provider }) => ({
@@ -439,7 +464,7 @@ export default {
           note,
           provider,
         })),
-        defaultModel: resolveModel(env),
+        defaultModel: decided.ok ? decided.model : null,
       });
     }
 
