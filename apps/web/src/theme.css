@@ -64,6 +64,13 @@
   --edge: hsl(250 20% 100% / 0.08);
   --edge-strong: hsl(250 20% 100% / 0.14);
 
+  /*
+   * The translucent surface behind the sticky header and footer. A token
+   * rather than a literal because it has to flip with the theme -- a
+   * hard-coded near-black veil puts dark text on a dark bar in light mode.
+   */
+  --surface-veil: hsl(250 24% 7% / 0.72);
+
   --text: hsl(250 30% 96%);
   --text-muted: hsl(250 14% 68%);
   --text-faint: hsl(250 12% 52%);
@@ -114,6 +121,7 @@
     --surface-3: hsl(250 26% 93%);
     --edge: hsl(250 30% 12% / 0.1);
     --edge-strong: hsl(250 30% 12% / 0.18);
+    --surface-veil: hsl(250 40% 98% / 0.78);
 
     --text: hsl(250 30% 12%);
     --text-muted: hsl(250 12% 38%);

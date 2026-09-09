@@ -549,7 +549,7 @@ body {
   top: 0;
   z-index: 20;
   padding: 0.85rem 1.5rem;
-  background: hsl(250 24% 7% / 0.72);
+  background: var(--surface-veil);
   backdrop-filter: blur(14px) saturate(1.4);
   border-bottom: 1px solid var(--edge);
 }
@@ -587,9 +587,17 @@ body {
 }
 
 .shell__body {
-  grid-template-columns: minmax(22rem, 30rem) minmax(0, 1fr);
   gap: 1.25rem;
   padding: 1.25rem 1.5rem 1.75rem;
+}
+
+/* Scoped above the breakpoint on purpose: unscoped, this rule sits after the
+   max-width: 68rem rule at the same specificity and wins, so a phone gets a
+   22rem column it cannot fit and the workspace overflows sideways. */
+@media (min-width: 68.01rem) {
+  .shell__body {
+    grid-template-columns: minmax(22rem, 30rem) minmax(0, 1fr);
+  }
 }
 
 /* Panels: one elevation step forward, soft edge, generous radius. */
@@ -720,7 +728,16 @@ body {
 
 .shell__footer {
   border-top: 1px solid var(--edge);
-  background: hsl(250 24% 7% / 0.6);
+  background: var(--surface-veil);
   font-size: var(--text-xs);
   color: var(--text-faint);
+}
+
+/* Re-asserted after the rule that adds the pulse: the earlier reduced-motion
+   block is overridden by it at equal specificity, and the 1.6s duration is a
+   literal that the motion tokens cannot reach. */
+@media (prefers-reduced-motion: reduce) {
+  .lifecycle__step--active .lifecycle__dot {
+    animation: none;
+  }
 }
