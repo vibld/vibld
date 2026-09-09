@@ -58,7 +58,10 @@ describe('decideModel', () => {
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 403);
-      assert.match(decision.error, /not available to you/);
+      // The identity is named: a policy keyed on the wrong address is the
+      // likeliest way to lock yourself out, and the error has to say which
+      // address it matched on.
+      assert.match(decision.error, /stranger@x\.com/);
     }
   });
 
@@ -92,7 +95,8 @@ describe('decideModel', () => {
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 403);
-      assert.match(decision.error, /No model is available to you/);
+      assert.match(decision.error, /No model is available to nobody@x\.com/);
+      assert.match(decision.error, /Check the policy/);
     }
   });
 
