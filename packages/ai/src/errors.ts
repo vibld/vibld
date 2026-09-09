@@ -49,3 +49,25 @@ export class ProviderShapeError extends ProviderError {
     this.name = 'ProviderShapeError';
   }
 }
+
+/**
+ * The existing project is too large to send with a follow-up request.
+ *
+ * Raised instead of truncating. A partial project would be returned as if it
+ * were the whole one, and every file that did not fit would be deleted when
+ * the result was promoted -- losing the user's work in order to save tokens,
+ * which is not a trade anyone would choose.
+ */
+export class ProviderContextError extends ProviderError {
+  readonly chars: number;
+  readonly limit: number;
+
+  constructor(chars: number, limit: number) {
+    super(
+      `This project is ${chars} characters, over the ${limit} that can be sent with a follow-up request. Start a new project, or ask for a change that reduces its size.`,
+    );
+    this.name = 'ProviderContextError';
+    this.chars = chars;
+    this.limit = limit;
+  }
+}

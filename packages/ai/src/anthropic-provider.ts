@@ -13,6 +13,7 @@ import { GenerationPlanSchema, PLAN_SYSTEM_PROMPT } from './plan-schema.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import {
+  ProviderContextError,
   ProviderRefusalError,
   ProviderShapeError,
   ProviderTruncationError,
@@ -141,10 +142,38 @@ export class AnthropicModelProvider implements ModelProvider {
 }
 
 /**
+ * The largest base project that will be sent with a follow-up request.
+ *
+ * Generated projects are capped at 25 files by the system prompt and 50 by
+ * the request guard, and the measured 24-file project was about 120 KB, so
+ * this is headroom rather than a limit anyone should meet. It exists because
+ * a budget nobody states is a budget nobody can check.
+ */
+export const MAX_BASE_CONTENT_CHARS = 160_000;
+
+/**
  * Describe the existing project when there is one, so a follow-up request
- * edits rather than silently replacing the user's work. Only paths are sent,
- * not file contents: whole-repository prompt stuffing is explicitly rejected
- * by ADR-0007, and targeted context selection is later work (#12).
+ * edits rather than replacing the user's work.
+ *
+ * File *contents* are sent, not only paths. Sending paths alone made the
+ * instruction below unfulfillable: a model cannot preserve what it has never
+ * seen, so every follow-up rewrote the project from scratch and the second
+ * prompt -- the one iteration is for -- silently threw the first away.
+ *
+ * ADR-0007 rejects "whole-repository context on every request" as an
+ * alternative, for cost and disclosure. That reasoning is about a repository.
+ * This is a project the user generated in this session, bounded at 25 files
+ * by the system prompt, that they are actively editing: there is no third
+ * party's code here and nothing to disclose. Targeted retrieval (#12) is
+ * still the answer once arbitrary repository import exists; it needs
+ * infrastructure that does not, and it is not a reason to ship an iteration
+ * that does not iterate. See docs/adr/0009.
+ *
+ * The project is sent as JSON, in the same shape the model returns. A file
+ * whose contents happened to contain a plausible delimiter could otherwise
+ * forge a boundary and appear to end the data and begin an instruction;
+ * JSON escaping removes that, and matching the output shape makes "return
+ * the complete set of files" unambiguous.
  */
 export function buildUserPrompt(
   request: GenerationRequest,
@@ -154,13 +183,27 @@ export function buildUserPrompt(
   const parts = [request.prompt];
 
   if (base && base.files.length > 0) {
-    const paths = base.files.map((file) => `- ${file.path}`).join('\n');
-    parts.push(
-      `The project already exists at revision ${base.revision} with these files:
-${paths}
+    const total = base.files.reduce(
+      (sum, file) => sum + file.path.length + file.content.length,
+      0,
+    );
+    if (total > MAX_BASE_CONTENT_CHARS) {
+      // Never silently truncate. A partial project would be returned as if it
+      // were the whole one, and the files that did not fit would be deleted
+      // by the promotion below -- losing the user's work to save tokens.
+      throw new ProviderContextError(total, MAX_BASE_CONTENT_CHARS);
+    }
 
-Return the complete set of files for the updated project, preserving anything
-the request does not ask you to change.`,
+    parts.push(
+      `The project already exists at revision ${base.revision}. These are its
+current files, as JSON in the same shape you must return:
+
+${JSON.stringify(base.files)}
+
+Return the complete set of files for the updated project. Every file the
+project should still contain must be in your response with its full content,
+including files your change does not touch -- a file you leave out is deleted.
+Preserve anything the request does not ask you to change.`,
     );
   }
 

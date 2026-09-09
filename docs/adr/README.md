@@ -20,5 +20,6 @@ ADRs record consequential decisions and the reasoning behind them. They compleme
 - [ADR-0006: Scoped authority and broker-first credentials](0006-permissions-credentials-and-previews.md)
 - [ADR-0007: Durable generation, staged changes and revision-scoped context](0007-durable-generation-and-repository-context.md)
 - [ADR-0008: Prerendered marketing sites as the first generated project](0008-portable-marketing-site-template.md)
+- [ADR-0009: Send the whole generated project when iterating on it](0009-bounded-project-context-for-iteration.md) — **Proposed**, awaiting the decision owner
 
 ADRs 0001-0004 remain unchanged. ADRs 0005-0008 record the founder's accepted [D1-D30 choices](../decisions.md); acceptance of architecture is separate from implementation status and review of the documentation PR. The archived blueprint's suggested ADR filenames were proposals, not assigned numbers.

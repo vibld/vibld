@@ -132,6 +132,11 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
+/** The same estimate for a length already counted. Zero stays zero. */
+function estimateTokensForChars(chars: number): number {
+  return chars > 0 ? Math.ceil(chars / 4) : 0;
+}
+
 const RESERVED_OUTPUT_TOKENS = 32_000;
 
 function initialState(budget: RunUsageReport): BuilderState {
@@ -275,7 +280,15 @@ export class BuilderSession {
     const brief = deriveBrief(trimmed);
     const plan = buildPlan(trimmed, mode);
 
-    const inputTokens = estimateTokens(trimmed);
+    // The accepted project is sent with the request, so it is part of what
+    // this run spends. Counting the typed prompt alone made every follow-up
+    // look as cheap as the first request.
+    const baseChars = (this.#state.acceptedSnapshot?.files ?? []).reduce(
+      (sum, file) => sum + file.path.length + file.content.length,
+      0,
+    );
+    const inputTokens =
+      estimateTokens(trimmed) + estimateTokensForChars(baseChars);
     let reservation;
     try {
       reservation = this.#ledger.reserve({

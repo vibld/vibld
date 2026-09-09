@@ -68,19 +68,25 @@ export function microUsdOf(usage: TokenUsage, prices: TokenPrices): number {
  * The most a single run can cost.
  *
  * Both halves are already bounded by the endpoint: `maxOutputTokens` is the
- * provider's own cap, and the request guard rejects a prompt longer than
- * `maxPromptChars`. Four characters per token is the same rough estimate the
+ * provider's own cap, and the request guard rejects anything larger than
+ * `maxInputChars`. Four characters per token is the same rough estimate the
  * shell's ledger uses; it is deliberately generous, because a worst case that
  * under-estimates is not a worst case.
+ *
+ * `maxInputChars` is the prompt *and* the base project sent with it. It used
+ * to be the prompt alone, which was right while only file paths went to the
+ * model; once contents did, the same call would have under-counted the input
+ * side of a run by roughly forty times -- and this file's own rule is that a
+ * worst case which under-estimates is not one.
  */
 export function worstCaseMicroUsd(
   prices: TokenPrices,
   maxOutputTokens: number,
-  maxPromptChars: number,
+  maxInputChars: number,
 ): number {
   return microUsdOf(
     {
-      inputTokens: Math.ceil(maxPromptChars / 4),
+      inputTokens: Math.ceil(maxInputChars / 4),
       outputTokens: maxOutputTokens,
     },
     prices,

@@ -208,7 +208,9 @@ async function handlePlan(
   const worstCase = worstCaseMicroUsd(
     prices,
     DEFAULT_MAX_TOKENS,
-    DEFAULT_LIMITS.maxPromptChars,
+    // Prompt plus the base project that goes with it. Both are what the
+    // guard above has already refused to exceed.
+    DEFAULT_LIMITS.maxPromptChars + DEFAULT_LIMITS.maxTotalContentChars,
   );
   const ledger = env.USER_BUDGET!.getByName(access.email);
 
