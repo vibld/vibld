@@ -13,6 +13,7 @@ import {
   checkBodySize,
   checkRequestOrigin,
   parseGenerationRequest,
+  parseKnowledge,
   parseStylePreset,
 } from './request-guard.ts';
 import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
@@ -182,6 +183,11 @@ async function handlePlan(
     return json({ error: style.error }, style.status);
   }
 
+  const knowledge = parseKnowledge(body);
+  if (!knowledge.ok) {
+    return json({ error: knowledge.error }, knowledge.status);
+  }
+
   // Layer one: a burst gate keyed on the caller. It is per-location and
   // documented as permissive, so it stops a naive flood and nothing more --
   // it is allowed to fail open only because the layer below fails closed.
@@ -210,7 +216,9 @@ async function handlePlan(
     DEFAULT_MAX_TOKENS,
     // Prompt plus the base project that goes with it. Both are what the
     // guard above has already refused to exceed.
-    DEFAULT_LIMITS.maxPromptChars + DEFAULT_LIMITS.maxTotalContentChars,
+    DEFAULT_LIMITS.maxPromptChars +
+      DEFAULT_LIMITS.maxTotalContentChars +
+      DEFAULT_LIMITS.maxKnowledgeChars,
   );
   const ledger = env.USER_BUDGET!.getByName(access.email);
 
@@ -300,6 +308,7 @@ async function handlePlan(
       onProgress: ({ characters }) => reportProgress(characters),
       signal: abort.signal,
       ...(style.value ? { style: style.value } : {}),
+      ...(knowledge.value ? { knowledge: knowledge.value } : {}),
     },
   );
 

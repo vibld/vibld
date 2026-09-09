@@ -1,5 +1,7 @@
 import { Conversation } from './components/Conversation.tsx';
+import { KnowledgePanel } from './components/KnowledgePanel.tsx';
 import { describeMode } from './generation/labels.ts';
+import { saveKnowledge } from './generation/knowledge-store.ts';
 import { LifecycleBar } from './components/LifecycleBar.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
 import { Workspace } from './components/Workspace.tsx';
@@ -36,6 +38,14 @@ export function App() {
           <Conversation state={state} />
           <div className="composer">
             <LifecycleBar status={state.status} />
+            <KnowledgePanel
+              knowledge={state.knowledge}
+              disabled={state.running}
+              onChange={(value) => {
+                session.setKnowledge(value);
+                saveKnowledge(value);
+              }}
+            />
             <PromptPanel
               state={state}
               onSubmit={(prompt, mode, style) => {

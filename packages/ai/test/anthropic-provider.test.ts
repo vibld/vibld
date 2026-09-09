@@ -3,9 +3,9 @@ import { describe, it } from 'node:test';
 import {
   AnthropicModelProvider,
   DEFAULT_MAX_TOKENS,
-  MAX_BASE_CONTENT_CHARS,
   buildUserPrompt,
 } from '../src/anthropic-provider.ts';
+import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '../src/limits.ts';
 import { readStructuredOutput } from '../src/anthropic-client.ts';
 import {
   ProviderContextError,
@@ -354,5 +354,57 @@ describe('progress reporting', () => {
     const client = stubClient({});
     await new AnthropicModelProvider(client).generate({ prompt: 'x' });
     assert.equal('onProgress' in client.requests[0]!, false);
+  });
+});
+
+describe('standing instructions', () => {
+  const request = { prompt: 'Add a testimonials section' };
+
+  it('are absent from the prompt when there are none', () => {
+    assert.equal(buildUserPrompt(request, null, null), request.prompt);
+    assert.equal(buildUserPrompt(request, null, '   '), request.prompt);
+  });
+
+  it('come after the request and are subordinate to it', () => {
+    // Someone who has written "keep it dark" and then asks for a white page
+    // means the white page.
+    const prompt = buildUserPrompt(
+      request,
+      null,
+      'Keep it dark. No rounded corners.',
+    );
+    assert.ok(prompt.startsWith(request.prompt));
+    assert.match(prompt, /Standing instructions for this project/);
+    assert.match(prompt, /Keep it dark\. No rounded corners\./);
+    assert.match(prompt, /follow the request/i);
+  });
+
+  it('sit above the base project and the style preset', () => {
+    // They are the user's own words about every turn. A style preset is a
+    // starting point Vibld offered, and the base project is data.
+    const prompt = buildUserPrompt(
+      {
+        prompt: 'Add a footer',
+        base: { revision: 'r1', files: [{ path: 'a.tsx', content: 'x' }] },
+      },
+      'minimalist',
+      'Always include a privacy link.',
+    );
+    const standing = prompt.indexOf('Standing instructions');
+    assert.ok(standing > 0);
+    assert.ok(standing < prompt.indexOf('already exists at revision r1'));
+    assert.ok(standing < prompt.indexOf('minimalist visual direction'));
+  });
+
+  it('refuse to be unbounded', () => {
+    assert.throws(
+      () => buildUserPrompt(request, null, 'x'.repeat(MAX_KNOWLEDGE_CHARS + 1)),
+      ProviderContextError,
+    );
+    // Exactly at the cap is fine.
+    assert.match(
+      buildUserPrompt(request, null, 'y'.repeat(MAX_KNOWLEDGE_CHARS)),
+      /Standing instructions/,
+    );
   });
 });

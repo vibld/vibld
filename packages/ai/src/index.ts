@@ -5,7 +5,6 @@ export {
   DEFAULT_EFFORT,
   DEFAULT_MAX_TOKENS,
   DEFAULT_MODEL,
-  MAX_BASE_CONTENT_CHARS,
   buildUserPrompt,
 } from './anthropic-provider.ts';
 export type { ModelProviderOptions } from './anthropic-provider.ts';
@@ -38,3 +37,4 @@ export {
   styleDirection,
 } from './style-presets.ts';
 export type { StylePreset, StylePresetId } from './style-presets.ts';
+export { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';

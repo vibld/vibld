@@ -1,6 +1,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { BuilderSession } from './generation/session.ts';
 import type { BuilderState } from './generation/session.ts';
+import { loadKnowledge } from './generation/knowledge-store.ts';
 
 /**
  * Bind a `BuilderSession` to React.
@@ -16,7 +17,14 @@ export function useBuilderSession(): {
   session: BuilderSession;
   state: BuilderState;
 } {
-  const session = useMemo(() => new BuilderSession(), []);
+  const session = useMemo(() => {
+    const created = new BuilderSession();
+    // Standing instructions outlive the tab. Read once, here, rather than in
+    // an effect: an effect would render one frame with them missing, and
+    // under StrictMode would run twice.
+    created.setKnowledge(loadKnowledge());
+    return created;
+  }, []);
   const state = useSyncExternalStore(
     session.subscribe,
     session.getState,

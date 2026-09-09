@@ -10,6 +10,7 @@ import type {
   PlanUsage,
 } from './client.ts';
 import { GenerationPlanSchema, PLAN_SYSTEM_PROMPT } from './plan-schema.ts';
+import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import {
@@ -45,6 +46,13 @@ export interface ModelProviderOptions {
    * network, and a closed set is what stops caller text becoming prompt.
    */
   style?: StylePresetId;
+  /**
+   * Standing instructions for the project. Unlike a style preset this is the
+   * user's own prose, which is fine: it is their instruction about their own
+   * generation, and the prompt already carries their arbitrary text. What it
+   * is not is unbounded -- see MAX_KNOWLEDGE_CHARS.
+   */
+  knowledge?: string;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -81,6 +89,7 @@ export class AnthropicModelProvider implements ModelProvider {
   readonly #signal?: AbortSignal;
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #style?: StylePresetId;
+  readonly #knowledge?: string;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -91,13 +100,14 @@ export class AnthropicModelProvider implements ModelProvider {
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style;
+    this.#knowledge = options.knowledge;
     this.id = `${client.id}:${this.#model}`;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
     const completion = await this.#client.createPlan({
       system: PLAN_SYSTEM_PROMPT,
-      prompt: buildUserPrompt(request, this.#style),
+      prompt: buildUserPrompt(request, this.#style, this.#knowledge),
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,
@@ -142,16 +152,6 @@ export class AnthropicModelProvider implements ModelProvider {
 }
 
 /**
- * The largest base project that will be sent with a follow-up request.
- *
- * Generated projects are capped at 25 files by the system prompt and 50 by
- * the request guard, and the measured 24-file project was about 120 KB, so
- * this is headroom rather than a limit anyone should meet. It exists because
- * a budget nobody states is a budget nobody can check.
- */
-export const MAX_BASE_CONTENT_CHARS = 160_000;
-
-/**
  * Describe the existing project when there is one, so a follow-up request
  * edits rather than replacing the user's work.
  *
@@ -178,9 +178,29 @@ export const MAX_BASE_CONTENT_CHARS = 160_000;
 export function buildUserPrompt(
   request: GenerationRequest,
   style?: string | null,
+  knowledge?: string | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
+
+  // Standing instructions come straight after the request and before
+  // everything else, because they are the user's own words about every turn
+  // rather than about this one. Subordinate to the request in the same way a
+  // style preset is: someone who has written "keep it dark" and then asks for
+  // a white page means the white page.
+  const standing = knowledge?.trim();
+  if (standing) {
+    if (standing.length > MAX_KNOWLEDGE_CHARS) {
+      throw new ProviderContextError(standing.length, MAX_KNOWLEDGE_CHARS);
+    }
+    parts.push(
+      `Standing instructions for this project, which apply to every request:
+
+${standing}
+
+Where these conflict with the request above, follow the request.`,
+    );
+  }
 
   if (base && base.files.length > 0) {
     const total = base.files.reduce(

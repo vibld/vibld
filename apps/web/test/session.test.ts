@@ -524,3 +524,71 @@ describe('BuilderSession transcript', () => {
     assert.equal(session.getState().transcript.length, 1);
   });
 });
+
+describe('BuilderSession standing instructions', () => {
+  it('sends them to the provider on every run', async () => {
+    const seen: (string | null | undefined)[] = [];
+    const session = createSession({
+      resolveProvider: async (
+        plan,
+        _signal,
+        _onProgress,
+        _style,
+        knowledge,
+      ) => {
+        seen.push(knowledge);
+        return new FakeModelProvider([plan]);
+      },
+    });
+
+    session.setKnowledge('Keep it dark. No rounded corners.');
+    await session.submit('A landing page for a coffee roaster');
+    await session.submit('Add a testimonials section');
+
+    assert.deepEqual(seen, [
+      'Keep it dark. No rounded corners.',
+      'Keep it dark. No rounded corners.',
+    ]);
+  });
+
+  it('survives starting over', async () => {
+    // They are how someone wants things built, not part of the thing that was
+    // built. Clearing them would make "start over" quietly discard a
+    // preference that was never on screen.
+    const session = createSession();
+    session.setKnowledge('Always include a privacy link.');
+    await session.submit('A landing page for a coffee roaster');
+
+    session.reset();
+    assert.equal(session.getState().transcript.length, 0);
+    assert.equal(
+      session.getState().knowledge,
+      'Always include a privacy link.',
+    );
+  });
+
+  it('charges the ledger for what it sends', async () => {
+    // They go with every request, so a run that carries them costs more than
+    // one that does not. Counting only the typed prompt under-reported it.
+    const withNone = createSession();
+    await withNone.submit('A landing page for a coffee roaster');
+
+    const withSome = createSession();
+    withSome.setKnowledge('x'.repeat(400));
+    await withSome.submit('A landing page for a coffee roaster');
+
+    assert.ok(
+      withSome.getState().budget.used.modelInputTokens >
+        withNone.getState().budget.used.modelInputTokens,
+    );
+  });
+
+  it('ignores a set that changes nothing', () => {
+    let notifications = 0;
+    const session = createSession();
+    session.subscribe(() => (notifications += 1));
+    session.setKnowledge('Keep it dark.');
+    session.setKnowledge('Keep it dark.');
+    assert.equal(notifications, 1);
+  });
+});
