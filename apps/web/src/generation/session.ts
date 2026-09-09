@@ -78,6 +78,14 @@ export interface BuilderState {
    * has always iterated.
    */
   transcript: TranscriptTurn[];
+  /**
+   * Standing instructions for this project, applied to every turn.
+   *
+   * They exist so nobody has to retype "keep it dark, no rounded corners" on
+   * every prompt. Kept out of the transcript deliberately: they are not
+   * something that was said once, they are a condition on everything said.
+   */
+  knowledge: string;
 }
 
 /** One prompt and what became of it. */
@@ -118,6 +126,7 @@ export interface SessionOptions {
     signal: AbortSignal,
     onProgress?: (progress: GenerationProgress) => void,
     style?: StylePresetId | null,
+    knowledge?: string | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -156,6 +165,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     providerId: null,
     progress: null,
     transcript: [],
+    knowledge: '',
   };
 }
 
@@ -170,6 +180,7 @@ async function defaultResolveProvider(
   signal: AbortSignal,
   onProgress?: (progress: GenerationProgress) => void,
   style?: StylePresetId | null,
+  knowledge?: string | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -177,6 +188,7 @@ async function defaultResolveProvider(
         signal,
         ...(onProgress ? { onProgress } : {}),
         ...(style ? { style } : {}),
+        ...(knowledge ? { knowledge } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -223,6 +235,7 @@ export class BuilderSession {
     signal: AbortSignal,
     onProgress?: (progress: GenerationProgress) => void,
     style?: StylePresetId | null,
+    knowledge?: string | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -254,15 +267,29 @@ export class BuilderSession {
     this.#listeners.clear();
   }
 
-  /** Discard the whole session: accepted checkpoint, history and budget. */
+  /** Replace the project's standing instructions. */
+  setKnowledge(knowledge: string): void {
+    if (this.#disposed || knowledge === this.#state.knowledge) return;
+    this.#state = { ...this.#state, knowledge };
+    this.#emit();
+  }
+
+  /**
+   * Discard the whole session: accepted checkpoint, history and budget.
+   *
+   * Standing instructions survive it. They are how someone wants things
+   * built, not part of the thing that was built -- clearing them would make
+   * "start over" quietly discard a preference that was never on screen.
+   */
   reset(): void {
     if (this.#disposed) return;
+    const knowledge = this.#state.knowledge;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
     this.#entrySeq = 0;
     this.#turnSeq = 0;
-    this.#state = initialState(this.#ledger.report());
+    this.#state = { ...initialState(this.#ledger.report()), knowledge };
     this.#emit();
   }
 
@@ -288,7 +315,9 @@ export class BuilderSession {
       0,
     );
     const inputTokens =
-      estimateTokens(trimmed) + estimateTokensForChars(baseChars);
+      estimateTokens(trimmed) +
+      estimateTokensForChars(baseChars) +
+      estimateTokensForChars(this.#state.knowledge.length);
     let reservation;
     try {
       reservation = this.#ledger.reserve({
@@ -384,6 +413,7 @@ export class BuilderSession {
           this.#patch(epoch, (state) => ({ ...state, progress }));
         },
         style,
+        this.#state.knowledge,
       );
     } catch (error) {
       reservation.release();

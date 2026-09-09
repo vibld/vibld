@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./style-presets": "./src/style-presets.ts"
+    "./style-presets": "./src/style-presets.ts",
+    "./limits": "./src/limits.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

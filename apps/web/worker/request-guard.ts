@@ -1,5 +1,5 @@
 import type { GenerationRequest } from '@vibld/core';
-import { MAX_BASE_CONTENT_CHARS } from '@vibld/ai';
+import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -19,6 +19,7 @@ export interface GuardLimits {
   maxPathChars: number;
   maxTotalPathChars: number;
   maxTotalContentChars: number;
+  maxKnowledgeChars: number;
 }
 
 export const DEFAULT_LIMITS: GuardLimits = {
@@ -36,6 +37,7 @@ export const DEFAULT_LIMITS: GuardLimits = {
   // guard refuses an oversized project before a run starts, rather than
   // letting the provider throw after the request has been paid for.
   maxTotalContentChars: MAX_BASE_CONTENT_CHARS,
+  maxKnowledgeChars: MAX_KNOWLEDGE_CHARS,
 };
 
 export interface GuardFailure {
@@ -196,4 +198,38 @@ export function parseStylePreset(
     return fail(400, 'Unknown "style" preset.');
   }
   return { ok: true, value: style };
+}
+
+/**
+ * Validate the project's standing instructions.
+ *
+ * Unlike a style preset this is the caller's own prose, and that is fine: it
+ * is their instruction about their own generation, and the prompt beside it
+ * already carries their arbitrary text. There is nothing to close off here,
+ * only a size to bound -- these are sent on every turn, so unbounded they
+ * would be a cost that grows quietly and never gets re-read.
+ */
+export function parseKnowledge(
+  body: unknown,
+  limits: GuardLimits = DEFAULT_LIMITS,
+): GuardResult<string | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { knowledge } = body as { knowledge?: unknown };
+  if (knowledge === undefined || knowledge === null) {
+    return { ok: true, value: null };
+  }
+  if (typeof knowledge !== 'string') {
+    return fail(400, '"knowledge" must be a string.');
+  }
+  if (knowledge.length > limits.maxKnowledgeChars) {
+    return fail(
+      413,
+      `Standing instructions must be ${limits.maxKnowledgeChars} characters or fewer.`,
+    );
+  }
+  // Empty or whitespace-only is the same as none: it should not become an
+  // empty section in the prompt that says nothing.
+  return { ok: true, value: knowledge.trim().length > 0 ? knowledge : null };
 }

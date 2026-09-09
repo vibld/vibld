@@ -114,6 +114,8 @@ export interface RemoteModelProviderOptions {
    * closed set -- the browser is not trusted to have sent a real one.
    */
   style?: StylePresetId | null;
+  /** Standing instructions for the project, sent with every turn. */
+  knowledge?: string | null;
 }
 
 export class RemoteModelProvider implements ModelProvider {
@@ -123,6 +125,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #signal?: AbortSignal;
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
   readonly #style: StylePresetId | null;
+  readonly #knowledge: string | null;
 
   constructor(options: RemoteModelProviderOptions = {}) {
     this.id = options.id ?? 'remote';
@@ -131,6 +134,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style ?? null;
+    this.#knowledge = options.knowledge ?? null;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
@@ -144,6 +148,7 @@ export class RemoteModelProvider implements ModelProvider {
         prompt: request.prompt,
         base: request.base,
         ...(this.#style ? { style: this.#style } : {}),
+        ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
       }),
       // Access uses a cookie; without this the browser omits it and every
       // request looks unauthenticated.

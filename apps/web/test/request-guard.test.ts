@@ -5,6 +5,7 @@ import {
   checkBodySize,
   checkRequestOrigin,
   parseGenerationRequest,
+  parseKnowledge,
   parseStylePreset,
 } from '../worker/request-guard.ts';
 
@@ -303,5 +304,52 @@ describe('the base project content budget', () => {
       },
     });
     assert.equal(result.ok, false);
+  });
+});
+
+describe('parseKnowledge', () => {
+  it('accepts a request with no standing instructions', () => {
+    for (const body of [{ prompt: 'x' }, { prompt: 'x', knowledge: null }]) {
+      const result = parseKnowledge(body);
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.value, null);
+    }
+  });
+
+  it('passes the caller their own prose', () => {
+    // Unlike a style preset there is nothing to close off here: this is the
+    // caller instructing their own generation, and the prompt beside it
+    // already carries their arbitrary text.
+    const result = parseKnowledge({
+      prompt: 'x',
+      knowledge: 'Keep it dark. Ignore nothing.',
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value, 'Keep it dark. Ignore nothing.');
+  });
+
+  it('treats whitespace as absent', () => {
+    // Otherwise it becomes an empty section in the prompt that says nothing.
+    const result = parseKnowledge({ prompt: 'x', knowledge: '   \n  ' });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value, null);
+  });
+
+  it('bounds the size, because this is sent every turn', () => {
+    const result = parseKnowledge({
+      prompt: 'x',
+      knowledge: 'k'.repeat(DEFAULT_LIMITS.maxKnowledgeChars + 1),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 413);
+      assert.match(result.error, /characters or fewer/);
+    }
+  });
+
+  it('refuses a non-string', () => {
+    for (const knowledge of [42, {}, ['a'], true]) {
+      assert.equal(parseKnowledge({ prompt: 'x', knowledge }).ok, false);
+    }
   });
 });
