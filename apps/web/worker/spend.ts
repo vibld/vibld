@@ -58,12 +58,17 @@ export function parsePrices(
     VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
   },
   provider = 'anthropic',
+  modelPrices?: TokenPrices,
 ): TokenPrices {
   // The fallback follows the selected provider. Without that, switching to
   // DeepSeek would price its runs at Anthropic's rates -- an over-estimate,
   // so safe, but a dollar figure that is wrong by forty times is not a
   // ceiling anyone can reason about.
-  const fallback = PROVIDER_PRICES[provider] ?? DEFAULT_PRICES;
+  // A chosen model's own rate is the most precise figure available and wins
+  // over the provider default: a run on Opus must not be ceilinged at
+  // DeepSeek's rate because the deployment happens to default to DeepSeek.
+  // An operator's explicit VIBLD_USD_MICRO_PER_* still overrides both.
+  const fallback = modelPrices ?? PROVIDER_PRICES[provider] ?? DEFAULT_PRICES;
   return {
     inputMicroUsd: parsePrice(
       env.VIBLD_USD_MICRO_PER_INPUT_TOKEN,

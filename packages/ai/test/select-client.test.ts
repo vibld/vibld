@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  configuredProviders,
   createPlanClient,
+  providerForRequest,
   defaultModelFor,
   resolveModel,
   selectProvider,
@@ -111,5 +113,54 @@ describe('resolveModel', () => {
       resolveModel({ VIBLD_MODEL: ' deepseek-v4-pro ' }),
       'deepseek-v4-pro',
     );
+  });
+});
+
+describe('providerForRequest', () => {
+  it('lets the chosen model decide, not the deployment default', () => {
+    // A run asking for deepseek-v4-pro must not be answered by Anthropic
+    // because that is what the deployment happens to default to.
+    assert.equal(
+      providerForRequest(
+        { VIBLD_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'a' },
+        'deepseek-v4-pro',
+      ),
+      'deepseek',
+    );
+    assert.equal(
+      providerForRequest(
+        { VIBLD_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'd' },
+        'claude-opus-5',
+      ),
+      'anthropic',
+    );
+  });
+
+  it('falls back to the deployment when no model was chosen', () => {
+    assert.equal(
+      providerForRequest({ VIBLD_PROVIDER: 'deepseek' }, null),
+      'deepseek',
+    );
+    assert.equal(providerForRequest({ ANTHROPIC_API_KEY: 'a' }), 'anthropic');
+  });
+
+  it('ignores a model it does not know rather than guessing', () => {
+    assert.equal(
+      providerForRequest({ VIBLD_PROVIDER: 'deepseek' }, 'gpt-5'),
+      'deepseek',
+    );
+  });
+});
+
+describe('configuredProviders', () => {
+  it('reports which keys the deployment holds', () => {
+    assert.deepEqual(configuredProviders({ DEEPSEEK_API_KEY: 'k' }), {
+      anthropic: false,
+      deepseek: true,
+    });
+    assert.deepEqual(configuredProviders({}), {
+      anthropic: false,
+      deepseek: false,
+    });
   });
 });

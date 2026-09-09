@@ -6,6 +6,7 @@ import {
   checkRequestOrigin,
   parseGenerationRequest,
   parseKnowledge,
+  parseModel,
   parseStylePreset,
 } from '../worker/request-guard.ts';
 
@@ -351,5 +352,56 @@ describe('parseKnowledge', () => {
     for (const knowledge of [42, {}, ['a'], true]) {
       assert.equal(parseKnowledge({ prompt: 'x', knowledge }).ok, false);
     }
+  });
+});
+
+describe('parseModel', () => {
+  const both = { anthropic: true, deepseek: true };
+
+  it('accepts no choice at all', () => {
+    for (const body of [
+      { prompt: 'x' },
+      { prompt: 'x', model: null },
+      { prompt: 'x', model: '' },
+    ]) {
+      const result = parseModel(body, both);
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.value, null);
+    }
+  });
+
+  it('accepts a model from the catalogue', () => {
+    const result = parseModel({ prompt: 'x', model: 'deepseek-v4-pro' }, both);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value, 'deepseek-v4-pro');
+  });
+
+  it('refuses anything outside the catalogue', () => {
+    // The id decides which service bills the account and at what rate. An
+    // open field would let anyone with a session point a run at the most
+    // expensive model a provider sells.
+    for (const model of [
+      'claude-opus-4-1-with-a-typo',
+      'gpt-5',
+      'Claude Opus 5',
+      42,
+      { id: 'claude-opus-5' },
+      ['claude-opus-5'],
+      '__proto__',
+    ]) {
+      const result = parseModel({ prompt: 'x', model }, both);
+      assert.equal(result.ok, false, `accepted ${JSON.stringify(model)}`);
+      if (!result.ok) assert.equal(result.status, 400);
+    }
+  });
+
+  it('refuses a real model this deployment has no key for', () => {
+    // Otherwise the run fails after the user has already waited for it.
+    const result = parseModel(
+      { prompt: 'x', model: 'claude-opus-5' },
+      { anthropic: false, deepseek: true },
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /no anthropic credential/);
   });
 });

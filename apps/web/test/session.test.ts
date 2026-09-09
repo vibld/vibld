@@ -592,3 +592,61 @@ describe('BuilderSession standing instructions', () => {
     assert.equal(notifications, 1);
   });
 });
+
+describe('BuilderSession model choice', () => {
+  it('sends the chosen model to the provider', async () => {
+    const seen: (string | null | undefined)[] = [];
+    const session = createSession({
+      resolveProvider: async (plan, _s, _p, _style, _knowledge, model) => {
+        seen.push(model);
+        return new FakeModelProvider([plan]);
+      },
+    });
+
+    session.setModel('deepseek-v4-pro');
+    await session.submit('A landing page for a coffee roaster');
+    assert.deepEqual(seen, ['deepseek-v4-pro']);
+  });
+
+  it('survives starting over, like the other preferences', () => {
+    const session = createSession();
+    session.setModel('deepseek-v4-flash');
+    session.reset();
+    // A model chosen for a reason should not silently revert to the
+    // deployment default when the project is discarded.
+    assert.equal(session.getState().model, 'deepseek-v4-flash');
+  });
+
+  it('ignores a set that changes nothing', () => {
+    let notifications = 0;
+    const session = createSession();
+    session.subscribe(() => (notifications += 1));
+    session.setModel('deepseek-v4-pro');
+    session.setModel('deepseek-v4-pro');
+    assert.equal(notifications, 1);
+  });
+});
+
+describe('what the deployment can serve survives a reset', () => {
+  it('keeps the model list, so the picker does not vanish', () => {
+    // The list comes from a probe that runs once a page load. Clearing it on
+    // reset would hide the picker until the user reloaded.
+    const session = createSession();
+    session.setModels([
+      {
+        id: 'claude-opus-5',
+        label: 'Claude Opus 5',
+        note: 'n',
+        provider: 'anthropic',
+      },
+      {
+        id: 'deepseek-v4-flash',
+        label: 'DeepSeek V4 Flash',
+        note: 'n',
+        provider: 'deepseek',
+      },
+    ]);
+    session.reset();
+    assert.equal(session.getState().models.length, 2);
+  });
+});

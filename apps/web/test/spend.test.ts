@@ -204,3 +204,34 @@ describe('prices follow the selected provider', () => {
     assert.deepEqual(parsePrices({}, 'nonesuch'), DEFAULT_PRICES);
   });
 });
+
+describe('the chosen model prices its own run', () => {
+  it('uses the model rate over the provider default', () => {
+    // A run on Opus must not be ceilinged at DeepSeek's rate because the
+    // deployment happens to default to DeepSeek.
+    const opus = parsePrices({}, 'deepseek', {
+      inputMicroUsd: 5,
+      outputMicroUsd: 25,
+    });
+    assert.deepEqual(opus, { inputMicroUsd: 5, outputMicroUsd: 25 });
+  });
+
+  it('still lets an operator override win over the model rate', () => {
+    const forced = parsePrices(
+      {
+        VIBLD_USD_MICRO_PER_INPUT_TOKEN: '9',
+        VIBLD_USD_MICRO_PER_OUTPUT_TOKEN: '99',
+      },
+      'deepseek',
+      { inputMicroUsd: 5, outputMicroUsd: 25 },
+    );
+    assert.deepEqual(forced, { inputMicroUsd: 9, outputMicroUsd: 99 });
+  });
+
+  it('falls back to the provider default when no model was chosen', () => {
+    assert.deepEqual(
+      parsePrices({}, 'deepseek', undefined),
+      PROVIDER_PRICES.deepseek,
+    );
+  });
+});

@@ -53,6 +53,7 @@ export function App() {
               }}
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}
+              onModelChange={(model) => session.setModel(model)}
             />
           </div>
         </section>
