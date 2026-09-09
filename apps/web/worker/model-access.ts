@@ -60,10 +60,14 @@ export function decideModel(
   const granted = grantedFor(env, principal);
 
   if (granted.length === 0) {
+    // Names the identity it matched on. A policy keyed on the wrong address
+    // is the likeliest way to be locked out of your own deployment, and
+    // "no model is available to you" gives no way to find out which "you"
+    // was meant. Disclosing a caller their own identity costs nothing.
     return {
       ok: false,
       status: 403,
-      error: 'No model is available to you on this deployment.',
+      error: `No model is available to ${principal} on this deployment. Check the policy grants something to that identity.`,
     };
   }
 
@@ -74,7 +78,7 @@ export function decideModel(
       return {
         ok: false,
         status: 403,
-        error: 'That model is not available to you.',
+        error: `That model is not available to ${principal}.`,
       };
     }
     return { ok: true, model: chosen, granted };
