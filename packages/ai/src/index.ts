@@ -49,9 +49,18 @@ export {
 export type { DeepseekPlanClientOptions } from './deepseek-client.ts';
 export {
   DEFAULT_MODELS,
+  configuredProviders,
   createPlanClient,
   defaultModelFor,
+  providerForRequest,
   resolveModel,
   selectProvider,
 } from './select-client.ts';
 export type { ProviderEnv, ProviderName } from './select-client.ts';
+export {
+  MODEL_CATALOGUE,
+  availableModels,
+  findModel,
+  isKnownModel,
+} from './model-catalogue.ts';
+export type { ModelChoice } from './model-catalogue.ts';

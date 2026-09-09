@@ -14,6 +14,7 @@ import type {
 } from '@vibld/core';
 import type { ModelProvider } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import type { ModelOption } from './remote-provider.ts';
 import type { ProjectBrief } from './brief.ts';
 import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
@@ -86,6 +87,10 @@ export interface BuilderState {
    * something that was said once, they are a condition on everything said.
    */
   knowledge: string;
+  /** The chosen model id, or null for the deployment's default. */
+  model: string | null;
+  /** What this deployment can serve. Empty until the probe answers. */
+  models: ModelOption[];
 }
 
 /** One prompt and what became of it. */
@@ -127,6 +132,7 @@ export interface SessionOptions {
     onProgress?: (progress: GenerationProgress) => void,
     style?: StylePresetId | null,
     knowledge?: string | null,
+    model?: string | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -166,6 +172,8 @@ function initialState(budget: RunUsageReport): BuilderState {
     progress: null,
     transcript: [],
     knowledge: '',
+    model: null,
+    models: [],
   };
 }
 
@@ -181,6 +189,7 @@ async function defaultResolveProvider(
   onProgress?: (progress: GenerationProgress) => void,
   style?: StylePresetId | null,
   knowledge?: string | null,
+  model?: string | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -189,6 +198,7 @@ async function defaultResolveProvider(
         ...(onProgress ? { onProgress } : {}),
         ...(style ? { style } : {}),
         ...(knowledge ? { knowledge } : {}),
+        ...(model ? { model } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -236,6 +246,7 @@ export class BuilderSession {
     onProgress?: (progress: GenerationProgress) => void,
     style?: StylePresetId | null,
     knowledge?: string | null,
+    model?: string | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -267,6 +278,20 @@ export class BuilderSession {
     this.#listeners.clear();
   }
 
+  /** Choose the model, or null for the deployment's default. */
+  setModel(model: string | null): void {
+    if (this.#disposed || model === this.#state.model) return;
+    this.#state = { ...this.#state, model };
+    this.#emit();
+  }
+
+  /** Record what the deployment can serve, once the probe answers. */
+  setModels(models: ModelOption[]): void {
+    if (this.#disposed) return;
+    this.#state = { ...this.#state, models };
+    this.#emit();
+  }
+
   /** Replace the project's standing instructions. */
   setKnowledge(knowledge: string): void {
     if (this.#disposed || knowledge === this.#state.knowledge) return;
@@ -277,19 +302,26 @@ export class BuilderSession {
   /**
    * Discard the whole session: accepted checkpoint, history and budget.
    *
-   * Standing instructions survive it. They are how someone wants things
-   * built, not part of the thing that was built -- clearing them would make
-   * "start over" quietly discard a preference that was never on screen.
+   * Preferences survive it, and so does what the deployment can serve.
+   * Standing instructions and the chosen model are how someone wants things
+   * built rather than part of the thing that was built, and the model list
+   * came from a probe that only runs once a page load -- clearing it would
+   * make the picker disappear after "Start over" until a reload.
    */
   reset(): void {
     if (this.#disposed) return;
-    const knowledge = this.#state.knowledge;
+    const { knowledge, model, models } = this.#state;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
     this.#entrySeq = 0;
     this.#turnSeq = 0;
-    this.#state = { ...initialState(this.#ledger.report()), knowledge };
+    this.#state = {
+      ...initialState(this.#ledger.report()),
+      knowledge,
+      model,
+      models,
+    };
     this.#emit();
   }
 
@@ -414,6 +446,7 @@ export class BuilderSession {
         },
         style,
         this.#state.knowledge,
+        this.#state.model,
       );
     } catch (error) {
       reservation.release();

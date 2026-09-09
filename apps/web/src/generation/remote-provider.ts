@@ -116,6 +116,12 @@ export interface RemoteModelProviderOptions {
   style?: StylePresetId | null;
   /** Standing instructions for the project, sent with every turn. */
   knowledge?: string | null;
+  /**
+   * The chosen model, by id. The Worker checks it against the catalogue and
+   * against its own credentials -- the browser is not trusted to have picked
+   * one this deployment can serve.
+   */
+  model?: string | null;
 }
 
 export class RemoteModelProvider implements ModelProvider {
@@ -126,6 +132,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
   readonly #style: StylePresetId | null;
   readonly #knowledge: string | null;
+  readonly #model: string | null;
 
   constructor(options: RemoteModelProviderOptions = {}) {
     this.id = options.id ?? 'remote';
@@ -135,6 +142,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#onProgress = options.onProgress;
     this.#style = options.style ?? null;
     this.#knowledge = options.knowledge ?? null;
+    this.#model = options.model ?? null;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
@@ -149,6 +157,7 @@ export class RemoteModelProvider implements ModelProvider {
         base: request.base,
         ...(this.#style ? { style: this.#style } : {}),
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
+        ...(this.#model ? { model: this.#model } : {}),
       }),
       // Access uses a cookie; without this the browser omits it and every
       // request looks unauthenticated.
@@ -208,15 +217,40 @@ export class RemoteModelProvider implements ModelProvider {
 
 export type GenerationMode = 'model' | 'fake';
 
-/**
- * Ask the deployment which provider is available. Cached, because the answer
- * cannot change within a page load and every run would otherwise pay for it.
- */
-let probe: Promise<GenerationMode> | undefined;
+/** One entry of the deployment's model picker. */
+export interface ModelOption {
+  id: string;
+  label: string;
+  note: string;
+  provider: string;
+}
 
-export function detectGenerationMode(
+export interface DeploymentConfig {
+  generation: GenerationMode;
+  models: ModelOption[];
+  defaultModel: string | null;
+}
+
+/**
+ * Ask the deployment what it can serve. Cached, because the answer cannot
+ * change within a page load and every run would otherwise pay for it.
+ *
+ * The empty model list is the honest answer for a deployment that has no
+ * credentials, and for `pnpm dev` where there is no endpoint at all. The
+ * picker renders nothing rather than offering a choice that cannot be
+ * fulfilled.
+ */
+const UNCONFIGURED: DeploymentConfig = {
+  generation: 'fake',
+  models: [],
+  defaultModel: null,
+};
+
+let probe: Promise<DeploymentConfig> | undefined;
+
+export function detectDeploymentConfig(
   fetchImpl?: typeof fetch,
-): Promise<GenerationMode> {
+): Promise<DeploymentConfig> {
   probe ??= (async () => {
     const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis);
     let response: Response;
@@ -228,7 +262,7 @@ export function detectGenerationMode(
     } catch {
       // No endpoint at all (pnpm dev, or the static-only deploy): the fake is
       // the correct answer, not an error.
-      return 'fake';
+      return UNCONFIGURED;
     }
 
     // A signed-out probe must not quietly answer "fake". That would run the
@@ -239,12 +273,33 @@ export function detectGenerationMode(
       throw new AccessSessionError();
     }
 
-    if (!response.ok) return 'fake';
+    if (!response.ok) return UNCONFIGURED;
     try {
-      const body = (await response.json()) as { generation?: unknown };
-      return body.generation === 'model' ? 'model' : 'fake';
+      const body = (await response.json()) as {
+        generation?: unknown;
+        models?: unknown;
+        defaultModel?: unknown;
+      };
+      // Every field is checked. This is the deployment's own endpoint, but a
+      // shape that drifted would otherwise put `undefined` in a <select> and
+      // send it as the model id.
+      const models = Array.isArray(body.models)
+        ? body.models.filter(
+            (model): model is ModelOption =>
+              typeof model === 'object' &&
+              model !== null &&
+              typeof (model as ModelOption).id === 'string' &&
+              typeof (model as ModelOption).label === 'string',
+          )
+        : [];
+      return {
+        generation: body.generation === 'model' ? 'model' : 'fake',
+        models,
+        defaultModel:
+          typeof body.defaultModel === 'string' ? body.defaultModel : null,
+      };
     } catch {
-      return 'fake';
+      return UNCONFIGURED;
     }
   })();
 
@@ -254,6 +309,13 @@ export function detectGenerationMode(
     probe = undefined;
     throw error;
   });
+}
+
+/** The mode alone, for callers that only need to know which provider runs. */
+export function detectGenerationMode(
+  fetchImpl?: typeof fetch,
+): Promise<GenerationMode> {
+  return detectDeploymentConfig(fetchImpl).then((config) => config.generation);
 }
 
 export function resetGenerationModeProbe(): void {

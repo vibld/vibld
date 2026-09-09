@@ -1,5 +1,6 @@
 import type { GenerationRequest } from '@vibld/core';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
+import { findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -232,4 +233,39 @@ export function parseKnowledge(
   // Empty or whitespace-only is the same as none: it should not become an
   // empty section in the prompt that says nothing.
   return { ok: true, value: knowledge.trim().length > 0 ? knowledge : null };
+}
+
+/**
+ * Validate a chosen model.
+ *
+ * A closed set, like the style preset, and for a sharper reason: the id
+ * decides which service the account is billed by and at what rate. An open
+ * field would let anyone with a session point a run at the most expensive
+ * model a provider sells.
+ *
+ * A model whose provider has no key configured is refused here rather than
+ * failing mid-run, after the user has already waited.
+ */
+export function parseModel(
+  body: unknown,
+  configured: { anthropic: boolean; deepseek: boolean },
+): GuardResult<string | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { model } = body as { model?: unknown };
+  if (model === undefined || model === null || model === '') {
+    return { ok: true, value: null };
+  }
+  if (!isKnownModel(model)) {
+    return fail(400, 'Unknown "model".');
+  }
+  const choice = findModel(model);
+  if (!choice || !configured[choice.provider]) {
+    return fail(
+      400,
+      `This deployment has no ${choice?.provider ?? 'matching'} credential, so it cannot use that model.`,
+    );
+  }
+  return { ok: true, value: model };
 }

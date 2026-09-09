@@ -1,5 +1,6 @@
 import { createAnthropicPlanClient } from './anthropic-client.ts';
 import { createDeepseekPlanClient } from './deepseek-client.ts';
+import { findModel } from './model-catalogue.ts';
 import type { PlanClient } from './client.ts';
 
 /**
@@ -59,8 +60,37 @@ export function resolveModel(env: ProviderEnv): string {
     : defaultModelFor(selectProvider(env));
 }
 
-export function createPlanClient(env: ProviderEnv): PlanClient {
-  const provider = selectProvider(env);
+/** Which providers this deployment holds a key for. */
+export function configuredProviders(env: ProviderEnv): {
+  anthropic: boolean;
+  deepseek: boolean;
+} {
+  return {
+    anthropic: Boolean(env.ANTHROPIC_API_KEY),
+    deepseek: Boolean(env.DEEPSEEK_API_KEY),
+  };
+}
+
+/**
+ * The provider a request will actually use.
+ *
+ * A chosen model decides it -- a run asking for `deepseek-v4-pro` must not be
+ * answered by Anthropic because that is what the deployment defaults to.
+ * Falls back to the deployment's own selection when no model was chosen.
+ */
+export function providerForRequest(
+  env: ProviderEnv,
+  modelId?: string | null,
+): ProviderName {
+  const chosen = modelId ? findModel(modelId) : null;
+  return chosen ? chosen.provider : selectProvider(env);
+}
+
+export function createPlanClient(
+  env: ProviderEnv,
+  modelId?: string | null,
+): PlanClient {
+  const provider = providerForRequest(env, modelId);
   if (provider === 'deepseek') {
     return createDeepseekPlanClient(
       env.DEEPSEEK_API_KEY ? { apiKey: env.DEEPSEEK_API_KEY } : {},

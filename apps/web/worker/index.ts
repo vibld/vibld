@@ -2,9 +2,12 @@ import {
   PlanProvider,
   DEFAULT_MAX_TOKENS,
   ProviderError,
+  availableModels,
+  configuredProviders,
   createPlanClient,
+  findModel,
+  providerForRequest,
   resolveModel,
-  selectProvider,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 
@@ -16,6 +19,7 @@ import {
   checkRequestOrigin,
   parseGenerationRequest,
   parseKnowledge,
+  parseModel,
   parseStylePreset,
 } from './request-guard.ts';
 import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
@@ -196,6 +200,11 @@ async function handlePlan(
     return json({ error: knowledge.error }, knowledge.status);
   }
 
+  const chosenModel = parseModel(body, configuredProviders(env));
+  if (!chosenModel.ok) {
+    return json({ error: chosenModel.error }, chosenModel.status);
+  }
+
   // Layer one: a burst gate keyed on the caller. It is per-location and
   // documented as permissive, so it stops a naive flood and nothing more --
   // it is allowed to fail open only because the layer below fails closed.
@@ -218,7 +227,17 @@ async function handlePlan(
   // Layer two: the ceiling. The worst case is charged before the run, because
   // charging afterwards gives an accurate ledger and no limit -- concurrent
   // callers would all read the same balance and all find headroom.
-  const prices = parsePrices(env, selectProvider(env));
+  const chosen = chosenModel.value ? findModel(chosenModel.value) : null;
+  const prices = parsePrices(
+    env,
+    providerForRequest(env, chosenModel.value),
+    chosen
+      ? {
+          inputMicroUsd: chosen.inputMicroUsd,
+          outputMicroUsd: chosen.outputMicroUsd,
+        }
+      : undefined,
+  );
   const worstCase = worstCaseMicroUsd(
     prices,
     DEFAULT_MAX_TOKENS,
@@ -306,11 +325,12 @@ async function handlePlan(
   });
 
   let usage: PlanUsage | undefined;
-  const provider = new PlanProvider(createPlanClient(env), {
-    // A model named for the other provider is a 400 that reads like an
-    // outage, so an unset or blank VIBLD_MODEL falls back to the selected
-    // provider's own model rather than to a single hard-coded one.
-    model: resolveModel(env),
+  const provider = new PlanProvider(createPlanClient(env, chosenModel.value), {
+    // The request's own choice wins; otherwise the deployment's. An unset or
+    // blank VIBLD_MODEL falls back to the selected provider's own model
+    // rather than to a single hard-coded one -- a model named for the other
+    // provider is a 400 that reads like an outage.
+    model: chosenModel.value ?? resolveModel(env),
     onUsage: (reported) => {
       usage = reported;
     },
@@ -407,7 +427,20 @@ export default {
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
-      return json({ generation: isConfigured(env) ? 'model' : 'fake' });
+      // The picker is built from what this deployment can actually serve.
+      // Offering a model whose provider has no key would produce a run that
+      // fails after the user has already waited for it.
+      const models = availableModels(configuredProviders(env));
+      return json({
+        generation: isConfigured(env) ? 'model' : 'fake',
+        models: models.map(({ id, label, note, provider }) => ({
+          id,
+          label,
+          note,
+          provider,
+        })),
+        defaultModel: resolveModel(env),
+      });
     }
 
     if (pathname === '/api/plan') {

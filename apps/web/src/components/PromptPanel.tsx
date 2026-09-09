@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { BuilderState } from '../generation/session.ts';
 import type { PlanMode } from '../generation/plan-builder.ts';
+import { ModelPicker } from './ModelPicker.tsx';
 import { StylePicker } from './StylePicker.tsx';
 
 const EXAMPLES = [
@@ -19,6 +20,7 @@ export interface PromptPanelProps {
   ) => void;
   onReset: () => void;
   onCancel: () => void;
+  onModelChange: (model: string | null) => void;
 }
 
 export function PromptPanel({
@@ -26,6 +28,7 @@ export function PromptPanel({
   onSubmit,
   onReset,
   onCancel,
+  onModelChange,
 }: PromptPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [failNext, setFailNext] = useState(false);
@@ -78,6 +81,13 @@ export function PromptPanel({
           ))}
         </div>
       )}
+
+      <ModelPicker
+        models={state.models}
+        value={state.model}
+        onChange={onModelChange}
+        disabled={disabled}
+      />
 
       <StylePicker value={style} onChange={setStyle} disabled={disabled} />
 
