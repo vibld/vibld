@@ -64,3 +64,5 @@ export {
   isKnownModel,
 } from './model-catalogue.ts';
 export type { ModelChoice } from './model-catalogue.ts';
+export { allowedModels, grantedIds, parseModelPolicy } from './model-policy.ts';
+export type { ModelPolicy, PolicyParse } from './model-policy.ts';
