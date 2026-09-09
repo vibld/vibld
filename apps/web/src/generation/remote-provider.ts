@@ -97,6 +97,11 @@ export interface RemoteModelProviderOptions {
   endpoint?: string;
   fetchImpl?: typeof fetch;
   /**
+   * Called as the endpoint reports progress, so the shell can show that a
+   * long generation is moving rather than stuck.
+   */
+  onProgress?: (progress: { characters: number; elapsedMs: number }) => void;
+  /**
    * Aborts the request when the user cancels. Aborting the fetch also drops
    * the connection, which is the signal the Worker uses to stop its own model
    * call -- so cancelling here really does stop the spending, rather than
@@ -110,12 +115,14 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #endpoint: string;
   readonly #fetch: typeof fetch;
   readonly #signal?: AbortSignal;
+  readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
 
   constructor(options: RemoteModelProviderOptions = {}) {
     this.id = options.id ?? 'remote';
     this.#endpoint = options.endpoint ?? '/api/plan';
     this.#fetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.#signal = options.signal;
+    this.#onProgress = options.onProgress;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
@@ -150,6 +157,16 @@ export class RemoteModelProvider implements ModelProvider {
     }
 
     for await (const { event, data } of readPlanEvents(response.body)) {
+      if (event === 'progress') {
+        const { characters, elapsedMs } = data as {
+          characters?: number;
+          elapsedMs?: number;
+        };
+        if (typeof characters === 'number' && typeof elapsedMs === 'number') {
+          this.#onProgress?.({ characters, elapsedMs });
+        }
+        continue;
+      }
       if (event === 'error') {
         throw new Error(
           (data as { error?: string }).error ?? 'Generation failed.',

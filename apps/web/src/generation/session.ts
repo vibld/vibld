@@ -59,6 +59,19 @@ export interface BuilderState {
   budget: RunUsageReport;
   /** Which provider produced the last plan, so the UI never implies AI. */
   providerId: string | null;
+  /**
+   * How far the in-flight generation has got. Null when nothing is running.
+   *
+   * A real project takes minutes to write. Without this the shell shows the
+   * same frozen "Generating..." for the whole wait, which reads as a hang --
+   * and did, for two days.
+   */
+  progress: GenerationProgress | null;
+}
+
+export interface GenerationProgress {
+  characters: number;
+  elapsedMs: number;
 }
 
 export interface SessionOptions {
@@ -76,6 +89,7 @@ export interface SessionOptions {
   resolveProvider?: (
     plan: GenerationPlan,
     signal: AbortSignal,
+    onProgress?: (progress: GenerationProgress) => void,
   ) => Promise<ModelProvider>;
 }
 
@@ -107,6 +121,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     runCount: 0,
     budget,
     providerId: null,
+    progress: null,
   };
 }
 
@@ -119,10 +134,11 @@ function initialState(budget: RunUsageReport): BuilderState {
 async function defaultResolveProvider(
   plan: GenerationPlan,
   signal: AbortSignal,
+  onProgress?: (progress: GenerationProgress) => void,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
-    ? new RemoteModelProvider({ signal })
+    ? new RemoteModelProvider({ signal, ...(onProgress ? { onProgress } : {}) })
     : new FakeModelProvider([plan]);
 }
 
@@ -163,6 +179,7 @@ export class BuilderSession {
   readonly #resolveProvider: (
     plan: GenerationPlan,
     signal: AbortSignal,
+    onProgress?: (progress: GenerationProgress) => void,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -295,7 +312,13 @@ export class BuilderSession {
 
     let resolved: ModelProvider;
     try {
-      resolved = await this.#resolveProvider(plan, controller.signal);
+      resolved = await this.#resolveProvider(
+        plan,
+        controller.signal,
+        (progress) => {
+          this.#patch(epoch, (state) => ({ ...state, progress }));
+        },
+      );
     } catch (error) {
       reservation.release();
       const message = error instanceof Error ? error.message : String(error);
@@ -303,6 +326,7 @@ export class BuilderSession {
         ...state,
         status: 'failed',
         running: false,
+        progress: null,
         problems: [message],
         timeline: this.#append(state.timeline, 'error', message),
       }));
@@ -327,6 +351,7 @@ export class BuilderSession {
         ...state,
         status: 'failed',
         running: false,
+        progress: null,
         problems: [message],
         timeline: this.#append(state.timeline, 'error', message),
       }));
@@ -350,6 +375,7 @@ export class BuilderSession {
         ...state,
         status: 'accepted',
         running: false,
+        progress: null,
         acceptedSnapshot: accepted,
         // The mock preview is rendered from this brief. It only describes the
         // deterministic fake's own output, so a model-generated project must
@@ -377,6 +403,7 @@ export class BuilderSession {
       ...state,
       status: 'failed',
       running: false,
+      progress: null,
       problems,
       runCount: state.runCount + 1,
       budget,
@@ -415,6 +442,7 @@ export class BuilderSession {
       ...this.#state,
       status: 'cancelled',
       running: false,
+      progress: null,
       problems: [],
       timeline: this.#append(
         this.#state.timeline,

@@ -1,4 +1,5 @@
 import { LifecycleBar } from './components/LifecycleBar.tsx';
+import { ProgressMeter } from './components/ProgressMeter.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
 import { StatusBanner } from './components/StatusBanner.tsx';
 import { Workspace } from './components/Workspace.tsx';
@@ -33,6 +34,7 @@ export function App() {
         <section className="column column--left" aria-label="Prompt and plan">
           <StatusBanner state={state} />
           <LifecycleBar status={state.status} />
+          <ProgressMeter progress={state.progress} />
           <PromptPanel
             state={state}
             onSubmit={(prompt, mode) => {

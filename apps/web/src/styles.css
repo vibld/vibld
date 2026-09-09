@@ -741,3 +741,62 @@ body {
     animation: none;
   }
 }
+
+/* --- Generation progress -------------------------------------------------
+ * There is no total to divide by, so the bar is indeterminate: it says
+ * "moving", not "63% done". A fake percentage would be a lie the moment a
+ * plan ran longer than expected. */
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.progress__track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--brand-8);
+  overflow: hidden;
+}
+
+.progress__bar {
+  display: block;
+  width: 34%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--brand), transparent);
+  animation: vibld-progress-sweep 1.8s var(--ease) infinite;
+}
+
+@keyframes vibld-progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+.progress__line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress__note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* A sweeping bar is exactly the kind of motion this preference is about. The
+   track stays, filled, so the element still reads as "work in progress". */
+@media (prefers-reduced-motion: reduce) {
+  .progress__bar {
+    animation: none;
+    width: 100%;
+    background: var(--brand-40);
+  }
+}
