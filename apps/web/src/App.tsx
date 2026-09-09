@@ -1,7 +1,7 @@
+import { Conversation } from './components/Conversation.tsx';
+import { describeMode } from './generation/labels.ts';
 import { LifecycleBar } from './components/LifecycleBar.tsx';
-import { ProgressMeter } from './components/ProgressMeter.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
-import { StatusBanner } from './components/StatusBanner.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
 
@@ -21,28 +21,30 @@ export function App() {
             <p className="shell__tagline">Vibe. Build. Ship.</p>
           </div>
         </div>
-        <p
-          className="shell__mode"
-          title="This shell runs entirely in your browser"
-        >
-          Local preview build · deterministic fake provider · no model
-          credentials
-        </p>
+        {/*
+          This said "deterministic fake provider - no model credentials"
+          unconditionally, which stopped being true the moment the hosted
+          Worker started generating. A header that misdescribes what just ran
+          is worse than no header, so it now reports what actually served the
+          last run and claims nothing before there has been one.
+        */}
+        <p className="shell__mode">{describeMode(state.providerId)}</p>
       </header>
 
       <main className="shell__body">
-        <section className="column column--left" aria-label="Prompt and plan">
-          <StatusBanner state={state} />
-          <LifecycleBar status={state.status} />
-          <ProgressMeter progress={state.progress} />
-          <PromptPanel
-            state={state}
-            onSubmit={(prompt, mode) => {
-              void session.submit(prompt, mode);
-            }}
-            onReset={() => session.reset()}
-            onCancel={() => session.cancel()}
-          />
+        <section className="column column--left" aria-label="Conversation">
+          <Conversation state={state} />
+          <div className="composer">
+            <LifecycleBar status={state.status} />
+            <PromptPanel
+              state={state}
+              onSubmit={(prompt, mode) => {
+                void session.submit(prompt, mode);
+              }}
+              onReset={() => session.reset()}
+              onCancel={() => session.cancel()}
+            />
+          </div>
         </section>
 
         <Workspace state={state} />

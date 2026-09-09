@@ -26,6 +26,9 @@ export function PromptPanel({
   const promptId = useId();
   const failId = useId();
   const disabled = state.running;
+  // Once there is a conversation, the examples are noise: what to type next
+  // comes from what was just built, not from a generic starting point.
+  const started = state.transcript.length > 0;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,31 +39,33 @@ export function PromptPanel({
   return (
     <form className="prompt" onSubmit={handleSubmit}>
       <label className="prompt__label" htmlFor={promptId}>
-        Describe your application
+        {started ? 'What should change?' : 'Describe your application'}
       </label>
       <textarea
         id={promptId}
         className="prompt__input"
         value={prompt}
-        rows={4}
-        placeholder="A landing page for…"
+        rows={started ? 2 : 4}
+        placeholder={started ? 'Make the hero navy…' : 'A landing page for…'}
         onChange={(event) => setPrompt(event.target.value)}
         disabled={disabled}
       />
 
-      <div className="prompt__examples">
-        {EXAMPLES.map((example) => (
-          <button
-            key={example}
-            type="button"
-            className="chip"
-            onClick={() => setPrompt(example)}
-            disabled={disabled}
-          >
-            {example.slice(0, 38)}…
-          </button>
-        ))}
-      </div>
+      {started ? null : (
+        <div className="prompt__examples">
+          {EXAMPLES.map((example) => (
+            <button
+              key={example}
+              type="button"
+              className="chip"
+              onClick={() => setPrompt(example)}
+              disabled={disabled}
+            >
+              {example.slice(0, 38)}…
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="prompt__row">
         <input
@@ -81,11 +86,7 @@ export function PromptPanel({
           className="button button--primary"
           disabled={disabled || prompt.trim().length === 0}
         >
-          {state.running
-            ? 'Generating…'
-            : state.runCount > 0
-              ? 'Generate again'
-              : 'Generate'}
+          {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
         </button>
         {/*
           A generation can run for a minute or more. Without this the only way
@@ -102,18 +103,11 @@ export function PromptPanel({
           type="button"
           className="button"
           onClick={onReset}
-          disabled={state.runCount === 0 && !state.running}
+          disabled={!started && !state.running}
         >
           Start over
         </button>
       </div>
-
-      {state.planSummary ? (
-        <section className="plan" aria-label="Plan">
-          <h2 className="plan__title">Plan</h2>
-          <p className="plan__summary">{state.planSummary}</p>
-        </section>
-      ) : null}
     </form>
   );
 }
