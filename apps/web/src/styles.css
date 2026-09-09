@@ -864,10 +864,13 @@ body {
   background: var(--surface-1);
 }
 
-/* The user's own words sit on the brand tint and are indented, so a long
-   conversation is scannable by shape alone rather than by reading it. */
+/* The user's own words sit on the brand tint and pull to the right, so a
+   long conversation is scannable by shape alone rather than by reading it.
+   An indent alone read as a misalignment rather than as a speaker change --
+   which is what it looked like once there were two turns on screen. */
 .bubble--you {
-  margin-left: 1.5rem;
+  align-self: flex-end;
+  max-width: 88%;
   border-color: var(--brand-24);
   background: var(--brand-8);
 }
