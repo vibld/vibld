@@ -45,12 +45,15 @@
     // keeps the user set small and enumerable.
     "VIBLD_DAILY_MICRO_USD": "4000000",
     "VIBLD_MAX_IN_FLIGHT": "2",
+    // No VIBLD_USD_MICRO_PER_* here on purpose. An explicit price overrides
+    // the chosen model's own rate, so pinning Anthropic's 5/25 while running
+    // DeepSeek ceilinged every run at roughly forty times what it cost --
+    // about two generations a day out of a budget that affords forty. Set
+    // these only to correct a rate the catalogue has wrong.
 
     // List prices in micro-USD per token. They decide what the ceiling above
     // actually means, so they live here to be corrected without a code change
     // -- and they must be corrected if VIBLD_MODEL changes.
-    "VIBLD_USD_MICRO_PER_INPUT_TOKEN": "5",
-    "VIBLD_USD_MICRO_PER_OUTPUT_TOKEN": "25",
   },
 
   // Per-location and permissive by design: a burst gate in front of the
