@@ -1,8 +1,10 @@
 import {
-  AnthropicModelProvider,
+  PlanProvider,
   DEFAULT_MAX_TOKENS,
   ProviderError,
-  createAnthropicPlanClient,
+  createPlanClient,
+  resolveModel,
+  selectProvider,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 
@@ -28,6 +30,10 @@ import {
 export interface Env {
   /** Worker secret. Never reaches the browser. */
   ANTHROPIC_API_KEY?: string;
+  /** Worker secret. Never reaches the browser. */
+  DEEPSEEK_API_KEY?: string;
+  /** "anthropic" or "deepseek". Explicit beats inferred; see selectProvider. */
+  VIBLD_PROVIDER?: string;
   /** e.g. "yourteam.cloudflareaccess.com" */
   ACCESS_TEAM_DOMAIN?: string;
   /** The Access application's AUD tag. */
@@ -76,7 +82,9 @@ function json(body: unknown, status = 200): Response {
  */
 function isConfigured(env: Env): boolean {
   return Boolean(
-    env.ANTHROPIC_API_KEY &&
+    // Either provider's key configures the endpoint. Which one it selects is
+    // `selectProvider`'s business, not this gate's.
+    (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY) &&
     env.ACCESS_TEAM_DOMAIN &&
     env.ACCESS_AUD &&
     // The ledger is part of the grant, not an optimisation: a deployment
@@ -210,7 +218,7 @@ async function handlePlan(
   // Layer two: the ceiling. The worst case is charged before the run, because
   // charging afterwards gives an accurate ledger and no limit -- concurrent
   // callers would all read the same balance and all find headroom.
-  const prices = parsePrices(env);
+  const prices = parsePrices(env, selectProvider(env));
   const worstCase = worstCaseMicroUsd(
     prices,
     DEFAULT_MAX_TOKENS,
@@ -298,19 +306,19 @@ async function handlePlan(
   });
 
   let usage: PlanUsage | undefined;
-  const provider = new AnthropicModelProvider(
-    createAnthropicPlanClient({ apiKey: env.ANTHROPIC_API_KEY }),
-    {
-      ...(env.VIBLD_MODEL ? { model: env.VIBLD_MODEL } : {}),
-      onUsage: (reported) => {
-        usage = reported;
-      },
-      onProgress: ({ characters }) => reportProgress(characters),
-      signal: abort.signal,
-      ...(style.value ? { style: style.value } : {}),
-      ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+  const provider = new PlanProvider(createPlanClient(env), {
+    // A model named for the other provider is a 400 that reads like an
+    // outage, so an unset or blank VIBLD_MODEL falls back to the selected
+    // provider's own model rather than to a single hard-coded one.
+    model: resolveModel(env),
+    onUsage: (reported) => {
+      usage = reported;
     },
-  );
+    onProgress: ({ characters }) => reportProgress(characters),
+    signal: abort.signal,
+    ...(style.value ? { style: style.value } : {}),
+    ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+  });
 
   // First bytes immediately, so the connection is never idle from the start.
   void write(KEEPALIVE_COMMENT);

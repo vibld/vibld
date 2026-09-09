@@ -16,8 +16,8 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { AnthropicModelProvider } from '../src/anthropic-provider.ts';
-import { createAnthropicPlanClient } from '../src/anthropic-client.ts';
+import { PlanProvider } from '../src/plan-provider.ts';
+import { createPlanClient, resolveModel } from '../src/select-client.ts';
 import { ProviderError } from '../src/errors.ts';
 import { parsePlanArgs } from '../src/cli-args.ts';
 import { diffProjects, readProject } from '../src/read-project.ts';
@@ -33,7 +33,11 @@ if (!prompt) {
 }
 
 let usage: PlanUsage | undefined;
-const provider = new AnthropicModelProvider(createAnthropicPlanClient(), {
+// Which service answers is configuration, not a constant: VIBLD_PROVIDER
+// picks, or the single key that is set does. An unset VIBLD_MODEL falls back
+// to the chosen provider's own model, never the other one's.
+const provider = new PlanProvider(createPlanClient(process.env), {
+  model: resolveModel(process.env),
   onUsage: (reported) => {
     usage = reported;
   },

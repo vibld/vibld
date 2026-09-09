@@ -79,7 +79,16 @@ export const DEFAULT_EFFORT: PlanEffort = 'high';
  * so the runner, the state machine and the UI are unchanged. CI keeps using
  * the fake — nothing here runs without credentials (ADR-0007).
  */
-export class AnthropicModelProvider implements ModelProvider {
+/**
+ * Turns a prompt into a validated `GenerationPlan`, whichever service answers.
+ *
+ * Named for what it does rather than for a vendor: it holds no vendor
+ * specifics at all, only a `PlanClient`. That was true when Anthropic was the
+ * only client and the name said otherwise; it became visibly wrong the moment
+ * a second provider existed and the worker read
+ * `new AnthropicModelProvider(deepseekClient)`.
+ */
+export class PlanProvider implements ModelProvider {
   readonly id: string;
   readonly #client: PlanClient;
   readonly #model: string;

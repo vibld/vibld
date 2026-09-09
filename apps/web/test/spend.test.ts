@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   DEFAULT_PRICES,
+  PROVIDER_PRICES,
   dayKey,
   decide,
   microUsdOf,
@@ -161,5 +162,45 @@ describe('the worst case counts the project sent with the prompt', () => {
         DEFAULT_PRICES.inputMicroUsd +
         DEFAULT_MAX_TOKENS * DEFAULT_PRICES.outputMicroUsd,
     );
+  });
+});
+
+describe('prices follow the selected provider', () => {
+  it("falls back to that provider's own rates, not the other one's", () => {
+    // Pricing DeepSeek runs at Anthropic's rates over-estimates, so it is
+    // safe -- but a dollar figure wrong by forty times is not a ceiling
+    // anyone can reason about.
+    const anthropic = parsePrices({}, 'anthropic');
+    const deepseek = parsePrices({}, 'deepseek');
+    assert.deepEqual(anthropic, DEFAULT_PRICES);
+    assert.ok(deepseek.outputMicroUsd < anthropic.outputMicroUsd);
+    assert.deepEqual(deepseek, PROVIDER_PRICES.deepseek);
+  });
+
+  it("is conservative across DeepSeek's peak and model spread", () => {
+    // Peak is double off-peak and v4-pro is triple v4-flash, so one default
+    // covers four combinations. It has to be the most expensive of them:
+    // a worst case that under-estimates is not a worst case.
+    assert.equal(PROVIDER_PRICES.deepseek!.inputMicroUsd, 1.32);
+    assert.equal(PROVIDER_PRICES.deepseek!.outputMicroUsd, 3.96);
+  });
+
+  it('still lets an explicit price win for either provider', () => {
+    const explicit = parsePrices(
+      {
+        VIBLD_USD_MICRO_PER_INPUT_TOKEN: '0.22',
+        VIBLD_USD_MICRO_PER_OUTPUT_TOKEN: '0.66',
+      },
+      'deepseek',
+    );
+    assert.deepEqual(explicit, { inputMicroUsd: 0.22, outputMicroUsd: 0.66 });
+  });
+
+  it('defaults to Anthropic when no provider is named', () => {
+    assert.deepEqual(parsePrices({}), DEFAULT_PRICES);
+  });
+
+  it('falls back safely for a provider it has no prices for', () => {
+    assert.deepEqual(parsePrices({}, 'nonesuch'), DEFAULT_PRICES);
   });
 });

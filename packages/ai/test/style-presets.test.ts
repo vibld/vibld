@@ -6,7 +6,7 @@ import {
   isStylePresetId,
   styleDirection,
 } from '../src/style-presets.ts';
-import { buildUserPrompt } from '../src/anthropic-provider.ts';
+import { buildUserPrompt } from '../src/plan-provider.ts';
 
 describe('the preset set', () => {
   it('offers the eight directions the chips promise', () => {
