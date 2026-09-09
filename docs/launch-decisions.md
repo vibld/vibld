@@ -372,7 +372,9 @@ parsed. Recommended; flagging it only so it is on the record.
 - (b) Accept keys now and encrypt them in D1.
 
 `decisions.md` already says Cloudflare secrets are not a user-secret vault. (b)
-is the decision that turns a breach into a disclosure event.
+is the decision that turns a breach into a disclosure event. Note that BYOK in
+the self-hosted build needs no vault at all — the key is the operator's own
+environment variable, and they are the only user. See L45.
 
 ### L32 - Data retention after account deletion
 
@@ -389,36 +391,35 @@ not going to propose them. Say so if you disagree.
 
 ---
 
-## H. Auto-purchasing model tokens on subscription
+## H. Funding model spend
 
-Short answer: **no, and it should stay that way.**
+**Settled: no auto-purchase.** You will rely on the console auto-reload in each
+provider account. That is also the only thing available — neither Anthropic nor
+DeepSeek exposes an API to buy credits, and a subscription-triggered top-up
+would fire at the wrong moment anyway: on signup rather than on low balance.
 
-- **Anthropic** has no public API to buy credits. Auto-reload is a Console
-  setting: a stored card charged automatically when the balance falls below a
-  threshold, with a monthly cap. It cannot be driven from code.
-- **DeepSeek** has no top-up API either. It does expose `GET /user/balance`
-  (`total_balance`, `granted_balance`, `topped_up_balance` per currency).
+What is left is how the hosted product pays for model calls, and whether we
+watch the balance ourselves.
 
-What is automatable, and what I recommend building instead:
+### L34 - How hosted model access is funded
 
-### L34 - Provider float and alerting
+- (a) **One shared platform key per provider. Our own credit ledger stops a user
+  before their spending reaches the provider bill.** _(recommended)_
+- (b) Hosted BYOK: each user supplies their own key. See L45 — this belongs to
+  the self-hosted build, not the hosted product.
+- (c) A per-user Anthropic workspace and key through the Admin API. Gives
+  per-user caps enforced by Anthropic, but makes every signup an Anthropic API
+  call and still cannot buy credits.
 
-- (a) **One shared platform key per provider. Our own credit ledger gates
-  spending _before_ the provider bill grows. A scheduled Worker reads DeepSeek's
-  balance and Anthropic's Admin API cost report daily and emails you through
-  Resend when either crosses a threshold. You set auto-reload once in each
-  console with a monthly cap.** _(recommended)_
-- (b) Per-user BYOK — no float, but D21 already says BYOK is not a paid gate, so
-  this cannot be the paid product.
-- (c) A per-user Anthropic workspace and key via the Admin API. Possible, gives
-  per-user spend caps enforced by Anthropic — but it still cannot buy credits,
-  and it makes every sign-up an Anthropic API call.
+### L44 - Do we watch the provider balance ourselves?
 
-Tying a top-up to a subscription event would also be the wrong shape: it would
-buy tokens when someone _subscribes_ rather than when the balance is low, which
-is the opposite of how the float should behave.
+Auto-reload prevents an outage; it does not tell you when spending changes
+shape. DeepSeek exposes `GET /user/balance`; Anthropic exposes an Admin API cost
+report.
 
----
+- (a) **A scheduled Worker reads both daily and emails you through Resend when
+  either crosses a threshold you set.** _(recommended)_
+- (b) No alerting; the provider consoles are enough.
 
 ## I. Subscription structure
 
@@ -447,8 +448,9 @@ Proposed, sized so included model spend is roughly 35-40% of price:
 | Ship   | $99/mo | $40/mo               | 400 / 129 / 22              | priority sandboxes; deploy to your own host; higher concurrency |
 | Top-up | $20    | $8                   | 80 / 25 / 4                 | expires 12 months from purchase                                 |
 
-Free includes export and BYOK deliberately — D21 requires it, and it is also the
-funnel: someone who has exported a working project is who buys Build.
+Free includes export deliberately — D21 requires it, and it is also the funnel:
+someone who has exported a working project is who buys Build. Whether BYOK also
+appears here is L45.
 
 ### L37 - Overage behaviour
 
@@ -515,6 +517,75 @@ Same pattern, so the only work per host is a committed config file: `vercel.json
 
 ---
 
+## K. The open-source build and self-hosting
+
+Hosted first; the public Apache-2.0 build for self-hosters with BYOK follows
+once the hosted product is dialled in. The repository is already public and
+already Apache-2.0 (D24), so this is about what the self-hosted build _is_, not
+about licensing. D21 requires the complete single-user builder to work without
+Vibld Cloud, and the README already flags that the self-hosting path is
+unvalidated.
+
+### L45 - Is BYOK offered in the hosted product?
+
+D21 says BYOK must not be an artificial paid gate. The self-hosted build
+satisfies that: a self-hoster puts their own key in their own environment and
+pays us nothing.
+
+- (a) **BYOK is the self-hosted story. The hosted product sells credits only —
+  simpler billing, one support path, and no user keys to hold (L31).** _(recommended)_
+- (b) Hosted BYOK as a cheap tier: a flat platform fee, user's key, no credits.
+- (c) BYOK on the hosted free tier.
+
+This changes the Free row in L36: under (a) it offers export but not BYOK.
+
+### L46 - How the self-hosted build authenticates
+
+Clerk is a hosted service with an account and a bill. A single developer running
+Vibld on their own machine should not need one.
+
+- (a) **No auth by default for a single-user local install; Clerk switched on by
+  the presence of its environment variables, which is how the hosted deploy
+  configures itself.** _(recommended)_
+- (b) A single shared token in an environment variable.
+- (c) Clerk required in both.
+
+The same pattern already works for the model provider: the code picks a provider
+from which keys are present.
+
+### L47 - Previews in the self-hosted build
+
+Cloudflare Containers needs a paid Cloudflare account, which a self-hoster may
+not have. ADR-0004 already defines an execution-adapter interface.
+
+- (a) **A local adapter — Docker or a child process on the developer's own
+  machine — shipped alongside the Cloudflare one, so the OSS build previews
+  without a Cloudflare bill.** _(recommended)_
+- (b) Self-hosted builds get no preview until someone asks for one.
+
+(a) is also what validates the adapter boundary D5 asked us to preserve; without
+a second implementation it is an untested claim.
+
+### L48 - Where hosted-only code lives
+
+- (a) **One public repository. Billing, entitlement and tenancy code ships in
+  the open and is inert without the secrets; the moat is the operation, not the
+  source.** _(recommended)_
+- (b) A private repository for billing and tenancy, public core.
+
+(b) means every change that touches both is two pull requests, and D21's
+"complete single-user builder in OSS" gets harder to honour, not easier.
+
+### L49 - When the self-hosted build is announced
+
+- (a) **Tag v0.1.0 once the hosted alpha is stable _and_ a clean checkout has
+  been proven to build, run and generate with only a provider key — verified in
+  CI, not by hand.** _(recommended)_
+- (b) Announce alongside the hosted launch.
+
+(b) means the first self-hosting bug report is also the first time anyone tried
+it.
+
 ## What only you can do
 
 Everything else is automatable from this repository. These are not:
@@ -543,3 +614,5 @@ https://github.com/vibld/vibld/settings/secrets/actions
 4. Stripe and the credit ledger (L12-L15, L35-L39).
 5. Ephemeral sandbox previews (L7-L11, L26).
 6. GitHub push and host configs (L40-L43), which is #64 unblocked.
+7. The local execution adapter and a CI-verified clean-checkout run (L46, L47,
+   L49), then tag v0.1.0 and announce self-hosting.
