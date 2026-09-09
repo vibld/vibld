@@ -28,10 +28,17 @@
     "ACCESS_TEAM_DOMAIN": "chris-brock-llc.cloudflareaccess.com",
     "ACCESS_AUD": "5d652184451045c3fde8eca6a09ebaa59fd4704666b94d839bebde5cf992d5d7",
 
-    // Micro-USD one user may spend per UTC day: 4000000 == $4.00, roughly ten
-    // worst-case runs. The per-user ceiling is also the aggregate one --
-    // (users x ceiling) is the most the account can be billed in a day, which
-    // works because Access keeps the user set small and enumerable.
+    // Micro-USD one user may spend per UTC day: 4000000 == $4.00.
+    //
+    // A run reserves its worst case up front -- with a 64000-token output
+    // ceiling that is about $1.61 -- and is reconciled to what it actually
+    // cost once it finishes. So this does not buy two runs a day: it buys as
+    // many as fit once each is settled at its real price, while still
+    // requiring $1.61 of headroom before any single run may start.
+    //
+    // The per-user ceiling is also the aggregate one -- (users x ceiling) is
+    // the most the account can be billed in a day, which works because Access
+    // keeps the user set small and enumerable.
     "VIBLD_DAILY_MICRO_USD": "4000000",
     "VIBLD_MAX_IN_FLIGHT": "2",
 

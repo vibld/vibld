@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   AnthropicModelProvider,
+  DEFAULT_MAX_TOKENS,
   buildUserPrompt,
 } from '../src/anthropic-provider.ts';
+import { readStructuredOutput } from '../src/anthropic-client.ts';
 import {
   ProviderRefusalError,
   ProviderShapeError,
@@ -206,5 +208,71 @@ describe('buildUserPrompt', () => {
       base: { revision: 'r00000000', files: [] },
     });
     assert.equal(prompt, 'start over');
+  });
+});
+
+describe('reading a structured output', () => {
+  it('returns the plan when the response is complete', () => {
+    const plan = { summary: 'ok', files: [] };
+    assert.deepEqual(
+      readStructuredOutput(
+        [{ type: 'text', text: JSON.stringify(plan) }],
+        'end_turn',
+      ),
+      plan,
+    );
+  });
+
+  it('returns null for output cut off at the ceiling, rather than throwing', () => {
+    // This is the exact failure that made every generation fail: the JSON
+    // arrives cut mid-string. Throwing here reports it as a parse bug and
+    // hides the truncation, which is what happened for two days.
+    const truncated = '{"summary":"A landing page","files":[{"path":"src/App';
+    assert.equal(
+      readStructuredOutput([{ type: 'text', text: truncated }], 'max_tokens'),
+      null,
+    );
+  });
+
+  it('returns null when the response carries no text block', () => {
+    assert.equal(
+      readStructuredOutput([{ type: 'thinking' }], 'end_turn'),
+      null,
+    );
+  });
+});
+
+describe('the output ceiling', () => {
+  it('is large enough for a whole multi-file project', () => {
+    // 16000 truncated a single landing page. The number is asserted because
+    // lowering it back would reintroduce a failure that looks like a parse bug.
+    assert.ok(
+      DEFAULT_MAX_TOKENS >= 32000,
+      `${DEFAULT_MAX_TOKENS} is not enough room for a multi-file project`,
+    );
+    assert.ok(DEFAULT_MAX_TOKENS <= 128000, 'above what the model accepts');
+  });
+
+  it('names truncation as truncation', async () => {
+    const provider = new AnthropicModelProvider({
+      id: 'stub',
+      createPlan: async () => ({
+        plan: null,
+        stopReason: 'max_tokens',
+        usage: {
+          inputTokens: 10,
+          outputTokens: DEFAULT_MAX_TOKENS,
+          cacheReadInputTokens: 0,
+        },
+      }),
+    });
+    await assert.rejects(
+      () => provider.generate({ prompt: 'a landing page' }),
+      (error: Error) => {
+        assert.equal(error.name, 'ProviderTruncationError');
+        assert.match(error.message, /incomplete/);
+        return true;
+      },
+    );
   });
 });

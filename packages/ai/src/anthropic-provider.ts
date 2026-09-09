@@ -33,7 +33,20 @@ export interface ModelProviderOptions {
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
-export const DEFAULT_MAX_TOKENS = 16000;
+/**
+ * A whole multi-file project has to fit in one response.
+ *
+ * 16000 was the reason generation never once succeeded: a landing page with
+ * several components ran past it, the structured output arrived cut off
+ * mid-string, and the run died with an unreadable JSON parse error. Opus 5
+ * accepts up to 128000; 64000 is the documented default for a response of
+ * this shape and leaves real headroom.
+ *
+ * This is the number the run budget prices its worst case from, so raising it
+ * raises what a single run may cost. That is the trade being made: a ceiling
+ * low enough to truncate is not cheaper, it just fails.
+ */
+export const DEFAULT_MAX_TOKENS = 64000;
 export const DEFAULT_EFFORT: PlanEffort = 'high';
 
 /**
