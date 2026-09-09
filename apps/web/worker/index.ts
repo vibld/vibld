@@ -13,6 +13,7 @@ import {
   checkBodySize,
   checkRequestOrigin,
   parseGenerationRequest,
+  parseStylePreset,
 } from './request-guard.ts';
 import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
 import {
@@ -176,6 +177,11 @@ async function handlePlan(
     return json({ error: parsed.error }, parsed.status);
   }
 
+  const style = parseStylePreset(body);
+  if (!style.ok) {
+    return json({ error: style.error }, style.status);
+  }
+
   // Layer one: a burst gate keyed on the caller. It is per-location and
   // documented as permissive, so it stops a naive flood and nothing more --
   // it is allowed to fail open only because the layer below fails closed.
@@ -291,6 +297,7 @@ async function handlePlan(
       },
       onProgress: ({ characters }) => reportProgress(characters),
       signal: abort.signal,
+      ...(style.value ? { style: style.value } : {}),
     },
   );
 

@@ -10,6 +10,8 @@ import type {
   PlanUsage,
 } from './client.ts';
 import { GenerationPlanSchema, PLAN_SYSTEM_PROMPT } from './plan-schema.ts';
+import { styleDirection } from './style-presets.ts';
+import type { StylePresetId } from './style-presets.ts';
 import {
   ProviderRefusalError,
   ProviderShapeError,
@@ -37,6 +39,11 @@ export interface ModelProviderOptions {
   signal?: AbortSignal;
   /** Forwarded to the client so a caller can report generation progress. */
   onProgress?: (progress: PlanProgress) => void;
+  /**
+   * A named visual direction to start from. Ids only: the value crosses the
+   * network, and a closed set is what stops caller text becoming prompt.
+   */
+  style?: StylePresetId;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -72,6 +79,7 @@ export class AnthropicModelProvider implements ModelProvider {
   readonly #onUsage?: (usage: PlanUsage) => void;
   readonly #signal?: AbortSignal;
   readonly #onProgress?: (progress: PlanProgress) => void;
+  readonly #style?: StylePresetId;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -81,13 +89,14 @@ export class AnthropicModelProvider implements ModelProvider {
     this.#onUsage = options.onUsage;
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
+    this.#style = options.style;
     this.id = `${client.id}:${this.#model}`;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
     const completion = await this.#client.createPlan({
       system: PLAN_SYSTEM_PROMPT,
-      prompt: buildUserPrompt(request),
+      prompt: buildUserPrompt(request, this.#style),
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,
@@ -137,18 +146,28 @@ export class AnthropicModelProvider implements ModelProvider {
  * not file contents: whole-repository prompt stuffing is explicitly rejected
  * by ADR-0007, and targeted context selection is later work (#12).
  */
-export function buildUserPrompt(request: GenerationRequest): string {
+export function buildUserPrompt(
+  request: GenerationRequest,
+  style?: string | null,
+): string {
   const base = request.base;
-  if (!base || base.files.length === 0) {
-    return request.prompt;
-  }
+  const parts = [request.prompt];
 
-  const paths = base.files.map((file) => `- ${file.path}`).join('\n');
-  return `${request.prompt}
-
-The project already exists at revision ${base.revision} with these files:
+  if (base && base.files.length > 0) {
+    const paths = base.files.map((file) => `- ${file.path}`).join('\n');
+    parts.push(
+      `The project already exists at revision ${base.revision} with these files:
 ${paths}
 
 Return the complete set of files for the updated project, preserving anything
-the request does not ask you to change.`;
+the request does not ask you to change.`,
+    );
+  }
+
+  // Last, and explicitly subordinate to the request. A preset is a starting
+  // point; an instruction the user actually typed outranks it.
+  const direction = styleDirection(style);
+  if (direction) parts.push(direction);
+
+  return parts.join('\n\n');
 }

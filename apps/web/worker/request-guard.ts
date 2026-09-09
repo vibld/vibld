@@ -1,4 +1,6 @@
 import type { GenerationRequest } from '@vibld/core';
+import { isStylePresetId } from '@vibld/ai/style-presets';
+import type { StylePresetId } from '@vibld/ai/style-presets';
 
 /**
  * Request validation for /api/plan.
@@ -150,4 +152,33 @@ export function parseGenerationRequest(
     ok: true,
     value: { prompt, base: { revision: snapshot.revision, files } },
   };
+}
+
+/**
+ * Validate an optional style preset.
+ *
+ * Kept as its own rule rather than folded into the request, because the
+ * property that matters is not the shape but the closure of the set: the id
+ * arrives from the browser and selects text that is appended to the model
+ * prompt. Accepting an arbitrary string here would be a way to write
+ * instructions for the model that the prompt itself does not contain, and
+ * would survive every other check in this file.
+ *
+ * An unrecognised id is rejected rather than ignored. Ignoring it would give
+ * someone who picked "Brutalism" an ordinary page and no reason why.
+ */
+export function parseStylePreset(
+  body: unknown,
+): GuardResult<StylePresetId | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { style } = body as { style?: unknown };
+  if (style === undefined || style === null) {
+    return { ok: true, value: null };
+  }
+  if (!isStylePresetId(style)) {
+    return fail(400, 'Unknown "style" preset.');
+  }
+  return { ok: true, value: style };
 }

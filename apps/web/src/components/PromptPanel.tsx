@@ -1,7 +1,9 @@
 import { useId, useState } from 'react';
 import type { FormEvent } from 'react';
+import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { BuilderState } from '../generation/session.ts';
 import type { PlanMode } from '../generation/plan-builder.ts';
+import { StylePicker } from './StylePicker.tsx';
 
 const EXAMPLES = [
   'A landing page for a cybersecurity SaaS with pricing, FAQ and a contact form',
@@ -10,7 +12,11 @@ const EXAMPLES = [
 
 export interface PromptPanelProps {
   state: BuilderState;
-  onSubmit: (prompt: string, mode: PlanMode) => void;
+  onSubmit: (
+    prompt: string,
+    mode: PlanMode,
+    style: StylePresetId | null,
+  ) => void;
   onReset: () => void;
   onCancel: () => void;
 }
@@ -23,6 +29,7 @@ export function PromptPanel({
 }: PromptPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [failNext, setFailNext] = useState(false);
+  const [style, setStyle] = useState<StylePresetId | null>(null);
   const promptId = useId();
   const failId = useId();
   const disabled = state.running;
@@ -33,7 +40,7 @@ export function PromptPanel({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled || prompt.trim().length === 0) return;
-    onSubmit(prompt, failNext ? 'fail-validation' : 'succeed');
+    onSubmit(prompt, failNext ? 'fail-validation' : 'succeed', style);
   }
 
   return (
@@ -66,6 +73,8 @@ export function PromptPanel({
           ))}
         </div>
       )}
+
+      <StylePicker value={style} onChange={setStyle} disabled={disabled} />
 
       <div className="prompt__row">
         <input

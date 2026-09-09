@@ -916,3 +916,45 @@ body {
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+
+/* --- Style presets -------------------------------------------------------
+ * A visual direction to start from, borrowed in spirit from open-lovable's
+ * eight chips. These send an id, never text: the direction they stand for
+ * lives with the prompt in @vibld/ai. */
+.styles {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.styles__legend {
+  padding: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.styles__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.chip--style {
+  border-radius: 999px;
+}
+
+.chip--on {
+  border-color: var(--brand);
+  background: var(--brand-16);
+  color: var(--text);
+}
+
+/* A disabled fieldset already blocks interaction; this keeps the chips from
+   reading as available while a run is in flight. */
+.styles:disabled .chip {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
