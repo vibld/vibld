@@ -3,7 +3,12 @@ import type {
   GenerationRequest,
   ModelProvider,
 } from '@vibld/core';
-import type { PlanClient, PlanEffort, PlanUsage } from './client.ts';
+import type {
+  PlanClient,
+  PlanEffort,
+  PlanProgress,
+  PlanUsage,
+} from './client.ts';
 import { GenerationPlanSchema, PLAN_SYSTEM_PROMPT } from './plan-schema.ts';
 import {
   ProviderRefusalError,
@@ -30,6 +35,8 @@ export interface ModelProviderOptions {
    * disconnected client -- and this adapter only forwards it to the client.
    */
   signal?: AbortSignal;
+  /** Forwarded to the client so a caller can report generation progress. */
+  onProgress?: (progress: PlanProgress) => void;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -64,6 +71,7 @@ export class AnthropicModelProvider implements ModelProvider {
   readonly #effort: PlanEffort;
   readonly #onUsage?: (usage: PlanUsage) => void;
   readonly #signal?: AbortSignal;
+  readonly #onProgress?: (progress: PlanProgress) => void;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -72,6 +80,7 @@ export class AnthropicModelProvider implements ModelProvider {
     this.#effort = options.effort ?? DEFAULT_EFFORT;
     this.#onUsage = options.onUsage;
     this.#signal = options.signal;
+    this.#onProgress = options.onProgress;
     this.id = `${client.id}:${this.#model}`;
   }
 
@@ -83,6 +92,7 @@ export class AnthropicModelProvider implements ModelProvider {
       maxTokens: this.#maxTokens,
       effort: this.#effort,
       ...(this.#signal ? { signal: this.#signal } : {}),
+      ...(this.#onProgress ? { onProgress: this.#onProgress } : {}),
     });
 
     // Report usage even for a failed run: a refusal or a truncation still

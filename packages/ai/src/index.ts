@@ -12,6 +12,7 @@ export type {
   PlanClient,
   PlanCompletion,
   PlanEffort,
+  PlanProgress,
   PlanRefusal,
   PlanRequest,
   PlanUsage,

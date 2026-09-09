@@ -258,3 +258,64 @@ describe('a lapsed Access session', () => {
     );
   });
 });
+
+describe('streamed progress', () => {
+  function progressFrame(characters: number, elapsedMs: number): string {
+    return `event: progress\ndata: ${JSON.stringify({ characters, elapsedMs })}\n\n`;
+  }
+
+  it('reports each progress event and still returns the plan', async () => {
+    const seen: { characters: number; elapsedMs: number }[] = [];
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([
+          ': keepalive\n\n',
+          progressFrame(1_024, 1_000),
+          progressFrame(8_192, 4_000),
+          PLAN_FRAME,
+        ])) as unknown as typeof fetch,
+      onProgress: (progress) => seen.push(progress),
+    });
+
+    assert.deepEqual(
+      await provider.generate({ prompt: 'a landing page' }),
+      PLAN,
+    );
+    assert.deepEqual(seen, [
+      { characters: 1_024, elapsedMs: 1_000 },
+      { characters: 8_192, elapsedMs: 4_000 },
+    ]);
+  });
+
+  it('ignores a progress frame with missing or wrong-typed counters', async () => {
+    // A malformed counter must not abort a run that is otherwise fine: the
+    // plan is what the user is paying for, the meter is decoration.
+    const seen: unknown[] = [];
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([
+          `event: progress\ndata: ${JSON.stringify({ characters: 'lots' })}\n\n`,
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 10 })}\n\n`,
+          PLAN_FRAME,
+        ])) as unknown as typeof fetch,
+      onProgress: (progress) => seen.push(progress),
+    });
+
+    assert.deepEqual(
+      await provider.generate({ prompt: 'a landing page' }),
+      PLAN,
+    );
+    assert.deepEqual(seen, []);
+  });
+
+  it('runs without a progress listener at all', async () => {
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([
+          progressFrame(10, 10),
+          PLAN_FRAME,
+        ])) as unknown as typeof fetch,
+    });
+    assert.deepEqual(await provider.generate({ prompt: 'x' }), PLAN);
+  });
+});

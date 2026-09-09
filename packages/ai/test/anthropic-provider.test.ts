@@ -276,3 +276,26 @@ describe('the output ceiling', () => {
     );
   });
 });
+
+describe('progress reporting', () => {
+  it('forwards a progress listener to the client', async () => {
+    const client = stubClient({});
+    const seen: { characters: number }[] = [];
+    await new AnthropicModelProvider(client, {
+      onProgress: (progress) => seen.push(progress),
+    }).generate({ prompt: 'a landing page' });
+
+    const forwarded = client.requests[0]?.onProgress;
+    assert.equal(typeof forwarded, 'function');
+    forwarded?.({ characters: 512 });
+    assert.deepEqual(seen, [{ characters: 512 }]);
+  });
+
+  it('omits the key entirely when no listener was given', async () => {
+    // An explicit `undefined` is not the same as an absent property under
+    // exactOptionalPropertyTypes, and the client checks for presence.
+    const client = stubClient({});
+    await new AnthropicModelProvider(client).generate({ prompt: 'x' });
+    assert.equal('onProgress' in client.requests[0]!, false);
+  });
+});

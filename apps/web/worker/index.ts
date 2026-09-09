@@ -18,6 +18,7 @@ import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
+  createProgressThrottle,
   encodeEvent,
   parseKeepaliveMs,
 } from './stream.ts';
@@ -274,6 +275,12 @@ async function handlePlan(
   const write = (chunk: string) =>
     writer.write(encoder.encode(chunk)).catch(() => cancel('write-failed'));
 
+  // A whole project takes minutes to write, so the wait needs to show
+  // something real rather than a spinner that could equally mean "hung".
+  const reportProgress = createProgressThrottle({
+    emit: (update) => void write(encodeEvent('progress', update)),
+  });
+
   let usage: PlanUsage | undefined;
   const provider = new AnthropicModelProvider(
     createAnthropicPlanClient({ apiKey: env.ANTHROPIC_API_KEY }),
@@ -282,6 +289,7 @@ async function handlePlan(
       onUsage: (reported) => {
         usage = reported;
       },
+      onProgress: ({ characters }) => reportProgress(characters),
       signal: abort.signal,
     },
   );

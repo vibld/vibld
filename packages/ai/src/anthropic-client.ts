@@ -70,21 +70,32 @@ export function createAnthropicPlanClient(
       // Reading the raw response first means the stop reason is known before
       // anything is parsed, so a truncated plan is named as truncated. The
       // schema is still enforced -- the provider validates it a layer up.
-      const response = await client.messages
-        .stream(
-          {
-            model: request.model,
-            max_tokens: request.maxTokens,
-            system: request.system,
-            output_config: {
-              effort: request.effort,
-              format: zodOutputFormat(GenerationPlanSchema),
-            },
-            messages: [{ role: 'user', content: request.prompt }],
+      const stream = client.messages.stream(
+        {
+          model: request.model,
+          max_tokens: request.maxTokens,
+          system: request.system,
+          output_config: {
+            effort: request.effort,
+            format: zodOutputFormat(GenerationPlanSchema),
           },
-          request.signal ? { signal: request.signal } : undefined,
-        )
-        .finalMessage();
+          messages: [{ role: 'user', content: request.prompt }],
+        },
+        request.signal ? { signal: request.signal } : undefined,
+      );
+
+      // Counted rather than estimated: this is the plan's own text arriving.
+      // The caller decides how often to surface it -- reporting every delta
+      // would be thousands of updates for one generation.
+      if (request.onProgress) {
+        let characters = 0;
+        stream.on('text', (delta) => {
+          characters += delta.length;
+          request.onProgress?.({ characters });
+        });
+      }
+
+      const response = await stream.finalMessage();
 
       return {
         plan: readStructuredOutput(response.content, response.stop_reason),

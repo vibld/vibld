@@ -284,3 +284,124 @@ describe('BuilderSession cancellation', () => {
     assert.equal(session.getState().status, 'idle');
   });
 });
+
+describe('BuilderSession progress', () => {
+  /**
+   * A provider that reports progress and then waits, so a run can be
+   * inspected mid-flight -- which is the only moment progress exists.
+   */
+  function reportingProvider(
+    onProgress:
+      | ((progress: { characters: number; elapsedMs: number }) => void)
+      | undefined,
+    signal: AbortSignal,
+  ) {
+    let reported!: () => void;
+    const running = new Promise<void>((resolve) => {
+      reported = resolve;
+    });
+    return {
+      running,
+      provider: {
+        id: 'reporting',
+        generate: () =>
+          new Promise<never>((_resolve, reject) => {
+            onProgress?.({ characters: 4_096, elapsedMs: 12_000 });
+            reported();
+            signal.addEventListener(
+              'abort',
+              () => reject(new DOMException('Aborted', 'AbortError')),
+              { once: true },
+            );
+          }),
+      },
+    };
+  }
+
+  it('surfaces what the model has written while the run is still going', async () => {
+    let handle!: ReturnType<typeof reportingProvider>;
+    const session = createSession({
+      resolveProvider: async (_plan, signal, onProgress) => {
+        handle = reportingProvider(onProgress, signal);
+        return handle.provider;
+      },
+    });
+
+    const run = session.submit('A landing page for a coffee roaster');
+    await handle.running;
+
+    assert.deepEqual(session.getState().progress, {
+      characters: 4_096,
+      elapsedMs: 12_000,
+    });
+
+    session.cancel();
+    await run;
+  });
+
+  it('clears progress when the run ends, however it ends', async () => {
+    // A stale counter left on screen after the run is over reads as a run
+    // that is still going, which is the failure this whole thing fixes.
+    let handle!: ReturnType<typeof reportingProvider>;
+    const cancelled = createSession({
+      resolveProvider: async (_plan, signal, onProgress) => {
+        handle = reportingProvider(onProgress, signal);
+        return handle.provider;
+      },
+    });
+    const run = cancelled.submit('A landing page for a coffee roaster');
+    await handle.running;
+    cancelled.cancel();
+    await run;
+    assert.equal(cancelled.getState().status, 'cancelled');
+    assert.equal(cancelled.getState().progress, null);
+
+    const failed = createSession({
+      resolveProvider: async (_plan, _signal, onProgress) => {
+        onProgress?.({ characters: 12, elapsedMs: 30 });
+        return {
+          id: 'failing',
+          generate: async () => {
+            throw new Error('the model declined this request');
+          },
+        };
+      },
+    });
+    await failed.submit('A landing page for a coffee roaster');
+    assert.equal(failed.getState().status, 'failed');
+    assert.equal(failed.getState().progress, null);
+
+    const accepted = createSession({
+      resolveProvider: async (plan, _signal, onProgress) => {
+        onProgress?.({ characters: 12, elapsedMs: 30 });
+        return new FakeModelProvider([plan]);
+      },
+    });
+    await accepted.submit('A landing page for a coffee roaster');
+    assert.equal(accepted.getState().status, 'accepted');
+    assert.equal(accepted.getState().progress, null);
+  });
+
+  it('ignores progress from a run that was already abandoned', async () => {
+    // The stream from a cancelled run is not closed synchronously. A late
+    // callback must not repaint a finished screen as busy.
+    let late!: (progress: { characters: number; elapsedMs: number }) => void;
+    let handle!: ReturnType<typeof reportingProvider>;
+    const session = createSession({
+      resolveProvider: async (_plan, signal, onProgress) => {
+        late = onProgress!;
+        handle = reportingProvider(onProgress, signal);
+        return handle.provider;
+      },
+    });
+
+    const run = session.submit('A landing page for a coffee roaster');
+    await handle.running;
+    session.cancel();
+    await run;
+
+    late({ characters: 99_999, elapsedMs: 600_000 });
+    assert.equal(session.getState().progress, null);
+    assert.equal(session.getState().status, 'cancelled');
+  });
+});

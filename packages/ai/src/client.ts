@@ -21,6 +21,19 @@ export interface PlanRequest {
    * part of the contract rather than an SDK detail.
    */
   signal?: AbortSignal;
+  /**
+   * Called as output arrives, so a caller can show that work is happening.
+   *
+   * A whole project takes minutes to write. Without a signal that something
+   * is being produced, a long generation is indistinguishable from a hung
+   * one -- which is exactly how this looked before it worked.
+   */
+  onProgress?: (progress: PlanProgress) => void;
+}
+
+export interface PlanProgress {
+  /** Characters of the plan written so far. Not tokens; no tokenizer here. */
+  characters: number;
 }
 
 export interface PlanUsage {

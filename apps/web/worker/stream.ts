@@ -35,3 +35,39 @@ export const STREAM_HEADERS = {
   // and defeat the keepalives entirely.
   'x-accel-buffering': 'no',
 };
+
+/** How often a run reports characters written. See `createProgressThrottle`. */
+export const DEFAULT_PROGRESS_INTERVAL_MS = 1000;
+
+export interface ProgressThrottleOptions {
+  /** Emits one frame. Called only for updates that survive the throttle. */
+  emit: (update: { characters: number; elapsedMs: number }) => void;
+  /** Injected so the throttle can be tested without waiting in real time. */
+  now?: () => number;
+  intervalMs?: number;
+}
+
+/**
+ * Rate-limits progress updates to one per interval.
+ *
+ * A generation writes tens of thousands of characters and the SDK reports
+ * every delta. Forwarding each one would put thousands of frames on a stream
+ * to say something a person can only read once a second, so this drops the
+ * ones in between. The first update always passes: the earliest possible
+ * "something is happening" is the most valuable one.
+ */
+export function createProgressThrottle({
+  emit,
+  now = () => Date.now(),
+  intervalMs = DEFAULT_PROGRESS_INTERVAL_MS,
+}: ProgressThrottleOptions): (characters: number) => void {
+  const startedAt = now();
+  let lastEmittedAt: number | null = null;
+
+  return (characters: number) => {
+    const at = now();
+    if (lastEmittedAt !== null && at - lastEmittedAt < intervalMs) return;
+    lastEmittedAt = at;
+    emit({ characters, elapsedMs: at - startedAt });
+  };
+}
