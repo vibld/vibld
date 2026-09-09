@@ -958,3 +958,17 @@ body {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* --- Export --------------------------------------------------------------
+ * Taking the project away is the whole point of ADR-0002, so the affordance
+ * sits with the files rather than hiding in a menu. */
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pane-note--error {
+  color: var(--danger);
+}
