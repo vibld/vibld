@@ -1,6 +1,13 @@
 # Open decisions: previews, accounts, billing, marketing site, security
 
-Status: awaiting decisions. Raised 2026-09-09.
+Status: **answered 2026-09-09.** The accepted choices are recorded in
+[`decisions.md`](decisions.md#launch-decisions-accepted-2026-09-09), including
+four that moved off the recommendation below (L15, L33, L40, L42c) and a
+handful still open (the L9 concurrency cap, L40's credential-vault
+qualifiers, and the new generation pattern/style/SEO catalogue). This
+document stays as the rationale and options record; it is not being kept in
+sync item-by-item — `decisions.md` is the source of truth for what was
+chosen.
 
 Every item below is a choice I cannot make for you, or a choice I can make but
 that costs money or changes an accepted decision in [`decisions.md`](decisions.md).
