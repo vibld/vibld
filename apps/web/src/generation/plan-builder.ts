@@ -138,6 +138,13 @@ body {
  *
  * ADR-0002: the output is an ordinary npm project. It installs, runs, builds
  * and lints with familiar commands and contains no Vibld runtime dependency.
+ *
+ * That claim was false until the two config files below were added. The
+ * manifest declared `tsc --noEmit && vite build` and `@vitejs/plugin-react`
+ * and shipped neither a tsconfig.json nor a vite config, so `npm run build`
+ * on an exported project stopped at tsc printing its own help. Every check
+ * in the eval package passed, because they all asked whether the scripts
+ * were *declared*, never whether they could run.
  */
 export function buildProjectFiles(
   brief: ProjectBrief,
@@ -164,6 +171,12 @@ export function buildProjectFiles(
             'react-dom': '^19.2.0',
           },
           devDependencies: {
+            // Without these TypeScript has no JSX types at all, and every
+            // element in every component is a TS7026 error. React ships no
+            // types of its own, so a React + TypeScript project that omits
+            // them does not typecheck -- which is what `build` runs first.
+            '@types/react': '^19.2.0',
+            '@types/react-dom': '^19.2.0',
             '@vitejs/plugin-react': '^5.1.0',
             typescript: '^5.9.0',
             vite: '^7.2.0',
@@ -172,6 +185,47 @@ export function buildProjectFiles(
         null,
         2,
       )}\n`,
+    },
+    {
+      // Without this, every script in the manifest that runs tsc fails
+      // immediately: tsc with no project file compiles nothing and prints
+      // its usage. The settings are the ones `npm create vite@latest`
+      // produces for a React + TypeScript app, so the project is one a
+      // person can recognise and edit.
+      path: 'tsconfig.json',
+      content: `${JSON.stringify(
+        {
+          compilerOptions: {
+            target: 'ES2022',
+            lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+            module: 'ESNext',
+            moduleResolution: 'bundler',
+            jsx: 'react-jsx',
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+            allowImportingTsExtensions: true,
+            verbatimModuleSyntax: true,
+            isolatedModules: true,
+          },
+          include: ['src'],
+        },
+        null,
+        2,
+      )}\n`,
+    },
+    {
+      // The manifest depends on @vitejs/plugin-react. Without a config that
+      // uses it the dependency is dead weight and JSX transformation is left
+      // to whatever the bundler happens to default to.
+      path: 'vite.config.ts',
+      content: `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+});
+`,
     },
     {
       path: 'index.html',

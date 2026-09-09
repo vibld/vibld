@@ -85,3 +85,113 @@ describe('portability', () => {
     assert.ok(problems.some((problem) => problem.check === 'valid-manifest'));
   });
 });
+
+describe('scripts that cannot actually run', () => {
+  function manifest(extra: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      name: 'site',
+      scripts: { dev: 'vite', build: 'tsc --noEmit && vite build' },
+      ...extra,
+    });
+  }
+
+  function withFiles(paths: string[], pkg = manifest()) {
+    return checkPortability(
+      snapshot([
+        { path: 'package.json', content: pkg },
+        { path: 'README.md', content: '# site\n' },
+        ...paths.map((path) => ({ path, content: '{}' })),
+      ]),
+    );
+  }
+
+  it('catches a tsc script with no tsconfig', () => {
+    // This is the real failure: the planner's own project declared this
+    // script, shipped no tsconfig, and `npm run build` on the export stopped
+    // at tsc printing its usage. Every other check here passed it.
+    const problems = withFiles([]);
+    assert.equal(problems.length, 1);
+    assert.equal(problems[0]?.check, 'runnable-scripts');
+    assert.match(problems[0]!.detail, /"build" script runs tsc/);
+    assert.match(problems[0]!.detail, /prints usage/);
+  });
+
+  it('is satisfied by a tsconfig', () => {
+    assert.deepEqual(withFiles(['tsconfig.json']), []);
+  });
+
+  it('accepts a script that names its own project file', () => {
+    // `tsc -p config/tsconfig.build.json` does not need a root tsconfig.
+    assert.deepEqual(
+      withFiles(
+        [],
+        manifest({
+          scripts: {
+            dev: 'vite',
+            build: 'tsc -p tsconfig.build.json && vite build',
+          },
+        }),
+      ),
+      [],
+    );
+    assert.deepEqual(
+      withFiles(
+        [],
+        manifest({
+          scripts: { dev: 'vite', build: 'tsc --project tsconfig.build.json' },
+        }),
+      ),
+      [],
+    );
+  });
+
+  it('finds tsc wherever it sits in the command', () => {
+    for (const command of [
+      'tsc --noEmit',
+      'vite build && tsc --noEmit',
+      'npm run clean; tsc',
+      'npx tsc --noEmit',
+      'rimraf dist || tsc --noEmit',
+    ]) {
+      const problems = withFiles(
+        [],
+        manifest({
+          scripts: { dev: 'vite', build: command },
+        }),
+      );
+      assert.equal(problems.length, 1, command);
+    }
+  });
+
+  it('is not fooled by a word that merely contains "tsc"', () => {
+    for (const command of ['run-tsc-wrapper', 'echo tscheck', 'vitest run']) {
+      assert.deepEqual(
+        withFiles([], manifest({ scripts: { dev: 'vite', build: command } })),
+        [],
+        command,
+      );
+    }
+  });
+
+  it('catches a build plugin that nothing configures', () => {
+    const problems = withFiles(
+      ['tsconfig.json'],
+      manifest({ devDependencies: { '@vitejs/plugin-react': '^5.1.0' } }),
+    );
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!.detail, /no vite config/);
+  });
+
+  it('accepts either vite config extension', () => {
+    for (const config of ['vite.config.ts', 'vite.config.js']) {
+      assert.deepEqual(
+        withFiles(
+          ['tsconfig.json', config],
+          manifest({ devDependencies: { '@vitejs/plugin-react': '^5.1.0' } }),
+        ),
+        [],
+        config,
+      );
+    }
+  });
+});
