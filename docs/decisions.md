@@ -39,20 +39,116 @@ The [charter](../VIBLD.md), [roadmap](../ROADMAP.md), and [ADRs](adr/README.md) 
 | D29 | a             | Use React Router framework mode with static prerendering for generated marketing sites, alongside TypeScript, Vite, Tailwind and selected UI components. The builder UI remains a separate Vite SPA.                                                   |
 | D30 | a             | Use Supabase PostgreSQL and Supabase Auth for the hosted platform, with Hyperdrive for direct PostgreSQL access from Workers.                                                                                                                          |
 
+## Launch decisions (accepted 2026-09-09)
+
+Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-decisions.md`](launch-decisions.md) (PR #70). IDs retain that document's identifiers; full rationale for each lives there, not repeated here. L1 and L24 amend D30 — D23 is untouched by both. Four items moved off the recommendation in that document; each is marked below.
+
+| ID   | Choice          | Accepted direction                                                                                                                                                                                                                          |
+| ---- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| L1   | a               | Clerk replaces Supabase Auth for the Vibld platform. D23 (Supabase for generated apps) is untouched. Amends D30.                                                                                                                            |
+| L2   | a               | Verify the Clerk session JWT against a cached JWKS inside the Worker — no network call per request.                                                                                                                                         |
+| L3   | a               | The budget ledger and every ownership row key on the Clerk user id. Email is display only.                                                                                                                                                  |
+| L4   | a               | Platform admins come from a `VIBLD_PLATFORM_ADMINS` GitHub Actions secret (comma-separated emails), synced to the Worker on deploy, honoured only for a Clerk-verified primary address.                                                     |
+| L5   | a               | Cloudflare Access stays until Clerk sign-in and the L29 abuse controls are both live, then comes off in the same deploy that opens sign-up.                                                                                                 |
+| L6   | a               | Clerk waitlist mode at launch — anyone can request, only allowlisted emails sign in.                                                                                                                                                        |
+| L7   | a               | Cloudflare Sandbox SDK / Containers for preview execution, as D5 already chose.                                                                                                                                                             |
+| L8   | a               | Previews run on a second registrable domain (e.g. `vibld-preview.dev`), one subdomain per preview, so a preview never shares cookie scope with the control plane.                                                                           |
+| L9   | —               | Preview idle timeout 10 min, hard lifetime 30 min, 1 concurrent preview per user. See "Reopened" below for the all-user cap.                                                                                                                |
+| L10  | a               | Preview sharing is a signed, revocable, time-limited URL. Private by default.                                                                                                                                                               |
+| L11  | a               | Sandbox egress denies by default; only the package registry is allowed. No model-provider or control-plane credential reaches a sandbox.                                                                                                    |
+| L12  | a               | Stripe-hosted Checkout and Billing Portal — card data never touches our origin.                                                                                                                                                             |
+| L13  | a               | Stripe webhooks mirror subscription state into our database; a nightly reconcile against Stripe corrects drift.                                                                                                                             |
+| L14  | a               | Vibld owns the Clerk-user-id-to-Stripe-customer mapping via `client_reference_id` and customer metadata.                                                                                                                                    |
+| L15  | **b**           | Stripe Tax stays off at launch; revisit at volume. _(moved off recommendation — recommended turning it on from the first invoice)_                                                                                                          |
+| L16  | —               | Entity: Chris Brock LLC. Public mailing address and mailbox list recorded below.                                                                                                                                                            |
+| L17  | a               | Two Resend sending domains — `notifications.vibld.com` transactional, `mail.vibld.com` marketing — kept on separate reputations.                                                                                                            |
+| L18  | a               | Double opt-in on the waitlist and any marketing list.                                                                                                                                                                                       |
+| L19  | a               | DMARC starts `p=none` with reporting, moves to `p=quarantine` after two clean weeks, then `p=reject`.                                                                                                                                       |
+| L20  | a               | `vibld.com` + `www` serve marketing; `app.vibld.com` serves the builder.                                                                                                                                                                    |
+| L21  | a               | The marketing site is its own Worker, built from the ADR-0008 template, with its own deploy workflow.                                                                                                                                       |
+| L22  | —               | Coming-soon page scope recorded below. Tagline: "Vibe. Build. Ship."                                                                                                                                                                        |
+| L23  | —               | Legal pages drafted per the list recorded below, governed by Georgia law, venue in Gwinnett County.                                                                                                                                         |
+| L23a | a               | Register a DMCA agent with the US Copyright Office and publish the policy now.                                                                                                                                                              |
+| L23b | a               | US-only at alpha, stated in the Terms. No EU/UK acceptance yet.                                                                                                                                                                             |
+| L24  | a               | Cloudflare D1 for the control plane, R2 for project content. D23 (Supabase for generated apps) is untouched. Amends D30's database half.                                                                                                    |
+| L25  | a               | R2 for project content, checkpoints and export archives.                                                                                                                                                                                    |
+| L26  | a               | Cloudflare Workflows for durable generation, landing in the same change as sandboxes.                                                                                                                                                       |
+| L27  | —               | Paid infrastructure approved per the list recorded below — fixed floor ≈ $5/mo plus one domain.                                                                                                                                             |
+| L28  | a               | No row-level security on the control plane; one enforced authorisation choke point plus a test that no query path bypasses it. RLS is mandatory in the generated-app Supabase template, and generation is refused when it is off there.     |
+| L29  | —               | Turnstile, a per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, and a new account-wide daily ceiling all ship before Access comes off.                                                                       |
+| L30  | a               | Stripe, Clerk (Svix) and the GitHub App webhooks are all signature-verified with a replay window, rejected before the body is parsed.                                                                                                       |
+| L31  | a               | No BYOK storage in the hosted product until a credential vault exists. _(Deployment tokens for L40's auto-publish flow are a separate question — see "Reopened" below; they are not covered by this line.)_                                 |
+| L32  | —               | Project content purged 30 days after account deletion; audit log kept 12 months with the user id tombstoned.                                                                                                                                |
+| L33  | **b**           | Chris runs DAST/SAST and other security/pentest scans directly, and stands up a trust centre on Keel GRC. _(moved off recommendation — recommended no compliance work at alpha)_                                                            |
+| L34  | a               | Hosted model access runs on one shared platform key per provider, gated by our own credit ledger.                                                                                                                                           |
+| L35  | a               | One credit = 1¢ of model spend; the user sees a plain "generations remaining" for the model they chose.                                                                                                                                     |
+| L36  | —               | Free $0/$1 spend, Build $29/$10, Ship $99/$40, top-up $20/$8 expiring 12 months. Recorded in full below.                                                                                                                                    |
+| L37  | a               | Hard stop at the allowance, with one-click top-up. No auto-charged overage.                                                                                                                                                                 |
+| L38  | a               | Annual billing at two months free — Build $290, Ship $990.                                                                                                                                                                                  |
+| L39  | a               | Opus is available inside a paid tier, drawn from the same allowance. _(Extended — see "Reopened" below: more providers are to be added as they ship, and hosted BYOK stays off per L45.)_                                                   |
+| L40  | **b**, reopened | Vibld deploys into the user's own Cloudflare account to auto-publish exported sites — reversing the recommendation against holding deploy credentials. This needs the qualifying questions in "Reopened" below answered before it is built. |
+| L41  | a               | Cloudflare, Vercel and Netlify at launch; DigitalOcean and a container path after.                                                                                                                                                          |
+| L42a | a               | The GitHub App requests Contents, Pull requests and Metadata permissions only.                                                                                                                                                              |
+| L42b | a               | No Vultr Kubernetes/registry template.                                                                                                                                                                                                      |
+| L42c | **b**           | Vibld may hold deploy hooks/credentials for users, specifically to run the L40 Cloudflare auto-publish flow. _(moved off recommendation — recommended no)_                                                                                  |
+| L43  | a               | One initial commit on first export, then one commit per accepted checkpoint.                                                                                                                                                                |
+| L44  | a               | A scheduled Worker reads both providers' balances daily and emails an alert through Resend on a threshold.                                                                                                                                  |
+| L45  | a               | BYOK is the self-hosted story only. The hosted product sells credits and holds no user model-provider keys.                                                                                                                                 |
+| L46  | a               | The self-hosted build has no auth by default; Clerk switches on when its environment variables are present.                                                                                                                                 |
+| L47  | a               | The self-hosted build ships a local (Docker or child-process) sandbox adapter alongside the Cloudflare one.                                                                                                                                 |
+| L48  | a               | Billing, entitlement and tenancy code ships in the same public repository as the core, inert without secrets.                                                                                                                               |
+| L49  | a               | v0.1.0 is tagged once the hosted alpha is stable and a clean checkout is proven in CI to build, run and generate with only a provider key.                                                                                                  |
+
+### Values set
+
+| Item                           | Value                                                    |
+| ------------------------------ | -------------------------------------------------------- |
+| Preview idle timeout           | 10 minutes                                               |
+| Preview hard lifetime          | 30 minutes                                               |
+| Concurrent previews per user   | 1                                                        |
+| Concurrent previews, all users | 10 (reopened — see below)                                |
+| Legal entity                   | Chris Brock LLC                                          |
+| Public mailing address         | 285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342          |
+| Data retention after deletion  | project content 30 days; audit log 12 months, tombstoned |
+| Free tier                      | $0 — $1/mo model spend                                   |
+| Build tier                     | $29/mo — $10/mo model spend                              |
+| Ship tier                      | $99/mo — $40/mo model spend                              |
+| Top-up                         | $20 — $8 model spend, expires 12 months                  |
+
+### Lists confirmed
+
+- **Mailboxes on vibld.com:** support@, privacy@, security@, abuse@, legal@, billing@, hello@
+- **Coming-soon page:** wordmark, tagline, one paragraph, waitlist field to a Resend audience, legal footer links, a screenshot/demo clip. No pricing preview yet.
+- **Legal pages to draft:** Terms of Service, Privacy Policy, Acceptable Use, Security & Vulnerability Disclosure + `security.txt`, Subprocessors, Cookie Notice, Refund Policy, Open-Source Notices.
+- **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry — all nine lines from L27.
+- **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
+
+### Reopened — not yet resolved
+
+**L9 — all-user preview concurrency.** A hard cap needs a stated behaviour for the request that exceeds it. Recommendation: don't reject the 11th concurrent preview — queue it with a visible position ("starting your preview, 3 ahead of you") and start it as soon as a slot frees, and raise the default cap itself to 25 rather than 10, since Containers scale on their own and the real limit is the per-preview cost, not a fixed slot count. Confirm the cap number and the queue-vs-reject behaviour.
+
+**L40 — Cloudflare auto-publish, credential design.** Reversing L31/L42c to let Vibld hold and use a user's Cloudflare credential to publish their exported project raises questions L40 alone doesn't answer:
+
+- _Token, not OAuth._ Cloudflare has no general-purpose third-party OAuth flow for Workers/DNS — that access model is reserved for approved technology partners, which Vibld is not. The buildable path is a scoped **API Token** the user creates in their own dashboard (Workers Scripts: Edit, Workers Routes: Edit, DNS: Edit — restricted to one zone) and pastes into Vibld. Confirm this is acceptable, or say if partner-program OAuth is worth pursuing later.
+- _Where it's stored._ This reopens D16/L31: a real credential now needs a real vault. Recommendation — **Cloudflare Secrets Store**, since it's built for exactly this (per-account encrypted secrets used by automation) and keeps the stack Cloudflare-first per D5, rather than hand-rolling envelope encryption in D1.
+- _Scope of the flow._ Confirm this applies to Cloudflare first, with Vercel/Netlify tokens (L41) following the same pattern once Cloudflare is proven, rather than building all three at once.
+- _Domain ownership._ DNS automation only works if the user's domain is already on Cloudflare. Confirm the default path is a Vibld-provided subdomain (e.g. `myproject.vibld.app`) with a full custom domain as an opt-in second step, rather than requiring every user to move their domain's nameservers to use export at all.
+
+**L39 — model catalogue growth.** Confirmed: no hosted BYOK (per L45), and new providers get added to the catalogue as they ship (starting point named: an OpenAI-family model). No further decision needed here — this is a standing instruction for how `model-catalogue.ts` grows, not a one-time choice.
+
+**New initiative — a generation pattern/style/SEO catalogue.** Raised in the response to PR #70, not part of the original ten workstreams. Needs its own scoping pass before work starts — see the reply for the proposed shape and two scoping questions.
+
 ## Scale without speculative implementation
 
 Use explicit owner/tenant, project type, template version and provider capability fields where the first slice needs them. Keep permissions and quotas out of model prompts and provider-specific objects out of core contracts. Add packages only when actual callers justify a boundary. Do not build enterprise roles, arbitrary imports, every template family or a universal plugin system in M1.
 
 ## Details still to resolve during implementation
 
-These details do not reopen D1-D30. Record choices in the implementing issue or a new ADR when they affect a durable boundary.
+These details do not reopen D1-D30 or the launch decisions above. Record choices in the implementing issue or a new ADR when they affect a durable boundary.
 
-- Select model and embedding providers using measured results and an approved spending cap.
-- Confirm Cloudflare account access, Sandbox availability and limits, deployment region, Supabase region/tier and backup requirements before provisioning.
-- Choose credential encryption/key management, including rotation, recovery and deletion. Cloudflare account secrets alone do not constitute a complete user-secret vault.
-- Choose and verify preview domain isolation, session transport and sharing rules before exposing untrusted previews.
-- Set numeric per-run and account caps, telemetry fields/retention, and data deletion/backup retention before admitting alpha users.
+- Resolve the L40 credential-vault qualifiers above before building the Cloudflare auto-publish flow.
+- Scope the generation pattern/style/SEO catalogue above before starting it.
 - Calibrate evaluation thresholds from the first baseline; proposed numbers in the implementation plan are engineering targets, not a reliability guarantee.
-- Validate an alternate execution path and self-hosting instructions before claiming a working Cloudflare-independent OSS builder.
+- Validate an alternate execution path and self-hosting instructions before claiming a working Cloudflare-independent OSS builder — the L47 local adapter is the mechanism, not yet proof it works.
 
 Acceptance of architecture does not authorize purchases, production deployment, public access changes or unlimited paid model runs.
