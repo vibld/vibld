@@ -7,27 +7,28 @@
  *
  * Writes the generated project to disk only when --out is given, so the
  * default is a dry read of what the model produced.
+ *
+ * With --base <dir> the request carries an existing project, which is the
+ * only way to exercise iteration against a real model. It prints what the
+ * follow-up did to the project it was given -- and specifically what it
+ * removed, because the generation machine replaces the file set with
+ * whatever comes back, so a file the model leaves out is deleted.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { AnthropicModelProvider } from '../src/anthropic-provider.ts';
 import { createAnthropicPlanClient } from '../src/anthropic-client.ts';
 import { ProviderError } from '../src/errors.ts';
+import { parsePlanArgs } from '../src/cli-args.ts';
+import { diffProjects, readProject } from '../src/read-project.ts';
 import type { PlanUsage } from '../src/client.ts';
 
-function parseArgs(argv: string[]): { prompt: string; out?: string } {
-  const out = argv.indexOf('--out');
-  if (out === -1) return { prompt: argv.join(' ').trim() };
-  return {
-    prompt: argv.slice(0, out).join(' ').trim(),
-    out: argv[out + 1],
-  };
-}
-
-const { prompt, out } = parseArgs(process.argv.slice(2));
+const { prompt, out, base } = parsePlanArgs(process.argv.slice(2));
 
 if (!prompt) {
-  console.error('Usage: pnpm --filter @vibld/ai plan "<prompt>" [--out <dir>]');
+  console.error(
+    'Usage: pnpm --filter @vibld/ai plan "<prompt>" [--out <dir>] [--base <dir>]',
+  );
   process.exit(2);
 }
 
@@ -40,7 +41,16 @@ const provider = new AnthropicModelProvider(createAnthropicPlanClient(), {
 
 try {
   const startedAt = Date.now();
-  const plan = await provider.generate({ prompt });
+  const baseProject = base ? await readProject(base) : undefined;
+  if (baseProject) {
+    console.log(
+      `editing ${baseProject.files.length} existing files from ${resolve(base!)}`,
+    );
+  }
+  const plan = await provider.generate({
+    prompt,
+    ...(baseProject ? { base: baseProject } : {}),
+  });
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
   console.log(`\n${provider.id} — ${elapsed}s`);
@@ -57,6 +67,21 @@ try {
           ? ` (${usage.cacheReadInputTokens} cached)`
           : ''),
     );
+  }
+
+  if (baseProject) {
+    const diff = diffProjects(baseProject, plan);
+    console.log(
+      `\nagainst the project it was given: ${diff.kept.length} kept, ` +
+        `${diff.changed.length} changed, ${diff.added.length} added, ` +
+        `${diff.removed.length} removed`,
+    );
+    if (diff.removed.length > 0) {
+      // Not a warning to skim past. A removed file is a deleted file: the
+      // machine promotes exactly the set the model returned.
+      console.log('\nREMOVED -- these files would be deleted:');
+      for (const path of diff.removed) console.log(`  ${path}`);
+    }
   }
 
   if (out) {
