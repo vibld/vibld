@@ -41,6 +41,11 @@ export function PromptPanel({
     event.preventDefault();
     if (disabled || prompt.trim().length === 0) return;
     onSubmit(prompt, failNext ? 'fail-validation' : 'succeed', style);
+    // Clear the box. It is a composer now, not a form field that holds the
+    // last thing submitted: leaving the sent message in it means the next
+    // turn starts by editing the previous one, which is not what anyone
+    // means by "what should change?".
+    setPrompt('');
   }
 
   return (
