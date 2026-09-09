@@ -1,6 +1,8 @@
 # Plan: push to GitHub, and rebuild on a host
 
-Status: proposal. Nothing here is built.
+Status: proposal. Nothing here is built. Its three open questions are
+answered below (2026-09-09) — phase 4's answer changes what phase 4 is; see
+that section before implementing it.
 
 Covers issue #13 (GitHub branches and PRs, already specified and accepted)
 and the deployment half, which has no issue and is new scope.
@@ -253,16 +255,26 @@ network. Specifically worth asserting:
   entirely redundant with Git integration.
 - Vibld-held production credentials, unless phase 4 clears a security review.
 
-## Open questions for the decision owner
+## Answered by the decision owner (2026-09-09)
 
-1. **GitHub App name, ownership and permission set.** The App is Vibld
-   infrastructure and needs to be registered under the org before phase 1.
-   Minimum permissions: Contents read/write, Pull requests read/write,
-   Metadata read. Nothing else — no Actions, no admin.
-2. **Phase 3's target list.** Cloudflare, Vercel and DigitalOcean are clear.
-   Is Vultr wanted enough to carry a Kubernetes or registry template, which
-   is materially more complex than the others?
-3. **Is phase 4 wanted at all**, given the recommendation above?
+Recorded as L42a-c in [`decisions.md`](decisions.md#launch-decisions-accepted-2026-09-09); full context in [`launch-decisions.md`](launch-decisions.md).
+
+1. **GitHub App name, ownership and permission set — accepted as proposed
+   (L42a).** Contents, Pull requests, Metadata only. No Actions, no admin.
+2. **Phase 3's target list — no Vultr template (L42b).** Cloudflare, Vercel
+   and DigitalOcean, as this plan already lays out.
+3. **Phase 4, Vibld-held deploy credentials — wanted, reversing this plan's
+   recommendation (L42c).** Chris wants a lights-out flow: the user pastes a
+   scoped Cloudflare API Token into Vibld, Vibld holds it and drives the
+   Worker + DNS publish automatically, rather than the git-connected pattern
+   phases 1-3 describe. This is a different mechanism from everything above
+   phase 4 in this document — a held, usable third-party credential rather
+   than a one-way GitHub push — and needs its own credential-vault design
+   before it can be scoped as a phase. The open qualifying questions (token
+   vs. OAuth, where the token is stored, which platform first, custom-domain
+   handling) are recorded under "Reopened" in `decisions.md`. Phase 4 in this
+   document should be read as superseded by that design once it lands, not
+   as the plan to build.
 
 ## References
 
