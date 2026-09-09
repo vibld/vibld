@@ -76,3 +76,13 @@ retrieval lands.
   it needs storage and an embedding provider that have not been provisioned.
 - **Send a diff of what changed.** Requires the model to have the prior
   content to apply it against, which is the thing being withheld.
+- **Ask a cheap model for a search plan, then use exact search.** Found after
+  this ADR was written, by reading open-lovable's `analyze-edit-intent` route:
+  it sends a one-line summary per file and asks a small model for search terms
+  and regex patterns rather than for file contents, then greps. This is the
+  exact-search half of what ADR-0007 prescribes, working without the semantic
+  half -- so it needs no vector store and no embedding provider, and it is a
+  real option now rather than after #12. It costs one extra model call per
+  turn, and it can silently miss a file the plan did not think to look for,
+  which the decision above cannot. It should be measured against this decision
+  rather than assumed better. See docs/lovable-gap-analysis.md.
