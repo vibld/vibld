@@ -27,6 +27,22 @@ export const DEFAULT_PRICES: TokenPrices = {
   outputMicroUsd: 25,
 };
 
+/**
+ * Per-provider list prices, in micro-USD per token, used when the deployment
+ * does not set them explicitly.
+ *
+ * DeepSeek's are its **peak** rates for its more expensive model. Peak is
+ * double off-peak and `v4-pro` is triple `v4-flash`, so one figure has to
+ * cover four combinations, and this file's own rule decides which: a worst
+ * case that under-estimates is not a worst case. The effect is a ceiling that
+ * binds sooner than a flash run strictly needs -- the safe direction. Set
+ * VIBLD_USD_MICRO_PER_* to the exact rate to reclaim it.
+ */
+export const PROVIDER_PRICES: Record<string, TokenPrices> = {
+  anthropic: DEFAULT_PRICES,
+  deepseek: { inputMicroUsd: 1.32, outputMicroUsd: 3.96 },
+};
+
 function parsePrice(raw: string | undefined, fallback: number): number {
   if (raw === undefined) return fallback;
   const value = Number(raw);
@@ -36,18 +52,26 @@ function parsePrice(raw: string | undefined, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-export function parsePrices(env: {
-  VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
-  VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
-}): TokenPrices {
+export function parsePrices(
+  env: {
+    VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
+    VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
+  },
+  provider = 'anthropic',
+): TokenPrices {
+  // The fallback follows the selected provider. Without that, switching to
+  // DeepSeek would price its runs at Anthropic's rates -- an over-estimate,
+  // so safe, but a dollar figure that is wrong by forty times is not a
+  // ceiling anyone can reason about.
+  const fallback = PROVIDER_PRICES[provider] ?? DEFAULT_PRICES;
   return {
     inputMicroUsd: parsePrice(
       env.VIBLD_USD_MICRO_PER_INPUT_TOKEN,
-      DEFAULT_PRICES.inputMicroUsd,
+      fallback.inputMicroUsd,
     ),
     outputMicroUsd: parsePrice(
       env.VIBLD_USD_MICRO_PER_OUTPUT_TOKEN,
-      DEFAULT_PRICES.outputMicroUsd,
+      fallback.outputMicroUsd,
     ),
   };
 }

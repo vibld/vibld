@@ -10,6 +10,17 @@ on:
         description: What should Vibld build?
         required: true
         default: A landing page for a cybersecurity SaaS with pricing, an FAQ and a contact form. Heavy animation. Navy, dark purple and neon yellow.
+      provider:
+        description: Which model service answers
+        type: choice
+        options: [anthropic, deepseek]
+        default: anthropic
+      model:
+        description: >-
+          Optional model override. Leave blank for the provider's default
+          (claude-opus-5, or deepseek-v4-flash).
+        required: false
+        default: ''
       build:
         description: Also install and build the generated project (proves portability)
         type: boolean
@@ -42,12 +53,21 @@ jobs:
 
       - name: Require a model credential
         env:
+          PROVIDER: ${{ inputs.provider }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::error::ANTHROPIC_API_KEY is not set on the 'preview' environment"
+          # Only the selected provider's key is required. Checking both would
+          # block a DeepSeek run on a credential it never uses.
+          case "$PROVIDER" in
+            deepseek) key="$DEEPSEEK_API_KEY"; name=DEEPSEEK_API_KEY ;;
+            *)        key="$ANTHROPIC_API_KEY"; name=ANTHROPIC_API_KEY ;;
+          esac
+          if [ -z "$key" ]; then
+            echo "::error::$name is not set on the 'preview' environment"
             exit 1
           fi
+          echo "Using $PROVIDER" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enable Corepack
         run: corepack enable
@@ -70,7 +90,10 @@ jobs:
           # interpolating ${{ inputs.prompt }} into this script would let a
           # crafted prompt run shell commands in a step that holds the API key.
           PROMPT: ${{ inputs.prompt }}
+          VIBLD_PROVIDER: ${{ inputs.provider }}
+          VIBLD_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           {
             echo '## Prompt'
@@ -103,7 +126,10 @@ jobs:
           # this script would let a crafted prompt run commands in a step
           # that holds the API key.
           FOLLOW_UP: ${{ inputs.follow_up }}
+          VIBLD_PROVIDER: ${{ inputs.provider }}
+          VIBLD_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           {
             echo

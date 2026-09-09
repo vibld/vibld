@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  AnthropicModelProvider,
+  PlanProvider,
   DEFAULT_MAX_TOKENS,
   buildUserPrompt,
-} from '../src/anthropic-provider.ts';
+} from '../src/plan-provider.ts';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '../src/limits.ts';
 import { readStructuredOutput } from '../src/anthropic-client.ts';
 import {
@@ -58,10 +58,10 @@ function stubClient(completion: Partial<PlanCompletion>): PlanClient & {
   };
 }
 
-describe('AnthropicModelProvider', () => {
+describe('PlanProvider', () => {
   it('returns a GenerationPlan for a well-formed response', async () => {
     const client = stubClient({});
-    const provider = new AnthropicModelProvider(client);
+    const provider = new PlanProvider(client);
 
     const plan = await provider.generate({ prompt: 'a security landing page' });
 
@@ -71,7 +71,7 @@ describe('AnthropicModelProvider', () => {
   });
 
   it('identifies itself by client and model so runs are attributable', () => {
-    const provider = new AnthropicModelProvider(stubClient({}), {
+    const provider = new PlanProvider(stubClient({}), {
       model: 'claude-sonnet-5',
     });
     assert.equal(provider.id, 'stub:claude-sonnet-5');
@@ -79,7 +79,7 @@ describe('AnthropicModelProvider', () => {
 
   it('sends the portability system prompt and the caller options', async () => {
     const client = stubClient({});
-    const provider = new AnthropicModelProvider(client, {
+    const provider = new PlanProvider(client, {
       model: 'claude-opus-5',
       maxTokens: 4242,
       effort: 'max',
@@ -97,7 +97,7 @@ describe('AnthropicModelProvider', () => {
 
   it('reports usage even when the run fails, so budgets stay honest', async () => {
     const seen: PlanUsage[] = [];
-    const provider = new AnthropicModelProvider(
+    const provider = new PlanProvider(
       stubClient({
         stopReason: 'refusal',
         refusal: { category: 'cyber', explanation: 'no' },
@@ -113,7 +113,7 @@ describe('AnthropicModelProvider', () => {
   });
 
   it('surfaces a refusal with its category rather than an empty plan', async () => {
-    const provider = new AnthropicModelProvider(
+    const provider = new PlanProvider(
       stubClient({
         plan: null,
         stopReason: 'refusal',
@@ -133,7 +133,7 @@ describe('AnthropicModelProvider', () => {
   });
 
   it('rejects a truncated project instead of accepting half a file', async () => {
-    const provider = new AnthropicModelProvider(
+    const provider = new PlanProvider(
       stubClient({ stopReason: 'max_tokens' }),
       {
         maxTokens: 900,
@@ -151,7 +151,7 @@ describe('AnthropicModelProvider', () => {
   });
 
   it('rejects a response that does not match the plan schema', async () => {
-    const provider = new AnthropicModelProvider(
+    const provider = new PlanProvider(
       stubClient({ plan: { summary: 'no files key' } }),
     );
 
@@ -166,7 +166,7 @@ describe('AnthropicModelProvider', () => {
   });
 
   it('rejects a null parsed output', async () => {
-    const provider = new AnthropicModelProvider(stubClient({ plan: null }));
+    const provider = new PlanProvider(stubClient({ plan: null }));
     await assert.rejects(
       () => provider.generate({ prompt: 'anything' }),
       ProviderShapeError,
@@ -311,7 +311,7 @@ describe('the output ceiling', () => {
   });
 
   it('names truncation as truncation', async () => {
-    const provider = new AnthropicModelProvider({
+    const provider = new PlanProvider({
       id: 'stub',
       createPlan: async () => ({
         plan: null,
@@ -338,7 +338,7 @@ describe('progress reporting', () => {
   it('forwards a progress listener to the client', async () => {
     const client = stubClient({});
     const seen: { characters: number }[] = [];
-    await new AnthropicModelProvider(client, {
+    await new PlanProvider(client, {
       onProgress: (progress) => seen.push(progress),
     }).generate({ prompt: 'a landing page' });
 
@@ -352,7 +352,7 @@ describe('progress reporting', () => {
     // An explicit `undefined` is not the same as an absent property under
     // exactOptionalPropertyTypes, and the client checks for presence.
     const client = stubClient({});
-    await new AnthropicModelProvider(client).generate({ prompt: 'x' });
+    await new PlanProvider(client).generate({ prompt: 'x' });
     assert.equal('onProgress' in client.requests[0]!, false);
   });
 });

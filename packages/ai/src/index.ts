@@ -1,13 +1,13 @@
 export { createAnthropicPlanClient } from './anthropic-client.ts';
 export type { AnthropicPlanClientOptions } from './anthropic-client.ts';
 export {
-  AnthropicModelProvider,
+  PlanProvider,
   DEFAULT_EFFORT,
   DEFAULT_MAX_TOKENS,
   DEFAULT_MODEL,
   buildUserPrompt,
-} from './anthropic-provider.ts';
-export type { ModelProviderOptions } from './anthropic-provider.ts';
+} from './plan-provider.ts';
+export type { ModelProviderOptions } from './plan-provider.ts';
 export type {
   PlanClient,
   PlanCompletion,
@@ -38,3 +38,20 @@ export {
 } from './style-presets.ts';
 export type { StylePreset, StylePresetId } from './style-presets.ts';
 export { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
+export {
+  createDeepseekPlanClient,
+  DEEPSEEK_BASE_URL,
+  JSON_MODE_INSTRUCTION,
+  mapFinishReason,
+  readCompletionStream,
+  readJsonPlan,
+} from './deepseek-client.ts';
+export type { DeepseekPlanClientOptions } from './deepseek-client.ts';
+export {
+  DEFAULT_MODELS,
+  createPlanClient,
+  defaultModelFor,
+  resolveModel,
+  selectProvider,
+} from './select-client.ts';
+export type { ProviderEnv, ProviderName } from './select-client.ts';
