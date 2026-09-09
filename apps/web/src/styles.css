@@ -1,45 +1,30 @@
+@import './theme.css';
+
+/*
+ * The names below are the ones the component rules already use. They are
+ * aliases onto the design system rather than a second palette: one place
+ * defines a colour, and this maps the shell's vocabulary onto it. Dark and
+ * light both come from theme.css, so there is no second media query here to
+ * keep in step.
+ */
 :root {
-  color-scheme: light dark;
+  --bg: var(--surface-0);
+  --surface: var(--surface-1);
+  --surface-alt: var(--surface-2);
+  --fg: var(--text);
+  --muted: var(--text-muted);
+  --line: var(--edge);
+  --accent: var(--brand);
+  --accent-fg: hsl(250 40% 8%);
+  --success: var(--signal);
+  --success-bg: var(--signal-dim);
+  --error: var(--danger);
+  --error-bg: var(--danger-dim);
 
-  --bg: #f6f7fa;
-  --surface: #ffffff;
-  --surface-alt: #f0f2f7;
-  --fg: #14161c;
-  --muted: #5c6274;
-  --line: #dfe3ec;
-  --accent: #3f5bd9;
-  --accent-fg: #ffffff;
-  --success: #17694a;
-  --success-bg: #e6f5ee;
-  --error: #9c2b2b;
-  --error-bg: #fbeaea;
-  --radius: 10px;
-
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-  font-size: 15px;
-  line-height: 1.5;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1116;
-    --surface: #171a21;
-    --surface-alt: #1e222b;
-    --fg: #eceff6;
-    --muted: #a2a9bb;
-    --line: #2a2f3a;
-    --accent: #7b93ff;
-    --accent-fg: #0f1116;
-    --success: #7fd8b0;
-    --success-bg: #123227;
-    --error: #ff9d9d;
-    --error-bg: #331a1a;
-  }
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
@@ -540,5 +525,219 @@ body {
 
   .code__body {
     max-height: 22rem;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Vibld surface treatment.
+ *
+ * The rules above define the shell's structure and are left alone. These
+ * retune how it reads: a layered dark workspace where the project being built
+ * holds the eye and the chrome recedes. Structure unchanged, so every
+ * behavioural test still describes the same markup.
+ * ------------------------------------------------------------------------ */
+
+body {
+  background:
+    radial-gradient(1200px 600px at 15% -10%, var(--brand-8), transparent 60%),
+    var(--surface-0);
+  background-attachment: fixed;
+}
+
+.shell__header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 0.85rem 1.5rem;
+  background: var(--surface-veil);
+  backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom: 1px solid var(--edge);
+}
+
+/* The mark: a gradient tile rather than a flat swatch, so the brand reads as
+   a product and not as a placeholder. */
+.shell__logo {
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    140deg,
+    hsl(var(--vibld-brand) 92% 72%),
+    hsl(212 92% 60%)
+  );
+  color: hsl(250 40% 8%);
+  font-weight: 800;
+  font-size: 1.1rem;
+  box-shadow:
+    0 0 0 1px var(--brand-24),
+    0 6px 18px -6px var(--brand-40);
+}
+
+.shell__name {
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  font-size: var(--text-lg);
+}
+
+.shell__tagline {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.shell__body {
+  gap: 1.25rem;
+  padding: 1.25rem 1.5rem 1.75rem;
+}
+
+/* Scoped above the breakpoint on purpose: unscoped, this rule sits after the
+   max-width: 68rem rule at the same specificity and wins, so a phone gets a
+   22rem column it cannot fit and the workspace overflows sideways. */
+@media (min-width: 68.01rem) {
+  .shell__body {
+    grid-template-columns: minmax(22rem, 30rem) minmax(0, 1fr);
+  }
+}
+
+/* Panels: one elevation step forward, soft edge, generous radius. */
+.prompt,
+.plan,
+.banner,
+.codepane,
+.preview,
+.console__list,
+.problems__list {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--edge);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm);
+}
+
+.prompt__input {
+  border-radius: var(--radius);
+  border: 1px solid var(--edge-strong);
+  background: var(--surface-0);
+  font-family: inherit;
+  font-size: var(--text-base);
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+
+.prompt__input:focus-visible {
+  outline: none;
+  border-color: var(--brand-64);
+  box-shadow: 0 0 0 3px var(--brand-16);
+}
+
+.button {
+  border-radius: var(--radius);
+  border: 1px solid var(--edge-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 560;
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--brand-40);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button--primary {
+  border-color: transparent;
+  background: linear-gradient(
+    140deg,
+    hsl(var(--vibld-brand) 92% 68%),
+    hsl(212 92% 56%)
+  );
+  color: hsl(250 40% 8%);
+  font-weight: 640;
+  box-shadow: 0 6px 18px -8px var(--brand-64);
+}
+
+.button--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  background: linear-gradient(
+    140deg,
+    hsl(var(--vibld-brand) 92% 68%),
+    hsl(212 92% 56%)
+  );
+}
+
+.chip {
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  transition:
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--brand-40);
+  color: var(--text);
+}
+
+/* The lifecycle rail is the one piece of persistent state in the UI, so it
+   gets the brand colour and a step that visibly moves. */
+.lifecycle__step--active .lifecycle__dot {
+  background: var(--brand);
+  box-shadow: 0 0 0 4px var(--brand-16);
+  animation: vibld-pulse 1.6s var(--ease) infinite;
+}
+
+.lifecycle__step--done .lifecycle__dot {
+  background: var(--signal);
+}
+
+@keyframes vibld-pulse {
+  50% {
+    box-shadow: 0 0 0 7px var(--brand-8);
+  }
+}
+
+.pane-title {
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.codepane__code,
+.code__body {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.preview__frame {
+  border-radius: var(--radius);
+  border: 1px solid var(--edge);
+  background: hsl(0 0% 100%);
+}
+
+.shell__footer {
+  border-top: 1px solid var(--edge);
+  background: var(--surface-veil);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* Re-asserted after the rule that adds the pulse: the earlier reduced-motion
+   block is overridden by it at equal specificity, and the 1.6s duration is a
+   literal that the motion tokens cannot reach. */
+@media (prefers-reduced-motion: reduce) {
+  .lifecycle__step--active .lifecycle__dot {
+    animation: none;
   }
 }
