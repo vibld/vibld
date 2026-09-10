@@ -140,7 +140,7 @@ describe('resendContactRequest', () => {
     assert.equal(headers['Content-Type'], 'application/json');
     assert.deepEqual(JSON.parse(init.body as string), {
       email: 'chris@example.com',
-      segments: ['segment-id'],
+      segments: [{ id: 'segment-id' }],
     });
   });
 });
