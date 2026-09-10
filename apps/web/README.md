@@ -213,10 +213,29 @@ so an incomplete deployment never breaks the app that already works.
    `email_verified` as unverified, not as granted.
 2. `VIBLD_PLATFORM_ADMINS` on the `preview` environment: comma-separated
    verified emails to grant platform-admin access.
-3. The L29 abuse controls (Turnstile, a WAF rate limit on `/api/*`,
-   disposable-email blocking, an account-wide daily ceiling).
+3. The rest of the L29 abuse controls -- Turnstile on sign-up and anonymous
+   generation, a WAF rate limit on `/api/*`, disposable-email blocking at
+   sign-up. All three are dashboard-only configuration (Cloudflare Turnstile
+   and WAF rules, Clerk's disposable-email restriction), not something this
+   session's tool access can set up:
+   - Turnstile: <https://dash.cloudflare.com> → **Turnstile** → create a
+     widget for `vibld.com`/the preview `workers.dev` origin.
+   - WAF rate limit: <https://dash.cloudflare.com> → the zone → **Security →
+     WAF → Rate limiting rules** → a rule on `/api/*`.
+   - Disposable email: <https://dashboard.clerk.com> → the app → **Rules** →
+     enable **Block sign-ups that use disposable email addresses**.
+
+   The fourth L29 item -- an account-wide daily ceiling above the per-user
+   one, "so one compromised account cannot spend the month" -- is done:
+   `worker/index.ts`'s `reserveBudget` reserves against a second ledger
+   (`USER_BUDGET`'s namespace, reserved key `__account__`) before the
+   per-user one, and releases it if the per-user reservation then fails.
+   `VIBLD_ACCOUNT_DAILY_MICRO_USD` controls it (default $80.00/day, 20x the
+   per-user default) -- that default is a starting point, not a measured
+   figure; adjust it once real usage gives one.
+
 4. The switch itself: `requireAccess` replaced by Clerk verification in
-   `worker/index.ts`, in the same deploy as #3.
+   `worker/index.ts`, in the same deploy as the three manual items above.
 
 ## Generated output
 
