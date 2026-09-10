@@ -20,17 +20,15 @@
 
   // ANTHROPIC_API_KEY is a Worker secret, set out of band and never committed.
   //
-  // The two values below are public identifiers rather than secrets: the team
-  // domain is the Access login hostname and the AUD tag names the Access
-  // application. /api/plan verifies each request's Access token against them,
-  // and refuses every request unless all three are present.
+  // docs/decisions.md L5: Cloudflare Access is off. CLERK_FRONTEND_API_URL is
+  // the only identity setting left -- a public identifier, not a secret.
+  // /api/plan and /api/config both verify each request's Clerk token against
+  // it, and refuse every request unless it and a provider key are present.
   "vars": {
     // Which model service answers /api/plan. "anthropic" or "deepseek".
     // The deploy workflow reads this to decide which key must be present
     // before it will deploy.
     "VIBLD_PROVIDER": "deepseek",
-    "ACCESS_TEAM_DOMAIN": "chris-brock-llc.cloudflareaccess.com",
-    "ACCESS_AUD": "5d652184451045c3fde8eca6a09ebaa59fd4704666b94d839bebde5cf992d5d7",
 
     // Clerk's Frontend API URL -- a public identifier, not a secret. Used as
     // both the JWT issuer to match and the base for the JWKS fetch

@@ -131,8 +131,8 @@ describe('decideModel', () => {
   });
 
   it('treats the unknown-identity bucket as an ordinary unnamed caller', () => {
-    // requireAccess falls back to 'unknown' for a token with no email. That
-    // must land on the default grant, never on a named user's.
+    // resolvePrincipal falls back to 'unknown' for a token with no verified
+    // email. That must land on the default grant, never on a named user's.
     const decision = decideModel(
       env,
       'unknown',
