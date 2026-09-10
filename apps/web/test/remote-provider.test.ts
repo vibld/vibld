@@ -69,7 +69,7 @@ describe('readPlanEvents', () => {
 });
 
 describe('RemoteModelProvider', () => {
-  it('posts the request and returns the streamed plan', async () => {
+  it('posts the request, with an Authorization header, and returns the streamed plan', async () => {
     const calls: Array<[string, RequestInit | undefined]> = [];
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       calls.push([url, init]);
@@ -79,6 +79,7 @@ describe('RemoteModelProvider', () => {
     const provider = new RemoteModelProvider({
       fetchImpl,
       id: 'anthropic:test',
+      getToken: async () => 'a-clerk-token',
     });
     const plan = await provider.generate({ prompt: 'a landing page' });
 
@@ -86,10 +87,27 @@ describe('RemoteModelProvider', () => {
     const [url, init] = calls[0]!;
     assert.equal(url, '/api/plan');
     assert.equal(init?.method, 'POST');
-    // Access uses a cookie; omitting credentials makes every call look
-    // unauthenticated.
-    assert.equal(init?.credentials, 'same-origin');
+    assert.equal(
+      (init?.headers as Record<string, string>).Authorization,
+      'Bearer a-clerk-token',
+    );
     assert.equal(JSON.parse(String(init?.body)).prompt, 'a landing page');
+  });
+
+  it('omits the Authorization header when signed out', async () => {
+    const calls: Array<RequestInit | undefined> = [];
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async (_url: string, init?: RequestInit) => {
+        calls.push(init);
+        return sseResponse([PLAN_FRAME]);
+      }) as unknown as typeof fetch,
+      getToken: async () => null,
+    });
+    await provider.generate({ prompt: 'x' });
+    assert.equal(
+      (calls[0]?.headers as Record<string, string>).Authorization,
+      undefined,
+    );
   });
 
   it('surfaces a streamed error event', async () => {
@@ -107,13 +125,27 @@ describe('RemoteModelProvider', () => {
   it('surfaces an HTTP error body', async () => {
     const provider = new RemoteModelProvider({
       fetchImpl: jsonFetch(
-        { error: 'This endpoint requires Cloudflare Access sign-in.' },
-        401,
+        { error: 'That model is not available to you.' },
+        403,
       ),
     });
     await assert.rejects(
       () => provider.generate({ prompt: 'x' }),
-      /Cloudflare Access sign-in/,
+      /not available to you/,
+    );
+  });
+
+  it('names an expired or missing sign-in rather than failing opaquely on a 401', async () => {
+    const provider = new RemoteModelProvider({
+      fetchImpl: jsonFetch({ error: 'Sign in required.' }, 401),
+    });
+    await assert.rejects(
+      () => provider.generate({ prompt: 'x' }),
+      (error: Error) => {
+        assert.equal(error.name, 'SignInRequiredError');
+        assert.match(error.message, /session has expired/i);
+        return true;
+      },
     );
   });
 
@@ -187,70 +219,24 @@ describe('detectGenerationMode', () => {
   });
 });
 
-/**
- * Cloudflare Access answers a signed-out request with a cross-origin 302.
- * With `redirect: 'manual'` the browser hands back an opaque-redirect
- * response: status 0, not ok, and unreadable. It cannot be built with the
- * `Response` constructor, so it is described here rather than constructed.
- */
-function accessRedirect(): typeof fetch {
-  return (async () =>
-    ({
-      type: 'opaqueredirect',
-      status: 0,
-      ok: false,
-      body: null,
-    }) as unknown as Response) as unknown as typeof fetch;
-}
-
-/** Records the init of the last call so the request shape can be asserted. */
-function capturingFetch(response: Response) {
-  const calls: RequestInit[] = [];
-  const impl = (async (_input: unknown, init: RequestInit) => {
-    calls.push(init);
-    return response;
-  }) as unknown as typeof fetch;
-  return { impl, calls };
-}
-
-describe('a lapsed Access session', () => {
+describe('a missing or expired Clerk session', () => {
   beforeEach(() => resetGenerationModeProbe());
-
-  it('never follows the login redirect', async () => {
-    // Following it is what produced the browser's bare "Load failed": the
-    // hop is cross-origin, so CORS refuses it and the real cause is lost.
-    const { impl, calls } = capturingFetch(sseResponse([PLAN_FRAME]));
-    await new RemoteModelProvider({ fetchImpl: impl }).generate({
-      prompt: 'a landing page',
-    });
-    assert.equal(calls[0]?.redirect, 'manual');
-  });
-
-  it('names the expired session instead of failing opaquely', async () => {
-    const provider = new RemoteModelProvider({ fetchImpl: accessRedirect() });
-    await assert.rejects(
-      () => provider.generate({ prompt: 'a landing page' }),
-      (error: Error) => {
-        assert.equal(error.name, 'AccessSessionError');
-        assert.match(error.message, /session has expired/i);
-        assert.match(error.message, /reload/i, 'must say what to do next');
-        return true;
-      },
-    );
-  });
 
   it('refuses to answer the provider probe with "fake" when signed out', async () => {
     // Answering "fake" would run the deterministic provider and present its
     // output as a finished project. A mock shown as a real result is worse
     // than an error.
     await assert.rejects(
-      () => detectGenerationMode(accessRedirect()),
+      () =>
+        detectGenerationMode(jsonFetch({ error: 'Sign in required.' }, 401)),
       /session has expired/i,
     );
   });
 
-  it('does not cache the failure, so reloading can recover', async () => {
-    await assert.rejects(() => detectGenerationMode(accessRedirect()));
+  it('does not cache the failure, so signing in can recover', async () => {
+    await assert.rejects(() =>
+      detectGenerationMode(jsonFetch({ error: 'Sign in required.' }, 401)),
+    );
     // A cached rejection would outlive the sign-in that fixes it.
     assert.equal(
       await detectGenerationMode(jsonFetch({ generation: 'model' })),

@@ -10,7 +10,7 @@ import {
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 
-import { fetchAccessKeys, verifyAccessJwt } from './access.ts';
+import { clerkConfigured, resolvePrincipal } from './principal.ts';
 import { UserBudget } from './budget.ts';
 import type { Reservation } from './budget.ts';
 import {
@@ -47,10 +47,13 @@ export interface Env {
    * whatever the deployment can serve.
    */
   VIBLD_MODEL_POLICY?: string;
-  /** e.g. "yourteam.cloudflareaccess.com" */
-  ACCESS_TEAM_DOMAIN?: string;
-  /** The Access application's AUD tag. */
-  ACCESS_AUD?: string;
+  /**
+   * Clerk's Frontend API URL -- a public identifier, not a secret. Used as
+   * both the JWT issuer to match and the base for the JWKS fetch
+   * (clerk-auth.ts appends /.well-known/jwks.json). docs/decisions.md L5:
+   * this replaces ACCESS_TEAM_DOMAIN/ACCESS_AUD, now that Access is off.
+   */
+  CLERK_FRONTEND_API_URL?: string;
   VIBLD_MODEL?: string;
   /** Transport keepalive interval in ms. Configuration, not a literal. */
   VIBLD_STREAM_KEEPALIVE_MS?: string;
@@ -79,8 +82,10 @@ export interface Env {
   VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
   /**
    * The control plane (docs/decisions.md L24/L25). Declared here because the
-   * binding exists in wrangler.jsonc; not read by anything yet -- see
-   * generation-store.ts's module comment for why that wiring waits on Clerk.
+   * binding exists in wrangler.jsonc; not read by anything yet. Clerk sign-in
+   * is live now (L5), so there is a principal to own a project against, but
+   * wiring `generation-store.ts` into request handling is separate work that
+   * has not started.
    */
   DB?: D1Database;
   PROJECT_CONTENT?: R2Bucket;
@@ -96,8 +101,9 @@ const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
 /**
  * Reserved key for the account-wide ledger, sharing `USER_BUDGET`'s
  * namespace with every per-user key rather than needing a second binding.
- * Safe as long as it can never collide with a real identity: Access
- * authenticates real email addresses, and this is not one.
+ * Safe as long as it can never collide with a real identity: per-user keys
+ * are Clerk user ids (L3), which are always prefixed "user_", and this is
+ * not one.
  */
 const ACCOUNT_BUDGET_KEY = '__account__';
 
@@ -113,8 +119,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * Generation is available only when the key AND both Access settings are
- * present. Missing configuration means unavailable, never "open" — an
+ * Generation is available only when the key AND Clerk are configured.
+ * Missing configuration means unavailable, never "open" — an
  * unauthenticated endpoint on a public URL lets anyone spend the account's
  * model budget, so the failure has to be closed.
  */
@@ -123,70 +129,11 @@ function isConfigured(env: Env): boolean {
     // Either provider's key configures the endpoint. Which one it selects is
     // `selectProvider`'s business, not this gate's.
     (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY) &&
-    env.ACCESS_TEAM_DOMAIN &&
-    env.ACCESS_AUD &&
+    clerkConfigured(env) &&
     // The ledger is part of the grant, not an optimisation: a deployment
     // that cannot account for spend must not be able to spend.
     env.USER_BUDGET,
   );
-}
-
-interface AccessDenied {
-  denied: Response;
-}
-interface AccessGranted {
-  denied: null;
-  email: string;
-}
-
-async function requireAccess(
-  request: Request,
-  env: Env,
-): Promise<AccessDenied | AccessGranted> {
-  if (!isConfigured(env)) {
-    return {
-      denied: json(
-        { error: 'Model generation is not configured for this deployment.' },
-        403,
-      ),
-    };
-  }
-
-  const token =
-    request.headers.get('Cf-Access-Jwt-Assertion') ??
-    /(?:^|;\s*)CF_Authorization=([^;]+)/.exec(
-      request.headers.get('Cookie') ?? '',
-    )?.[1];
-
-  if (!token) {
-    return {
-      denied: json(
-        { error: 'This endpoint requires Cloudflare Access sign-in.' },
-        401,
-      ),
-    };
-  }
-
-  try {
-    const keys = await fetchAccessKeys(env.ACCESS_TEAM_DOMAIN!);
-    const claims = await verifyAccessJwt(token, {
-      keys,
-      audience: env.ACCESS_AUD!,
-      issuer: `https://${env.ACCESS_TEAM_DOMAIN}`,
-    });
-    // The identity is carried forward so a run's cost is attributable to
-    // someone. Spend with no name attached cannot be limited or explained.
-    //
-    // A token with no email claim falls into one shared 'unknown' bucket
-    // rather than getting its own. That is deliberately the strict reading:
-    // every such caller then competes for a single ceiling instead of each
-    // being handed a fresh one.
-    return { denied: null, email: claims.email ?? 'unknown' };
-  } catch {
-    // Deliberately opaque: a verification failure should not tell a caller
-    // which check failed.
-    return { denied: json({ error: 'Access verification failed.' }, 403) };
-  }
 }
 
 interface BudgetLayers {
@@ -208,7 +155,7 @@ type DeniedVerdict = Extract<SpendVerdict, { allow: false }>;
  */
 async function reserveBudget(
   env: Env,
-  email: string,
+  userId: string,
   worstCase: number,
 ): Promise<
   { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
@@ -236,7 +183,7 @@ async function reserveBudget(
     DEFAULT_MAX_IN_FLIGHT,
   );
   const user = await ledger
-    .getByName(email)
+    .getByName(userId)
     .reserve(worstCase, userCeiling, maxInFlight);
   if (!user.verdict.allow) {
     if (account.id !== undefined) {
@@ -268,8 +215,18 @@ async function handlePlan(
   const size = checkBodySize(request.headers);
   if (!size.ok) return json({ error: size.error }, size.status);
 
-  const access = await requireAccess(request, env);
-  if (access.denied) return access.denied;
+  // Whether this deployment can generate at all -- keys, Clerk, and the
+  // ledger -- is checked before spending effort on any one caller's token.
+  if (!isConfigured(env)) {
+    return json(
+      { error: 'Model generation is not configured for this deployment.' },
+      403,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
 
   let body: unknown;
   try {
@@ -299,10 +256,12 @@ async function handlePlan(
   }
 
   // The picker only offers what this person may use, but the picker is a
-  // convenience and this endpoint is the boundary.
+  // convenience and this endpoint is the boundary. Model policy is keyed by
+  // email (L4), not the Clerk user id the ledger below uses (L3) -- it is a
+  // human-edited secret that predates Clerk.
   const decision = decideModel(
     env,
-    access.email,
+    principal.policyIdentity,
     chosenModel.value,
     resolveModel(env),
   );
@@ -313,7 +272,7 @@ async function handlePlan(
   // documented as permissive, so it stops a naive flood and nothing more --
   // it is allowed to fail open only because the layer below fails closed.
   try {
-    const key = `plan:${access.email}`;
+    const key = `plan:${principal.userId}`;
     const gates = [env.PLAN_BURST, env.PLAN_SUSTAINED].filter(
       (gate): gate is RateLimit => gate !== undefined,
     );
@@ -355,7 +314,7 @@ async function handlePlan(
 
   let reserved;
   try {
-    reserved = await reserveBudget(env, access.email, worstCase);
+    reserved = await reserveBudget(env, principal.userId, worstCase);
   } catch (error) {
     // Fail closed. A retry costs the user a minute; an unbounded endpoint on
     // a public URL costs real money. 503 rather than 429: this is the
@@ -477,7 +436,7 @@ async function handlePlan(
       if (reservation.id !== undefined) {
         ctx.waitUntil(
           ledger
-            .getByName(access.email)
+            .getByName(principal.userId)
             .settle(reservation.id, actual)
             .catch((error: unknown) =>
               console.error('spend settlement failed', error),
@@ -504,7 +463,9 @@ async function handlePlan(
       console.log(
         JSON.stringify({
           event: 'generation.settled',
-          email: access.email,
+          userId: principal.userId,
+          // Display only (L3) -- never the ledger key.
+          ...(principal.email ? { email: principal.email } : {}),
           model: provider.id,
           outcome,
           ...(cancelledBy ? { cancelledBy } : {}),
@@ -542,18 +503,32 @@ export default {
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
+      if (!isConfigured(env)) {
+        return json(
+          { error: 'Model generation is not configured for this deployment.' },
+          403,
+        );
+      }
+
       // Identified before answered: the picker is per-person now, so this
       // cannot be served to an anonymous caller without telling them what
       // somebody else may use.
-      const access = await requireAccess(request, env);
-      if (access.denied) return access.denied;
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      const { principal } = resolved;
 
       // Two filters, in order. What the deployment can serve at all --
       // offering a model whose provider has no key produces a run that fails
-      // after the user has waited for it. Then what this person is granted.
-      const models = grantedFor(env, access.email);
+      // after the user has waited for it. Then what this person is granted
+      // (by email, per L4 -- see the same note in handlePlan).
+      const models = grantedFor(env, principal.policyIdentity);
       // The deployment default is only offered if this person may use it.
-      const decided = decideModel(env, access.email, null, resolveModel(env));
+      const decided = decideModel(
+        env,
+        principal.policyIdentity,
+        null,
+        resolveModel(env),
+      );
       return json({
         generation: isConfigured(env) ? 'model' : 'fake',
         models: models.map(({ id, label, note, provider }) => ({
