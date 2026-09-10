@@ -1,0 +1,94 @@
+name: Deploy a generated preview
+
+# Deploys a Vibld-generated project (ADR-0002: ordinary npm, no Vibld
+# dependency) as its own Cloudflare Worker, purely so it can be viewed live --
+# the builder shell's own preview pane only renders a local static mock and
+# cannot run a model-generated project (sandbox execution is not implemented
+# yet, ADR-0004). `directory` must already contain its own `wrangler.jsonc`
+# naming a distinct Worker; this workflow does not invent one. Manual only.
+on:
+  workflow_dispatch:
+    inputs:
+      directory:
+        description: Path from the repo root to the generated project. Must contain its own wrangler.jsonc.
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-preview-${{ github.event.inputs.directory }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Reuses the same "preview" environment apps/web deploys to -- its
+    # CLOUDFLARE_API_TOKEN already has Workers Scripts: Edit for the whole
+    # account (apps/web/README.md explains why it can't be scoped tighter),
+    # which covers deploying an additional, unrelated Worker too.
+    environment:
+      name: preview
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add both to the \"preview\" environment (Settings -> Environments)." >&2
+            exit 1
+          fi
+
+      - name: Require the target directory and its wrangler.jsonc
+        env:
+          DIRECTORY: ${{ inputs.directory }}
+        run: |
+          if [ ! -f "$DIRECTORY/wrangler.jsonc" ]; then
+            echo "::error::$DIRECTORY/wrangler.jsonc not found. This workflow deploys an existing generated project; it does not create one."
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Plain npm, not pnpm: a generated project is deliberately not part of
+      # the pnpm workspace, and is tested to build with ordinary npm commands.
+      - name: Install dependencies
+        working-directory: ${{ inputs.directory }}
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        working-directory: ${{ inputs.directory }}
+        run: npm run build
+
+      - name: Deploy to Cloudflare Workers
+        id: deploy
+        shell: bash
+        working-directory: ${{ inputs.directory }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          log="$RUNNER_TEMP/wrangler-deploy.log"
+          npx wrangler@4.129.1 deploy | tee "$log"
+          url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+          if [ -n "$url" ]; then
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            echo "Deployed to $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Deploy succeeded but the URL could not be read from wrangler output"
+          fi
