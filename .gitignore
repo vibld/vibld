@@ -2,6 +2,7 @@ node_modules/
 .turbo/
 dist/
 build/
+.react-router/
 coverage/
 playwright-report/
 test-results/

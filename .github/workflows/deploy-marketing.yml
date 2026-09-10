@@ -1,0 +1,108 @@
+name: Deploy marketing site
+
+# Manual only, like "Deploy web preview" -- an automatic deploy on every push
+# to main would redeploy vibld.com on every unrelated merge.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-marketing
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy vibld.com
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Credentials live on this environment rather than the repository, so
+    # they are reachable only from a job that names it, and any protection
+    # rule configured on it (a required reviewer) gates the run before a
+    # single step executes.
+    environment:
+      name: marketing
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require deploy credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          [ -n "$RESEND_API_KEY" ] || { echo "::error::RESEND_API_KEY is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add all three to the \"marketing\" environment (Settings -> Environments)." >&2
+            echo "The Cloudflare token needs \"Workers Scripts: Edit\" and \"DNS: Edit\" on the vibld.com zone -- the routes in wrangler.jsonc create that zone's records on first deploy." >&2
+            exit 1
+          fi
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @vibld/marketing build
+
+      # RESEND_API_KEY is a Worker secret, not a build input, so it is pushed
+      # separately from the deploy -- the same reasoning as the model-key
+      # sync in deploy-web-preview.yml.
+      - name: Sync the Resend key to the Worker
+        shell: bash
+        working-directory: apps/marketing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          # The value goes in on stdin so it never appears in a command line
+          # or in the run log.
+          printf '%s' "$RESEND_API_KEY" | pnpm dlx wrangler@4.129.1 secret put RESEND_API_KEY
+          echo "Synced RESEND_API_KEY." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy to Cloudflare Workers
+        id: deploy
+        shell: bash
+        working-directory: apps/marketing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          log="$RUNNER_TEMP/wrangler-deploy.log"
+          pnpm dlx wrangler@4.129.1 deploy | tee "$log"
+          url="$(grep -oE 'https://vibld\.com' "$log" | head -n 1 || true)"
+          if [ -n "$url" ]; then
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Deployed vibld-marketing (vibld.com, www.vibld.com)" >> "$GITHUB_STEP_SUMMARY"
+
+      # A green deploy only says the upload worked, not that the custom
+      # domain is actually answering yet -- the first deploy after buying
+      # vibld-preview.dev is the reminder for why this exists.
+      - name: Smoke test the deployment
+        run: |
+          set -euo pipefail
+          status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://vibld.com/ || echo "000")"
+          if [ "$status" != "200" ]; then
+            echo "::warning::https://vibld.com/ answered $status. DNS for a freshly-routed custom domain can take a few minutes to propagate; re-run this step if this is the first deploy."
+          else
+            echo "https://vibld.com/ is live." >> "$GITHUB_STEP_SUMMARY"
+          fi
