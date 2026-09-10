@@ -58,7 +58,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # CLERK_PUBLISHABLE_KEY is not sensitive -- Clerk designs it to ship in
+      # the client bundle -- but it lives alongside CLERK_SECRET_KEY on this
+      # environment rather than as a repository var, so both are set in one
+      # place. Vite only inlines VITE_-prefixed env vars into the build, and
+      # only at build time; an unset key here means ClerkRoot renders nothing
+      # rather than the app failing to build or boot (see src/auth/clerk.tsx).
       - name: Build
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
         run: pnpm --filter @vibld/web build
 
       # Model keys are Worker secrets, not build inputs, so they are pushed

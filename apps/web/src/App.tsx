@@ -6,6 +6,7 @@ import { LifecycleBar } from './components/LifecycleBar.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
+import { AuthStatus } from './auth/clerk.tsx';
 
 export function App() {
   const { session, state } = useBuilderSession();
@@ -31,6 +32,7 @@ export function App() {
           last run and claims nothing before there has been one.
         */}
         <p className="shell__mode">{describeMode(state.providerId)}</p>
+        <AuthStatus />
       </header>
 
       <main className="shell__body">
