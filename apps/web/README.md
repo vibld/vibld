@@ -39,7 +39,13 @@ into newer state.
 - **Console and Problems are placeholders** beyond the lifecycle log and
   validation findings. Process output and build diagnostics arrive with sandbox
   execution.
-- No authentication, durable persistence, Git export or deployment.
+- **No authentication, Git export or deployment.** A D1/R2-backed
+  `GenerationStore` exists (`worker/generation-store.ts`) and is tested
+  against the same contract `InMemoryGenerationStore` satisfies, but nothing
+  in this slice calls it yet: there is no authenticated principal to own a
+  project until Clerk lands (docs/decisions.md L1), and every generation
+  here still runs in the browser against in-memory state that a reload
+  discards.
 
 ## Hosted preview (optional)
 
@@ -56,10 +62,10 @@ arrives with sandbox execution ([#6](https://github.com/vibld/vibld/issues/6)).
 Create a **`preview`** environment under **Settings → Environments**, then add
 both secrets _to that environment_ rather than to the repository:
 
-| Secret                  | Value                                                   |
-| ----------------------- | ------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`  | A token with **Workers Scripts: Edit** and nothing more |
-| `CLOUDFLARE_ACCOUNT_ID` | The target Cloudflare account                           |
+| Secret                  | Value                                                                                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | A token with **Workers Scripts: Edit**, **D1: Edit** and **Workers R2 Storage: Edit**, nothing else |
+| `CLOUDFLARE_ACCOUNT_ID` | The target Cloudflare account                                                                       |
 
 Environment secrets are reachable only from a job that names the environment,
 and any protection rule on it gates the run before a single step executes. Add
@@ -69,6 +75,13 @@ time. Repository-level secrets of the same name still work as a fallback.
 `Workers Scripts: Edit` cannot be scoped to one script, so the token can write
 to every Worker on the account it is issued for. Issue it against a Cloudflare
 account used only for Vibld to keep the blast radius to this preview.
+
+**D1: Edit** and **Workers R2 Storage: Edit** were added alongside
+`generation-store.ts`: `wrangler.jsonc` now declares `d1_databases` and
+`r2_buckets` bindings, and a token that only had `Workers Scripts: Edit`
+will fail the next deploy at the binding-verification step, not at runtime
+-- if the existing token predates this change, it needs those two scopes
+added (or reissuing) before the next deploy runs.
 
 ### Deploying
 
