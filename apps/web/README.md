@@ -166,6 +166,44 @@ optionally installs and builds the generated project as the ADR-0002
 portability check. It needs `ANTHROPIC_API_KEY` on the `preview` environment
 and spends model tokens on each run.
 
+## Clerk authentication (not yet wired)
+
+`worker/clerk-auth.ts` verifies Clerk session tokens (RS256, JWKS-pinned, the
+same shape as the Access verification above) and `worker/platform-admins.ts`
+decides platform-admin status from a verified, allow-listed email. Both are
+built and tested; neither is called from request handling yet. Access stays
+authoritative until Clerk sign-in and the abuse controls in
+docs/decisions.md L29 are both ready to land in the same deploy
+(docs/decisions.md L5) -- this exists so that deploy is a cutover, not a
+rewrite.
+
+When that deploy is ready, the Clerk instance needs:
+
+1. An application: <https://dashboard.clerk.com/apps/new>.
+2. Its **Frontend API URL**, from the created application's **Configure →
+   API Keys** page -- this is `VerifyClerkOptions.issuer`, and JWKS is served
+   at `<that URL>/.well-known/jwks.json`.
+3. A custom session token claim, from **Configure → Sessions → Edit** →
+   **Customize session token**, so verified requests carry an email at all:
+   ```json
+   { "email": "{{user.primary_email_address}}" }
+   ```
+   `clerk-auth.ts` also reads `email_verified` as a boolean off the token; if
+   Clerk's shortcut for the primary address's verification status differs
+   from what's above once you're in the live claims editor, add it there
+   rather than guessing it here -- an unconfirmed shortcode in an auth claim
+   is worse than one left out, since `platform-admins.ts` treats an absent
+   `email_verified` as unverified, not as granted.
+
+Once wired, the Worker will need three more secrets on the `preview`
+environment, added the same way `VIBLD_MODEL_POLICY` already is:
+
+| Secret                  | Value                                                          |
+| ----------------------- | -------------------------------------------------------------- |
+| `CLERK_SECRET_KEY`      | From the same API Keys page as the Frontend API URL            |
+| `CLERK_PUBLISHABLE_KEY` | From the same API Keys page                                    |
+| `VIBLD_PLATFORM_ADMINS` | Comma-separated verified emails to grant platform-admin access |
+
 ## Generated output
 
 Generated projects are conventional and portable (ADR-0002): React, TypeScript
