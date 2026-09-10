@@ -22,6 +22,13 @@ export const SITE = {
    * the production value.
    */
   url: import.meta.env?.VITE_SITE_URL ?? 'https://vibld.com',
+  /**
+   * Cloudflare Turnstile's site key -- public by design, meant to sit in
+   * every page's HTML (docs/decisions.md L29). The matching secret key
+   * verifies tokens server-side in worker/waitlist.ts and is never
+   * committed; it lives on the `marketing` GitHub environment.
+   */
+  turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   mailingAddress: '285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342',

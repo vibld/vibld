@@ -8,19 +8,21 @@ const ENV = {
   VIBLD_WAITLIST_SEGMENT_ID: 'segment-id',
 };
 
-function jsonRequest(body: unknown): Request {
+function jsonRequest(body: Record<string, unknown>): Request {
   return new Request('https://vibld.com/api/waitlist', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify(body),
+    // Every test's ENV omits TURNSTILE_SECRET_KEY, so the check is skipped
+    // and no request needs a real token -- this just documents the field.
+    body: JSON.stringify({ 'cf-turnstile-response': '', ...body }),
   });
 }
 
 function htmlFormRequest(fields: Record<string, string>): Request {
-  const body = new URLSearchParams(fields);
+  const body = new URLSearchParams({ 'cf-turnstile-response': '', ...fields });
   return new Request('https://vibld.com/api/waitlist', {
     method: 'POST',
     headers: {
@@ -158,6 +160,116 @@ describe('POST /api/waitlist, JSON caller', () => {
       ENV,
     );
     assert.equal(response.status, 502);
+  });
+});
+
+describe('POST /api/waitlist, Turnstile configured', () => {
+  const ENV_WITH_TURNSTILE = { ...ENV, TURNSTILE_SECRET_KEY: 'ts_secret' };
+
+  it('verifies the token, then adds the contact when it checks out', async () => {
+    const fetchMock = mock.method(globalThis, 'fetch', async (url: string) => {
+      if (url.includes('siteverify')) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            action: 'waitlist',
+            hostname: 'vibld.com',
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    const response = await worker.fetch(
+      jsonRequest({
+        email: 'chris@example.com',
+        company: '',
+        'cf-turnstile-response': 'a-token',
+      }),
+      ENV_WITH_TURNSTILE,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { ok: boolean };
+    assert.equal(body.ok, true);
+
+    assert.equal(fetchMock.mock.calls.length, 2);
+    const [verifyUrl, verifyInit] = fetchMock.mock.calls[0].arguments as [
+      string,
+      RequestInit,
+    ];
+    assert.equal(
+      verifyUrl,
+      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+    );
+    const verifyBody = verifyInit.body as URLSearchParams;
+    assert.equal(verifyBody.get('response'), 'a-token');
+    assert.equal(verifyBody.get('secret'), 'ts_secret');
+  });
+
+  it('reports success without calling Resend when verification fails', async () => {
+    const fetchMock = mock.method(
+      globalThis,
+      'fetch',
+      async () =>
+        new Response(JSON.stringify({ success: false }), { status: 200 }),
+    );
+    const response = await worker.fetch(
+      jsonRequest({
+        email: 'chris@example.com',
+        company: '',
+        'cf-turnstile-response': 'bad-token',
+      }),
+      ENV_WITH_TURNSTILE,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { ok: boolean };
+    assert.equal(body.ok, true);
+    // Only the siteverify call happened -- never a Resend call.
+    assert.equal(fetchMock.mock.calls.length, 1);
+  });
+
+  it('reports success without calling Resend when the token is for the wrong hostname', async () => {
+    mock.method(
+      globalThis,
+      'fetch',
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            action: 'waitlist',
+            hostname: 'evil.example.com',
+          }),
+          { status: 200 },
+        ),
+    );
+    const response = await worker.fetch(
+      jsonRequest({
+        email: 'chris@example.com',
+        company: '',
+        'cf-turnstile-response': 'replayed-token',
+      }),
+      ENV_WITH_TURNSTILE,
+    );
+    const body = (await response.json()) as { ok: boolean };
+    assert.equal(body.ok, true);
+  });
+
+  it('reports success without calling Resend when the siteverify request throws', async () => {
+    const fetchMock = mock.method(globalThis, 'fetch', async () => {
+      throw new Error('network down');
+    });
+    const response = await worker.fetch(
+      jsonRequest({
+        email: 'chris@example.com',
+        company: '',
+        'cf-turnstile-response': 'a-token',
+      }),
+      ENV_WITH_TURNSTILE,
+    );
+    const body = (await response.json()) as { ok: boolean };
+    assert.equal(body.ok, true);
+    assert.equal(fetchMock.mock.calls.length, 1);
   });
 });
 

@@ -27,6 +27,14 @@ export interface WaitlistSubmission {
    * so any value here means a bot filled every field it could find.
    */
   company: string;
+  /**
+   * Cloudflare Turnstile's response token (docs/decisions.md L29). Empty
+   * when the widget never ran -- no JavaScript, or a caller that skipped
+   * the browser entirely -- which `verifyTurnstile` below treats the same
+   * as a token that failed verification, not as a separate case: either
+   * way, nothing proved a person is here.
+   */
+  turnstileToken: string;
 }
 
 export type WaitlistResult =
@@ -44,12 +52,19 @@ export async function parseWaitlistSubmission(
       return {
         email: typeof body.email === 'string' ? body.email : '',
         company: typeof body.company === 'string' ? body.company : '',
+        turnstileToken:
+          typeof body['cf-turnstile-response'] === 'string'
+            ? body['cf-turnstile-response']
+            : '',
       };
     }
     const form = await request.formData();
     return {
       email: String(form.get('email') ?? ''),
       company: String(form.get('company') ?? ''),
+      // The widget injects this field into the form itself (see
+      // WaitlistForm.tsx) -- nothing here has to read it out separately.
+      turnstileToken: String(form.get('cf-turnstile-response') ?? ''),
     };
   } catch {
     return null;
@@ -70,6 +85,57 @@ export function validateSubmission(
     return { ok: false, reason: 'invalid-email' };
   }
   return { ok: true, email: submission.email.trim().toLowerCase() };
+}
+
+/** The `data-action` WaitlistForm's widget declares -- verified server-side too. */
+export const WAITLIST_TURNSTILE_ACTION = 'waitlist';
+
+/** The only hostnames this site is ever served from -- see wrangler.jsonc's routes. */
+export const WAITLIST_HOSTNAMES = new Set(['vibld.com', 'www.vibld.com']);
+
+/**
+ * Builds the Turnstile siteverify request. Returned rather than sent, same
+ * reason as `resendContactRequest` below --
+ * https://developers.cloudflare.com/turnstile/get-started/server-side-validation/
+ */
+export function turnstileVerifyRequest(
+  token: string,
+  secretKey: string,
+  remoteIp?: string,
+): { url: string; init: RequestInit } {
+  const body = new URLSearchParams({ secret: secretKey, response: token });
+  if (remoteIp) body.set('remoteip', remoteIp);
+  return {
+    url: 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+    init: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    },
+  };
+}
+
+interface TurnstileSiteverifyResponse {
+  success: boolean;
+  action?: string;
+  hostname?: string;
+}
+
+/**
+ * Decides whether a siteverify response actually clears this submission.
+ * `success` alone is not enough: it is also what Turnstile returns for a
+ * token issued to a *different* site or action, so a leaked or replayed
+ * token from elsewhere would otherwise pass.
+ */
+export function isTurnstileVerified(
+  result: TurnstileSiteverifyResponse,
+): boolean {
+  return (
+    result.success &&
+    result.action === WAITLIST_TURNSTILE_ACTION &&
+    typeof result.hostname === 'string' &&
+    WAITLIST_HOSTNAMES.has(result.hostname)
+  );
 }
 
 /**

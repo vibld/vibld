@@ -61,22 +61,36 @@ jobs:
       - name: Build
         run: pnpm --filter @vibld/marketing build
 
-      # RESEND_API_KEY is a Worker secret, not a build input, so it is pushed
-      # separately from the deploy -- the same reasoning as the model-key
-      # sync in deploy-web-preview.yml.
-      - name: Sync the Resend key to the Worker
+      # RESEND_API_KEY and TURNSTILE_SECRET_KEY are Worker secrets, not build
+      # inputs, so they are pushed separately from the deploy -- the same
+      # reasoning as the model-key sync in deploy-web-preview.yml.
+      #
+      # TURNSTILE_SECRET_KEY is optional, unlike RESEND_API_KEY: it is not in
+      # "Require deploy credentials" above, and worker/index.ts skips the
+      # Turnstile check entirely when it is unset rather than failing closed
+      # (docs/decisions.md L29) -- so it is synced only when present, the
+      # same `[ -n ... ]` pattern deploy-web-preview.yml uses for the model
+      # keys, rather than being required like RESEND_API_KEY is.
+      - name: Sync Worker secrets
         shell: bash
         working-directory: apps/marketing
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
         run: |
           set -euo pipefail
           # The value goes in on stdin so it never appears in a command line
           # or in the run log.
           printf '%s' "$RESEND_API_KEY" | pnpm dlx wrangler@4.129.1 secret put RESEND_API_KEY
           echo "Synced RESEND_API_KEY." >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$TURNSTILE_SECRET_KEY" ]; then
+            printf '%s' "$TURNSTILE_SECRET_KEY" | pnpm dlx wrangler@4.129.1 secret put TURNSTILE_SECRET_KEY
+            echo "Synced TURNSTILE_SECRET_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "TURNSTILE_SECRET_KEY not set -- Turnstile verification stays disabled on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Deploy to Cloudflare Workers
         id: deploy
