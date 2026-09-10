@@ -105,6 +105,11 @@ body {
   color: var(--muted);
 }
 
+.shell__auth {
+  display: flex;
+  align-items: center;
+}
+
 .shell__body {
   display: grid;
   grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr);

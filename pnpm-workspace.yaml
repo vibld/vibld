@@ -13,3 +13,7 @@ packages:
 allowBuilds:
   esbuild: true
   workerd: true
+
+minimumReleaseAgeExclude:
+  - '@clerk/react@6.15.2'
+  - '@clerk/shared@4.31.1'

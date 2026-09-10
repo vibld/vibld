@@ -166,25 +166,42 @@ optionally installs and builds the generated project as the ADR-0002
 portability check. It needs `ANTHROPIC_API_KEY` on the `preview` environment
 and spends model tokens on each run.
 
-## Clerk authentication (not yet wired)
+## Clerk authentication (sign-in live; not yet gating anything)
 
-`worker/clerk-auth.ts` verifies Clerk session tokens (RS256, JWKS-pinned, the
-same shape as the Access verification above) and `worker/platform-admins.ts`
-decides platform-admin status from a verified, allow-listed email. Both are
-built and tested; neither is called from request handling yet. Access stays
+The Clerk instance exists and is live: Frontend API at
+`https://clerk.vibld.com` (a custom domain -- its DNS record must stay
+**DNS only**, not proxied, or Cloudflare intercepts it with its own "DNS
+points to prohibited IP" error before Clerk ever sees the request), with
+`CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` set on the `preview`
+environment.
+
+Two independent pieces exist so far:
+
+- **Verification** (`worker/clerk-auth.ts`, `worker/platform-admins.ts`):
+  verifies Clerk session tokens (RS256, JWKS-pinned, the same shape as the
+  Access verification above) and decides platform-admin status from a
+  verified, allow-listed email. Built and tested against the real JWKS
+  endpoint; not called from request handling yet.
+- **Sign-in** (`src/auth/clerk.tsx`): `ClerkRoot` wraps the app in
+  `ClerkProvider` and the header shows a working sign-in button / user menu,
+  using `VITE_CLERK_PUBLISHABLE_KEY` at build time (`CLERK_PUBLISHABLE_KEY`
+  on the `preview` environment, synced by the deploy workflow's Build step).
+  A visitor can sign in for real right now -- it just doesn't unlock
+  anything yet.
+
+Neither is wired to `requireAccess` in `worker/index.ts`. Access stays
 authoritative until Clerk sign-in and the abuse controls in
 docs/decisions.md L29 are both ready to land in the same deploy
 (docs/decisions.md L5) -- this exists so that deploy is a cutover, not a
-rewrite.
+rewrite. Both pieces above gracefully no-op if their key is ever unset
+(`ClerkRoot` renders its children unwrapped; `AuthStatus` renders nothing),
+so an incomplete deployment never breaks the app that already works.
 
-When that deploy is ready, the Clerk instance needs:
+**Still needed before the cutover:**
 
-1. An application: <https://dashboard.clerk.com/apps/new>.
-2. Its **Frontend API URL**, from the created application's **Configure →
-   API Keys** page -- this is `VerifyClerkOptions.issuer`, and JWKS is served
-   at `<that URL>/.well-known/jwks.json`.
-3. A custom session token claim, from **Configure → Sessions → Edit** →
-   **Customize session token**, so verified requests carry an email at all:
+1. A custom session token claim, from **Configure → Sessions → Edit** →
+   **Customize session token** in the Clerk dashboard, so verified requests
+   carry an email at all:
    ```json
    { "email": "{{user.primary_email_address}}" }
    ```
@@ -194,15 +211,31 @@ When that deploy is ready, the Clerk instance needs:
    rather than guessing it here -- an unconfirmed shortcode in an auth claim
    is worse than one left out, since `platform-admins.ts` treats an absent
    `email_verified` as unverified, not as granted.
+2. `VIBLD_PLATFORM_ADMINS` on the `preview` environment: comma-separated
+   verified emails to grant platform-admin access.
+3. The rest of the L29 abuse controls -- Turnstile on sign-up and anonymous
+   generation, a WAF rate limit on `/api/*`, disposable-email blocking at
+   sign-up. All three are dashboard-only configuration (Cloudflare Turnstile
+   and WAF rules, Clerk's disposable-email restriction), not something this
+   session's tool access can set up:
+   - Turnstile: <https://dash.cloudflare.com> → **Turnstile** → create a
+     widget for `vibld.com`/the preview `workers.dev` origin.
+   - WAF rate limit: <https://dash.cloudflare.com> → the zone → **Security →
+     WAF → Rate limiting rules** → a rule on `/api/*`.
+   - Disposable email: <https://dashboard.clerk.com> → the app → **Rules** →
+     enable **Block sign-ups that use disposable email addresses**.
 
-Once wired, the Worker will need three more secrets on the `preview`
-environment, added the same way `VIBLD_MODEL_POLICY` already is:
+   The fourth L29 item -- an account-wide daily ceiling above the per-user
+   one, "so one compromised account cannot spend the month" -- is done:
+   `worker/index.ts`'s `reserveBudget` reserves against a second ledger
+   (`USER_BUDGET`'s namespace, reserved key `__account__`) before the
+   per-user one, and releases it if the per-user reservation then fails.
+   `VIBLD_ACCOUNT_DAILY_MICRO_USD` controls it (default $80.00/day, 20x the
+   per-user default) -- that default is a starting point, not a measured
+   figure; adjust it once real usage gives one.
 
-| Secret                  | Value                                                          |
-| ----------------------- | -------------------------------------------------------------- |
-| `CLERK_SECRET_KEY`      | From the same API Keys page as the Frontend API URL            |
-| `CLERK_PUBLISHABLE_KEY` | From the same API Keys page                                    |
-| `VIBLD_PLATFORM_ADMINS` | Comma-separated verified emails to grant platform-admin access |
+4. The switch itself: `requireAccess` replaced by Clerk verification in
+   `worker/index.ts`, in the same deploy as the three manual items above.
 
 ## Generated output
 

@@ -12,6 +12,7 @@ import type { PlanUsage } from '@vibld/ai';
 
 import { fetchAccessKeys, verifyAccessJwt } from './access.ts';
 import { UserBudget } from './budget.ts';
+import type { Reservation } from './budget.ts';
 import {
   DEFAULT_LIMITS,
   checkBodySize,
@@ -23,6 +24,7 @@ import {
 } from './request-guard.ts';
 import { decideModel, grantedFor } from './model-access.ts';
 import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
+import type { SpendVerdict } from './spend.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
@@ -64,6 +66,15 @@ export interface Env {
   VIBLD_DAILY_MICRO_USD?: string;
   /** Runs one user may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
+  /**
+   * Micro-USD the whole deployment may spend per UTC day, across every user
+   * -- docs/decisions.md L29. Layered above VIBLD_DAILY_MICRO_USD so one
+   * compromised account cannot spend the month; the per-user ceiling alone
+   * bounds only what *one* identity can do, not what N of them can do
+   * together. Default is 20x the per-user default -- a starting point, not
+   * a measured figure; correct it once real usage gives one.
+   */
+  VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
   VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
   VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
   /**
@@ -80,6 +91,15 @@ export { UserBudget };
 
 const DEFAULT_DAILY_MICRO_USD = 4_000_000;
 const DEFAULT_MAX_IN_FLIGHT = 2;
+const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
+
+/**
+ * Reserved key for the account-wide ledger, sharing `USER_BUDGET`'s
+ * namespace with every per-user key rather than needing a second binding.
+ * Safe as long as it can never collide with a real identity: Access
+ * authenticates real email addresses, and this is not one.
+ */
+const ACCOUNT_BUDGET_KEY = '__account__';
 
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
@@ -167,6 +187,65 @@ async function requireAccess(
     // which check failed.
     return { denied: json({ error: 'Access verification failed.' }, 403) };
   }
+}
+
+interface BudgetLayers {
+  account: Reservation;
+  user: Reservation;
+}
+
+/** Only ever constructed from a verdict already known to deny the run. */
+type DeniedVerdict = Extract<SpendVerdict, { allow: false }>;
+
+/**
+ * Reserves against both ceilings before a run may start: the account-wide
+ * one first (cheaper to check, and failing it means the user-level ledger
+ * never needs touching at all), then the per-user one. If the account layer
+ * allows but the user layer then refuses, the account-level hold is
+ * released at once -- a run that never starts must never leave a phantom
+ * charge sitting against the account for up to fifteen minutes waiting on
+ * the abandoned-reservation reclaim.
+ */
+async function reserveBudget(
+  env: Env,
+  email: string,
+  worstCase: number,
+): Promise<
+  { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
+> {
+  const ledger = env.USER_BUDGET!;
+  const accountCeiling = positiveInt(
+    env.VIBLD_ACCOUNT_DAILY_MICRO_USD,
+    DEFAULT_ACCOUNT_DAILY_MICRO_USD,
+  );
+  // Unbounded in-flight on purpose: concurrency is the per-user layer's job
+  // below. This layer enforces spend only.
+  const account = await ledger
+    .getByName(ACCOUNT_BUDGET_KEY)
+    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER);
+  if (!account.verdict.allow) {
+    return { ok: false, verdict: account.verdict };
+  }
+
+  const userCeiling = positiveInt(
+    env.VIBLD_DAILY_MICRO_USD,
+    DEFAULT_DAILY_MICRO_USD,
+  );
+  const maxInFlight = positiveInt(
+    env.VIBLD_MAX_IN_FLIGHT,
+    DEFAULT_MAX_IN_FLIGHT,
+  );
+  const user = await ledger
+    .getByName(email)
+    .reserve(worstCase, userCeiling, maxInFlight);
+  if (!user.verdict.allow) {
+    if (account.id !== undefined) {
+      await ledger.getByName(ACCOUNT_BUDGET_KEY).settle(account.id, 0);
+    }
+    return { ok: false, verdict: user.verdict };
+  }
+
+  return { ok: true, layers: { account, user } };
 }
 
 async function handlePlan(
@@ -272,15 +351,11 @@ async function handlePlan(
       DEFAULT_LIMITS.maxTotalContentChars +
       DEFAULT_LIMITS.maxKnowledgeChars,
   );
-  const ledger = env.USER_BUDGET!.getByName(access.email);
+  const ledger = env.USER_BUDGET!;
 
-  let reservation;
+  let reserved;
   try {
-    reservation = await ledger.reserve(
-      worstCase,
-      positiveInt(env.VIBLD_DAILY_MICRO_USD, DEFAULT_DAILY_MICRO_USD),
-      positiveInt(env.VIBLD_MAX_IN_FLIGHT, DEFAULT_MAX_IN_FLIGHT),
-    );
+    reserved = await reserveBudget(env, access.email, worstCase);
   } catch (error) {
     // Fail closed. A retry costs the user a minute; an unbounded endpoint on
     // a public URL costs real money. 503 rather than 429: this is the
@@ -294,17 +369,18 @@ async function handlePlan(
     );
   }
 
-  if (!reservation.verdict.allow) {
+  if (!reserved.ok) {
     return json(
       {
         error:
-          reservation.verdict.reason === 'daily-ceiling'
+          reserved.verdict.reason === 'daily-ceiling'
             ? 'Daily generation budget reached. It resets at 00:00 UTC.'
             : 'A generation is already running. Wait for it to finish.',
       },
       429,
     );
   }
+  const reservation = reserved.layers.user;
 
   // Stream rather than buffer. A buffered response sends nothing until the
   // model finishes, and the client gives up first -- which surfaces as an
@@ -401,9 +477,24 @@ async function handlePlan(
       if (reservation.id !== undefined) {
         ctx.waitUntil(
           ledger
+            .getByName(access.email)
             .settle(reservation.id, actual)
             .catch((error: unknown) =>
               console.error('spend settlement failed', error),
+            ),
+        );
+      }
+      // Both layers were reserved together, so both settle together -- the
+      // account-wide ledger must reflect the same run at the same cost, or
+      // its ceiling stops meaning what it says.
+      const accountReservation = reserved.layers.account;
+      if (accountReservation.id !== undefined) {
+        ctx.waitUntil(
+          ledger
+            .getByName(ACCOUNT_BUDGET_KEY)
+            .settle(accountReservation.id, actual)
+            .catch((error: unknown) =>
+              console.error('account spend settlement failed', error),
             ),
         );
       }
