@@ -32,6 +32,12 @@
     "ACCESS_TEAM_DOMAIN": "chris-brock-llc.cloudflareaccess.com",
     "ACCESS_AUD": "5d652184451045c3fde8eca6a09ebaa59fd4704666b94d839bebde5cf992d5d7",
 
+    // Clerk's Frontend API URL -- a public identifier, not a secret. Used as
+    // both the JWT issuer to match and the base for the JWKS fetch
+    // (clerk-auth.ts appends /.well-known/jwks.json). CLERK_SECRET_KEY and
+    // CLERK_PUBLISHABLE_KEY are Worker/build secrets set out of band.
+    "CLERK_FRONTEND_API_URL": "https://clerk.vibld.com",
+
     // Micro-USD one user may spend per UTC day: 4000000 == $4.00.
     //
     // A run reserves its worst case up front -- with a 64000-token output
