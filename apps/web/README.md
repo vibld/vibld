@@ -39,13 +39,14 @@ into newer state.
 - **Console and Problems are placeholders** beyond the lifecycle log and
   validation findings. Process output and build diagnostics arrive with sandbox
   execution.
-- **No authentication, Git export or deployment.** A D1/R2-backed
+- **No project persistence, Git export or deployment.** A D1/R2-backed
   `GenerationStore` exists (`worker/generation-store.ts`) and is tested
   against the same contract `InMemoryGenerationStore` satisfies, but nothing
-  in this slice calls it yet: there is no authenticated principal to own a
-  project until Clerk lands (docs/decisions.md L1), and every generation
-  here still runs in the browser against in-memory state that a reload
-  discards.
+  in this slice calls it yet. Clerk sign-in is live now (see "Clerk
+  authentication" below), so there is an authenticated principal to own a
+  project against, but wiring `generation-store.ts` in is separate work that
+  has not started; every generation here still runs in the browser against
+  in-memory state that a reload discards.
 
 ## Hosted preview (optional)
 
@@ -98,8 +99,10 @@ pnpm --filter @vibld/web build
 pnpm --filter @vibld/web deploy:preview
 ```
 
-The deployed URL is public on `workers.dev`. Put it behind Cloudflare Access if
-the work in progress should stay internal.
+The deployed URL is public on `workers.dev`. The SPA shell itself carries no
+gate (only `/api/plan` and `/api/config` require a Clerk sign-in, per the
+"Clerk authentication" section below) -- put the whole route behind
+Cloudflare Access instead if the work in progress should stay internal.
 
 ## Model generation (optional)
 
@@ -131,29 +134,37 @@ cannot outlive its request.
 
 ### Fail closed
 
-`/api/plan` serves a generation only when **all three** of `ANTHROPIC_API_KEY`,
-`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are present. Missing configuration means
-refused, never open: an unauthenticated endpoint on a public URL would let
-anyone spend the account's model budget.
+`/api/plan` and `/api/config` serve a generation only when **all three** of
+a provider key (`ANTHROPIC_API_KEY` or `DEEPSEEK_API_KEY`), `USER_BUDGET` and
+`CLERK_FRONTEND_API_URL` are present. Missing configuration means refused,
+never open: an unauthenticated endpoint on a public URL would let anyone
+spend the account's model budget.
 
-The Worker verifies the Cloudflare Access JWT itself rather than trusting the
-`Cf-Access-Jwt-Assertion` header. Access already checks at the edge, but a
-header is forgeable by anyone reaching the origin directly, and ADR-0006
-requires proving a raw URL cannot bypass access control. Verification pins
-RS256 (rejecting the `alg: none` downgrade), matches the application audience
-and team issuer, and honours expiry with a small skew allowance.
+The Worker verifies the Clerk session JWT itself (`worker/principal.ts`,
+`worker/clerk-auth.ts`) rather than trusting the browser's session cookie --
+which never arrives here anyway, since the cookie is scoped to Clerk's own
+Frontend API domain, not this Worker's origin. The client sends the token as
+`Authorization: Bearer <token>` instead (`src/auth/clerk-token.ts`,
+`src/generation/remote-provider.ts`), and ADR-0006 requires the Worker to
+verify it itself regardless. Verification pins RS256 (rejecting the
+`alg: none` downgrade), matches the Clerk instance's issuer, and honours
+expiry with a small skew allowance.
+
+**Cloudflare Access is off** (docs/decisions.md L5): Clerk is the only gate.
 
 ### Setup
 
-1. Enable Access on the Worker: **Workers & Pages → the Worker → Settings →
-   Domains & Routes**, then **Enable Cloudflare Access** for the `workers.dev`
-   URL. This works on `workers.dev` directly — no custom domain needed.
-2. In **Zero Trust → Access → Applications**, open the generated application
-   and copy its **Application Audience (AUD) tag**.
-3. Set `ACCESS_TEAM_DOMAIN` (e.g. `yourteam.cloudflareaccess.com`) and
-   `ACCESS_AUD` in `wrangler.jsonc`, then redeploy.
-4. Add the key as a Worker secret — it must never be committed:
+1. Create a Clerk application and note its **Frontend API URL** (**Configure
+   → API Keys**, e.g. `https://clerk.vibld.com`).
+2. Set `CLERK_FRONTEND_API_URL` in `wrangler.jsonc`'s `vars` -- a public
+   identifier, not a secret -- then redeploy.
+3. Add the provider key as a Worker secret — it must never be committed:
    `wrangler secret put ANTHROPIC_API_KEY`
+4. Add `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` to the `preview`
+   environment (the deploy workflow's Build step inlines the publishable key
+   as `VITE_CLERK_PUBLISHABLE_KEY`; `CLERK_SECRET_KEY` is currently unused by
+   any Worker code -- JWKS verification needs no secret -- and is kept only
+   because Clerk issues both together).
 
 Until all of that is in place the deployed shell keeps running the fake, which
 is the intended safe default.
@@ -166,76 +177,72 @@ optionally installs and builds the generated project as the ADR-0002
 portability check. It needs `ANTHROPIC_API_KEY` on the `preview` environment
 and spends model tokens on each run.
 
-## Clerk authentication (sign-in live; not yet gating anything)
+## Clerk authentication (the cutover -- docs/decisions.md L5)
 
-The Clerk instance exists and is live: Frontend API at
+Clerk is the only thing that gates `/api/plan` and `/api/config` now.
+Cloudflare Access is off. The Clerk instance is live: Frontend API at
 `https://clerk.vibld.com` (a custom domain -- its DNS record must stay
 **DNS only**, not proxied, or Cloudflare intercepts it with its own "DNS
 points to prohibited IP" error before Clerk ever sees the request), with
 `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` set on the `preview`
-environment.
+environment, the custom session claim configured, and **Waitlist** sign-up
+mode enabled (L6) so sign-in stays restricted to people Chris approves.
 
-Two independent pieces exist so far:
+Two pieces, wired together:
 
-- **Verification** (`worker/clerk-auth.ts`, `worker/platform-admins.ts`):
-  verifies Clerk session tokens (RS256, JWKS-pinned, the same shape as the
-  Access verification above) and decides platform-admin status from a
-  verified, allow-listed email. Built and tested against the real JWKS
-  endpoint; not called from request handling yet.
-- **Sign-in** (`src/auth/clerk.tsx`): `ClerkRoot` wraps the app in
-  `ClerkProvider` and the header shows a working sign-in button / user menu,
-  using `VITE_CLERK_PUBLISHABLE_KEY` at build time (`CLERK_PUBLISHABLE_KEY`
-  on the `preview` environment, synced by the deploy workflow's Build step).
-  A visitor can sign in for real right now -- it just doesn't unlock
-  anything yet.
+- **Verification** (`worker/principal.ts`, `worker/clerk-auth.ts`):
+  `resolvePrincipal` reads the `Authorization: Bearer` header, verifies it
+  (RS256, JWKS-pinned) against `CLERK_FRONTEND_API_URL`, and returns a
+  `Principal` with two identities that are **not interchangeable**:
+  - `userId` -- the Clerk user id (`sub`). What `handlePlan`'s spend ledger
+    and rate limiting key on (docs/decisions.md L3: "the budget ledger and
+    every ownership row key on the Clerk user id. Email is display only.").
+  - `policyIdentity` -- the verified email, or the shared `'unknown'` bucket
+    when the email claim is missing or unverified. What `VIBLD_MODEL_POLICY`
+    and `VIBLD_PLATFORM_ADMINS` (L4) are checked against instead: both
+    predate Clerk, are human-edited by email address, and are not ownership
+    rows.
 
-Neither is wired to `requireAccess` in `worker/index.ts`. Access stays
-authoritative until Clerk sign-in and the abuse controls in
-docs/decisions.md L29 are both ready to land in the same deploy
-(docs/decisions.md L5) -- this exists so that deploy is a cutover, not a
-rewrite. Both pieces above gracefully no-op if their key is ever unset
-(`ClerkRoot` renders its children unwrapped; `AuthStatus` renders nothing),
-so an incomplete deployment never breaks the app that already works.
+  An email claim with no verification status attached is never treated as
+  verified by default (`platform-admins.ts`'s `isPlatformAdmin` and
+  `principal.ts`'s `policyIdentity` both require `emailVerified === true`) --
+  that would turn a missing dashboard setting into an open grant.
 
-**Still needed before the cutover:**
+- **Sign-in** (`src/auth/clerk.tsx`, `src/auth/clerk-token.ts`): `ClerkRoot`
+  wraps the app in `ClerkProvider`; the header's `AuthStatus` shows a sign-in
+  button or the user menu. `clerk-token.ts` is the JSX-free half --
+  `getClerkToken()` (read via `window.Clerk`, since the session cookie is
+  scoped to Clerk's own domain and never reaches this Worker's origin on its
+  own) and `onClerkSessionChange()` (so `useBuilderSession.ts` re-probes
+  `/api/config` the moment someone signs in through the modal, rather than
+  requiring a reload) -- kept apart from `clerk.tsx`'s JSX specifically so
+  `node --test --experimental-strip-types` (which strips types but not JSX)
+  can still import it.
 
-1. A custom session token claim, from **Configure → Sessions → Edit** →
-   **Customize session token** in the Clerk dashboard, so verified requests
-   carry an email at all:
-   ```json
-   { "email": "{{user.primary_email_address}}" }
-   ```
-   `clerk-auth.ts` also reads `email_verified` as a boolean off the token; if
-   Clerk's shortcut for the primary address's verification status differs
-   from what's above once you're in the live claims editor, add it there
-   rather than guessing it here -- an unconfirmed shortcode in an auth claim
-   is worse than one left out, since `platform-admins.ts` treats an absent
-   `email_verified` as unverified, not as granted.
-2. `VIBLD_PLATFORM_ADMINS` on the `preview` environment: comma-separated
-   verified emails to grant platform-admin access.
-3. The rest of the L29 abuse controls -- Turnstile on sign-up and anonymous
-   generation, a WAF rate limit on `/api/*`, disposable-email blocking at
-   sign-up. All three are dashboard-only configuration (Cloudflare Turnstile
-   and WAF rules, Clerk's disposable-email restriction), not something this
-   session's tool access can set up:
-   - Turnstile: <https://dash.cloudflare.com> → **Turnstile** → create a
-     widget for `vibld.com`/the preview `workers.dev` origin.
-   - WAF rate limit: <https://dash.cloudflare.com> → the zone → **Security →
-     WAF → Rate limiting rules** → a rule on `/api/*`.
-   - Disposable email: <https://dashboard.clerk.com> → the app → **Rules** →
-     enable **Block sign-ups that use disposable email addresses**.
+Both gracefully no-op if `VITE_CLERK_PUBLISHABLE_KEY` is ever unset
+(`ClerkRoot` renders its children unwrapped; `AuthStatus` renders nothing;
+`getClerkToken()` returns `null`) -- but since Access is off, an unset key on
+a live deployment now means generation is unreachable, not merely
+unauthenticated, which is the fail-closed behaviour `isConfigured` in
+`worker/index.ts` requires.
 
-   The fourth L29 item -- an account-wide daily ceiling above the per-user
-   one, "so one compromised account cannot spend the month" -- is done:
-   `worker/index.ts`'s `reserveBudget` reserves against a second ledger
-   (`USER_BUDGET`'s namespace, reserved key `__account__`) before the
-   per-user one, and releases it if the per-user reservation then fails.
-   `VIBLD_ACCOUNT_DAILY_MICRO_USD` controls it (default $80.00/day, 20x the
-   per-user default) -- that default is a starting point, not a measured
-   figure; adjust it once real usage gives one.
+**What only Chris can do (one-time, dashboard-only):**
 
-4. The switch itself: `requireAccess` replaced by Clerk verification in
-   `worker/index.ts`, in the same deploy as the three manual items above.
+- **Remove the Cloudflare Access application** that used to gate this
+  Worker's route: <https://one.dash.cloudflare.com/> → **Access →
+  Applications** → find the one protecting `vibld-web-preview` (or wherever
+  the builder is routed) → delete it. Leaving it in place means Access still
+  intercepts every request before Clerk is ever reached, regardless of what
+  the Worker's own code does -- Access was always a second, independent gate
+  at the edge, not something this repository's deploy can remove on its own.
+- **Waitlist mode**: `https://dashboard.clerk.com/~/user-authentication/access-mode`
+  → **Waitlist** → **Save** (done). Approve or deny requests at
+  `https://dashboard.clerk.com/~/users/waitlist`.
+- `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) is set on the
+  deployment, but nothing reads it yet -- `platform-admins.ts`'s
+  `isPlatformAdmin` exists and is tested, but no endpoint calls it. There is
+  no admin-only surface to gate until one exists; wiring it in ahead of that
+  would be guessing at a shape nothing has tested yet.
 
 ## Generated output
 

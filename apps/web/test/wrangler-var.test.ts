@@ -17,7 +17,7 @@ describe('readVars', () => {
     );
     assert.ok(vars.VIBLD_PROVIDER);
     assert.ok(['anthropic', 'deepseek'].includes(vars.VIBLD_PROVIDER));
-    assert.ok(vars.ACCESS_AUD);
+    assert.ok(vars.CLERK_FRONTEND_API_URL);
   });
 
   it('ignores a commented-out entry, which grep would have matched', () => {

@@ -12,32 +12,18 @@
  * caller must see. It needs no credentials, which is the point: it can run
  * after every deploy without anyone holding a session.
  *
+ * docs/decisions.md L5: Cloudflare Access is off. Clerk is a Bearer-token
+ * check now, not a redirect, so a signed-out caller sees a plain 401 rather
+ * than a cross-origin bounce -- there is no redirect-following pitfall left
+ * to assert against, only that the endpoint still refuses to answer.
+ *
  * Usage: node scripts/smoke.mjs [origin]
  */
-
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 const ORIGIN =
   process.argv[2] ??
   process.env.VIBLD_SMOKE_ORIGIN ??
   'https://vibld-web-preview.chris-brock-llc.workers.dev';
-
-const root = join(import.meta.dirname, '..');
-
-/** Read the committed Access identifiers so drift is a failure, not a mystery. */
-function expectedAccess() {
-  const raw = readFileSync(join(root, 'apps/web/wrangler.jsonc'), 'utf8');
-  // Strip // comments; wrangler.jsonc is JSON with comments and trailing commas.
-  const stripped = raw
-    .replace(/^\s*\/\/.*$/gm, '')
-    .replace(/,(\s*[}\]])/g, '$1');
-  const config = JSON.parse(stripped);
-  return {
-    teamDomain: config.vars.ACCESS_TEAM_DOMAIN,
-    aud: config.vars.ACCESS_AUD,
-  };
-}
 
 const results = [];
 function check(name, fn) {
@@ -53,61 +39,20 @@ check('the origin is reachable', async () => {
   if (response.status === 0) throw new Error('no response from the origin');
 });
 
-check('Access gates the application', async () => {
-  const response = await head('/');
-  if (response.status !== 302) {
-    throw new Error(
-      `expected a 302 to the Access login for a signed-out caller, got ${response.status}. ` +
-        'An unauthenticated 200 would mean the Access application is no longer in front of this Worker.',
-    );
-  }
-});
-
-check('Access gates the API, not only the page', async () => {
-  // run_worker_first routes /api/* to the Worker. If Access were scoped to
-  // the SPA alone, the endpoints that spend money would be open.
+check('Clerk gates the API for a signed-out caller', async () => {
+  // run_worker_first routes /api/* to the Worker; the SPA shell at / is
+  // served straight from assets and carries no gate of its own -- the
+  // endpoints that spend money are what must refuse an anonymous caller.
   for (const path of ['/api/config', '/api/plan']) {
     const response = await head(path, { method: 'POST' });
-    if (response.status !== 302) {
-      throw new Error(`${path} answered ${response.status}, expected 302`);
+    if (response.status !== 401) {
+      throw new Error(
+        `${path} answered ${response.status} for a signed-out caller, expected 401. ` +
+          "A 200 here would mean anyone can spend the account's model budget.",
+      );
     }
   }
 });
-
-check(
-  'the login redirect matches the committed Access identifiers',
-  async () => {
-    const { teamDomain, aud } = expectedAccess();
-    const response = await head('/api/plan', { method: 'POST' });
-    const location = response.headers.get('location') ?? '';
-    const url = new URL(location);
-    if (url.host !== teamDomain) {
-      throw new Error(
-        `login host ${url.host} does not match ACCESS_TEAM_DOMAIN ${teamDomain}`,
-      );
-    }
-    if (url.searchParams.get('kid') !== aud) {
-      throw new Error(
-        'the login redirect names a different Access application than ACCESS_AUD. ' +
-          'Token verification in the Worker will reject every request.',
-      );
-    }
-  },
-);
-
-check(
-  'the redirect is cross-origin, so a browser must not follow it',
-  async () => {
-    // This is the whole bug, asserted rather than remembered: the hop leaves
-    // the Worker's origin, so a fetch that follows it is refused by CORS and
-    // reports nothing useful. The client must use redirect: 'manual'.
-    const response = await head('/api/plan', { method: 'POST' });
-    const location = new URL(response.headers.get('location') ?? '');
-    if (location.origin === new URL(ORIGIN).origin) {
-      throw new Error('expected the login redirect to leave the origin');
-    }
-  },
-);
 
 const failures = [];
 for (const { name, fn } of results) {

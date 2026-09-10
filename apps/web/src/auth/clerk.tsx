@@ -1,19 +1,12 @@
 import { ClerkProvider, Show, SignInButton, UserButton } from '@clerk/react';
 import type { ReactNode } from 'react';
+import { PUBLISHABLE_KEY, clerkConfigured } from './clerk-token.ts';
 
-/**
- * Present only once the deployment has been given a publishable key -- see
- * apps/web/README.md's Clerk setup section. Absent means "not configured
- * yet", not broken: every component here degrades to rendering nothing
- * rather than throwing, because the app must keep working exactly as it
- * always has whether or not this key exists. Cloudflare Access is still the
- * only thing that gates `/api/plan` (docs/decisions.md L5) -- nothing below
- * changes that on its own.
- */
-const PUBLISHABLE_KEY = import.meta.env?.VITE_CLERK_PUBLISHABLE_KEY as
-  string | undefined;
-
-export const clerkConfigured = Boolean(PUBLISHABLE_KEY);
+export {
+  clerkConfigured,
+  getClerkToken,
+  onClerkSessionChange,
+} from './clerk-token.ts';
 
 /** Wraps the app in `ClerkProvider` only when a key is actually present. */
 export function ClerkRoot({ children }: { children: ReactNode }) {
@@ -26,10 +19,9 @@ export function ClerkRoot({ children }: { children: ReactNode }) {
 }
 
 /**
- * The header's sign-in affordance. Deliberately inert beyond itself: signing
- * in here proves the Clerk side of the cutover works, but does not yet grant
- * access to anything -- that switch flips once the L29 abuse controls land
- * alongside it, not before (L5).
+ * The header's sign-in affordance. This is the whole gate now
+ * (docs/decisions.md L5): signing in here is what lets `/api/plan` and
+ * `/api/config` answer at all.
  */
 export function AuthStatus() {
   if (!clerkConfigured) return null;
