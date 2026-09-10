@@ -1,0 +1,11 @@
+{
+  "name": "vibld-preview-nstarsystems",
+  "compatibility_date": "2026-09-10",
+  // Pure static assets, no Worker script: this is a Vibld-generated project
+  // (ADR-0002, ordinary npm project, no Vibld runtime dependency), not part
+  // of the platform itself. Deployed as a one-off so it can be viewed live --
+  // see README.md in this directory.
+  "assets": {
+    "directory": "./dist"
+  }
+}
