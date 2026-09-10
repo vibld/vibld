@@ -81,4 +81,21 @@
     "bindings": [{ "name": "USER_BUDGET", "class_name": "UserBudget" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserBudget"] }],
+
+  // The control plane (docs/decisions.md L24/L25): D1 for generation
+  // metadata, R2 for the file content it points at. Provisioned already --
+  // see apps/web/migrations/ for the schema. worker/generation-store.ts is
+  // not wired into request handling yet: there is no authenticated principal
+  // to own a project until Clerk lands (L1), and writing that wiring before
+  // there is anyone to test it against would be guessing at the shape.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vibld-control-plane",
+      "database_id": "4d3190b8-9093-4dfe-8f88-58b4f9c61c73",
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "PROJECT_CONTENT", "bucket_name": "vibld-control-plane" },
+  ],
 }

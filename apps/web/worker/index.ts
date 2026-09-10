@@ -66,6 +66,13 @@ export interface Env {
   VIBLD_MAX_IN_FLIGHT?: string;
   VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
   VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
+  /**
+   * The control plane (docs/decisions.md L24/L25). Declared here because the
+   * binding exists in wrangler.jsonc; not read by anything yet -- see
+   * generation-store.ts's module comment for why that wiring waits on Clerk.
+   */
+  DB?: D1Database;
+  PROJECT_CONTENT?: R2Bucket;
 }
 
 /** Re-exported so Wrangler can find the class from the Worker's entrypoint. */

@@ -49,6 +49,34 @@ interface RateLimit {
   limit(options: { key: string }): Promise<{ success: boolean }>;
 }
 
+/**
+ * The `d1_databases` binding. `changes` is what makes the compare-and-set
+ * promotion in `generation-store.ts` atomic: a conditional `UPDATE`'s `WHERE`
+ * either matches and is counted here, or it does not and nothing is written
+ * -- no read-then-write race between checking and setting the value.
+ */
+interface D1Result<T = Record<string, unknown>> {
+  results: T[];
+  success: boolean;
+  meta: { changes: number; last_row_id: number };
+}
+
+interface D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement;
+  run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
+  first<T = Record<string, unknown>>(): Promise<T | null>;
+}
+
+interface D1Database {
+  prepare(query: string): D1PreparedStatement;
+}
+
+/** The `r2_buckets` binding, narrowed to plain text get/put. */
+interface R2Bucket {
+  get(key: string): Promise<{ text(): Promise<string> } | null>;
+  put(key: string, value: string): Promise<unknown>;
+}
+
 declare module 'cloudflare:workers' {
   export class DurableObject<Env = unknown> {
     protected ctx: DurableObjectState;
