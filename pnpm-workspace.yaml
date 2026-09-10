@@ -17,3 +17,10 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@clerk/react@6.15.2'
   - '@clerk/shared@4.31.1'
+
+# sharp is a transitive dev dependency (wrangler > miniflare, pulled in by
+# @react-router/dev), not something the deployed Worker ever runs -- but
+# <0.35.4 carries a high-severity libheif vulnerability
+# (GHSA-rgj7-g3m4-5g8c), so it's pinned up regardless.
+overrides:
+  sharp: '>=0.35.4'
