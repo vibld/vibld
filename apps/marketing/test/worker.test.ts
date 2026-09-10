@@ -76,7 +76,7 @@ describe('POST /api/waitlist, JSON caller', () => {
     assert.equal(url, 'https://api.resend.com/contacts');
     assert.deepEqual(JSON.parse(init.body as string), {
       email: 'chris@example.com',
-      segments: ['segment-id'],
+      segments: [{ id: 'segment-id' }],
     });
   });
 

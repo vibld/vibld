@@ -90,7 +90,7 @@ export function resendContactRequest(
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ email, segments: [segmentId] }),
+      body: JSON.stringify({ email, segments: [{ id: segmentId }] }),
     },
   };
 }
