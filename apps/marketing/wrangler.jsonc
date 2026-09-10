@@ -1,0 +1,38 @@
+{
+  "name": "vibld-marketing",
+  "compatibility_date": "2026-09-10",
+
+  // The Worker handles /api/* only -- today, just the waitlist submission.
+  // Every other request is served straight from the prerendered build.
+  "main": "./worker/index.ts",
+  "assets": {
+    "directory": "./build/client",
+    "binding": "ASSETS",
+    // Every declared route (see app/site.ts) is prerendered to its own
+    // index.html. This only matters for a path that was never declared --
+    // the client ErrorBoundary in app/root.tsx renders the "page not found"
+    // message after hydration, the same way a conventional static host's
+    // SPA fallback works.
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+
+  // vibld.com and www both point at this Worker. There is no DNS step
+  // beyond this file: Cloudflare creates the records for an active zone it
+  // already controls the first time this deploys. See docs/decisions.md,
+  // L20/L21.
+  "routes": [
+    { "pattern": "vibld.com", "custom_domain": true },
+    { "pattern": "www.vibld.com", "custom_domain": true },
+  ],
+
+  // Public identifier, not a secret -- the "vibld-waitlist" segment in
+  // Resend that /api/waitlist adds a signup to.
+  "vars": {
+    "VIBLD_WAITLIST_SEGMENT_ID": "6a463d34-31bc-4f24-ba0b-f30bfb5c7660",
+  },
+
+  // RESEND_API_KEY is a Worker secret, set out of band by the deploy
+  // workflow and never committed. Without it, /api/waitlist answers 503
+  // rather than silently discarding a signup -- see worker/index.ts.
+}

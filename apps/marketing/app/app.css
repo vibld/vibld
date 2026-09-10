@@ -1,0 +1,138 @@
+@import 'tailwindcss';
+
+/*
+ * A native system-font stack rather than a webfont link, on purpose: the
+ * Cookie Notice on this site says it makes no third-party requests, and a
+ * Google Fonts (or similar) link would make that false the moment someone
+ * checked. Revisit together if a webfont is ever added.
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Code', 'Courier New', monospace;
+
+  --color-ink: oklch(0.2 0.015 40);
+  --color-ink-muted: oklch(0.47 0.015 40);
+  --color-paper: oklch(0.985 0.006 60);
+  --color-surface: oklch(0.96 0.01 60);
+  --color-accent: oklch(0.68 0.19 45);
+  --color-accent-ink: oklch(0.32 0.14 45);
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+/*
+ * `@theme` only has to run once, at the top of the file: it registers each
+ * token and its default (light) value, and generates the utilities that
+ * reference it. A second `@theme` block here would look like an override but
+ * is not one -- Tailwind v4 resolves `@theme` at build time regardless of
+ * what media query wraps it, so it silently replaces the light value
+ * everywhere instead of only under `prefers-color-scheme: dark`. Overriding
+ * the custom property itself, in plain CSS, is what actually varies by
+ * media query -- the utility classes read the same variable either way.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ink: oklch(0.95 0.008 60);
+    --color-ink-muted: oklch(0.72 0.015 60);
+    --color-paper: oklch(0.17 0.012 40);
+    --color-surface: oklch(0.23 0.014 40);
+    --color-accent: oklch(0.74 0.17 50);
+    --color-accent-ink: oklch(0.88 0.1 55);
+  }
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+/*
+ * A visible focus ring on every interactive element. Removing it is the most
+ * common way a site becomes unusable by keyboard while still looking fine.
+ */
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Plain semantic HTML inside every legal document, styled from here rather
+ * than with a utility class on every tag -- eight documents' worth of
+ * <h2>/<p>/<ul> would otherwise repeat the same handful of classes hundreds
+ * of times for no benefit over one rule each.
+ */
+.prose-legal h2 {
+  margin-top: 2.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.prose-legal h2:first-child {
+  margin-top: 0;
+}
+.prose-legal p {
+  margin-top: 1rem;
+  line-height: 1.75;
+  color: var(--color-ink-muted);
+}
+.prose-legal ul,
+.prose-legal ol {
+  margin-top: 1rem;
+  padding-left: 1.25rem;
+  color: var(--color-ink-muted);
+}
+.prose-legal ul {
+  list-style: disc;
+}
+.prose-legal ol {
+  list-style: decimal;
+}
+.prose-legal li + li {
+  margin-top: 0.5rem;
+}
+.prose-legal a {
+  color: var(--color-accent-ink);
+  text-underline-offset: 3px;
+}
+.prose-legal a:hover {
+  text-decoration: underline;
+}
+.prose-legal strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.prose-legal table {
+  margin-top: 1.5rem;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+.prose-legal th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid
+    color-mix(in oklch, var(--color-ink) 15%, transparent);
+  color: var(--color-ink);
+}
+.prose-legal td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid
+    color-mix(in oklch, var(--color-ink) 10%, transparent);
+  color: var(--color-ink-muted);
+  vertical-align: top;
+}
