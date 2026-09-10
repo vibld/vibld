@@ -40,6 +40,8 @@ describe('validateSubmission', () => {
     const result = validateSubmission({
       email: 'Chris@Example.com',
       company: '',
+      pageUrl: '',
+      pageReferrer: '',
     });
     assert.deepEqual(result, { ok: true, email: 'chris@example.com' });
   });
@@ -48,13 +50,20 @@ describe('validateSubmission', () => {
     const result = validateSubmission({
       email: '  Chris@Example.com  ',
       company: '',
+      pageUrl: '',
+      pageReferrer: '',
     });
     assert.equal(result.ok, true);
     assert.equal(result.ok && result.email, 'chris@example.com');
   });
 
   it('rejects an implausible email', () => {
-    const result = validateSubmission({ email: 'nope', company: '' });
+    const result = validateSubmission({
+      email: 'nope',
+      company: '',
+      pageUrl: '',
+      pageReferrer: '',
+    });
     assert.deepEqual(result, { ok: false, reason: 'invalid-email' });
   });
 
@@ -62,6 +71,8 @@ describe('validateSubmission', () => {
     const result = validateSubmission({
       email: 'chris@example.com',
       company: 'a bot filled this',
+      pageUrl: '',
+      pageReferrer: '',
     });
     assert.deepEqual(result, { ok: false, reason: 'spam-honeypot' });
   });
@@ -85,6 +96,8 @@ describe('parseWaitlistSubmission', () => {
     assert.deepEqual(submission, {
       email: 'chris@example.com',
       company: '',
+      pageUrl: '',
+      pageReferrer: '',
     });
   });
 
@@ -102,6 +115,8 @@ describe('parseWaitlistSubmission', () => {
     assert.deepEqual(submission, {
       email: 'chris@example.com',
       company: '',
+      pageUrl: '',
+      pageReferrer: '',
     });
   });
 
@@ -112,7 +127,31 @@ describe('parseWaitlistSubmission', () => {
       body: JSON.stringify({}),
     });
     const submission = await parseWaitlistSubmission(request);
-    assert.deepEqual(submission, { email: '', company: '' });
+    assert.deepEqual(submission, {
+      email: '',
+      company: '',
+      pageUrl: '',
+      pageReferrer: '',
+    });
+  });
+
+  it('reads the attribution fields the form reports', async () => {
+    // The Worker only ever sees its own /api/waitlist URL, so the page has to
+    // report where the visitor actually was -- see WaitlistForm.tsx.
+    const body = new URLSearchParams({
+      email: 'chris@example.com',
+      company: '',
+      page_url: 'https://vibld.com/?utm_source=hn',
+      page_referrer: 'https://news.ycombinator.com/',
+    });
+    const request = new Request('https://vibld.com/api/waitlist', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    const submission = await parseWaitlistSubmission(request);
+    assert.equal(submission?.pageUrl, 'https://vibld.com/?utm_source=hn');
+    assert.equal(submission?.pageReferrer, 'https://news.ycombinator.com/');
   });
 
   it('returns null for an unparseable body', async () => {

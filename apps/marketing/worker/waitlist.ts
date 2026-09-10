@@ -22,6 +22,14 @@ export function isPlausibleEmail(value: string): boolean {
 export interface WaitlistSubmission {
   email: string;
   /**
+   * The page the visitor submitted from, and what referred them there. The
+   * Worker only ever sees its own `/api/waitlist` URL, so attribution has to
+   * be reported by the form -- see the hidden fields in WaitlistForm.tsx.
+   * Both are optional: a submission without them is still a valid signup.
+   */
+  pageUrl: string;
+  pageReferrer: string;
+  /**
    * Honeypot field. A real visitor never sees or fills it -- it is hidden
    * from sighted and screen-reader users alike (see the form component) --
    * so any value here means a bot filled every field it could find.
@@ -44,12 +52,17 @@ export async function parseWaitlistSubmission(
       return {
         email: typeof body.email === 'string' ? body.email : '',
         company: typeof body.company === 'string' ? body.company : '',
+        pageUrl: typeof body.page_url === 'string' ? body.page_url : '',
+        pageReferrer:
+          typeof body.page_referrer === 'string' ? body.page_referrer : '',
       };
     }
     const form = await request.formData();
     return {
       email: String(form.get('email') ?? ''),
       company: String(form.get('company') ?? ''),
+      pageUrl: String(form.get('page_url') ?? ''),
+      pageReferrer: String(form.get('page_referrer') ?? ''),
     };
   } catch {
     return null;

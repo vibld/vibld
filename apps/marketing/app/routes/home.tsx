@@ -1,8 +1,8 @@
 import { WaitlistForm } from '../components/WaitlistForm';
-import { metaFor } from '../site';
+import { metaFor, organizationSchema } from '../site';
 
 export function meta() {
-  return metaFor('/');
+  return [...metaFor('/'), organizationSchema()];
 }
 
 export default function Home() {

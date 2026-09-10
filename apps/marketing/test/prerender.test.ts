@@ -36,8 +36,11 @@ function tagContent(html: string, attr: string, value: string): string | null {
 
 before(() => {
   // Building here rather than assuming a build exists: a test that silently
-  // reads a stale artefact proves nothing about the current source.
-  execFileSync('npx', ['react-router', 'build'], {
+  // reads a stale artefact proves nothing about the current source. This runs
+  // the package's own build script, not `react-router build` directly, so the
+  // postbuild step (robots.txt, sitemap.xml, llms.txt, 404.html) is covered
+  // by everything below.
+  execFileSync('npm', ['run', 'build'], {
     cwd: join(import.meta.dirname, '..'),
     stdio: 'ignore',
   });
@@ -186,5 +189,121 @@ describe('security.txt', () => {
     const body = readFileSync(path, 'utf8');
     assert.match(body, /^Contact: mailto:security@vibld\.com$/m);
     assert.match(body, /^Expires: \d{4}-\d{2}-\d{2}T/m);
+  });
+});
+
+describe('crawler-facing files', () => {
+  it('serves a real robots.txt that points at the sitemap', () => {
+    const body = readFileSync(join(CLIENT, 'robots.txt'), 'utf8');
+    assert.match(body, /^User-agent: \*$/m);
+    assert.match(body, /^Allow: \/$/m);
+    assert.match(body, /^Sitemap: https:\/\/[^\s]+\/sitemap\.xml$/m);
+  });
+
+  it('lists every declared route in the sitemap, and nothing else', () => {
+    const body = readFileSync(join(CLIENT, 'sitemap.xml'), 'utf8');
+    const locs = [...body.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+    assert.equal(locs.length, ROUTES.length);
+    for (const route of ROUTES) {
+      assert.ok(
+        locs.includes(new URL(route.path, SITE.url).toString()),
+        `sitemap is missing ${route.path}`,
+      );
+    }
+  });
+
+  it('keeps the 404 page out of the sitemap', () => {
+    const body = readFileSync(join(CLIENT, 'sitemap.xml'), 'utf8');
+    assert.ok(
+      !body.includes('/404'),
+      '404 must never be advertised to crawlers',
+    );
+  });
+
+  it('emits sitemap URLs that match the canonical tags exactly', () => {
+    // A sitemap entry that redirects to the canonical URL is a crawl-budget
+    // leak; both must name the same, slash-free form.
+    const body = readFileSync(join(CLIENT, 'sitemap.xml'), 'utf8');
+    for (const route of ROUTES) {
+      const canonical =
+        /rel="canonical"[^>]*href="([^"]+)"|href="([^"]+)"[^>]*rel="canonical"/.exec(
+          read(route.path),
+        );
+      const href = canonical?.[1] ?? canonical?.[2];
+      assert.ok(href, `no canonical on ${route.path}`);
+      assert.ok(
+        body.includes(`<loc>${href}</loc>`),
+        `sitemap/canonical mismatch for ${route.path}`,
+      );
+    }
+  });
+
+  it('publishes llms.txt naming the product and disambiguating the name', () => {
+    const body = readFileSync(join(CLIENT, 'llms.txt'), 'utf8');
+    assert.match(body, /^# Vibld$/m);
+    // The brand is read by search engines as a misspelling of "Bible"; the
+    // file has to say plainly what the word means.
+    assert.match(body, /vibe/i);
+    assert.match(body, /Bible/);
+  });
+});
+
+describe('the 404 page', () => {
+  it('is emitted where not_found_handling can serve it', () => {
+    const html = readFileSync(join(CLIENT, '404.html'), 'utf8');
+    assert.match(html, /Page not found/);
+  });
+
+  it('is marked noindex', () => {
+    const html = readFileSync(join(CLIENT, '404.html'), 'utf8');
+    assert.match(
+      html,
+      /name="robots"[^>]*content="noindex"|content="noindex"[^>]*name="robots"/,
+    );
+  });
+
+  it('leaves no /404 route behind that would answer 200', () => {
+    assert.ok(
+      !existsSync(join(CLIENT, '404', 'index.html')),
+      'postbuild must remove the prerendered /404 directory',
+    );
+  });
+});
+
+describe('social and structured metadata', () => {
+  it('gives every page an og:image that was actually built', () => {
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      const image = tagContent(html, 'property', 'og:image');
+      assert.ok(image, `og:image missing for ${route.path}`);
+      assert.match(image!, /^https?:\/\//);
+    }
+    // twitter:card promises a large image; it has to exist on disk.
+    assert.ok(
+      existsSync(join(CLIENT, 'og.png')),
+      'public/og.png did not build',
+    );
+  });
+
+  it('publishes Organization and WebSite schema on the home page', () => {
+    const html = read('/');
+    const block =
+      /<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/.exec(html);
+    assert.ok(block, 'no JSON-LD on the home page');
+    const graph = JSON.parse(block![1]);
+    const types = graph['@graph'].map(
+      (node: { '@type': string }) => node['@type'],
+    );
+    assert.deepEqual(types.sort(), ['Organization', 'WebSite']);
+  });
+
+  it('links the source repository via sameAs, the entity signal for the name', () => {
+    const html = read('/');
+    const block =
+      /<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/.exec(html);
+    const org = JSON.parse(block![1])['@graph'].find(
+      (node: { '@type': string }) => node['@type'] === 'Organization',
+    );
+    assert.ok(org.sameAs.includes(SITE.github));
   });
 });

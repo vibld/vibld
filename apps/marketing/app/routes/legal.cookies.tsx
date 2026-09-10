@@ -19,10 +19,20 @@ export default function Cookies() {
 
       <h2>What we use today</h2>
       <p>
-        This site sets no first-party cookies, and runs no analytics,
-        advertising, or third-party tracking scripts. We do not use Google Fonts
-        or any other external font, script, or embed that would send your
-        browser to a third party just by loading a page.
+        This site sets no cookies at all, and runs no advertising or third-party
+        tracking scripts. We do not use Google Fonts or any other external font,
+        script, or embed that would send your browser to a third party just by
+        loading a page.
+      </p>
+      <p>
+        We do count page views, using our own first-party measurement rather
+        than a third-party analytics service. Nothing about it identifies you:
+        it sets no cookie, assigns no visitor or device identifier, and stores
+        no IP address. For each page view we record only the page path, the
+        <em>hostname</em> of the site that linked you here (never the full
+        referring URL), any campaign tags in the link you followed, and the
+        country your request came from. Those records are aggregate counts and
+        cannot be traced back to a person or linked across visits.
       </p>
       <p>
         Cloudflare, our hosting provider, may set a small number of

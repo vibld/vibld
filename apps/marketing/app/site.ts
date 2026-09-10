@@ -24,6 +24,23 @@ export const SITE = {
   url: import.meta.env?.VITE_SITE_URL ?? 'https://vibld.com',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
+  /**
+   * Decisions BRAND-01 -- searching "vibld" returns Bible-study sites, because
+   * Google reads the word as a misspelling of "Bible". Nothing on-page fixes
+   * that directly; what does help is publishing an unambiguous entity, so the
+   * name, the logo, the source repository and the description below are the
+   * same everywhere they appear. `sameAs` is the strongest signal available,
+   * so it lists only profiles that actually exist -- an invented URL is worse
+   * than an omitted one.
+   */
+  github: 'https://github.com/vibld',
+  /** Absolute URL is filled in against SITE.url; see `metaFor`. */
+  ogImage: '/og.png',
+  ogImageAlt:
+    'Vibld — an AI application builder that generates conventional, portable projects.',
+  /** One sentence, reused verbatim in schema, llms.txt and the OG card. */
+  summary:
+    'Vibld is an AI application builder that turns a conversation into a working project and generates a conventional, portable codebase you can read, own and take with you.',
   mailingAddress: '285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342',
   governingLaw: 'the State of Georgia, USA, with venue in Gwinnett County',
   emails: {
@@ -131,6 +148,7 @@ export function routeFor(path: string): SiteRoute {
 export function metaFor(path: string) {
   const route = routeFor(path);
   const url = new URL(path, SITE.url).toString();
+  const image = new URL(SITE.ogImage, SITE.url).toString();
   return [
     { title: route.title },
     { name: 'description', content: route.description },
@@ -140,8 +158,62 @@ export function metaFor(path: string) {
     { property: 'og:title', content: route.title },
     { property: 'og:description', content: route.description },
     { property: 'og:url', content: url },
+    // twitter:card declares a large image, so one has to exist -- without
+    // og:image every share renders an empty card.
+    { property: 'og:image', content: image },
+    { property: 'og:image:width', content: '1200' },
+    { property: 'og:image:height', content: '630' },
+    { property: 'og:image:alt', content: SITE.ogImageAlt },
+    { property: 'og:locale', content: 'en_US' },
     { name: 'twitter:card', content: 'summary_large_image' },
     { name: 'twitter:title', content: route.title },
     { name: 'twitter:description', content: route.description },
+    { name: 'twitter:image', content: image },
+    { name: 'twitter:image:alt', content: SITE.ogImageAlt },
   ];
+}
+
+/**
+ * Organization and WebSite schema for the home page.
+ *
+ * React Router renders a `script:ld+json` meta descriptor as a JSON-LD block,
+ * so this rides along with the rest of the metadata rather than needing its
+ * own component.
+ */
+export function organizationSchema() {
+  return {
+    'script:ld+json': {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'Organization',
+          '@id': `${SITE.url}/#organization`,
+          name: SITE.name,
+          alternateName: 'Vibld by Chris Brock LLC',
+          url: SITE.url,
+          logo: new URL('/favicon.svg', SITE.url).toString(),
+          description: SITE.summary,
+          email: SITE.emails.hello,
+          sameAs: [SITE.github],
+          address: {
+            '@type': 'PostalAddress',
+            streetAddress: '285 W Wieuca Rd NE STE 62715',
+            addressLocality: 'Atlanta',
+            addressRegion: 'GA',
+            postalCode: '30342',
+            addressCountry: 'US',
+          },
+        },
+        {
+          '@type': 'WebSite',
+          '@id': `${SITE.url}/#website`,
+          name: SITE.name,
+          url: SITE.url,
+          description: SITE.summary,
+          inLanguage: 'en-US',
+          publisher: { '@id': `${SITE.url}/#organization` },
+        },
+      ],
+    },
+  };
 }
