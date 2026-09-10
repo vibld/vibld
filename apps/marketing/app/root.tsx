@@ -20,6 +20,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <Meta />
         <Links />
+        {/*
+          Cloudflare Turnstile (docs/decisions.md L29). Loaded site-wide,
+          async/defer so it never blocks rendering; WaitlistForm is the only
+          page that currently renders a `.cf-turnstile` div for it to find.
+        */}
+        <script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+          async
+          defer
+        ></script>
       </head>
       <body className="min-h-screen font-sans antialiased">
         <SiteHeader />

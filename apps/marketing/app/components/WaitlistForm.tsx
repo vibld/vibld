@@ -1,6 +1,19 @@
 import { useEffect, useId, useState } from 'react';
 
+import { SITE } from '../site.ts';
+
 type Status = 'idle' | 'submitting' | 'success' | 'error';
+
+/**
+ * The minimum of Turnstile's global API this component calls. `reset()`
+ * with no id resets every widget on the page, which is fine here -- this
+ * form is the only one that ever renders one.
+ */
+declare global {
+  interface Window {
+    turnstile?: { reset(widgetId?: string): void };
+  }
+}
 
 /**
  * Submits to a real endpoint (`/api/waitlist`, handled by the Worker in
@@ -51,12 +64,17 @@ export function WaitlistForm() {
         setMessage(
           data?.error ?? 'Something went wrong. Please try again in a moment.',
         );
+        // Turnstile tokens are single-use. Without this, a retry after any
+        // failure -- including one that has nothing to do with Turnstile --
+        // would always be rejected on the second attempt too.
+        window.turnstile?.reset();
       }
     } catch {
       setStatus('error');
       setMessage(
         'Could not reach the server. Check your connection and try again.',
       );
+      window.turnstile?.reset();
     }
   }
 
@@ -124,6 +142,19 @@ export function WaitlistForm() {
           {status === 'submitting' ? 'Joining…' : 'Join the waitlist'}
         </button>
       </div>
+      {/*
+        Auto-render mode: the api.js script (loaded in root.tsx) finds this
+        div on its own and turns it into the interactive widget, injecting
+        its token as a `cf-turnstile-response` field into this same <form> --
+        no ref, no manual render() call, and it flows through unchanged
+        whether the browser submits via the fetch/FormData path above or the
+        plain POST fallback below it (see worker/waitlist.ts).
+      */}
+      <div
+        className="cf-turnstile mt-3"
+        data-sitekey={SITE.turnstileSiteKey}
+        data-action="waitlist"
+      />
       {status === 'error' && message ? (
         <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-400">
           {message}

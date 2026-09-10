@@ -6,8 +6,10 @@ import {
   record,
 } from './analytics.ts';
 import {
+  isTurnstileVerified,
   parseWaitlistSubmission,
   resendContactRequest,
+  turnstileVerifyRequest,
   validateSubmission,
 } from './waitlist.ts';
 
@@ -16,6 +18,14 @@ export interface Env {
   RESEND_API_KEY?: string;
   /** Public identifier, not a secret -- the vibld-waitlist segment in Resend. */
   VIBLD_WAITLIST_SEGMENT_ID?: string;
+  /**
+   * Worker secret, pairs with the public site key baked into WaitlistForm.tsx
+   * (docs/decisions.md L29). Unset means the Turnstile check is skipped
+   * rather than the endpoint refusing every submission -- the widget is
+   * defense in depth on top of the honeypot, not something this endpoint
+   * has ever required to keep working.
+   */
+  TURNSTILE_SECRET_KEY?: string;
   /** Workers Analytics Engine dataset. Absent in local dev; see worker/analytics.ts. */
   ANALYTICS?: AnalyticsDataset;
 }
@@ -131,6 +141,31 @@ async function handleWaitlist(request: Request, env: Env): Promise<Response> {
     return html
       ? htmlResponse(CONFIRMATION_PAGE(message, false), 400)
       : jsonResponse({ ok: false, error: message }, 400);
+  }
+
+  if (env.TURNSTILE_SECRET_KEY) {
+    const { url, init } = turnstileVerifyRequest(
+      submission!.turnstileToken,
+      env.TURNSTILE_SECRET_KEY,
+      request.headers.get('cf-connecting-ip') ?? undefined,
+    );
+
+    let verified = false;
+    try {
+      const response = await fetch(url, init);
+      verified = response.ok && isTurnstileVerified(await response.json());
+    } catch (error) {
+      console.error('Turnstile verification request threw', error);
+    }
+
+    if (!verified) {
+      // Same treatment as the honeypot case above, and for the same reason:
+      // telling a bot specifically that Turnstile caught it only teaches it
+      // to solve Turnstile, not to give up.
+      return html
+        ? htmlResponse(CONFIRMATION_PAGE("You're on the list.", true), 200)
+        : jsonResponse({ ok: true }, 200);
+    }
   }
 
   if (!env.RESEND_API_KEY || !env.VIBLD_WAITLIST_SEGMENT_ID) {

@@ -32,6 +32,13 @@ export default function Privacy() {
           Cloudflare retains operationally.
         </li>
         <li>
+          <strong>An anti-abuse check on the waitlist form.</strong> We use
+          Cloudflare Turnstile to establish that a submission came from a person
+          rather than a bot. Loading a page contacts Cloudflare, which performs
+          that check and returns a token we verify server-side. We receive only
+          whether the check passed, never the signals Cloudflare used to decide.
+        </li>
+        <li>
           <strong>Aggregate page-view counts</strong>, measured by us rather
           than by a third-party analytics service. We record the page path, the
           hostname of the site that linked you here, any campaign tags in that

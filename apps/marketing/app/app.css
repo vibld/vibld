@@ -2,9 +2,9 @@
 
 /*
  * A native system-font stack rather than a webfont link, on purpose: the
- * Cookie Notice on this site says it makes no third-party requests, and a
- * Google Fonts (or similar) link would make that false the moment someone
- * checked. Revisit together if a webfont is ever added.
+ * Cookie Notice enumerates every third party the site contacts, and it is
+ * kept to the shortest list that the site actually needs. Adding a Google
+ * Fonts (or similar) link means adding a third party to that page too.
  */
 @theme {
   --font-sans:
