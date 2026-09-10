@@ -4,7 +4,12 @@ packages:
   - examples/*
 
 # esbuild is a Vite dependency whose install script fetches the platform
-# binary. pnpm blocks dependency build scripts by default; this allows that
-# one and nothing else.
+# binary. workerd is Cloudflare's own Workers runtime, pulled in as an
+# optional peer of @react-router/dev (apps/marketing's Cloudflare preset)
+# regardless of whether wrangler is a direct dependency anywhere -- its
+# install script does the same thing esbuild's does, fetching the matching
+# platform binary. pnpm blocks dependency build scripts by default; this
+# allows those two and nothing else.
 allowBuilds:
   esbuild: true
+  workerd: true
