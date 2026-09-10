@@ -46,8 +46,17 @@ Refund Policy, which exists ahead of any billing on purpose).
 it validates the submission (`worker/waitlist.ts`, tested without a Workers
 runtime — the same pattern `apps/web/worker/spend.ts` uses) and adds the
 email to the `vibld-waitlist` segment in Resend via their contacts API. A
-hidden honeypot field catches simple bots without requiring a CAPTCHA for a
-coming-soon page.
+hidden honeypot field catches simple bots, and Cloudflare Turnstile
+(docs/decisions.md L29) sits in front of both submission paths: the widget's
+public site key is a plain constant in `app/site.ts` (Turnstile's site keys
+are meant to ship in HTML, unlike its secret key), and `worker/waitlist.ts`
+verifies the token server-side against Cloudflare's siteverify endpoint,
+checking the action and hostname too so a token issued for a different site
+can't be replayed here. A failed check is treated exactly like a filled
+honeypot -- the caller still sees success, so a bot never learns which
+defense caught it. Both defenses are additive: Turnstile is skipped
+entirely, not required, when `TURNSTILE_SECRET_KEY` isn't set (see
+"Deploying" below), so a deploy without it still has the honeypot.
 
 The form posts to a real `action`/`method`, so it degrades to a full-page
 submission without JavaScript; with it, `WaitlistForm.tsx` submits via
@@ -80,6 +89,13 @@ Edit on the `vibld.com` zone, for the custom-domain routes),
 `apps/web`'s README documents for its `preview` environment. Then run the
 **Deploy marketing site** workflow from the Actions tab
 (`workflow_dispatch` only).
+
+`TURNSTILE_SECRET_KEY` is optional on the same environment: add it to turn
+on server-side verification of the widget already live in `WaitlistForm.tsx`
+(the public site key needs no secret handling — it's a plain constant in
+`app/site.ts`). It's on the same Cloudflare Turnstile page the site key came
+from. Without it, the endpoint works exactly as before -- the honeypot
+alone, no Turnstile check.
 
 To deploy from a workstation instead:
 

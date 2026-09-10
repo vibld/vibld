@@ -3,8 +3,10 @@ import { describe, it } from 'node:test';
 
 import {
   isPlausibleEmail,
+  isTurnstileVerified,
   parseWaitlistSubmission,
   resendContactRequest,
+  turnstileVerifyRequest,
   validateSubmission,
 } from '../worker/waitlist.ts';
 
@@ -40,6 +42,7 @@ describe('validateSubmission', () => {
     const result = validateSubmission({
       email: 'Chris@Example.com',
       company: '',
+      turnstileToken: 'token',
     });
     assert.deepEqual(result, { ok: true, email: 'chris@example.com' });
   });
@@ -48,13 +51,18 @@ describe('validateSubmission', () => {
     const result = validateSubmission({
       email: '  Chris@Example.com  ',
       company: '',
+      turnstileToken: 'token',
     });
     assert.equal(result.ok, true);
     assert.equal(result.ok && result.email, 'chris@example.com');
   });
 
   it('rejects an implausible email', () => {
-    const result = validateSubmission({ email: 'nope', company: '' });
+    const result = validateSubmission({
+      email: 'nope',
+      company: '',
+      turnstileToken: 'token',
+    });
     assert.deepEqual(result, { ok: false, reason: 'invalid-email' });
   });
 
@@ -62,6 +70,7 @@ describe('validateSubmission', () => {
     const result = validateSubmission({
       email: 'chris@example.com',
       company: 'a bot filled this',
+      turnstileToken: 'token',
     });
     assert.deepEqual(result, { ok: false, reason: 'spam-honeypot' });
   });
@@ -75,23 +84,29 @@ describe('validateSubmission', () => {
 });
 
 describe('parseWaitlistSubmission', () => {
-  it('reads a JSON body', async () => {
+  it('reads a JSON body, including the Turnstile token', async () => {
     const request = new Request('https://vibld.com/api/waitlist', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'chris@example.com', company: '' }),
+      body: JSON.stringify({
+        email: 'chris@example.com',
+        company: '',
+        'cf-turnstile-response': 'a-token',
+      }),
     });
     const submission = await parseWaitlistSubmission(request);
     assert.deepEqual(submission, {
       email: 'chris@example.com',
       company: '',
+      turnstileToken: 'a-token',
     });
   });
 
-  it('reads a form-encoded body', async () => {
+  it('reads a form-encoded body, including the Turnstile token', async () => {
     const body = new URLSearchParams({
       email: 'chris@example.com',
       company: '',
+      'cf-turnstile-response': 'a-token',
     });
     const request = new Request('https://vibld.com/api/waitlist', {
       method: 'POST',
@@ -102,6 +117,7 @@ describe('parseWaitlistSubmission', () => {
     assert.deepEqual(submission, {
       email: 'chris@example.com',
       company: '',
+      turnstileToken: 'a-token',
     });
   });
 
@@ -112,7 +128,11 @@ describe('parseWaitlistSubmission', () => {
       body: JSON.stringify({}),
     });
     const submission = await parseWaitlistSubmission(request);
-    assert.deepEqual(submission, { email: '', company: '' });
+    assert.deepEqual(submission, {
+      email: '',
+      company: '',
+      turnstileToken: '',
+    });
   });
 
   it('returns null for an unparseable body', async () => {
@@ -123,6 +143,92 @@ describe('parseWaitlistSubmission', () => {
     });
     const submission = await parseWaitlistSubmission(request);
     assert.equal(submission, null);
+  });
+});
+
+describe('turnstileVerifyRequest', () => {
+  it('targets the siteverify endpoint with the secret, token and remote IP', () => {
+    const { url, init } = turnstileVerifyRequest(
+      'a-token',
+      'ts_secret',
+      '203.0.113.5',
+    );
+    assert.equal(
+      url,
+      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+    );
+    assert.equal(init.method, 'POST');
+    const body = init.body as URLSearchParams;
+    assert.equal(body.get('secret'), 'ts_secret');
+    assert.equal(body.get('response'), 'a-token');
+    assert.equal(body.get('remoteip'), '203.0.113.5');
+  });
+
+  it('omits remoteip when no IP is available', () => {
+    const { init } = turnstileVerifyRequest('a-token', 'ts_secret');
+    const body = init.body as URLSearchParams;
+    assert.equal(body.has('remoteip'), false);
+  });
+});
+
+describe('isTurnstileVerified', () => {
+  it('accepts success for the right action and hostname', () => {
+    assert.equal(
+      isTurnstileVerified({
+        success: true,
+        action: 'waitlist',
+        hostname: 'vibld.com',
+      }),
+      true,
+    );
+    assert.equal(
+      isTurnstileVerified({
+        success: true,
+        action: 'waitlist',
+        hostname: 'www.vibld.com',
+      }),
+      true,
+    );
+  });
+
+  it('rejects success: false', () => {
+    assert.equal(
+      isTurnstileVerified({
+        success: false,
+        action: 'waitlist',
+        hostname: 'vibld.com',
+      }),
+      false,
+    );
+  });
+
+  it('rejects a token issued for a different action', () => {
+    assert.equal(
+      isTurnstileVerified({
+        success: true,
+        action: 'something-else',
+        hostname: 'vibld.com',
+      }),
+      false,
+    );
+  });
+
+  it('rejects a token issued for a different hostname', () => {
+    assert.equal(
+      isTurnstileVerified({
+        success: true,
+        action: 'waitlist',
+        hostname: 'evil.example.com',
+      }),
+      false,
+    );
+  });
+
+  it('rejects a response missing the hostname entirely', () => {
+    assert.equal(
+      isTurnstileVerified({ success: true, action: 'waitlist' }),
+      false,
+    );
   });
 });
 
