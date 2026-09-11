@@ -42,8 +42,11 @@ import {
   parseKeepaliveMs,
 } from './stream.ts';
 import {
+  createShare,
+  listShares,
   previewConfigured,
   previewStatus,
+  revokeShare,
   startPreview,
   stopPreview,
 } from './preview-client.ts';
@@ -739,6 +742,59 @@ async function handlePreview(request: Request, env: Env): Promise<Response> {
   return json({ error: 'Use GET, POST or DELETE.' }, 405);
 }
 
+/**
+ * Create, list, or revoke share links for the caller's own preview (L10).
+ * Same authentication as `handlePreview` -- this Worker still never trusts
+ * a userId the browser could supply itself, share links included.
+ */
+async function handlePreviewShare(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!previewConfigured(env)) {
+    return json(
+      { error: 'Preview is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (request.method === 'GET') {
+    const shares = await listShares(env, principal.userId);
+    return json({ shares });
+  }
+
+  if (request.method === 'POST') {
+    const result = await createShare(env, principal.userId);
+    if (!result.ok) return json({ error: result.error }, 409);
+    return json({
+      shareId: result.shareId,
+      expiresAt: result.expiresAt,
+      url: result.url,
+    });
+  }
+
+  if (request.method === 'DELETE') {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Body must be valid JSON.' }, 400);
+    }
+    const { shareId } = (body ?? {}) as { shareId?: unknown };
+    if (typeof shareId !== 'string' || shareId.length === 0) {
+      return json({ error: '"shareId" is required.' }, 400);
+    }
+    await revokeShare(env, principal.userId, shareId);
+    return json({ ok: true });
+  }
+
+  return json({ error: 'Use GET, POST or DELETE.' }, 405);
+}
+
 /** The slice of Cloudflare's ExecutionContext this Worker uses. */
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -799,6 +855,10 @@ export default {
 
     if (pathname === '/api/preview') {
       return handlePreview(request, env);
+    }
+
+    if (pathname === '/api/preview/share') {
+      return handlePreviewShare(request, env);
     }
 
     if (pathname === '/api/billing/status') {

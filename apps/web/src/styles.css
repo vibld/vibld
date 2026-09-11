@@ -426,6 +426,48 @@ body {
   color: var(--muted);
 }
 
+.preview__shares {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.6rem;
+}
+
+.preview__shares-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.preview__share-warning {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.preview__share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview__share-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+
+.preview__share-url {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
 .codepane {
   display: grid;
   grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);

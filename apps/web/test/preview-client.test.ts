@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  createShare,
+  listShares,
   previewConfigured,
   previewStatus,
+  revokeShare,
   startPreview,
   stopPreview,
 } from '../worker/preview-client.ts';
@@ -157,5 +160,129 @@ describe('stopPreview', () => {
     assert.equal(request.method, 'POST');
     const body = await request.json();
     assert.equal(body.userId, 'user_abc');
+  });
+});
+
+describe('createShare', () => {
+  it('posts the userId and returns the parsed grant', async () => {
+    const { binding, calls } = fakeBinding(() =>
+      jsonResponse({
+        shareId: 'share_1',
+        expiresAt: 1_800_000_000_000,
+        url: 'https://share.vibld-preview.dev/user_abc/share_1?exp=1&sig=x',
+      }),
+    );
+    const result = await createShare(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+    );
+    assert.deepEqual(result, {
+      ok: true,
+      shareId: 'share_1',
+      expiresAt: 1_800_000_000_000,
+      url: 'https://share.vibld-preview.dev/user_abc/share_1?exp=1&sig=x',
+    });
+    const request = calls[0]!;
+    assert.equal(new URL(request.url).pathname, '/internal/preview/share');
+    assert.equal(request.method, 'POST');
+    assert.equal((await request.json()).userId, 'user_abc');
+  });
+
+  it('surfaces the service error message when the preview cannot be shared', async () => {
+    const { binding } = fakeBinding(() =>
+      jsonResponse({ error: 'This preview is not currently running.' }, 409),
+    );
+    const result = await createShare(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'This preview is not currently running.',
+    });
+  });
+
+  it('does not crash on an unreadable response body', async () => {
+    const { binding } = fakeBinding(
+      () => new Response('not json', { status: 200 }),
+    );
+    const result = await createShare(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+    );
+    assert.equal(result.ok, false);
+  });
+});
+
+describe('listShares', () => {
+  it('gets the share endpoint with the userId in the query string', async () => {
+    const { binding, calls } = fakeBinding(() =>
+      jsonResponse({
+        shares: [
+          {
+            shareId: 'share_1',
+            createdAt: 1,
+            expiresAt: 1_800_000_000_000,
+            revoked: false,
+            url: 'https://share.vibld-preview.dev/user_abc/share_1?exp=1&sig=x',
+          },
+          {
+            shareId: 'share_2',
+            createdAt: 2,
+            expiresAt: 3,
+            revoked: true,
+          },
+        ],
+      }),
+    );
+    const shares = await listShares(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user abc',
+    );
+    assert.equal(shares.length, 2);
+    assert.equal(shares[1]!.revoked, true);
+    assert.equal(shares[1]!.url, undefined);
+    const request = calls[0]!;
+    assert.equal(new URL(request.url).pathname, '/internal/preview/share');
+    assert.equal(new URL(request.url).searchParams.get('userId'), 'user abc');
+  });
+
+  it('filters out anything not shaped like a share', async () => {
+    const { binding } = fakeBinding(() =>
+      jsonResponse({ shares: [{ shareId: 'share_1' }, 'garbage', null] }),
+    );
+    const shares = await listShares(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+    );
+    assert.deepEqual(shares, []);
+  });
+
+  it('is an empty list on an unreadable response body', async () => {
+    const { binding } = fakeBinding(
+      () => new Response('not json', { status: 200 }),
+    );
+    const shares = await listShares(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+    );
+    assert.deepEqual(shares, []);
+  });
+});
+
+describe('revokeShare', () => {
+  it('sends the userId and shareId to the share endpoint as a DELETE', async () => {
+    const { binding, calls } = fakeBinding(() => jsonResponse({ ok: true }));
+    await revokeShare(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+      'share_1',
+    );
+    const request = calls[0]!;
+    assert.equal(new URL(request.url).pathname, '/internal/preview/share');
+    assert.equal(request.method, 'DELETE');
+    const body = await request.json();
+    assert.equal(body.userId, 'user_abc');
+    assert.equal(body.shareId, 'share_1');
   });
 });

@@ -48,6 +48,6 @@
     "PREVIEW_HOSTNAME": "vibld-preview.dev",
   },
 
-  // PREVIEW_INTERNAL_SECRET is a Worker secret, set out of band -- see
-  // internal-auth.ts and README.md.
+  // PREVIEW_INTERNAL_SECRET and PREVIEW_SHARE_SECRET are Worker secrets, set
+  // out of band -- see internal-auth.ts / share-token.ts and README.md.
 }

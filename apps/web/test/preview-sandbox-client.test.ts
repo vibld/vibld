@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  createPreviewShare,
+  fetchPreviewShares,
   fetchPreviewStatus,
+  revokePreviewShare,
   startSandboxPreview,
   stopSandboxPreview,
 } from '../src/generation/preview-client.ts';
@@ -160,6 +163,132 @@ describe('stopSandboxPreview', () => {
   it('throws on a failed stop, rather than pretending it succeeded', async () => {
     await assert.rejects(
       () => stopSandboxPreview(jsonFetch({ error: 'nope' }, 500)),
+      /nope/,
+    );
+  });
+});
+
+describe('fetchPreviewShares', () => {
+  it('sends the Clerk bearer token and returns the parsed list', async () => {
+    const calls: Array<[string, RequestInit | undefined]> = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push([url, init]);
+      return new Response(
+        JSON.stringify({
+          shares: [
+            {
+              shareId: 'share_1',
+              createdAt: 1,
+              expiresAt: 2,
+              revoked: false,
+              url: 'https://share.vibld-preview.dev/user_1/share_1?exp=2&sig=x',
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const shares = await fetchPreviewShares(fetchImpl, async () => 'a-token');
+
+    assert.equal(shares.length, 1);
+    assert.equal(shares[0]!.shareId, 'share_1');
+    const [url, init] = calls[0]!;
+    assert.equal(url, '/api/preview/share');
+    assert.equal(
+      (init?.headers as Record<string, string>).Authorization,
+      'Bearer a-token',
+    );
+  });
+
+  it('filters out anything not shaped like a share', async () => {
+    const shares = await fetchPreviewShares(
+      jsonFetch({ shares: [{ shareId: 'share_1' }, 'garbage', null] }),
+    );
+    assert.deepEqual(shares, []);
+  });
+
+  it('is an empty list rather than throwing when signed out or unauthorized', async () => {
+    assert.deepEqual(
+      await fetchPreviewShares(jsonFetch({ error: 'Sign in required.' }, 401)),
+      [],
+    );
+  });
+
+  it('is an empty list when the deployment has no preview endpoint at all', async () => {
+    const failing = (async () => {
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch;
+    assert.deepEqual(await fetchPreviewShares(failing), []);
+  });
+});
+
+describe('createPreviewShare', () => {
+  it('posts and returns the parsed grant', async () => {
+    const calls: Array<[string, RequestInit | undefined]> = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push([url, init]);
+      return new Response(
+        JSON.stringify({
+          shareId: 'share_1',
+          expiresAt: 1_800_000_000_000,
+          url: 'https://share.vibld-preview.dev/user_1/share_1?exp=1&sig=x',
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const share = await createPreviewShare(fetchImpl, async () => 'a-token');
+
+    assert.equal(share.shareId, 'share_1');
+    assert.equal(share.revoked, false);
+    assert.equal(
+      share.url,
+      'https://share.vibld-preview.dev/user_1/share_1?exp=1&sig=x',
+    );
+    const [url, init] = calls[0]!;
+    assert.equal(url, '/api/preview/share');
+    assert.equal(init?.method, 'POST');
+  });
+
+  it('surfaces the server error message rather than failing opaquely', async () => {
+    await assert.rejects(
+      () =>
+        createPreviewShare(
+          jsonFetch({ error: 'This preview is not currently running.' }, 409),
+        ),
+      /not currently running/,
+    );
+  });
+
+  it('rejects a 200 response that is not shaped like a grant', async () => {
+    await assert.rejects(
+      () => createPreviewShare(jsonFetch({})),
+      /unreadable response/,
+    );
+  });
+});
+
+describe('revokePreviewShare', () => {
+  it('sends the shareId as a DELETE', async () => {
+    const calls: Array<[string, RequestInit | undefined]> = [];
+    await revokePreviewShare(
+      'share_1',
+      (async (url: string, init?: RequestInit) => {
+        calls.push([url, init]);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }) as unknown as typeof fetch,
+      async () => 'a-token',
+    );
+    const [url, init] = calls[0]!;
+    assert.equal(url, '/api/preview/share');
+    assert.equal(init?.method, 'DELETE');
+    assert.deepEqual(JSON.parse(String(init?.body)), { shareId: 'share_1' });
+  });
+
+  it('throws on a failed revoke, rather than pretending it succeeded', async () => {
+    await assert.rejects(
+      () => revokePreviewShare('share_1', jsonFetch({ error: 'nope' }, 500)),
       /nope/,
     );
   });

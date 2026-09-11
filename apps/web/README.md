@@ -294,12 +294,12 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
 `/api/preview` runs the caller's own project for real -- `npm install`, then
 a live dev server -- in a genuinely untrusted, time-boxed container, and
 returns a URL to view it. All of the actual work (the container, egress
-lockdown, concurrency, lifetime) lives in `@vibld/preview`, a separate
-Worker; see that package's README for why, and for what it does and does
-not do yet (sharing beyond default privacy is the open piece). This app's
-own `worker/preview-client.ts` is a thin, authenticated forwarder: it
-resolves the caller's Clerk principal, then calls `@vibld/preview` over a
-service binding, trusting nothing the browser could have supplied itself.
+lockdown, concurrency, lifetime, sharing) lives in `@vibld/preview`, a
+separate Worker; see that package's README for why, and for the full
+sharing design (L10). This app's own `worker/preview-client.ts` is a thin,
+authenticated forwarder: it resolves the caller's Clerk principal, then
+calls `@vibld/preview` over a service binding, trusting nothing the browser
+could have supplied itself.
 
 - `POST /api/preview` -- body `{ "files": [{ "path", "content" }, ...] }`
   (the same shape `/api/plan`'s `base` already uses). Starts a preview, or
@@ -316,6 +316,16 @@ again with the files to actually start), `{status: "installing" | "starting"}`,
 `/api/preview` answers `503` when `PREVIEW` or `PREVIEW_INTERNAL_SECRET` is
 unset -- unavailable, never open, the same rule `isConfigured` already
 applies to `/api/plan`.
+
+- `POST /api/preview/share` -- no body. Mints a new share link (L10) for
+  the caller's currently-running preview; `409` if nothing is running to
+  share. Returns `{ shareId, expiresAt, url }`.
+- `GET /api/preview/share` -- every grant ever issued for the caller's
+  preview, active or not: `{ shares: [{ shareId, createdAt, expiresAt,
+revoked, url? }, ...] }`. `url` is present only for a still-active grant.
+- `DELETE /api/preview/share` -- body `{ "shareId" }`. Revokes one grant,
+  independently of the preview it points at and of any other grant.
+  Idempotent.
 
 ### In the builder shell
 
@@ -334,6 +344,16 @@ The polling state lives in `Workspace.tsx` (`generation/use-preview-sandbox.ts`'
 Preview tab is active, so state scoped to `PreviewPanel` would be torn
 down -- along with the poll loop -- every time the user switched to Code or
 Console and back, silently orphaning a sandbox that was still running.
+
+Once a sandbox is `ready`, the panel also shows a **Share** section
+(`PreviewPanel.tsx`'s `SharePanel`): a "Share" button (`usePreviewSandbox`'s
+same hook, extended with `shares`/`share`/`revokeShare`), a list of every
+currently-active link with a "Revoke" button of its own, and a standing
+warning that anyone with a link can view the running app and everything it
+shows -- ADR-0006 requires that warning be part of the flow, not a tooltip
+nobody opens. Shares are cleared from view (not revoked -- just no longer
+this session's to show) the moment the sandbox itself stops or fails, since
+a share only ever makes sense against a preview that is actually running.
 
 ### Setup
 

@@ -120,6 +120,68 @@ export function PreviewPanel({
           ) : null}
         </>
       ) : null}
+
+      {sandbox.status?.status === 'ready' ? (
+        <SharePanel sandbox={sandbox} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Share links (docs/decisions.md L10): several may be active at once, each
+ * independently revocable, unaffected by anything else here -- restarting
+ * or stopping the sandbox this panel already handles above, not a share.
+ */
+function SharePanel({ sandbox }: { sandbox: PreviewSandbox }) {
+  const active = sandbox.shares.filter((share) => !share.revoked);
+
+  return (
+    <div className="preview__shares">
+      <div className="preview__shares-header">
+        <button
+          type="button"
+          className="chip"
+          disabled={sandbox.sharePending}
+          onClick={() => sandbox.share()}
+        >
+          Share
+        </button>
+        {/* ADR-0006: a share grants access to a running, live copy of this
+            project's own content -- the warning is part of the flow, not
+            an afterthought in a tooltip nobody opens. */}
+        <span className="preview__share-warning">
+          Anyone with a share link can view this running app and everything it
+          shows, until it&apos;s revoked or expires.
+        </span>
+      </div>
+
+      {active.length > 0 ? (
+        <ul className="preview__share-list">
+          {active.map((share) => (
+            <li key={share.shareId} className="preview__share-item">
+              <code className="preview__share-url">{share.url}</code>
+              <span className="preview__expiry">
+                Expires {new Date(share.expiresAt).toLocaleString()}
+              </span>
+              <button
+                type="button"
+                className="chip"
+                disabled={sandbox.sharePending}
+                onClick={() => sandbox.revokeShare(share.shareId)}
+              >
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {sandbox.shareError ? (
+        <p className="pane-note pane-note--error" role="alert">
+          {sandbox.shareError}
+        </p>
+      ) : null}
     </div>
   );
 }
