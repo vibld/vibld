@@ -86,12 +86,23 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserBudget"] }],
 
+  // Durable generation (docs/decisions.md L26). A Workflow binding is
+  // declared independently of durable_objects above -- Workflows are built
+  // on Durable Objects internally, but that is Cloudflare's implementation
+  // detail, not something this binding needs a migrations entry for.
+  "workflows": [
+    {
+      "name": "vibld-generation",
+      "binding": "GENERATION_WORKFLOW",
+      "class_name": "GenerationWorkflow",
+    },
+  ],
+
   // The control plane (docs/decisions.md L24/L25): D1 for generation
   // metadata, R2 for the file content it points at. Provisioned already --
-  // see apps/web/migrations/ for the schema. worker/generation-store.ts is
-  // not wired into request handling yet: Clerk sign-in is live now (L5), so
-  // there is a principal to own a project against, but that wiring is
-  // separate work that has not started.
+  // see apps/web/migrations/ for the schema. Wired into request handling by
+  // GenerationWorkflow (worker/generation-workflow.ts), the only thing that
+  // constructs worker/generation-store.ts now.
   "d1_databases": [
     {
       "binding": "DB",

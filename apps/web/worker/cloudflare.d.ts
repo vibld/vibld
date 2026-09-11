@@ -77,10 +77,81 @@ interface R2Bucket {
   put(key: string, value: string): Promise<unknown>;
 }
 
+/**
+ * The `workflows` binding (docs/decisions.md L26), narrowed the same way as
+ * everything else in this file: only what `generation-workflow.ts` and
+ * `index.ts` actually call. `step.do`'s real signature also carries a
+ * `WorkflowStepContext` argument and a rollback-handler overload; neither is
+ * used here, so neither is declared.
+ */
+interface WorkflowInstanceStatus {
+  status:
+    | 'queued'
+    | 'running'
+    | 'paused'
+    | 'errored'
+    | 'terminated'
+    | 'complete'
+    | 'waiting'
+    | 'waitingForPause'
+    | 'unknown';
+  error?: { name: string; message: string };
+  output?: unknown;
+}
+
+interface WorkflowInstance {
+  readonly id: string;
+  status(): Promise<WorkflowInstanceStatus>;
+  /** Best-effort: an instance already errored, terminated or complete throws. */
+  terminate(): Promise<void>;
+}
+
+interface WorkflowInstanceCreateOptions<Params> {
+  /** Chosen by the caller so a run's id can double as its Workflow instance id. */
+  id?: string;
+  params?: Params;
+}
+
+interface Workflow<Params = unknown> {
+  get(id: string): Promise<WorkflowInstance>;
+  /** Throws if `options.id` already names an existing instance. */
+  create(
+    options?: WorkflowInstanceCreateOptions<Params>,
+  ): Promise<WorkflowInstance>;
+}
+
+interface WorkflowEvent<T> {
+  readonly payload: Readonly<T>;
+}
+
+interface WorkflowStepConfig {
+  retries?: {
+    limit: number;
+    delay: string | number;
+    backoff?: 'constant' | 'linear' | 'exponential';
+  };
+  timeout?: string | number;
+}
+
+interface WorkflowStep {
+  do<T>(
+    name: string,
+    config: WorkflowStepConfig,
+    callback: () => Promise<T>,
+  ): Promise<T>;
+}
+
 declare module 'cloudflare:workers' {
   export class DurableObject<Env = unknown> {
     protected ctx: DurableObjectState;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
+  }
+
+  export abstract class WorkflowEntrypoint<Env = unknown, T = unknown> {
+    protected ctx: unknown;
+    protected env: Env;
+    constructor(ctx: unknown, env: Env);
+    run(event: WorkflowEvent<T>, step: WorkflowStep): Promise<unknown>;
   }
 }

@@ -46,4 +46,12 @@ export interface GenerationResult {
   accepted?: ProjectSnapshot;
   staged?: ProjectSnapshot;
   errors: string[];
+  /**
+   * The model's own description of what it built, once a plan has landed.
+   * Absent for a run that never reached `provider.generate()`'s return (a
+   * failure before then has nothing to describe). Carried on every result
+   * from that point on -- including a validation failure or a cancellation --
+   * so a caller showing "what was this run" never loses it partway through.
+   */
+  summary?: string;
 }

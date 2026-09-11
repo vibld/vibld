@@ -16,12 +16,15 @@ pnpm --filter @vibld/web test
 `prompt → planning → staged files → validation → accepted checkpoint → preview`
 
 The orchestration is `@vibld/core`'s, not a reimplementation: the shell wires a
-`FakeModelProvider` into a `DurableGenerationRunner` over an
+`ModelProvider` into a `DurableGenerationRunner` over an
 `InMemoryGenerationStore`, validates the staged snapshot, promotes the
 checkpoint by compare-and-set and meters the run with `RunBudgetLedger`. To show
 lifecycle progress without adding an event bus to core, `src/generation/observers.ts`
 decorates the `GenerationStore` and `ModelProvider` contracts the runner already
-depends on.
+depends on. This runs the same way for both providers -- the deterministic
+fake and, since it implements the same `ModelProvider` contract, the real one
+too (see "Durable generation" below for what a real `generate()` call does on
+the other end of that fetch).
 
 `BuilderSession` (`src/generation/session.ts`) is a framework-free controller;
 React binds to it with `useSyncExternalStore`. An epoch guard means a run
@@ -45,14 +48,12 @@ into newer state.
   failure as a whole (see "Sandbox previews" below), but nothing pipes a
   running preview's live process output or build diagnostics into these
   panels yet.
-- **No project persistence, Git export or deployment.** A D1/R2-backed
-  `GenerationStore` exists (`worker/generation-store.ts`) and is tested
-  against the same contract `InMemoryGenerationStore` satisfies, but nothing
-  in this slice calls it yet. Clerk sign-in is live now (see "Clerk
-  authentication" below), so there is an authenticated principal to own a
-  project against, but wiring `generation-store.ts` in is separate work that
-  has not started; every generation here still runs in the browser against
-  in-memory state that a reload discards.
+- **No Git export or deployment beyond the sandbox preview.** A real
+  generation (see "Durable generation" below) is now persisted server-side in
+  D1/R2, one project per Clerk user, but there is still no UI for browsing
+  history, renaming a project, or starting a second one -- "the project" is
+  still exactly one thing per account, the same as when it lived only in the
+  browser tab's memory.
 
 ## Hosted preview (optional)
 
@@ -140,11 +141,12 @@ cannot outlive its request.
 
 ### Fail closed
 
-`/api/plan` and `/api/config` serve a generation only when **all three** of
-a provider key (`ANTHROPIC_API_KEY` or `DEEPSEEK_API_KEY`), `USER_BUDGET` and
-`CLERK_FRONTEND_API_URL` are present. Missing configuration means refused,
-never open: an unauthenticated endpoint on a public URL would let anyone
-spend the account's model budget.
+`/api/plan` and `/api/config` serve a generation only when a provider key
+(`ANTHROPIC_API_KEY` or `DEEPSEEK_API_KEY`), `USER_BUDGET`,
+`CLERK_FRONTEND_API_URL`, `GENERATION_WORKFLOW`, `DB` and `PROJECT_CONTENT`
+are **all** present. Missing configuration means refused, never open: an
+unauthenticated endpoint on a public URL would let anyone spend the account's
+model budget.
 
 The Worker verifies the Clerk session JWT itself (`worker/principal.ts`,
 `worker/clerk-auth.ts`) rather than trusting the browser's session cookie --
@@ -157,6 +159,44 @@ verify it itself regardless. Verification pins RS256 (rejecting the
 expiry with a small skew allowance.
 
 **Cloudflare Access is off** (docs/decisions.md L5): Clerk is the only gate.
+
+### Durable generation (docs/decisions.md L26)
+
+A real generation's model call, staging, validation and promotion now run
+inside `GenerationWorkflow` (`worker/generation-workflow.ts`), a Cloudflare
+Workflow instance, against the D1/R2-backed `GenerationStore`
+(`worker/generation-store.ts`) rather than in `handlePlan`'s own request
+scope. `handlePlan` creates one instance per run (its id doubling as the
+Workflow instance id) and polls `WorkflowInstance.status()` over the same SSE
+connection it already holds open, so `remote-provider.ts`'s client contract
+(`event: plan` / `event: error`) is unchanged. One project per Clerk user for
+now: there is no multi-project UI, so the D1 project id is just the user's own
+id (`worker/generation-run.ts`'s `WorkflowParams.projectId` comment).
+
+Two things this costs, both accepted rather than solved here:
+
+- **No live character progress for a real generation.** There is no channel
+  between a Workflow step and the Worker polling it -- only the step's return
+  value once it finishes. The stream still emits keepalives, so a long run
+  reads as "still going", not as "how far along". The old in-request
+  `onProgress` callback only ever existed for exactly this endpoint, so the
+  fake provider (which never streamed live progress either) is unaffected.
+- **Cancelling stops the _next_ step, not the current one.** `handlePlan`
+  calls `WorkflowInstance.terminate()` on disconnect, but termination lands
+  at a step boundary; a cancel that arrives mid-model-call cannot stop that
+  one call from finishing (or being billed for). `budget.ts`'s existing
+  abandoned-reservation reclaim is the backstop either way -- the same one a
+  Worker dying mid-request already relied on before this change.
+- **The browser still keeps its own working copy.** `BuilderSession` sends
+  its whole `base` snapshot with every request rather than asking the server
+  to look one up, so `D1GenerationStore.loadAccepted` is never actually
+  reached in this path yet -- the client remains the thing every other part
+  of the shell (preview, zip export, the next turn's `base`) reads from. What
+  changed is that D1/R2 also durably record every run alongside it, and a
+  Workflow, not a request handler, is what drives the model call and the
+  promotion. Making the server copy authoritative -- so a reload could resume
+  a project the browser tab never saw start -- is a real next step, not this
+  one.
 
 ### Setup
 
