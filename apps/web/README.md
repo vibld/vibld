@@ -433,6 +433,31 @@ Dashboard needs no code change, only the amount to change.
   mirrored subscription from Stripe and corrects any drift a missed or
   failed webhook delivery left behind (L13).
 
+### Provider balance alerts (docs/decisions.md L44)
+
+The same nightly Cron Trigger also runs `worker/provider-balance.ts`'s
+`checkProviderBalances` -- one "daily" schedule, not two. Only **DeepSeek**
+is actually checked: its `/user/balance` endpoint uses the same
+`DEEPSEEK_API_KEY` this deployment already holds for generation, no
+separate credential. **Anthropic has no public balance-check API** outside
+the Console as of this writing -- reading its spend programmatically needs
+an Admin API key (the Usage and Cost Admin API), a distinct, more
+privileged credential from the plain key used for generation. That gap is
+real and recorded here rather than silently skipped.
+
+Below `VIBLD_DEEPSEEK_BALANCE_ALERT_USD` (default $10), an alert is sent
+through Resend to `VIBLD_ALERT_EMAIL` (default `billing@vibld.com`) from
+`VIBLD_ALERT_FROM` (default `alerts@notifications.vibld.com`, the
+transactional domain L17 already reserves). Additive like every other
+optional secret here: unset `RESEND_API_KEY` means the check still runs and
+logs, it just cannot send. To turn alerts on, add `RESEND_API_KEY` (the
+same key apps/marketing already uses -- Cloudflare Secrets are per-Worker,
+so it has to be added here too) to the `preview` environment; the deploy
+workflow syncs it the same way it already syncs every other optional
+secret on this page. Actually sending also needs `notifications.vibld.com`
+verified in Resend -- apps/marketing's own README already tracks that as
+outstanding under its "What only Chris can do."
+
 ### What a tier actually buys (docs/decisions.md L35-L39)
 
 `/api/plan`'s own spend gate (`worker/index.ts`'s `reserveBudget`) reads the

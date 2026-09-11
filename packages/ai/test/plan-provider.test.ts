@@ -176,9 +176,12 @@ describe('PlanProvider', () => {
 
 describe('buildUserPrompt', () => {
   it('passes a first-build prompt through unchanged', () => {
+    // Deliberately matches no pattern trigger in patterns.ts -- this test is
+    // about the base-project logic below, not pattern guidance (see
+    // patterns.test.ts for that).
     assert.equal(
-      buildUserPrompt({ prompt: 'a landing page' }),
-      'a landing page',
+      buildUserPrompt({ prompt: 'a widget for tracking espresso orders' }),
+      'a widget for tracking espresso orders',
     );
   });
 

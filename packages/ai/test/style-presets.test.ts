@@ -90,7 +90,10 @@ describe('findStylePreset', () => {
 });
 
 describe('buildUserPrompt with a preset', () => {
-  const request = { prompt: 'A landing page for a coffee roaster' };
+  // Deliberately matches no pattern trigger in patterns.ts -- these tests
+  // assert on style direction alone, and a request that also matched a page
+  // pattern would append that guidance too (see patterns.test.ts for that).
+  const request = { prompt: 'Make the espresso menu card wider' };
 
   it('leaves the prompt alone when no preset was chosen', () => {
     assert.equal(buildUserPrompt(request), request.prompt);

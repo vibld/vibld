@@ -58,6 +58,7 @@ import {
   handleStripeWebhook,
   reconcileSubscriptions,
 } from './billing-handlers.ts';
+import { checkProviderBalances } from './provider-balance.ts';
 import { BillingStore } from './billing-store.ts';
 import { createStripeClient } from './stripe-client.ts';
 
@@ -155,6 +156,19 @@ export interface Env {
   STRIPE_SECRET_KEY?: string;
   /** Worker secret: the signing secret for this deployment's registered webhook endpoint. */
   STRIPE_WEBHOOK_SECRET?: string;
+  /**
+   * L44: the nightly balance check answers "not configured" for DeepSeek,
+   * same as every other optional secret here, when this is unset -- see
+   * provider-balance.ts. Shared with apps/marketing's own Resend key in
+   * spirit, but not the same secret store: each Worker holds its own copy.
+   */
+  RESEND_API_KEY?: string;
+  /** USD threshold for the DeepSeek balance alert. Default: $10. */
+  VIBLD_DEEPSEEK_BALANCE_ALERT_USD?: string;
+  /** Where the balance alert is sent. Default: billing@vibld.com. */
+  VIBLD_ALERT_EMAIL?: string;
+  /** The alert's From address. Default: alerts@notifications.vibld.com. */
+  VIBLD_ALERT_FROM?: string;
 }
 
 /** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
@@ -908,23 +922,37 @@ export default {
    * Nightly reconcile (docs/decisions.md L13): Stripe, not this deployment's
    * own mirror, is authoritative, and a webhook delivery can be missed or
    * fail. The Cron Trigger that calls this is declared in wrangler.jsonc.
+   * Also runs the L44 provider-balance check -- same "daily," same trigger,
+   * no separate cron to declare.
    */
   async scheduled(
     _event: unknown,
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
-    if (!billingConfigured(env)) return;
+    if (billingConfigured(env)) {
+      ctx.waitUntil(
+        reconcileSubscriptions(
+          createStripeClient(env),
+          new BillingStore(env.DB!),
+        ).then(
+          (result) =>
+            console.log(
+              JSON.stringify({ event: 'billing.reconciled', ...result }),
+            ),
+          (error: unknown) => console.error('billing reconcile failed', error),
+        ),
+      );
+    }
+
     ctx.waitUntil(
-      reconcileSubscriptions(
-        createStripeClient(env),
-        new BillingStore(env.DB!),
-      ).then(
+      checkProviderBalances(env).then(
         (result) =>
           console.log(
-            JSON.stringify({ event: 'billing.reconciled', ...result }),
+            JSON.stringify({ event: 'provider_balance.checked', ...result }),
           ),
-        (error: unknown) => console.error('billing reconcile failed', error),
+        (error: unknown) =>
+          console.error('provider balance check failed', error),
       ),
     );
   },
