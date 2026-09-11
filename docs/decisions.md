@@ -148,7 +148,9 @@ Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-de
 
 ## Generation pattern/style/SEO catalogue (scoped 2026-09-09)
 
-Raised in the response to PR #70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set — 10 marketing page types, 6 SaaS screens, 5 style presets — as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, with the disclosure question above resolved first. Not yet an implementing issue.
+Raised in the response to PR #70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set — 10 marketing page types, 6 SaaS screens, 5 style presets — as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, with the disclosure question above resolved first.
+
+Steps (1) and (2) shipped 2026-09-11 (`packages/ai/src/patterns.ts`, alongside the pre-existing `style-presets.ts`): a closed, versioned set of 10 marketing page patterns and 6 SaaS screen patterns, matched by keyword against the request text and injected as structural guidance for whatever matches — not semantic retrieval (that still needs #12's embedding provider and spend cap), but the smallest thing that satisfies L50's actual "a handful of relevant patterns injected per request" without either dependency. Step (3) is deliberately not started: it means auto-wiring a live third-party dependency into every generated site by default, and the "Reopened" disclosure question above is still open. Confirm that framing (or say it should be opt-out at setup instead) before it's built.
 
 ## Scale without speculative implementation
 

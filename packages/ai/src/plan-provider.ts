@@ -13,6 +13,7 @@ import { GenerationPlanSchema, PLAN_SYSTEM_PROMPT } from './plan-schema.ts';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
+import { patternGuidance } from './patterns.ts';
 import {
   ProviderContextError,
   ProviderRefusalError,
@@ -235,6 +236,11 @@ including files your change does not touch -- a file you leave out is deleted.
 Preserve anything the request does not ask you to change.`,
     );
   }
+
+  // L50: a handful of relevant patterns, retrieved on demand -- structural
+  // guidance, so it comes before the purely visual style direction below.
+  const guidance = patternGuidance(request.prompt);
+  if (guidance) parts.push(guidance);
 
   // Last, and explicitly subordinate to the request. A preset is a starting
   // point; an instruction the user actually typed outranks it.
