@@ -1028,6 +1028,31 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Billing status -------------------------------------------------------
+ * The header's tier/usage readout and its upgrade/portal buttons. Reuses
+ * `.models__select`, `.button`, `.chip` and `.pane-note` rather than
+ * introducing its own control styling -- the same choice `ModelPicker` and
+ * `ExportButton` make. */
+.billing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.billing__usage {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.billing__upgrade {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 /* --- Model picker --------------------------------------------------------
  * Only rendered when the deployment can serve more than one. The trade is on
  * screen rather than in a tooltip, because quality against cost is the whole

@@ -299,6 +299,79 @@ async function reserveBudget(
   return { ok: false, verdict: primary.verdict };
 }
 
+/**
+ * GET -> the caller's own billing status: current tier, this period's spend
+ * against their monthly allowance, and any top-up credit remaining. Read-only
+ * mirror of exactly what `handlePlan`'s Layer three above computes and
+ * reserves against -- `UserBudget` stays the one authoritative ledger, this
+ * only reads it back for the shell to show a "generations remaining"
+ * readout and drive its checkout/portal buttons (L35).
+ */
+async function handleBillingStatus(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (!env.USER_BUDGET || !env.DB) {
+    return json(
+      { error: 'Usage accounting is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  try {
+    const now = Date.now();
+    const billing = new BillingStore(env.DB);
+    const subscription = await billing.findActiveSubscription(principal.userId);
+    const tier = tierFor(subscription);
+    const freeAllowance = positiveInt(
+      env.VIBLD_FREE_MONTHLY_MICRO_USD,
+      DEFAULT_FREE_INCLUDED_MICRO_USD,
+    );
+    const allowanceMicroUsd = monthlyAllowanceMicroUsd(tier, freeAllowance);
+    const usage = await env.USER_BUDGET.getByName(principal.userId).usageFor(
+      allowancePeriodKey(now),
+    );
+    const topupCreditMicroUsd = await billing.totalTopupCreditMicroUsd(
+      principal.userId,
+    );
+    const topupUsage = await env.USER_BUDGET.getByName(
+      topupKeyFor(principal.userId),
+    ).usageFor('lifetime');
+    // The Billing Portal (`handleBillingPortal`) 502s without a Stripe
+    // customer to manage -- a first-time free-tier caller has none yet, so
+    // the shell needs to know before it offers that button at all.
+    const hasStripeCustomer = Boolean(
+      await billing.findCustomerId(principal.userId),
+    );
+
+    return json({
+      tier,
+      allowanceMicroUsd,
+      spentMicroUsd: usage.spentMicroUsd,
+      topupRemainingMicroUsd: Math.max(
+        0,
+        topupCreditMicroUsd - topupUsage.spentMicroUsd,
+      ),
+      currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
+      cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+      hasStripeCustomer,
+      billingConfigured: billingConfigured(env),
+    });
+  } catch (error) {
+    console.error('billing status unavailable', error);
+    return json(
+      { error: 'Could not read billing status. Try again shortly.' },
+      503,
+    );
+  }
+}
+
 async function handlePlan(
   request: Request,
   env: Env,
@@ -726,6 +799,10 @@ export default {
 
     if (pathname === '/api/preview') {
       return handlePreview(request, env);
+    }
+
+    if (pathname === '/api/billing/status') {
+      return handleBillingStatus(request, env);
     }
 
     if (pathname === '/api/billing/checkout') {
