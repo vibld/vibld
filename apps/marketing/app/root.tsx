@@ -18,6 +18,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <Meta />
         <Links />
         {/*
@@ -57,7 +58,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   const notFound = isRouteErrorResponse(error) && error.status === 404;
   return (
     <article className="mx-auto max-w-5xl px-5 py-12">
-      <h1 className="text-4xl font-semibold tracking-tight">
+      <h1 className="font-display text-4xl font-bold tracking-tight">
         {notFound ? 'Page not found' : 'Something went wrong'}
       </h1>
       <p className="mt-4 max-w-2xl text-lg text-[var(--color-ink-muted)]">

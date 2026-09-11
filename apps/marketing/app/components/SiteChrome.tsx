@@ -16,11 +16,24 @@ export function SiteHeader() {
       </a>
       <header className="border-b border-black/10 dark:border-white/10">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5">
-          <Link
-            to="/"
-            className="font-mono text-lg font-semibold tracking-tight"
-          >
-            vibld
+          <Link to="/" className="flex items-center gap-2.5">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 32 32"
+              fill="none"
+              aria-hidden="true"
+            >
+              <rect width="32" height="32" rx="7" fill="oklch(0.19 0.02 40)" />
+              <path
+                d="M8 10l8 12 8-12"
+                stroke="oklch(0.68 0.19 45)"
+                strokeWidth="3.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="text-lg font-semibold tracking-tight">vibld</span>
           </Link>
           <span className="hidden text-sm text-[var(--color-ink-muted)] sm:inline">
             {SITE.tagline}
@@ -84,7 +97,7 @@ export function Page({
           {eyebrow}
         </p>
       ) : null}
-      <h1 className="mt-2 text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+      <h1 className="mt-2 font-display text-4xl font-bold tracking-tight text-balance sm:text-5xl">
         {title}
       </h1>
       <p className="mt-4 max-w-2xl text-lg text-[var(--color-ink-muted)] text-pretty">
@@ -120,7 +133,7 @@ export function LegalPage({
           ← All legal documents
         </Link>
       </p>
-      <h1 className="mt-4 text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+      <h1 className="mt-4 font-display text-3xl font-bold tracking-tight text-balance sm:text-4xl">
         {title}
       </h1>
       <p className="mt-2 text-sm text-[var(--color-ink-muted)]">

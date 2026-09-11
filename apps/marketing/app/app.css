@@ -12,6 +12,14 @@
     Arial, sans-serif;
   --font-mono:
     ui-monospace, 'SF Mono', 'Cascadia Code', 'Courier New', monospace;
+  /*
+   * Headlines only -- a system serif, not a webfont, for the same reason
+   * --font-sans and --font-mono above are: the Cookie Notice says this site
+   * makes no third-party requests, and a font link would make that false.
+   * Georgia ships on every OS and gives the brand's display type real
+   * character with zero added requests.
+   */
+  --font-display: Georgia, 'Times New Roman', serif;
 
   --color-ink: oklch(0.2 0.015 40);
   --color-ink-muted: oklch(0.47 0.015 40);
