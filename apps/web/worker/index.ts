@@ -22,8 +22,19 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { decideModel, grantedFor } from './model-access.ts';
-import { ACCOUNT_BUDGET_KEY, parsePrices, worstCaseMicroUsd } from './spend.ts';
+import {
+  ACCOUNT_BUDGET_KEY,
+  dayKey,
+  parsePrices,
+  worstCaseMicroUsd,
+} from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
+import {
+  DEFAULT_FREE_INCLUDED_MICRO_USD,
+  allowancePeriodKey,
+  monthlyAllowanceMicroUsd,
+  tierFor,
+} from './entitlement.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
@@ -79,17 +90,24 @@ export interface Env {
    */
   PLAN_BURST?: RateLimit;
   PLAN_SUSTAINED?: RateLimit;
-  /** Micro-USD one user may spend per UTC day. 4000000 == $4.00. */
-  VIBLD_DAILY_MICRO_USD?: string;
+  /**
+   * Micro-USD the Free tier (no active subscription) may spend per UTC
+   * calendar month -- docs/decisions.md L36 sets this at $1.00
+   * (`entitlement.ts`'s `DEFAULT_FREE_INCLUDED_MICRO_USD`); set this only to
+   * correct that figure. Build and Ship are not configurable here: their
+   * included spend is fixed by the accepted price table, not an operator
+   * knob (`entitlement.ts`'s `TIER_INCLUDED_MICRO_USD`).
+   */
+  VIBLD_FREE_MONTHLY_MICRO_USD?: string;
   /** Runs one user may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
   /**
    * Micro-USD the whole deployment may spend per UTC day, across every user
-   * -- docs/decisions.md L29. Layered above VIBLD_DAILY_MICRO_USD so one
-   * compromised account cannot spend the month; the per-user ceiling alone
-   * bounds only what *one* identity can do, not what N of them can do
-   * together. Default is 20x the per-user default -- a starting point, not
-   * a measured figure; correct it once real usage gives one.
+   * -- docs/decisions.md L29. Layered above the per-user tier allowances so
+   * one compromised account cannot spend the month; those ceilings alone
+   * bound only what *one* identity can do, not what N of them can do
+   * together. The default is a starting point, not a measured figure;
+   * correct it once real usage gives one.
    */
   VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
   VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
@@ -133,7 +151,6 @@ export interface Env {
 /** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
 export { UserBudget, GenerationWorkflow };
 
-const DEFAULT_DAILY_MICRO_USD = 4_000_000;
 const DEFAULT_MAX_IN_FLIGHT = 2;
 const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
 /** How often `handlePlan` checks its Workflow instance for a result. */
@@ -176,24 +193,44 @@ function isConfigured(env: Env): boolean {
 interface BudgetLayers {
   account: Reservation;
   user: Reservation;
+  /**
+   * Which `USER_BUDGET` instance `user.id` was actually reserved against:
+   * `userId` for the caller's own monthly tier allowance, or
+   * `"<userId>:topup"` if that allowance was already exhausted and the
+   * reservation was drawn from top-up credit instead. Threaded through
+   * `WorkflowParams.reservationKey` so settlement targets the same instance.
+   */
+  userReservationKey: string;
 }
 
 /** Only ever constructed from a verdict already known to deny the run. */
 type DeniedVerdict = Extract<SpendVerdict, { allow: false }>;
 
+function topupKeyFor(userId: string): string {
+  return `${userId}:topup`;
+}
+
 /**
- * Reserves against both ceilings before a run may start: the account-wide
- * one first (cheaper to check, and failing it means the user-level ledger
- * never needs touching at all), then the per-user one. If the account layer
- * allows but the user layer then refuses, the account-level hold is
- * released at once -- a run that never starts must never leave a phantom
- * charge sitting against the account for up to fifteen minutes waiting on
- * the abandoned-reservation reclaim.
+ * Reserves against every ceiling before a run may start: the account-wide
+ * one first (cheaper to check, and failing it means nothing else needs
+ * touching), then the caller's own monthly tier allowance (L35-L39), then --
+ * only if that allowance is exhausted, not merely low -- their top-up
+ * credit balance (L37). If an earlier layer allows but a later one refuses,
+ * the earlier hold is released at once: a run that never starts must never
+ * leave a phantom charge sitting against a ceiling for up to fifteen
+ * minutes waiting on the abandoned-reservation reclaim.
+ *
+ * `monthlyAllowance` and `topupCeiling` are the caller's to compute
+ * (`handlePlan` reads them from `BillingStore`) -- this function only knows
+ * how to spend them, not where they come from.
  */
 async function reserveBudget(
   env: Env,
   userId: string,
   worstCase: number,
+  monthlyAllowance: number,
+  topupCeiling: number,
+  now: number,
 ): Promise<
   { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
 > {
@@ -206,30 +243,60 @@ async function reserveBudget(
   // below. This layer enforces spend only.
   const account = await ledger
     .getByName(ACCOUNT_BUDGET_KEY)
-    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER);
+    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
   if (!account.verdict.allow) {
     return { ok: false, verdict: account.verdict };
   }
 
-  const userCeiling = positiveInt(
-    env.VIBLD_DAILY_MICRO_USD,
-    DEFAULT_DAILY_MICRO_USD,
-  );
+  const releaseAccount = async () => {
+    if (account.id !== undefined) {
+      await ledger.getByName(ACCOUNT_BUDGET_KEY).settle(account.id, 0);
+    }
+  };
+
   const maxInFlight = positiveInt(
     env.VIBLD_MAX_IN_FLIGHT,
     DEFAULT_MAX_IN_FLIGHT,
   );
-  const user = await ledger
+  const primary = await ledger
     .getByName(userId)
-    .reserve(worstCase, userCeiling, maxInFlight);
-  if (!user.verdict.allow) {
-    if (account.id !== undefined) {
-      await ledger.getByName(ACCOUNT_BUDGET_KEY).settle(account.id, 0);
-    }
-    return { ok: false, verdict: user.verdict };
+    .reserve(worstCase, monthlyAllowance, maxInFlight, allowancePeriodKey(now));
+  if (primary.verdict.allow) {
+    return {
+      ok: true,
+      layers: { account, user: primary, userReservationKey: userId },
+    };
   }
 
-  return { ok: true, layers: { account, user } };
+  // A top-up buys more spend, not more in-flight runs: concurrency is only
+  // ever gated by the primary bucket, so this denial is final regardless of
+  // top-up balance.
+  if (primary.verdict.reason === 'too-many-in-flight' || topupCeiling <= 0) {
+    await releaseAccount();
+    return { ok: false, verdict: primary.verdict };
+  }
+
+  // The monthly allowance is exhausted -- try the caller's top-up balance
+  // next, automatically. "lifetime" as the period key on purpose: unlike the
+  // allowance above, a top-up does not reset month to month, it is drawn
+  // down until spent (or, approximately, until it is 12 months old -- see
+  // `BillingStore.totalTopupCreditMicroUsd`).
+  const topupKey = topupKeyFor(userId);
+  const topup = await ledger
+    .getByName(topupKey)
+    .reserve(worstCase, topupCeiling, Number.MAX_SAFE_INTEGER, 'lifetime');
+  if (topup.verdict.allow) {
+    return {
+      ok: true,
+      layers: { account, user: topup, userReservationKey: topupKey },
+    };
+  }
+
+  await releaseAccount();
+  // The monthly-allowance denial is the one worth reporting: it is what a
+  // top-up would have fixed, whereas the top-up bucket's own denial is just
+  // "also not enough" and says nothing new.
+  return { ok: false, verdict: primary.verdict };
 }
 
 async function handlePlan(
@@ -348,9 +415,32 @@ async function handlePlan(
       DEFAULT_LIMITS.maxKnowledgeChars,
   );
 
+  // Layer three: what the caller's own subscription actually buys them
+  // (L35-L39) -- a monthly allowance by tier, plus whatever top-up credit
+  // they have left.
   let reserved;
   try {
-    reserved = await reserveBudget(env, principal.userId, worstCase);
+    const now = Date.now();
+    const billing = new BillingStore(env.DB!);
+    const subscription = await billing.findActiveSubscription(principal.userId);
+    const tier = tierFor(subscription);
+    const freeAllowance = positiveInt(
+      env.VIBLD_FREE_MONTHLY_MICRO_USD,
+      DEFAULT_FREE_INCLUDED_MICRO_USD,
+    );
+    const monthlyAllowance = monthlyAllowanceMicroUsd(tier, freeAllowance);
+    const topupCeiling = await billing.totalTopupCreditMicroUsd(
+      principal.userId,
+    );
+
+    reserved = await reserveBudget(
+      env,
+      principal.userId,
+      worstCase,
+      monthlyAllowance,
+      topupCeiling,
+      now,
+    );
   } catch (error) {
     // Fail closed. A retry costs the user a minute; an unbounded endpoint on
     // a public URL costs real money. 503 rather than 429: this is the
@@ -368,8 +458,8 @@ async function handlePlan(
     return json(
       {
         error:
-          reserved.verdict.reason === 'daily-ceiling'
-            ? 'Daily generation budget reached. It resets at 00:00 UTC.'
+          reserved.verdict.reason === 'period-ceiling'
+            ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
             : 'A generation is already running. Wait for it to finish.',
       },
       429,
@@ -405,6 +495,7 @@ async function handlePlan(
         userId: principal.userId,
         ...(principal.email ? { email: principal.email } : {}),
         reservationId: reservation.id,
+        reservationKey: reserved.layers.userReservationKey,
         accountReservationId: reserved.layers.account.id,
         worstCaseMicroUsd: worstCase,
         prices,

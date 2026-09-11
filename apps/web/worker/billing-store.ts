@@ -155,6 +155,54 @@ export class BillingStore {
     return result.results.map((row) => row.stripe_subscription_id);
   }
 
+  /**
+   * The subscription `/api/plan`'s budget gate (docs/decisions.md L35-L39)
+   * should honour for this user, if any. A user has at most one in practice
+   * -- Checkout always reuses their existing Stripe customer -- but this
+   * still orders by `updated_at` and takes the most recent, defensively,
+   * rather than assume the invariant holds.
+   */
+  async findActiveSubscription(
+    userId: string,
+  ): Promise<SubscriptionRecord | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT stripe_subscription_id, user_id, stripe_customer_id, tier, status,
+                price_id, current_period_end, cancel_at_period_end
+         FROM billing_subscriptions
+         WHERE user_id = ?1 AND status IN ('active', 'trialing')
+         ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .bind(userId)
+      .first<SubscriptionRow>();
+    return row ? toSubscriptionRecord(row) : undefined;
+  }
+
+  /**
+   * This user's spendable top-up credit (L37), summed rather than tracked as
+   * a running balance -- decrementing one durably as it is drawn down would
+   * need its own write path with its own race to get right, and the ledger
+   * that actually spends it (`entitlement.ts`'s `"<userId>:topup"` bucket in
+   * `budget.ts`) already *is* a correct running balance: its own period-keyed
+   * spend total, subtracted from whatever this returns, is what "remaining"
+   * means. Restricted to the last 12 months, matching L36's top-up expiry --
+   * an approximation of it, not an exact one: this excludes an old top-up
+   * from the total outright rather than tracking each purchase's own expiry
+   * against what was actually drawn from it first.
+   */
+  async totalTopupCreditMicroUsd(userId: string): Promise<number> {
+    const row = await this.#db
+      .prepare(
+        `SELECT COALESCE(SUM(credit_usd_cents), 0) AS total
+         FROM billing_topups
+         WHERE user_id = ?1 AND created_at > datetime('now', '-12 months')`,
+      )
+      .bind(userId)
+      .first<{ total: number }>();
+    // 1 cent = 10,000 micro-USD ($1 = 1,000,000 micro-USD).
+    return (row?.total ?? 0) * 10_000;
+  }
+
   async recordTopup(
     stripeCheckoutSessionId: string,
     userId: string,

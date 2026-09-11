@@ -36,18 +36,17 @@
     // CLERK_PUBLISHABLE_KEY are Worker/build secrets set out of band.
     "CLERK_FRONTEND_API_URL": "https://clerk.vibld.com",
 
-    // Micro-USD one user may spend per UTC day: 4000000 == $4.00.
-    //
     // A run reserves its worst case up front -- with a 64000-token output
     // ceiling that is about $1.61 -- and is reconciled to what it actually
-    // cost once it finishes. So this does not buy two runs a day: it buys as
-    // many as fit once each is settled at its real price, while still
-    // requiring $1.61 of headroom before any single run may start.
+    // cost once it finishes.
     //
-    // The per-user ceiling is also the aggregate one -- (users x ceiling) is
-    // the most the account can be billed in a day, which works because Access
-    // keeps the user set small and enumerable.
-    "VIBLD_DAILY_MICRO_USD": "4000000",
+    // What one user may spend now comes from their subscribed tier
+    // (docs/decisions.md L35-L39: Free $1/mo, Build $10/mo, Ship $40/mo,
+    // plus top-up credit), not a flat env var -- see worker/entitlement.ts.
+    // No VIBLD_FREE_MONTHLY_MICRO_USD here on purpose: its $1.00 default
+    // already matches L36, and Build/Ship are not operator-configurable at
+    // all (their included spend is fixed by the accepted price table). Set
+    // it only to correct the Free tier's own figure.
     "VIBLD_MAX_IN_FLIGHT": "2",
     // No VIBLD_USD_MICRO_PER_* here on purpose. An explicit price overrides
     // the chosen model's own rate, so pinning Anthropic's 5/25 while running

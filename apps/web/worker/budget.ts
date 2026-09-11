@@ -1,9 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { SpendVerdict } from './spend.ts';
-import { dayKey, decide } from './spend.ts';
+import { decide } from './spend.ts';
 
 /**
- * One user's spend ledger.
+ * One spend ledger, keyed by whoever `getByName` names it for.
  *
  * A Durable Object is used because it is the only option on the platform that
  * serialises concurrent callers: a series of reads followed by writes with no
@@ -11,12 +11,21 @@ import { dayKey, decide } from './spend.ts';
  * ceiling rather than a race. Its SQLite storage is also the usage record --
  * there is no second store to keep in step.
  *
- * Keyed per user, deliberately. Cloudflare's own guidance warns against a
- * single object as a global counter, because it funnels all traffic through
- * one instance; an object per identity shards naturally and each one sees a
- * handful of requests a day. The aggregate ceiling is arithmetic instead:
- * choose a per-user ceiling such that (users x ceiling) is a bill worth
- * paying, which Access makes possible because the user set is enumerable.
+ * Keyed per user, deliberately, for the account's main ledger. Cloudflare's
+ * own guidance warns against a single object as a global counter, because it
+ * funnels all traffic through one instance; an object per identity shards
+ * naturally and each one sees a handful of requests a day. The aggregate
+ * ceiling is arithmetic instead: choose a per-user ceiling such that
+ * (users x ceiling) is a bill worth paying.
+ *
+ * `index.ts`'s `reserveBudget` also uses this same class, under a second key
+ * per user (`"<userId>:topup"`), as a running top-up credit balance
+ * (docs/decisions.md L37) -- the period key it passes in for that instance
+ * never changes, so nothing here needs to know that "period" can mean a UTC
+ * day (the account-wide ceiling, L29), a UTC month (a subscribed tier's
+ * monthly allowance, L35-L39) or "forever" (a top-up balance that persists
+ * until spent). The `reserve`/`usageFor` caller decides what a period means;
+ * this class only groups spend by whatever string it is given.
  *
  * Nothing here is provisioned. The object is created on first access.
  */
@@ -64,17 +73,23 @@ export class UserBudget extends DurableObject {
    * Synchronous on purpose. Awaiting anything between the read and the write
    * opens the input gate, lets a concurrent caller read the same balance, and
    * quietly turns the ceiling back into a race.
+   *
+   * `periodKey` is opaque to this class -- see the class comment. The `day`
+   * column name predates that generalisation and is kept rather than
+   * migrated: a live rename would break any object that already has rows
+   * under the old schema, for no benefit over just no longer assuming what
+   * the string in it means.
    */
   reserve(
     worstCaseMicroUsd: number,
     ceilingMicroUsd: number,
     maxInFlight: number,
+    periodKey: string,
   ): Reservation {
     const now = Date.now();
-    const day = dayKey(now);
 
     // Reclaim reservations whose run never came back to settle. Without this
-    // a crashed Worker holds its worst case against the user until midnight.
+    // a crashed Worker holds its worst case against the user indefinitely.
     this.ctx.storage.sql.exec(
       `UPDATE runs SET settled = ?, actual = reserved
          WHERE settled IS NULL AND started < ?`,
@@ -91,7 +106,7 @@ export class UserBudget extends DurableObject {
            COALESCE(SUM(CASE WHEN settled IS NULL THEN 1 ELSE 0 END), 0)
              AS inflight
          FROM runs WHERE day = ?`,
-        day,
+        periodKey,
       )
       .toArray();
 
@@ -112,7 +127,7 @@ export class UserBudget extends DurableObject {
       .exec<{ id: number }>(
         `INSERT INTO runs (day, started, reserved) VALUES (?, ?, ?)
            RETURNING id`,
-        day,
+        periodKey,
         now,
         worstCaseMicroUsd,
       )
@@ -136,8 +151,8 @@ export class UserBudget extends DurableObject {
     );
   }
 
-  /** Today's spend, for reporting. Reads nothing the ceiling does not. */
-  today(): { spentMicroUsd: number; inFlight: number } {
+  /** This period's spend, for reporting. Reads nothing the ceiling does not. */
+  usageFor(periodKey: string): { spentMicroUsd: number; inFlight: number } {
     const [totals] = this.ctx.storage.sql
       .exec<Totals>(
         `SELECT
@@ -145,7 +160,7 @@ export class UserBudget extends DurableObject {
            COALESCE(SUM(CASE WHEN settled IS NULL THEN 1 ELSE 0 END), 0)
              AS inflight
          FROM runs WHERE day = ?`,
-        dayKey(Date.now()),
+        periodKey,
       )
       .toArray();
     return {

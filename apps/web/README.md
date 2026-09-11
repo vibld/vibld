@@ -54,12 +54,11 @@ into newer state.
   history, renaming a project, or starting a second one -- "the project" is
   still exactly one thing per account, the same as when it lived only in the
   browser tab's memory.
-- **No billing UI, and no tier actually limits anything yet.** `/api/billing/*`
-  and Stripe's own webhooks exist (see "Billing" below) and durably mirror
-  who has an active subscription, but nothing in the shell offers to start a
-  checkout, and a subscribed tier does not yet change what `/api/plan`'s
-  budget gate allows -- everyone still runs against the same
-  `VIBLD_DAILY_MICRO_USD` ceiling regardless of what they have paid for.
+- **No billing UI.** A subscribed tier now does change what `/api/plan`'s
+  budget gate allows (see "What a tier actually buys" under "Billing"
+  below), but nothing in the shell offers to start a checkout, open the
+  Billing Portal, or shows a caller their own plan or usage -- that still
+  means calling `/api/billing/*` directly, not clicking a button here.
 
 ## Hosted preview (optional)
 
@@ -365,14 +364,41 @@ Dashboard needs no code change, only the amount to change.
   mirrored subscription from Stripe and corrects any drift a missed or
   failed webhook delivery left behind (L13).
 
-**Not in this change**, deliberately split into a separate PR: wiring a
-tier's included model spend into `/api/plan`'s own budget gate (L35-L39).
-This PR gets a subscription's existence and status durably mirrored and
-billable; what a tier actually _entitles_ someone to spend is the next
-piece, since it changes how `budget.ts`'s ceiling itself works. There is
-also no billing UI yet in the builder shell -- a checkout/portal button, a
-tier picker -- the same "backend exists, nothing calls it from here yet"
-gap `/api/preview` had before it was wired into the shell.
+### What a tier actually buys (docs/decisions.md L35-L39)
+
+`/api/plan`'s own spend gate (`worker/index.ts`'s `reserveBudget`) reads the
+caller's mirrored subscription (`worker/entitlement.ts`'s `tierFor`) and
+ceilings each run against three layers, in order:
+
+1. **The account-wide daily ceiling** (L29) -- unchanged, still a UTC day.
+2. **The caller's own monthly tier allowance** (L36): Free $1/mo, Build
+   $10/mo, Ship $40/mo, resetting on the UTC calendar month.
+3. **Top-up credit** (L37), tried only once the monthly allowance is
+   genuinely exhausted, not merely low. A top-up is not period-scoped --
+   it persists until spent, tracked as its own `USER_BUDGET` instance keyed
+   `"<userId>:topup"` rather than a separate table, so the ceiling for that
+   instance (the caller's lifetime top-up total, from
+   `BillingStore.totalTopupCreditMicroUsd`) less what has been spent from it
+   _is_ the remaining balance -- the same mechanism that already enforces
+   every other ceiling here, reused rather than reimplemented.
+
+A caller with no active subscription is Free. A denied `SpendVerdict`'s own
+reason is `period-ceiling` now, not `daily-ceiling` -- it covers both the
+account's daily layer and a tier's monthly one, whichever fires.
+
+Two deliberate simplifications, both documented at their own definitions
+rather than repeated here: the monthly reset is the calendar month for
+everyone, not each subscription's own billing-cycle anchor
+(`entitlement.ts`'s `allowancePeriodKey`); and a top-up's 12-month expiry
+(L36) is approximated by excluding old purchases from the running total
+outright, not by tracking each purchase's own expiry against what was
+actually drawn from it first (`BillingStore.totalTopupCreditMicroUsd`).
+
+**Still not in this change**: a billing UI in the builder shell -- a
+checkout/portal button, a tier picker, a "generations remaining" readout
+(L35 wants one; `UserBudget.usageFor` exists for it, nothing calls it yet).
+The same "backend exists, nothing calls it from here yet" gap `/api/preview`
+had before it was wired into the shell.
 
 ### Setup
 

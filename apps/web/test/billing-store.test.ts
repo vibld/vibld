@@ -15,6 +15,12 @@ function newStore(): BillingStore {
   return new BillingStore(new SqliteD1Database(SCHEMA));
 }
 
+/** For tests that need to reach past `BillingStore`'s own writers -- an old top-up's `created_at`, say. */
+function newStoreWithDb(): { store: BillingStore; db: SqliteD1Database } {
+  const db = new SqliteD1Database(SCHEMA);
+  return { store: new BillingStore(db), db };
+}
+
 describe('BillingStore.linkCustomer / findCustomerId / findUserIdForCustomer', () => {
   it('round-trips a user-to-customer mapping in both directions', async () => {
     const store = newStore();
@@ -93,9 +99,82 @@ describe('BillingStore.recordTopup', () => {
     // double-count the credit.
     await store.recordTopup('cs_1', 'user_1', 'cus_1', 800);
 
-    // No public read method exists yet (the credit-ledger PR adds one) --
-    // this just confirms the second call didn't throw on the primary key.
-    assert.ok(true);
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 8_000_000);
+  });
+});
+
+describe('BillingStore.findActiveSubscription', () => {
+  const RECORD = {
+    stripeSubscriptionId: 'sub_1',
+    userId: 'user_1',
+    stripeCustomerId: 'cus_1',
+    tier: 'ship' as const,
+    status: 'active',
+    priceId: 'price_1',
+    currentPeriodEnd: '2026-10-01T00:00:00.000Z',
+    cancelAtPeriodEnd: false,
+  };
+
+  it('finds an active subscription for a user', async () => {
+    const store = newStore();
+    await store.upsertSubscription(RECORD);
+
+    assert.deepEqual(await store.findActiveSubscription('user_1'), RECORD);
+  });
+
+  it('finds a trialing subscription too', async () => {
+    const store = newStore();
+    await store.upsertSubscription({ ...RECORD, status: 'trialing' });
+
+    assert.equal(
+      (await store.findActiveSubscription('user_1'))?.status,
+      'trialing',
+    );
+  });
+
+  it('is undefined for a canceled subscription -- it must not still grant a tier', async () => {
+    const store = newStore();
+    await store.upsertSubscription({ ...RECORD, status: 'canceled' });
+
+    assert.equal(await store.findActiveSubscription('user_1'), undefined);
+  });
+
+  it('is undefined for a user with no subscription at all', async () => {
+    const store = newStore();
+    assert.equal(await store.findActiveSubscription('user_nobody'), undefined);
+  });
+});
+
+describe('BillingStore.totalTopupCreditMicroUsd', () => {
+  it('is zero with no top-ups', async () => {
+    const store = newStore();
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 0);
+  });
+
+  it('sums every top-up for the user, converting cents to micro-USD', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 800);
+    await store.recordTopup('cs_2', 'user_1', 'cus_1', 800);
+    await store.recordTopup('cs_3', 'user_2', 'cus_2', 800);
+
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 16_000_000);
+    assert.equal(await store.totalTopupCreditMicroUsd('user_2'), 8_000_000);
+  });
+
+  it('excludes a top-up older than 12 months (L36)', async () => {
+    const { store, db } = newStoreWithDb();
+    await store.recordTopup('cs_recent', 'user_1', 'cus_1', 800);
+    // Older than 12 months: not reachable through recordTopup, which always
+    // stamps "now" -- inserted directly to exercise the boundary.
+    await db
+      .prepare(
+        `INSERT INTO billing_topups
+           (stripe_checkout_session_id, user_id, stripe_customer_id, credit_usd_cents, created_at)
+         VALUES ('cs_old', 'user_1', 'cus_1', 800, datetime('now', '-13 months'))`,
+      )
+      .run();
+
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 8_000_000);
   });
 });
 
