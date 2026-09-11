@@ -20,6 +20,7 @@ import {
   parseGenerationRequest,
   parseKnowledge,
   parseModel,
+  parsePreviewRequest,
   parseStylePreset,
 } from './request-guard.ts';
 import { decideModel, grantedFor } from './model-access.ts';
@@ -32,6 +33,13 @@ import {
   encodeEvent,
   parseKeepaliveMs,
 } from './stream.ts';
+import {
+  previewConfigured,
+  previewStatus,
+  startPreview,
+  stopPreview,
+} from './preview-client.ts';
+import type { ServiceBinding } from './preview-client.ts';
 
 export interface Env {
   /** Worker secret. Never reaches the browser. */
@@ -89,6 +97,16 @@ export interface Env {
    */
   DB?: D1Database;
   PROJECT_CONTENT?: R2Bucket;
+  /**
+   * The sandbox execution service (docs/decisions.md L7-L11; see
+   * apps/preview/README.md for why it is a separate Worker). `/api/preview`
+   * is unavailable, not open, when this or `PREVIEW_INTERNAL_SECRET` is
+   * unset -- the same fail-closed rule `isConfigured` already applies to
+   * generation.
+   */
+  PREVIEW?: ServiceBinding;
+  /** Worker secret, shared with @vibld/preview -- see preview-client.ts. */
+  PREVIEW_INTERNAL_SECRET?: string;
 }
 
 /** Re-exported so Wrangler can find the class from the Worker's entrypoint. */
@@ -487,6 +505,49 @@ async function handlePlan(
   return new Response(readable, { status: 200, headers: STREAM_HEADERS });
 }
 
+/**
+ * Start, check on, or stop a live preview of the caller's own project
+ * (docs/decisions.md L7-L11). Thin by design: every real decision --
+ * concurrency, egress, lifetime -- is `@vibld/preview`'s; this only
+ * authenticates the caller and forwards their own userId, never trusting
+ * one a client could supply itself.
+ */
+async function handlePreview(request: Request, env: Env): Promise<Response> {
+  if (!previewConfigured(env)) {
+    return json(
+      { error: 'Preview is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (request.method === 'GET') {
+    return json(await previewStatus(env, principal.userId));
+  }
+
+  if (request.method === 'POST') {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Body must be valid JSON.' }, 400);
+    }
+    const files = parsePreviewRequest(body);
+    if (!files.ok) return json({ error: files.error }, files.status);
+    return json(await startPreview(env, principal.userId, files.value));
+  }
+
+  if (request.method === 'DELETE') {
+    await stopPreview(env, principal.userId);
+    return json({ ok: true });
+  }
+
+  return json({ error: 'Use GET, POST or DELETE.' }, 405);
+}
+
 /** The slice of Cloudflare's ExecutionContext this Worker uses. */
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -543,6 +604,10 @@ export default {
 
     if (pathname === '/api/plan') {
       return handlePlan(request, env, ctx);
+    }
+
+    if (pathname === '/api/preview') {
+      return handlePreview(request, env);
     }
 
     return json({ error: 'Not found.' }, 404);

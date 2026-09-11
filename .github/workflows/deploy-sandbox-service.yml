@@ -1,0 +1,97 @@
+name: Deploy sandbox service
+
+# Manual only, like "Deploy web preview". Deploy this before apps/web
+# whenever PREVIEW_INTERNAL_SECRET changes or apps/preview itself changes --
+# apps/web's service binding to it only routes successfully once
+# "vibld-preview" actually exists.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-sandbox-service
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy @vibld/preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Same "preview" environment apps/web and apps/marketing already deploy
+    # from -- see apps/preview/README.md for exactly which token scopes it
+    # needs beyond what's already there (DNS: Edit on vibld-preview.dev).
+    environment:
+      name: preview
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW_INTERNAL_SECRET: ${{ secrets.PREVIEW_INTERNAL_SECRET }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          [ -n "$PREVIEW_INTERNAL_SECRET" ] || { echo "::error::PREVIEW_INTERNAL_SECRET is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add all three to the \"preview\" environment (Settings -> Environments)." >&2
+            echo "The Cloudflare token needs \"Workers Scripts: Edit\" (already covers this account) and \"DNS: Edit\" on the vibld-preview.dev zone, for the wildcard route." >&2
+            exit 1
+          fi
+
+      # The Sandbox SDK builds the container image at deploy time; GitHub's
+      # ubuntu-latest runners ship Docker preinstalled, so this only ever
+      # fails if that ever changes.
+      - name: Require Docker
+        run: docker info > /dev/null
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and test
+        run: |
+          pnpm --filter @vibld/preview typecheck
+          pnpm --filter @vibld/preview test
+
+      - name: Sync the internal secret to the Worker
+        shell: bash
+        working-directory: apps/preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW_INTERNAL_SECRET: ${{ secrets.PREVIEW_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          # The value goes in on stdin so it never appears in a command line
+          # or in the run log.
+          printf '%s' "$PREVIEW_INTERNAL_SECRET" | pnpm dlx wrangler@4.129.1 secret put PREVIEW_INTERNAL_SECRET
+          echo "Synced PREVIEW_INTERNAL_SECRET." >> "$GITHUB_STEP_SUMMARY"
+
+      # Building the container image can take several minutes on a cold
+      # cache -- longer than apps/web's or apps/marketing's plain Worker
+      # deploys, which upload source only.
+      - name: Deploy to Cloudflare Workers
+        shell: bash
+        working-directory: apps/preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          pnpm dlx wrangler@4.129.1 deploy
+          echo "Deployed vibld-preview (*.vibld-preview.dev)" >> "$GITHUB_STEP_SUMMARY"
