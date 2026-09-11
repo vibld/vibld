@@ -94,6 +94,12 @@ export interface Env {
   PLAN_BURST?: RateLimit;
   PLAN_SUSTAINED?: RateLimit;
   /**
+   * Per-IP, checked before identity (docs/decisions.md L29). PLAN_BURST and
+   * PLAN_SUSTAINED above key on the caller's Clerk user id, so they do
+   * nothing for a flood of requests that never resolves to a valid user.
+   */
+  IP_BURST?: RateLimit;
+  /**
    * Micro-USD the Free tier (no active subscription) may spend per UTC
    * calendar month -- docs/decisions.md L36 sets this at $1.00
    * (`entitlement.ts`'s `DEFAULT_FREE_INCLUDED_MICRO_USD`); set this only to
@@ -394,6 +400,24 @@ async function handlePlan(
 
   const size = checkBodySize(request.headers);
   if (!size.ok) return json({ error: size.error }, size.status);
+
+  // Per-IP, ahead of identity (docs/decisions.md L29): the burst gates below
+  // key on the caller's Clerk user id, so a flood of garbage or expired
+  // tokens -- each still costing a JWKS verification -- would otherwise
+  // reach resolvePrincipal every time. Fails open on the limiter itself
+  // being unavailable, the same as the per-user gates below; a rate limiter
+  // outage is not a reason to refuse every legitimate caller.
+  if (env.IP_BURST) {
+    try {
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+      const result = await env.IP_BURST.limit({ key: `ip:${ip}` });
+      if (!result.success) {
+        return json({ error: 'Too many requests from this address.' }, 429);
+      }
+    } catch (error) {
+      console.error('IP rate limiter unavailable', error);
+    }
+  }
 
   // Whether this deployment can generate at all -- keys, Clerk, and the
   // ledger -- is checked before spending effort on any one caller's token.

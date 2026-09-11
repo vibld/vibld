@@ -91,6 +91,22 @@
       "namespace_id": "1002",
       "simple": { "limit": 10, "period": 60 },
     },
+    // docs/decisions.md L29: "a per-IP WAF rate limit" required before
+    // Cloudflare Access comes off. PLAN_BURST/PLAN_SUSTAINED above are keyed
+    // on the caller's Clerk user id -- real protection once someone is
+    // signed in, but no defense at all against a flood of requests that
+    // never gets that far (garbage/expired tokens still cost a JWKS
+    // verification each). This is the same Workers Rate Limiting mechanism,
+    // just keyed on CF-Connecting-IP instead, and checked before identity is
+    // resolved -- an actual zone-level WAF rule would need Cloudflare
+    // account/zone permissions this deployment's token doesn't have (see
+    // apps/web/README.md's Deploying section), so this is the equivalent
+    // control achievable from inside the Worker itself.
+    {
+      "name": "IP_BURST",
+      "namespace_id": "1003",
+      "simple": { "limit": 20, "period": 60 },
+    },
   ],
 
   // The spend ceiling. Also not provisioned: the object is created on first

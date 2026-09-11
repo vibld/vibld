@@ -105,10 +105,18 @@ pnpm --filter @vibld/web build
 pnpm --filter @vibld/web deploy:preview
 ```
 
-The deployed URL is public on `workers.dev`. The SPA shell itself carries no
-gate (only `/api/plan` and `/api/config` require a Clerk sign-in, per the
-"Clerk authentication" section below) -- put the whole route behind
-Cloudflare Access instead if the work in progress should stay internal.
+The deployed Worker serves at `app.vibld.com` (a custom domain route --
+`docs/decisions.md` L20; adding it disables the `workers.dev` URL for this
+Worker entirely, so that address 404s once a custom domain exists). The
+shell itself is gated behind sign-in now (`AuthGate` in `src/auth/clerk.tsx`,
+see "Clerk authentication" below) -- a signed-out visitor sees a `<SignIn/>`
+page, not the builder. That gate only works, though, because
+`CLERK_FRONTEND_API_URL` is a **live** Clerk instance bound to the
+`vibld.com` domain: Clerk's Frontend API refuses any request whose `Origin`
+isn't `vibld.com` or a subdomain of it, so Clerk itself will not load at
+all on a deployment reachable only at some other domain (a fork's own
+`workers.dev` URL, for instance) -- put the whole route behind Cloudflare
+Access instead if a deployment like that needs to stay gated.
 
 ## Model generation (optional)
 
@@ -288,6 +296,31 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
   `isPlatformAdmin` exists and is tested, but no endpoint calls it. There is
   no admin-only surface to gate until one exists; wiring it in ahead of that
   would be guessing at a shape nothing has tested yet.
+
+### Abuse controls required before Access came off (docs/decisions.md L29)
+
+Access is off; sign-up is open to anyone (subject to Waitlist approval).
+L29 named five controls that had to ship first -- audited directly, not
+assumed, once that was true:
+
+1. **Turnstile on sign-up** -- Clerk's own, not something this repo builds:
+   confirmed via Clerk's `/v1/environment` (`display_config.captcha_provider:
+"turnstile"`, `user_settings.sign_up.captcha_enabled: true`).
+2. **Per-IP rate limit** -- `IP_BURST` (`wrangler.jsonc`), checked in
+   `handlePlan` before `resolvePrincipal` is ever called. `PLAN_BURST`/
+   `PLAN_SUSTAINED` key on the Clerk user id, so they do nothing for a flood
+   of requests that never resolves to a valid one -- this is the layer that
+   does. Not literally a Cloudflare WAF rule (that needs zone permissions
+   this deployment's token doesn't have -- see "Deploying" above); the same
+   Workers Rate Limiting mechanism, keyed by `CF-Connecting-IP` instead.
+3. **Disposable-domain blocking** -- also Clerk's own: confirmed via the
+   same environment response
+   (`user_settings.restrictions.block_disposable_email_domains.enabled:
+true`).
+4. **Per-user ceiling** -- `reserveBudget`'s tier allowance, documented
+   above (L36-L39).
+5. **Account-wide daily ceiling** -- `VIBLD_ACCOUNT_DAILY_MICRO_USD`,
+   documented above (L29).
 
 ## Sandbox previews (docs/decisions.md L7-L11)
 
