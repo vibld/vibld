@@ -457,12 +457,14 @@ wrapper and URL-shaped response parsing it calls are JSX-free
 
 ### Setup
 
-1. `wrangler secret put STRIPE_SECRET_KEY` -- the account's live secret key
-   (https://dashboard.stripe.com/apikeys).
-2. `wrangler secret put STRIPE_WEBHOOK_SECRET` -- the signing secret for
-   this deployment's registered webhook endpoint
-   (https://dashboard.stripe.com/workbench/webhooks). Relayed once, out of
-   band, when the endpoint is created -- never committed here.
+1. Add `STRIPE_SECRET_KEY` -- the account's live secret key
+   (https://dashboard.stripe.com/apikeys) -- to the `preview` environment
+   here. The **Deploy web preview** workflow syncs it to this Worker, the
+   same way it already syncs `PREVIEW_INTERNAL_SECRET` above.
+2. Add `STRIPE_WEBHOOK_SECRET` -- the signing secret for this deployment's
+   registered webhook endpoint (https://dashboard.stripe.com/workbench/webhooks)
+   -- to the same environment. Relayed once, out of band, when the endpoint
+   is created -- never committed here.
 3. Once `app.vibld.com` (L20) is live, update that webhook endpoint's `url`
    to point at it (a Dashboard edit or one API call; the signing secret does
    not change). Until then, deliveries queue and retry against a domain
