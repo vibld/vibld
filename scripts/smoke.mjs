@@ -20,10 +20,18 @@
  * Usage: node scripts/smoke.mjs [origin]
  */
 
+// `||`, not `??`: the deploy workflow always sets VIBLD_SMOKE_ORIGIN (even to
+// an empty string, when wrangler's output didn't contain a URL to read --
+// see deploy-web-preview.yml), and `??` only falls through for null/undefined,
+// not '' -- an empty string would otherwise reach `new URL('/', '')` below
+// and fail every check with an opaque "Invalid URL" instead of this default.
+//
+// app.vibld.com (docs/decisions.md L20), not the old *.workers.dev address:
+// adding that custom domain route disabled the workers.dev route entirely
+// (wrangler's own default once any custom domain exists), so the old address
+// now 404s rather than reaching this Worker at all.
 const ORIGIN =
-  process.argv[2] ??
-  process.env.VIBLD_SMOKE_ORIGIN ??
-  'https://vibld-web-preview.chris-brock-llc.workers.dev';
+  process.argv[2] || process.env.VIBLD_SMOKE_ORIGIN || 'https://app.vibld.com';
 
 const results = [];
 function check(name, fn) {
