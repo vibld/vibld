@@ -43,8 +43,19 @@ check('Clerk gates the API for a signed-out caller', async () => {
   // run_worker_first routes /api/* to the Worker; the SPA shell at / is
   // served straight from assets and carries no gate of its own -- the
   // endpoints that spend money are what must refuse an anonymous caller.
+  //
+  // A real caller always sends Content-Type: application/json (every
+  // browser-side client in src/ does) -- this probe does too, so it reaches
+  // and actually exercises the Clerk gate, rather than being refused a step
+  // earlier by /api/plan's own content-type/origin check
+  // (request-guard.ts's checkRequestOrigin, which runs before identity is
+  // ever checked and would otherwise answer 415 here first -- also a closed
+  // refusal, just not the one this check means to assert).
   for (const path of ['/api/config', '/api/plan']) {
-    const response = await head(path, { method: 'POST' });
+    const response = await head(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
     if (response.status !== 401) {
       throw new Error(
         `${path} answered ${response.status} for a signed-out caller, expected 401. ` +
