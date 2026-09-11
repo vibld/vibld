@@ -15,9 +15,12 @@ Install Node.js 22 or newer and pnpm, then run:
 ```bash
 pnpm install --frozen-lockfile
 pnpm format:check
+pnpm typecheck
+pnpm test
+pnpm build
 ```
 
-Root build/lint/typecheck/test/check commands currently run no workspace tasks. They are not evidence of product correctness. M0 [issue #2](https://github.com/vibld/vibld/issues/2) tracks meaningful, enforced checks before feature code. Use the pnpm version pinned in `package.json`.
+Root `typecheck`/`test`/`build` run Turborepo across every workspace package. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) enforces a frozen install, `format:check`, `typecheck` and `test` on every PR, plus an independent build of `templates/marketing` outside the workspace (it has to prove it builds the way an exported project actually would). Use the pnpm version pinned in `package.json`.
 
 ## Working agreements
 
