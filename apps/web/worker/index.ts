@@ -1,18 +1,16 @@
 import {
-  PlanProvider,
   DEFAULT_MAX_TOKENS,
-  ProviderError,
   configuredProviders,
-  createPlanClient,
   findModel,
   providerForRequest,
   resolveModel,
 } from '@vibld/ai';
-import type { PlanUsage } from '@vibld/ai';
 
 import { clerkConfigured, resolvePrincipal } from './principal.ts';
 import { UserBudget } from './budget.ts';
 import type { Reservation } from './budget.ts';
+import { GenerationWorkflow } from './generation-workflow.ts';
+import type { WorkflowParams } from './generation-workflow.ts';
 import {
   DEFAULT_LIMITS,
   checkBodySize,
@@ -24,12 +22,11 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { decideModel, grantedFor } from './model-access.ts';
-import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
+import { ACCOUNT_BUDGET_KEY, parsePrices, worstCaseMicroUsd } from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
-  createProgressThrottle,
   encodeEvent,
   parseKeepaliveMs,
 } from './stream.ts';
@@ -89,14 +86,20 @@ export interface Env {
   VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
   VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
   /**
-   * The control plane (docs/decisions.md L24/L25). Declared here because the
-   * binding exists in wrangler.jsonc; not read by anything yet. Clerk sign-in
-   * is live now (L5), so there is a principal to own a project against, but
-   * wiring `generation-store.ts` into request handling is separate work that
-   * has not started.
+   * The control plane (docs/decisions.md L24/L25): D1 for generation
+   * metadata, R2 for the file content it points at. Read only by
+   * `GenerationWorkflow` (generation-workflow.ts) -- `handlePlan` itself
+   * never touches D1/R2 directly, the same way it never calls the model
+   * directly any more.
    */
   DB?: D1Database;
   PROJECT_CONTENT?: R2Bucket;
+  /**
+   * Durable generation (docs/decisions.md L26). `handlePlan` creates one
+   * instance per run and polls it; see generation-workflow.ts for why a
+   * Workflow rather than the in-request model call this replaced.
+   */
+  GENERATION_WORKFLOW?: Workflow<WorkflowParams>;
   /**
    * The sandbox execution service (docs/decisions.md L7-L11; see
    * apps/preview/README.md for why it is a separate Worker). `/api/preview`
@@ -109,21 +112,14 @@ export interface Env {
   PREVIEW_INTERNAL_SECRET?: string;
 }
 
-/** Re-exported so Wrangler can find the class from the Worker's entrypoint. */
-export { UserBudget };
+/** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
+export { UserBudget, GenerationWorkflow };
 
 const DEFAULT_DAILY_MICRO_USD = 4_000_000;
 const DEFAULT_MAX_IN_FLIGHT = 2;
 const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
-
-/**
- * Reserved key for the account-wide ledger, sharing `USER_BUDGET`'s
- * namespace with every per-user key rather than needing a second binding.
- * Safe as long as it can never collide with a real identity: per-user keys
- * are Clerk user ids (L3), which are always prefixed "user_", and this is
- * not one.
- */
-const ACCOUNT_BUDGET_KEY = '__account__';
+/** How often `handlePlan` checks its Workflow instance for a result. */
+const POLL_INTERVAL_MS = 1500;
 
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
@@ -150,7 +146,12 @@ function isConfigured(env: Env): boolean {
     clerkConfigured(env) &&
     // The ledger is part of the grant, not an optimisation: a deployment
     // that cannot account for spend must not be able to spend.
-    env.USER_BUDGET,
+    env.USER_BUDGET &&
+    // Durable generation (L26) needs all three, or there is nowhere for a
+    // run to execute and nothing to persist it.
+    env.GENERATION_WORKFLOW &&
+    env.DB &&
+    env.PROJECT_CONTENT,
   );
 }
 
@@ -328,7 +329,6 @@ async function handlePlan(
       DEFAULT_LIMITS.maxTotalContentChars +
       DEFAULT_LIMITS.maxKnowledgeChars,
   );
-  const ledger = env.USER_BUDGET!;
 
   let reserved;
   try {
@@ -358,9 +358,50 @@ async function handlePlan(
     );
   }
   const reservation = reserved.layers.user;
+  // Reservations settle inside the Workflow itself now (generation-workflow.ts's
+  // 'settle-budget' step), once the run's real usage is known -- `handlePlan`
+  // no longer holds the model call in its own scope to settle around. A run
+  // this connection never sees complete (a crash, a terminated instance that
+  // never reached that step) still settles: it falls back to `budget.ts`'s
+  // existing abandoned-reservation reclaim, the same backstop a Worker dying
+  // mid-request already relied on.
+
+  const runId = crypto.randomUUID();
+  // One project per Clerk user -- there is no multi-project UI yet, so the
+  // user id is the whole of "which project" for now. See WorkflowParams's
+  // own comment.
+  const projectId = principal.userId;
+
+  let instance;
+  try {
+    instance = await env.GENERATION_WORKFLOW!.create({
+      id: runId,
+      params: {
+        projectId,
+        runId,
+        prompt: parsed.value.prompt,
+        base: parsed.value.base,
+        ...(style.value ? { style: style.value } : {}),
+        ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+        model: effectiveModel,
+        userId: principal.userId,
+        ...(principal.email ? { email: principal.email } : {}),
+        reservationId: reservation.id,
+        accountReservationId: reserved.layers.account.id,
+        worstCaseMicroUsd: worstCase,
+        prices,
+      },
+    });
+  } catch (error) {
+    console.error('failed to start generation workflow', error);
+    return json(
+      { error: 'Generation could not be started. Try again shortly.' },
+      503,
+    );
+  }
 
   // Stream rather than buffer. A buffered response sends nothing until the
-  // model finishes, and the client gives up first -- which surfaces as an
+  // run finishes, and the client gives up first -- which surfaces as an
   // opaque network error, not a failed generation.
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -375,131 +416,99 @@ async function handlePlan(
     }
   };
 
-  // A run nobody is waiting for is still billed until the call to the model
-  // ends. `ctx.waitUntil` deliberately outlives the response, so without this
-  // a user who closes the tab -- or presses Cancel -- pays for a plan that is
-  // then thrown away.
-  const abort = new AbortController();
-  let cancelledBy: string | undefined;
-  const cancel = (reason: string) => {
-    if (abort.signal.aborted) return;
-    cancelledBy = reason;
+  // A run nobody is waiting for should stop, not run to completion unread.
+  // Termination lands at the Workflow's next step boundary, not mid-step
+  // (generation-workflow.ts's own module comment), so a cancel that arrives
+  // while the model call itself is in flight cannot stop that one call --
+  // the ledger's abandoned-reservation reclaim is the backstop either way.
+  let cancelled = false;
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
     stopKeepalive();
-    abort.abort();
+    ctx.waitUntil(instance.terminate().catch(() => {}));
   };
 
   // Two independent notices that the client is gone. The runtime aborts
   // `request.signal` on disconnect; a failed write catches the same thing at
   // the next keepalive, which is the backstop if the signal is unavailable.
-  request.signal?.addEventListener('abort', () => cancel('client-disconnect'));
+  request.signal?.addEventListener('abort', cancel);
 
   const write = (chunk: string) =>
-    writer.write(encoder.encode(chunk)).catch(() => cancel('write-failed'));
-
-  // A whole project takes minutes to write, so the wait needs to show
-  // something real rather than a spinner that could equally mean "hung".
-  const reportProgress = createProgressThrottle({
-    emit: (update) => void write(encodeEvent('progress', update)),
-  });
-
-  let usage: PlanUsage | undefined;
-  const provider = new PlanProvider(createPlanClient(env, effectiveModel), {
-    // Always a model this person is granted: their own choice when they made
-    // one, otherwise the deployment default if they may use it, otherwise the
-    // first thing they may.
-    model: effectiveModel,
-    onUsage: (reported) => {
-      usage = reported;
-    },
-    onProgress: ({ characters }) => reportProgress(characters),
-    signal: abort.signal,
-    ...(style.value ? { style: style.value } : {}),
-    ...(knowledge.value ? { knowledge: knowledge.value } : {}),
-  });
+    writer.write(encoder.encode(chunk)).catch(cancel);
 
   // First bytes immediately, so the connection is never idle from the start.
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
 
   const run = (async () => {
-    let outcome = 'ok';
     try {
-      const plan = await provider.generate(parsed.value);
-      await write(encodeEvent('plan', { providerId: provider.id, plan }));
-    } catch (error) {
-      if (abort.signal.aborted) {
-        // The caller left. Writing an error to a closed stream would fail
-        // anyway, and this is not a fault worth reporting as one.
-        outcome = 'cancelled';
-      } else if (error instanceof ProviderError) {
-        // Expected, explainable outcomes, not server faults.
-        outcome = 'provider-error';
-        await write(
-          encodeEvent('error', { error: error.message, kind: error.name }),
-        );
-      } else {
-        // Never forward an upstream error body: it can carry request details.
-        outcome = 'error';
-        console.error('plan generation failed', error);
-        await write(
-          encodeEvent('error', { error: 'Generation failed unexpectedly.' }),
-        );
+      for (;;) {
+        if (cancelled) return;
+
+        let status;
+        try {
+          status = await instance.status();
+        } catch (error) {
+          console.error('workflow status unavailable', error);
+          if (!cancelled) {
+            await write(
+              encodeEvent('error', {
+                error: 'Generation failed unexpectedly.',
+              }),
+            );
+          }
+          return;
+        }
+
+        if (status.status === 'complete') {
+          const result = status.output as {
+            state: string;
+            accepted?: { revision: string; files: unknown[] };
+            errors: string[];
+            summary?: string;
+          };
+          if (result.state === 'accepted' && result.accepted) {
+            await write(
+              encodeEvent('plan', {
+                providerId: effectiveModel,
+                plan: {
+                  summary: result.summary ?? '',
+                  files: result.accepted.files,
+                },
+              }),
+            );
+          } else {
+            await write(
+              encodeEvent('error', {
+                error: result.errors[0] ?? 'Generation failed.',
+              }),
+            );
+          }
+          return;
+        }
+
+        if (status.status === 'errored' || status.status === 'terminated') {
+          if (!cancelled) {
+            await write(
+              encodeEvent('error', {
+                error:
+                  status.error?.message ?? 'Generation failed unexpectedly.',
+              }),
+            );
+          }
+          return;
+        }
+
+        // Still queued, running, paused or waiting: nothing new to report.
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       }
     } finally {
       stopKeepalive();
-      // Reconcile the pessimistic debit down to what the run really cost.
-      // A run that never reported usage settles at the full reservation
-      // rather than at zero: failing safe means over-counting, not under.
-      const actual = usage ? microUsdOf(usage, prices) : worstCase;
-      if (reservation.id !== undefined) {
-        ctx.waitUntil(
-          ledger
-            .getByName(principal.userId)
-            .settle(reservation.id, actual)
-            .catch((error: unknown) =>
-              console.error('spend settlement failed', error),
-            ),
-        );
-      }
-      // Both layers were reserved together, so both settle together -- the
-      // account-wide ledger must reflect the same run at the same cost, or
-      // its ceiling stops meaning what it says.
-      const accountReservation = reserved.layers.account;
-      if (accountReservation.id !== undefined) {
-        ctx.waitUntil(
-          ledger
-            .getByName(ACCOUNT_BUDGET_KEY)
-            .settle(accountReservation.id, actual)
-            .catch((error: unknown) =>
-              console.error('account spend settlement failed', error),
-            ),
-        );
-      }
-      // Spend is recorded even when the run failed: a refusal, a truncation
-      // or a cancellation still consumed tokens, and a record that counts
-      // only successes under-reports the bill.
-      console.log(
-        JSON.stringify({
-          event: 'generation.settled',
-          userId: principal.userId,
-          // Display only (L3) -- never the ledger key.
-          ...(principal.email ? { email: principal.email } : {}),
-          model: provider.id,
-          outcome,
-          ...(cancelledBy ? { cancelledBy } : {}),
-          inputTokens: usage?.inputTokens ?? 0,
-          outputTokens: usage?.outputTokens ?? 0,
-          microUsd: actual,
-        }),
-      );
       await writer.close().catch(() => {});
     }
   })();
 
-  // `waitUntil` is safe here only because the run is now abortable. Without
-  // that it would guarantee an abandoned generation up to 30 more seconds of
-  // billable model time; with it, the window is used for the opposite -- the
-  // spend record still gets written after the caller has gone.
   ctx.waitUntil(run);
 
   return new Response(readable, { status: 200, headers: STREAM_HEADERS });

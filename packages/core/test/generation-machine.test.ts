@@ -51,6 +51,7 @@ test('accepts a validated generated snapshot', async () => {
   assert.equal(result.errors.length, 0);
   assert.equal(result.accepted?.files[0]?.path, 'src/App.tsx');
   assert.match(result.accepted?.revision ?? '', /^r[a-f0-9]{8}$/);
+  assert.equal(result.summary, 'Create a landing page');
 });
 
 test('preserves the last accepted checkpoint when a later run fails validation', async () => {
@@ -85,6 +86,11 @@ test('preserves the last accepted checkpoint when a later run fails validation',
   assert.equal(second.accepted?.files[0]?.content, 'good');
   assert.equal(second.staged?.files[0]?.content, 'broken');
   assert.deepEqual(second.errors, ['validation failed']);
+  assert.equal(
+    second.summary,
+    'Broken version',
+    'a validation failure must still report what the model said it built',
+  );
 });
 
 test('reports scripted provider exhaustion as a failed run', async () => {
