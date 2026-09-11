@@ -6,6 +6,23 @@
   // as of" date in Cloudflare's table, so no compatibility_date turns it on.
   "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
 
+  // docs/decisions.md L20: app.vibld.com serves the builder. Also the fix for
+  // a real bug: CLERK_FRONTEND_API_URL above is a *live* Clerk instance, and
+  // a live instance's Frontend API refuses any request whose Origin isn't
+  // vibld.com or a subdomain of it (confirmed directly against Clerk's own
+  // API -- "The Request HTTP Origin header must be equal to or a subdomain of
+  // the requesting URL"). Every *.workers.dev URL this Worker has ever been
+  // reachable at, Clerk itself has silently refused to load on.
+  //
+  // A custom domain route provisions its own DNS record on deploy -- no
+  // separate DNS step -- but only if the deploying token can manage it: the
+  // documented CLOUDFLARE_API_TOKEN scope for this workflow is "Workers
+  // Scripts: Edit" only (README.md, deploy-web-preview.yml), which is not
+  // enough. Needs DNS edit (or the "Cloudflare Workers Custom Domains"
+  // permission group) added on the vibld.com zone before this can deploy --
+  // see the PR this shipped in for the exact one-time step.
+  "routes": [{ "pattern": "app.vibld.com", "custom_domain": true }],
+
   // The Worker handles /api/* only; everything else is served straight from
   // the built SPA. Explicit routing is used rather than the implicit
   // Sec-Fetch-Mode heuristic so an API path can never fall through to
