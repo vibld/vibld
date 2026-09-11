@@ -49,6 +49,11 @@ describe('the browser bundle boundary', () => {
           false,
           `${path} imports a provider SDK`,
         );
+        assert.notEqual(
+          specifier,
+          'stripe',
+          `${path} imports the Stripe SDK, which carries the secret key into the browser bundle -- Stripe billing (worker/stripe-client.ts) is Worker-only.`,
+        );
       }
     }
   });
