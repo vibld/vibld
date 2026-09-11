@@ -37,6 +37,15 @@ import {
   stopPreview,
 } from './preview-client.ts';
 import type { ServiceBinding } from './preview-client.ts';
+import {
+  billingConfigured,
+  handleBillingCheckout,
+  handleBillingPortal,
+  handleStripeWebhook,
+  reconcileSubscriptions,
+} from './billing-handlers.ts';
+import { BillingStore } from './billing-store.ts';
+import { createStripeClient } from './stripe-client.ts';
 
 export interface Env {
   /** Worker secret. Never reaches the browser. */
@@ -110,6 +119,15 @@ export interface Env {
   PREVIEW?: ServiceBinding;
   /** Worker secret, shared with @vibld/preview -- see preview-client.ts. */
   PREVIEW_INTERNAL_SECRET?: string;
+  /**
+   * Stripe billing (docs/decisions.md L12-L15). Worker secret, live-mode --
+   * see billing-handlers.ts. `/api/billing/*` and `/api/stripe/webhook` are
+   * unavailable, not open, when this or `STRIPE_WEBHOOK_SECRET` is unset,
+   * the same fail-closed rule `isConfigured` already applies to generation.
+   */
+  STRIPE_SECRET_KEY?: string;
+  /** Worker secret: the signing secret for this deployment's registered webhook endpoint. */
+  STRIPE_WEBHOOK_SECRET?: string;
 }
 
 /** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
@@ -619,6 +637,43 @@ export default {
       return handlePreview(request, env);
     }
 
+    if (pathname === '/api/billing/checkout') {
+      return handleBillingCheckout(request, env, new URL(request.url).origin);
+    }
+
+    if (pathname === '/api/billing/portal') {
+      return handleBillingPortal(request, env, new URL(request.url).origin);
+    }
+
+    if (pathname === '/api/stripe/webhook') {
+      return handleStripeWebhook(request, env);
+    }
+
     return json({ error: 'Not found.' }, 404);
+  },
+
+  /**
+   * Nightly reconcile (docs/decisions.md L13): Stripe, not this deployment's
+   * own mirror, is authoritative, and a webhook delivery can be missed or
+   * fail. The Cron Trigger that calls this is declared in wrangler.jsonc.
+   */
+  async scheduled(
+    _event: unknown,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    if (!billingConfigured(env)) return;
+    ctx.waitUntil(
+      reconcileSubscriptions(
+        createStripeClient(env),
+        new BillingStore(env.DB!),
+      ).then(
+        (result) =>
+          console.log(
+            JSON.stringify({ event: 'billing.reconciled', ...result }),
+          ),
+        (error: unknown) => console.error('billing reconcile failed', error),
+      ),
+    );
   },
 };

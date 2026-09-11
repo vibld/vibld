@@ -66,6 +66,37 @@ check('/api/preview never answers a signed-out caller with 200', async () => {
   }
 });
 
+check(
+  '/api/stripe/webhook refuses a request with no Stripe-Signature header',
+  async () => {
+    // Confirms the endpoint checks for a signature before doing anything else
+    // with the body -- not a full forged-signature test, which needs the
+    // deployment's own webhook secret and has no business living in a smoke
+    // test that runs with no credentials.
+    const response = await head('/api/stripe/webhook', {
+      method: 'POST',
+      body: '{}',
+    });
+    if (response.status === 200) {
+      throw new Error(
+        '/api/stripe/webhook answered 200 with no Stripe-Signature header.',
+      );
+    }
+  },
+);
+
+check('/api/billing/* never answers a signed-out caller with 200', async () => {
+  // Same closed set as above: 401 (Clerk gate) or 503 (Stripe unconfigured
+  // on this deployment) are both fine. Only 200 would mean anyone can start
+  // a Checkout or Billing Portal session as somebody else's account.
+  for (const path of ['/api/billing/checkout', '/api/billing/portal']) {
+    const response = await head(path, { method: 'POST' });
+    if (response.status === 200) {
+      throw new Error(`${path} answered 200 for a signed-out caller.`);
+    }
+  }
+});
+
 const failures = [];
 for (const { name, fn } of results) {
   try {

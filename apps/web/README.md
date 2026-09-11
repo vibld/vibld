@@ -54,6 +54,12 @@ into newer state.
   history, renaming a project, or starting a second one -- "the project" is
   still exactly one thing per account, the same as when it lived only in the
   browser tab's memory.
+- **No billing UI, and no tier actually limits anything yet.** `/api/billing/*`
+  and Stripe's own webhooks exist (see "Billing" below) and durably mirror
+  who has an active subscription, but nothing in the shell offers to start a
+  checkout, and a subscribed tier does not yet change what `/api/plan`'s
+  budget gate allows -- everyone still runs against the same
+  `VIBLD_DAILY_MICRO_USD` ceiling regardless of what they have paid for.
 
 ## Hosted preview (optional)
 
@@ -325,6 +331,62 @@ applies to `/api/plan`.
 2. Add `PREVIEW_INTERNAL_SECRET` (a long random value) to the `preview`
    environment here, the same value used when deploying `@vibld/preview`.
    The **Deploy web preview** workflow syncs it to this Worker.
+
+## Billing (docs/decisions.md L12-L15)
+
+Stripe-hosted Checkout and Billing Portal (L12): card data never reaches
+this Worker, only a redirect URL does. Stripe webhooks mirror subscription
+state into D1 (L13); the app reads that copy, not Stripe, on every request
+that needs it. Vibld owns the Clerk-user-id-to-Stripe-customer mapping
+(L14) via `client_reference_id` and customer metadata -- not Clerk Billing.
+Stripe Tax is on for every Checkout Session (L15).
+
+The five prices this deployment sells (L36/L38: Build $29/mo or $290/yr,
+Ship $99/mo or $990/yr, Top-up $20 one-time) already exist in the live
+Stripe account, referenced here by `lookup_key` (`stripe-client.ts`'s
+`PRICE_LOOKUP_KEYS`) rather than by id -- correcting a price in the Stripe
+Dashboard needs no code change, only the amount to change.
+
+- `POST /api/billing/checkout` -- body `{ "tier": "build" | "ship", "interval": "monthly" | "annual" }`
+  or `{ "topup": true }`. Authenticated the same way `/api/plan` is; returns
+  `{ url }`, the Checkout Session to redirect the browser to.
+- `POST /api/billing/portal` -- authenticated, no body. Returns `{ url }` for
+  the Stripe-hosted Billing Portal, where a customer manages or cancels
+  their own subscription.
+- `POST /api/stripe/webhook` -- Stripe's own POST, not a browser's. No Clerk
+  session exists to check; the `Stripe-Signature` header, verified against
+  the raw body before anything is parsed (L30), is the entire
+  authentication. Subscribed events: `checkout.session.completed`,
+  `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
+  `invoice.payment_failed` (the last two are acknowledged but not yet
+  separately mirrored -- `customer.subscription.updated` already carries
+  the status change either one implies).
+- A nightly Cron Trigger (`wrangler.jsonc`'s `triggers.crons`) re-reads every
+  mirrored subscription from Stripe and corrects any drift a missed or
+  failed webhook delivery left behind (L13).
+
+**Not in this change**, deliberately split into a separate PR: wiring a
+tier's included model spend into `/api/plan`'s own budget gate (L35-L39).
+This PR gets a subscription's existence and status durably mirrored and
+billable; what a tier actually _entitles_ someone to spend is the next
+piece, since it changes how `budget.ts`'s ceiling itself works. There is
+also no billing UI yet in the builder shell -- a checkout/portal button, a
+tier picker -- the same "backend exists, nothing calls it from here yet"
+gap `/api/preview` had before it was wired into the shell.
+
+### Setup
+
+1. `wrangler secret put STRIPE_SECRET_KEY` -- the account's live secret key
+   (https://dashboard.stripe.com/apikeys).
+2. `wrangler secret put STRIPE_WEBHOOK_SECRET` -- the signing secret for
+   this deployment's registered webhook endpoint
+   (https://dashboard.stripe.com/workbench/webhooks). Relayed once, out of
+   band, when the endpoint is created -- never committed here.
+3. Once `app.vibld.com` (L20) is live, update that webhook endpoint's `url`
+   to point at it (a Dashboard edit or one API call; the signing secret does
+   not change). Until then, deliveries queue and retry against a domain
+   that does not yet resolve to this Worker -- harmless, since nothing can
+   subscribe before both the code and the domain exist.
 
 ## Generated output
 

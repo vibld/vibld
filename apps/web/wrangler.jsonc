@@ -119,4 +119,10 @@
   // PREVIEW_INTERNAL_SECRET is a Worker secret, set out of band and shared
   // with @vibld/preview's copy of the same value.
   "services": [{ "binding": "PREVIEW", "service": "vibld-preview" }],
+
+  // Stripe billing (docs/decisions.md L12-L15). STRIPE_SECRET_KEY and
+  // STRIPE_WEBHOOK_SECRET are Worker secrets, set out of band -- see
+  // apps/web/README.md's "Billing" section. Off-peak UTC time, arbitrarily;
+  // nothing about the reconcile depends on when it runs.
+  "triggers": { "crons": ["17 9 * * *"] },
 }
