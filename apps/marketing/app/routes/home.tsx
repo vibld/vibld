@@ -1,5 +1,5 @@
 import { WaitlistForm } from '../components/WaitlistForm';
-import { metaFor } from '../site';
+import { SITE, metaFor } from '../site';
 
 export function meta() {
   return metaFor('/');
@@ -11,7 +11,7 @@ export default function Home() {
       <p className="font-mono text-sm font-medium tracking-wide text-[var(--color-accent-ink)] uppercase">
         Coming soon
       </p>
-      <h1 className="mt-3 max-w-3xl text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
+      <h1 className="mt-3 max-w-3xl font-display text-5xl font-bold tracking-tight text-balance sm:text-6xl">
         Vibe. Build. Ship.
       </h1>
       <p className="mt-6 max-w-2xl text-lg text-[var(--color-ink-muted)] text-pretty sm:text-xl">
@@ -23,6 +23,17 @@ export default function Home() {
       </p>
 
       <WaitlistForm />
+
+      <p className="mt-4 text-sm text-[var(--color-ink-muted)]">
+        Vibld's core is open source under Apache-2.0 — no lock-in by promise,
+        not just by product design.{' '}
+        <a
+          href={SITE.repoUrl}
+          className="font-medium text-[var(--color-accent-ink)] underline underline-offset-4"
+        >
+          View the code on GitHub →
+        </a>
+      </p>
 
       <BuildPreview />
     </article>

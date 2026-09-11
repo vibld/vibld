@@ -29,6 +29,8 @@ export const SITE = {
    * committed; it lives on the `marketing` GitHub environment.
    */
   turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',
+  /** Issue #7 -- link the repository and the open-source, portable-code promise. */
+  repoUrl: 'https://github.com/vibld/vibld',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   mailingAddress: '285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342',
@@ -138,6 +140,7 @@ export function routeFor(path: string): SiteRoute {
 export function metaFor(path: string) {
   const route = routeFor(path);
   const url = new URL(path, SITE.url).toString();
+  const image = new URL('/og-image.png', SITE.url).toString();
   return [
     { title: route.title },
     { name: 'description', content: route.description },
@@ -147,8 +150,12 @@ export function metaFor(path: string) {
     { property: 'og:title', content: route.title },
     { property: 'og:description', content: route.description },
     { property: 'og:url', content: url },
+    { property: 'og:image', content: image },
+    { property: 'og:image:width', content: '1200' },
+    { property: 'og:image:height', content: '630' },
     { name: 'twitter:card', content: 'summary_large_image' },
     { name: 'twitter:title', content: route.title },
     { name: 'twitter:description', content: route.description },
+    { name: 'twitter:image', content: image },
   ];
 }
