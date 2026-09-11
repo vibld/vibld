@@ -186,7 +186,18 @@ jobs:
         run: |
           log="$RUNNER_TEMP/wrangler-deploy.log"
           pnpm dlx wrangler@4.129.1 deploy | tee "$log"
-          url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+
+          # A custom domain route (apps/web/wrangler.jsonc's "routes") makes
+          # wrangler disable the workers.dev preview URL by default -- its
+          # output then lists the domain under "Deployed ... triggers" as
+          # "  app.vibld.com (custom domain)" instead of printing a
+          # https://*.workers.dev line at all. Prefer that when present;
+          # fall back to the workers.dev line for a deployment with no
+          # custom domain configured.
+          url="$(sed -n 's/^[[:space:]]*\([A-Za-z0-9.-]*\) (custom domain)$/https:\/\/\1/p' "$log" | head -n 1 || true)"
+          if [ -z "$url" ]; then
+            url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+          fi
           if [ -n "$url" ]; then
             echo "url=$url" >> "$GITHUB_OUTPUT"
             echo "Deployed the builder shell to $url" >> "$GITHUB_STEP_SUMMARY"
