@@ -148,6 +148,34 @@ jobs:
             echo "PREVIEW_INTERNAL_SECRET not set -- /api/preview stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Stripe billing (docs/decisions.md L12-L15). Optional, same as
+      # PREVIEW_INTERNAL_SECRET above: unset means handlePlan's budget gate
+      # and /api/billing/* answer "not configured" rather than the whole
+      # deploy failing -- billing is additive to a deployment that already
+      # works without it.
+      - name: Sync Stripe credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$STRIPE_SECRET_KEY" ]; then
+            printf '%s' "$STRIPE_SECRET_KEY" | pnpm dlx wrangler@4.129.1 secret put STRIPE_SECRET_KEY
+            echo "Synced STRIPE_SECRET_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "STRIPE_SECRET_KEY not set -- billing stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$STRIPE_WEBHOOK_SECRET" ]; then
+            printf '%s' "$STRIPE_WEBHOOK_SECRET" | pnpm dlx wrangler@4.129.1 secret put STRIPE_WEBHOOK_SECRET
+            echo "Synced STRIPE_WEBHOOK_SECRET." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "STRIPE_WEBHOOK_SECRET not set -- /api/stripe/webhook stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Deploy to Cloudflare Workers
         id: deploy
         shell: bash
