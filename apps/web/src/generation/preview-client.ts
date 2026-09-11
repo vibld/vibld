@@ -154,3 +154,106 @@ export async function stopSandboxPreview(
   });
   if (!response.ok) throw new Error(await errorMessage(response));
 }
+
+/** L10: "Preview sharing is a signed, revocable, time-limited URL." Several may be active for one preview at once, each independently revocable. */
+export interface PreviewShare {
+  shareId: string;
+  createdAt: number;
+  expiresAt: number;
+  revoked: boolean;
+  /** Present only for a still-active grant. */
+  url?: string;
+}
+
+function isPreviewShare(value: unknown): value is PreviewShare {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as PreviewShare).shareId === 'string' &&
+    typeof (value as PreviewShare).createdAt === 'number' &&
+    typeof (value as PreviewShare).expiresAt === 'number' &&
+    typeof (value as PreviewShare).revoked === 'boolean'
+  );
+}
+
+/**
+ * Every share grant ever issued for the caller's current preview. `[]` for
+ * every case that is not "here is a list to show" -- the same "render
+ * nothing rather than throw" contract `fetchPreviewStatus` has, and for the
+ * same reason: this is read on mount and after every share/revoke action,
+ * not in response to something the caller just explicitly asked for.
+ */
+export async function fetchPreviewShares(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<PreviewShare[]> {
+  let response: Response;
+  try {
+    response = await fetchImpl('/api/preview/share', {
+      headers: await authHeaders(getToken),
+    });
+  } catch {
+    return [];
+  }
+  if (!response.ok) return [];
+  try {
+    const body: unknown = await response.json();
+    const shares = (body as { shares?: unknown } | null)?.shares;
+    return Array.isArray(shares) ? shares.filter(isPreviewShare) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Mint a new share link for the caller's currently-running preview. Unlike
+ * `fetchPreviewShares`, this is the direct result of something the caller
+ * just clicked, so it throws rather than swallowing the problem.
+ */
+export async function createPreviewShare(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<PreviewShare> {
+  const response = await fetchImpl('/api/preview/share', {
+    method: 'POST',
+    headers: await authHeaders(getToken),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  const body: unknown = await response.json().catch(() => null);
+  const record = (body ?? {}) as {
+    shareId?: unknown;
+    expiresAt?: unknown;
+    url?: unknown;
+  };
+  if (
+    typeof record.shareId !== 'string' ||
+    typeof record.expiresAt !== 'number' ||
+    typeof record.url !== 'string'
+  ) {
+    throw new Error('The preview service returned an unreadable response.');
+  }
+  return {
+    shareId: record.shareId,
+    createdAt: Date.now(),
+    expiresAt: record.expiresAt,
+    revoked: false,
+    url: record.url,
+  };
+}
+
+/** Revoke one share link. Idempotent -- revoking one already revoked still succeeds. */
+export async function revokePreviewShare(
+  shareId: string,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<void> {
+  const response = await fetchImpl('/api/preview/share', {
+    method: 'DELETE',
+    headers: {
+      'content-type': 'application/json',
+      ...(await authHeaders(getToken)),
+    },
+    body: JSON.stringify({ shareId }),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+}

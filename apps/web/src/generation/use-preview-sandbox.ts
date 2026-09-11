@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectFile } from '@vibld/core';
 import {
+  createPreviewShare,
+  fetchPreviewShares,
   fetchPreviewStatus,
+  revokePreviewShare,
   startSandboxPreview,
   stopSandboxPreview,
 } from './preview-client.ts';
-import type { PreviewStatus } from './preview-client.ts';
+import type { PreviewShare, PreviewStatus } from './preview-client.ts';
 
 /** How often to re-check a preview that has not yet settled (matches `handlePlan`'s own poll interval, `worker/index.ts`'s `POLL_INTERVAL_MS`). */
 const POLL_INTERVAL_MS = 1500;
@@ -19,11 +22,20 @@ export interface PreviewSandbox {
   run(files: ProjectFile[]): void;
   /** Stop the running preview, if any. */
   stop(): void;
+  /** Every share grant issued for the current preview (docs/decisions.md L10). Empty once the preview itself stops or fails. */
+  shares: PreviewShare[];
+  sharePending: boolean;
+  shareError: string | null;
+  /** Mint a new share link for the currently-ready preview. */
+  share(): void;
+  /** Revoke one share link, independent of the preview itself. */
+  revokeShare(shareId: string): void;
 }
 
 /**
- * Owns the lifecycle of one sandbox preview (docs/decisions.md L7-L11):
- * start, poll until it settles, stop.
+ * Owns the lifecycle of one sandbox preview (docs/decisions.md L7-L11) and
+ * its share links (L10): start, poll until it settles, stop; mint or revoke
+ * a share once it is ready.
  *
  * Called from `Workspace.tsx`, one level above `PreviewPanel`, deliberately:
  * `Workspace` renders `PreviewPanel` only while the Preview tab is the
@@ -37,6 +49,10 @@ export function usePreviewSandbox(): PreviewSandbox {
   const [pending, setPending] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [shares, setShares] = useState<PreviewShare[]>([]);
+  const [sharePending, setSharePending] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+
   function stopPolling() {
     if (pollRef.current !== null) {
       clearInterval(pollRef.current);
@@ -47,6 +63,17 @@ export function usePreviewSandbox(): PreviewSandbox {
   // The interval must not outlive the shell even though this hook otherwise
   // does not track component lifetime.
   useEffect(() => stopPolling, []);
+
+  // A share only ever makes sense against a preview that is actually
+  // running -- once this one stops or fails, its shares are somebody else's
+  // history now, not this session's to keep showing or revoking.
+  useEffect(() => {
+    if (status?.status !== 'ready') {
+      setShares([]);
+      return;
+    }
+    void fetchPreviewShares().then(setShares);
+  }, [status?.status]);
 
   function pollUntilSettled() {
     stopPolling();
@@ -98,10 +125,55 @@ export function usePreviewSandbox(): PreviewSandbox {
     }
   }
 
+  async function share() {
+    setShareError(null);
+    setSharePending(true);
+    try {
+      const grant = await createPreviewShare();
+      setShares((current) => [...current, grant]);
+    } catch (error) {
+      setShareError(
+        error instanceof Error
+          ? error.message
+          : 'Could not create a share link.',
+      );
+    } finally {
+      setSharePending(false);
+    }
+  }
+
+  async function doRevokeShare(shareId: string) {
+    setShareError(null);
+    setSharePending(true);
+    try {
+      await revokePreviewShare(shareId);
+      setShares((current) =>
+        current.map((entry) =>
+          entry.shareId === shareId
+            ? { ...entry, revoked: true, url: undefined }
+            : entry,
+        ),
+      );
+    } catch (error) {
+      setShareError(
+        error instanceof Error
+          ? error.message
+          : 'Could not revoke that share link.',
+      );
+    } finally {
+      setSharePending(false);
+    }
+  }
+
   return {
     status,
     pending,
     run: (files) => void run(files),
     stop: () => void stop(),
+    shares,
+    sharePending,
+    shareError,
+    share: () => void share(),
+    revokeShare: (shareId) => void doRevokeShare(shareId),
   };
 }
