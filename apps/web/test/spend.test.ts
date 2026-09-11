@@ -6,6 +6,7 @@ import {
   dayKey,
   decide,
   microUsdOf,
+  monthKey,
   parsePrices,
   worstCaseMicroUsd,
 } from '../worker/spend.ts';
@@ -91,7 +92,7 @@ describe('spend ceiling', () => {
     });
     assert.deepEqual(decide({ ...base, spentMicroUsd: 3_600_001 }), {
       allow: false,
-      reason: 'daily-ceiling',
+      reason: 'period-ceiling',
     });
   });
 
@@ -102,7 +103,7 @@ describe('spend ceiling', () => {
     const nearly = base.ceilingMicroUsd - base.worstCaseMicroUsd + 1;
     assert.deepEqual(decide({ ...base, spentMicroUsd: nearly }), {
       allow: false,
-      reason: 'daily-ceiling',
+      reason: 'period-ceiling',
     });
     assert.deepEqual(decide({ ...base, spentMicroUsd: nearly - 1 }), {
       allow: true,
@@ -119,15 +120,20 @@ describe('spend ceiling', () => {
   it('refuses everything when the ceiling is smaller than one run', () => {
     assert.deepEqual(decide({ ...base, ceilingMicroUsd: 1 }), {
       allow: false,
-      reason: 'daily-ceiling',
+      reason: 'period-ceiling',
     });
   });
 });
 
-describe('spend day boundaries', () => {
-  it('groups by UTC day, so a ceiling resets at 00:00 UTC', () => {
+describe('spend period boundaries', () => {
+  it('groups by UTC day, so the account-wide ceiling resets at 00:00 UTC', () => {
     assert.equal(dayKey(Date.UTC(2026, 8, 8, 23, 59, 59)), '2026-09-08');
     assert.equal(dayKey(Date.UTC(2026, 8, 9, 0, 0, 0)), '2026-09-09');
+  });
+
+  it('groups by UTC calendar month, so a tier allowance resets on the 1st', () => {
+    assert.equal(monthKey(Date.UTC(2026, 8, 30, 23, 59, 59)), '2026-09');
+    assert.equal(monthKey(Date.UTC(2026, 9, 1, 0, 0, 0)), '2026-10');
   });
 });
 

@@ -45,6 +45,15 @@ export interface WorkflowParams {
   email?: string;
   /** Absent only if the reservation call itself failed to return an id. */
   reservationId?: number;
+  /**
+   * The `USER_BUDGET` instance `reservationId` was reserved against --
+   * `userId` for the caller's monthly tier allowance, `"<userId>:topup"` if
+   * the reservation was drawn from top-up credit instead (L37; see
+   * `index.ts`'s `reserveBudget`). Settlement has to target the same
+   * instance the reservation was made against, or it reconciles a balance
+   * the run never actually drew from.
+   */
+  reservationKey?: string;
   accountReservationId?: number;
   worstCaseMicroUsd: number;
   prices: TokenPrices;
@@ -150,6 +159,7 @@ export async function settleBudget(
     WorkflowParams,
     | 'userId'
     | 'reservationId'
+    | 'reservationKey'
     | 'accountReservationId'
     | 'worstCaseMicroUsd'
     | 'prices'
@@ -163,7 +173,12 @@ export async function settleBudget(
     : params.worstCaseMicroUsd;
 
   if (params.reservationId !== undefined) {
-    await ledger.getByName(params.userId).settle(params.reservationId, actual);
+    // `reservationKey` is always set alongside `reservationId` by index.ts's
+    // `reserveBudget`; falling back to `userId` is only a safety net for a
+    // caller that predates the top-up bucket, not a real expected path.
+    await ledger
+      .getByName(params.reservationKey ?? params.userId)
+      .settle(params.reservationId, actual);
   }
   // Both layers were reserved together (index.ts's `reserveBudget`), so both
   // settle together -- the account-wide ledger must reflect the same run at
