@@ -110,6 +110,22 @@ body {
   align-items: center;
 }
 
+.auth-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  min-height: 100vh;
+  padding: 3rem 1.25rem;
+  background: var(--bg);
+}
+
+.auth-gate__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .shell__body {
   display: grid;
   grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr);

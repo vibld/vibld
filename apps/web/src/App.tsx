@@ -6,10 +6,25 @@ import { LifecycleBar } from './components/LifecycleBar.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
-import { AuthStatus } from './auth/clerk.tsx';
+import { AuthGate, AuthStatus } from './auth/clerk.tsx';
 import { BillingStatusWidget } from './components/BillingStatus.tsx';
 
+/**
+ * `AuthGate` is the outermost piece deliberately: `Builder` -- and the
+ * `useBuilderSession` probe it mounts -- must not exist at all while signed
+ * out, not just render behind a gate. Splitting it out of `App` is what
+ * makes that mount conditional instead of the gate wrapping an
+ * already-running session.
+ */
 export function App() {
+  return (
+    <AuthGate>
+      <Builder />
+    </AuthGate>
+  );
+}
+
+function Builder() {
   const { session, state } = useBuilderSession();
   const usage = state.budget.used;
 
