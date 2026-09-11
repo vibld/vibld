@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { BuilderState } from '../generation/session.ts';
+import { usePreviewSandbox } from '../generation/use-preview-sandbox.ts';
 import { CodeViewer } from './CodeViewer.tsx';
 import { ExportButton } from './ExportButton.tsx';
 import { FileList } from './FileList.tsx';
@@ -19,6 +20,10 @@ export function Workspace({ state }: { state: BuilderState }) {
   const [activeTab, setActiveTab] = useState<TabId>('preview');
   const [requestedPath, setRequestedPath] = useState<string | null>(null);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Owned here, not by PreviewPanel: this component does not unmount when a
+  // tab switch hides PreviewPanel, so a running sandbox survives switching
+  // to Code and back (see use-preview-sandbox.ts's own doc comment).
+  const sandbox = usePreviewSandbox();
 
   // Derive the selection instead of storing it: when a run replaces the file
   // set, a selection that no longer exists falls back to the first file
@@ -52,12 +57,18 @@ export function Workspace({ state }: { state: BuilderState }) {
       <div className="tabs" role="tablist" aria-label="Workspace views">
         {TABS.map((tab, index) => {
           const isActive = tab.id === activeTab;
-          const count =
+          // A running sandbox is worth flagging on its tab specifically
+          // because it keeps running while another tab is in view -- unlike
+          // the problems/console counts, this is not otherwise visible at
+          // all once the user has looked away from Preview.
+          const badge =
             tab.id === 'problems'
-              ? state.problems.length
+              ? state.problems.length || null
               : tab.id === 'console'
-                ? state.timeline.length
-                : 0;
+                ? state.timeline.length || null
+                : tab.id === 'preview' && sandbox.status?.status === 'ready'
+                  ? 'live'
+                  : null;
           return (
             <button
               key={tab.id}
@@ -75,7 +86,9 @@ export function Workspace({ state }: { state: BuilderState }) {
               onKeyDown={(event) => onTabKeyDown(event, index)}
             >
               {tab.label}
-              {count > 0 ? <span className="tabs__count">{count}</span> : null}
+              {badge !== null ? (
+                <span className="tabs__count">{badge}</span>
+              ) : null}
             </button>
           );
         })}
@@ -88,7 +101,9 @@ export function Workspace({ state }: { state: BuilderState }) {
         aria-labelledby={`tab-${activeTab}`}
         tabIndex={0}
       >
-        {activeTab === 'preview' ? <PreviewPanel state={state} /> : null}
+        {activeTab === 'preview' ? (
+          <PreviewPanel state={state} sandbox={sandbox} />
+        ) : null}
 
         {activeTab === 'code' ? (
           <div className="codepane">

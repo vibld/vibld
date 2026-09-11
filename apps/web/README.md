@@ -33,14 +33,13 @@ into newer state.
 
 ## What this slice does not do
 
-- **The built-in preview pane is still a local mock.** It is static HTML
-  assembled from the accepted plan and the generated stylesheet, rendered in
-  a fully restricted iframe (`sandbox=""`); nothing installs dependencies and
-  no generated code runs there. Real sandbox execution now exists
-  (`@vibld/preview`, ADR-0004, "Sandbox previews" below) and `/api/preview`
-  can run and expose a live, installed copy of the same project -- the shell
-  does not call it from this pane yet, so a running preview today means
-  calling `/api/preview` directly, not clicking a button here.
+- **The default preview pane content is still a local mock.** It is static
+  HTML assembled from the accepted plan and the generated stylesheet,
+  rendered in a fully restricted iframe (`sandbox=""`); nothing installs
+  dependencies and no generated code runs there. The Preview tab's "Run in
+  sandbox" button (see "Sandbox previews" below) starts the real thing --
+  the mock is what shows before that button is pressed, and for a
+  model-generated project, which has no mock to build in the first place.
 - **There is no model provider.** Plans come from a deterministic local
   function so CI needs no credentials (ADR-0007).
 - **Console and Problems are placeholders** beyond the lifecycle log and
@@ -317,6 +316,24 @@ again with the files to actually start), `{status: "installing" | "starting"}`,
 `/api/preview` answers `503` when `PREVIEW` or `PREVIEW_INTERNAL_SECRET` is
 unset -- unavailable, never open, the same rule `isConfigured` already
 applies to `/api/plan`.
+
+### In the builder shell
+
+The Preview tab's "Run in sandbox" button calls `/api/preview` with the
+accepted checkpoint's files
+(`src/generation/preview-client.ts`, the browser-side mirror of
+`worker/preview-client.ts`'s `PreviewStatus` union and its defensive
+parsing) and polls until the sandbox settles, then swaps the local mock for
+a real `<iframe src>` pointed at the returned URL. "Stop" ends it early;
+the tab shows a `live` badge while a sandbox is running, since it keeps
+running even while another tab is in view.
+
+The polling state lives in `Workspace.tsx` (`generation/use-preview-sandbox.ts`'s
+`usePreviewSandbox`), one level above `PreviewPanel`, not inside
+`PreviewPanel` itself: `Workspace` renders `PreviewPanel` only while the
+Preview tab is active, so state scoped to `PreviewPanel` would be torn
+down -- along with the poll loop -- every time the user switched to Code or
+Console and back, silently orphaning a sandbox that was still running.
 
 ### Setup
 

@@ -414,6 +414,18 @@ body {
   background: #ffffff;
 }
 
+.preview__sandbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.preview__expiry {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
 .codepane {
   display: grid;
   grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
