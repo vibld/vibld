@@ -143,7 +143,7 @@ describe('RemoteModelProvider', () => {
       () => provider.generate({ prompt: 'x' }),
       (error: Error) => {
         assert.equal(error.name, 'SignInRequiredError');
-        assert.match(error.message, /session has expired/i);
+        assert.match(error.message, /sign in/i);
         return true;
       },
     );
@@ -229,7 +229,7 @@ describe('a missing or expired Clerk session', () => {
     await assert.rejects(
       () =>
         detectGenerationMode(jsonFetch({ error: 'Sign in required.' }, 401)),
-      /session has expired/i,
+      /sign in/i,
     );
   });
 

@@ -33,7 +33,7 @@ interface PlanEvent {
 export class SignInRequiredError extends Error {
   constructor() {
     super(
-      'Your sign-in session has expired. Reload the page to sign in again, then try once more.',
+      'Sign in to generate -- use the "Sign in" button above, then try again.',
     );
     this.name = 'SignInRequiredError';
   }
