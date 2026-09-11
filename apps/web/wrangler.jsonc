@@ -89,9 +89,9 @@
   // The control plane (docs/decisions.md L24/L25): D1 for generation
   // metadata, R2 for the file content it points at. Provisioned already --
   // see apps/web/migrations/ for the schema. worker/generation-store.ts is
-  // not wired into request handling yet: there is no authenticated principal
-  // to own a project until Clerk lands (L1), and writing that wiring before
-  // there is anyone to test it against would be guessing at the shape.
+  // not wired into request handling yet: Clerk sign-in is live now (L5), so
+  // there is a principal to own a project against, but that wiring is
+  // separate work that has not started.
   "d1_databases": [
     {
       "binding": "DB",
@@ -102,4 +102,10 @@
   "r2_buckets": [
     { "binding": "PROJECT_CONTENT", "bucket_name": "vibld-control-plane" },
   ],
+
+  // Sandbox execution (docs/decisions.md L7-L11) -- see
+  // apps/preview/README.md for why it lives in its own Worker.
+  // PREVIEW_INTERNAL_SECRET is a Worker secret, set out of band and shared
+  // with @vibld/preview's copy of the same value.
+  "services": [{ "binding": "PREVIEW", "service": "vibld-preview" }],
 }

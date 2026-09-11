@@ -54,6 +54,18 @@ check('Clerk gates the API for a signed-out caller', async () => {
   }
 });
 
+check('/api/preview never answers a signed-out caller with 200', async () => {
+  // 401 (Clerk configured, caller isn't signed in) and 503 (PREVIEW isn't
+  // configured on this deployment yet) are both a safe "closed"; either is
+  // fine here. Only 200 would mean anyone can spend sandbox container time.
+  const response = await head('/api/preview', { method: 'POST' });
+  if (response.status === 200) {
+    throw new Error(
+      "/api/preview answered 200 for a signed-out caller. That would mean anyone can spend the account's sandbox budget.",
+    );
+  }
+});
+
 const failures = [];
 for (const { name, fn } of results) {
   try {

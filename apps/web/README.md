@@ -30,15 +30,21 @@ into newer state.
 
 ## What this slice does not do
 
-- **The preview is a local mock.** It is static HTML assembled from the accepted
-  plan and the generated stylesheet, rendered in a fully restricted iframe
-  (`sandbox=""`). Nothing installs dependencies and no generated code runs.
-  Sandbox execution (ADR-0004) is not implemented.
+- **The built-in preview pane is still a local mock.** It is static HTML
+  assembled from the accepted plan and the generated stylesheet, rendered in
+  a fully restricted iframe (`sandbox=""`); nothing installs dependencies and
+  no generated code runs there. Real sandbox execution now exists
+  (`@vibld/preview`, ADR-0004, "Sandbox previews" below) and `/api/preview`
+  can run and expose a live, installed copy of the same project -- the shell
+  does not call it from this pane yet, so a running preview today means
+  calling `/api/preview` directly, not clicking a button here.
 - **There is no model provider.** Plans come from a deterministic local
   function so CI needs no credentials (ADR-0007).
 - **Console and Problems are placeholders** beyond the lifecycle log and
-  validation findings. Process output and build diagnostics arrive with sandbox
-  execution.
+  validation findings. `@vibld/preview` reports install/start success or
+  failure as a whole (see "Sandbox previews" below), but nothing pipes a
+  running preview's live process output or build diagnostics into these
+  panels yet.
 - **No project persistence, Git export or deployment.** A D1/R2-backed
   `GenerationStore` exists (`worker/generation-store.ts`) and is tested
   against the same contract `InMemoryGenerationStore` satisfies, but nothing
@@ -243,6 +249,42 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
   `isPlatformAdmin` exists and is tested, but no endpoint calls it. There is
   no admin-only surface to gate until one exists; wiring it in ahead of that
   would be guessing at a shape nothing has tested yet.
+
+## Sandbox previews (docs/decisions.md L7-L11)
+
+`/api/preview` runs the caller's own project for real -- `npm install`, then
+a live dev server -- in a genuinely untrusted, time-boxed container, and
+returns a URL to view it. All of the actual work (the container, egress
+lockdown, concurrency, lifetime) lives in `@vibld/preview`, a separate
+Worker; see that package's README for why, and for what it does and does
+not do yet (sharing beyond default privacy is the open piece). This app's
+own `worker/preview-client.ts` is a thin, authenticated forwarder: it
+resolves the caller's Clerk principal, then calls `@vibld/preview` over a
+service binding, trusting nothing the browser could have supplied itself.
+
+- `POST /api/preview` -- body `{ "files": [{ "path", "content" }, ...] }`
+  (the same shape `/api/plan`'s `base` already uses). Starts a preview, or
+  reports queued/in-progress if the caller already has one running.
+- `GET /api/preview` -- polls the current preview's status. Never starts or
+  enqueues anything; safe to call as often as needed.
+- `DELETE /api/preview` -- stops the caller's preview early. Idempotent.
+
+Every response is one of: `{status: "queued", position}`,
+`{status: "ready-to-start"}` (a slot freed while queued -- call `POST`
+again with the files to actually start), `{status: "installing" | "starting"}`,
+`{status: "ready", url, expiresAt}`, or `{status: "failed", error}`.
+
+`/api/preview` answers `503` when `PREVIEW` or `PREVIEW_INTERNAL_SECRET` is
+unset -- unavailable, never open, the same rule `isConfigured` already
+applies to `/api/plan`.
+
+### Setup
+
+1. Deploy `@vibld/preview` first (see its own README) -- apps/web's service
+   binding only routes successfully once `vibld-preview` exists.
+2. Add `PREVIEW_INTERNAL_SECRET` (a long random value) to the `preview`
+   environment here, the same value used when deploying `@vibld/preview`.
+   The **Deploy web preview** workflow syncs it to this Worker.
 
 ## Generated output
 

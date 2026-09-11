@@ -128,14 +128,64 @@ export function parseGenerationRequest(
   if (typeof snapshot.revision !== 'string' || !Array.isArray(snapshot.files)) {
     return fail(400, '"base" must be a project snapshot.');
   }
-  if (snapshot.files.length > limits.maxFiles) {
+  const files = parseProjectFiles(snapshot.files, limits);
+  if (!files.ok) return files;
+
+  return {
+    ok: true,
+    value: {
+      prompt,
+      base: { revision: snapshot.revision, files: files.value },
+    },
+  };
+}
+
+/**
+ * A relative, canonical path with no way out of the project root -- the same
+ * rule `src/generation/validator.ts`'s `pathProblem` already applies
+ * client-side before a file is even staged. That check alone is not enough
+ * here: `/api/preview` is the first place a `path` is used to write an
+ * actual file on an actual filesystem (inside the sandbox container), and a
+ * client-side rule is not a boundary check (ADR-0006) -- a caller that skips
+ * the browser entirely could otherwise ask a sandbox to write outside
+ * `/workspace`.
+ */
+function pathProblem(path: string): string | undefined {
+  if (path.length === 0) return 'A file has an empty path.';
+  if (path.startsWith('/') || /^[a-zA-Z]:/.test(path)) {
+    return `"${path}" must be a relative path.`;
+  }
+  if (path.includes('\\')) return `"${path}" must use forward slashes.`;
+  if (path.includes('\0')) return `"${path}" contains an invalid character.`;
+  const segments = path.split('/');
+  if (segments.some((segment) => segment === '..')) {
+    return `"${path}" escapes the project root.`;
+  }
+  if (segments.some((segment) => segment === '' || segment === '.')) {
+    return `"${path}" is not a canonical path.`;
+  }
+  return undefined;
+}
+
+/**
+ * The file-list rules `parseGenerationRequest`'s `base` and `/api/preview`
+ * both need: how many files, how long a path, how much content in total.
+ * Shared so the two endpoints cannot quietly drift onto different limits for
+ * what is, in both cases, "how big a project can this deployment afford to
+ * hand to a model or a sandbox".
+ */
+function parseProjectFiles(
+  entries: unknown[],
+  limits: GuardLimits,
+): GuardResult<{ path: string; content: string }[]> {
+  if (entries.length > limits.maxFiles) {
     return fail(413, `A project may contain at most ${limits.maxFiles} files.`);
   }
 
   const files: { path: string; content: string }[] = [];
   let totalPathChars = 0;
   let totalContentChars = 0;
-  for (const entry of snapshot.files) {
+  for (const entry of entries) {
     if (typeof entry !== 'object' || entry === null) {
       return fail(400, 'Every staged file must be an object.');
     }
@@ -143,6 +193,8 @@ export function parseGenerationRequest(
     if (typeof path !== 'string' || typeof content !== 'string') {
       return fail(400, 'Every staged file needs a string path and content.');
     }
+    const problem = pathProblem(path);
+    if (problem) return fail(400, problem);
     if (path.length > limits.maxPathChars) {
       return fail(
         413,
@@ -165,11 +217,26 @@ export function parseGenerationRequest(
     }
     files.push({ path, content });
   }
+  return { ok: true, value: files };
+}
 
-  return {
-    ok: true,
-    value: { prompt, base: { revision: snapshot.revision, files } },
-  };
+/**
+ * Validate `/api/preview`'s body: just the files a sandbox should run: no
+ * prompt, no revision -- a preview is not a generation, only what already
+ * got generated.
+ */
+export function parsePreviewRequest(
+  body: unknown,
+  limits: GuardLimits = DEFAULT_LIMITS,
+): GuardResult<{ path: string; content: string }[]> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { files } = body as { files?: unknown };
+  if (!Array.isArray(files) || files.length === 0) {
+    return fail(400, '"files" must be a non-empty list.');
+  }
+  return parseProjectFiles(files, limits);
 }
 
 /**
