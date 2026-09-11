@@ -54,11 +54,6 @@ into newer state.
   history, renaming a project, or starting a second one -- "the project" is
   still exactly one thing per account, the same as when it lived only in the
   browser tab's memory.
-- **No billing UI.** A subscribed tier now does change what `/api/plan`'s
-  budget gate allows (see "What a tier actually buys" under "Billing"
-  below), but nothing in the shell offers to start a checkout, open the
-  Billing Portal, or shows a caller their own plan or usage -- that still
-  means calling `/api/billing/*` directly, not clicking a button here.
 
 ## Hosted preview (optional)
 
@@ -346,6 +341,10 @@ Stripe account, referenced here by `lookup_key` (`stripe-client.ts`'s
 `PRICE_LOOKUP_KEYS`) rather than by id -- correcting a price in the Stripe
 Dashboard needs no code change, only the amount to change.
 
+- `GET /api/billing/status` -- authenticated, no body. Returns the caller's
+  own tier, this period's spend against their allowance, remaining top-up
+  credit, and whether a Stripe customer exists yet for them (see "Billing UI
+  in the builder shell" below).
 - `POST /api/billing/checkout` -- body `{ "tier": "build" | "ship", "interval": "monthly" | "annual" }`
   or `{ "topup": true }`. Authenticated the same way `/api/plan` is; returns
   `{ url }`, the Checkout Session to redirect the browser to.
@@ -394,11 +393,30 @@ everyone, not each subscription's own billing-cycle anchor
 outright, not by tracking each purchase's own expiry against what was
 actually drawn from it first (`BillingStore.totalTopupCreditMicroUsd`).
 
-**Still not in this change**: a billing UI in the builder shell -- a
-checkout/portal button, a tier picker, a "generations remaining" readout
-(L35 wants one; `UserBudget.usageFor` exists for it, nothing calls it yet).
-The same "backend exists, nothing calls it from here yet" gap `/api/preview`
-had before it was wired into the shell.
+### Billing UI in the builder shell (L35)
+
+The header now shows the caller's tier and this period's spend against their
+allowance (`GET /api/billing/status`, `worker/index.ts`'s `handleBillingStatus`
+-- a read-only mirror of exactly what `reserveBudget` above computes and
+reserves against; nothing new is authoritative, `UserBudget` still is), plus:
+
+- **A tier picker and "Upgrade" button**, shown only on the Free tier --
+  starts a Checkout Session for the chosen tier at the monthly price
+  (`src/billing/billing-client.ts`'s `startCheckout`).
+- **"Buy top-up"** -- always offered; a top-up is a fallback layer regardless
+  of tier (see above).
+- **"Manage billing"**, opening the Stripe-hosted Billing Portal -- shown
+  only once the status endpoint reports a Stripe customer exists
+  (`hasStripeCustomer`), since the Portal 502s without one and a caller who
+  has never checked out has nothing to manage yet.
+
+Every button redirects the whole page to a Stripe-hosted URL and back
+(`success_url`/`cancel_url`/the Portal's `return_url`), so there is no
+in-app checkout state to keep in sync -- the next mount just fetches the
+status again. `src/components/BillingStatus.tsx` is the JSX half; the fetch
+wrapper and URL-shaped response parsing it calls are JSX-free
+(`src/billing/billing-client.ts`) for the same testability reason
+`remote-provider.ts` is (see that file's own doc comment).
 
 ### Setup
 
