@@ -411,3 +411,36 @@ describe('standing instructions', () => {
     );
   });
 });
+
+describe('reference material', () => {
+  // Not "a landing page" or similar: that phrase alone matches L50's pattern
+  // catalogue and appends its own guidance section, which is exactly the
+  // kind of prompt-shape coupling these tests should not depend on.
+  const request = { prompt: 'Update the header copy to be punchier' };
+
+  it('is absent from the prompt when there is none', () => {
+    assert.equal(buildUserPrompt(request, null, null, null), request.prompt);
+    assert.equal(buildUserPrompt(request, null, null, '   '), request.prompt);
+  });
+
+  it('comes right after the request, ahead of standing instructions', () => {
+    const prompt = buildUserPrompt(
+      request,
+      null,
+      'Keep it dark.',
+      'Acme Corp -- We sell widgets. Pricing. About. Contact.',
+    );
+    assert.ok(prompt.startsWith(request.prompt));
+    const reference = prompt.indexOf('Reference material for this request');
+    assert.ok(reference > 0);
+    assert.ok(reference < prompt.indexOf('Standing instructions'));
+    assert.match(prompt, /Acme Corp -- We sell widgets\./);
+    assert.match(prompt, /starting point to adapt/i);
+    assert.match(prompt, /not a template to reproduce/i);
+  });
+
+  it('is trusted at whatever length it arrives -- the fetcher already truncated it', () => {
+    const long = 'z'.repeat(50_000);
+    assert.doesNotThrow(() => buildUserPrompt(request, null, null, long));
+  });
+});

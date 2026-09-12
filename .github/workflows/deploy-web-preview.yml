@@ -217,6 +217,22 @@ jobs:
             echo "RESEND_API_KEY not set -- the L44 balance check still runs but cannot send an alert." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Idempotent -- wrangler tracks applied migrations in the database's own
+      # `d1_migrations` table and only runs what is new. Runs before the
+      # deploy itself so a Worker never goes live expecting a table a
+      # migration this same push added hasn't created yet. This step's own
+      # absence was a real production bug: 0002_billing.sql and
+      # 0003_publish.sql sat unapplied for two days after their PRs merged,
+      # and every /api/plan call failed with "Usage accounting is
+      # unavailable" until this was caught and applied by hand.
+      - name: Apply D1 migrations
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote
+
       - name: Deploy to Cloudflare Workers
         id: deploy
         shell: bash

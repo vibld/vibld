@@ -21,6 +21,7 @@ export interface GuardLimits {
   maxTotalPathChars: number;
   maxTotalContentChars: number;
   maxKnowledgeChars: number;
+  maxReferenceUrlChars: number;
 }
 
 export const DEFAULT_LIMITS: GuardLimits = {
@@ -39,6 +40,9 @@ export const DEFAULT_LIMITS: GuardLimits = {
   // letting the provider throw after the request has been paid for.
   maxTotalContentChars: MAX_BASE_CONTENT_CHARS,
   maxKnowledgeChars: MAX_KNOWLEDGE_CHARS,
+  // A URL, not content -- generous next to a real address bar's limit, tight
+  // next to what a request could otherwise pad the body with.
+  maxReferenceUrlChars: 2048,
 };
 
 export interface GuardFailure {
@@ -300,6 +304,43 @@ export function parseKnowledge(
   // Empty or whitespace-only is the same as none: it should not become an
   // empty section in the prompt that says nothing.
   return { ok: true, value: knowledge.trim().length > 0 ? knowledge : null };
+}
+
+/**
+ * Validate the shape of an optional "copy from or emulate" URL.
+ *
+ * Only the shape: a string within a sane length. Whether it is actually
+ * reachable, points at http(s), or resolves to something this deployment
+ * should fetch is `reference-fetch.ts`'s job, which needs a real `fetch` and
+ * so cannot live in this file's pure-function set (this module's own
+ * comment). Rejecting a non-string/oversized value here still matters on its
+ * own: it is caught before a network call is ever made for it.
+ */
+export function parseReferenceUrl(
+  body: unknown,
+  limits: GuardLimits = DEFAULT_LIMITS,
+): GuardResult<string | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { referenceUrl } = body as { referenceUrl?: unknown };
+  if (
+    referenceUrl === undefined ||
+    referenceUrl === null ||
+    referenceUrl === ''
+  ) {
+    return { ok: true, value: null };
+  }
+  if (typeof referenceUrl !== 'string') {
+    return fail(400, '"referenceUrl" must be a string.');
+  }
+  if (referenceUrl.length > limits.maxReferenceUrlChars) {
+    return fail(
+      413,
+      `"referenceUrl" must be ${limits.maxReferenceUrlChars} characters or fewer.`,
+    );
+  }
+  return { ok: true, value: referenceUrl };
 }
 
 /**

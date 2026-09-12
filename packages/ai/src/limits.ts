@@ -31,3 +31,16 @@ export const MAX_BASE_CONTENT_CHARS = 160_000;
  * be a cost that grows quietly and never gets re-read.
  */
 export const MAX_KNOWLEDGE_CHARS = 2_000;
+
+/**
+ * The largest extracted-text excerpt a reference URL may contribute to a
+ * prompt.
+ *
+ * The fetch that fills this (`apps/web/worker/reference-fetch.ts`) already
+ * truncates to this figure before the text ever reaches a provider, so this
+ * constant is really documentation of that contract plus the number the
+ * worst-case cost estimate in `apps/web/worker/index.ts` adds in -- a page
+ * someone points at could be enormous, and nothing downstream should have to
+ * guess how much of it might arrive.
+ */
+export const MAX_REFERENCE_CHARS = 6_000;

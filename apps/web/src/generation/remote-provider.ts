@@ -117,6 +117,13 @@ export interface RemoteModelProviderOptions {
   /** Standing instructions for the project, sent with every turn. */
   knowledge?: string | null;
   /**
+   * A page to fetch and use as inspiration for this one request. The Worker
+   * does the actual fetching and text extraction (`reference-fetch.ts`) --
+   * the browser only ever sends the URL, never fetches third-party content
+   * itself.
+   */
+  referenceUrl?: string | null;
+  /**
    * The chosen model, by id. The Worker checks it against the catalogue and
    * against its own credentials -- the browser is not trusted to have picked
    * one this deployment can serve.
@@ -138,6 +145,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
   readonly #style: StylePresetId | null;
   readonly #knowledge: string | null;
+  readonly #referenceUrl: string | null;
   readonly #model: string | null;
   readonly #getToken: () => Promise<string | null>;
 
@@ -149,6 +157,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#onProgress = options.onProgress;
     this.#style = options.style ?? null;
     this.#knowledge = options.knowledge ?? null;
+    this.#referenceUrl = options.referenceUrl ?? null;
     this.#model = options.model ?? null;
     this.#getToken = options.getToken ?? getClerkToken;
   }
@@ -166,6 +175,7 @@ export class RemoteModelProvider implements ModelProvider {
         base: request.base,
         ...(this.#style ? { style: this.#style } : {}),
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
+        ...(this.#referenceUrl ? { referenceUrl: this.#referenceUrl } : {}),
         ...(this.#model ? { model: this.#model } : {}),
       }),
       signal: this.#signal,

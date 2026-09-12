@@ -67,8 +67,8 @@ function Builder() {
             />
             <PromptPanel
               state={state}
-              onSubmit={(prompt, mode, style) => {
-                void session.submit(prompt, mode, style);
+              onSubmit={(prompt, mode, style, referenceUrl) => {
+                void session.submit(prompt, mode, style, referenceUrl);
               }}
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}

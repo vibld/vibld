@@ -14,6 +14,7 @@ import type {
 } from '@vibld/core';
 import type { ModelProvider } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import type { ModelOption } from './remote-provider.ts';
 import type { ProjectBrief } from './brief.ts';
 import { deriveBrief } from './brief.ts';
@@ -133,6 +134,7 @@ export interface SessionOptions {
     style?: StylePresetId | null,
     knowledge?: string | null,
     model?: string | null,
+    referenceUrl?: string | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -190,6 +192,7 @@ async function defaultResolveProvider(
   style?: StylePresetId | null,
   knowledge?: string | null,
   model?: string | null,
+  referenceUrl?: string | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -199,6 +202,7 @@ async function defaultResolveProvider(
         ...(style ? { style } : {}),
         ...(knowledge ? { knowledge } : {}),
         ...(model ? { model } : {}),
+        ...(referenceUrl ? { referenceUrl } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -247,6 +251,7 @@ export class BuilderSession {
     style?: StylePresetId | null,
     knowledge?: string | null,
     model?: string | null,
+    referenceUrl?: string | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -329,6 +334,7 @@ export class BuilderSession {
     prompt: string,
     mode: PlanMode = 'succeed',
     style: StylePresetId | null = null,
+    referenceUrl: string | null = null,
   ): Promise<void> {
     const trimmed = prompt.trim();
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
@@ -346,10 +352,15 @@ export class BuilderSession {
       (sum, file) => sum + file.path.length + file.content.length,
       0,
     );
+    // A reference URL's actual content is not known until the Worker fetches
+    // it, so this counts the worst case (`MAX_REFERENCE_CHARS`) rather than
+    // zero -- the same reasoning as `baseChars`: an estimate that ignores a
+    // real cost is not an estimate a budget can be checked against.
     const inputTokens =
       estimateTokens(trimmed) +
       estimateTokensForChars(baseChars) +
-      estimateTokensForChars(this.#state.knowledge.length);
+      estimateTokensForChars(this.#state.knowledge.length) +
+      (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0);
     let reservation;
     try {
       reservation = this.#ledger.reserve({
@@ -447,6 +458,7 @@ export class BuilderSession {
         style,
         this.#state.knowledge,
         this.#state.model,
+        referenceUrl,
       );
     } catch (error) {
       reservation.release();

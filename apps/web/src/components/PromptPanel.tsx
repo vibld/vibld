@@ -17,6 +17,7 @@ export interface PromptPanelProps {
     prompt: string,
     mode: PlanMode,
     style: StylePresetId | null,
+    referenceUrl: string | null,
   ) => void;
   onReset: () => void;
   onCancel: () => void;
@@ -33,8 +34,10 @@ export function PromptPanel({
   const [prompt, setPrompt] = useState('');
   const [failNext, setFailNext] = useState(false);
   const [style, setStyle] = useState<StylePresetId | null>(null);
+  const [referenceUrl, setReferenceUrl] = useState('');
   const promptId = useId();
   const failId = useId();
+  const referenceId = useId();
   const disabled = state.running;
   // Once there is a conversation, the examples are noise: what to type next
   // comes from what was just built, not from a generic starting point.
@@ -43,12 +46,22 @@ export function PromptPanel({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled || prompt.trim().length === 0) return;
-    onSubmit(prompt, failNext ? 'fail-validation' : 'succeed', style);
+    const trimmedReference = referenceUrl.trim();
+    onSubmit(
+      prompt,
+      failNext ? 'fail-validation' : 'succeed',
+      style,
+      trimmedReference.length > 0 ? trimmedReference : null,
+    );
     // Clear the box. It is a composer now, not a form field that holds the
     // last thing submitted: leaving the sent message in it means the next
     // turn starts by editing the previous one, which is not what anyone
     // means by "what should change?".
     setPrompt('');
+    // The reference URL is scoped to the request it was submitted with, not
+    // a standing preference the way `knowledge` is -- clearing it means a
+    // later, unrelated turn never re-fetches a page nobody meant it for.
+    setReferenceUrl('');
   }
 
   return (
@@ -81,6 +94,19 @@ export function PromptPanel({
           ))}
         </div>
       )}
+
+      <label className="prompt__label" htmlFor={referenceId}>
+        Reference URL (optional)
+      </label>
+      <input
+        id={referenceId}
+        type="url"
+        className="prompt__input"
+        value={referenceUrl}
+        placeholder="https://example.com — a page to copy from or emulate"
+        onChange={(event) => setReferenceUrl(event.target.value)}
+        disabled={disabled}
+      />
 
       <ModelPicker
         models={state.models}
