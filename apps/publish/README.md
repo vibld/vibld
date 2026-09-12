@@ -65,8 +65,6 @@ section used to give is resolved.
 Still not built, per ADR-0010's own scoping:
 
 - The opt-in custom-domain step (the user's own pasted Cloudflare token).
-- A "Publish" button in the builder shell itself -- `/api/publish` is
-  wired and tested, but nothing in the UI calls it yet.
 - Storage quota per user/plan tier (only a request-rate limit exists so
   far, not a cap on how much R2 storage one account may occupy).
 - Slug release/reclaim rules after a project is deleted.
