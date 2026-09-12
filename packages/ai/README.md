@@ -73,8 +73,9 @@ public URL lets anyone spend the account's model budget.
 `style-presets.ts` (23 named visual directions -- 16 surface treatments and
 7 complete colour systems), `patterns.ts` (10 marketing
 page types, 6 SaaS screens), `palettes.ts` (15 product-type colour, typography
-and feel defaults), `motion.ts` (16 motion recipes) and `surfaces.ts` (5
-painting techniques) are closed-set,
+and feel defaults), `motion.ts` (16 motion recipes), `surfaces.ts` (5
+painting techniques) and `diagrams.ts` (5 diagram types plus the connector
+craft) are closed-set,
 keyword-matched retrieval -- the same shape, for the same reason: a request's
 own text selects a handful of relevant, concrete guidance to append to the
 prompt, never an arbitrary string a caller supplies directly
@@ -136,7 +137,7 @@ MIT-licensed design skills. What was taken, and from where:
   motion-principles duration bands agree with what was taken from
   emilkowalski/skills.
 
-Three of the nine are not ported, on technical grounds only:
+Two of the nine are not ported, on technical grounds only:
 
 [greensock/gsap-skills](https://github.com/greensock/gsap-skills) (MIT) is
 API reference for a library this stack does not ship, and its `gsap-core`
@@ -169,6 +170,32 @@ grant and conveys no trademark rights, which the cataloguer does not hold; on
 that basis the owner directed that the archetypes drawn from it ship
 de-named, which is what `style-presets.ts` does. A test enforces it on the id,
 chip name and caption.
+
+### Diagrams
+
+`diagrams.ts` is a deliberate capability rather than a rescue. A request that
+says "show how the system fits together" otherwise gets a stack of styled
+divs, an `<img>` pointing at a file that does not exist, or a charting library
+added against `STACK`. Inline SVG in a React component fits the stack exactly;
+the reason it was not already the answer is that the craft is unforgiving,
+and a diagram is either legible or it is decoration.
+
+Adapted from
+[cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)
+(MIT). Its own deliverable is a standalone HTML file sized to a fixed viewBox,
+produced through an interactive pipeline with a style-guide gate, a
+confirm-before-drawing step and a Python geometry verifier. None of that
+transfers to one-shot generation and none of it is ported. What is ported is
+pure craft: the six connector rules, the elbow and hop path formulae, and the
+layout grammar per diagram type. The formulae matter more than the rules they
+serve, because "use rounded elbows" without the path data produces a
+different curve every run, and usually a diagonal.
+
+Two of its rules are deliberately left behind. It bans shadows outright and
+caps corner radius at 6-10px. Those are house style for its own output, and as
+general rules they would contradict the `claymorphism`, `neumorphism` and
+`depth` presets shipped here, so the guidance defers to the project's own
+tokens instead. A test asserts both bans stayed out.
 
 ### Verified rather than asserted
 

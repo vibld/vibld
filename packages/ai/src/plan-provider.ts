@@ -16,6 +16,7 @@ import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
 import { motionGuidance } from './motion.ts';
 import { surfaceGuidance } from './surfaces.ts';
+import { diagramGuidance } from './diagrams.ts';
 import { paletteGuidance } from './palettes.ts';
 import { styleDnaGuidance } from './style-dna.ts';
 import type { StyleDna } from './style-dna.ts';
@@ -303,6 +304,12 @@ Preserve anything the request does not ask you to change.`,
   // fields, and this says how to paint one in plain CSS.
   const surfaces = surfaceGuidance(request.prompt);
   if (surfaces) parts.push(surfaces);
+
+  // A diagram is its own deliverable rather than a treatment of the page, so
+  // it is not suppressed by a preset either. The craft rules are what stop
+  // the model reaching for an <img> to a file it cannot produce.
+  const diagram = diagramGuidance(request.prompt);
+  if (diagram) parts.push(diagram);
 
   // Only when no style preset was chosen: a preset like "dark" already
   // carries its own colour direction, and a product-type default should

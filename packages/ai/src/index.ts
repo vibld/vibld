@@ -74,6 +74,14 @@ export {
 } from './surfaces.ts';
 export type { SurfaceTechnique } from './surfaces.ts';
 export {
+  DIAGRAM_CRAFT,
+  DIAGRAM_TYPES,
+  diagramGuidance,
+  findDiagramType,
+  selectDiagrams,
+} from './diagrams.ts';
+export type { DiagramType } from './diagrams.ts';
+export {
   PRODUCT_PALETTES,
   findPalette,
   paletteGuidance,
