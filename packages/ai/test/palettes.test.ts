@@ -106,3 +106,50 @@ describe('buildUserPrompt with a matching product type', () => {
     assert.equal(composed, 'Make the hero navy');
   });
 });
+
+describe('palette feel tokens', () => {
+  it('gives every palette a radius, shadow and motion set', () => {
+    for (const palette of PRODUCT_PALETTES) {
+      const { radius, shadow, motion } = palette.feel;
+      for (const value of Object.values(radius)) {
+        assert.match(value, /^\d+px$/, `${palette.id}: ${value}`);
+      }
+      for (const value of Object.values(shadow)) {
+        assert.match(value, /rgba\(/, `${palette.id}: ${value}`);
+      }
+      for (const value of [motion.quick, motion.standard, motion.slow]) {
+        assert.match(value, /^\d+ms$/, `${palette.id}: ${value}`);
+      }
+      assert.match(motion.overshoot, /^\d+%$/);
+    }
+  });
+
+  it('keeps quick and standard inside the sub-300ms UI ceiling', () => {
+    // `slow` is deliberately allowed past it -- see the interface comment on
+    // why the source skill's premium tier was not copied verbatim.
+    for (const palette of PRODUCT_PALETTES) {
+      const { quick, standard } = palette.feel.motion;
+      assert.ok(Number.parseInt(quick, 10) < 300, `${palette.id} quick`);
+      assert.ok(Number.parseInt(standard, 10) < 300, `${palette.id} standard`);
+    }
+  });
+
+  it('orders the three durations', () => {
+    for (const palette of PRODUCT_PALETTES) {
+      const { quick, standard, slow } = palette.feel.motion;
+      assert.ok(
+        Number.parseInt(quick, 10) < Number.parseInt(standard, 10) &&
+          Number.parseInt(standard, 10) < Number.parseInt(slow, 10),
+        palette.id,
+      );
+    }
+  });
+
+  it('emits the feel tokens alongside the colours', () => {
+    const guidance = paletteGuidance('A landing page for a SaaS product');
+    assert.ok(guidance);
+    assert.match(guidance, /--radius-md: 10px/);
+    assert.match(guidance, /--duration-standard: 250ms/);
+    assert.match(guidance, /reads as corporate/);
+  });
+});

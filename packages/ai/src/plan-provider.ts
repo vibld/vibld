@@ -14,6 +14,7 @@ import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
+import { motionGuidance } from './motion.ts';
 import { paletteGuidance } from './palettes.ts';
 import {
   ProviderContextError,
@@ -276,6 +277,12 @@ Preserve anything the request does not ask you to change.`,
   // guidance, so it comes before the purely visual style direction below.
   const guidance = patternGuidance(request.prompt);
   if (guidance) parts.push(guidance);
+
+  // Motion recipes are technique, not taste, so unlike the palette below
+  // they are not suppressed by an explicit style preset: a request for a
+  // drawer wants the drawer curve whether or not "Brutalism" was picked.
+  const motion = motionGuidance(request.prompt);
+  if (motion) parts.push(motion);
 
   // Only when no style preset was chosen: a preset like "dark" already
   // carries its own colour direction, and a product-type default should

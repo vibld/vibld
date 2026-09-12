@@ -45,6 +45,13 @@ export {
 } from './patterns.ts';
 export type { PagePattern } from './patterns.ts';
 export {
+  MOTION_RECIPES,
+  findMotionRecipe,
+  motionGuidance,
+  selectMotion,
+} from './motion.ts';
+export type { MotionRecipe } from './motion.ts';
+export {
   PRODUCT_PALETTES,
   findPalette,
   paletteGuidance,

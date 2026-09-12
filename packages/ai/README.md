@@ -71,13 +71,15 @@ public URL lets anyone spend the account's model budget.
 ## Design intelligence
 
 `style-presets.ts` (16 named visual directions), `patterns.ts` (10 marketing
-page types, 6 SaaS screens) and `palettes.ts` (15 product-type colour +
-typography defaults) are closed-set, keyword-matched retrieval — the same
-shape, for the same reason: a request's own text selects a handful of
-relevant, concrete guidance to append to the prompt, never an arbitrary
-string a caller supplies directly (docs/decisions.md L50-L51). `plan-schema.ts`'s
-`PLAN_SYSTEM_PROMPT` carries a small, universal "UX BASELINE" section
-alongside these for the rules that apply regardless of style or product type.
+page types, 6 SaaS screens), `palettes.ts` (15 product-type colour, typography
+and feel defaults) and `motion.ts` (12 motion recipes) are closed-set,
+keyword-matched retrieval — the same shape, for the same reason: a request's
+own text selects a handful of relevant, concrete guidance to append to the
+prompt, never an arbitrary string a caller supplies directly
+(docs/decisions.md L50-L51). `plan-schema.ts`'s `PLAN_SYSTEM_PROMPT` carries
+the universal "UX BASELINE", "MOTION BASELINE" and "CONTENT" sections
+alongside these, for the rules that apply regardless of style or product
+type.
 
 A meaningful share of this content (the eight newer style presets, the UX
 baseline, and every palette's values) is adapted from
@@ -91,6 +93,60 @@ what is ported is a hand-picked, adapted subset of the underlying values:
 real hex tokens and real Google Fonts pairings, restated as plain CSS custom
 properties to match this project's own default stack rather than the
 source's Tailwind-oriented output.
+
+Motion and copy voice were added later, from a second pass over eight more
+MIT-licensed design skills. What was taken, and from where:
+
+- **[emilkowalski/skills](https://github.com/emilkowalski/skills)** (MIT) —
+  the bulk of `motion.ts` and of `MOTION BASELINE`: the three easing curves,
+  the per-element duration table, the sub-300ms ceiling, the frequency gate
+  ("the more often something is triggered, the less it animates"), and the
+  plain-CSS recipes themselves. Chosen over the alternatives because it is
+  plain-CSS-first by construction, which is the same constraint `STACK`
+  imposes on generated projects. It also corrected a rule this package was
+  already shipping: reduced motion means _fewer and gentler_, not none.
+- **[LottieFiles/motion-design-skill](https://github.com/LottieFiles/motion-design-skill)**
+  (MIT) — the four motion archetypes and their overshoot budgets, now the
+  `feel.motion` field on every `ProductPalette`; the ambient numbers
+  (breathing, floating, gradient drift, shimmer, parallax ratios) in
+  `motion.ts`; the 65-75% exit ratio and the 500ms total-stagger cap. Its
+  duration _values_ were not copied: its premium tier puts a standard
+  transition at 500ms, which breaks the sub-300ms ceiling above.
+- **[blader/humanizer](https://github.com/blader/humanizer)** (MIT) — the
+  structural copy rules in `CONTENT`: not-X-but-Y, the closer that restates
+  the section above it, the forced triad, the inflated send-off, and the
+  safeguard against over-correcting into affectless prose. Its own
+  vocabulary lists are encyclopedic in register and carry none of the
+  SaaS-marketing words that actually show up in generated copy, so that list
+  is this project's own, written in humanizer's format.
+- **[AThevon/genjutsu](https://github.com/AThevon/genjutsu)** (MIT) — read
+  and largely not ported: its `ui-ux-pro-max` tree is a verbatim vendored
+  copy of the skill above, and most of the rest is Jetpack Compose and
+  SwiftUI. Its motion-principles duration bands agree with what was taken
+  from emilkowalski/skills.
+
+Four more were read and rejected outright, recorded here so the question is
+not reopened:
+[greensock/gsap-skills](https://github.com/greensock/gsap-skills) (MIT) is
+API reference for a library this stack does not ship, and instructs the
+reader to recommend installing it — which would break `STACK` and
+`PORTABILITY`;
+[cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)
+(MIT) emits standalone HTML/SVG through an interactive, multi-turn pipeline,
+and its "no shadows, max 6-10px radius" anti-patterns contradict the
+`claymorphism`, `neumorphism` and `depth` presets;
+[zanwei/design-dna](https://github.com/zanwei/design-dna) (MIT) is an
+extraction-output schema whose colour model has no on-colour pairing, so it
+is strictly weaker than `palettes.ts` for this job;
+[VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md)
+(MIT) catalogues ~70 real companies' design languages — the licence is a
+copyright grant and conveys no trademark rights, so shipping brand-named
+presets is out for the same reason `style-presets.ts` already declines to
+port Fluent, Polaris and Spectrum. Its shape/elevation/motion _structure_
+informed `ProductPalette.feel`; none of its values or names are used.
+[CloudAI-X/threejs-skills](https://github.com/CloudAI-X/threejs-skills) has
+no licence file at all, so nothing from it could be adopted regardless of
+merit.
 
 ## Model selection
 
