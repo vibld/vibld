@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   DEFAULT_LIMITS,
+  MAX_ADMIN_TOPUP_NOTE_CHARS,
+  MAX_ADMIN_TOPUP_USD_CENTS,
   checkBodySize,
   checkRequestOrigin,
+  parseAdminTopupRequest,
   parseGenerationRequest,
   parseKnowledge,
   parseModel,
@@ -395,6 +398,97 @@ describe('parseReferenceUrl', () => {
     for (const referenceUrl of [42, {}, ['a'], true]) {
       assert.equal(parseReferenceUrl({ prompt: 'x', referenceUrl }).ok, false);
     }
+  });
+});
+
+describe('parseAdminTopupRequest', () => {
+  it('accepts a well-formed grant', () => {
+    const result = parseAdminTopupRequest({
+      email: 'user@example.com',
+      amountUsdCents: 500,
+      note: 'goodwill',
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.value, {
+        email: 'user@example.com',
+        amountUsdCents: 500,
+        note: 'goodwill',
+      });
+    }
+  });
+
+  it('treats a missing or whitespace note as absent', () => {
+    for (const body of [
+      { email: 'a@example.com', amountUsdCents: 100 },
+      { email: 'a@example.com', amountUsdCents: 100, note: null },
+      { email: 'a@example.com', amountUsdCents: 100, note: '   ' },
+    ]) {
+      const result = parseAdminTopupRequest(body);
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.value.note, null);
+    }
+  });
+
+  it('requires a non-empty email', () => {
+    for (const email of ['', '   ', undefined, 42]) {
+      const result = parseAdminTopupRequest({ email, amountUsdCents: 100 });
+      assert.equal(
+        result.ok,
+        false,
+        `${JSON.stringify(email)} must be rejected`,
+      );
+    }
+  });
+
+  it('requires a positive integer amount', () => {
+    for (const amountUsdCents of [0, -100, 1.5, '100', undefined, null]) {
+      const result = parseAdminTopupRequest({
+        email: 'a@example.com',
+        amountUsdCents,
+      });
+      assert.equal(
+        result.ok,
+        false,
+        `${JSON.stringify(amountUsdCents)} must be rejected`,
+      );
+    }
+  });
+
+  it('bounds the amount so a typo cannot grant an enormous sum', () => {
+    const result = parseAdminTopupRequest({
+      email: 'a@example.com',
+      amountUsdCents: MAX_ADMIN_TOPUP_USD_CENTS + 1,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.status, 400);
+
+    assert.equal(
+      parseAdminTopupRequest({
+        email: 'a@example.com',
+        amountUsdCents: MAX_ADMIN_TOPUP_USD_CENTS,
+      }).ok,
+      true,
+    );
+  });
+
+  it('bounds the note length', () => {
+    const result = parseAdminTopupRequest({
+      email: 'a@example.com',
+      amountUsdCents: 100,
+      note: 'x'.repeat(MAX_ADMIN_TOPUP_NOTE_CHARS + 1),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.status, 413);
+  });
+
+  it('refuses a non-string note', () => {
+    const result = parseAdminTopupRequest({
+      email: 'a@example.com',
+      amountUsdCents: 100,
+      note: 42,
+    });
+    assert.equal(result.ok, false);
   });
 });
 

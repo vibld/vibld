@@ -217,6 +217,35 @@ jobs:
             echo "RESEND_API_KEY not set -- the L44 balance check still runs but cannot send an alert." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Platform admins (docs/decisions.md L4) and the Clerk secret key
+      # `/api/admin/*` uses to resolve an admin-typed email into the Clerk
+      # user id the ledger keys on (clerk-lookup.ts). Optional, same rule as
+      # every secret above: unset means `/api/admin/*` answers "not
+      # configured" rather than the whole deploy failing -- the admin credit
+      # tool is additive to a deployment that already works without it.
+      - name: Sync admin credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIBLD_PLATFORM_ADMINS: ${{ secrets.VIBLD_PLATFORM_ADMINS }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VIBLD_PLATFORM_ADMINS" ]; then
+            printf '%s' "$VIBLD_PLATFORM_ADMINS" | pnpm dlx wrangler@4.129.1 secret put VIBLD_PLATFORM_ADMINS
+            echo "Synced VIBLD_PLATFORM_ADMINS." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_PLATFORM_ADMINS not set -- no admin grants on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$CLERK_SECRET_KEY" ]; then
+            printf '%s' "$CLERK_SECRET_KEY" | pnpm dlx wrangler@4.129.1 secret put CLERK_SECRET_KEY
+            echo "Synced CLERK_SECRET_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "CLERK_SECRET_KEY not set -- /api/admin/* stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # Idempotent -- wrangler tracks applied migrations in the database's own
       # `d1_migrations` table and only runs what is new. Runs before the
       # deploy itself so a Worker never goes live expecting a table a

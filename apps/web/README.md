@@ -329,10 +329,8 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
   → **Waitlist** → **Save** (done). Approve or deny requests at
   `https://dashboard.clerk.com/~/users/waitlist`.
 - `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) is set on the
-  deployment, but nothing reads it yet -- `platform-admins.ts`'s
-  `isPlatformAdmin` exists and is tested, but no endpoint calls it. There is
-  no admin-only surface to gate until one exists; wiring it in ahead of that
-  would be guessing at a shape nothing has tested yet.
+  deployment -- see "Admin: manual credit grants" below for its first
+  consumer.
 
 ### Abuse controls required before Access came off (docs/decisions.md L29)
 
@@ -610,6 +608,48 @@ wrapper and URL-shaped response parsing it calls are JSX-free
    not change). Until then, deliveries queue and retry against a domain
    that does not yet resolve to this Worker -- harmless, since nothing can
    subscribe before both the code and the domain exist.
+
+## Admin: manual credit grants (docs/decisions.md L4)
+
+The first consumer of `platform-admins.ts`'s `isPlatformAdmin`: a platform
+admin can grant a user spend credit outside the Stripe top-up flow --
+support, goodwill, or testing. `AdminPanel` in the builder shell offers
+this to anyone `/api/config`'s `isAdmin` field says is a platform admin;
+`/api/admin/user` (GET, by email) and `/api/admin/topup` (POST) both
+re-check admin membership themselves regardless of what the shell showed
+(ADR-0006) -- the picker is a convenience, the endpoint is the boundary.
+
+A grant lands in its own `billing_admin_credits` table, not as a row in
+`billing_topups`: every row in that table came from a real Stripe Checkout
+Session (see `billing-store.ts`'s own comment), which is exactly what the
+nightly `reconcileSubscriptions` assumes. `BillingStore.totalSpendableCreditMicroUsd`
+combines both tables into the one balance `handlePlan`'s budget gate and
+`/api/billing/status`'s readout actually spend against and show -- a grant
+is immediately usable, and immediately visible in the user's own "top-up
+remaining" figure. Grants expire after 12 months, the same window L36 gives
+a purchased top-up.
+
+`/api/admin/*` accepts an email, not a Clerk user id -- what an admin
+helping a user actually has -- and resolves it server-side
+(`clerk-lookup.ts`, a raw call to Clerk's Backend API rather than a new
+SDK dependency, the same choice `clerk-auth.ts` already made for session
+verification). A single grant is capped at $500 (`request-guard.ts`'s
+`MAX_ADMIN_TOPUP_USD_CENTS`) so a typo cannot hand out an enormous sum;
+grant again for more.
+
+### Setup
+
+1. `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) and
+   `CLERK_SECRET_KEY` (https://dashboard.clerk.com/~/api-keys -- the
+   **Secret keys** section) both go on the `preview` environment here. The
+   **Deploy web preview** workflow syncs both to this Worker, the same way
+   it already syncs `STRIPE_SECRET_KEY` above. Both are optional in the
+   same fail-closed sense every other secret here is: unset means
+   `/api/admin/*` answers "not configured", not open.
+2. `migrations/0004_admin_credits.sql` needs no manual step -- the
+   **Deploy web preview** workflow's migration-apply step (see "Hosted
+   preview" → "Deploying" above) picks up any pending migration
+   automatically on the next deploy.
 
 ## Generated output
 
