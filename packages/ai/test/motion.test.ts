@@ -189,3 +189,28 @@ describe('the rest of the copy rules', () => {
     );
   });
 });
+
+describe('DESIGN.md', () => {
+  it('is a required file, not a suggestion', () => {
+    assert.match(PLAN_SYSTEM_PROMPT, /REQUIRED FILES[\s\S]*?DESIGN\.md/);
+  });
+
+  it('asks for the three sections that carry intent', () => {
+    for (const section of ['Overview:', 'Do:', "Don't:"]) {
+      assert.ok(PLAN_SYSTEM_PROMPT.includes(section), section);
+    }
+  });
+
+  it('forbids writing the rules from a named company', () => {
+    // The convention is adopted from a corpus of real brands; the corpus is
+    // not. Without this line the easiest way to fill the file is to name one.
+    assert.match(
+      PLAN_SYSTEM_PROMPT,
+      /never from a named company's\s+design language/,
+    );
+  });
+
+  it('bounds it, since it is paid for in output tokens every run', () => {
+    assert.match(PLAN_SYSTEM_PROMPT, /under 100 lines/);
+  });
+});

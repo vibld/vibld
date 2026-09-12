@@ -60,6 +60,22 @@ export type ParsedGenerationPlan = z.infer<typeof GenerationPlanSchema>;
  * closer, the forced triad, the inflated send-off -- transfer unchanged, and
  * they are the half that matters: they are register-independent.
  *
+ * The DESIGN.md convention is adapted from VoltAgent/awesome-design-md (MIT
+ * License, https://github.com/VoltAgent/awesome-design-md), which documents
+ * about seventy design languages in that shape. The convention is adopted,
+ * not the corpus: nothing from those files is emitted, and the prompt says
+ * explicitly to write the rules from what the project does rather than from
+ * a named company's design language.
+ *
+ * It earns its place twice. Once for ADR-0002 portability, since a project
+ * taken away to Cursor or Claude Code carries its own design brief with it.
+ * And once for iteration, which is the larger win and the less obvious one:
+ * `buildUserPrompt` sends every existing file back on a follow-up turn, so
+ * DESIGN.md returns to the model as a record of what it decided last time.
+ * Intent is the thing that degrades across turns -- styles.css can say a
+ * radius is 4px but not that generous pills would be wrong -- and this is
+ * the only file in a generated project that can hold that.
+ *
  * The em-dash ban is stated separately and absolutely, above the list, for
  * two reasons. It is a house rule (see CLAUDE.md) rather than a tell to
  * weigh, and humanizer itself marks its dash pattern *weak alone* and frames
@@ -85,9 +101,22 @@ needs otherwise. No CSS framework or component library unless the request asks
 for one by name.
 
 REQUIRED FILES
-package.json, index.html, src/main.tsx, src/App.tsx and src/styles.css must
-always be present. package.json must declare "dev", "build", "lint" and
-"typecheck" scripts and must not depend on any Vibld package.
+package.json, index.html, src/main.tsx, src/App.tsx, src/styles.css and
+DESIGN.md must always be present. package.json must declare "dev", "build",
+"lint" and "typecheck" scripts and must not depend on any Vibld package.
+
+DESIGN.md
+A short record of the design decisions this project actually made, so the
+next person or tool to touch it extends the design rather than guessing at
+it. YAML frontmatter with the token values you used -- colors, typography,
+rounded, spacing -- then three short sections:
+- Overview: two or three sentences on what this design is and who it is for.
+- Do: four or five specific rules, each naming a real token or value.
+- Don't: four or five, each saying what it would break.
+Write the rules from what this project does, never from a named company's
+design language. The value is in the specifics ("the warmth of the canvas is
+the identity; neutral grey loses it"), not in generic advice ("keep it
+consistent"). Keep the whole file under 100 lines.
 
 PATHS
 Every path is relative to the project root, uses forward slashes, and contains

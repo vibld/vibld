@@ -136,30 +136,36 @@ MIT-licensed design skills. What was taken, and from where:
   motion-principles duration bands agree with what was taken from
   emilkowalski/skills.
 
-Four more were read and rejected outright, recorded here so the question is
-not reopened:
+Three of the nine are not ported, on technical grounds only:
+
 [greensock/gsap-skills](https://github.com/greensock/gsap-skills) (MIT) is
-API reference for a library this stack does not ship, and instructs the
-reader to recommend installing it -- which would break `STACK` and
-`PORTABILITY`;
-[cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design)
-(MIT) emits standalone HTML/SVG through an interactive, multi-turn pipeline,
-and its "no shadows, max 6-10px radius" anti-patterns contradict the
-`claymorphism`, `neumorphism` and `depth` presets;
+API reference for a library this stack does not ship, and its `gsap-core`
+skill instructs the reader to recommend installing GSAP, which would break
+`STACK` and `PORTABILITY`.
+
+[CloudAI-X/threejs-skills](https://github.com/CloudAI-X/threejs-skills) has
+three.js API detail that has drifted roughly twenty releases and contains
+several build-breaking errors: a `ContactShadows` import that does not exist
+in three.js (it is a `@react-three/drei` component), `scene.add(transformControls)`
+which throws since r169, and `uv2` for `aoMap`, renamed in r151. Separately, a
+retrieval module for it could not be triggered safely: `selectMotion` does
+substring matching, so a trigger of `3d` would fire on "3D card flip" and push
+an npm dependency into a project that asked for a CSS transform. Its
+repository states an MIT grant in its README with no LICENSE file present.
+
 [zanwei/design-dna](https://github.com/zanwei/design-dna) (MIT) is an
 extraction-output schema whose colour model has no on-colour pairing, so it
-is strictly weaker than `palettes.ts` for this job;
+is weaker than `palettes.ts` for this job. Its shape/elevation/motion
+sub-trees did inform `ProductPalette.feel`, and its verification idea is what
+`contrast.ts` implements.
+
+One licensing question was decided by the project owner rather than here.
 [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md)
-(MIT) catalogues ~70 real companies' design languages -- the licence is a
-copyright grant and conveys no trademark rights, so shipping brand-named
-presets is out for the same reason `style-presets.ts` already declines to
-port Fluent, Polaris and Spectrum. Its shape/elevation/motion _structure_
-informed `ProductPalette.feel`, and clustering it revealed the seven
-archetypes that became the tokened style presets (see below); none of its
-values or names are used.
-[CloudAI-X/threejs-skills](https://github.com/CloudAI-X/threejs-skills) has
-no licence file at all, so nothing from it could be adopted regardless of
-merit.
+catalogues about seventy real companies' design languages. MIT is a copyright
+grant and conveys no trademark rights, which the cataloguer does not hold; on
+that basis the owner directed that the archetypes drawn from it ship
+de-named, which is what `style-presets.ts` does. A test enforces it on the id,
+chip name and caption.
 
 ### The seven tokened archetypes
 
