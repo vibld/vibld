@@ -27,7 +27,7 @@ async function main(): Promise<number> {
     const result = await runScenario(scenario);
     if (result.passed) scenariosPassed += 1;
     console.log(
-      `  ${result.id}: ${result.passed ? 'behaved correctly' : 'MISBEHAVED'} — ${result.detail}`,
+      `  ${result.id}: ${result.passed ? 'behaved correctly' : 'MISBEHAVED'} -- ${result.detail}`,
     );
   }
   console.log(

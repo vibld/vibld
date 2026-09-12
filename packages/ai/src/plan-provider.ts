@@ -87,7 +87,7 @@ export const DEFAULT_EFFORT: PlanEffort = 'high';
  *
  * It is a drop-in peer of `FakeModelProvider`: same contract, same call shape,
  * so the runner, the state machine and the UI are unchanged. CI keeps using
- * the fake — nothing here runs without credentials (ADR-0007).
+ * the fake -- nothing here runs without credentials (ADR-0007).
  */
 /**
  * Turns a prompt into a validated `GenerationPlan`, whichever service answers.

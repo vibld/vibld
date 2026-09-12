@@ -55,7 +55,7 @@ export default function Privacy() {
       <h2>How long we keep it</h2>
       <p>
         We keep your email address until you unsubscribe, ask us to delete it,
-        or Vibld launches and the waitlist is retired — whichever comes first.
+        or Vibld launches and the waitlist is retired, whichever comes first.
       </p>
 
       <h2>Your choices</h2>

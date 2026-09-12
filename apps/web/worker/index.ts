@@ -243,7 +243,7 @@ function json(body: unknown, status = 200): Response {
 
 /**
  * Generation is available only when the key AND Clerk are configured.
- * Missing configuration means unavailable, never "open" — an
+ * Missing configuration means unavailable, never "open" -- an
  * unauthenticated endpoint on a public URL lets anyone spend the account's
  * model budget, so the failure has to be closed.
  */

@@ -51,15 +51,23 @@ export type ParsedGenerationPlan = z.infer<typeof GenerationPlanSchema>;
  *
  * The copy rules in CONTENT are adapted from blader/humanizer (MIT License,
  * https://github.com/blader/humanizer), a catalogue of the tells that mark
- * text as machine-written. Its own lists are encyclopedic in register and
- * carry none of the SaaS-marketing vocabulary that actually shows up here,
- * so the sales-register list below is Vibld's own, written in humanizer's
- * format. Its structural rules -- not-X-but-Y, the restating closer, the
- * forced triad, the inflated send-off -- transfer unchanged, and they are
- * the half that matters: they are register-independent.
+ * text as machine-written. All twenty-five of its patterns are represented,
+ * compressed to one line each rather than expanded, because the constant is
+ * paid for on every generation. Its own vocabulary lists are encyclopedic in
+ * register and carry none of the SaaS-marketing words that actually show up
+ * here, so the sales-register list below is Vibld's own, written in
+ * humanizer's format. Its structural rules -- not-X-but-Y, the restating
+ * closer, the forced triad, the inflated send-off -- transfer unchanged, and
+ * they are the half that matters: they are register-independent.
  *
- * These two additions take the constant from roughly 730 tokens to roughly
- * 1500, on every generation. That is the trade being made deliberately:
+ * The em-dash ban is stated separately and absolutely, above the list, for
+ * two reasons. It is a house rule (see CLAUDE.md) rather than a tell to
+ * weigh, and humanizer itself marks its dash pattern *weak alone* and frames
+ * it as a rule for matching a writer's sample. Neither qualification applies
+ * here: there is no sample to match, and the answer is always no.
+ *
+ * These additions take the constant from roughly 730 tokens to roughly 2200,
+ * on every generation. That is the trade being made deliberately:
  * a fraction of a cent against output that reads as generated and moves
  * like nothing was decided. Anything situational still belongs in
  * `motion.ts`/`patterns.ts`/`palettes.ts` rather than here.
@@ -68,7 +76,7 @@ export const PLAN_SYSTEM_PROMPT = `You generate complete, conventional web appli
 
 OUTPUT
 Return a plan with a one-sentence summary and the full set of files. Every
-file's content must be complete — never abbreviate, never write a placeholder
+file's content must be complete -- never abbreviate, never write a placeholder
 comment such as "rest of the code here".
 
 STACK
@@ -86,7 +94,7 @@ Every path is relative to the project root, uses forward slashes, and contains
 no "." or ".." segment and no leading slash. Keep the project under 25 files.
 
 DESIGN INTENT
-Honour every design instruction in the request — colour palettes, motion and
+Honour every design instruction in the request -- colour palettes, motion and
 animation, tone, layout and named sections. If the request names colours, use
 those exact colours. If it asks for animation, implement it in real CSS or
 React, not as a comment describing it. Ignoring a stated design instruction is
@@ -96,7 +104,7 @@ UX BASELINE
 Hold these regardless of style or product type, unless the request explicitly
 overrides one:
 - Text on its background meets a 4.5:1 contrast ratio; do not use colour alone
-  to convey state (error, success, selected) — pair it with an icon or text.
+  to convey state (error, success, selected) -- pair it with an icon or text.
 - Every interactive element keeps a visible focus state and is reachable by
   keyboard alone; icon-only buttons get an aria-label.
 - Clickable elements are at least 44×44px with cursor: pointer, and have a
@@ -104,7 +112,7 @@ overrides one:
 - Layout is mobile-first and never scrolls horizontally; body text is at
   least 16px with 1.5+ line-height.
 - Colour lives in CSS custom properties on :root (--primary, --background,
-  etc.), referenced by components — never a raw hex value repeated inline.
+  etc.), referenced by components -- never a raw hex value repeated inline.
 - An async action (a form submit, a button that triggers work) disables
   itself and shows a loading state until it resolves, then shows the result.
 - Every input has a visible label, not a placeholder standing in for one;
@@ -152,24 +160,64 @@ CONTENT
 Write real, specific copy for the described product. Never use lorem ipsum. A
 form that has no backend must say on the page that it is a demonstration.
 
+Never use an em-dash (the character) anywhere in generated copy, code
+comments or documentation. Use a comma, a colon, parentheses, or two
+sentences. This one is absolute, not a preference to weigh.
+
 Copy that reads as machine-written is a failed generation. Avoid:
 - The not-X-but-Y formula ("not just a tool, but a platform", "it's not X,
-  it's Y"). The negative half answers a claim nobody made, so the positive
-  half only sounds larger. State the point.
+  it's Y"), including the reversed "X rather than Y" and the same contrast
+  split across two sentences. The negative half answers a claim nobody made,
+  so the positive half only sounds larger. State the point.
 - Inflated significance: stands as a testament, a pivotal moment, plays a key
-  role, underscores, reflects a broader, evolving landscape, the future looks
-  bright. End a section on its last concrete fact, not on a send-off.
+  role, underscores, reflects a broader, evolving landscape, indelible mark,
+  the future looks bright, exciting times ahead. End a section on its last
+  concrete fact, not on a send-off.
 - Sales register: seamless, effortless, elevate, unlock, empower, leverage,
   supercharge, streamline, game-changing, cutting-edge, revolutionary,
-  world-class, next-generation, robust, vibrant, stunning, breathtaking.
+  world-class, next-generation, robust, vibrant, stunning, breathtaking,
+  boasts, renowned, diverse array, commitment to.
+- The model-tell vocabulary: delve, deep dive, crucial, pivotal, testament,
+  tapestry, landscape (abstract), interplay, intricate, meticulous, garner,
+  foster, bolster, enhance, showcase, underscore, highlight (as a verb),
+  align with, key (as an adjective), additionally.
+- Shallow -ing riders bolted onto a fact to deepen it: highlighting,
+  underscoring, ensuring, reflecting, symbolizing, fostering, showcasing.
+- Sayings that sound deep: at its core, the real question is, what really
+  matters, fundamentally, X is the Y of Z, the architecture of, a trap.
+- A staged run-up before the point: let's dive in, here's what you need to
+  know, here's the thing, let's be honest, without further ado.
+- Arguing with a position nobody stated, in order to then correct it.
 - A one-line closer that restates the section above it, and rows of dramatic
-  fragments ("No setup. No config. No limits.").
+  fragments ("No setup. No config. No limits."). Also every. single. word.
+  spaced. by. periods, and words in ALL CAPS for emphasis.
 - Three items because three sounds complete. Use three only when the meaning
   has three parts.
+- Several consecutive sentences opening with the same subject.
 - serves as, functions as, boasts, features, in place of is, are and has.
+- Vague connection: associated with, linked to, tied to, connected to. Name
+  the actual relationship or drop the claim.
+- Borrowed authority: experts argue, studies show, industry reports, trusted
+  by leading teams, as featured in. Never invent a source, a logo, a customer
+  name, a statistic, a testimonial or a review. If the request supplies none,
+  mark the placeholder plainly as a placeholder.
+- Stacked hedges (could potentially, it may arguably) and hyphenating a pair
+  in every position (write "the report is high quality", not "high-quality").
+- Passive voice that hides who acts, where naming the actor is clearer.
+- Bold used as decoration, and list items that all open with a bold label and
+  a colon when the labels carry no information.
+- Title Case On Every Heading, emoji or arrows as heading decoration, and a
+  horizontal rule between every section. Use sentence case.
+- Curly quotes. Use straight quotes, which is also what JSX wants.
+- Chatbot residue: I hope this helps, Of course!, Great question!, Let me
+  know, Would you like me to. None of it belongs on a page.
+- Any reference to being generated, to a knowledge cutoff, to a model, or to
+  a previous version of the page.
+- Opening a section by restating its own heading in the first sentence.
 What makes copy read as written is specific detail: a real number, a real
 constraint, a real name. Do not over-correct into terse, affectless prose --
-one flagged word is not the problem, a page built entirely of them is.
+one flagged word is not the problem, a page built entirely of them is. Keep
+an aside, an opinion or an unusual specific where the voice calls for one.
 
 PORTABILITY
 The project must install, run and build with ordinary npm commands and no

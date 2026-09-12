@@ -1,7 +1,7 @@
 # Plan: push to GitHub, and rebuild on a host
 
 Status: proposal. Nothing here is built. Its three open questions are
-answered below (2026-09-09) — phase 4's answer changes what phase 4 is; see
+answered below (2026-09-09) -- phase 4's answer changes what phase 4 is; see
 that section before implementing it.
 
 Covers issue #13 (GitHub branches and PRs, already specified and accepted)
@@ -14,17 +14,17 @@ size. **On every platform with a Git integration, the push is the trigger.**
 
 Verified September 2026:
 
-| Platform                   | Redeploys on push?          | Explicit trigger                                                                         | Credential Vibld would hold            |
-| -------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------- |
-| Cloudflare Workers / Pages | Yes, Git integration        | Deploy Hook URL (POST), added April 2026                                                 | none, unless using the hook            |
-| Vercel                     | Yes, Git integration        | Deploy Hook URL (GET/POST)                                                               | none, unless using the hook            |
-| Netlify                    | Yes, Git integration        | Build hook URL                                                                           | none, unless using the hook            |
-| DigitalOcean App Platform  | Yes, Git integration        | `POST /v2/apps/{id}/deployments`, or its GitHub Action                                   | API token, if using the API            |
-| Render, Railway, Fly       | Yes, Git integration        | Deploy hook URL                                                                          | none, unless using the hook            |
-| **Vultr**                  | **No first-party Git PaaS** | Coolify or Dokploy webhook, GitHub Actions to Vultr Kubernetes or the container registry | **none — the trigger lives on GitHub** |
+| Platform                   | Redeploys on push?          | Explicit trigger                                                                         | Credential Vibld would hold             |
+| -------------------------- | --------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------- |
+| Cloudflare Workers / Pages | Yes, Git integration        | Deploy Hook URL (POST), added April 2026                                                 | none, unless using the hook             |
+| Vercel                     | Yes, Git integration        | Deploy Hook URL (GET/POST)                                                               | none, unless using the hook             |
+| Netlify                    | Yes, Git integration        | Build hook URL                                                                           | none, unless using the hook             |
+| DigitalOcean App Platform  | Yes, Git integration        | `POST /v2/apps/{id}/deployments`, or its GitHub Action                                   | API token, if using the API             |
+| Render, Railway, Fly       | Yes, Git integration        | Deploy hook URL                                                                          | none, unless using the hook             |
+| **Vultr**                  | **No first-party Git PaaS** | Coolify or Dokploy webhook, GitHub Actions to Vultr Kubernetes or the container registry | **none -- the trigger lives on GitHub** |
 
 Vultr is the row that settles the architecture. There is no Vercel-style
-"connect a repo" product; every documented path deploys _from GitHub_ —
+"connect a repo" product; every documented path deploys _from GitHub_ --
 a repository webhook into a self-hosted PaaS, or a GitHub Actions workflow.
 The generic answer to "and other common hosting platforms" is therefore not
 an adapter per platform. It is: **get the code into GitHub correctly, and let
@@ -37,7 +37,7 @@ So the plan is one substantial piece of work and two small ones.
 ADR-0006's credential table already separates these, which decides the
 sequencing:
 
-**GitHub App private key — "Vibld infrastructure ... trusted service bindings
+**GitHub App private key -- "Vibld infrastructure ... trusted service bindings
 only".** A Worker secret. Installation access tokens are minted per request
 from the App key plus a non-secret installation id, expire in an hour, and
 are never stored. Nothing user-secret is persisted.
@@ -45,7 +45,7 @@ are never stored. Nothing user-secret is persisted.
 → **#13 is not blocked on #15's user-secret store.** That is worth stating
 plainly, because #13 currently reads as though it were.
 
-**Deploy hook URLs and platform API tokens — user secrets.** Vercel's own
+**Deploy hook URLs and platform API tokens -- user secrets.** Vercel's own
 documentation is explicit: _"anyone with the URL to deploy your project, so
 treat it with the same security as you would any other token or password."_
 ADR-0006 requires choosing "a user-secret store with separate encryption keys
@@ -69,7 +69,7 @@ This is worth more than a workaround. It:
   reach anything;
 - satisfies ADR-0006's rule as written rather than by exception;
 - keeps ADR-0002's promise, because the exported project deploys itself with
-  no Vibld account, service or involvement — a Vibld-hosted deploy trigger
+  no Vibld account, service or involvement -- a Vibld-hosted deploy trigger
   would be the first thing in the output that needed Vibld;
 - costs one template file per target instead of an integration per platform.
 
@@ -91,7 +91,7 @@ Three things this plan does **not** need, which is the reason it can start:
 - **No #14 (accounts).** Access already yields a stable identity, and the
   budget object is already keyed on it (`env.USER_BUDGET.getByName(email)`).
   The repository binding keys the same way.
-- **No #15 (secret store)** — for the GitHub half. See above.
+- **No #15 (secret store)** -- for the GitHub half. See above.
 
 What it does need: one new Durable Object holding **non-secret** binding
 metadata.
@@ -125,7 +125,7 @@ there is no separate blob upload:
 Then `POST /repos/{o}/{r}/pulls` for the pull request.
 
 Minting the installation token needs an RS256 JWT signed with the App key.
-Workers' WebCrypto does `RSASSA-PKCS1-v1_5` with SHA-256 directly — no
+Workers' WebCrypto does `RSASSA-PKCS1-v1_5` with SHA-256 directly -- no
 dependency, and no vendor SDK crossing the ADR-0003 boundary.
 
 ### Exactly-once, which ADR-0007 requires by name
@@ -148,7 +148,7 @@ Three properties make a retry safe:
   already points at a commit whose tree matches, the push succeeded and the
   retry reports success rather than creating a second commit.
 
-The pull request is deduplicated the same way — query open PRs for the head
+The pull request is deduplicated the same way -- query open PRs for the head
 branch before opening one.
 
 ### Conflicts are reported, never resolved
@@ -179,10 +179,10 @@ If a stored-hook feature is ever built (phase 4 below), it must:
 
 - accept **https only**, and only hosts matching a per-platform allowlist
   (`api.vercel.com`, `api.cloudflare.com`, `api.digitalocean.com`,
-  `api.netlify.com`, …) — chosen by the user picking a platform, not by
+  `api.netlify.com`, …) -- chosen by the user picking a platform, not by
   parsing whatever they pasted;
 - resolve the host and refuse private, loopback, link-local and
-  metadata-service addresses, re-checking after any redirect — or simply
+  metadata-service addresses, re-checking after any redirect -- or simply
   refuse redirects, which is what these endpoints need anyway;
 - send `POST` with no body and no Vibld credential;
 - cap and discard the response body rather than returning it to the browser,
@@ -194,26 +194,26 @@ the first.
 
 ## Phases
 
-**Phase 1 — Push to GitHub (#13).** GitHub App, installation binding, push an
+**Phase 1 -- Push to GitHub (#13).** GitHub App, installation binding, push an
 accepted checkpoint to `vibld/<revision>`, open a PR. Unblocked today. This is
 the substantial piece: roughly a Worker route, a DO, a GitHub client, the JWT
 signing, and the reconciliation logic.
 
-**Phase 2 — Deploy: build nothing.** Document connecting the repository to
+**Phase 2 -- Deploy: build nothing.** Document connecting the repository to
 Cloudflare, Vercel, Netlify or DigitalOcean once, in their dashboard. From
 then on every Vibld push redeploys. Zero code, zero credentials, and it covers
 most of the platforms in the table. Shipping phase 1 without saying this out
-loud would be the mistake — people would ask for an integration they already
+loud would be the mistake -- people would ask for an integration they already
 have.
 
-**Phase 3 — "Add a deploy workflow".** A `.github/workflows/deploy.yml`
+**Phase 3 -- "Add a deploy workflow".** A `.github/workflows/deploy.yml`
 generated into the project, one small template per target (Cloudflare via
 `wrangler`, Vercel CLI, DigitalOcean's `app_action`, Vultr via its registry or
 Kubernetes). The user adds their token to their own repo's secrets. This is
 what makes "and other common hosting platforms" true, including the ones with
 no Git integration at all. Still zero Vibld secrets.
 
-**Phase 4 — Stored deploy hooks (optional, blocked on #15).** Only if phases
+**Phase 4 -- Stored deploy hooks (optional, blocked on #15).** Only if phases
 2 and 3 prove insufficient. Needs the encrypted secret store, the allowlisted
 broker above, and its own security review. My recommendation is to not build
 it: it buys a button that saves one dashboard visit, in exchange for holding
@@ -221,15 +221,15 @@ a credential that redeploys production.
 
 ## Failure modes worth designing for
 
-| Situation                               | What the user sees                                                           |
-| --------------------------------------- | ---------------------------------------------------------------------------- |
-| App uninstalled or access revoked       | "Vibld no longer has access to owner/repo" and a re-connect link — not a 401 |
-| Grant expired                           | Same shape; re-approval, not a silent re-auth                                |
-| Branch already exists, different commit | Both shas, and a choice: new branch, or stop                                 |
-| Ambiguous push (timeout after step 3)   | Nothing on retry — the reconciliation finds the commit and reports success   |
-| Repo empty (no base ref)                | Handled: first commit has no parent                                          |
-| Project over the size cap               | Refused before the API call, like the prompt guard already does              |
-| GitHub rate limit / 5xx                 | Retry with backoff **only** after reconciling remote state                   |
+| Situation                               | What the user sees                                                            |
+| --------------------------------------- | ----------------------------------------------------------------------------- |
+| App uninstalled or access revoked       | "Vibld no longer has access to owner/repo" and a re-connect link -- not a 401 |
+| Grant expired                           | Same shape; re-approval, not a silent re-auth                                 |
+| Branch already exists, different commit | Both shas, and a choice: new branch, or stop                                  |
+| Ambiguous push (timeout after step 3)   | Nothing on retry -- the reconciliation finds the commit and reports success   |
+| Repo empty (no base ref)                | Handled: first commit has no parent                                           |
+| Project over the size cap               | Refused before the API call, like the prompt guard already does               |
+| GitHub rate limit / 5xx                 | Retry with backoff **only** after reconciling remote state                    |
 
 ## Testing
 
@@ -248,7 +248,7 @@ network. Specifically worth asserting:
 
 ## What I would deliberately not build
 
-- Arbitrary repository import — ADR-0007 defers it, and it is a different
+- Arbitrary repository import -- ADR-0007 defers it, and it is a different
   security problem.
 - Pushing to `main`, merging, or anything that publishes.
 - A platform adapter per host. The table above shows it would be almost
@@ -259,17 +259,17 @@ network. Specifically worth asserting:
 
 Recorded as L42a-c in [`decisions.md`](decisions.md#launch-decisions-accepted-2026-09-09); full context in [`launch-decisions.md`](launch-decisions.md).
 
-1. **GitHub App name, ownership and permission set — accepted as proposed
+1. **GitHub App name, ownership and permission set -- accepted as proposed
    (L42a).** Contents, Pull requests, Metadata only. No Actions, no admin.
-2. **Phase 3's target list — no Vultr template (L42b).** Cloudflare, Vercel
+2. **Phase 3's target list -- no Vultr template (L42b).** Cloudflare, Vercel
    and DigitalOcean, as this plan already lays out.
-3. **Phase 4, Vibld-held deploy credentials — wanted, reversing this plan's
+3. **Phase 4, Vibld-held deploy credentials -- wanted, reversing this plan's
    recommendation (L42c).** Chris wants a lights-out flow: the user pastes a
    scoped Cloudflare API Token into Vibld, Vibld holds it and drives the
    Worker + DNS publish automatically, rather than the git-connected pattern
    phases 1-3 describe. This is a different mechanism from everything above
-   phase 4 in this document — a held, usable third-party credential rather
-   than a one-way GitHub push — and needs its own credential-vault design
+   phase 4 in this document -- a held, usable third-party credential rather
+   than a one-way GitHub push -- and needs its own credential-vault design
    before it can be scoped as a phase. The open qualifying questions (token
    vs. OAuth, where the token is stored, which platform first, custom-domain
    handling) are recorded under "Reopened" in `decisions.md`. Phase 4 in this
@@ -278,9 +278,9 @@ Recorded as L42a-c in [`decisions.md`](decisions.md#launch-decisions-accepted-20
 
 ## References
 
-- [Cloudflare Workers Builds — Deploy Hooks](https://developers.cloudflare.com/workers/ci-cd/builds/deploy-hooks/)
-- [Cloudflare Workers Builds — Git integration](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/)
-- [Vercel — Creating and triggering Deploy Hooks](https://vercel.com/docs/deploy-hooks)
-- [DigitalOcean App Platform — deploy from GitHub Actions](https://docs.digitalocean.com/products/app-platform/how-to/deploy-from-github-actions/)
-- [Vultr — deploying a Git project with Dokploy](https://docs.vultr.com/how-to-deploy-jetbrains-junie-projects-on-vultr-using-dokploy)
-- [GitHub — installation access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
+- [Cloudflare Workers Builds -- Deploy Hooks](https://developers.cloudflare.com/workers/ci-cd/builds/deploy-hooks/)
+- [Cloudflare Workers Builds -- Git integration](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/)
+- [Vercel -- Creating and triggering Deploy Hooks](https://vercel.com/docs/deploy-hooks)
+- [DigitalOcean App Platform -- deploy from GitHub Actions](https://docs.digitalocean.com/products/app-platform/how-to/deploy-from-github-actions/)
+- [Vultr -- deploying a Git project with Dokploy](https://docs.vultr.com/how-to-deploy-jetbrains-junie-projects-on-vultr-using-dokploy)
+- [GitHub -- installation access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)

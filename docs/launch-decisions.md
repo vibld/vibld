@@ -6,7 +6,7 @@ four that moved off the recommendation below (L15, L33, L40, L42c) and a
 handful still open (the L9 concurrency cap, L40's credential-vault
 qualifiers, and the new generation pattern/style/SEO catalogue). This
 document stays as the rationale and options record; it is not being kept in
-sync item-by-item — `decisions.md` is the source of truth for what was
+sync item-by-item -- `decisions.md` is the source of truth for what was
 chosen.
 
 Every item below is a choice I cannot make for you, or a choice I can make but
@@ -32,7 +32,7 @@ without replacing it gives every visitor one shared $4/day bucket.
 Supabase Postgres. Clerk is a different bet: hosted sign-in UI, organisations,
 MFA and password reset that we never own.
 
-- (a) **Clerk for the Vibld platform. D23 is untouched — Supabase remains the
+- (a) **Clerk for the Vibld platform. D23 is untouched -- Supabase remains the
   recommended backend for the applications Vibld generates.** _(recommended)_
 - (b) Keep Supabase Auth as D30 says.
 
@@ -62,7 +62,7 @@ There is no production data, so this is free to do now and expensive later.
 
 You asked for a GitHub secret with a comma-separated list of emails. That works
 and matches how `VIBLD_MODEL_POLICY` is already synced to the Worker by the
-deploy workflow — no console step, no terminal command.
+deploy workflow -- no console step, no terminal command.
 
 - (a) **`VIBLD_PLATFORM_ADMINS` as a GitHub Actions secret, comma-separated
   emails, synced to a Worker secret on deploy. An email grants admin only when
@@ -104,7 +104,7 @@ D4 says invitation-only hosted alpha.
 - (c) Fly Machines.
 
 Sticking with D5 keeps one vendor, one bill and one identity model. It requires
-the Workers Paid plan and Containers — a paid-infrastructure decision, so it
+the Workers Paid plan and Containers -- a paid-infrastructure decision, so it
 needs your explicit yes (see L27).
 
 ### L8 - Preview origin
@@ -291,7 +291,7 @@ waitlist and the audit log all need somewhere to live.
 
 - (a) **Cloudflare D1 for the control plane at alpha, with R2 for project
   content. D23 unchanged: Supabase stays the recommendation for generated apps.**
-  _(recommended — amends D30's database half)_
+  _(recommended -- amends D30's database half)_
 - (b) Supabase Postgres + Hyperdrive as D30 says.
 - (c) Neon.
 
@@ -299,7 +299,7 @@ waitlist and the audit log all need somewhere to live.
 does not pause), a connection-pooling layer and cross-cloud latency, to store a
 few thousand small relational rows. If we later need vector search for D13,
 Vectorize covers it without Postgres. If D13's semantic index arrives and wants
-`pgvector` specifically, that is the moment to revisit — one migration of a
+`pgvector` specifically, that is the moment to revisit -- one migration of a
 small schema, not a foundational bet.
 
 ### L25 - Object storage
@@ -318,18 +318,18 @@ ADR-0007 wants generation to survive a disconnect.
 
 You told me not to enable paid infrastructure silently. What the above requires:
 
-| Item                                                                | Cost                                                                                                          |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Workers Paid (needed for Containers and additional Durable Objects) | $5/mo                                                                                                         |
-| Containers (sandbox previews)                                       | usage; expect single-digit cents per preview session — I will confirm against current pricing before enabling |
-| R2                                                                  | $0.015/GB-month, no egress fees                                                                               |
-| D1                                                                  | free tier covers alpha                                                                                        |
-| vibld.com                                                           | already paid, renews 2027-09-06                                                                               |
-| Preview domain (L8)                                                 | ~$10-15/yr                                                                                                    |
-| Clerk                                                               | free to 10,000 monthly active users                                                                           |
-| Stripe                                                              | 2.9% + $0.30, plus 0.5% if L15(a)                                                                             |
-| Resend                                                              | account exists; free to 3,000 emails/mo                                                                       |
-| Sentry                                                              | free tier                                                                                                     |
+| Item                                                                | Cost                                                                                                           |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Workers Paid (needed for Containers and additional Durable Objects) | $5/mo                                                                                                          |
+| Containers (sandbox previews)                                       | usage; expect single-digit cents per preview session -- I will confirm against current pricing before enabling |
+| R2                                                                  | $0.015/GB-month, no egress fees                                                                                |
+| D1                                                                  | free tier covers alpha                                                                                         |
+| vibld.com                                                           | already paid, renews 2027-09-06                                                                                |
+| Preview domain (L8)                                                 | ~$10-15/yr                                                                                                     |
+| Clerk                                                               | free to 10,000 monthly active users                                                                            |
+| Stripe                                                              | 2.9% + $0.30, plus 0.5% if L15(a)                                                                              |
+| Resend                                                              | account exists; free to 3,000 emails/mo                                                                        |
+| Sentry                                                              | free tier                                                                                                      |
 
 **Fixed floor is about $5/month plus one domain.** Everything else scales with
 use. Say yes to this table, or name the lines you want left off.
@@ -341,7 +341,7 @@ use. Say yes to this table, or name the lines you want left off.
 ### L28 - Do we need RLS?
 
 Row-level security is what protects a database that untrusted clients can reach
-directly with a user-scoped token — Supabase's PostgREST model. Under L24(a)
+directly with a user-scoped token -- Supabase's PostgREST model. Under L24(a)
 the only client of the control-plane database is our Worker, so RLS has nothing
 to enforce that the Worker is not already enforcing, and D1 does not offer it.
 
@@ -351,7 +351,7 @@ My recommendation, in three parts:
    authorisation choke point, and a test asserts that no query path bypasses
    it.** A single enforced function is auditable; RLS on a database only we can
    reach is ceremony.
-2. **If you choose L24(b) (Supabase), then RLS is required** — enable it
+2. **If you choose L24(b) (Supabase), then RLS is required** -- enable it
    deny-by-default on every table even though we hold the service key, because
    the failure mode of a leaked anon key is total.
 3. **Generated applications: RLS is mandatory in the Supabase template.** This
@@ -380,14 +380,14 @@ parsed. Recommended; flagging it only so it is on the record.
 
 `decisions.md` already says Cloudflare secrets are not a user-secret vault. (b)
 is the decision that turns a breach into a disclosure event. Note that BYOK in
-the self-hosted build needs no vault at all — the key is the operator's own
+the self-hosted build needs no vault at all -- the key is the operator's own
 environment variable, and they are the only user. See L45.
 
 ### L32 - Data retention after account deletion
 
 - (a) **Project content purged 30 days after deletion; audit log entries kept 12
   months with the user id replaced by a tombstone.** _(recommended)_
-- (b) Different numbers — tell me which.
+- (b) Different numbers -- tell me which.
 
 Whatever you pick goes verbatim into the Privacy Policy.
 
@@ -401,7 +401,7 @@ not going to propose them. Say so if you disagree.
 ## H. Funding model spend
 
 **Settled: no auto-purchase.** You will rely on the console auto-reload in each
-provider account. That is also the only thing available — neither Anthropic nor
+provider account. That is also the only thing available -- neither Anthropic nor
 DeepSeek exposes an API to buy credits, and a subscription-triggered top-up
 would fire at the wrong moment anyway: on signup rather than on low balance.
 
@@ -412,7 +412,7 @@ watch the balance ourselves.
 
 - (a) **One shared platform key per provider. Our own credit ledger stops a user
   before their spending reaches the provider bill.** _(recommended)_
-- (b) Hosted BYOK: each user supplies their own key. See L45 — this belongs to
+- (b) Hosted BYOK: each user supplies their own key. See L45 -- this belongs to
   the self-hosted build, not the hosted product.
 - (c) A per-user Anthropic workspace and key through the Admin API. Gives
   per-user caps enforced by Anthropic, but makes every signup an Anthropic API
@@ -442,7 +442,7 @@ What we sell is our model spend, hosted previews, and managed operation.
 
 (b) is simpler to market and loses money the moment someone picks Opus: measured
 today, a run costs $0.10 on `deepseek-v4-flash`, $0.31 on `deepseek-v4-pro` and
-$1.81 on `claude-opus-5` — an 18x spread that a flat count cannot absorb.
+$1.81 on `claude-opus-5` -- an 18x spread that a flat count cannot absorb.
 
 ### L36 - Tiers
 
@@ -455,7 +455,7 @@ Proposed, sized so included model spend is roughly 35-40% of price:
 | Ship   | $99/mo | $40/mo               | 400 / 129 / 22              | priority sandboxes; deploy to your own host; higher concurrency |
 | Top-up | $20    | $8                   | 80 / 25 / 4                 | expires 12 months from purchase                                 |
 
-Free includes export deliberately — D21 requires it, and it is also the funnel:
+Free includes export deliberately -- D21 requires it, and it is also the funnel:
 someone who has exported a working project is who buys Build. Whether BYOK also
 appears here is L45.
 
@@ -465,7 +465,7 @@ appears here is L45.
 - (b) Auto-charge overage.
 
 (a) matches the existing daily ceiling and means no customer ever gets a
-surprise invoice — which is also the support burden we avoid.
+surprise invoice -- which is also the support burden we avoid.
 
 ### L38 - Annual billing
 
@@ -512,7 +512,7 @@ Same pattern, so the only work per host is a committed config file: `vercel.json
 
 - GitHub App permissions: Contents, Pull requests, Metadata only. _(recommended)_
 - A Vultr Kubernetes/registry template in phase 3: **no**, unless you have a
-  specific reason — it is the only target that needs infrastructure rather than a
+  specific reason -- it is the only target that needs infrastructure rather than a
   config file.
 - Phase 4, Vibld holding deploy hooks for users: **no.** Same objection as L40(b).
 
@@ -539,7 +539,7 @@ D21 says BYOK must not be an artificial paid gate. The self-hosted build
 satisfies that: a self-hoster puts their own key in their own environment and
 pays us nothing.
 
-- (a) **BYOK is the self-hosted story. The hosted product sells credits only —
+- (a) **BYOK is the self-hosted story. The hosted product sells credits only --
   simpler billing, one support path, and no user keys to hold (L31).** _(recommended)_
 - (b) Hosted BYOK as a cheap tier: a flat platform fee, user's key, no credits.
 - (c) BYOK on the hosted free tier.
@@ -565,8 +565,8 @@ from which keys are present.
 Cloudflare Containers needs a paid Cloudflare account, which a self-hoster may
 not have. ADR-0004 already defines an execution-adapter interface.
 
-- (a) **A local adapter — Docker or a child process on the developer's own
-  machine — shipped alongside the Cloudflare one, so the OSS build previews
+- (a) **A local adapter -- Docker or a child process on the developer's own
+  machine -- shipped alongside the Cloudflare one, so the OSS build previews
   without a Cloudflare bill.** _(recommended)_
 - (b) Self-hosted builds get no preview until someone asks for one.
 
@@ -586,7 +586,7 @@ a second implementation it is an untested claim.
 ### L49 - When the self-hosted build is announced
 
 - (a) **Tag v0.1.0 once the hosted alpha is stable _and_ a clean checkout has
-  been proven to build, run and generate with only a provider key — verified in
+  been proven to build, run and generate with only a provider key -- verified in
   CI, not by hand.** _(recommended)_
 - (b) Announce alongside the hosted launch.
 
@@ -597,25 +597,25 @@ it.
 
 Everything else is automatable from this repository. These are not:
 
-| What                                                                                                             | Where                                                   |
-| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Create the Clerk application, then add its keys as GitHub secrets — the deploy workflow syncs them to the Worker | https://dashboard.clerk.com/apps/new                    |
-| Create the Stripe account and add the secret + webhook signing secret as GitHub secrets                          | https://dashboard.stripe.com/register                   |
-| Enable the Workers Paid plan (needed for Containers)                                                             | https://dash.cloudflare.com/?to=/:account/workers/plans |
-| Register the DMCA agent, if L23 (a)                                                                              | https://dmca.copyright.gov/osp/                         |
-| Tell me the exact legal entity name, public mailing address, and which `@vibld.com` mailboxes to create          | —                                                       |
+| What                                                                                                              | Where                                                   |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Create the Clerk application, then add its keys as GitHub secrets -- the deploy workflow syncs them to the Worker | https://dashboard.clerk.com/apps/new                    |
+| Create the Stripe account and add the secret + webhook signing secret as GitHub secrets                           | https://dashboard.stripe.com/register                   |
+| Enable the Workers Paid plan (needed for Containers)                                                              | https://dash.cloudflare.com/?to=/:account/workers/plans |
+| Register the DMCA agent, if L23 (a)                                                                               | https://dmca.copyright.gov/osp/                         |
+| Tell me the exact legal entity name, public mailing address, and which `@vibld.com` mailboxes to create           | --                                                      |
 
 GitHub secret names, once you have the values:
 `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_WEBHOOK_SECRET`,
 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`,
-`VIBLD_PLATFORM_ADMINS` — added at
+`VIBLD_PLATFORM_ADMINS` -- added at
 https://github.com/vibld/vibld/settings/secrets/actions
 
 ## Order I would build it in
 
-1. Marketing site at vibld.com with the waitlist and legal pages (L20-L23) — no
+1. Marketing site at vibld.com with the waitlist and legal pages (L20-L23) -- no
    dependency on anything else, and it is the thing that is publicly missing.
-2. Control-plane database and R2 (L24, L25) — everything below needs it.
+2. Control-plane database and R2 (L24, L25) -- everything below needs it.
 3. Clerk, admin list, ledger re-keyed to user id (L1-L4, L6), Access removed
    last (L5) once abuse controls (L29) are in.
 4. Stripe and the credit ledger (L12-L15, L35-L39).

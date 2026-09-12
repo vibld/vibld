@@ -30,19 +30,19 @@ npm test         # builds, then asserts on the emitted HTML
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set `VITE_SITE_URL` to the origin the site is actually served from. It builds absolute URLs for canonical links and social cards, which crawlers require to be absolute. The build falls back to `https://example.com` so a fresh clone works — but a placeholder in a social card is a broken social card, so set it before going live.
+Copy `.env.example` to `.env` and set `VITE_SITE_URL` to the origin the site is actually served from. It builds absolute URLs for canonical links and social cards, which crawlers require to be absolute. The build falls back to `https://example.com` so a fresh clone works -- but a placeholder in a social card is a broken social card, so set it before going live.
 
 ## The contact form is a demonstration
 
 `app/routes/contact.tsx` renders a form that goes nowhere. It says so, in the prerendered HTML, above the fields. There is no backend in this template and it does not pretend otherwise.
 
-To make it real, replace the `handleSubmit` handler with a request to whatever endpoint you use — a form service, your own API, a serverless function — and remove the notice at the same time. Removing the notice without wiring the endpoint is the one edit that turns an honest page into a dishonest one.
+To make it real, replace the `handleSubmit` handler with a request to whatever endpoint you use -- a form service, your own API, a serverless function -- and remove the notice at the same time. Removing the notice without wiring the endpoint is the one edit that turns an honest page into a dishonest one.
 
 ## Deploying
 
 `npm run build` writes static files to `build/client/`. Upload that directory.
 
-Each route is emitted as its own `index.html` (`/pricing` → `build/client/pricing/index.html`), so deep links work on any host that serves directory indexes — which is nearly all of them, with no rewrite rules.
+Each route is emitted as its own `index.html` (`/pricing` → `build/client/pricing/index.html`), so deep links work on any host that serves directory indexes -- which is nearly all of them, with no rewrite rules.
 
 For unknown paths, point your host's 404 handler at `build/client/__spa-fallback.html`. It renders the "page not found" screen and lets a visitor navigate onwards rather than seeing the host's own error page.
 
@@ -56,7 +56,7 @@ Those tests are the specification. If you change the site's structure, change th
 
 ## Provenance
 
-`vibld.json` records which template this came from. Nothing reads it. Delete it and everything still works — and a test asserts that no application file imports it, so it cannot quietly become required.
+`vibld.json` records which template this came from. Nothing reads it. Delete it and everything still works -- and a test asserts that no application file imports it, so it cannot quietly become required.
 
 ## License
 

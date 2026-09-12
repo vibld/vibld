@@ -1,6 +1,6 @@
 # @vibld/marketing
 
-Vibld's own public site at [vibld.com](https://vibld.com) — built from the
+Vibld's own public site at [vibld.com](https://vibld.com) -- built from the
 same stack ADR-0008 chose for generated marketing sites (React Router
 framework mode, static prerendering, Vite, TypeScript, Tailwind), the way
 `docs/decisions.md`'s L21 requires: "The marketing site is its own Worker,
@@ -25,7 +25,7 @@ pnpm --filter @vibld/marketing test
 
 A coming-soon page (L22): wordmark, tagline, one paragraph, a waitlist form,
 a link to the open-source repository, an illustration of how Vibld works,
-and a footer linking every legal document. Nothing else — no pricing, about
+and a footer linking every legal document. Nothing else -- no pricing, about
 or contact pages yet; those come with the marketing site's next phase, not
 this one.
 
@@ -34,7 +34,7 @@ County: Terms of Service (including a DMCA notice procedure), Privacy Policy,
 Acceptable Use Policy, Security & Vulnerability Disclosure (plus
 `/.well-known/security.txt`, RFC 9116), Subprocessors, Cookie Notice, Refund
 Policy, and Open-Source Notices. `app/site.ts` is the single source for the
-entity name, mailing address and every `@vibld.com` address they reference —
+entity name, mailing address and every `@vibld.com` address they reference --
 change it there, not in eight places.
 
 These are boilerplate drafts, not legal advice. Have a Georgia attorney read
@@ -74,7 +74,7 @@ criteria scope this to the public brand expression, not product UI.
 
 `/api/waitlist` (`worker/index.ts`) is a real endpoint, not a demonstration:
 it validates the submission (`worker/waitlist.ts`, tested without a Workers
-runtime — the same pattern `apps/web/worker/spend.ts` uses) and adds the
+runtime -- the same pattern `apps/web/worker/spend.ts` uses) and adds the
 email to the `vibld-waitlist` segment in Resend via their contacts API. A
 hidden honeypot field catches simple bots, and Cloudflare Turnstile
 (docs/decisions.md L29) sits in front of both submission paths: the widget's
@@ -95,7 +95,7 @@ submission without JavaScript; with it, `WaitlistForm.tsx` submits via
 Double opt-in (L18) is not implemented yet: it needs a verified sending
 domain (`notifications.vibld.com` or `mail.vibld.com`, per L17), which needs
 DNS records this repository cannot add on its own. Until that domain is
-verified, a signup is captured immediately — single opt-in — rather than
+verified, a signup is captured immediately -- single opt-in -- rather than
 blocked on a feature with an unmet dependency.
 
 ## What only Chris can do
@@ -105,7 +105,7 @@ blocked on a feature with an unmet dependency.
   takedown procedure and note the registration is pending; once it's filed,
   add the registration number to `legal.terms.tsx`.
 - **Create the `@vibld.com` mailboxes** the footer and legal pages reference
-  (`support`, `privacy`, `security`, `abuse`, `legal`, `billing`, `hello`) —
+  (`support`, `privacy`, `security`, `abuse`, `legal`, `billing`, `hello`) --
   wherever vibld.com's mail is hosted.
 - **Verify a sending domain in Resend** (`notifications.vibld.com` or
   `mail.vibld.com`) before double opt-in can be built.
@@ -115,14 +115,14 @@ blocked on a feature with an unmet dependency.
 One-time: create a **`marketing`** environment under **Settings →
 Environments**, and add `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit + DNS:
 Edit on the `vibld.com` zone, for the custom-domain routes),
-`CLOUDFLARE_ACCOUNT_ID`, and `RESEND_API_KEY` to it — the same pattern
+`CLOUDFLARE_ACCOUNT_ID`, and `RESEND_API_KEY` to it -- the same pattern
 `apps/web`'s README documents for its `preview` environment. Then run the
 **Deploy marketing site** workflow from the Actions tab
 (`workflow_dispatch` only).
 
 `TURNSTILE_SECRET_KEY` is optional on the same environment: add it to turn
 on server-side verification of the widget already live in `WaitlistForm.tsx`
-(the public site key needs no secret handling — it's a plain constant in
+(the public site key needs no secret handling -- it's a plain constant in
 `app/site.ts`). It's on the same Cloudflare Turnstile page the site key came
 from. Without it, the endpoint works exactly as before -- the honeypot
 alone, no Turnstile check.
