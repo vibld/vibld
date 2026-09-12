@@ -20,6 +20,7 @@ import type { ProjectBrief } from './brief.ts';
 import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
 import { buildPlan } from './plan-builder.ts';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import { createValidator } from './validator.ts';
 import {
   ObservingGenerationStore,
@@ -43,7 +44,7 @@ export type BuilderStatus =
 export interface TimelineEntry {
   id: number;
   at: number;
-  level: 'info' | 'error';
+  level: 'info' | 'warn' | 'error';
   message: string;
 }
 
@@ -88,6 +89,7 @@ export interface BuilderState {
    * something that was said once, they are a condition on everything said.
    */
   knowledge: string;
+  styleDna: StyleDna;
   /** The chosen model id, or null for the deployment's default. */
   model: string | null;
   /** What this deployment can serve. Empty until the probe answers. */
@@ -141,6 +143,7 @@ export interface SessionOptions {
     knowledge?: string | null,
     model?: string | null,
     referenceUrl?: string | null,
+    styleDna?: StyleDna | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -180,6 +183,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     progress: null,
     transcript: [],
     knowledge: '',
+    styleDna: {},
     model: null,
     models: [],
     isAdmin: false,
@@ -200,6 +204,7 @@ async function defaultResolveProvider(
   knowledge?: string | null,
   model?: string | null,
   referenceUrl?: string | null,
+  styleDna?: StyleDna | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -210,6 +215,7 @@ async function defaultResolveProvider(
         ...(knowledge ? { knowledge } : {}),
         ...(model ? { model } : {}),
         ...(referenceUrl ? { referenceUrl } : {}),
+        ...(styleDna && Object.keys(styleDna).length > 0 ? { styleDna } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -259,6 +265,7 @@ export class BuilderSession {
     knowledge?: string | null,
     model?: string | null,
     referenceUrl?: string | null,
+    styleDna?: StyleDna | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -308,6 +315,19 @@ export class BuilderSession {
   setIsAdmin(isAdmin: boolean): void {
     if (this.#disposed || isAdmin === this.#state.isAdmin) return;
     this.#state = { ...this.#state, isAdmin };
+    this.#emit();
+  }
+
+  /**
+   * Replace the project's standing visual preferences.
+   *
+   * Stored as the selection, not as prose: the same choice produces the same
+   * guidance every turn, which is the whole reason this is not more text in
+   * the knowledge field.
+   */
+  setStyleDna(styleDna: StyleDna): void {
+    if (this.#disposed) return;
+    this.#state = { ...this.#state, styleDna };
     this.#emit();
   }
 
@@ -474,6 +494,7 @@ export class BuilderSession {
         this.#state.knowledge,
         this.#state.model,
         referenceUrl,
+        this.#state.styleDna,
       );
     } catch (error) {
       reservation.release();
@@ -557,10 +578,16 @@ export class BuilderSession {
           revision: accepted.revision,
           providerId: resolved.id,
         }),
-        timeline: this.#append(
-          state.timeline,
-          'info',
-          `Checkpoint accepted at revision ${accepted.revision}`,
+        // Warnings belong on the accepted path, which is the point of them:
+        // the project works and still has something worth looking at. They
+        // follow the acceptance line so the run reads as a success first.
+        timeline: (result.warnings ?? []).reduce(
+          (timeline, warning) => this.#append(timeline, 'warn', warning),
+          this.#append(
+            state.timeline,
+            'info',
+            `Checkpoint accepted at revision ${accepted.revision}`,
+          ),
         ),
       }));
       return;

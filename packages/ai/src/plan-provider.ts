@@ -17,6 +17,8 @@ import { patternGuidance } from './patterns.ts';
 import { motionGuidance } from './motion.ts';
 import { surfaceGuidance } from './surfaces.ts';
 import { paletteGuidance } from './palettes.ts';
+import { styleDnaGuidance } from './style-dna.ts';
+import type { StyleDna } from './style-dna.ts';
 import {
   ProviderContextError,
   ProviderRefusalError,
@@ -64,6 +66,13 @@ export interface ModelProviderOptions {
    * the prompt, the same division of labour it already has with `knowledge`.
    */
   referenceContext?: string;
+  /**
+   * Standing visual preferences, as a closed set of dimension/value pairs.
+   * Unlike `knowledge` this is not the user's prose, so it is validated
+   * against the catalogue rather than trusted, and unlike `style` it is
+   * several independent choices rather than one named direction.
+   */
+  styleDna?: StyleDna;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -111,6 +120,7 @@ export class PlanProvider implements ModelProvider {
   readonly #style?: StylePresetId;
   readonly #knowledge?: string;
   readonly #referenceContext?: string;
+  readonly #styleDna?: StyleDna;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -123,6 +133,7 @@ export class PlanProvider implements ModelProvider {
     this.#style = options.style;
     this.#knowledge = options.knowledge;
     this.#referenceContext = options.referenceContext;
+    this.#styleDna = options.styleDna;
     this.id = `${client.id}:${this.#model}`;
   }
 
@@ -134,6 +145,7 @@ export class PlanProvider implements ModelProvider {
         this.#style,
         this.#knowledge,
         this.#referenceContext,
+        this.#styleDna,
       ),
       model: this.#model,
       maxTokens: this.#maxTokens,
@@ -207,6 +219,7 @@ export function buildUserPrompt(
   style?: string | null,
   knowledge?: string | null,
   referenceContext?: string | null,
+  styleDna?: StyleDna | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
@@ -298,6 +311,13 @@ Preserve anything the request does not ask you to change.`,
     const palette = paletteGuidance(request.prompt);
     if (palette) parts.push(palette);
   }
+
+  // Standing visual preferences sit with the other standing guidance and
+  // before the preset, for the same reason the palette does: a named
+  // direction chosen for this run should be the last word before the
+  // request itself.
+  const dna = styleDna ? styleDnaGuidance(styleDna) : null;
+  if (dna) parts.push(dna);
 
   // Last, and explicitly subordinate to the request. A preset is a starting
   // point; an instruction the user actually typed outranks it.

@@ -45,10 +45,13 @@ export {
   AA_LARGE_TEXT,
   AA_NORMAL_TEXT,
   contrastRatio,
+  findContrastFailures,
   meetsAA,
   parseHex,
+  readRootTokens,
   relativeLuminance,
 } from './contrast.ts';
+export type { ContrastFinding } from './contrast.ts';
 export {
   MARKETING_PAGE_PATTERNS,
   SAAS_SCREEN_PATTERNS,
@@ -77,6 +80,19 @@ export {
   selectPalette,
 } from './palettes.ts';
 export type { ProductPalette } from './palettes.ts';
+export {
+  STYLE_DIMENSIONS,
+  encodeStyleDna,
+  findDimension,
+  sanitizeStyleDna,
+  styleDnaGuidance,
+} from './style-dna.ts';
+export type {
+  StyleDimension,
+  StyleDimensionId,
+  StyleDna,
+  StyleOption,
+} from './style-dna.ts';
 export { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 export {
   createDeepseekPlanClient,

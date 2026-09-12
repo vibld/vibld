@@ -10,6 +10,7 @@ import {
 import { ProviderError } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import { createValidator } from '../src/generation/validator.ts';
 import { ACCOUNT_BUDGET_KEY, microUsdOf } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
@@ -38,6 +39,8 @@ export interface WorkflowParams {
   prompt: string;
   base?: ProjectSnapshot;
   style?: StylePresetId;
+  /** Standing visual preferences, already sanitized against the catalogue. */
+  styleDna?: StyleDna;
   knowledge?: string;
   /**
    * Already-fetched, already-truncated text from a reference URL (L52-style

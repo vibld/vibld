@@ -153,11 +153,14 @@ substring matching, so a trigger of `3d` would fire on "3D card flip" and push
 an npm dependency into a project that asked for a CSS transform. Its
 repository states an MIT grant in its README with no LICENSE file present.
 
-[zanwei/design-dna](https://github.com/zanwei/design-dna) (MIT) is an
-extraction-output schema whose colour model has no on-colour pairing, so it
-is weaker than `palettes.ts` for this job. Its shape/elevation/motion
-sub-trees did inform `ProductPalette.feel`, and its verification idea is what
-`contrast.ts` implements.
+[zanwei/design-dna](https://github.com/zanwei/design-dna) (MIT) contributed
+three things, though not its schema: its shape/elevation/motion sub-trees
+informed `ProductPalette.feel`, its controlled-enum dimensions became
+`style-dna.ts`, and its verification loop is what `contrast.ts` and the
+validator's warnings implement. The schema itself is an extraction-output
+format whose colour model has no on-colour pairing, so it is weaker than
+`palettes.ts` for this job, and its `measure-colors.mjs` needs `sharp` and a
+screenshot, neither of which exists in a Worker.
 
 One licensing question was decided by the project owner rather than here.
 [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md)
@@ -166,6 +169,25 @@ grant and conveys no trademark rights, which the cataloguer does not hold; on
 that basis the owner directed that the archetypes drawn from it ship
 de-named, which is what `style-presets.ts` does. A test enforces it on the id,
 chip name and caption.
+
+### Verified rather than asserted
+
+`contrast.ts` is WCAG relative luminance and contrast ratio in about eighty
+lines of arithmetic, with no dependency. It is used twice: the tests hold
+every tokened archetype to 4.5:1 on all eight of its text pairs, and the
+generation validator parses `:root` out of a generated stylesheet and reports
+any declared `--x` / `--x-foreground` pair that falls below it.
+
+The second of those is a warning, not an error, and deliberately. A page whose
+muted text sits at 4.2:1 is a real defect and still a working project;
+rejecting it would cost the user the generation and what it cost to produce,
+to fix something they can see and decide about. `ValidationResult` and
+`GenerationResult` grew an optional `warnings` channel for this, which is why
+a run can be `accepted` and still have something to say.
+
+Hairlines are not checked. WCAG's 3:1 is for interactive control boundaries,
+not for a decorative rule between two surfaces, and holding a `--border` token
+to it produces heavy-lined output no design system ships.
 
 ### The seven tokened archetypes
 

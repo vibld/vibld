@@ -66,3 +66,81 @@ export function meetsAA(foreground: string, background: string): boolean {
   const ratio = contrastRatio(foreground, background);
   return ratio !== null && ratio >= AA_NORMAL_TEXT;
 }
+
+/**
+ * The custom properties declared on `:root` in a stylesheet.
+ *
+ * Deliberately not a CSS parser. It finds `:root` blocks, reads
+ * `--name: value` declarations out of them, and ignores everything else.
+ * That is enough for the token convention this package emits and asks for,
+ * and a real parser would be a dependency and a maintenance surface for no
+ * additional answer.
+ *
+ * Later declarations win, which is what the cascade does within one file.
+ */
+export function readRootTokens(css: string): Map<string, string> {
+  const tokens = new Map<string, string>();
+  // Matches `:root` (with or without a following selector list) and takes
+  // everything to the next `}`. Nested blocks inside :root would break this,
+  // but :root carries declarations, not rules.
+  const blocks = css.matchAll(/:root[^{]*\{([^}]*)\}/g);
+  for (const block of blocks) {
+    const declarations = block[1].matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g);
+    for (const declaration of declarations) {
+      tokens.set(declaration[1].trim(), declaration[2].trim());
+    }
+  }
+  return tokens;
+}
+
+export interface ContrastFinding {
+  foreground: string;
+  background: string;
+  foregroundValue: string;
+  backgroundValue: string;
+  ratio: number;
+}
+
+/**
+ * Every declared text-on-surface pair that falls under 4.5:1.
+ *
+ * Pairs are found by the naming convention this package emits: `--x` with
+ * `--x-foreground`, plus `--background` with `--foreground`. A token whose
+ * value is not a 6-digit hex is skipped rather than guessed at -- `oklch()`,
+ * `rgb()` and `var()` are all legitimate, and reporting a pair as passing
+ * when it was never measured would be worse than reporting nothing.
+ *
+ * Hairlines are not checked. WCAG's 3:1 applies to interactive control
+ * boundaries, not to a decorative rule between two surfaces, and holding a
+ * `--border` token to it produces heavy-lined output no design system ships.
+ */
+export function findContrastFailures(css: string): ContrastFinding[] {
+  const tokens = readRootTokens(css);
+  const pairs: Array<[string, string]> = [];
+
+  for (const name of tokens.keys()) {
+    if (!name.endsWith('-foreground')) continue;
+    const surface = name.slice(0, -'-foreground'.length);
+    if (tokens.has(surface)) pairs.push([name, surface]);
+  }
+  if (tokens.has('--foreground') && tokens.has('--background')) {
+    pairs.push(['--foreground', '--background']);
+  }
+
+  const findings: ContrastFinding[] = [];
+  for (const [foreground, background] of pairs) {
+    const foregroundValue = tokens.get(foreground)!;
+    const backgroundValue = tokens.get(background)!;
+    const ratio = contrastRatio(foregroundValue, backgroundValue);
+    if (ratio === null) continue; // not a hex; not measurable, so not claimed
+    if (ratio >= AA_NORMAL_TEXT) continue;
+    findings.push({
+      foreground,
+      background,
+      foregroundValue,
+      backgroundValue,
+      ratio,
+    });
+  }
+  return findings;
+}

@@ -1,4 +1,5 @@
 import type { ProjectSnapshot, ValidationResult, Validator } from '@vibld/core';
+import { findContrastFailures } from '@vibld/ai/contrast';
 
 export interface ValidationLimits {
   maxFiles: number;
@@ -37,6 +38,40 @@ export function pathProblem(path: string): string | undefined {
 }
 
 const encoder = new TextEncoder();
+
+/**
+ * The stylesheets worth checking for contrast. `src/styles.css` is the one
+ * the system prompt names, but a project that split its tokens into a second
+ * file should not escape the check for being tidy.
+ */
+function stylesheets(snapshot: ProjectSnapshot) {
+  return snapshot.files.filter((file) => file.path.endsWith('.css'));
+}
+
+/**
+ * Contrast findings for a staged project, as warnings rather than errors.
+ *
+ * UX BASELINE has asked for 4.5:1 since it was written and nothing checked
+ * it, so the requirement lived only in the prompt: a model that ignored it
+ * was never contradicted. This contradicts it.
+ *
+ * Deliberately not an error. A page whose muted text sits at 4.2:1 is a real
+ * defect and still a working project, and failing the run would cost the
+ * user the generation and what it cost to produce, to fix something they can
+ * see and decide about themselves. The honest thing is to say so and hand it
+ * over.
+ */
+export function contrastWarnings(snapshot: ProjectSnapshot): string[] {
+  const warnings: string[] = [];
+  for (const file of stylesheets(snapshot)) {
+    for (const finding of findContrastFailures(file.content)) {
+      warnings.push(
+        `${file.path}: ${finding.foreground} (${finding.foregroundValue}) on ${finding.background} (${finding.backgroundValue}) is ${finding.ratio.toFixed(2)}:1, below the 4.5:1 needed for body text`,
+      );
+    }
+  }
+  return warnings;
+}
 
 export function validateSnapshot(
   snapshot: ProjectSnapshot,
@@ -80,7 +115,12 @@ export function validateSnapshot(
     }
   }
 
-  return { ok: errors.length === 0, errors };
+  const warnings = contrastWarnings(snapshot);
+  return {
+    ok: errors.length === 0,
+    errors,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
 }
 
 export function createValidator(

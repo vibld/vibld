@@ -89,6 +89,14 @@ export class GenerationMachine {
         return this.#cancelledResult();
       }
 
+      // Warnings ride along whichever way validation went. A rejected
+      // snapshot can still have been worth commenting on, and an accepted
+      // one is the whole reason this channel exists.
+      const warnings =
+        validation.warnings && validation.warnings.length > 0
+          ? [...validation.warnings]
+          : undefined;
+
       if (!validation.ok) {
         this.#state = 'failed';
         return {
@@ -97,6 +105,7 @@ export class GenerationMachine {
           staged: structuredClone(this.#staged),
           errors: [...validation.errors],
           summary: this.#summary,
+          ...(warnings ? { warnings } : {}),
         };
       }
 
@@ -109,6 +118,7 @@ export class GenerationMachine {
         staged: structuredClone(this.#staged),
         errors: [],
         summary: this.#summary,
+        ...(warnings ? { warnings } : {}),
       };
     } catch (error) {
       this.#state = 'failed';
