@@ -1051,6 +1051,25 @@ body {
   color: var(--danger);
 }
 
+.publish-button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+
+.publish-button__slug {
+  font: inherit;
+  font-size: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  color: inherit;
+  padding: 0.3rem 0.55rem;
+  width: 10rem;
+}
+
 /* --- Standing instructions -----------------------------------------------
  * Collapsed by default: a preference you set and forget should not take
  * space from the composer on every turn. The summary still says when it is

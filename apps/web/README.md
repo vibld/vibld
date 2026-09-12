@@ -417,11 +417,20 @@ user id (checked after identity, unlike `IP_BURST`) -- publishing runs a
 real sandbox build and a real R2 write, priced per caller rather than per
 flood, so it does not ride `PLAN_BURST`'s ceiling.
 
-**Not built yet:** a "Publish" button in the builder shell itself
-(`/api/preview`'s own `usePreviewSandbox` pattern is the natural template
-once this is wired up), and the opt-in custom-domain step ADR-0010
-describes. `/api/publish` is complete and tested on its own; nothing in
-this codebase calls it yet outside tests.
+### In the builder shell
+
+The Code tab's `PublishButton` (next to `ExportButton`, both keyed on
+`state.acceptedSnapshot`) calls `/api/publish`
+(`src/generation/publish-client.ts`, the browser-side mirror of
+`worker/publish-client.ts`). A slug is required on first publish; the
+component remembers the slug its own successful publish returned for the
+rest of the page's lifetime, so a later click in the same session
+republishes without asking again -- there is no endpoint yet to ask "what
+slug does this project already have" on a fresh page load, so a returning
+visitor re-enters it once. On success, shows the live URL (and which
+binary asset paths, if any, were skipped); on failure, the error inline.
+
+**Not built yet:** the opt-in custom-domain step ADR-0010 describes.
 
 ### Setup
 
