@@ -21,6 +21,18 @@
  * for a library Vibld does not ship, and it instructs the reader to
  * recommend installing GSAP, which would break STACK and PORTABILITY.
  *
+ * The four platform-capability entries (`scroll-driven`, `view-transition`,
+ * `discrete-transition`, `anchor-position`) are adapted from the `css-native`
+ * skill in AThevon/genjutsu (MIT License,
+ * https://github.com/AThevon/genjutsu). They are here because each one
+ * replaces a library with a platform feature, which is the same trade
+ * STACK already makes. What is deliberately not carried over is that
+ * skill's browser-support claims: it dates and version-stamps them because
+ * they perish, and a perishable fact baked into a prompt goes stale
+ * silently and is never corrected. The durable half is the discipline --
+ * guard the feature, keep the content usable without it -- and that is
+ * what these entries state instead.
+ *
  * The universal rules -- easing tokens, duration bands, the frequency gate,
  * the reduced-motion posture -- live in `PLAN_SYSTEM_PROMPT` instead,
  * because they are true on every generation and cheap. This file holds only
@@ -163,6 +175,58 @@ export const MOTION_RECIPES: readonly MotionRecipe[] = [
     triggers: ['hold to confirm', 'press and hold', 'confirm destructive'],
     guidance:
       "For a destructive action a plain click fires too easily. Fill an overlay with `clip-path: inset(0 100% 0 0)` to `inset(0 0 0 0)` over 2s `linear` while :active -- linear is correct because the fill is a progress indicator and progress should not ease -- and snap it back at 200ms --ease-out on release. Asymmetric by design: slow on the part the user is deciding, immediate on the system's response.",
+  },
+  {
+    id: 'scroll-driven',
+    name: 'Scroll-linked animation',
+    triggers: [
+      'scroll-driven',
+      'scroll driven',
+      'scroll progress',
+      'progress bar on scroll',
+      'scroll linked',
+      'animate with scroll',
+    ],
+    guidance:
+      'CSS can drive an animation from scroll position with no JavaScript and no observer: `animation: grow linear both; animation-timeline: scroll(root block)` for page progress, or `animation-timeline: view(); animation-range: entry 0% entry 100%` for an element animating as it enters the viewport. Use `both`, never `forwards`, or the element locks into its end state when the reader scrolls back up. This is the part that matters: put the whole thing inside `@supports (animation-timeline: scroll())` and write the default styles so the content is fully visible and readable without it. Support is uneven across browsers, so an unguarded scroll-driven reveal leaves some readers looking at a blank page, which is a worse failure than having no animation at all.',
+  },
+  {
+    id: 'view-transition',
+    name: 'View transition between states or pages',
+    triggers: [
+      'view transition',
+      'page transition',
+      'route transition',
+      'morph between',
+      'shared element transition',
+    ],
+    guidance:
+      'The View Transitions API animates between two DOM states without either state knowing about the animation. Wrap the state change in `document.startViewTransition(() => { /* update the DOM synchronously */ })`, and give the element that should appear to persist across the change a matching `view-transition-name` on both sides. Feature-detect before calling it (`if (!document.startViewTransition) { update(); return; }`) so the update still happens where the API is missing; the page then changes instantly instead of animating, which is the correct fallback. Do not give two visible elements the same `view-transition-name` at once, which fails the whole transition rather than degrading it.',
+  },
+  {
+    id: 'discrete-transition',
+    name: 'Animating in or out of display: none',
+    triggers: [
+      'fade in on mount',
+      'animate in and out',
+      'enter and exit animation',
+      'popover',
+      'native dialog',
+    ],
+    guidance:
+      'An element going to `display: none` normally disappears instantly, which is why exit animations get faked with timers. CSS does it natively: list `display` in the transition with `allow-discrete` (`transition: opacity 300ms ease, display 300ms allow-discrete`), and use a `@starting-style` block to declare the from-state for the first render. Without `allow-discrete` the display change is skipped and the exit never plays. For `[popover]` and `<dialog>` add `overlay` to the same list, or the element leaves the top layer before its animation finishes and vanishes mid-fade.',
+  },
+  {
+    id: 'anchor-position',
+    name: 'Positioning a tooltip or popover against its trigger',
+    triggers: [
+      'anchor positioning',
+      'position tooltip',
+      'floating panel',
+      'attach to button',
+    ],
+    guidance:
+      'CSS can tether a floating element to its trigger with no positioning library and no scroll listener: `anchor-name: --trigger` on the trigger, then `position-anchor: --trigger` with `position-area: top center` on the panel. Always give it `position-try-fallbacks` pointing at an `@position-try` block with the opposite placement, or the panel clips off-screen whenever the trigger sits near an edge. Feature-detect with `@supports (anchor-name: --a)` and keep a plain absolutely-positioned fallback, since the panel must still be readable where this is unsupported.',
   },
 ];
 

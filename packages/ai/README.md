@@ -73,7 +73,8 @@ public URL lets anyone spend the account's model budget.
 `style-presets.ts` (23 named visual directions -- 16 surface treatments and
 7 complete colour systems), `patterns.ts` (10 marketing
 page types, 6 SaaS screens), `palettes.ts` (15 product-type colour, typography
-and feel defaults) and `motion.ts` (12 motion recipes) are closed-set,
+and feel defaults), `motion.ts` (16 motion recipes) and `surfaces.ts` (5
+painting techniques) are closed-set,
 keyword-matched retrieval -- the same shape, for the same reason: a request's
 own text selects a handful of relevant, concrete guidance to append to the
 prompt, never an arbitrary string a caller supplies directly
@@ -120,11 +121,20 @@ MIT-licensed design skills. What was taken, and from where:
   vocabulary lists are encyclopedic in register and carry none of the
   SaaS-marketing words that actually show up in generated copy, so that list
   is this project's own, written in humanizer's format.
-- **[AThevon/genjutsu](https://github.com/AThevon/genjutsu)** (MIT) -- read
-  and largely not ported: its `ui-ux-pro-max` tree is a verbatim vendored
-  copy of the skill above, and most of the rest is Jetpack Compose and
-  SwiftUI. Its motion-principles duration bands agree with what was taken
-  from emilkowalski/skills.
+- **[AThevon/genjutsu](https://github.com/AThevon/genjutsu)** (MIT) -- its
+  `css-native` skill is the source of four `motion.ts` entries
+  (`scroll-driven`, `view-transition`, `discrete-transition`,
+  `anchor-position`) and of all of `surfaces.ts`. Each replaces a library
+  with a platform feature, which is the same trade `STACK` already makes.
+  Its dated browser-support claims are deliberately not carried over: that
+  skill version-stamps them because they perish, and a perishable fact baked
+  into a prompt goes stale silently and is never corrected. The durable half
+  is the discipline (guard the feature, keep the content usable without it),
+  and a test asserts that no recipe names a browser. The rest of the repo is
+  not ported: its `ui-ux-pro-max` tree is a verbatim vendored copy of the
+  skill above, and most of the remainder is Jetpack Compose and SwiftUI. Its
+  motion-principles duration bands agree with what was taken from
+  emilkowalski/skills.
 
 Four more were read and rejected outright, recorded here so the question is
 not reopened:

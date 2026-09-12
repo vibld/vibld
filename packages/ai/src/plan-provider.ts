@@ -15,6 +15,7 @@ import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
 import { motionGuidance } from './motion.ts';
+import { surfaceGuidance } from './surfaces.ts';
 import { paletteGuidance } from './palettes.ts';
 import {
   ProviderContextError,
@@ -283,6 +284,12 @@ Preserve anything the request does not ask you to change.`,
   // drawer wants the drawer curve whether or not "Brutalism" was picked.
   const motion = motionGuidance(request.prompt);
   if (motion) parts.push(motion);
+
+  // Surface techniques are technique too, and not suppressed by a preset for
+  // the same reason: "Aurora UI" says a page should have flowing gradient
+  // fields, and this says how to paint one in plain CSS.
+  const surfaces = surfaceGuidance(request.prompt);
+  if (surfaces) parts.push(surfaces);
 
   // Only when no style preset was chosen: a preset like "dark" already
   // carries its own colour direction, and a product-type default should

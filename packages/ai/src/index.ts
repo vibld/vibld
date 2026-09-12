@@ -64,6 +64,13 @@ export {
 } from './motion.ts';
 export type { MotionRecipe } from './motion.ts';
 export {
+  SURFACE_TECHNIQUES,
+  findSurfaceTechnique,
+  selectSurfaces,
+  surfaceGuidance,
+} from './surfaces.ts';
+export type { SurfaceTechnique } from './surfaces.ts';
+export {
   PRODUCT_PALETTES,
   findPalette,
   paletteGuidance,
