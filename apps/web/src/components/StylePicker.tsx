@@ -1,5 +1,5 @@
 import { STYLE_PRESETS } from '@vibld/ai/style-presets';
-import type { StylePresetId } from '@vibld/ai/style-presets';
+import type { StylePreset, StylePresetId } from '@vibld/ai/style-presets';
 
 /**
  * A visual direction to start from.
@@ -7,7 +7,16 @@ import type { StylePresetId } from '@vibld/ai/style-presets';
  * The set is closed and lives in `@vibld/ai` beside the prompt it shapes --
  * these chips send an id, never text, and the Worker checks the id against
  * the same list.
+ *
+ * Two groups, because the presets are two different things and a single row
+ * of twenty-three chips hid that. A treatment ("Frosted glass") is a surface
+ * finish any palette can wear; a complete system ("Warm terminal") brings its
+ * own colours and fonts and replaces the product-type palette entirely.
+ * Someone picking between them should be able to see which they are choosing.
  */
+const TREATMENTS = STYLE_PRESETS.filter((preset) => !preset.tokens);
+const SYSTEMS = STYLE_PRESETS.filter((preset) => preset.tokens);
+
 export function StylePicker({
   value,
   onChange,
@@ -17,11 +26,13 @@ export function StylePicker({
   onChange: (value: StylePresetId | null) => void;
   disabled: boolean;
 }) {
-  return (
-    <fieldset className="styles" disabled={disabled}>
-      <legend className="styles__legend">Style</legend>
-      <div className="styles__row">
-        {STYLE_PRESETS.map((preset) => {
+  const row = (label: string, presets: readonly StylePreset[]) => (
+    <>
+      <span className="styles__group" aria-hidden="true">
+        {label}
+      </span>
+      <div className="styles__row" role="group" aria-label={label}>
+        {presets.map((preset) => {
           const selected = preset.id === value;
           return (
             <button
@@ -39,6 +50,14 @@ export function StylePicker({
           );
         })}
       </div>
+    </>
+  );
+
+  return (
+    <fieldset className="styles" disabled={disabled}>
+      <legend className="styles__legend">Style</legend>
+      {row('Treatment', TREATMENTS)}
+      {row('Complete system', SYSTEMS)}
     </fieldset>
   );
 }

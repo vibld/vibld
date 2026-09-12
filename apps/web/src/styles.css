@@ -1020,6 +1020,17 @@ body {
   margin-top: 0.35rem;
 }
 
+.styles__group {
+  display: block;
+  margin-top: 0.6rem;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.styles__group:first-of-type {
+  margin-top: 0.35rem;
+}
+
 .chip--style {
   border-radius: 999px;
 }

@@ -36,7 +36,19 @@ export {
   isStylePresetId,
   styleDirection,
 } from './style-presets.ts';
-export type { StylePreset, StylePresetId } from './style-presets.ts';
+export type {
+  StylePreset,
+  StylePresetId,
+  StyleTokens,
+} from './style-presets.ts';
+export {
+  AA_LARGE_TEXT,
+  AA_NORMAL_TEXT,
+  contrastRatio,
+  meetsAA,
+  parseHex,
+  relativeLuminance,
+} from './contrast.ts';
 export {
   MARKETING_PAGE_PATTERNS,
   SAAS_SCREEN_PATTERNS,
