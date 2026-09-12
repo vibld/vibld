@@ -23,7 +23,15 @@ pnpm --filter @vibld/preview test
   how L9's "1 concurrent preview per user" is enforced: a second call for the
   same user reuses this same instance rather than creating a competitor.
   Writes the caller's files into `/workspace`, runs `npm install`, starts
-  `npm run dev` and exposes it via `exposePort()`.
+  `npm run dev` and exposes it via `exposePort()`. Also `buildProject`
+  (ADR-0010: Cloudflare auto-publish's build step) -- a one-shot
+  `npm install && npm run build` in the same sandbox, reading the output
+  tree back with `listFiles`/`readFile` rather than exposing a port. Not
+  queued through `PreviewFleet`: a build finishes within one request's
+  lifetime, holding no exposed port and no long-lived process, so L9's
+  concurrency accounting (sized for exactly those two things) does not
+  apply to it. Refuses to run alongside an active preview in the same
+  sandbox, to avoid racing that preview's own filesystem writes.
 - **`worker/preview-fleet.ts`** / **`worker/fleet.ts`** -- `PreviewFleet`, a
   single well-known Durable Object instance enforcing L9's other number: 25
   concurrent previews across every user, with the 26th queued (a real FIFO
@@ -36,9 +44,9 @@ pnpm --filter @vibld/preview test
   into a sandbox by `proxyToSandbox`, satisfying L8's isolated-origin
   requirement -- this domain never carries a builder cookie); share-link
   redemption on the reserved `share.*` subdomain (L10, see below); and an
-  internal control-plane API (`/internal/preview/*`) that only apps/web
-  calls, over a service binding, gated by a shared secret (see
-  `internal-auth.ts`).
+  internal control-plane API (`/internal/preview/*`, `build` included) that
+  only apps/web calls, over a service binding, gated by a shared secret
+  (see `internal-auth.ts`).
 - **`worker/share-token.ts`** -- the "signed" half of L10: a pure,
   storage-free HMAC-SHA256 sign/verify pair for share links.
 

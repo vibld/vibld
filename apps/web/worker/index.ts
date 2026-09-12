@@ -52,6 +52,11 @@ import {
 } from './preview-client.ts';
 import type { ServiceBinding } from './preview-client.ts';
 import {
+  autoPublishConfigured,
+  buildProject,
+  publishProject,
+} from './publish-client.ts';
+import {
   billingConfigured,
   handleBillingCheckout,
   handleBillingPortal,
@@ -147,6 +152,26 @@ export interface Env {
   PREVIEW?: ServiceBinding;
   /** Worker secret, shared with @vibld/preview -- see preview-client.ts. */
   PREVIEW_INTERNAL_SECRET?: string;
+  /**
+   * Cloudflare auto-publish's serving Worker (ADR-0010; see
+   * apps/publish/README.md). `/api/publish` is unavailable, not open, when
+   * this, `PUBLISH_INTERNAL_SECRET`, `PREVIEW` or `PREVIEW_INTERNAL_SECRET`
+   * is unset -- publishing needs both apps/preview's build step and
+   * apps/publish's store, the same fail-closed rule `isConfigured` already
+   * applies to generation.
+   */
+  PUBLISH?: ServiceBinding;
+  /** Worker secret, shared with @vibld/publish -- see publish-client.ts. */
+  PUBLISH_INTERNAL_SECRET?: string;
+  /**
+   * Publishing runs a real build and writes real storage, so it gets its
+   * own burst gate keyed on the caller rather than riding PLAN_BURST's --
+   * a naive flood here costs sandbox compute and R2 writes, not model spend,
+   * so the ceiling that matters is a different one. Optional and permissive
+   * for the same reason PLAN_BURST is: a speed bump, not the boundary
+   * (there is no ledger to size a hard limit against yet).
+   */
+  PUBLISH_BURST?: RateLimit;
   /**
    * Stripe billing (docs/decisions.md L12-L15). Worker secret, live-mode --
    * see billing-handlers.ts. `/api/billing/*` and `/api/stripe/webhook` are
@@ -833,6 +858,87 @@ async function handlePreviewShare(
   return json({ error: 'Use GET, POST or DELETE.' }, 405);
 }
 
+/**
+ * Cloudflare auto-publish (ADR-0010, docs/decisions.md L40): build the
+ * caller's own project, then publish the result. `files` is the accepted
+ * checkpoint's own source -- the same client-supplied shape `/api/preview`
+ * already takes (`parsePreviewRequest`), not something this Worker reads
+ * back from D1/R2 itself. Thin by design, same reason `handlePreview` is:
+ * every real decision (how a build runs, where it is served from) belongs
+ * to apps/preview and apps/publish, not here.
+ */
+async function handlePublish(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'POST') {
+    return json({ error: 'Use POST.' }, 405);
+  }
+  if (!autoPublishConfigured(env)) {
+    return json(
+      { error: 'Publishing is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  // A real build and a real R2 write, not a model call -- its own gate
+  // rather than PLAN_BURST's, and checked after identity (unlike IP_BURST)
+  // since it is priced per caller, not per flood.
+  if (env.PUBLISH_BURST) {
+    try {
+      const result = await env.PUBLISH_BURST.limit({
+        key: `publish:${principal.userId}`,
+      });
+      if (!result.success) {
+        return json(
+          { error: 'Too many publish requests. Try again shortly.' },
+          429,
+        );
+      }
+    } catch (error) {
+      console.error('publish rate limiter unavailable', error);
+    }
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const parsed = parsePreviewRequest(body);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+
+  const { slug } = (body ?? {}) as { slug?: unknown };
+  if (slug !== undefined && (typeof slug !== 'string' || slug.length === 0)) {
+    return json({ error: '"slug" must be a non-empty string.' }, 400);
+  }
+
+  const built = await buildProject(env, principal.userId, parsed.value);
+  if (!built.ok) return json({ error: built.error }, 422);
+
+  // One project per Clerk user, same convention `handlePlan` already uses --
+  // there is no multi-project UI yet.
+  const projectId = principal.userId;
+  const published = await publishProject(
+    env,
+    principal.userId,
+    projectId,
+    slug,
+    built.files,
+  );
+  if (!published.ok) {
+    return json({ error: published.error }, published.status);
+  }
+  return json({
+    slug: published.slug,
+    url: published.url,
+    skipped: built.skipped,
+  });
+}
+
 /** The slice of Cloudflare's ExecutionContext this Worker uses. */
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -897,6 +1003,10 @@ export default {
 
     if (pathname === '/api/preview/share') {
       return handlePreviewShare(request, env);
+    }
+
+    if (pathname === '/api/publish') {
+      return handlePublish(request, env);
     }
 
     if (pathname === '/api/billing/status') {

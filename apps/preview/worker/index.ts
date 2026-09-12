@@ -132,6 +132,34 @@ async function handleStop(request: Request, env: Env): Promise<Response> {
   return json({ ok: true });
 }
 
+/**
+ * Cloudflare auto-publish's build step (ADR-0010). Unlike `handleStart`,
+ * this needs no `PREVIEW_HOSTNAME` -- a build exposes no port, so
+ * `requireConfigured` does not gate it.
+ */
+async function handleBuild(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { userId, files } = (body ?? {}) as {
+    userId?: unknown;
+    files?: unknown;
+  };
+  if (typeof userId !== 'string' || userId.length === 0) {
+    return json({ error: '"userId" is required.' }, 400);
+  }
+  if (!isProjectFileArray(files)) {
+    return json({ error: '"files" must be a list of {path, content}.' }, 400);
+  }
+
+  const sandbox = getSandbox(env.Sandbox, userId, { normalizeId: true });
+  const result = await sandbox.buildProject(files);
+  return json(result, 'error' in result ? 422 : 200);
+}
+
 function shareUrlFor(
   hostname: string,
   sandboxId: string,
@@ -282,6 +310,9 @@ async function handleInternal(
   }
   if (pathname === '/internal/preview/stop' && request.method === 'POST') {
     return handleStop(request, env);
+  }
+  if (pathname === '/internal/preview/build' && request.method === 'POST') {
+    return handleBuild(request, env);
   }
   if (pathname === '/internal/preview/share') {
     if (request.method === 'POST') return handleShareCreate(request, env);

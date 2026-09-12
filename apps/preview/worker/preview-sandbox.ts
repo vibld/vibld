@@ -52,6 +52,16 @@ const ACCOUNT_MAX_IN_FLIGHT = 25;
 /** Vite's default dev-server port; every generated project here uses Vite. */
 const DEV_PORT = 5173;
 
+/**
+ * Where `npm run build` writes its output, for the one template this
+ * codebase generates today (`templates/marketing`'s `react-router.config.ts`
+ * sets `ssr: false`, so `react-router build` emits plain static files here).
+ * A second template with a different build tool would need its own
+ * convention -- this is not yet a per-project setting, the same way
+ * `DEV_PORT` above is not.
+ */
+const BUILD_OUTPUT_DIR = 'build/client';
+
 type Phase = 'queued' | 'installing' | 'starting' | 'ready' | 'failed';
 
 interface PreviewState {
@@ -209,6 +219,92 @@ export class PreviewSandbox extends Sandbox<Env> {
         .catch(() => {});
     }
     await this.destroy().catch(() => {});
+  }
+
+  /**
+   * A one-shot production build of `files` (ADR-0010's Cloudflare
+   * auto-publish primary path: apps/web calls this, then hands the result
+   * straight to apps/publish's `/internal/publish`). Unlike `startPreview`,
+   * this never touches `PreviewFleet` -- a build finishes within one
+   * request's lifetime, holding no exposed port and no long-lived dev
+   * server, so L9's "1 concurrent preview per user" accounting (which
+   * exists to bound exactly those two things) does not apply to it. It does
+   * still run inside this same per-user sandbox instance, under the same
+   * L11 egress restrictions as a preview's own `npm install` -- untrusted
+   * code is untrusted whether or not anything is ever exposed.
+   *
+   * Only text output is returned. A build that emits binary assets (images,
+   * fonts) skips them and reports which paths were skipped, rather than
+   * silently mangling them: apps/publish's own R2 usage is text-only today
+   * (the same narrowing `apps/web/worker/generation-store.ts`'s R2Bucket
+   * interface already applies), so there is nowhere correct to put binary
+   * bytes yet.
+   */
+  async buildProject(
+    files: ProjectFile[],
+  ): Promise<{ files: ProjectFile[]; skipped: string[] } | { error: string }> {
+    // A running preview's dev server and this build would both write into
+    // the same /workspace at once -- not a security boundary (both are the
+    // same user's own untrusted code either way), but a real race on the
+    // filesystem a dev server may be watching. Refuse rather than risk a
+    // build that reads a half-written tree, or a preview restart mid-build.
+    const existing = await this.readState();
+    if (existing && !this.isExpired(existing) && existing.phase !== 'failed') {
+      return {
+        error:
+          'A preview is currently running for this project. Stop it before publishing.',
+      };
+    }
+
+    try {
+      await this.writeProject(files);
+
+      const install = await this.exec('npm install --no-audit --no-fund', {
+        cwd: '/workspace',
+      });
+      if (!install.success) {
+        return {
+          error: `npm install failed (exit ${install.exitCode}): ${install.stderr.slice(-2000)}`,
+        };
+      }
+
+      const build = await this.exec('npm run build', { cwd: '/workspace' });
+      if (!build.success) {
+        return {
+          error: `npm run build failed (exit ${build.exitCode}): ${build.stderr.slice(-2000)}`,
+        };
+      }
+
+      const outputDir = `/workspace/${BUILD_OUTPUT_DIR}`;
+      const listing = await this.listFiles(outputDir, { recursive: true });
+      if (!listing.success) {
+        return {
+          error: `The build succeeded but its output directory (${BUILD_OUTPUT_DIR}) could not be read.`,
+        };
+      }
+
+      const output: ProjectFile[] = [];
+      const skipped: string[] = [];
+      for (const entry of listing.files) {
+        if (entry.type !== 'file') continue;
+        const read = await this.readFile(`${outputDir}/${entry.relativePath}`);
+        if (read.encoding === 'base64') {
+          skipped.push(entry.relativePath);
+          continue;
+        }
+        output.push({ path: entry.relativePath, content: read.content });
+      }
+      if (output.length === 0) {
+        return {
+          error: `The build produced no readable output in ${BUILD_OUTPUT_DIR}.`,
+        };
+      }
+      return { files: output, skipped };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : 'Build failed.',
+      };
+    }
   }
 
   /**
