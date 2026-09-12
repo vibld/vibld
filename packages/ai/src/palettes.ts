@@ -55,6 +55,41 @@ export interface ProductPalette {
     /** A real, working Google Fonts stylesheet URL for exactly these two families. */
     googleFontsUrl: string;
   };
+  /**
+   * The non-colour half of a visual system: corner radius, shadow depth and
+   * motion timing. Without these a generated project picks a radius and a
+   * duration per component per run, so two cards in the same project can
+   * disagree -- the same "a model given only a label invents its own
+   * reading of it" failure `style-presets.ts` describes, one level down.
+   *
+   * `personality` and `overshoot` are the archetype names and overshoot
+   * budgets from LottieFiles/motion-design-skill (MIT License,
+   * https://github.com/LottieFiles/motion-design-skill), mapped onto product
+   * type via that skill's own content-type table (financial -> corporate,
+   * editorial -> premium, gaming/fitness -> energetic, and so on).
+   *
+   * The durations are deliberately *not* that skill's. Its premium tier puts
+   * "standard" at 500ms, which would put a dropdown at half a second and
+   * breaks the sub-300ms UI ceiling the system prompt takes from
+   * emilkowalski/skills. `quick` and `standard` here stay inside that
+   * ceiling; `slow` is the only tier allowed past it, because it is for
+   * marketing-scale moves -- a hero reveal, a full-width panel -- which that
+   * ceiling explicitly exempts. The personality shows up in the spread
+   * between the three, not in breaking the rule.
+   */
+  feel: {
+    radius: { sm: string; md: string; lg: string; pill: string };
+    /** Real box-shadow values, low to high elevation. */
+    shadow: { low: string; medium: string; high: string };
+    motion: {
+      personality: 'playful' | 'premium' | 'corporate' | 'energetic';
+      quick: string;
+      standard: string;
+      slow: string;
+      /** Overshoot budget on an entrance, as a percentage. '0%' means none. */
+      overshoot: string;
+    };
+  };
   /** One line on why this pairing, shown in the prompt so it reads as a default, not an accident. */
   rationale: string;
 }
@@ -87,6 +122,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap',
     },
+    feel: {
+      radius: { sm: '6px', md: '10px', lg: '16px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(15, 23, 42, 0.06)',
+        medium: '0 4px 12px rgba(15, 23, 42, 0.08)',
+        high: '0 12px 32px rgba(15, 23, 42, 0.12)',
+      },
+      motion: {
+        personality: 'corporate',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '450ms',
+        overshoot: '0%',
+      },
+    },
     rationale: 'Trust blue with an orange CTA for contrast against it.',
   },
   {
@@ -115,6 +165,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       bodyFont: 'Nunito Sans',
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700&family=Rubik:wght@500;600;700&display=swap',
+    },
+    feel: {
+      radius: { sm: '6px', md: '10px', lg: '16px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(15, 23, 42, 0.06)',
+        medium: '0 4px 12px rgba(15, 23, 42, 0.08)',
+        high: '0 12px 32px rgba(15, 23, 42, 0.12)',
+      },
+      motion: {
+        personality: 'corporate',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '450ms',
+        overshoot: '0%',
+      },
     },
     rationale:
       'Success green for trust, warm orange for urgency (sale/cart CTAs).',
@@ -146,6 +211,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap',
     },
+    feel: {
+      radius: { sm: '2px', md: '4px', lg: '8px', pill: '999px' },
+      shadow: {
+        low: '0 1px 0 rgba(0, 0, 0, 0.06)',
+        medium: '0 2px 6px rgba(0, 0, 0, 0.08)',
+        high: '0 8px 24px rgba(0, 0, 0, 0.10)',
+      },
+      motion: {
+        personality: 'premium',
+        quick: '200ms',
+        standard: '280ms',
+        slow: '600ms',
+        overshoot: '0%',
+      },
+    },
     rationale:
       'Near-monochrome so the work is the colour; one accent for links and CTAs.',
   },
@@ -175,6 +255,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       bodyFont: 'Noto Sans',
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700&family=Noto+Sans:wght@400;500&display=swap',
+    },
+    feel: {
+      radius: { sm: '10px', md: '16px', lg: '24px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(15, 23, 42, 0.06)',
+        medium: '0 4px 12px rgba(15, 23, 42, 0.08)',
+        high: '0 12px 32px rgba(15, 23, 42, 0.12)',
+      },
+      motion: {
+        personality: 'corporate',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '450ms',
+        overshoot: '0%',
+      },
     },
     rationale:
       'Calm cyan with a health-green accent. Accessibility is not optional for this product type -- re-check every pairing here against the DESIGN INTENT contrast rule, not just this file.',
@@ -211,6 +306,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600&display=swap',
     },
+    feel: {
+      radius: { sm: '10px', md: '16px', lg: '24px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(15, 23, 42, 0.06)',
+        medium: '0 4px 12px rgba(15, 23, 42, 0.08)',
+        high: '0 12px 32px rgba(15, 23, 42, 0.12)',
+      },
+      motion: {
+        personality: 'playful',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '400ms',
+        overshoot: '12%',
+      },
+    },
     rationale:
       'Playful indigo with an energetic accent, for engagement over formality.',
   },
@@ -240,6 +350,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       bodyFont: 'Exo 2',
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600&family=Orbitron:wght@600;700&display=swap',
+    },
+    feel: {
+      radius: { sm: '6px', md: '10px', lg: '16px', pill: '999px' },
+      shadow: {
+        low: '0 2px 4px rgba(0, 0, 0, 0.20)',
+        medium: '0 8px 20px rgba(0, 0, 0, 0.28)',
+        high: '0 20px 48px rgba(0, 0, 0, 0.40)',
+      },
+      motion: {
+        personality: 'corporate',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '450ms',
+        overshoot: '0%',
+      },
     },
     rationale:
       'Dark by default with a gold-trust primary and a purple tech accent.',
@@ -271,6 +396,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Josefin+Sans:wght@400;500&display=swap',
     },
+    feel: {
+      radius: { sm: '2px', md: '4px', lg: '8px', pill: '999px' },
+      shadow: {
+        low: '0 1px 0 rgba(0, 0, 0, 0.06)',
+        medium: '0 2px 6px rgba(0, 0, 0, 0.08)',
+        high: '0 8px 24px rgba(0, 0, 0, 0.10)',
+      },
+      motion: {
+        personality: 'premium',
+        quick: '200ms',
+        standard: '280ms',
+        slow: '600ms',
+        overshoot: '0%',
+      },
+    },
     rationale:
       'Trust teal with a professional blue accent, reads as established rather than trendy.',
   },
@@ -300,6 +440,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       bodyFont: 'Karla',
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Karla:wght@400;500;600&family=Playfair+Display+SC:wght@700&display=swap',
+    },
+    feel: {
+      radius: { sm: '10px', md: '16px', lg: '24px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(68, 42, 20, 0.08)',
+        medium: '0 6px 16px rgba(68, 42, 20, 0.10)',
+        high: '0 16px 40px rgba(68, 42, 20, 0.16)',
+      },
+      motion: {
+        personality: 'premium',
+        quick: '200ms',
+        standard: '280ms',
+        slow: '600ms',
+        overshoot: '0%',
+      },
     },
     rationale:
       'Appetite-red primary with a warm gold accent for menu highlights and pricing.',
@@ -331,6 +486,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap',
     },
+    feel: {
+      radius: { sm: '12px', md: '20px', lg: '28px', pill: '999px' },
+      shadow: {
+        low: '0 2px 4px rgba(0, 0, 0, 0.20)',
+        medium: '0 8px 20px rgba(0, 0, 0, 0.28)',
+        high: '0 20px 48px rgba(0, 0, 0, 0.40)',
+      },
+      motion: {
+        personality: 'energetic',
+        quick: '100ms',
+        standard: '180ms',
+        slow: '300ms',
+        overshoot: '18%',
+      },
+    },
     rationale:
       'Dark background with energetic orange and a success-green accent for achievements.',
   },
@@ -360,6 +530,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       bodyFont: 'Source Sans 3',
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Lexend:wght@500;600;700&family=Source+Sans+3:wght@400;500&display=swap',
+    },
+    feel: {
+      radius: { sm: '10px', md: '16px', lg: '24px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(68, 42, 20, 0.08)',
+        medium: '0 6px 16px rgba(68, 42, 20, 0.10)',
+        high: '0 16px 40px rgba(68, 42, 20, 0.16)',
+      },
+      motion: {
+        personality: 'corporate',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '450ms',
+        overshoot: '0%',
+      },
     },
     rationale:
       'Compassion blue with an action-orange donate CTA. Lexend was designed for reading proficiency -- a good default where accessibility matters most.',
@@ -391,6 +576,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Source+Sans+3:wght@400;500&display=swap',
     },
+    feel: {
+      radius: { sm: '2px', md: '4px', lg: '8px', pill: '999px' },
+      shadow: {
+        low: '0 1px 0 rgba(0, 0, 0, 0.06)',
+        medium: '0 2px 6px rgba(0, 0, 0, 0.08)',
+        high: '0 8px 24px rgba(0, 0, 0, 0.10)',
+      },
+      motion: {
+        personality: 'energetic',
+        quick: '100ms',
+        standard: '180ms',
+        slow: '300ms',
+        overshoot: '18%',
+      },
+    },
     rationale:
       'Bold pink against a cyan accent -- meant to be a differentiator, not a safe default.',
   },
@@ -420,6 +620,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       bodyFont: 'Work Sans',
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Work+Sans:wght@400;500&display=swap',
+    },
+    feel: {
+      radius: { sm: '6px', md: '10px', lg: '16px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(15, 23, 42, 0.06)',
+        medium: '0 4px 12px rgba(15, 23, 42, 0.08)',
+        high: '0 12px 32px rgba(15, 23, 42, 0.12)',
+      },
+      motion: {
+        personality: 'corporate',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '450ms',
+        overshoot: '0%',
+      },
     },
     rationale:
       'Trust purple with a transaction-green accent (buy/sell/confirm actions).',
@@ -456,6 +671,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap',
     },
+    feel: {
+      radius: { sm: '6px', md: '10px', lg: '16px', pill: '999px' },
+      shadow: {
+        low: '0 2px 4px rgba(0, 0, 0, 0.20)',
+        medium: '0 8px 20px rgba(0, 0, 0, 0.28)',
+        high: '0 20px 48px rgba(0, 0, 0, 0.40)',
+      },
+      motion: {
+        personality: 'energetic',
+        quick: '100ms',
+        standard: '180ms',
+        slow: '300ms',
+        overshoot: '18%',
+      },
+    },
     rationale:
       'Cinema-dark background so poster art and thumbnails carry the colour, not the chrome.',
   },
@@ -486,6 +716,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=EB+Garamond:wght@500;600&family=Lato:wght@400;700&display=swap',
     },
+    feel: {
+      radius: { sm: '2px', md: '4px', lg: '8px', pill: '999px' },
+      shadow: {
+        low: '0 1px 0 rgba(0, 0, 0, 0.06)',
+        medium: '0 2px 6px rgba(0, 0, 0, 0.08)',
+        high: '0 8px 24px rgba(0, 0, 0, 0.10)',
+      },
+      motion: {
+        personality: 'premium',
+        quick: '200ms',
+        standard: '280ms',
+        slow: '600ms',
+        overshoot: '0%',
+      },
+    },
     rationale:
       'Authority navy with a restrained gold accent -- credibility over personality.',
   },
@@ -515,6 +760,21 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       bodyFont: 'IBM Plex Sans',
       googleFontsUrl:
         'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap',
+    },
+    feel: {
+      radius: { sm: '6px', md: '10px', lg: '16px', pill: '999px' },
+      shadow: {
+        low: '0 1px 2px rgba(15, 23, 42, 0.06)',
+        medium: '0 4px 12px rgba(15, 23, 42, 0.08)',
+        high: '0 12px 32px rgba(15, 23, 42, 0.12)',
+      },
+      motion: {
+        personality: 'corporate',
+        quick: '150ms',
+        standard: '250ms',
+        slow: '450ms',
+        overshoot: '0%',
+      },
     },
     rationale:
       'Near-black primary with a small gold accent -- security-first, minimal decoration.',
@@ -551,7 +811,7 @@ export function selectPalette(promptText: string): ProductPalette | null {
 export function paletteGuidance(promptText: string): string | null {
   const palette = selectPalette(promptText);
   if (!palette) return null;
-  const { colors, typography } = palette;
+  const { colors, typography, feel } = palette;
   return `This looks like a ${palette.name} product. In the absence of a stated palette, default to these CSS custom properties in src/styles.css (${palette.rationale}) -- an explicit colour or font in the request above still wins:
 
 :root {
@@ -563,7 +823,21 @@ export function paletteGuidance(promptText: string): string | null {
   --muted: ${colors.muted}; --muted-foreground: ${colors.mutedForeground};
   --border: ${colors.border};
   --destructive: ${colors.destructive}; --destructive-foreground: ${colors.onDestructive};
+
+  --radius-sm: ${feel.radius.sm}; --radius-md: ${feel.radius.md};
+  --radius-lg: ${feel.radius.lg}; --radius-pill: ${feel.radius.pill};
+  --shadow-low: ${feel.shadow.low};
+  --shadow-medium: ${feel.shadow.medium};
+  --shadow-high: ${feel.shadow.high};
+  --duration-quick: ${feel.motion.quick}; --duration-standard: ${feel.motion.standard};
+  --duration-slow: ${feel.motion.slow};
 }
 
-Use these as design tokens referenced by components (var(--primary), etc.), not as one-off hex values copy-pasted around the codebase. Heading font: ${typography.headingFont}. Body font: ${typography.bodyFont}. Import both with: @import url('${typography.googleFontsUrl}');`;
+Use these as design tokens referenced by components (var(--primary), etc.), not as one-off hex values copy-pasted around the codebase. Heading font: ${typography.headingFont}. Body font: ${typography.bodyFont}. Import both with: @import url('${typography.googleFontsUrl}');
+
+Motion for this product type reads as ${feel.motion.personality}: --duration-quick for hover and press, --duration-standard for overlays and state changes, --duration-slow only for marketing-scale reveals. ${
+    feel.motion.overshoot === '0%'
+      ? 'No overshoot on entrances -- things arrive and stop.'
+      : `Entrances may overshoot by about ${feel.motion.overshoot} and settle.`
+  }`;
 }

@@ -21,6 +21,17 @@
  * original preset that was never actually built; `editorial` below is that
  * one, finally.
  *
+ * Each `direction` also carries a motion sentence. A preset that says only
+ * how a page looks leaves how it moves to chance, and a model given no
+ * timing invents one per run -- the same failure the file-level comment
+ * above describes for bare style labels. The archetype numbers (duration
+ * band, overshoot) are from LottieFiles/motion-design-skill (MIT License,
+ * https://github.com/LottieFiles/motion-design-skill); the "materialize,
+ * don't just fade" rule and the translucent-surface warnings on the glass
+ * presets are from emilkowalski/skills (MIT License,
+ * https://github.com/emilkowalski/skills). Only one preset ever ships per
+ * generation, so this costs a single sentence in the prompt.
+ *
  * The set is closed, and that is the security property, not a convenience:
  * the id crosses the network from the browser, so anything that is not one of
  * these ids is rejected rather than passed through. Forwarding caller text
@@ -62,112 +73,112 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Glassmorphism',
     description: 'Frosted glass',
     direction:
-      'Frosted glass surfaces: translucent panels over a saturated background, backdrop-filter blur, hairline light borders and soft shadows. Keep text on a solid-enough backing to stay readable.',
+      'Frosted glass surfaces: translucent panels over a saturated background, backdrop-filter blur, hairline light borders and soft shadows. Keep text on a solid-enough backing to stay readable. Motion: materialize rather than fade -- animate backdrop-filter blur radius and scale together on enter so the surface reads as real material arriving, 250ms --ease-out. Never stack one light translucent surface on another; legibility collapses. Put colour on a solid layer behind the glass, not on the translucent foreground.',
   },
   {
     id: 'neumorphism',
     name: 'Neumorphism',
     description: 'Soft 3D shadows',
     direction:
-      'Soft extruded surfaces in a single low-contrast tone: paired light and dark shadows so controls look pressed into or raised out of the background. Contrast is the risk here, so keep text and focus rings clearly visible.',
+      'Soft extruded surfaces in a single low-contrast tone: paired light and dark shadows so controls look pressed into or raised out of the background. Contrast is the risk here, so keep text and focus rings clearly visible. Motion: the shadow pair swaps rather than the element moving -- an inset shadow on :active over 120ms --ease-out reads as a real press. Keep everything else still; this style has no contrast headroom for movement.',
   },
   {
     id: 'brutalism',
     name: 'Brutalism',
     description: 'Bold and raw',
     direction:
-      'Raw and deliberate: heavy black rules, flat blocks of one or two loud colours, oversized type, visible grid, hard shadows and no rounded corners.',
+      'Raw and deliberate: heavy black rules, flat blocks of one or two loud colours, oversized type, visible grid, hard shadows and no rounded corners. Motion: near-zero. Transitions at 0-80ms with no easing softness, or none at all -- a hard cut is the honest choice here, and a gentle curve contradicts the whole direction.',
   },
   {
     id: 'minimalist',
     name: 'Minimalist',
     description: 'Clean and quiet',
     direction:
-      'Generous whitespace, a restrained neutral palette with one accent, a strict type scale, few rules and borders, and no decoration that does not carry meaning.',
+      'Generous whitespace, a restrained neutral palette with one accent, a strict type scale, few rules and borders, and no decoration that does not carry meaning. Motion: opacity only, around 150ms --ease-out, no transforms and no stagger. In a design this quiet, movement is the loudest thing on the page.',
   },
   {
     id: 'dark',
     name: 'Dark',
     description: 'Dark by default',
     direction:
-      'Dark by default: layered near-black surfaces rather than one flat black, low-chroma text at graded emphasis, and a single bright accent used sparingly.',
+      'Dark by default: layered near-black surfaces rather than one flat black, low-chroma text at graded emphasis, and a single bright accent used sparingly. Motion: reduce intensity by 10-20% against the same design on light -- bright elements on a dark ground already read as higher-energy, so the same distance and duration feel more agitated.',
   },
   {
     id: 'gradient',
     name: 'Gradient rich',
     description: 'Vivid gradients',
     direction:
-      'Vivid multi-stop gradients across large surfaces, gradient text on headings, glowing accents, and colour that shifts between sections.',
+      'Vivid multi-stop gradients across large surfaces, gradient text on headings, glowing accents, and colour that shifts between sections. Motion: the gradient itself drifts -- shift background-position by 10-20% over 8000-20000ms, linear, imperceptible at a glance. Foreground elements stay on the standard 150-250ms budget.',
   },
   {
     id: 'depth',
     name: '3D depth',
     description: 'Dimensional layers',
     direction:
-      'Dimensional layering: overlapping cards at several elevations, large soft shadows, subtle perspective transforms and parallax between foreground and background.',
+      'Dimensional layering: overlapping cards at several elevations, large soft shadows, subtle perspective transforms and parallax between foreground and background. Motion: parallax between layers at 1.0x foreground, 0.5x midground, 0.2x background, total displacement under 100px, disabled on mobile and never applied to text. Cards lift on hover by shadow and 2-4px of translateY, not by scale.',
   },
   {
     id: 'retrowave',
     name: 'Retro wave',
     description: '80s inspired',
     direction:
-      'Eighties retro-futurism: magenta, cyan and deep purple on near-black, neon glow on text and edges, horizon grids, scanlines and chrome-style headings.',
+      'Eighties retro-futurism: magenta, cyan and deep purple on near-black, neon glow on text and edges, horizon grids, scanlines and chrome-style headings. Motion: a slow glow pulse on neon edges -- opacity or text-shadow spread breathing over 2000-3000ms -- plus horizon-grid drift if there is one. Interface motion stays fast and snappy underneath it.',
   },
   {
     id: 'claymorphism',
     name: 'Claymorphism',
     description: 'Soft and playful',
     direction:
-      'Puffy, rounded surfaces that look moulded from clay: soft matte colours, an inflated 3D look from a light inner highlight plus a soft outer shadow (never a hard shadow), generous corner radii, and a friendly, approachable tone throughout.',
+      'Puffy, rounded surfaces that look moulded from clay: soft matte colours, an inflated 3D look from a light inner highlight plus a soft outer shadow (never a hard shadow), generous corner radii, and a friendly, approachable tone throughout. Motion: playful -- 150-300ms with a 10-20% overshoot on entrances (an ease-out-back curve), and a visible squash on press. The material looks soft, so it should settle like something soft.',
   },
   {
     id: 'aurora',
     name: 'Aurora UI',
     description: 'Flowing gradient light',
     direction:
-      'Soft, flowing multi-colour gradient fields (like aurora light) behind glass-like foreground panels, gentle blur, and light that feels like it is slowly moving rather than a static backdrop. Keep foreground text on a surface solid enough to stay readable over the gradient.',
+      'Soft, flowing multi-colour gradient fields (like aurora light) behind glass-like foreground panels, gentle blur, and light that feels like it is slowly moving rather than a static backdrop. Keep foreground text on a surface solid enough to stay readable over the gradient. Motion: the drifting light is the point, not decoration. Move the gradient field over 8000-20000ms, linear or sine, with foreground panels entering at the normal 200-250ms. If the background is static, this is not aurora.',
   },
   {
     id: 'bentoGrid',
     name: 'Bento grid',
     description: 'Asymmetric tiles',
     direction:
-      'A grid of asymmetric rounded tiles of varying sizes, each one a self-contained card holding one idea (a stat, a feature, an image), like a bento box. Consistent gutter and corner radius across every tile size, restrained colour so the grid structure itself carries the visual interest.',
+      'A grid of asymmetric rounded tiles of varying sizes, each one a self-contained card holding one idea (a stat, a feature, an image), like a bento box. Consistent gutter and corner radius across every tile size, restrained colour so the grid structure itself carries the visual interest. Motion: tiles enter staggered by 30-60ms in a center-out or top-left order, total under 500ms, each fading up 8px. Hover lifts a single tile; the grid itself never reflows.',
   },
   {
     id: 'editorial',
     name: 'Editorial',
     description: 'Magazine-style grid',
     direction:
-      'A magazine-style editorial grid: a dominant serif or high-contrast display headline, a strict multi-column text grid, generous margins, pull quotes set apart from body copy, and photography treated as full-bleed feature images rather than small thumbnails.',
+      'A magazine-style editorial grid: a dominant serif or high-contrast display headline, a strict multi-column text grid, generous margins, pull quotes set apart from body copy, and photography treated as full-bleed feature images rather than small thumbnails. Motion: premium and unhurried -- 350-600ms, zero overshoot, opacity plus a 98%-to-100% scale and nothing more. Full-bleed images may reveal on scroll with a clip-path wipe; body text never animates.',
   },
   {
     id: 'organic',
     name: 'Organic',
     description: 'Natural and biophilic',
     direction:
-      'Biophilic and natural: earthy, desaturated greens and browns, soft irregular blob shapes rather than rectangles, textures suggesting paper or natural material, and generous breathing room that reads as calm rather than corporate.',
+      'Biophilic and natural: earthy, desaturated greens and browns, soft irregular blob shapes rather than rectangles, textures suggesting paper or natural material, and generous breathing room that reads as calm rather than corporate. Motion: slow and breathing -- ambient scale between 0.98 and 1.02 over 3000-4000ms on decorative shapes, and 300-500ms eased transitions on everything else. Nothing snaps.',
   },
   {
     id: 'aiNative',
     name: 'AI-native',
     description: 'Ambient and adaptive',
     direction:
-      'Ambient, adaptive surfaces built around a conversational or generative core: a soft animated gradient or glow standing in for "thinking" state, chat-first layout, restrained chrome so the AI output is the visual focus, and generous rounded corners on message/response surfaces.',
+      'Ambient, adaptive surfaces built around a conversational or generative core: a soft animated gradient or glow standing in for "thinking" state, chat-first layout, restrained chrome so the AI output is the visual focus, and generous rounded corners on message/response surfaces. Motion: a soft animated gradient or glow standing in for a thinking state -- 1500-2500ms loop, running only while work is actually in flight, never as permanent decoration. Streamed response text appears progressively rather than all at once.',
   },
   {
     id: 'vibrantBlocks',
     name: 'Vibrant blocks',
     description: 'Bold flat colour',
     direction:
-      'Bold, saturated flat colour blocks with hard edges (no gradients, no shadows), high-contrast complementary colour pairs, oversized rounded sans-serif type, and a confident, energetic tone aimed at a younger or more casual audience.',
+      'Bold, saturated flat colour blocks with hard edges (no gradients, no shadows), high-contrast complementary colour pairs, oversized rounded sans-serif type, and a confident, energetic tone aimed at a younger or more casual audience. Motion: energetic -- 100-250ms with 15-30% overshoot, large decisive moves, colour blocks snapping into place from an edge. Fast enough to feel eager, never bouncy enough to feel unstable.',
   },
   {
     id: 'liquidGlass',
     name: 'Liquid glass',
     description: 'Fluid translucent surfaces',
     direction:
-      'Fluid, translucent surfaces that refract and bend the content behind them like real glass or liquid, with soft specular highlights along edges and smooth, physical-feeling transitions between states. More dimensional and fluid than flat glassmorphism -- the surface should feel like it is reacting to what is behind and around it, not just blurred.',
+      'Fluid, translucent surfaces that refract and bend the content behind them like real glass or liquid, with soft specular highlights along edges and smooth, physical-feeling transitions between states. More dimensional and fluid than flat glassmorphism -- the surface should feel like it is reacting to what is behind and around it, not just blurred. Motion: the surface should react, not just blur -- animate blur radius, scale and the specular highlight together on enter and on hover, 250-350ms --ease-out. Never stack one translucent surface on another, and keep colour on the solid layer behind.',
   },
 ] as const;
 
