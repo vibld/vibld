@@ -396,6 +396,42 @@ a share only ever makes sense against a preview that is actually running.
    environment here, the same value used when deploying `@vibld/preview`.
    The **Deploy web preview** workflow syncs it to this Worker.
 
+## Cloudflare auto-publish (ADR-0010, docs/decisions.md L40)
+
+`POST /api/publish` -- body `{ "files": [{ "path", "content" }, ...],
+"slug"? }` (the same file shape `/api/preview` already takes). Builds the
+caller's own project for real (`@vibld/preview`'s `buildProject`, over the
+same service binding `/api/preview` uses) and, if that succeeds, publishes
+the result (`@vibld/publish`'s `/internal/publish`, a second Worker --
+see `apps/publish/README.md`). `slug` is required on a project's first
+publish and optional after (the existing slug is reused). Returns
+`{ slug, url, skipped }` on success -- `skipped` lists any binary asset
+paths the build produced that could not be published yet (see
+`apps/publish/README.md`'s own text-only limitation). Answers `503` when
+any of `PREVIEW`, `PREVIEW_INTERNAL_SECRET`, `PUBLISH` or
+`PUBLISH_INTERNAL_SECRET` is unset, the same fail-closed rule
+`isConfigured` already applies to `/api/plan`.
+
+Gated by its own `PUBLISH_BURST` rate limit, keyed on the caller's Clerk
+user id (checked after identity, unlike `IP_BURST`) -- publishing runs a
+real sandbox build and a real R2 write, priced per caller rather than per
+flood, so it does not ride `PLAN_BURST`'s ceiling.
+
+**Not built yet:** a "Publish" button in the builder shell itself
+(`/api/preview`'s own `usePreviewSandbox` pattern is the natural template
+once this is wired up), and the opt-in custom-domain step ADR-0010
+describes. `/api/publish` is complete and tested on its own; nothing in
+this codebase calls it yet outside tests.
+
+### Setup
+
+1. Deploy `@vibld/preview` (above) and `@vibld/publish` (see its own
+   README) first -- this Worker's two service bindings only route
+   successfully once both exist.
+2. Add `PUBLISH_INTERNAL_SECRET` (a long random value, distinct from
+   `PREVIEW_INTERNAL_SECRET`) to the `preview` environment here, the same
+   value used when deploying `@vibld/publish`.
+
 ## Billing (docs/decisions.md L12-L15)
 
 Stripe-hosted Checkout and Billing Portal (L12): card data never reaches

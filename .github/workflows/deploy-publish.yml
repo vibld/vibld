@@ -1,0 +1,90 @@
+name: Deploy publish service
+
+# Manual only, like "Deploy web preview" and "Deploy sandbox service".
+# Deploy this (and apply migrations/0003_publish.sql once -- see
+# apps/publish/README.md) before apps/web calls /api/publish for the first
+# time -- apps/web's service binding to it only routes successfully once
+# "vibld-publish" actually exists.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-publish
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy @vibld/publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Same "preview" environment apps/web, apps/marketing and apps/preview
+    # already deploy from. No new Cloudflare permission needed beyond what
+    # apps/preview's own token already has for the vibld-preview.dev zone
+    # (ADR-0010 reuses that same zone's wildcard route, and apps/web's own
+    # D1 database/R2 bucket -- see wrangler.jsonc's own comments).
+    environment:
+      name: preview
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PUBLISH_INTERNAL_SECRET: ${{ secrets.PUBLISH_INTERNAL_SECRET }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          [ -n "$PUBLISH_INTERNAL_SECRET" ] || { echo "::error::PUBLISH_INTERNAL_SECRET is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add all three to the \"preview\" environment (Settings -> Environments)." >&2
+            exit 1
+          fi
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and test
+        run: |
+          pnpm --filter @vibld/publish typecheck
+          pnpm --filter @vibld/publish test
+
+      - name: Sync the internal secret to the Worker
+        shell: bash
+        working-directory: apps/publish
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PUBLISH_INTERNAL_SECRET: ${{ secrets.PUBLISH_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          # The value goes in on stdin so it never appears in a command line
+          # or in the run log.
+          printf '%s' "$PUBLISH_INTERNAL_SECRET" | pnpm dlx wrangler@4.129.1 secret put PUBLISH_INTERNAL_SECRET
+          echo "Synced PUBLISH_INTERNAL_SECRET." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy to Cloudflare Workers
+        shell: bash
+        working-directory: apps/publish
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          pnpm dlx wrangler@4.129.1 deploy
+          echo "Deployed vibld-publish (*.published.vibld-preview.dev)" >> "$GITHUB_STEP_SUMMARY"

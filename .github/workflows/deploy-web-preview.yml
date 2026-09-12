@@ -148,6 +148,27 @@ jobs:
             echo "PREVIEW_INTERNAL_SECRET not set -- /api/preview stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # ADR-0010. Shared with @vibld/publish's own copy of the same value --
+      # apps/web's /api/publish uses it to authenticate to that Worker over
+      # the PUBLISH service binding. Optional, same rule as the preview
+      # secret above: unset means /api/publish answers "not configured"
+      # rather than the whole deploy failing.
+      - name: Sync the publish service secret to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PUBLISH_INTERNAL_SECRET: ${{ secrets.PUBLISH_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PUBLISH_INTERNAL_SECRET" ]; then
+            printf '%s' "$PUBLISH_INTERNAL_SECRET" | pnpm dlx wrangler@4.129.1 secret put PUBLISH_INTERNAL_SECRET
+            echo "Synced PUBLISH_INTERNAL_SECRET." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "PUBLISH_INTERNAL_SECRET not set -- /api/publish stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # Stripe billing (docs/decisions.md L12-L15). Optional, same as
       # PREVIEW_INTERNAL_SECRET above: unset means handlePlan's budget gate
       # and /api/billing/* answer "not configured" rather than the whole
