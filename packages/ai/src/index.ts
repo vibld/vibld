@@ -45,10 +45,13 @@ export {
   AA_LARGE_TEXT,
   AA_NORMAL_TEXT,
   contrastRatio,
+  findContrastFailures,
   meetsAA,
   parseHex,
+  readRootTokens,
   relativeLuminance,
 } from './contrast.ts';
+export type { ContrastFinding } from './contrast.ts';
 export {
   MARKETING_PAGE_PATTERNS,
   SAAS_SCREEN_PATTERNS,
@@ -64,12 +67,48 @@ export {
 } from './motion.ts';
 export type { MotionRecipe } from './motion.ts';
 export {
+  SURFACE_TECHNIQUES,
+  findSurfaceTechnique,
+  selectSurfaces,
+  surfaceGuidance,
+} from './surfaces.ts';
+export type { SurfaceTechnique } from './surfaces.ts';
+export {
+  DIAGRAM_CRAFT,
+  DIAGRAM_TYPES,
+  diagramGuidance,
+  findDiagramType,
+  selectDiagrams,
+} from './diagrams.ts';
+export type { DiagramType } from './diagrams.ts';
+export {
+  PRIMITIVE_BASICS,
+  PRIMITIVE_RECIPES,
+  findPrimitive,
+  primitiveGuidance,
+  selectPrimitives,
+} from './primitives.ts';
+export type { PrimitiveRecipe } from './primitives.ts';
+export {
   PRODUCT_PALETTES,
   findPalette,
   paletteGuidance,
   selectPalette,
 } from './palettes.ts';
 export type { ProductPalette } from './palettes.ts';
+export {
+  STYLE_DIMENSIONS,
+  encodeStyleDna,
+  findDimension,
+  sanitizeStyleDna,
+  styleDnaGuidance,
+} from './style-dna.ts';
+export type {
+  StyleDimension,
+  StyleDimensionId,
+  StyleDna,
+  StyleOption,
+} from './style-dna.ts';
 export { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 export {
   createDeepseekPlanClient,

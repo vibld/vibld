@@ -21,6 +21,7 @@ import {
   parsePreviewRequest,
   parseAdminTopupRequest,
   parseReferenceUrl,
+  parseStyleDna,
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
@@ -243,7 +244,7 @@ function json(body: unknown, status = 200): Response {
 
 /**
  * Generation is available only when the key AND Clerk are configured.
- * Missing configuration means unavailable, never "open" — an
+ * Missing configuration means unavailable, never "open" -- an
  * unauthenticated endpoint on a public URL lets anyone spend the account's
  * model budget, so the failure has to be closed.
  */
@@ -635,6 +636,11 @@ async function handlePlan(
     return json({ error: style.error }, style.status);
   }
 
+  const styleDna = parseStyleDna(body);
+  if (!styleDna.ok) {
+    return json({ error: styleDna.error }, styleDna.status);
+  }
+
   const knowledge = parseKnowledge(body);
   if (!knowledge.ok) {
     return json({ error: knowledge.error }, knowledge.status);
@@ -796,6 +802,9 @@ async function handlePlan(
         prompt: parsed.value.prompt,
         base: parsed.value.base,
         ...(style.value ? { style: style.value } : {}),
+        ...(Object.keys(styleDna.value).length > 0
+          ? { styleDna: styleDna.value }
+          : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
         ...(referenceContext ? { referenceContext } : {}),
         model: effectiveModel,

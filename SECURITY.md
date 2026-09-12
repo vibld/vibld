@@ -12,7 +12,7 @@ That form is GitHub's private vulnerability reporting. The draft advisory is vis
 
 Maintainer responsible for this route: [Chris Brock (@cbrock84)](https://github.com/cbrock84).
 
-Include impact, affected components or commits, reproduction steps and any suggested mitigation. Do not include live credentials or unrelated user data — a report does not need them, and sending them makes the report itself a liability.
+Include impact, affected components or commits, reproduction steps and any suggested mitigation. Do not include live credentials or unrelated user data -- a report does not need them, and sending them makes the report itself a liability.
 
 If the link above does not open a report form, the route is not working and that is itself worth telling us: say so in [issue #17](https://github.com/vibld/vibld/issues/17) **without any vulnerability details**, and wait for the route to be fixed rather than disclosing publicly.
 

@@ -20,8 +20,8 @@ export default function Licenses() {
 
       <h2>The Vibld core</h2>
       <p>
-        The Vibld core — the builder, its provider integrations, and the
-        platform code — is licensed under the{' '}
+        The Vibld core (the builder, its provider integrations, and the platform
+        code) is licensed under the{' '}
         <a
           href="https://www.apache.org/licenses/LICENSE-2.0"
           rel="noopener noreferrer"
@@ -40,7 +40,7 @@ export default function Licenses() {
           LICENSE
         </a>{' '}
         file. Vibld intends to keep a complete, single-user version of the
-        builder available and self-hostable outside the hosted product — saving
+        builder available and self-hostable outside the hosted product: saving
         your work, connecting Git, bringing your own model keys, and exporting
         your project are not features locked behind a paid plan.
       </p>

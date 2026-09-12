@@ -69,7 +69,7 @@ export default function Security() {
       </ul>
       <p>
         This safe harbor does not extend to third-party services we use (see our{' '}
-        <a href="/legal/subprocessors">Subprocessors</a> page) — report an issue
+        <a href="/legal/subprocessors">Subprocessors</a> page). Report an issue
         in one of those directly to its own provider.
       </p>
 

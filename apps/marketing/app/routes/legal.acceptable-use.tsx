@@ -41,7 +41,7 @@ export default function AcceptableUse() {
         </li>
         <li>
           Probe, scan, or test the Service&apos;s security without our prior
-          written permission — see our{' '}
+          written permission. See our{' '}
           <a href="/legal/security">Security & Vulnerability Disclosure</a>{' '}
           policy for how to report a vulnerability instead.
         </li>

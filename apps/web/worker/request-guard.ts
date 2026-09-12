@@ -2,6 +2,8 @@ import type { GenerationRequest } from '@vibld/core';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
 import { findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
+import { sanitizeStyleDna } from '@vibld/ai/style-dna';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
 /**
@@ -274,6 +276,29 @@ export function parseStylePreset(
     return fail(400, 'Unknown "style" preset.');
   }
   return { ok: true, value: style };
+}
+
+/**
+ * Validate standing visual preferences.
+ *
+ * Sanitized rather than rejected, which is the opposite of `parseStylePreset`
+ * above, and deliberately. A style preset is one deliberate choice, so an
+ * unrecognised id means something went wrong and saying so is useful. This is
+ * nine independent optional dimensions carried across every turn: a value
+ * that has since been renamed should cost the user that one dimension, not
+ * their whole request. Anything unknown is dropped by `sanitizeStyleDna`,
+ * so the closed-set property holds either way -- nothing a caller sends
+ * reaches the prompt unless it is already in the catalogue.
+ */
+export function parseStyleDna(body: unknown): GuardResult<StyleDna> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { styleDna } = body as { styleDna?: unknown };
+  if (styleDna === undefined || styleDna === null) {
+    return { ok: true, value: {} };
+  }
+  return { ok: true, value: sanitizeStyleDna(styleDna) };
 }
 
 /**

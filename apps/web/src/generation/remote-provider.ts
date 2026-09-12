@@ -4,6 +4,7 @@ import type {
   ModelProvider,
 } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import { getClerkToken } from '../auth/clerk-token.ts';
 
 /**
@@ -114,6 +115,7 @@ export interface RemoteModelProviderOptions {
    * closed set -- the browser is not trusted to have sent a real one.
    */
   style?: StylePresetId | null;
+  styleDna?: StyleDna | null;
   /** Standing instructions for the project, sent with every turn. */
   knowledge?: string | null;
   /**
@@ -144,6 +146,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #signal?: AbortSignal;
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
   readonly #style: StylePresetId | null;
+  readonly #styleDna: StyleDna | null;
   readonly #knowledge: string | null;
   readonly #referenceUrl: string | null;
   readonly #model: string | null;
@@ -156,6 +159,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style ?? null;
+    this.#styleDna = options.styleDna ?? null;
     this.#knowledge = options.knowledge ?? null;
     this.#referenceUrl = options.referenceUrl ?? null;
     this.#model = options.model ?? null;
@@ -174,6 +178,9 @@ export class RemoteModelProvider implements ModelProvider {
         prompt: request.prompt,
         base: request.base,
         ...(this.#style ? { style: this.#style } : {}),
+        ...(this.#styleDna && Object.keys(this.#styleDna).length > 0
+          ? { styleDna: this.#styleDna }
+          : {}),
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
         ...(this.#referenceUrl ? { referenceUrl: this.#referenceUrl } : {}),
         ...(this.#model ? { model: this.#model } : {}),

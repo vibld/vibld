@@ -103,7 +103,7 @@ export function PromptPanel({
         type="url"
         className="prompt__input"
         value={referenceUrl}
-        placeholder="https://example.com — a page to copy from or emulate"
+        placeholder="https://example.com -- a page to copy from or emulate"
         onChange={(event) => setReferenceUrl(event.target.value)}
         disabled={disabled}
       />

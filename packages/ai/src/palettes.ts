@@ -27,7 +27,7 @@ export interface ProductPalette {
   /** Lowercase words/phrases matched against the request text. */
   triggers: readonly string[];
   /**
-   * Semantic tokens (Primary/On Primary/Secondary/... — Material's naming),
+   * Semantic tokens (Primary/On Primary/Secondary/... -- Material's naming),
    * not simply "brand colours": each pairing is already checked for
    * text-on-fill contrast, which is why they are given as pairs rather than
    * a flat swatch list a model would have to pair up itself.

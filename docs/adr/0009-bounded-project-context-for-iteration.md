@@ -20,7 +20,7 @@ preserving anything the request does not ask you to change".
 That instruction cannot be obeyed. A model cannot preserve content it has
 never been shown. The generation machine replaces the project's file set with
 whatever the plan returns, so every follow-up request rewrote the project from
-scratch, and the second prompt — the one iteration exists for — silently threw
+scratch, and the second prompt -- the one iteration exists for -- silently threw
 the first away. The shell now presents runs as a conversation, which makes the
 gap between what the interface implies and what the engine does worse rather
 than better.
@@ -36,7 +36,7 @@ their paths, bounded by a stated budget.
   about 120 KB. The budget is headroom, not a limit anyone should meet.
 - A project over the budget is **refused, never truncated**. A truncated
   project would be returned as though it were the whole one, and every file
-  that did not fit would be deleted on promotion — losing the user's work in
+  that did not fit would be deleted on promotion -- losing the user's work in
   order to save tokens.
 - The request guard refuses it first, so an oversized project costs nothing;
   the provider refuses it too, so the rule holds for any caller.
@@ -52,8 +52,8 @@ their paths, bounded by a stated budget.
 ## Consequences
 
 Iteration works: a follow-up request edits the project instead of replacing
-it. Input cost per follow-up rises with project size — at list price a 120 KB
-project is about 30,000 input tokens, roughly $0.15 — and the ceiling now
+it. Input cost per follow-up rises with project size -- at list price a 120 KB
+project is about 30,000 input tokens, roughly $0.15 -- and the ceiling now
 accounts for it rather than under-reporting.
 
 This is **not** a general answer to repository context and does not reduce the

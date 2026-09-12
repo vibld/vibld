@@ -1,7 +1,9 @@
 import { AdminPanel } from './components/AdminPanel.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
+import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
 import { describeMode } from './generation/labels.ts';
+import { saveStyleDna } from './generation/style-dna-store.ts';
 import { saveKnowledge } from './generation/knowledge-store.ts';
 import { LifecycleBar } from './components/LifecycleBar.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
@@ -64,6 +66,14 @@ function Builder() {
               onChange={(value) => {
                 session.setKnowledge(value);
                 saveKnowledge(value);
+              }}
+            />
+            <StyleDnaPanel
+              styleDna={state.styleDna}
+              disabled={state.running}
+              onChange={(value) => {
+                session.setStyleDna(value);
+                saveStyleDna(value);
               }}
             />
             {state.isAdmin ? <AdminPanel /> : null}

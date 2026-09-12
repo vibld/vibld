@@ -148,3 +148,69 @@ describe('the copy rules in the system prompt', () => {
     assert.match(PLAN_SYSTEM_PROMPT, /one flagged word is not the problem/);
   });
 });
+
+describe('the em-dash rule', () => {
+  it('states it absolutely, and separately from the tells', () => {
+    // A house rule (CLAUDE.md), not a pattern to weigh. humanizer itself
+    // marks its dash pattern "weak alone"; that qualification does not
+    // apply here, so the rule is stated above the list rather than in it.
+    assert.match(PLAN_SYSTEM_PROMPT, /Never use an em-dash/);
+    assert.match(PLAN_SYSTEM_PROMPT, /absolute, not a preference/);
+  });
+
+  it('does not itself contain one', () => {
+    // Built rather than written literally: Prettier rewrites a \u escape
+    // back to the character, which would trip the repo's own guard.
+    assert.equal(
+      PLAN_SYSTEM_PROMPT.includes(String.fromCharCode(0x2014)),
+      false,
+    );
+  });
+});
+
+describe('the rest of the copy rules', () => {
+  it('covers the tells beyond the first pass', () => {
+    for (const tell of [
+      'Borrowed authority',
+      'Chatbot residue',
+      'Curly quotes',
+      'Shallow -ing riders',
+      'Vague connection',
+      'knowledge cutoff',
+    ]) {
+      assert.ok(PLAN_SYSTEM_PROMPT.includes(tell), tell);
+    }
+  });
+
+  it('forbids inventing proof, which is the one with real consequences', () => {
+    assert.match(
+      PLAN_SYSTEM_PROMPT,
+      /Never invent a source, a logo, a customer\s+name, a statistic, a testimonial or a review/,
+    );
+  });
+});
+
+describe('DESIGN.md', () => {
+  it('is a required file, not a suggestion', () => {
+    assert.match(PLAN_SYSTEM_PROMPT, /REQUIRED FILES[\s\S]*?DESIGN\.md/);
+  });
+
+  it('asks for the three sections that carry intent', () => {
+    for (const section of ['Overview:', 'Do:', "Don't:"]) {
+      assert.ok(PLAN_SYSTEM_PROMPT.includes(section), section);
+    }
+  });
+
+  it('forbids writing the rules from a named company', () => {
+    // The convention is adopted from a corpus of real brands; the corpus is
+    // not. Without this line the easiest way to fill the file is to name one.
+    assert.match(
+      PLAN_SYSTEM_PROMPT,
+      /never from a named company's\s+design language/,
+    );
+  });
+
+  it('bounds it, since it is paid for in output tokens every run', () => {
+    assert.match(PLAN_SYSTEM_PROMPT, /under 100 lines/);
+  });
+});

@@ -35,6 +35,9 @@ jobs:
       - name: Format check
         run: pnpm format:check
 
+      - name: House style
+        run: pnpm check:style
+
       - name: Typecheck
         run: pnpm typecheck
 

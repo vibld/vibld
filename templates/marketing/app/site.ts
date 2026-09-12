@@ -29,35 +29,35 @@ export const ROUTES: SiteRoute[] = [
   {
     path: '/',
     label: 'Home',
-    title: `${SITE.name} — ${SITE.tagline}`,
+    title: ` | ${SITE.tagline}`,
     description:
       'Industrial parts sourcing for maintenance teams who need the right component this week, not next quarter.',
   },
   {
     path: '/what-we-do',
     label: 'What we do',
-    title: `What we do — ${SITE.name}`,
+    title: `What we do | `,
     description:
       'Sourcing, verification and logistics for hard-to-find industrial components, handled end to end.',
   },
   {
     path: '/pricing',
     label: 'Pricing',
-    title: `Pricing — ${SITE.name}`,
+    title: `Pricing | `,
     description:
       'Transparent per-order and retainer pricing, with no minimum commitment and no charge for a sourcing quote.',
   },
   {
     path: '/faq',
     label: 'FAQ',
-    title: `Frequently asked questions — ${SITE.name}`,
+    title: `Frequently asked questions | `,
     description:
       'Lead times, verification, returns and how sourcing works when a part is discontinued.',
   },
   {
     path: '/contact',
     label: 'Contact',
-    title: `Contact — ${SITE.name}`,
+    title: `Contact | `,
     description:
       'Send a part number and a deadline. A sourcing specialist replies within one business day.',
   },

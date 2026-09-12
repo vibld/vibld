@@ -57,7 +57,7 @@ try {
   });
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
-  console.log(`\n${provider.id} — ${elapsed}s`);
+  console.log(`\n${provider.id} -- ${elapsed}s`);
   console.log(`\n${plan.summary}\n`);
   for (const file of plan.files) {
     console.log(

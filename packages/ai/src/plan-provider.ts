@@ -15,7 +15,12 @@ import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
 import { motionGuidance } from './motion.ts';
+import { surfaceGuidance } from './surfaces.ts';
+import { diagramGuidance } from './diagrams.ts';
+import { primitiveGuidance } from './primitives.ts';
 import { paletteGuidance } from './palettes.ts';
+import { styleDnaGuidance } from './style-dna.ts';
+import type { StyleDna } from './style-dna.ts';
 import {
   ProviderContextError,
   ProviderRefusalError,
@@ -63,6 +68,13 @@ export interface ModelProviderOptions {
    * the prompt, the same division of labour it already has with `knowledge`.
    */
   referenceContext?: string;
+  /**
+   * Standing visual preferences, as a closed set of dimension/value pairs.
+   * Unlike `knowledge` this is not the user's prose, so it is validated
+   * against the catalogue rather than trusted, and unlike `style` it is
+   * several independent choices rather than one named direction.
+   */
+  styleDna?: StyleDna;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -87,7 +99,7 @@ export const DEFAULT_EFFORT: PlanEffort = 'high';
  *
  * It is a drop-in peer of `FakeModelProvider`: same contract, same call shape,
  * so the runner, the state machine and the UI are unchanged. CI keeps using
- * the fake — nothing here runs without credentials (ADR-0007).
+ * the fake -- nothing here runs without credentials (ADR-0007).
  */
 /**
  * Turns a prompt into a validated `GenerationPlan`, whichever service answers.
@@ -110,6 +122,7 @@ export class PlanProvider implements ModelProvider {
   readonly #style?: StylePresetId;
   readonly #knowledge?: string;
   readonly #referenceContext?: string;
+  readonly #styleDna?: StyleDna;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -122,6 +135,7 @@ export class PlanProvider implements ModelProvider {
     this.#style = options.style;
     this.#knowledge = options.knowledge;
     this.#referenceContext = options.referenceContext;
+    this.#styleDna = options.styleDna;
     this.id = `${client.id}:${this.#model}`;
   }
 
@@ -133,6 +147,7 @@ export class PlanProvider implements ModelProvider {
         this.#style,
         this.#knowledge,
         this.#referenceContext,
+        this.#styleDna,
       ),
       model: this.#model,
       maxTokens: this.#maxTokens,
@@ -206,6 +221,7 @@ export function buildUserPrompt(
   style?: string | null,
   knowledge?: string | null,
   referenceContext?: string | null,
+  styleDna?: StyleDna | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
@@ -284,6 +300,24 @@ Preserve anything the request does not ask you to change.`,
   const motion = motionGuidance(request.prompt);
   if (motion) parts.push(motion);
 
+  // Surface techniques are technique too, and not suppressed by a preset for
+  // the same reason: "Aurora UI" says a page should have flowing gradient
+  // fields, and this says how to paint one in plain CSS.
+  const surfaces = surfaceGuidance(request.prompt);
+  if (surfaces) parts.push(surfaces);
+
+  // A diagram is its own deliverable rather than a treatment of the page, so
+  // it is not suppressed by a preset either. The craft rules are what stop
+  // the model reaching for an <img> to a file it cannot produce.
+  const diagram = diagramGuidance(request.prompt);
+  if (diagram) parts.push(diagram);
+
+  // The one dependency STACK allows. Naming a library without its import
+  // shape is how a model invents an API and ships a project that does not
+  // build, so the how travels with the permission.
+  const primitives = primitiveGuidance(request.prompt);
+  if (primitives) parts.push(primitives);
+
   // Only when no style preset was chosen: a preset like "dark" already
   // carries its own colour direction, and a product-type default should
   // never compete with an explicit one (see palettes.ts's own comment).
@@ -291,6 +325,13 @@ Preserve anything the request does not ask you to change.`,
     const palette = paletteGuidance(request.prompt);
     if (palette) parts.push(palette);
   }
+
+  // Standing visual preferences sit with the other standing guidance and
+  // before the preset, for the same reason the palette does: a named
+  // direction chosen for this run should be the last word before the
+  // request itself.
+  const dna = styleDna ? styleDnaGuidance(styleDna) : null;
+  if (dna) parts.push(dna);
 
   // Last, and explicitly subordinate to the request. A preset is a starting
   // point; an instruction the user actually typed outranks it.

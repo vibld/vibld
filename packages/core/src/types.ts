@@ -35,6 +35,15 @@ export interface ModelProvider {
 export interface ValidationResult {
   ok: boolean;
   errors: string[];
+  /**
+   * Problems worth telling the user about that do not justify throwing the
+   * run away. A page whose body text sits at 4.2:1 is a real accessibility
+   * defect and still a working project; rejecting it would cost the user
+   * their generation and the money it took, to fix something they can see
+   * and decide about. Optional, so a validator that has nothing to say
+   * stays exactly as it was.
+   */
+  warnings?: string[];
 }
 
 export type Validator = (
@@ -54,4 +63,9 @@ export interface GenerationResult {
    * so a caller showing "what was this run" never loses it partway through.
    */
   summary?: string;
+  /**
+   * Carried through from validation. Unlike `errors` these do not change
+   * the state: a result can be `accepted` and still have warnings.
+   */
+  warnings?: string[];
 }

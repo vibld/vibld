@@ -95,7 +95,7 @@ added (or reissuing) before the next deploy runs.
 Run the **Deploy web preview** workflow from the Actions tab. It is
 `workflow_dispatch` only, so it never runs on its own. The workflow fails fast
 with a clear message if either secret is missing, and on success records the
-deployed URL on the environment and in the run summary — so the current preview
+deployed URL on the environment and in the run summary -- so the current preview
 URL is always visible on the repository's Environments page.
 
 The workflow applies any pending `migrations/` file against `vibld-control-plane`
@@ -139,14 +139,14 @@ deterministic fake otherwise. The footer names the provider that actually ran,
 so the UI never implies AI when it is running the stub.
 
 **The browser never holds a provider credential.** The key is a Worker secret,
-and `@vibld/ai` is imported only from `worker/`, never from `src/` — a build
+and `@vibld/ai` is imported only from `worker/`, never from `src/` -- a build
 check confirms the model SDK stays out of the client bundle (ADR-0006).
 
 ### Streaming
 
 `/api/plan` returns a server-sent event stream, not a buffered JSON body. A
 generation runs for a minute or more with no model output to forward, and a
-buffered response sends nothing until it finishes — long enough that browsers,
+buffered response sends nothing until it finishes -- long enough that browsers,
 mobile networks and intermediate proxies abandon the connection. The failure
 then surfaces as an opaque network error (Safari reports `Load failed`) rather
 than anything about the generation.
@@ -248,7 +248,7 @@ Two things this costs, both accepted rather than solved here:
    → API Keys**, e.g. `https://clerk.vibld.com`).
 2. Set `CLERK_FRONTEND_API_URL` in `wrangler.jsonc`'s `vars` -- a public
    identifier, not a secret -- then redeploy.
-3. Add the provider key as a Worker secret — it must never be committed:
+3. Add the provider key as a Worker secret -- it must never be committed:
    `wrangler secret put ANTHROPIC_API_KEY`
 4. Add `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` to the `preview`
    environment (the deploy workflow's Build step inlines the publishable key

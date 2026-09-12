@@ -62,7 +62,7 @@ const CONFIRMATION_PAGE = (message: string, ok: boolean) => `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${ok ? "You're on the list — Vibld" : 'Something went wrong — Vibld'}</title>
+<title>${ok ? "You're on the list -- Vibld" : 'Something went wrong -- Vibld'}</title>
 <meta name="robots" content="noindex">
 </head>
 <body style="font-family:ui-sans-serif,system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1.25rem;color:#1a1a1a">
