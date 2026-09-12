@@ -69,12 +69,13 @@ describe('extractReadableText', () => {
     assert.equal(text, '');
   });
 
-  it('strips a script/style element whose closing tag has whitespace before ">"', () => {
-    // CodeQL js/incomplete-html-attribute-sanitization: a bare `</script>`
-    // pattern misses this real-world closing-tag shape and lets the
-    // script's contents leak through as "text".
+  it('strips a script/style element whatever its closing tag contains before ">"', () => {
+    // CodeQL js/incomplete-html-attribute-sanitization, twice: a bare
+    // `</script>` pattern missed `</script >`; requiring only whitespace
+    // then missed `</script\t\n bar>` -- a real tokenizer closes the
+    // element at the next `>` regardless of what comes before it.
     const text = extractReadableText(
-      '<style>.a{color:red}</style ><script>alert(1)</script\n>Visible',
+      '<style>.a{color:red}</style ><script>alert(1)</script\t\n bar>Visible',
     );
     assert.ok(!text.includes('alert'));
     assert.ok(!text.includes('color:red'));

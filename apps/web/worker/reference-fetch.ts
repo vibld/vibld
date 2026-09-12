@@ -87,13 +87,16 @@ export function parseReferenceTarget(
  * not trying to be a readability extractor.
  */
 export function extractReadableText(html: string): string {
-  // `\s*` before the closing `>` -- CodeQL correctly flagged the original
-  // pattern (a bare `<\/script>`) for missing a real closing tag like
-  // `</script >` or `</script\n>`, which would let script content fall
-  // through into "extracted text" unstripped.
+  // `[^>]*` before the closing `>`, matching how a real HTML tokenizer
+  // treats a closing tag: anything up to the next `>` ends it, attributes
+  // and all -- `</script foo="bar">` really does close the element. CodeQL
+  // flagged two narrower attempts here in turn (a bare `<\/script>` missed
+  // `</script >`; requiring only whitespace via `\s*` still missed
+  // `</script\t\n bar>`), so this matches the opening-tag pattern's own
+  // shape instead of trying to enumerate what a closing tag may contain.
   const withoutScripts = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-    .replace(/<style[^>]*>[\s\S]*?<\/style\s*>/gi, ' ');
+    .replace(/<script[^>]*>[\s\S]*?<\/script[^>]*>/gi, ' ')
+    .replace(/<style[^>]*>[\s\S]*?<\/style[^>]*>/gi, ' ');
   const withoutTags = withoutScripts.replace(/<[^>]+>/g, ' ');
   // `&amp;` decoded LAST, not first: decoding it first turns a page's own
   // literal, doubly-encoded `&amp;lt;` into `&lt;` in time for the `&lt;`
