@@ -98,6 +98,19 @@ with a clear message if either secret is missing, and on success records the
 deployed URL on the environment and in the run summary — so the current preview
 URL is always visible on the repository's Environments page.
 
+The workflow applies any pending `migrations/` file against `vibld-control-plane`
+(`wrangler d1 migrations apply --remote`) before it deploys the Worker --
+idempotent, so a run with nothing new to apply is a no-op. This step's own
+absence was a real production incident: 0002_billing.sql and
+0003_publish.sql both merged and sat unapplied against the live database for
+two days, and every `/api/plan` call failed with "Usage accounting is
+unavailable" until it was caught and applied by hand. If a future migration
+ever needs applying between deploys, run it the same way this workflow does:
+
+```bash
+pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote
+```
+
 To deploy from a workstation instead, authenticate wrangler yourself and run:
 
 ```bash
@@ -154,6 +167,30 @@ cannot outlive its request.
 are **all** present. Missing configuration means refused, never open: an
 unauthenticated endpoint on a public URL would let anyone spend the account's
 model budget.
+
+### Reference URL ("copy from or emulate")
+
+`PromptPanel` offers an optional URL alongside the prompt on each request.
+`handlePlan` fetches it server-side (`worker/reference-fetch.ts`) before a
+Workflow is even created -- a bad or unreachable URL is refused the same way
+a bad style or model choice is, before anything is billed. The page's markup
+is reduced to plain visible text (scripts, styles and tags stripped, capped
+at `MAX_REFERENCE_CHARS`) and placed in the prompt as material to draw on,
+explicitly subordinate to the request itself (`@vibld/ai`'s
+`buildUserPrompt`) -- never sent to the model as raw HTML, and never fetched
+by the browser directly.
+
+Refused before any network call is made: non-http(s) schemes, and a small
+hostname denylist (loopback, link-local/cloud-metadata addresses,
+`*.internal`) as defense in depth on top of what Cloudflare's own `fetch()`
+already refuses to route to. The fetch itself is capped at 8 seconds and 512
+KB read; a non-2xx response, a non-HTML/text content type, or a page with no
+extractable text is reported back as a normal validation error rather than
+silently generating without it.
+
+The URL is scoped to the request it was submitted with -- unlike standing
+instructions, it is cleared from the field once sent, so an unrelated
+follow-up prompt never re-fetches a page nobody meant it for.
 
 The Worker verifies the Clerk session JWT itself (`worker/principal.ts`,
 `worker/clerk-auth.ts`) rather than trusting the browser's session cookie --

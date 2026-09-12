@@ -79,6 +79,9 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             },
             ...(params.style ? { style: params.style } : {}),
             ...(params.knowledge ? { knowledge: params.knowledge } : {}),
+            ...(params.referenceContext
+              ? { referenceContext: params.referenceContext }
+              : {}),
           }),
         );
         const outcome = await runGeneration(store, provider, params);

@@ -54,6 +54,13 @@ export interface ModelProviderOptions {
    * is not is unbounded -- see MAX_KNOWLEDGE_CHARS.
    */
   knowledge?: string;
+  /**
+   * Extracted text from a reference URL the caller wants this build to
+   * emulate. Already fetched and trimmed to MAX_REFERENCE_CHARS by
+   * `apps/web/worker/reference-fetch.ts` -- this adapter only places it in
+   * the prompt, the same division of labour it already has with `knowledge`.
+   */
+  referenceContext?: string;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -100,6 +107,7 @@ export class PlanProvider implements ModelProvider {
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #style?: StylePresetId;
   readonly #knowledge?: string;
+  readonly #referenceContext?: string;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -111,13 +119,19 @@ export class PlanProvider implements ModelProvider {
     this.#onProgress = options.onProgress;
     this.#style = options.style;
     this.#knowledge = options.knowledge;
+    this.#referenceContext = options.referenceContext;
     this.id = `${client.id}:${this.#model}`;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
     const completion = await this.#client.createPlan({
       system: PLAN_SYSTEM_PROMPT,
-      prompt: buildUserPrompt(request, this.#style, this.#knowledge),
+      prompt: buildUserPrompt(
+        request,
+        this.#style,
+        this.#knowledge,
+        this.#referenceContext,
+      ),
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,
@@ -189,9 +203,29 @@ export function buildUserPrompt(
   request: GenerationRequest,
   style?: string | null,
   knowledge?: string | null,
+  referenceContext?: string | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
+
+  // The reference site comes right after the request itself: it exists to
+  // serve *this* ask ("build it like that"), not to stand for every future
+  // turn the way `knowledge` does, so it is scoped tightly to the request it
+  // sits beside. Already truncated to MAX_REFERENCE_CHARS by whoever fetched
+  // it (`apps/web/worker/reference-fetch.ts`) -- this function trusts that
+  // and does not re-check the length, the same trust it places in `request`.
+  const reference = referenceContext?.trim();
+  if (reference) {
+    parts.push(
+      `Reference material for this request, extracted from a page the user
+pointed at (visible text only -- markup, scripts and styles are already
+stripped). Use it as inspiration for structure, tone and content per the
+request above; it is a starting point to adapt, not a template to reproduce
+verbatim:
+
+${reference}`,
+    );
+  }
 
   // Standing instructions come straight after the request and before
   // everything else, because they are the user's own words about every turn

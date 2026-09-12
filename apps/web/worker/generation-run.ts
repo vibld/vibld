@@ -39,6 +39,15 @@ export interface WorkflowParams {
   base?: ProjectSnapshot;
   style?: StylePresetId;
   knowledge?: string;
+  /**
+   * Already-fetched, already-truncated text from a reference URL (L52-style
+   * feature request: "a URL to copy from or emulate") -- see
+   * `reference-fetch.ts`. The raw URL itself is not carried through: fetching
+   * it is `handlePlan`'s job, before this Workflow instance is even created,
+   * the same reason `knowledge` here is standing-instruction text and not
+   * something this Workflow goes and looks up itself.
+   */
+  referenceContext?: string;
   model: string;
   userId: string;
   /** Display only (L3) -- never a ledger key. Carried through to the log line. */

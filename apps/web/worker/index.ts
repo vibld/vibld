@@ -19,8 +19,11 @@ import {
   parseKnowledge,
   parseModel,
   parsePreviewRequest,
+  parseReferenceUrl,
   parseStylePreset,
 } from './request-guard.ts';
+import { fetchReferenceContext } from './reference-fetch.ts';
+import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { decideModel, grantedFor } from './model-access.ts';
 import {
   ACCOUNT_BUDGET_KEY,
@@ -493,6 +496,23 @@ async function handlePlan(
     return json({ error: knowledge.error }, knowledge.status);
   }
 
+  const referenceUrl = parseReferenceUrl(body);
+  if (!referenceUrl.ok) {
+    return json({ error: referenceUrl.error }, referenceUrl.status);
+  }
+  // Fetched here, before anything is reserved against the caller's budget --
+  // the same reasoning as every other validation above. A failed fetch is
+  // reported and the request stops; it never silently proceeds without the
+  // reference material the caller specifically asked for.
+  let referenceContext: string | undefined;
+  if (referenceUrl.value) {
+    const fetched = await fetchReferenceContext(referenceUrl.value);
+    if (!fetched.ok) {
+      return json({ error: fetched.error }, 422);
+    }
+    referenceContext = fetched.text;
+  }
+
   const chosenModel = parseModel(body, configuredProviders(env));
   if (!chosenModel.ok) {
     return json({ error: chosenModel.error }, chosenModel.status);
@@ -551,7 +571,8 @@ async function handlePlan(
     // guard above has already refused to exceed.
     DEFAULT_LIMITS.maxPromptChars +
       DEFAULT_LIMITS.maxTotalContentChars +
-      DEFAULT_LIMITS.maxKnowledgeChars,
+      DEFAULT_LIMITS.maxKnowledgeChars +
+      MAX_REFERENCE_CHARS,
   );
 
   // Layer three: what the caller's own subscription actually buys them
@@ -630,6 +651,7 @@ async function handlePlan(
         base: parsed.value.base,
         ...(style.value ? { style: style.value } : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+        ...(referenceContext ? { referenceContext } : {}),
         model: effectiveModel,
         userId: principal.userId,
         ...(principal.email ? { email: principal.email } : {}),

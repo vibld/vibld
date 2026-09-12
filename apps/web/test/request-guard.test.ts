@@ -8,6 +8,7 @@ import {
   parseKnowledge,
   parseModel,
   parsePreviewRequest,
+  parseReferenceUrl,
   parseStylePreset,
 } from '../worker/request-guard.ts';
 
@@ -352,6 +353,47 @@ describe('parseKnowledge', () => {
   it('refuses a non-string', () => {
     for (const knowledge of [42, {}, ['a'], true]) {
       assert.equal(parseKnowledge({ prompt: 'x', knowledge }).ok, false);
+    }
+  });
+});
+
+describe('parseReferenceUrl', () => {
+  it('accepts a request with no reference URL', () => {
+    for (const body of [
+      { prompt: 'x' },
+      { prompt: 'x', referenceUrl: null },
+      { prompt: 'x', referenceUrl: '' },
+    ]) {
+      const result = parseReferenceUrl(body);
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.value, null);
+    }
+  });
+
+  it('passes the caller their URL, unvalidated -- reachability is a fetch concern', () => {
+    const result = parseReferenceUrl({
+      prompt: 'x',
+      referenceUrl: 'https://example.com/pricing',
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value, 'https://example.com/pricing');
+  });
+
+  it('bounds the length', () => {
+    const result = parseReferenceUrl({
+      prompt: 'x',
+      referenceUrl: `https://example.com/${'a'.repeat(DEFAULT_LIMITS.maxReferenceUrlChars)}`,
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 413);
+      assert.match(result.error, /characters or fewer/);
+    }
+  });
+
+  it('refuses a non-string', () => {
+    for (const referenceUrl of [42, {}, ['a'], true]) {
+      assert.equal(parseReferenceUrl({ prompt: 'x', referenceUrl }).ok, false);
     }
   });
 });

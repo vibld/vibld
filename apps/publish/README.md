@@ -78,15 +78,12 @@ Still not built, per ADR-0010's own scoping:
 **No new Cloudflare resources to create.** This Worker binds the exact
 `database_id`/`bucket_name` apps/web's `wrangler.jsonc` already uses;
 Cloudflare allows the same D1 database and R2 bucket to be bound into more
-than one Worker. Before the first deploy, apply the new table's migration
-against that database the same way `migrations/0001` and `0002` were
-applied (`vibld-control-plane`, from a workstation with the real
-`CLOUDFLARE_API_TOKEN` -- this environment has no such credential, so this
-one step has to happen from wherever those two were run):
-
-```bash
-pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote
-```
+than one Worker. The **Deploy publish service** workflow applies any pending
+`migrations/` file against that database (`wrangler d1 migrations apply
+--remote`, run from apps/web since that is where the migrations directory
+lives) before it deploys the Worker -- no manual step needed. (0002 and 0003
+themselves went unapplied against production for two days before this
+automation existed -- see apps/web/README.md's "Deploying" section.)
 
 One-time: add a **`PUBLISH_INTERNAL_SECRET`** secret (a long random value,
 distinct from `PREVIEW_INTERNAL_SECRET` -- a leak of one must not
@@ -99,8 +96,8 @@ wildcard route -- the same permissions apps/preview's own token already
 has, since it is the same zone.
 
 Run the **Deploy publish service** workflow from the Actions tab
-(`workflow_dispatch` only) -- deploy this, and apply the migration above,
-before apps/web calls `/api/publish` for the first time.
+(`workflow_dispatch` only) before apps/web calls `/api/publish` for the
+first time.
 
 To deploy from a workstation instead:
 

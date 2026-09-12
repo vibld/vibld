@@ -79,6 +79,22 @@ jobs:
           printf '%s' "$PUBLISH_INTERNAL_SECRET" | pnpm dlx wrangler@4.129.1 secret put PUBLISH_INTERNAL_SECRET
           echo "Synced PUBLISH_INTERNAL_SECRET." >> "$GITHUB_STEP_SUMMARY"
 
+      # Idempotent, same as apps/web's own copy of this step -- wrangler
+      # tracks what it has already applied in the database's own
+      # `d1_migrations` table, so either Worker's deploy applying a pending
+      # migration is enough and running it twice across both is harmless.
+      # Run from apps/web, not apps/publish: the migrations directory lives
+      # there (it is the shared database's own history, not this Worker's --
+      # see apps/publish/wrangler.jsonc's own comment), and apps/publish has
+      # no `migrations` directory of its own for wrangler to default to.
+      - name: Apply D1 migrations
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote
+
       - name: Deploy to Cloudflare Workers
         shell: bash
         working-directory: apps/publish
