@@ -14,6 +14,7 @@ import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
+import { paletteGuidance } from './palettes.ts';
 import {
   ProviderContextError,
   ProviderRefusalError,
@@ -275,6 +276,14 @@ Preserve anything the request does not ask you to change.`,
   // guidance, so it comes before the purely visual style direction below.
   const guidance = patternGuidance(request.prompt);
   if (guidance) parts.push(guidance);
+
+  // Only when no style preset was chosen: a preset like "dark" already
+  // carries its own colour direction, and a product-type default should
+  // never compete with an explicit one (see palettes.ts's own comment).
+  if (!style) {
+    const palette = paletteGuidance(request.prompt);
+    if (palette) parts.push(palette);
+  }
 
   // Last, and explicitly subordinate to the request. A preset is a starting
   // point; an instruction the user actually typed outranks it.

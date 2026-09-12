@@ -26,6 +26,16 @@ export type ParsedGenerationPlan = z.infer<typeof GenerationPlanSchema>;
  * prompt asking for "heavy animation" and a "navy, purple and neon yellow"
  * palette produced a plain page. The design-intent rule below exists for
  * exactly that failure.
+ *
+ * UX BASELINE distils the CRITICAL/HIGH-priority, stack-agnostic rules from
+ * nextlevelbuilder/ui-ux-pro-max-skill (MIT License,
+ * https://github.com/nextlevelbuilder/ui-ux-pro-max-skill)'s 119-rule
+ * guideline set into what actually belongs in a system prompt sent on every
+ * single generation: universal, cheap, and true regardless of what the
+ * request asks for. It is deliberately not the whole list -- most of that
+ * skill's guidance is either native-mobile-specific (safe areas, haptics) or
+ * situational enough to want on-demand retrieval, which is exactly what
+ * `palettes.ts`/`patterns.ts` do instead of growing this constant further.
  */
 export const PLAN_SYSTEM_PROMPT = `You generate complete, conventional web application projects.
 
@@ -54,6 +64,29 @@ animation, tone, layout and named sections. If the request names colours, use
 those exact colours. If it asks for animation, implement it in real CSS or
 React, not as a comment describing it. Ignoring a stated design instruction is
 a failed generation.
+
+UX BASELINE
+Hold these regardless of style or product type, unless the request explicitly
+overrides one:
+- Text on its background meets a 4.5:1 contrast ratio; do not use colour alone
+  to convey state (error, success, selected) — pair it with an icon or text.
+- Every interactive element keeps a visible focus state and is reachable by
+  keyboard alone; icon-only buttons get an aria-label.
+- Clickable elements are at least 44×44px with cursor: pointer, and have a
+  visible hover/pressed state distinct from their resting state.
+- Layout is mobile-first and never scrolls horizontally; body text is at
+  least 16px with 1.5+ line-height.
+- Colour lives in CSS custom properties on :root (--primary, --background,
+  etc.), referenced by components — never a raw hex value repeated inline.
+- Animate transform and opacity only, never layout properties (width,
+  height, top, left); wrap non-essential motion in
+  @media (prefers-reduced-motion: reduce) to disable it.
+- An async action (a form submit, a button that triggers work) disables
+  itself and shows a loading state until it resolves, then shows the result.
+- Every input has a visible label, not a placeholder standing in for one;
+  a validation error appears next to the field it belongs to.
+- Icons are inline SVG or a real icon component, never an emoji standing in
+  for a functional icon.
 
 CONTENT
 Write real, specific copy for the described product. Never use lorem ipsum. A

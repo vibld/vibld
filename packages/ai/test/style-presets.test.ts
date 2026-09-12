@@ -9,11 +9,11 @@ import {
 import { buildUserPrompt } from '../src/plan-provider.ts';
 
 describe('the preset set', () => {
-  it('offers the eight directions the chips promise', () => {
-    assert.equal(STYLE_PRESETS.length, 8);
+  it('offers the sixteen directions the chips promise', () => {
+    assert.equal(STYLE_PRESETS.length, 16);
     assert.equal(
       new Set(STYLE_PRESETS.map((preset) => preset.id)).size,
-      8,
+      16,
       'ids are the wire value and React keys, so they must be distinct',
     );
   });

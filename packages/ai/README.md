@@ -68,6 +68,30 @@ holds the key and calls this adapter. That endpoint also needs an access
 control decision before it exists, because an unauthenticated endpoint on a
 public URL lets anyone spend the account's model budget.
 
+## Design intelligence
+
+`style-presets.ts` (16 named visual directions), `patterns.ts` (10 marketing
+page types, 6 SaaS screens) and `palettes.ts` (15 product-type colour +
+typography defaults) are closed-set, keyword-matched retrieval — the same
+shape, for the same reason: a request's own text selects a handful of
+relevant, concrete guidance to append to the prompt, never an arbitrary
+string a caller supplies directly (docs/decisions.md L50-L51). `plan-schema.ts`'s
+`PLAN_SYSTEM_PROMPT` carries a small, universal "UX BASELINE" section
+alongside these for the rules that apply regardless of style or product type.
+
+A meaningful share of this content (the eight newer style presets, the UX
+baseline, and every palette's values) is adapted from
+[nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill)
+(MIT License) — a much larger, actively-searched design-intelligence dataset
+(89 styles, 192 product/palette pairs, 119 UX guidelines) meant to be queried
+by a local Python tool at generation time. Neither the tool nor live
+retrieval fits here yet (no Python runtime in a Worker, no retrieval
+infrastructure until #12/D13 exists — see `patterns.ts`'s own comment), so
+what is ported is a hand-picked, adapted subset of the underlying values:
+real hex tokens and real Google Fonts pairings, restated as plain CSS custom
+properties to match this project's own default stack rather than the
+source's Tailwind-oriented output.
+
 ## Model selection
 
 `DEFAULT_MODEL` exists so the adapter runs, and is **not** a selection. D10
