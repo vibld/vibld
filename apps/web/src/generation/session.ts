@@ -92,6 +92,12 @@ export interface BuilderState {
   model: string | null;
   /** What this deployment can serve. Empty until the probe answers. */
   models: ModelOption[];
+  /**
+   * Whether the signed-in caller is a platform admin (docs/decisions.md
+   * L4) -- decides only whether `AdminPanel` renders. `false` until the
+   * `/api/config` probe answers, the same as `models` above.
+   */
+  isAdmin: boolean;
 }
 
 /** One prompt and what became of it. */
@@ -176,6 +182,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     knowledge: '',
     model: null,
     models: [],
+    isAdmin: false,
   };
 }
 
@@ -297,6 +304,13 @@ export class BuilderSession {
     this.#emit();
   }
 
+  /** Record whether the signed-in caller is a platform admin, once the probe answers. */
+  setIsAdmin(isAdmin: boolean): void {
+    if (this.#disposed || isAdmin === this.#state.isAdmin) return;
+    this.#state = { ...this.#state, isAdmin };
+    this.#emit();
+  }
+
   /** Replace the project's standing instructions. */
   setKnowledge(knowledge: string): void {
     if (this.#disposed || knowledge === this.#state.knowledge) return;
@@ -315,7 +329,7 @@ export class BuilderSession {
    */
   reset(): void {
     if (this.#disposed) return;
-    const { knowledge, model, models } = this.#state;
+    const { knowledge, model, models, isAdmin } = this.#state;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
@@ -326,6 +340,7 @@ export class BuilderSession {
       knowledge,
       model,
       models,
+      isAdmin,
     };
     this.#emit();
   }

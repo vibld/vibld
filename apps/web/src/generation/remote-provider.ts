@@ -242,6 +242,13 @@ export interface DeploymentConfig {
   generation: GenerationMode;
   models: ModelOption[];
   defaultModel: string | null;
+  /**
+   * Whether the signed-in caller is a platform admin (docs/decisions.md
+   * L4). Only decides whether the shell *offers* the admin credit tool --
+   * `/api/admin/*` re-checks this itself at the trusted boundary either
+   * way (ADR-0006), same as the model grants this same response reports.
+   */
+  isAdmin: boolean;
 }
 
 /**
@@ -257,6 +264,7 @@ const UNCONFIGURED: DeploymentConfig = {
   generation: 'fake',
   models: [],
   defaultModel: null,
+  isAdmin: false,
 };
 
 let probe: Promise<DeploymentConfig> | undefined;
@@ -295,6 +303,7 @@ export function detectDeploymentConfig(
         generation?: unknown;
         models?: unknown;
         defaultModel?: unknown;
+        isAdmin?: unknown;
       };
       // Every field is checked. This is the deployment's own endpoint, but a
       // shape that drifted would otherwise put `undefined` in a <select> and
@@ -313,6 +322,7 @@ export function detectDeploymentConfig(
         models,
         defaultModel:
           typeof body.defaultModel === 'string' ? body.defaultModel : null,
+        isAdmin: body.isAdmin === true,
       };
     } catch {
       return UNCONFIGURED;

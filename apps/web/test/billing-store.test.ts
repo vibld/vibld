@@ -6,10 +6,15 @@ import { describe, it } from 'node:test';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
-const SCHEMA = readFileSync(
-  join(import.meta.dirname, '..', 'migrations', '0002_billing.sql'),
-  'utf8',
-);
+const SCHEMA =
+  readFileSync(
+    join(import.meta.dirname, '..', 'migrations', '0002_billing.sql'),
+    'utf8',
+  ) +
+  readFileSync(
+    join(import.meta.dirname, '..', 'migrations', '0004_admin_credits.sql'),
+    'utf8',
+  );
 
 function newStore(): BillingStore {
   return new BillingStore(new SqliteD1Database(SCHEMA));
@@ -175,6 +180,113 @@ describe('BillingStore.totalTopupCreditMicroUsd', () => {
       .run();
 
     assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 8_000_000);
+  });
+});
+
+describe('BillingStore.grantAdminCredit / totalAdminCreditMicroUsd', () => {
+  it('is zero with no grants', async () => {
+    const store = newStore();
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 0);
+  });
+
+  it('sums every grant for the user, converting cents to micro-USD', async () => {
+    const store = newStore();
+    await store.grantAdminCredit('g1', 'user_1', 500, 'admin@vibld.com', null);
+    await store.grantAdminCredit(
+      'g2',
+      'user_1',
+      300,
+      'admin@vibld.com',
+      'goodwill',
+    );
+    await store.grantAdminCredit('g3', 'user_2', 500, 'admin@vibld.com', null);
+
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 8_000_000);
+    assert.equal(await store.totalAdminCreditMicroUsd('user_2'), 5_000_000);
+  });
+
+  it('keeps the first grant if the same id is somehow reused', async () => {
+    const store = newStore();
+    await store.grantAdminCredit('g1', 'user_1', 500, 'admin@vibld.com', null);
+    await store.grantAdminCredit('g1', 'user_1', 999, 'admin@vibld.com', null);
+
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 5_000_000);
+  });
+
+  it('excludes a grant older than 12 months, the same window top-ups use', async () => {
+    const { store, db } = newStoreWithDb();
+    await store.grantAdminCredit(
+      'g_recent',
+      'user_1',
+      500,
+      'admin@vibld.com',
+      null,
+    );
+    await db
+      .prepare(
+        `INSERT INTO billing_admin_credits
+           (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
+         VALUES ('g_old', 'user_1', 500, 'admin@vibld.com', NULL, datetime('now', '-13 months'))`,
+      )
+      .run();
+
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 5_000_000);
+  });
+});
+
+describe('BillingStore.totalSpendableCreditMicroUsd', () => {
+  it('combines Stripe top-ups and admin grants', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 800);
+    await store.grantAdminCredit('g1', 'user_1', 500, 'admin@vibld.com', null);
+
+    assert.equal(
+      await store.totalSpendableCreditMicroUsd('user_1'),
+      13_000_000,
+    );
+  });
+
+  it('is zero for a user with neither', async () => {
+    const store = newStore();
+    assert.equal(await store.totalSpendableCreditMicroUsd('user_1'), 0);
+  });
+});
+
+describe('BillingStore.listAdminCredits', () => {
+  it("returns this user's grants only, newest first", async () => {
+    const { store, db } = newStoreWithDb();
+    await db
+      .prepare(
+        `INSERT INTO billing_admin_credits
+           (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
+         VALUES ('g_old', 'user_1', 500, 'admin@vibld.com', 'first', datetime('now', '-2 days'))`,
+      )
+      .run();
+    await store.grantAdminCredit(
+      'g_new',
+      'user_1',
+      300,
+      'admin@vibld.com',
+      'second',
+    );
+    await store.grantAdminCredit(
+      'g_other',
+      'user_2',
+      999,
+      'admin@vibld.com',
+      null,
+    );
+
+    const grants = await store.listAdminCredits('user_1');
+    assert.equal(grants.length, 2);
+    assert.equal(grants[0]!.id, 'g_new');
+    assert.equal(grants[0]!.note, 'second');
+    assert.equal(grants[1]!.id, 'g_old');
+  });
+
+  it('is empty for a user with no grants', async () => {
+    const store = newStore();
+    assert.deepEqual(await store.listAdminCredits('user_1'), []);
   });
 });
 

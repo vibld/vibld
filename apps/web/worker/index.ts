@@ -19,11 +19,17 @@ import {
   parseKnowledge,
   parseModel,
   parsePreviewRequest,
+  parseAdminTopupRequest,
   parseReferenceUrl,
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
 import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
+import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
+import {
+  clerkLookupConfigured,
+  findClerkUserIdByEmail,
+} from './clerk-lookup.ts';
 import { decideModel, grantedFor } from './model-access.ts';
 import {
   ACCOUNT_BUDGET_KEY,
@@ -197,6 +203,23 @@ export interface Env {
   VIBLD_ALERT_EMAIL?: string;
   /** The alert's From address. Default: alerts@notifications.vibld.com. */
   VIBLD_ALERT_FROM?: string;
+  /**
+   * Platform admins (docs/decisions.md L4): a GitHub Actions secret,
+   * comma-separated verified emails, synced to the Worker on deploy the
+   * same way `VIBLD_MODEL_POLICY` already is. Checked via
+   * `platform-admins.ts`'s `isPlatformAdmin` against `policyIdentity`,
+   * never `userId` -- this predates Clerk and is human-edited by email,
+   * the same exception `VIBLD_MODEL_POLICY` is.
+   */
+  VIBLD_PLATFORM_ADMINS?: string;
+  /**
+   * Worker secret. Lets `/api/admin/*` resolve an email an admin typed into
+   * the Clerk user id the ledger actually keys on -- see clerk-lookup.ts.
+   * `/api/admin/*` is unavailable, not open, when this or
+   * `VIBLD_PLATFORM_ADMINS` is unset, the same fail-closed rule
+   * `isConfigured` already applies to generation.
+   */
+  CLERK_SECRET_KEY?: string;
 }
 
 /** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
@@ -388,7 +411,9 @@ async function handleBillingStatus(
     const usage = await env.USER_BUDGET.getByName(principal.userId).usageFor(
       allowancePeriodKey(now),
     );
-    const topupCreditMicroUsd = await billing.totalTopupCreditMicroUsd(
+    // Stripe top-ups and admin-granted credit (L4) combined -- see
+    // `totalSpendableCreditMicroUsd`'s own comment.
+    const topupCreditMicroUsd = await billing.totalSpendableCreditMicroUsd(
       principal.userId,
     );
     const topupUsage = await env.USER_BUDGET.getByName(
@@ -421,6 +446,125 @@ async function handleBillingStatus(
       503,
     );
   }
+}
+
+function adminConfigured(env: Env): boolean {
+  return Boolean(
+    env.VIBLD_PLATFORM_ADMINS && clerkLookupConfigured(env) && env.DB,
+  );
+}
+
+/**
+ * The one check every `/api/admin/*` handler makes before anything else:
+ * Clerk-verified identity, then platform-admin membership. Both endpoints
+ * below call this rather than trusting the shell's own `isAdmin` readout
+ * (`/api/config`) -- that field only decides whether the shell *offers* the
+ * tool, the same "picker is a convenience, this endpoint is the boundary"
+ * rule `handlePlan`'s model check already follows (ADR-0006).
+ */
+async function requireAdmin(
+  request: Request,
+  env: Env,
+): Promise<{ denied: Response } | { denied: null; adminEmail: string }> {
+  if (!adminConfigured(env)) {
+    return {
+      denied: json(
+        {
+          error: 'The admin credit tool is not configured for this deployment.',
+        },
+        503,
+      ),
+    };
+  }
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return { denied: resolved.denied };
+  const { principal } = resolved;
+  if (
+    !isPlatformAdmin(
+      { email: principal.email, emailVerified: principal.emailVerified },
+      parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+    )
+  ) {
+    return { denied: json({ error: 'Not authorized.' }, 403) };
+  }
+  return { denied: null, adminEmail: principal.policyIdentity };
+}
+
+/**
+ * GET -> a user's current spendable credit and admin-grant history, looked
+ * up by email. What the admin tool shows before granting more, so a repeat
+ * visit does not mean guessing whether an earlier grant already landed.
+ */
+async function handleAdminUser(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+
+  const admin = await requireAdmin(request, env);
+  if (admin.denied) return admin.denied;
+
+  const email = new URL(request.url).searchParams.get('email');
+  if (!email)
+    return json({ error: 'A "email" query parameter is required.' }, 400);
+
+  const lookup = await findClerkUserIdByEmail(env, email);
+  if (!lookup.ok) return json({ error: lookup.error }, 404);
+
+  const billing = new BillingStore(env.DB!);
+  const [creditMicroUsd, grants] = await Promise.all([
+    billing.totalSpendableCreditMicroUsd(lookup.userId),
+    billing.listAdminCredits(lookup.userId),
+  ]);
+  return json({
+    userId: lookup.userId,
+    spendableCreditMicroUsd: creditMicroUsd,
+    grants: grants.map((grant) => ({
+      creditUsdCents: grant.creditUsdCents,
+      grantedByEmail: grant.grantedByEmail,
+      note: grant.note,
+      createdAt: grant.createdAt,
+    })),
+  });
+}
+
+/** POST -> grant a user manual spend credit (docs/decisions.md L4). */
+async function handleAdminTopup(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+
+  const admin = await requireAdmin(request, env);
+  if (admin.denied) return admin.denied;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const parsed = parseAdminTopupRequest(body);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+
+  const lookup = await findClerkUserIdByEmail(env, parsed.value.email);
+  if (!lookup.ok) return json({ error: lookup.error }, 404);
+
+  const billing = new BillingStore(env.DB!);
+  const id = crypto.randomUUID();
+  await billing.grantAdminCredit(
+    id,
+    lookup.userId,
+    parsed.value.amountUsdCents,
+    admin.adminEmail,
+    parsed.value.note,
+  );
+  // The row itself is the audit trail; this line is only for a live
+  // `wrangler tail` to catch the same grant in real time.
+  console.log(
+    `admin credit granted: ${admin.adminEmail} -> ${lookup.userId} (${parsed.value.amountUsdCents}c)`,
+  );
+
+  return json({
+    ok: true,
+    userId: lookup.userId,
+    creditUsdCents: parsed.value.amountUsdCents,
+  });
 }
 
 async function handlePlan(
@@ -589,7 +733,9 @@ async function handlePlan(
       DEFAULT_FREE_INCLUDED_MICRO_USD,
     );
     const monthlyAllowance = monthlyAllowanceMicroUsd(tier, freeAllowance);
-    const topupCeiling = await billing.totalTopupCreditMicroUsd(
+    // Stripe top-ups and admin-granted credit (L4) combined -- see
+    // `totalSpendableCreditMicroUsd`'s own comment.
+    const topupCeiling = await billing.totalSpendableCreditMicroUsd(
       principal.userId,
     );
 
@@ -1012,6 +1158,13 @@ export default {
           provider,
         })),
         defaultModel: decided.ok ? decided.model : null,
+        // So the shell knows whether to offer the admin credit tool at all --
+        // `/api/admin/*` itself re-checks this independently either way
+        // (ADR-0006), the same as every other grant this endpoint reports.
+        isAdmin: isPlatformAdmin(
+          { email: principal.email, emailVerified: principal.emailVerified },
+          parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+        ),
       });
     }
 
@@ -1045,6 +1198,14 @@ export default {
 
     if (pathname === '/api/stripe/webhook') {
       return handleStripeWebhook(request, env);
+    }
+
+    if (pathname === '/api/admin/user') {
+      return handleAdminUser(request, env);
+    }
+
+    if (pathname === '/api/admin/topup') {
+      return handleAdminTopup(request, env);
     }
 
     return json({ error: 'Not found.' }, 404);

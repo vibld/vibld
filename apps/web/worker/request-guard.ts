@@ -45,6 +45,10 @@ export const DEFAULT_LIMITS: GuardLimits = {
   maxReferenceUrlChars: 2048,
 };
 
+/** A typo that adds an extra digit should not be able to grant $10,000. */
+export const MAX_ADMIN_TOPUP_USD_CENTS = 500_00;
+export const MAX_ADMIN_TOPUP_NOTE_CHARS = 500;
+
 export interface GuardFailure {
   status: number;
   error: string;
@@ -341,6 +345,66 @@ export function parseReferenceUrl(
     );
   }
   return { ok: true, value: referenceUrl };
+}
+
+export interface AdminTopupRequest {
+  email: string;
+  amountUsdCents: number;
+  note: string | null;
+}
+
+/**
+ * Validate an admin credit grant's shape (docs/decisions.md L4). Whether the
+ * caller is actually an admin is checked separately, at the trusted
+ * boundary (`isPlatformAdmin`, per ADR-0006) -- this is only "is the body
+ * well-formed", the same division every other `parse*` in this file keeps.
+ */
+export function parseAdminTopupRequest(
+  body: unknown,
+): GuardResult<AdminTopupRequest> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { email, amountUsdCents, note } = body as {
+    email?: unknown;
+    amountUsdCents?: unknown;
+    note?: unknown;
+  };
+  if (typeof email !== 'string' || email.trim().length === 0) {
+    return fail(400, 'A non-empty "email" is required.');
+  }
+  if (
+    typeof amountUsdCents !== 'number' ||
+    !Number.isInteger(amountUsdCents) ||
+    amountUsdCents <= 0
+  ) {
+    return fail(400, '"amountUsdCents" must be a positive integer.');
+  }
+  if (amountUsdCents > MAX_ADMIN_TOPUP_USD_CENTS) {
+    return fail(
+      400,
+      `"amountUsdCents" must be ${MAX_ADMIN_TOPUP_USD_CENTS} or fewer -- grant again for more.`,
+    );
+  }
+  if (note !== undefined && note !== null) {
+    if (typeof note !== 'string') {
+      return fail(400, '"note" must be a string.');
+    }
+    if (note.length > MAX_ADMIN_TOPUP_NOTE_CHARS) {
+      return fail(
+        413,
+        `"note" must be ${MAX_ADMIN_TOPUP_NOTE_CHARS} characters or fewer.`,
+      );
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      email: email.trim(),
+      amountUsdCents,
+      note: typeof note === 'string' && note.trim().length > 0 ? note : null,
+    },
+  };
 }
 
 /**

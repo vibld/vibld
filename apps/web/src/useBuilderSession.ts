@@ -35,6 +35,7 @@ export function useBuilderSession(): {
       .then((config) => {
         created.setModels(config.models);
         created.setModel(config.defaultModel);
+        created.setIsAdmin(config.isAdmin);
       })
       .catch(() => {});
     return created;
@@ -51,6 +52,7 @@ export function useBuilderSession(): {
         if (!signedIn) {
           session.setModels([]);
           session.setModel(null);
+          session.setIsAdmin(false);
           return;
         }
         resetGenerationModeProbe();
@@ -58,6 +60,7 @@ export function useBuilderSession(): {
           .then((config) => {
             session.setModels(config.models);
             session.setModel(config.defaultModel);
+            session.setIsAdmin(config.isAdmin);
           })
           .catch(() => {});
       }),

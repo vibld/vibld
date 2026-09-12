@@ -1,3 +1,4 @@
+import { AdminPanel } from './components/AdminPanel.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
 import { describeMode } from './generation/labels.ts';
@@ -65,6 +66,7 @@ function Builder() {
                 saveKnowledge(value);
               }}
             />
+            {state.isAdmin ? <AdminPanel /> : null}
             <PromptPanel
               state={state}
               onSubmit={(prompt, mode, style, referenceUrl) => {
