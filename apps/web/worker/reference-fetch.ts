@@ -21,6 +21,17 @@ export type ReferenceFetchResult =
 const FETCH_TIMEOUT_MS = 8_000;
 
 /**
+ * A Worker's `fetch()` sends no User-Agent unless one is set, which reads as
+ * a script rather than a browser to a fair number of ordinary sites' WAFs --
+ * the observed failure mode was a real marketing site 403ing every request.
+ * This is a normal browser UA string, not a spoofed bypass of anything
+ * targeted: the same header every browser already sends on the request a
+ * site's own owner would make of it.
+ */
+const FETCH_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+/**
  * How much of the response body is read, in bytes, before extraction stops.
  *
  * Bounds the cost of a caller pointing this at an enormous page: reading (and
@@ -172,7 +183,10 @@ export async function fetchReferenceContext(
   try {
     response = await doFetch(target.value.toString(), {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: { accept: 'text/html,text/plain;q=0.9,*/*;q=0.1' },
+      headers: {
+        accept: 'text/html,text/plain;q=0.9,*/*;q=0.1',
+        'user-agent': FETCH_USER_AGENT,
+      },
     });
   } catch (error) {
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
