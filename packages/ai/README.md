@@ -70,7 +70,8 @@ public URL lets anyone spend the account's model budget.
 
 ## Design intelligence
 
-`style-presets.ts` (16 named visual directions), `patterns.ts` (10 marketing
+`style-presets.ts` (23 named visual directions — 16 surface treatments and
+7 complete colour systems), `patterns.ts` (10 marketing
 page types, 6 SaaS screens), `palettes.ts` (15 product-type colour, typography
 and feel defaults) and `motion.ts` (12 motion recipes) are closed-set,
 keyword-matched retrieval — the same shape, for the same reason: a request's
@@ -143,10 +144,36 @@ is strictly weaker than `palettes.ts` for this job;
 copyright grant and conveys no trademark rights, so shipping brand-named
 presets is out for the same reason `style-presets.ts` already declines to
 port Fluent, Polaris and Spectrum. Its shape/elevation/motion _structure_
-informed `ProductPalette.feel`; none of its values or names are used.
+informed `ProductPalette.feel`, and clustering it revealed the seven
+archetypes that became the tokened style presets (see below); none of its
+values or names are used.
 [CloudAI-X/threejs-skills](https://github.com/CloudAI-X/threejs-skills) has
 no licence file at all, so nothing from it could be adopted regardless of
 merit.
+
+### The seven tokened archetypes
+
+Clustering that corpus showed that its useful content is structural, not
+nominal: "dark" is really four unrelated systems, and a warm paper ground
+with a terracotta accent is its own thing rather than a tint of minimalism.
+Those clusters are `warmTerminal`, `layeredVoid`, `acidDark`, `nightIndigo`,
+`warmPaper`, `monoPress` and `polarityBands` — presets that carry a whole
+colour system, font pairing and radius scale rather than only a sentence.
+
+They fill a real hole. `buildUserPrompt` suppresses the product-type palette
+whenever a style preset is chosen, so before these existed, picking a preset
+meant getting no colour tokens at all. Their token names are identical to
+`ProductPalette.colors`, so the `:root` block the prompt receives has one
+shape whichever source produced it.
+
+Every hex is authored here, not copied, and `contrast.ts` verifies all eight
+text pairs per archetype at 4.5:1 in the test suite. That check is not
+ceremony: several of the source corpus's own declared pairs fail it, because
+it records real brands faithfully rather than vetting them.
+
+Naming them after the companies is deliberately not done, and a test enforces
+it — the id, chip name and caption are the surface a trademark claim attaches
+to.
 
 ## Model selection
 
