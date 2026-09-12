@@ -83,6 +83,22 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  apps/publish:
+    dependencies:
+      '@vibld/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20260907.1
+        version: 5.20260907.1
+      '@types/node':
+        specifier: 26.4.1
+        version: 26.4.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   apps/web:
     dependencies:
       '@clerk/react':

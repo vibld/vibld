@@ -1,0 +1,41 @@
+{
+  "name": "vibld-publish",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-09-07",
+
+  // Same D1 database and R2 bucket apps/web already binds -- ADR-0010
+  // deliberately reuses the control plane's existing storage rather than
+  // provisioning a second database/bucket for one more table and one more
+  // key prefix. Cloudflare allows the same database_id/bucket_name to be
+  // bound into more than one Worker; nothing here needs Chris to create
+  // anything new in the Cloudflare dashboard.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vibld-control-plane",
+      "database_id": "4d3190b8-9093-4dfe-8f88-58b4f9c61c73",
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "PROJECT_CONTENT", "bucket_name": "vibld-control-plane" },
+  ],
+
+  // ADR-0010: a third-level label under apps/preview's own second
+  // registrable domain, so a published site never shares cookie scope with
+  // app.vibld.com, and can never collide with apps/preview's own ephemeral
+  // `{port}-{sandbox-id}-{token}.vibld-preview.dev` hostname shape (that
+  // shape never inserts a `published` label).
+  "routes": [
+    {
+      "pattern": "*.published.vibld-preview.dev/*",
+      "zone_name": "vibld-preview.dev",
+    },
+  ],
+
+  "vars": {
+    "PUBLISH_HOSTNAME": "published.vibld-preview.dev",
+  },
+
+  // PUBLISH_INTERNAL_SECRET is a Worker secret, set out of band -- see
+  // internal-auth.ts / README.md.
+}
