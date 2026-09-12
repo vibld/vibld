@@ -77,18 +77,45 @@ export function meetsAA(foreground: string, background: string): boolean {
  * additional answer.
  *
  * Later declarations win, which is what the cascade does within one file.
+ *
+ * Scanned with `indexOf` and `split` rather than matched with a regex, and
+ * that is not a style preference. The obvious patterns here -- `:root[^{]*\{`
+ * for the block and `(--[\w-]+)\s*:` for a declaration -- both backtrack
+ * polynomially, so a stylesheet of ten thousand repetitions of `:root` or of
+ * `-` takes quadratic time. The input is a generated project's CSS, and
+ * model output is untrusted input (ADR-0007), so that is a way to pin the
+ * Worker with one plausible-looking file. Scanning is linear and, as it
+ * turns out, easier to read.
  */
+function readDeclarations(block: string, into: Map<string, string>): void {
+  for (const declaration of block.split(';')) {
+    const colon = declaration.indexOf(':');
+    if (colon === -1) continue;
+    const name = declaration.slice(0, colon).trim();
+    // A custom property, and a plausible one: a name carrying whitespace or a
+    // brace means the block was not shaped the way this assumes.
+    if (!name.startsWith('--') || name.length < 3) continue;
+    if (/[\s{}]/.test(name)) continue;
+    const value = declaration.slice(colon + 1).trim();
+    if (value.length > 0) into.set(name, value);
+  }
+}
+
 export function readRootTokens(css: string): Map<string, string> {
   const tokens = new Map<string, string>();
-  // Matches `:root` (with or without a following selector list) and takes
-  // everything to the next `}`. Nested blocks inside :root would break this,
-  // but :root carries declarations, not rules.
-  const blocks = css.matchAll(/:root[^{]*\{([^}]*)\}/g);
-  for (const block of blocks) {
-    const declarations = block[1].matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g);
-    for (const declaration of declarations) {
-      tokens.set(declaration[1].trim(), declaration[2].trim());
-    }
+  let cursor = 0;
+  while (cursor < css.length) {
+    const selector = css.indexOf(':root', cursor);
+    if (selector === -1) break;
+    // The first `{` after the selector opens the block, and the first `}`
+    // closes it. Nested rules inside :root would break this, but :root
+    // carries declarations, not rules.
+    const open = css.indexOf('{', selector);
+    if (open === -1) break;
+    const close = css.indexOf('}', open);
+    if (close === -1) break;
+    readDeclarations(css.slice(open + 1, close), tokens);
+    cursor = close + 1;
   }
   return tokens;
 }

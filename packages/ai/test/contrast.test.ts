@@ -135,3 +135,55 @@ describe('findContrastFailures', () => {
     );
   });
 });
+
+describe('readRootTokens on hostile input', () => {
+  /**
+   * The inputs CodeQL named when it flagged the regex versions of this:
+   * many repetitions of ':root', of ':root{{|', and of '--'. Each was
+   * quadratic. A generated project's CSS is model output, and model output
+   * is untrusted input, so this is a way to pin the Worker with one
+   * plausible-looking file.
+   */
+  const HOSTILE = [
+    ':root'.repeat(40_000),
+    ':root{{|'.repeat(20_000),
+    '--'.repeat(80_000),
+    `:root { ${'--'.repeat(40_000)} }`,
+    `:root { --a: ${'x'.repeat(200_000)} }`,
+  ];
+
+  it('stays fast on every shape that made the regex version quadratic', () => {
+    for (const css of HOSTILE) {
+      const started = performance.now();
+      readRootTokens(css);
+      const elapsed = performance.now() - started;
+      assert.ok(
+        elapsed < 250,
+        `${css.slice(0, 12)}... took ${elapsed.toFixed(0)}ms`,
+      );
+    }
+  });
+
+  it('and findContrastFailures does too, since it is the real entry point', () => {
+    for (const css of HOSTILE) {
+      const started = performance.now();
+      findContrastFailures(css);
+      assert.ok(performance.now() - started < 250);
+    }
+  });
+
+  it('still reads a real block that follows a hostile prefix', () => {
+    // Fast is not enough: it has to remain correct on the same input.
+    const tokens = readRootTokens(
+      `${':root'.repeat(5_000)}\n:root { --primary: #2563EB; }`,
+    );
+    assert.equal(tokens.get('--primary'), '#2563EB');
+  });
+
+  it('skips a malformed declaration rather than storing garbage', () => {
+    const tokens = readRootTokens(
+      ':root { --ok: #000000; --bad name: #fff; no-dashes: #fff; --: #fff; --empty: ; }',
+    );
+    assert.deepEqual([...tokens.keys()], ['--ok']);
+  });
+});
