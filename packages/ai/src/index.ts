@@ -44,6 +44,13 @@ export {
   selectPatterns,
 } from './patterns.ts';
 export type { PagePattern } from './patterns.ts';
+export {
+  PRODUCT_PALETTES,
+  findPalette,
+  paletteGuidance,
+  selectPalette,
+} from './palettes.ts';
+export type { ProductPalette } from './palettes.ts';
 export { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 export {
   createDeepseekPlanClient,

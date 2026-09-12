@@ -45,7 +45,7 @@ export const MARKETING_PAGE_PATTERNS: readonly PagePattern[] = [
     name: 'Pricing page',
     triggers: ['pricing page', 'pricing', 'plans page', 'plans and pricing'],
     guidance:
-      'A small number of tiers (two or three) as parallel cards, the recommended one visually distinguished but not the only one that looks viable. A monthly/annual toggle if both exist, with the annual saving stated in plain terms. One primary action per tier. Answer the two questions a pricing page always raises -- what happens at the limit, and can this be cancelled -- either inline or in an FAQ immediately below.',
+      'A small number of tiers (two or three) as parallel cards, the recommended one visually distinguished but not the only one that looks viable. A monthly/annual toggle if both exist, with the annual saving stated in plain terms. One primary action per tier. Answer the two questions a pricing page always raises -- what happens at the limit, and can this be cancelled -- either inline or in an FAQ immediately below. Verify the CTA label text against its own button fill at 4.5:1, not against the page background -- a button that reads clearly on the card can still fail once its own fill colour is the actual backdrop.',
   },
   {
     id: 'about',
@@ -122,7 +122,7 @@ export const SAAS_SCREEN_PATTERNS: readonly PagePattern[] = [
     name: 'Dashboard / overview',
     triggers: ['dashboard', 'overview screen', 'home screen', 'app home'],
     guidance:
-      'Lead with the small number of things a returning user actually checks (status, recent activity, one or two key numbers), not every metric the system can produce. One clear next action, not a wall of equally-weighted widgets.',
+      'Lead with the small number of things a returning user actually checks (status, recent activity, one or two key numbers), not every metric the system can produce. One clear next action, not a wall of equally-weighted widgets. Any chart gets a visible legend and a data-table or numeric fallback -- never encode the only meaningful distinction in colour alone.',
   },
   {
     id: 'settings',
