@@ -12,32 +12,26 @@
  * caller must see. It needs no credentials, which is the point: it can run
  * after every deploy without anyone holding a session.
  *
+ * docs/decisions.md L5: Cloudflare Access is off. Clerk is a Bearer-token
+ * check now, not a redirect, so a signed-out caller sees a plain 401 rather
+ * than a cross-origin bounce -- there is no redirect-following pitfall left
+ * to assert against, only that the endpoint still refuses to answer.
+ *
  * Usage: node scripts/smoke.mjs [origin]
  */
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
+// `||`, not `??`: the deploy workflow always sets VIBLD_SMOKE_ORIGIN (even to
+// an empty string, when wrangler's output didn't contain a URL to read --
+// see deploy-web-preview.yml), and `??` only falls through for null/undefined,
+// not '' -- an empty string would otherwise reach `new URL('/', '')` below
+// and fail every check with an opaque "Invalid URL" instead of this default.
+//
+// app.vibld.com (docs/decisions.md L20), not the old *.workers.dev address:
+// adding that custom domain route disabled the workers.dev route entirely
+// (wrangler's own default once any custom domain exists), so the old address
+// now 404s rather than reaching this Worker at all.
 const ORIGIN =
-  process.argv[2] ??
-  process.env.VIBLD_SMOKE_ORIGIN ??
-  'https://vibld-web-preview.chris-brock-llc.workers.dev';
-
-const root = join(import.meta.dirname, '..');
-
-/** Read the committed Access identifiers so drift is a failure, not a mystery. */
-function expectedAccess() {
-  const raw = readFileSync(join(root, 'apps/web/wrangler.jsonc'), 'utf8');
-  // Strip // comments; wrangler.jsonc is JSON with comments and trailing commas.
-  const stripped = raw
-    .replace(/^\s*\/\/.*$/gm, '')
-    .replace(/,(\s*[}\]])/g, '$1');
-  const config = JSON.parse(stripped);
-  return {
-    teamDomain: config.vars.ACCESS_TEAM_DOMAIN,
-    aud: config.vars.ACCESS_AUD,
-  };
-}
+  process.argv[2] || process.env.VIBLD_SMOKE_ORIGIN || 'https://app.vibld.com';
 
 const results = [];
 function check(name, fn) {
@@ -53,61 +47,74 @@ check('the origin is reachable', async () => {
   if (response.status === 0) throw new Error('no response from the origin');
 });
 
-check('Access gates the application', async () => {
-  const response = await head('/');
-  if (response.status !== 302) {
+check('Clerk gates the API for a signed-out caller', async () => {
+  // run_worker_first routes /api/* to the Worker; the SPA shell at / is
+  // served straight from assets and carries no gate of its own -- the
+  // endpoints that spend money are what must refuse an anonymous caller.
+  //
+  // A real caller always sends Content-Type: application/json (every
+  // browser-side client in src/ does) -- this probe does too, so it reaches
+  // and actually exercises the Clerk gate, rather than being refused a step
+  // earlier by /api/plan's own content-type/origin check
+  // (request-guard.ts's checkRequestOrigin, which runs before identity is
+  // ever checked and would otherwise answer 415 here first -- also a closed
+  // refusal, just not the one this check means to assert).
+  for (const path of ['/api/config', '/api/plan']) {
+    const response = await head(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    if (response.status !== 401) {
+      throw new Error(
+        `${path} answered ${response.status} for a signed-out caller, expected 401. ` +
+          "A 200 here would mean anyone can spend the account's model budget.",
+      );
+    }
+  }
+});
+
+check('/api/preview never answers a signed-out caller with 200', async () => {
+  // 401 (Clerk configured, caller isn't signed in) and 503 (PREVIEW isn't
+  // configured on this deployment yet) are both a safe "closed"; either is
+  // fine here. Only 200 would mean anyone can spend sandbox container time.
+  const response = await head('/api/preview', { method: 'POST' });
+  if (response.status === 200) {
     throw new Error(
-      `expected a 302 to the Access login for a signed-out caller, got ${response.status}. ` +
-        'An unauthenticated 200 would mean the Access application is no longer in front of this Worker.',
+      "/api/preview answered 200 for a signed-out caller. That would mean anyone can spend the account's sandbox budget.",
     );
   }
 });
 
-check('Access gates the API, not only the page', async () => {
-  // run_worker_first routes /api/* to the Worker. If Access were scoped to
-  // the SPA alone, the endpoints that spend money would be open.
-  for (const path of ['/api/config', '/api/plan']) {
+check(
+  '/api/stripe/webhook refuses a request with no Stripe-Signature header',
+  async () => {
+    // Confirms the endpoint checks for a signature before doing anything else
+    // with the body -- not a full forged-signature test, which needs the
+    // deployment's own webhook secret and has no business living in a smoke
+    // test that runs with no credentials.
+    const response = await head('/api/stripe/webhook', {
+      method: 'POST',
+      body: '{}',
+    });
+    if (response.status === 200) {
+      throw new Error(
+        '/api/stripe/webhook answered 200 with no Stripe-Signature header.',
+      );
+    }
+  },
+);
+
+check('/api/billing/* never answers a signed-out caller with 200', async () => {
+  // Same closed set as above: 401 (Clerk gate) or 503 (Stripe unconfigured
+  // on this deployment) are both fine. Only 200 would mean anyone can start
+  // a Checkout or Billing Portal session as somebody else's account.
+  for (const path of ['/api/billing/checkout', '/api/billing/portal']) {
     const response = await head(path, { method: 'POST' });
-    if (response.status !== 302) {
-      throw new Error(`${path} answered ${response.status}, expected 302`);
+    if (response.status === 200) {
+      throw new Error(`${path} answered 200 for a signed-out caller.`);
     }
   }
 });
-
-check(
-  'the login redirect matches the committed Access identifiers',
-  async () => {
-    const { teamDomain, aud } = expectedAccess();
-    const response = await head('/api/plan', { method: 'POST' });
-    const location = response.headers.get('location') ?? '';
-    const url = new URL(location);
-    if (url.host !== teamDomain) {
-      throw new Error(
-        `login host ${url.host} does not match ACCESS_TEAM_DOMAIN ${teamDomain}`,
-      );
-    }
-    if (url.searchParams.get('kid') !== aud) {
-      throw new Error(
-        'the login redirect names a different Access application than ACCESS_AUD. ' +
-          'Token verification in the Worker will reject every request.',
-      );
-    }
-  },
-);
-
-check(
-  'the redirect is cross-origin, so a browser must not follow it',
-  async () => {
-    // This is the whole bug, asserted rather than remembered: the hop leaves
-    // the Worker's origin, so a fetch that follows it is refused by CORS and
-    // reports nothing useful. The client must use redirect: 'manual'.
-    const response = await head('/api/plan', { method: 'POST' });
-    const location = new URL(response.headers.get('location') ?? '');
-    if (location.origin === new URL(ORIGIN).origin) {
-      throw new Error('expected the login redirect to leave the origin');
-    }
-  },
-);
 
 const failures = [];
 for (const { name, fn } of results) {

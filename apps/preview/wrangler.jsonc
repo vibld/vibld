@@ -1,0 +1,53 @@
+{
+  "name": "vibld-preview",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-09-07",
+
+  // docs/decisions.md L7: Cloudflare Sandbox SDK / Containers. "lite" is the
+  // smallest instance type -- matches L27's "expect single-digit cents per
+  // preview session" estimate. max_instances is L9's account-wide
+  // concurrency cap (25); Cloudflare enforces it as a hard platform limit
+  // underneath PreviewFleet's own queue, so the two can never disagree.
+  "containers": [
+    {
+      "class_name": "PreviewSandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 25,
+    },
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      // Binding name "Sandbox" is required verbatim -- @cloudflare/sandbox's
+      // proxyToSandbox() looks for env.Sandbox specifically.
+      { "class_name": "PreviewSandbox", "name": "Sandbox" },
+      { "class_name": "PreviewFleet", "name": "Fleet" },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["PreviewSandbox", "PreviewFleet"],
+    },
+  ],
+
+  // docs/decisions.md L8: a second registrable domain, one subdomain per
+  // preview, so a preview never shares cookie scope with the control plane.
+  // The wildcard covers exposePort()'s own subdomain scheme
+  // (`{port}-{sandbox-id}-{token}.vibld-preview.dev`); this Worker's own
+  // /internal/* routes are reached only via the service binding from
+  // apps/web, never through this route.
+  "routes": [
+    { "pattern": "*.vibld-preview.dev/*", "zone_name": "vibld-preview.dev" },
+  ],
+
+  "vars": {
+    // Public: the domain exposePort() mints preview URLs under. Matches
+    // the routes pattern above.
+    "PREVIEW_HOSTNAME": "vibld-preview.dev",
+  },
+
+  // PREVIEW_INTERNAL_SECRET and PREVIEW_SHARE_SECRET are Worker secrets, set
+  // out of band -- see internal-auth.ts / share-token.ts and README.md.
+}

@@ -1,18 +1,16 @@
 import {
-  PlanProvider,
   DEFAULT_MAX_TOKENS,
-  ProviderError,
   configuredProviders,
-  createPlanClient,
   findModel,
   providerForRequest,
   resolveModel,
 } from '@vibld/ai';
-import type { PlanUsage } from '@vibld/ai';
 
-import { fetchAccessKeys, verifyAccessJwt } from './access.ts';
+import { clerkConfigured, resolvePrincipal } from './principal.ts';
 import { UserBudget } from './budget.ts';
 import type { Reservation } from './budget.ts';
+import { GenerationWorkflow } from './generation-workflow.ts';
+import type { WorkflowParams } from './generation-workflow.ts';
 import {
   DEFAULT_LIMITS,
   checkBodySize,
@@ -20,18 +18,49 @@ import {
   parseGenerationRequest,
   parseKnowledge,
   parseModel,
+  parsePreviewRequest,
   parseStylePreset,
 } from './request-guard.ts';
 import { decideModel, grantedFor } from './model-access.ts';
-import { microUsdOf, parsePrices, worstCaseMicroUsd } from './spend.ts';
+import {
+  ACCOUNT_BUDGET_KEY,
+  dayKey,
+  parsePrices,
+  worstCaseMicroUsd,
+} from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
+import {
+  DEFAULT_FREE_INCLUDED_MICRO_USD,
+  allowancePeriodKey,
+  monthlyAllowanceMicroUsd,
+  tierFor,
+} from './entitlement.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
-  createProgressThrottle,
   encodeEvent,
   parseKeepaliveMs,
 } from './stream.ts';
+import {
+  createShare,
+  listShares,
+  previewConfigured,
+  previewStatus,
+  revokeShare,
+  startPreview,
+  stopPreview,
+} from './preview-client.ts';
+import type { ServiceBinding } from './preview-client.ts';
+import {
+  billingConfigured,
+  handleBillingCheckout,
+  handleBillingPortal,
+  handleStripeWebhook,
+  reconcileSubscriptions,
+} from './billing-handlers.ts';
+import { checkProviderBalances } from './provider-balance.ts';
+import { BillingStore } from './billing-store.ts';
+import { createStripeClient } from './stripe-client.ts';
 
 export interface Env {
   /** Worker secret. Never reaches the browser. */
@@ -47,10 +76,13 @@ export interface Env {
    * whatever the deployment can serve.
    */
   VIBLD_MODEL_POLICY?: string;
-  /** e.g. "yourteam.cloudflareaccess.com" */
-  ACCESS_TEAM_DOMAIN?: string;
-  /** The Access application's AUD tag. */
-  ACCESS_AUD?: string;
+  /**
+   * Clerk's Frontend API URL -- a public identifier, not a secret. Used as
+   * both the JWT issuer to match and the base for the JWKS fetch
+   * (clerk-auth.ts appends /.well-known/jwks.json). docs/decisions.md L5:
+   * this replaces ACCESS_TEAM_DOMAIN/ACCESS_AUD, now that Access is off.
+   */
+  CLERK_FRONTEND_API_URL?: string;
   VIBLD_MODEL?: string;
   /** Transport keepalive interval in ms. Configuration, not a literal. */
   VIBLD_STREAM_KEEPALIVE_MS?: string;
@@ -62,44 +94,90 @@ export interface Env {
    */
   PLAN_BURST?: RateLimit;
   PLAN_SUSTAINED?: RateLimit;
-  /** Micro-USD one user may spend per UTC day. 4000000 == $4.00. */
-  VIBLD_DAILY_MICRO_USD?: string;
+  /**
+   * Per-IP, checked before identity (docs/decisions.md L29). PLAN_BURST and
+   * PLAN_SUSTAINED above key on the caller's Clerk user id, so they do
+   * nothing for a flood of requests that never resolves to a valid user.
+   */
+  IP_BURST?: RateLimit;
+  /**
+   * Micro-USD the Free tier (no active subscription) may spend per UTC
+   * calendar month -- docs/decisions.md L36 sets this at $1.00
+   * (`entitlement.ts`'s `DEFAULT_FREE_INCLUDED_MICRO_USD`); set this only to
+   * correct that figure. Build and Ship are not configurable here: their
+   * included spend is fixed by the accepted price table, not an operator
+   * knob (`entitlement.ts`'s `TIER_INCLUDED_MICRO_USD`).
+   */
+  VIBLD_FREE_MONTHLY_MICRO_USD?: string;
   /** Runs one user may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
   /**
    * Micro-USD the whole deployment may spend per UTC day, across every user
-   * -- docs/decisions.md L29. Layered above VIBLD_DAILY_MICRO_USD so one
-   * compromised account cannot spend the month; the per-user ceiling alone
-   * bounds only what *one* identity can do, not what N of them can do
-   * together. Default is 20x the per-user default -- a starting point, not
-   * a measured figure; correct it once real usage gives one.
+   * -- docs/decisions.md L29. Layered above the per-user tier allowances so
+   * one compromised account cannot spend the month; those ceilings alone
+   * bound only what *one* identity can do, not what N of them can do
+   * together. The default is a starting point, not a measured figure;
+   * correct it once real usage gives one.
    */
   VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
   VIBLD_USD_MICRO_PER_INPUT_TOKEN?: string;
   VIBLD_USD_MICRO_PER_OUTPUT_TOKEN?: string;
   /**
-   * The control plane (docs/decisions.md L24/L25). Declared here because the
-   * binding exists in wrangler.jsonc; not read by anything yet -- see
-   * generation-store.ts's module comment for why that wiring waits on Clerk.
+   * The control plane (docs/decisions.md L24/L25): D1 for generation
+   * metadata, R2 for the file content it points at. Read only by
+   * `GenerationWorkflow` (generation-workflow.ts) -- `handlePlan` itself
+   * never touches D1/R2 directly, the same way it never calls the model
+   * directly any more.
    */
   DB?: D1Database;
   PROJECT_CONTENT?: R2Bucket;
+  /**
+   * Durable generation (docs/decisions.md L26). `handlePlan` creates one
+   * instance per run and polls it; see generation-workflow.ts for why a
+   * Workflow rather than the in-request model call this replaced.
+   */
+  GENERATION_WORKFLOW?: Workflow<WorkflowParams>;
+  /**
+   * The sandbox execution service (docs/decisions.md L7-L11; see
+   * apps/preview/README.md for why it is a separate Worker). `/api/preview`
+   * is unavailable, not open, when this or `PREVIEW_INTERNAL_SECRET` is
+   * unset -- the same fail-closed rule `isConfigured` already applies to
+   * generation.
+   */
+  PREVIEW?: ServiceBinding;
+  /** Worker secret, shared with @vibld/preview -- see preview-client.ts. */
+  PREVIEW_INTERNAL_SECRET?: string;
+  /**
+   * Stripe billing (docs/decisions.md L12-L15). Worker secret, live-mode --
+   * see billing-handlers.ts. `/api/billing/*` and `/api/stripe/webhook` are
+   * unavailable, not open, when this or `STRIPE_WEBHOOK_SECRET` is unset,
+   * the same fail-closed rule `isConfigured` already applies to generation.
+   */
+  STRIPE_SECRET_KEY?: string;
+  /** Worker secret: the signing secret for this deployment's registered webhook endpoint. */
+  STRIPE_WEBHOOK_SECRET?: string;
+  /**
+   * L44: the nightly balance check answers "not configured" for DeepSeek,
+   * same as every other optional secret here, when this is unset -- see
+   * provider-balance.ts. Shared with apps/marketing's own Resend key in
+   * spirit, but not the same secret store: each Worker holds its own copy.
+   */
+  RESEND_API_KEY?: string;
+  /** USD threshold for the DeepSeek balance alert. Default: $10. */
+  VIBLD_DEEPSEEK_BALANCE_ALERT_USD?: string;
+  /** Where the balance alert is sent. Default: billing@vibld.com. */
+  VIBLD_ALERT_EMAIL?: string;
+  /** The alert's From address. Default: alerts@notifications.vibld.com. */
+  VIBLD_ALERT_FROM?: string;
 }
 
-/** Re-exported so Wrangler can find the class from the Worker's entrypoint. */
-export { UserBudget };
+/** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
+export { UserBudget, GenerationWorkflow };
 
-const DEFAULT_DAILY_MICRO_USD = 4_000_000;
 const DEFAULT_MAX_IN_FLIGHT = 2;
 const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
-
-/**
- * Reserved key for the account-wide ledger, sharing `USER_BUDGET`'s
- * namespace with every per-user key rather than needing a second binding.
- * Safe as long as it can never collide with a real identity: Access
- * authenticates real email addresses, and this is not one.
- */
-const ACCOUNT_BUDGET_KEY = '__account__';
+/** How often `handlePlan` checks its Workflow instance for a result. */
+const POLL_INTERVAL_MS = 1500;
 
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
@@ -113,8 +191,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * Generation is available only when the key AND both Access settings are
- * present. Missing configuration means unavailable, never "open" — an
+ * Generation is available only when the key AND Clerk are configured.
+ * Missing configuration means unavailable, never "open" — an
  * unauthenticated endpoint on a public URL lets anyone spend the account's
  * model budget, so the failure has to be closed.
  */
@@ -123,93 +201,59 @@ function isConfigured(env: Env): boolean {
     // Either provider's key configures the endpoint. Which one it selects is
     // `selectProvider`'s business, not this gate's.
     (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY) &&
-    env.ACCESS_TEAM_DOMAIN &&
-    env.ACCESS_AUD &&
+    clerkConfigured(env) &&
     // The ledger is part of the grant, not an optimisation: a deployment
     // that cannot account for spend must not be able to spend.
-    env.USER_BUDGET,
+    env.USER_BUDGET &&
+    // Durable generation (L26) needs all three, or there is nowhere for a
+    // run to execute and nothing to persist it.
+    env.GENERATION_WORKFLOW &&
+    env.DB &&
+    env.PROJECT_CONTENT,
   );
-}
-
-interface AccessDenied {
-  denied: Response;
-}
-interface AccessGranted {
-  denied: null;
-  email: string;
-}
-
-async function requireAccess(
-  request: Request,
-  env: Env,
-): Promise<AccessDenied | AccessGranted> {
-  if (!isConfigured(env)) {
-    return {
-      denied: json(
-        { error: 'Model generation is not configured for this deployment.' },
-        403,
-      ),
-    };
-  }
-
-  const token =
-    request.headers.get('Cf-Access-Jwt-Assertion') ??
-    /(?:^|;\s*)CF_Authorization=([^;]+)/.exec(
-      request.headers.get('Cookie') ?? '',
-    )?.[1];
-
-  if (!token) {
-    return {
-      denied: json(
-        { error: 'This endpoint requires Cloudflare Access sign-in.' },
-        401,
-      ),
-    };
-  }
-
-  try {
-    const keys = await fetchAccessKeys(env.ACCESS_TEAM_DOMAIN!);
-    const claims = await verifyAccessJwt(token, {
-      keys,
-      audience: env.ACCESS_AUD!,
-      issuer: `https://${env.ACCESS_TEAM_DOMAIN}`,
-    });
-    // The identity is carried forward so a run's cost is attributable to
-    // someone. Spend with no name attached cannot be limited or explained.
-    //
-    // A token with no email claim falls into one shared 'unknown' bucket
-    // rather than getting its own. That is deliberately the strict reading:
-    // every such caller then competes for a single ceiling instead of each
-    // being handed a fresh one.
-    return { denied: null, email: claims.email ?? 'unknown' };
-  } catch {
-    // Deliberately opaque: a verification failure should not tell a caller
-    // which check failed.
-    return { denied: json({ error: 'Access verification failed.' }, 403) };
-  }
 }
 
 interface BudgetLayers {
   account: Reservation;
   user: Reservation;
+  /**
+   * Which `USER_BUDGET` instance `user.id` was actually reserved against:
+   * `userId` for the caller's own monthly tier allowance, or
+   * `"<userId>:topup"` if that allowance was already exhausted and the
+   * reservation was drawn from top-up credit instead. Threaded through
+   * `WorkflowParams.reservationKey` so settlement targets the same instance.
+   */
+  userReservationKey: string;
 }
 
 /** Only ever constructed from a verdict already known to deny the run. */
 type DeniedVerdict = Extract<SpendVerdict, { allow: false }>;
 
+function topupKeyFor(userId: string): string {
+  return `${userId}:topup`;
+}
+
 /**
- * Reserves against both ceilings before a run may start: the account-wide
- * one first (cheaper to check, and failing it means the user-level ledger
- * never needs touching at all), then the per-user one. If the account layer
- * allows but the user layer then refuses, the account-level hold is
- * released at once -- a run that never starts must never leave a phantom
- * charge sitting against the account for up to fifteen minutes waiting on
- * the abandoned-reservation reclaim.
+ * Reserves against every ceiling before a run may start: the account-wide
+ * one first (cheaper to check, and failing it means nothing else needs
+ * touching), then the caller's own monthly tier allowance (L35-L39), then --
+ * only if that allowance is exhausted, not merely low -- their top-up
+ * credit balance (L37). If an earlier layer allows but a later one refuses,
+ * the earlier hold is released at once: a run that never starts must never
+ * leave a phantom charge sitting against a ceiling for up to fifteen
+ * minutes waiting on the abandoned-reservation reclaim.
+ *
+ * `monthlyAllowance` and `topupCeiling` are the caller's to compute
+ * (`handlePlan` reads them from `BillingStore`) -- this function only knows
+ * how to spend them, not where they come from.
  */
 async function reserveBudget(
   env: Env,
-  email: string,
+  userId: string,
   worstCase: number,
+  monthlyAllowance: number,
+  topupCeiling: number,
+  now: number,
 ): Promise<
   { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
 > {
@@ -222,30 +266,133 @@ async function reserveBudget(
   // below. This layer enforces spend only.
   const account = await ledger
     .getByName(ACCOUNT_BUDGET_KEY)
-    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER);
+    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
   if (!account.verdict.allow) {
     return { ok: false, verdict: account.verdict };
   }
 
-  const userCeiling = positiveInt(
-    env.VIBLD_DAILY_MICRO_USD,
-    DEFAULT_DAILY_MICRO_USD,
-  );
+  const releaseAccount = async () => {
+    if (account.id !== undefined) {
+      await ledger.getByName(ACCOUNT_BUDGET_KEY).settle(account.id, 0);
+    }
+  };
+
   const maxInFlight = positiveInt(
     env.VIBLD_MAX_IN_FLIGHT,
     DEFAULT_MAX_IN_FLIGHT,
   );
-  const user = await ledger
-    .getByName(email)
-    .reserve(worstCase, userCeiling, maxInFlight);
-  if (!user.verdict.allow) {
-    if (account.id !== undefined) {
-      await ledger.getByName(ACCOUNT_BUDGET_KEY).settle(account.id, 0);
-    }
-    return { ok: false, verdict: user.verdict };
+  const primary = await ledger
+    .getByName(userId)
+    .reserve(worstCase, monthlyAllowance, maxInFlight, allowancePeriodKey(now));
+  if (primary.verdict.allow) {
+    return {
+      ok: true,
+      layers: { account, user: primary, userReservationKey: userId },
+    };
   }
 
-  return { ok: true, layers: { account, user } };
+  // A top-up buys more spend, not more in-flight runs: concurrency is only
+  // ever gated by the primary bucket, so this denial is final regardless of
+  // top-up balance.
+  if (primary.verdict.reason === 'too-many-in-flight' || topupCeiling <= 0) {
+    await releaseAccount();
+    return { ok: false, verdict: primary.verdict };
+  }
+
+  // The monthly allowance is exhausted -- try the caller's top-up balance
+  // next, automatically. "lifetime" as the period key on purpose: unlike the
+  // allowance above, a top-up does not reset month to month, it is drawn
+  // down until spent (or, approximately, until it is 12 months old -- see
+  // `BillingStore.totalTopupCreditMicroUsd`).
+  const topupKey = topupKeyFor(userId);
+  const topup = await ledger
+    .getByName(topupKey)
+    .reserve(worstCase, topupCeiling, Number.MAX_SAFE_INTEGER, 'lifetime');
+  if (topup.verdict.allow) {
+    return {
+      ok: true,
+      layers: { account, user: topup, userReservationKey: topupKey },
+    };
+  }
+
+  await releaseAccount();
+  // The monthly-allowance denial is the one worth reporting: it is what a
+  // top-up would have fixed, whereas the top-up bucket's own denial is just
+  // "also not enough" and says nothing new.
+  return { ok: false, verdict: primary.verdict };
+}
+
+/**
+ * GET -> the caller's own billing status: current tier, this period's spend
+ * against their monthly allowance, and any top-up credit remaining. Read-only
+ * mirror of exactly what `handlePlan`'s Layer three above computes and
+ * reserves against -- `UserBudget` stays the one authoritative ledger, this
+ * only reads it back for the shell to show a "generations remaining"
+ * readout and drive its checkout/portal buttons (L35).
+ */
+async function handleBillingStatus(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (!env.USER_BUDGET || !env.DB) {
+    return json(
+      { error: 'Usage accounting is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  try {
+    const now = Date.now();
+    const billing = new BillingStore(env.DB);
+    const subscription = await billing.findActiveSubscription(principal.userId);
+    const tier = tierFor(subscription);
+    const freeAllowance = positiveInt(
+      env.VIBLD_FREE_MONTHLY_MICRO_USD,
+      DEFAULT_FREE_INCLUDED_MICRO_USD,
+    );
+    const allowanceMicroUsd = monthlyAllowanceMicroUsd(tier, freeAllowance);
+    const usage = await env.USER_BUDGET.getByName(principal.userId).usageFor(
+      allowancePeriodKey(now),
+    );
+    const topupCreditMicroUsd = await billing.totalTopupCreditMicroUsd(
+      principal.userId,
+    );
+    const topupUsage = await env.USER_BUDGET.getByName(
+      topupKeyFor(principal.userId),
+    ).usageFor('lifetime');
+    // The Billing Portal (`handleBillingPortal`) 502s without a Stripe
+    // customer to manage -- a first-time free-tier caller has none yet, so
+    // the shell needs to know before it offers that button at all.
+    const hasStripeCustomer = Boolean(
+      await billing.findCustomerId(principal.userId),
+    );
+
+    return json({
+      tier,
+      allowanceMicroUsd,
+      spentMicroUsd: usage.spentMicroUsd,
+      topupRemainingMicroUsd: Math.max(
+        0,
+        topupCreditMicroUsd - topupUsage.spentMicroUsd,
+      ),
+      currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
+      cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+      hasStripeCustomer,
+      billingConfigured: billingConfigured(env),
+    });
+  } catch (error) {
+    console.error('billing status unavailable', error);
+    return json(
+      { error: 'Could not read billing status. Try again shortly.' },
+      503,
+    );
+  }
 }
 
 async function handlePlan(
@@ -268,8 +415,36 @@ async function handlePlan(
   const size = checkBodySize(request.headers);
   if (!size.ok) return json({ error: size.error }, size.status);
 
-  const access = await requireAccess(request, env);
-  if (access.denied) return access.denied;
+  // Per-IP, ahead of identity (docs/decisions.md L29): the burst gates below
+  // key on the caller's Clerk user id, so a flood of garbage or expired
+  // tokens -- each still costing a JWKS verification -- would otherwise
+  // reach resolvePrincipal every time. Fails open on the limiter itself
+  // being unavailable, the same as the per-user gates below; a rate limiter
+  // outage is not a reason to refuse every legitimate caller.
+  if (env.IP_BURST) {
+    try {
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+      const result = await env.IP_BURST.limit({ key: `ip:${ip}` });
+      if (!result.success) {
+        return json({ error: 'Too many requests from this address.' }, 429);
+      }
+    } catch (error) {
+      console.error('IP rate limiter unavailable', error);
+    }
+  }
+
+  // Whether this deployment can generate at all -- keys, Clerk, and the
+  // ledger -- is checked before spending effort on any one caller's token.
+  if (!isConfigured(env)) {
+    return json(
+      { error: 'Model generation is not configured for this deployment.' },
+      403,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
 
   let body: unknown;
   try {
@@ -299,10 +474,12 @@ async function handlePlan(
   }
 
   // The picker only offers what this person may use, but the picker is a
-  // convenience and this endpoint is the boundary.
+  // convenience and this endpoint is the boundary. Model policy is keyed by
+  // email (L4), not the Clerk user id the ledger below uses (L3) -- it is a
+  // human-edited secret that predates Clerk.
   const decision = decideModel(
     env,
-    access.email,
+    principal.policyIdentity,
     chosenModel.value,
     resolveModel(env),
   );
@@ -313,7 +490,7 @@ async function handlePlan(
   // documented as permissive, so it stops a naive flood and nothing more --
   // it is allowed to fail open only because the layer below fails closed.
   try {
-    const key = `plan:${access.email}`;
+    const key = `plan:${principal.userId}`;
     const gates = [env.PLAN_BURST, env.PLAN_SUSTAINED].filter(
       (gate): gate is RateLimit => gate !== undefined,
     );
@@ -351,11 +528,33 @@ async function handlePlan(
       DEFAULT_LIMITS.maxTotalContentChars +
       DEFAULT_LIMITS.maxKnowledgeChars,
   );
-  const ledger = env.USER_BUDGET!;
 
+  // Layer three: what the caller's own subscription actually buys them
+  // (L35-L39) -- a monthly allowance by tier, plus whatever top-up credit
+  // they have left.
   let reserved;
   try {
-    reserved = await reserveBudget(env, access.email, worstCase);
+    const now = Date.now();
+    const billing = new BillingStore(env.DB!);
+    const subscription = await billing.findActiveSubscription(principal.userId);
+    const tier = tierFor(subscription);
+    const freeAllowance = positiveInt(
+      env.VIBLD_FREE_MONTHLY_MICRO_USD,
+      DEFAULT_FREE_INCLUDED_MICRO_USD,
+    );
+    const monthlyAllowance = monthlyAllowanceMicroUsd(tier, freeAllowance);
+    const topupCeiling = await billing.totalTopupCreditMicroUsd(
+      principal.userId,
+    );
+
+    reserved = await reserveBudget(
+      env,
+      principal.userId,
+      worstCase,
+      monthlyAllowance,
+      topupCeiling,
+      now,
+    );
   } catch (error) {
     // Fail closed. A retry costs the user a minute; an unbounded endpoint on
     // a public URL costs real money. 503 rather than 429: this is the
@@ -373,17 +572,59 @@ async function handlePlan(
     return json(
       {
         error:
-          reserved.verdict.reason === 'daily-ceiling'
-            ? 'Daily generation budget reached. It resets at 00:00 UTC.'
+          reserved.verdict.reason === 'period-ceiling'
+            ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
             : 'A generation is already running. Wait for it to finish.',
       },
       429,
     );
   }
   const reservation = reserved.layers.user;
+  // Reservations settle inside the Workflow itself now (generation-workflow.ts's
+  // 'settle-budget' step), once the run's real usage is known -- `handlePlan`
+  // no longer holds the model call in its own scope to settle around. A run
+  // this connection never sees complete (a crash, a terminated instance that
+  // never reached that step) still settles: it falls back to `budget.ts`'s
+  // existing abandoned-reservation reclaim, the same backstop a Worker dying
+  // mid-request already relied on.
+
+  const runId = crypto.randomUUID();
+  // One project per Clerk user -- there is no multi-project UI yet, so the
+  // user id is the whole of "which project" for now. See WorkflowParams's
+  // own comment.
+  const projectId = principal.userId;
+
+  let instance;
+  try {
+    instance = await env.GENERATION_WORKFLOW!.create({
+      id: runId,
+      params: {
+        projectId,
+        runId,
+        prompt: parsed.value.prompt,
+        base: parsed.value.base,
+        ...(style.value ? { style: style.value } : {}),
+        ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+        model: effectiveModel,
+        userId: principal.userId,
+        ...(principal.email ? { email: principal.email } : {}),
+        reservationId: reservation.id,
+        reservationKey: reserved.layers.userReservationKey,
+        accountReservationId: reserved.layers.account.id,
+        worstCaseMicroUsd: worstCase,
+        prices,
+      },
+    });
+  } catch (error) {
+    console.error('failed to start generation workflow', error);
+    return json(
+      { error: 'Generation could not be started. Try again shortly.' },
+      503,
+    );
+  }
 
   // Stream rather than buffer. A buffered response sends nothing until the
-  // model finishes, and the client gives up first -- which surfaces as an
+  // run finishes, and the client gives up first -- which surfaces as an
   // opaque network error, not a failed generation.
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -398,132 +639,198 @@ async function handlePlan(
     }
   };
 
-  // A run nobody is waiting for is still billed until the call to the model
-  // ends. `ctx.waitUntil` deliberately outlives the response, so without this
-  // a user who closes the tab -- or presses Cancel -- pays for a plan that is
-  // then thrown away.
-  const abort = new AbortController();
-  let cancelledBy: string | undefined;
-  const cancel = (reason: string) => {
-    if (abort.signal.aborted) return;
-    cancelledBy = reason;
+  // A run nobody is waiting for should stop, not run to completion unread.
+  // Termination lands at the Workflow's next step boundary, not mid-step
+  // (generation-workflow.ts's own module comment), so a cancel that arrives
+  // while the model call itself is in flight cannot stop that one call --
+  // the ledger's abandoned-reservation reclaim is the backstop either way.
+  let cancelled = false;
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
     stopKeepalive();
-    abort.abort();
+    ctx.waitUntil(instance.terminate().catch(() => {}));
   };
 
   // Two independent notices that the client is gone. The runtime aborts
   // `request.signal` on disconnect; a failed write catches the same thing at
   // the next keepalive, which is the backstop if the signal is unavailable.
-  request.signal?.addEventListener('abort', () => cancel('client-disconnect'));
+  request.signal?.addEventListener('abort', cancel);
 
   const write = (chunk: string) =>
-    writer.write(encoder.encode(chunk)).catch(() => cancel('write-failed'));
-
-  // A whole project takes minutes to write, so the wait needs to show
-  // something real rather than a spinner that could equally mean "hung".
-  const reportProgress = createProgressThrottle({
-    emit: (update) => void write(encodeEvent('progress', update)),
-  });
-
-  let usage: PlanUsage | undefined;
-  const provider = new PlanProvider(createPlanClient(env, effectiveModel), {
-    // Always a model this person is granted: their own choice when they made
-    // one, otherwise the deployment default if they may use it, otherwise the
-    // first thing they may.
-    model: effectiveModel,
-    onUsage: (reported) => {
-      usage = reported;
-    },
-    onProgress: ({ characters }) => reportProgress(characters),
-    signal: abort.signal,
-    ...(style.value ? { style: style.value } : {}),
-    ...(knowledge.value ? { knowledge: knowledge.value } : {}),
-  });
+    writer.write(encoder.encode(chunk)).catch(cancel);
 
   // First bytes immediately, so the connection is never idle from the start.
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
 
   const run = (async () => {
-    let outcome = 'ok';
     try {
-      const plan = await provider.generate(parsed.value);
-      await write(encodeEvent('plan', { providerId: provider.id, plan }));
-    } catch (error) {
-      if (abort.signal.aborted) {
-        // The caller left. Writing an error to a closed stream would fail
-        // anyway, and this is not a fault worth reporting as one.
-        outcome = 'cancelled';
-      } else if (error instanceof ProviderError) {
-        // Expected, explainable outcomes, not server faults.
-        outcome = 'provider-error';
-        await write(
-          encodeEvent('error', { error: error.message, kind: error.name }),
-        );
-      } else {
-        // Never forward an upstream error body: it can carry request details.
-        outcome = 'error';
-        console.error('plan generation failed', error);
-        await write(
-          encodeEvent('error', { error: 'Generation failed unexpectedly.' }),
-        );
+      for (;;) {
+        if (cancelled) return;
+
+        let status;
+        try {
+          status = await instance.status();
+        } catch (error) {
+          console.error('workflow status unavailable', error);
+          if (!cancelled) {
+            await write(
+              encodeEvent('error', {
+                error: 'Generation failed unexpectedly.',
+              }),
+            );
+          }
+          return;
+        }
+
+        if (status.status === 'complete') {
+          const result = status.output as {
+            state: string;
+            accepted?: { revision: string; files: unknown[] };
+            errors: string[];
+            summary?: string;
+          };
+          if (result.state === 'accepted' && result.accepted) {
+            await write(
+              encodeEvent('plan', {
+                providerId: effectiveModel,
+                plan: {
+                  summary: result.summary ?? '',
+                  files: result.accepted.files,
+                },
+              }),
+            );
+          } else {
+            await write(
+              encodeEvent('error', {
+                error: result.errors[0] ?? 'Generation failed.',
+              }),
+            );
+          }
+          return;
+        }
+
+        if (status.status === 'errored' || status.status === 'terminated') {
+          if (!cancelled) {
+            await write(
+              encodeEvent('error', {
+                error:
+                  status.error?.message ?? 'Generation failed unexpectedly.',
+              }),
+            );
+          }
+          return;
+        }
+
+        // Still queued, running, paused or waiting: nothing new to report.
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       }
     } finally {
       stopKeepalive();
-      // Reconcile the pessimistic debit down to what the run really cost.
-      // A run that never reported usage settles at the full reservation
-      // rather than at zero: failing safe means over-counting, not under.
-      const actual = usage ? microUsdOf(usage, prices) : worstCase;
-      if (reservation.id !== undefined) {
-        ctx.waitUntil(
-          ledger
-            .getByName(access.email)
-            .settle(reservation.id, actual)
-            .catch((error: unknown) =>
-              console.error('spend settlement failed', error),
-            ),
-        );
-      }
-      // Both layers were reserved together, so both settle together -- the
-      // account-wide ledger must reflect the same run at the same cost, or
-      // its ceiling stops meaning what it says.
-      const accountReservation = reserved.layers.account;
-      if (accountReservation.id !== undefined) {
-        ctx.waitUntil(
-          ledger
-            .getByName(ACCOUNT_BUDGET_KEY)
-            .settle(accountReservation.id, actual)
-            .catch((error: unknown) =>
-              console.error('account spend settlement failed', error),
-            ),
-        );
-      }
-      // Spend is recorded even when the run failed: a refusal, a truncation
-      // or a cancellation still consumed tokens, and a record that counts
-      // only successes under-reports the bill.
-      console.log(
-        JSON.stringify({
-          event: 'generation.settled',
-          email: access.email,
-          model: provider.id,
-          outcome,
-          ...(cancelledBy ? { cancelledBy } : {}),
-          inputTokens: usage?.inputTokens ?? 0,
-          outputTokens: usage?.outputTokens ?? 0,
-          microUsd: actual,
-        }),
-      );
       await writer.close().catch(() => {});
     }
   })();
 
-  // `waitUntil` is safe here only because the run is now abortable. Without
-  // that it would guarantee an abandoned generation up to 30 more seconds of
-  // billable model time; with it, the window is used for the opposite -- the
-  // spend record still gets written after the caller has gone.
   ctx.waitUntil(run);
 
   return new Response(readable, { status: 200, headers: STREAM_HEADERS });
+}
+
+/**
+ * Start, check on, or stop a live preview of the caller's own project
+ * (docs/decisions.md L7-L11). Thin by design: every real decision --
+ * concurrency, egress, lifetime -- is `@vibld/preview`'s; this only
+ * authenticates the caller and forwards their own userId, never trusting
+ * one a client could supply itself.
+ */
+async function handlePreview(request: Request, env: Env): Promise<Response> {
+  if (!previewConfigured(env)) {
+    return json(
+      { error: 'Preview is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (request.method === 'GET') {
+    return json(await previewStatus(env, principal.userId));
+  }
+
+  if (request.method === 'POST') {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Body must be valid JSON.' }, 400);
+    }
+    const files = parsePreviewRequest(body);
+    if (!files.ok) return json({ error: files.error }, files.status);
+    return json(await startPreview(env, principal.userId, files.value));
+  }
+
+  if (request.method === 'DELETE') {
+    await stopPreview(env, principal.userId);
+    return json({ ok: true });
+  }
+
+  return json({ error: 'Use GET, POST or DELETE.' }, 405);
+}
+
+/**
+ * Create, list, or revoke share links for the caller's own preview (L10).
+ * Same authentication as `handlePreview` -- this Worker still never trusts
+ * a userId the browser could supply itself, share links included.
+ */
+async function handlePreviewShare(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!previewConfigured(env)) {
+    return json(
+      { error: 'Preview is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (request.method === 'GET') {
+    const shares = await listShares(env, principal.userId);
+    return json({ shares });
+  }
+
+  if (request.method === 'POST') {
+    const result = await createShare(env, principal.userId);
+    if (!result.ok) return json({ error: result.error }, 409);
+    return json({
+      shareId: result.shareId,
+      expiresAt: result.expiresAt,
+      url: result.url,
+    });
+  }
+
+  if (request.method === 'DELETE') {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Body must be valid JSON.' }, 400);
+    }
+    const { shareId } = (body ?? {}) as { shareId?: unknown };
+    if (typeof shareId !== 'string' || shareId.length === 0) {
+      return json({ error: '"shareId" is required.' }, 400);
+    }
+    await revokeShare(env, principal.userId, shareId);
+    return json({ ok: true });
+  }
+
+  return json({ error: 'Use GET, POST or DELETE.' }, 405);
 }
 
 /** The slice of Cloudflare's ExecutionContext this Worker uses. */
@@ -542,18 +849,32 @@ export default {
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
+      if (!isConfigured(env)) {
+        return json(
+          { error: 'Model generation is not configured for this deployment.' },
+          403,
+        );
+      }
+
       // Identified before answered: the picker is per-person now, so this
       // cannot be served to an anonymous caller without telling them what
       // somebody else may use.
-      const access = await requireAccess(request, env);
-      if (access.denied) return access.denied;
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      const { principal } = resolved;
 
       // Two filters, in order. What the deployment can serve at all --
       // offering a model whose provider has no key produces a run that fails
-      // after the user has waited for it. Then what this person is granted.
-      const models = grantedFor(env, access.email);
+      // after the user has waited for it. Then what this person is granted
+      // (by email, per L4 -- see the same note in handlePlan).
+      const models = grantedFor(env, principal.policyIdentity);
       // The deployment default is only offered if this person may use it.
-      const decided = decideModel(env, access.email, null, resolveModel(env));
+      const decided = decideModel(
+        env,
+        principal.policyIdentity,
+        null,
+        resolveModel(env),
+      );
       return json({
         generation: isConfigured(env) ? 'model' : 'fake',
         models: models.map(({ id, label, note, provider }) => ({
@@ -570,6 +891,69 @@ export default {
       return handlePlan(request, env, ctx);
     }
 
+    if (pathname === '/api/preview') {
+      return handlePreview(request, env);
+    }
+
+    if (pathname === '/api/preview/share') {
+      return handlePreviewShare(request, env);
+    }
+
+    if (pathname === '/api/billing/status') {
+      return handleBillingStatus(request, env);
+    }
+
+    if (pathname === '/api/billing/checkout') {
+      return handleBillingCheckout(request, env, new URL(request.url).origin);
+    }
+
+    if (pathname === '/api/billing/portal') {
+      return handleBillingPortal(request, env, new URL(request.url).origin);
+    }
+
+    if (pathname === '/api/stripe/webhook') {
+      return handleStripeWebhook(request, env);
+    }
+
     return json({ error: 'Not found.' }, 404);
+  },
+
+  /**
+   * Nightly reconcile (docs/decisions.md L13): Stripe, not this deployment's
+   * own mirror, is authoritative, and a webhook delivery can be missed or
+   * fail. The Cron Trigger that calls this is declared in wrangler.jsonc.
+   * Also runs the L44 provider-balance check -- same "daily," same trigger,
+   * no separate cron to declare.
+   */
+  async scheduled(
+    _event: unknown,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    if (billingConfigured(env)) {
+      ctx.waitUntil(
+        reconcileSubscriptions(
+          createStripeClient(env),
+          new BillingStore(env.DB!),
+        ).then(
+          (result) =>
+            console.log(
+              JSON.stringify({ event: 'billing.reconciled', ...result }),
+            ),
+          (error: unknown) => console.error('billing reconcile failed', error),
+        ),
+      );
+    }
+
+    ctx.waitUntil(
+      checkProviderBalances(env).then(
+        (result) =>
+          console.log(
+            JSON.stringify({ event: 'provider_balance.checked', ...result }),
+          ),
+        (error: unknown) =>
+          console.error('provider balance check failed', error),
+      ),
+    );
   },
 };

@@ -4,6 +4,7 @@ import type {
   ModelProvider,
 } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import { getClerkToken } from '../auth/clerk-token.ts';
 
 /**
  * Calls the Worker's /api/plan endpoint.
@@ -24,26 +25,25 @@ interface PlanEvent {
 }
 
 /**
- * The endpoint sits behind Cloudflare Access, which answers a request with no
- * live session with a 302 to its own login host. `fetch` follows redirects by
- * default, lands cross-origin, and is refused by CORS -- surfacing as a bare
- * `TypeError: Load failed` that says nothing about the actual cause.
- *
- * So every call here uses `redirect: 'manual'`, which turns that bounce into
- * an opaque-redirect response we can recognise and name.
+ * The endpoint is gated by Clerk now (docs/decisions.md L5): a request with
+ * no valid `Authorization: Bearer` token gets a plain 401, not a redirect --
+ * there is no login host to bounce to, and no cross-origin hop to be caught
+ * by `redirect: 'manual'` the way Access's did.
  */
-export class AccessSessionError extends Error {
+export class SignInRequiredError extends Error {
   constructor() {
     super(
-      'Your sign-in session has expired. Reload the page to sign in again, then try once more.',
+      'Sign in to generate -- use the "Sign in" button above, then try again.',
     );
-    this.name = 'AccessSessionError';
+    this.name = 'SignInRequiredError';
   }
 }
 
-/** An opaque redirect is the only shape a blocked cross-origin bounce takes. */
-function isAccessRedirect(response: Response): boolean {
-  return response.type === 'opaqueredirect' || response.status === 0;
+async function authHeaders(
+  getToken: () => Promise<string | null>,
+): Promise<Record<string, string>> {
+  const token = await getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 /**
@@ -122,6 +122,12 @@ export interface RemoteModelProviderOptions {
    * one this deployment can serve.
    */
   model?: string | null;
+  /**
+   * Returns the caller's current Clerk session token, or `null` when signed
+   * out. Injectable so tests do not need a real Clerk instance; defaults to
+   * reading the live one via `window.Clerk`.
+   */
+  getToken?: () => Promise<string | null>;
 }
 
 export class RemoteModelProvider implements ModelProvider {
@@ -133,6 +139,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #style: StylePresetId | null;
   readonly #knowledge: string | null;
   readonly #model: string | null;
+  readonly #getToken: () => Promise<string | null>;
 
   constructor(options: RemoteModelProviderOptions = {}) {
     this.id = options.id ?? 'remote';
@@ -143,6 +150,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#style = options.style ?? null;
     this.#knowledge = options.knowledge ?? null;
     this.#model = options.model ?? null;
+    this.#getToken = options.getToken ?? getClerkToken;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
@@ -151,6 +159,7 @@ export class RemoteModelProvider implements ModelProvider {
       headers: {
         'content-type': 'application/json',
         accept: 'text/event-stream',
+        ...(await authHeaders(this.#getToken)),
       },
       body: JSON.stringify({
         prompt: request.prompt,
@@ -159,17 +168,11 @@ export class RemoteModelProvider implements ModelProvider {
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
         ...(this.#model ? { model: this.#model } : {}),
       }),
-      // Access uses a cookie; without this the browser omits it and every
-      // request looks unauthenticated.
-      credentials: 'same-origin',
-      // Never follow Access's login redirect: it is cross-origin, so following
-      // it produces an unreadable failure instead of a diagnosable one.
-      redirect: 'manual',
       signal: this.#signal,
     });
 
-    if (isAccessRedirect(response)) {
-      throw new AccessSessionError();
+    if (response.status === 401) {
+      throw new SignInRequiredError();
     }
 
     if (!response.ok) {
@@ -250,14 +253,14 @@ let probe: Promise<DeploymentConfig> | undefined;
 
 export function detectDeploymentConfig(
   fetchImpl?: typeof fetch,
+  getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<DeploymentConfig> {
   probe ??= (async () => {
     const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis);
     let response: Response;
     try {
       response = await doFetch('/api/config', {
-        credentials: 'same-origin',
-        redirect: 'manual',
+        headers: await authHeaders(getToken),
       });
     } catch {
       // No endpoint at all (pnpm dev, or the static-only deploy): the fake is
@@ -265,12 +268,15 @@ export function detectDeploymentConfig(
       return UNCONFIGURED;
     }
 
-    // A signed-out probe must not quietly answer "fake". That would run the
-    // deterministic provider and present its output as a finished result,
-    // which is the one thing the shell must never do -- the user asked a
-    // model for a project and would be shown a mock of one instead.
-    if (isAccessRedirect(response)) {
-      throw new AccessSessionError();
+    // A signed-in-but-rejected probe must not quietly answer "fake". That
+    // would run the deterministic provider and present its output as a
+    // finished result, which is the one thing the shell must never do -- the
+    // user asked a model for a project and would be shown a mock of one
+    // instead. A simply signed-out probe also lands here (no token to send),
+    // and every caller of this function already treats that rejection as
+    // "nothing to show yet" rather than an error worth surfacing.
+    if (response.status === 401) {
+      throw new SignInRequiredError();
     }
 
     if (!response.ok) return UNCONFIGURED;

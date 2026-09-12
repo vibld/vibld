@@ -16,12 +16,15 @@ pnpm --filter @vibld/web test
 `prompt → planning → staged files → validation → accepted checkpoint → preview`
 
 The orchestration is `@vibld/core`'s, not a reimplementation: the shell wires a
-`FakeModelProvider` into a `DurableGenerationRunner` over an
+`ModelProvider` into a `DurableGenerationRunner` over an
 `InMemoryGenerationStore`, validates the staged snapshot, promotes the
 checkpoint by compare-and-set and meters the run with `RunBudgetLedger`. To show
 lifecycle progress without adding an event bus to core, `src/generation/observers.ts`
 decorates the `GenerationStore` and `ModelProvider` contracts the runner already
-depends on.
+depends on. This runs the same way for both providers -- the deterministic
+fake and, since it implements the same `ModelProvider` contract, the real one
+too (see "Durable generation" below for what a real `generate()` call does on
+the other end of that fetch).
 
 `BuilderSession` (`src/generation/session.ts`) is a framework-free controller;
 React binds to it with `useSyncExternalStore`. An epoch guard means a run
@@ -30,22 +33,26 @@ into newer state.
 
 ## What this slice does not do
 
-- **The preview is a local mock.** It is static HTML assembled from the accepted
-  plan and the generated stylesheet, rendered in a fully restricted iframe
-  (`sandbox=""`). Nothing installs dependencies and no generated code runs.
-  Sandbox execution (ADR-0004) is not implemented.
+- **The default preview pane content is still a local mock.** It is static
+  HTML assembled from the accepted plan and the generated stylesheet,
+  rendered in a fully restricted iframe (`sandbox=""`); nothing installs
+  dependencies and no generated code runs there. The Preview tab's "Run in
+  sandbox" button (see "Sandbox previews" below) starts the real thing --
+  the mock is what shows before that button is pressed, and for a
+  model-generated project, which has no mock to build in the first place.
 - **There is no model provider.** Plans come from a deterministic local
   function so CI needs no credentials (ADR-0007).
 - **Console and Problems are placeholders** beyond the lifecycle log and
-  validation findings. Process output and build diagnostics arrive with sandbox
-  execution.
-- **No authentication, Git export or deployment.** A D1/R2-backed
-  `GenerationStore` exists (`worker/generation-store.ts`) and is tested
-  against the same contract `InMemoryGenerationStore` satisfies, but nothing
-  in this slice calls it yet: there is no authenticated principal to own a
-  project until Clerk lands (docs/decisions.md L1), and every generation
-  here still runs in the browser against in-memory state that a reload
-  discards.
+  validation findings. `@vibld/preview` reports install/start success or
+  failure as a whole (see "Sandbox previews" below), but nothing pipes a
+  running preview's live process output or build diagnostics into these
+  panels yet.
+- **No Git export or deployment beyond the sandbox preview.** A real
+  generation (see "Durable generation" below) is now persisted server-side in
+  D1/R2, one project per Clerk user, but there is still no UI for browsing
+  history, renaming a project, or starting a second one -- "the project" is
+  still exactly one thing per account, the same as when it lived only in the
+  browser tab's memory.
 
 ## Hosted preview (optional)
 
@@ -98,8 +105,18 @@ pnpm --filter @vibld/web build
 pnpm --filter @vibld/web deploy:preview
 ```
 
-The deployed URL is public on `workers.dev`. Put it behind Cloudflare Access if
-the work in progress should stay internal.
+The deployed Worker serves at `app.vibld.com` (a custom domain route --
+`docs/decisions.md` L20; adding it disables the `workers.dev` URL for this
+Worker entirely, so that address 404s once a custom domain exists). The
+shell itself is gated behind sign-in now (`AuthGate` in `src/auth/clerk.tsx`,
+see "Clerk authentication" below) -- a signed-out visitor sees a `<SignIn/>`
+page, not the builder. That gate only works, though, because
+`CLERK_FRONTEND_API_URL` is a **live** Clerk instance bound to the
+`vibld.com` domain: Clerk's Frontend API refuses any request whose `Origin`
+isn't `vibld.com` or a subdomain of it, so Clerk itself will not load at
+all on a deployment reachable only at some other domain (a fork's own
+`workers.dev` URL, for instance) -- put the whole route behind Cloudflare
+Access instead if a deployment like that needs to stay gated.
 
 ## Model generation (optional)
 
@@ -131,29 +148,76 @@ cannot outlive its request.
 
 ### Fail closed
 
-`/api/plan` serves a generation only when **all three** of `ANTHROPIC_API_KEY`,
-`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are present. Missing configuration means
-refused, never open: an unauthenticated endpoint on a public URL would let
-anyone spend the account's model budget.
+`/api/plan` and `/api/config` serve a generation only when a provider key
+(`ANTHROPIC_API_KEY` or `DEEPSEEK_API_KEY`), `USER_BUDGET`,
+`CLERK_FRONTEND_API_URL`, `GENERATION_WORKFLOW`, `DB` and `PROJECT_CONTENT`
+are **all** present. Missing configuration means refused, never open: an
+unauthenticated endpoint on a public URL would let anyone spend the account's
+model budget.
 
-The Worker verifies the Cloudflare Access JWT itself rather than trusting the
-`Cf-Access-Jwt-Assertion` header. Access already checks at the edge, but a
-header is forgeable by anyone reaching the origin directly, and ADR-0006
-requires proving a raw URL cannot bypass access control. Verification pins
-RS256 (rejecting the `alg: none` downgrade), matches the application audience
-and team issuer, and honours expiry with a small skew allowance.
+The Worker verifies the Clerk session JWT itself (`worker/principal.ts`,
+`worker/clerk-auth.ts`) rather than trusting the browser's session cookie --
+which never arrives here anyway, since the cookie is scoped to Clerk's own
+Frontend API domain, not this Worker's origin. The client sends the token as
+`Authorization: Bearer <token>` instead (`src/auth/clerk-token.ts`,
+`src/generation/remote-provider.ts`), and ADR-0006 requires the Worker to
+verify it itself regardless. Verification pins RS256 (rejecting the
+`alg: none` downgrade), matches the Clerk instance's issuer, and honours
+expiry with a small skew allowance.
+
+**Cloudflare Access is off** (docs/decisions.md L5): Clerk is the only gate.
+
+### Durable generation (docs/decisions.md L26)
+
+A real generation's model call, staging, validation and promotion now run
+inside `GenerationWorkflow` (`worker/generation-workflow.ts`), a Cloudflare
+Workflow instance, against the D1/R2-backed `GenerationStore`
+(`worker/generation-store.ts`) rather than in `handlePlan`'s own request
+scope. `handlePlan` creates one instance per run (its id doubling as the
+Workflow instance id) and polls `WorkflowInstance.status()` over the same SSE
+connection it already holds open, so `remote-provider.ts`'s client contract
+(`event: plan` / `event: error`) is unchanged. One project per Clerk user for
+now: there is no multi-project UI, so the D1 project id is just the user's own
+id (`worker/generation-run.ts`'s `WorkflowParams.projectId` comment).
+
+Two things this costs, both accepted rather than solved here:
+
+- **No live character progress for a real generation.** There is no channel
+  between a Workflow step and the Worker polling it -- only the step's return
+  value once it finishes. The stream still emits keepalives, so a long run
+  reads as "still going", not as "how far along". The old in-request
+  `onProgress` callback only ever existed for exactly this endpoint, so the
+  fake provider (which never streamed live progress either) is unaffected.
+- **Cancelling stops the _next_ step, not the current one.** `handlePlan`
+  calls `WorkflowInstance.terminate()` on disconnect, but termination lands
+  at a step boundary; a cancel that arrives mid-model-call cannot stop that
+  one call from finishing (or being billed for). `budget.ts`'s existing
+  abandoned-reservation reclaim is the backstop either way -- the same one a
+  Worker dying mid-request already relied on before this change.
+- **The browser still keeps its own working copy.** `BuilderSession` sends
+  its whole `base` snapshot with every request rather than asking the server
+  to look one up, so `D1GenerationStore.loadAccepted` is never actually
+  reached in this path yet -- the client remains the thing every other part
+  of the shell (preview, zip export, the next turn's `base`) reads from. What
+  changed is that D1/R2 also durably record every run alongside it, and a
+  Workflow, not a request handler, is what drives the model call and the
+  promotion. Making the server copy authoritative -- so a reload could resume
+  a project the browser tab never saw start -- is a real next step, not this
+  one.
 
 ### Setup
 
-1. Enable Access on the Worker: **Workers & Pages → the Worker → Settings →
-   Domains & Routes**, then **Enable Cloudflare Access** for the `workers.dev`
-   URL. This works on `workers.dev` directly — no custom domain needed.
-2. In **Zero Trust → Access → Applications**, open the generated application
-   and copy its **Application Audience (AUD) tag**.
-3. Set `ACCESS_TEAM_DOMAIN` (e.g. `yourteam.cloudflareaccess.com`) and
-   `ACCESS_AUD` in `wrangler.jsonc`, then redeploy.
-4. Add the key as a Worker secret — it must never be committed:
+1. Create a Clerk application and note its **Frontend API URL** (**Configure
+   → API Keys**, e.g. `https://clerk.vibld.com`).
+2. Set `CLERK_FRONTEND_API_URL` in `wrangler.jsonc`'s `vars` -- a public
+   identifier, not a secret -- then redeploy.
+3. Add the provider key as a Worker secret — it must never be committed:
    `wrangler secret put ANTHROPIC_API_KEY`
+4. Add `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` to the `preview`
+   environment (the deploy workflow's Build step inlines the publishable key
+   as `VITE_CLERK_PUBLISHABLE_KEY`; `CLERK_SECRET_KEY` is currently unused by
+   any Worker code -- JWKS verification needs no secret -- and is kept only
+   because Clerk issues both together).
 
 Until all of that is in place the deployed shell keeps running the fake, which
 is the intended safe default.
@@ -166,76 +230,304 @@ optionally installs and builds the generated project as the ADR-0002
 portability check. It needs `ANTHROPIC_API_KEY` on the `preview` environment
 and spends model tokens on each run.
 
-## Clerk authentication (sign-in live; not yet gating anything)
+## Clerk authentication (the cutover -- docs/decisions.md L5)
 
-The Clerk instance exists and is live: Frontend API at
+Clerk is the only thing that gates `/api/plan` and `/api/config` now.
+Cloudflare Access is off. The Clerk instance is live: Frontend API at
 `https://clerk.vibld.com` (a custom domain -- its DNS record must stay
 **DNS only**, not proxied, or Cloudflare intercepts it with its own "DNS
 points to prohibited IP" error before Clerk ever sees the request), with
 `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` set on the `preview`
-environment.
+environment, the custom session claim configured, and **Waitlist** sign-up
+mode enabled (L6) so sign-in stays restricted to people Chris approves.
 
-Two independent pieces exist so far:
+Two pieces, wired together:
 
-- **Verification** (`worker/clerk-auth.ts`, `worker/platform-admins.ts`):
-  verifies Clerk session tokens (RS256, JWKS-pinned, the same shape as the
-  Access verification above) and decides platform-admin status from a
-  verified, allow-listed email. Built and tested against the real JWKS
-  endpoint; not called from request handling yet.
-- **Sign-in** (`src/auth/clerk.tsx`): `ClerkRoot` wraps the app in
-  `ClerkProvider` and the header shows a working sign-in button / user menu,
-  using `VITE_CLERK_PUBLISHABLE_KEY` at build time (`CLERK_PUBLISHABLE_KEY`
-  on the `preview` environment, synced by the deploy workflow's Build step).
-  A visitor can sign in for real right now -- it just doesn't unlock
-  anything yet.
+- **Verification** (`worker/principal.ts`, `worker/clerk-auth.ts`):
+  `resolvePrincipal` reads the `Authorization: Bearer` header, verifies it
+  (RS256, JWKS-pinned) against `CLERK_FRONTEND_API_URL`, and returns a
+  `Principal` with two identities that are **not interchangeable**:
+  - `userId` -- the Clerk user id (`sub`). What `handlePlan`'s spend ledger
+    and rate limiting key on (docs/decisions.md L3: "the budget ledger and
+    every ownership row key on the Clerk user id. Email is display only.").
+  - `policyIdentity` -- the verified email, or the shared `'unknown'` bucket
+    when the email claim is missing or unverified. What `VIBLD_MODEL_POLICY`
+    and `VIBLD_PLATFORM_ADMINS` (L4) are checked against instead: both
+    predate Clerk, are human-edited by email address, and are not ownership
+    rows.
 
-Neither is wired to `requireAccess` in `worker/index.ts`. Access stays
-authoritative until Clerk sign-in and the abuse controls in
-docs/decisions.md L29 are both ready to land in the same deploy
-(docs/decisions.md L5) -- this exists so that deploy is a cutover, not a
-rewrite. Both pieces above gracefully no-op if their key is ever unset
-(`ClerkRoot` renders its children unwrapped; `AuthStatus` renders nothing),
-so an incomplete deployment never breaks the app that already works.
+  An email claim with no verification status attached is never treated as
+  verified by default (`platform-admins.ts`'s `isPlatformAdmin` and
+  `principal.ts`'s `policyIdentity` both require `emailVerified === true`) --
+  that would turn a missing dashboard setting into an open grant.
 
-**Still needed before the cutover:**
+- **Sign-in** (`src/auth/clerk.tsx`, `src/auth/clerk-token.ts`): `ClerkRoot`
+  wraps the app in `ClerkProvider`; the header's `AuthStatus` shows a sign-in
+  button or the user menu. `clerk-token.ts` is the JSX-free half --
+  `getClerkToken()` (read via `window.Clerk`, since the session cookie is
+  scoped to Clerk's own domain and never reaches this Worker's origin on its
+  own) and `onClerkSessionChange()` (so `useBuilderSession.ts` re-probes
+  `/api/config` the moment someone signs in through the modal, rather than
+  requiring a reload) -- kept apart from `clerk.tsx`'s JSX specifically so
+  `node --test --experimental-strip-types` (which strips types but not JSX)
+  can still import it.
 
-1. A custom session token claim, from **Configure → Sessions → Edit** →
-   **Customize session token** in the Clerk dashboard, so verified requests
-   carry an email at all:
-   ```json
-   { "email": "{{user.primary_email_address}}" }
-   ```
-   `clerk-auth.ts` also reads `email_verified` as a boolean off the token; if
-   Clerk's shortcut for the primary address's verification status differs
-   from what's above once you're in the live claims editor, add it there
-   rather than guessing it here -- an unconfirmed shortcode in an auth claim
-   is worse than one left out, since `platform-admins.ts` treats an absent
-   `email_verified` as unverified, not as granted.
-2. `VIBLD_PLATFORM_ADMINS` on the `preview` environment: comma-separated
-   verified emails to grant platform-admin access.
-3. The rest of the L29 abuse controls -- Turnstile on sign-up and anonymous
-   generation, a WAF rate limit on `/api/*`, disposable-email blocking at
-   sign-up. All three are dashboard-only configuration (Cloudflare Turnstile
-   and WAF rules, Clerk's disposable-email restriction), not something this
-   session's tool access can set up:
-   - Turnstile: <https://dash.cloudflare.com> → **Turnstile** → create a
-     widget for `vibld.com`/the preview `workers.dev` origin.
-   - WAF rate limit: <https://dash.cloudflare.com> → the zone → **Security →
-     WAF → Rate limiting rules** → a rule on `/api/*`.
-   - Disposable email: <https://dashboard.clerk.com> → the app → **Rules** →
-     enable **Block sign-ups that use disposable email addresses**.
+Both gracefully no-op if `VITE_CLERK_PUBLISHABLE_KEY` is ever unset
+(`ClerkRoot` renders its children unwrapped; `AuthStatus` renders nothing;
+`getClerkToken()` returns `null`) -- but since Access is off, an unset key on
+a live deployment now means generation is unreachable, not merely
+unauthenticated, which is the fail-closed behaviour `isConfigured` in
+`worker/index.ts` requires.
 
-   The fourth L29 item -- an account-wide daily ceiling above the per-user
-   one, "so one compromised account cannot spend the month" -- is done:
-   `worker/index.ts`'s `reserveBudget` reserves against a second ledger
-   (`USER_BUDGET`'s namespace, reserved key `__account__`) before the
-   per-user one, and releases it if the per-user reservation then fails.
-   `VIBLD_ACCOUNT_DAILY_MICRO_USD` controls it (default $80.00/day, 20x the
-   per-user default) -- that default is a starting point, not a measured
-   figure; adjust it once real usage gives one.
+**What only Chris can do (one-time, dashboard-only):**
 
-4. The switch itself: `requireAccess` replaced by Clerk verification in
-   `worker/index.ts`, in the same deploy as the three manual items above.
+- **Remove the Cloudflare Access application** that used to gate this
+  Worker's route: <https://one.dash.cloudflare.com/> → **Access →
+  Applications** → find the one protecting `vibld-web-preview` (or wherever
+  the builder is routed) → delete it. Leaving it in place means Access still
+  intercepts every request before Clerk is ever reached, regardless of what
+  the Worker's own code does -- Access was always a second, independent gate
+  at the edge, not something this repository's deploy can remove on its own.
+- **Waitlist mode**: `https://dashboard.clerk.com/~/user-authentication/access-mode`
+  → **Waitlist** → **Save** (done). Approve or deny requests at
+  `https://dashboard.clerk.com/~/users/waitlist`.
+- `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) is set on the
+  deployment, but nothing reads it yet -- `platform-admins.ts`'s
+  `isPlatformAdmin` exists and is tested, but no endpoint calls it. There is
+  no admin-only surface to gate until one exists; wiring it in ahead of that
+  would be guessing at a shape nothing has tested yet.
+
+### Abuse controls required before Access came off (docs/decisions.md L29)
+
+Access is off; sign-up is open to anyone (subject to Waitlist approval).
+L29 named five controls that had to ship first -- audited directly, not
+assumed, once that was true:
+
+1. **Turnstile on sign-up** -- Clerk's own, not something this repo builds:
+   confirmed via Clerk's `/v1/environment` (`display_config.captcha_provider:
+"turnstile"`, `user_settings.sign_up.captcha_enabled: true`).
+2. **Per-IP rate limit** -- `IP_BURST` (`wrangler.jsonc`), checked in
+   `handlePlan` before `resolvePrincipal` is ever called. `PLAN_BURST`/
+   `PLAN_SUSTAINED` key on the Clerk user id, so they do nothing for a flood
+   of requests that never resolves to a valid one -- this is the layer that
+   does. Not literally a Cloudflare WAF rule (that needs zone permissions
+   this deployment's token doesn't have -- see "Deploying" above); the same
+   Workers Rate Limiting mechanism, keyed by `CF-Connecting-IP` instead.
+3. **Disposable-domain blocking** -- also Clerk's own: confirmed via the
+   same environment response
+   (`user_settings.restrictions.block_disposable_email_domains.enabled:
+true`).
+4. **Per-user ceiling** -- `reserveBudget`'s tier allowance, documented
+   above (L36-L39).
+5. **Account-wide daily ceiling** -- `VIBLD_ACCOUNT_DAILY_MICRO_USD`,
+   documented above (L29).
+
+## Sandbox previews (docs/decisions.md L7-L11)
+
+`/api/preview` runs the caller's own project for real -- `npm install`, then
+a live dev server -- in a genuinely untrusted, time-boxed container, and
+returns a URL to view it. All of the actual work (the container, egress
+lockdown, concurrency, lifetime, sharing) lives in `@vibld/preview`, a
+separate Worker; see that package's README for why, and for the full
+sharing design (L10). This app's own `worker/preview-client.ts` is a thin,
+authenticated forwarder: it resolves the caller's Clerk principal, then
+calls `@vibld/preview` over a service binding, trusting nothing the browser
+could have supplied itself.
+
+- `POST /api/preview` -- body `{ "files": [{ "path", "content" }, ...] }`
+  (the same shape `/api/plan`'s `base` already uses). Starts a preview, or
+  reports queued/in-progress if the caller already has one running.
+- `GET /api/preview` -- polls the current preview's status. Never starts or
+  enqueues anything; safe to call as often as needed.
+- `DELETE /api/preview` -- stops the caller's preview early. Idempotent.
+
+Every response is one of: `{status: "queued", position}`,
+`{status: "ready-to-start"}` (a slot freed while queued -- call `POST`
+again with the files to actually start), `{status: "installing" | "starting"}`,
+`{status: "ready", url, expiresAt}`, or `{status: "failed", error}`.
+
+`/api/preview` answers `503` when `PREVIEW` or `PREVIEW_INTERNAL_SECRET` is
+unset -- unavailable, never open, the same rule `isConfigured` already
+applies to `/api/plan`.
+
+- `POST /api/preview/share` -- no body. Mints a new share link (L10) for
+  the caller's currently-running preview; `409` if nothing is running to
+  share. Returns `{ shareId, expiresAt, url }`.
+- `GET /api/preview/share` -- every grant ever issued for the caller's
+  preview, active or not: `{ shares: [{ shareId, createdAt, expiresAt,
+revoked, url? }, ...] }`. `url` is present only for a still-active grant.
+- `DELETE /api/preview/share` -- body `{ "shareId" }`. Revokes one grant,
+  independently of the preview it points at and of any other grant.
+  Idempotent.
+
+### In the builder shell
+
+The Preview tab's "Run in sandbox" button calls `/api/preview` with the
+accepted checkpoint's files
+(`src/generation/preview-client.ts`, the browser-side mirror of
+`worker/preview-client.ts`'s `PreviewStatus` union and its defensive
+parsing) and polls until the sandbox settles, then swaps the local mock for
+a real `<iframe src>` pointed at the returned URL. "Stop" ends it early;
+the tab shows a `live` badge while a sandbox is running, since it keeps
+running even while another tab is in view.
+
+The polling state lives in `Workspace.tsx` (`generation/use-preview-sandbox.ts`'s
+`usePreviewSandbox`), one level above `PreviewPanel`, not inside
+`PreviewPanel` itself: `Workspace` renders `PreviewPanel` only while the
+Preview tab is active, so state scoped to `PreviewPanel` would be torn
+down -- along with the poll loop -- every time the user switched to Code or
+Console and back, silently orphaning a sandbox that was still running.
+
+Once a sandbox is `ready`, the panel also shows a **Share** section
+(`PreviewPanel.tsx`'s `SharePanel`): a "Share" button (`usePreviewSandbox`'s
+same hook, extended with `shares`/`share`/`revokeShare`), a list of every
+currently-active link with a "Revoke" button of its own, and a standing
+warning that anyone with a link can view the running app and everything it
+shows -- ADR-0006 requires that warning be part of the flow, not a tooltip
+nobody opens. Shares are cleared from view (not revoked -- just no longer
+this session's to show) the moment the sandbox itself stops or fails, since
+a share only ever makes sense against a preview that is actually running.
+
+### Setup
+
+1. Deploy `@vibld/preview` first (see its own README) -- apps/web's service
+   binding only routes successfully once `vibld-preview` exists.
+2. Add `PREVIEW_INTERNAL_SECRET` (a long random value) to the `preview`
+   environment here, the same value used when deploying `@vibld/preview`.
+   The **Deploy web preview** workflow syncs it to this Worker.
+
+## Billing (docs/decisions.md L12-L15)
+
+Stripe-hosted Checkout and Billing Portal (L12): card data never reaches
+this Worker, only a redirect URL does. Stripe webhooks mirror subscription
+state into D1 (L13); the app reads that copy, not Stripe, on every request
+that needs it. Vibld owns the Clerk-user-id-to-Stripe-customer mapping
+(L14) via `client_reference_id` and customer metadata -- not Clerk Billing.
+Stripe Tax is on for every Checkout Session (L15).
+
+The five prices this deployment sells (L36/L38: Build $29/mo or $290/yr,
+Ship $99/mo or $990/yr, Top-up $20 one-time) already exist in the live
+Stripe account, referenced here by `lookup_key` (`stripe-client.ts`'s
+`PRICE_LOOKUP_KEYS`) rather than by id -- correcting a price in the Stripe
+Dashboard needs no code change, only the amount to change.
+
+- `GET /api/billing/status` -- authenticated, no body. Returns the caller's
+  own tier, this period's spend against their allowance, remaining top-up
+  credit, and whether a Stripe customer exists yet for them (see "Billing UI
+  in the builder shell" below).
+- `POST /api/billing/checkout` -- body `{ "tier": "build" | "ship", "interval": "monthly" | "annual" }`
+  or `{ "topup": true }`. Authenticated the same way `/api/plan` is; returns
+  `{ url }`, the Checkout Session to redirect the browser to.
+- `POST /api/billing/portal` -- authenticated, no body. Returns `{ url }` for
+  the Stripe-hosted Billing Portal, where a customer manages or cancels
+  their own subscription.
+- `POST /api/stripe/webhook` -- Stripe's own POST, not a browser's. No Clerk
+  session exists to check; the `Stripe-Signature` header, verified against
+  the raw body before anything is parsed (L30), is the entire
+  authentication. Subscribed events: `checkout.session.completed`,
+  `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
+  `invoice.payment_failed` (the last two are acknowledged but not yet
+  separately mirrored -- `customer.subscription.updated` already carries
+  the status change either one implies).
+- A nightly Cron Trigger (`wrangler.jsonc`'s `triggers.crons`) re-reads every
+  mirrored subscription from Stripe and corrects any drift a missed or
+  failed webhook delivery left behind (L13).
+
+### Provider balance alerts (docs/decisions.md L44)
+
+The same nightly Cron Trigger also runs `worker/provider-balance.ts`'s
+`checkProviderBalances` -- one "daily" schedule, not two. Only **DeepSeek**
+is actually checked: its `/user/balance` endpoint uses the same
+`DEEPSEEK_API_KEY` this deployment already holds for generation, no
+separate credential. **Anthropic has no public balance-check API** outside
+the Console as of this writing -- reading its spend programmatically needs
+an Admin API key (the Usage and Cost Admin API), a distinct, more
+privileged credential from the plain key used for generation. That gap is
+real and recorded here rather than silently skipped.
+
+Below `VIBLD_DEEPSEEK_BALANCE_ALERT_USD` (default $10), an alert is sent
+through Resend to `VIBLD_ALERT_EMAIL` (default `billing@vibld.com`) from
+`VIBLD_ALERT_FROM` (default `alerts@notifications.vibld.com`, the
+transactional domain L17 already reserves). Additive like every other
+optional secret here: unset `RESEND_API_KEY` means the check still runs and
+logs, it just cannot send. To turn alerts on, add `RESEND_API_KEY` (the
+same key apps/marketing already uses -- Cloudflare Secrets are per-Worker,
+so it has to be added here too) to the `preview` environment; the deploy
+workflow syncs it the same way it already syncs every other optional
+secret on this page. Actually sending also needs `notifications.vibld.com`
+verified in Resend -- apps/marketing's own README already tracks that as
+outstanding under its "What only Chris can do."
+
+### What a tier actually buys (docs/decisions.md L35-L39)
+
+`/api/plan`'s own spend gate (`worker/index.ts`'s `reserveBudget`) reads the
+caller's mirrored subscription (`worker/entitlement.ts`'s `tierFor`) and
+ceilings each run against three layers, in order:
+
+1. **The account-wide daily ceiling** (L29) -- unchanged, still a UTC day.
+2. **The caller's own monthly tier allowance** (L36): Free $1/mo, Build
+   $10/mo, Ship $40/mo, resetting on the UTC calendar month.
+3. **Top-up credit** (L37), tried only once the monthly allowance is
+   genuinely exhausted, not merely low. A top-up is not period-scoped --
+   it persists until spent, tracked as its own `USER_BUDGET` instance keyed
+   `"<userId>:topup"` rather than a separate table, so the ceiling for that
+   instance (the caller's lifetime top-up total, from
+   `BillingStore.totalTopupCreditMicroUsd`) less what has been spent from it
+   _is_ the remaining balance -- the same mechanism that already enforces
+   every other ceiling here, reused rather than reimplemented.
+
+A caller with no active subscription is Free. A denied `SpendVerdict`'s own
+reason is `period-ceiling` now, not `daily-ceiling` -- it covers both the
+account's daily layer and a tier's monthly one, whichever fires.
+
+Two deliberate simplifications, both documented at their own definitions
+rather than repeated here: the monthly reset is the calendar month for
+everyone, not each subscription's own billing-cycle anchor
+(`entitlement.ts`'s `allowancePeriodKey`); and a top-up's 12-month expiry
+(L36) is approximated by excluding old purchases from the running total
+outright, not by tracking each purchase's own expiry against what was
+actually drawn from it first (`BillingStore.totalTopupCreditMicroUsd`).
+
+### Billing UI in the builder shell (L35)
+
+The header now shows the caller's tier and this period's spend against their
+allowance (`GET /api/billing/status`, `worker/index.ts`'s `handleBillingStatus`
+-- a read-only mirror of exactly what `reserveBudget` above computes and
+reserves against; nothing new is authoritative, `UserBudget` still is), plus:
+
+- **A tier picker and "Upgrade" button**, shown only on the Free tier --
+  starts a Checkout Session for the chosen tier at the monthly price
+  (`src/billing/billing-client.ts`'s `startCheckout`).
+- **"Buy top-up"** -- always offered; a top-up is a fallback layer regardless
+  of tier (see above).
+- **"Manage billing"**, opening the Stripe-hosted Billing Portal -- shown
+  only once the status endpoint reports a Stripe customer exists
+  (`hasStripeCustomer`), since the Portal 502s without one and a caller who
+  has never checked out has nothing to manage yet.
+
+Every button redirects the whole page to a Stripe-hosted URL and back
+(`success_url`/`cancel_url`/the Portal's `return_url`), so there is no
+in-app checkout state to keep in sync -- the next mount just fetches the
+status again. `src/components/BillingStatus.tsx` is the JSX half; the fetch
+wrapper and URL-shaped response parsing it calls are JSX-free
+(`src/billing/billing-client.ts`) for the same testability reason
+`remote-provider.ts` is (see that file's own doc comment).
+
+### Setup
+
+1. Add `STRIPE_SECRET_KEY` -- the account's live secret key
+   (https://dashboard.stripe.com/apikeys) -- to the `preview` environment
+   here. The **Deploy web preview** workflow syncs it to this Worker, the
+   same way it already syncs `PREVIEW_INTERNAL_SECRET` above.
+2. Add `STRIPE_WEBHOOK_SECRET` -- the signing secret for this deployment's
+   registered webhook endpoint (https://dashboard.stripe.com/workbench/webhooks)
+   -- to the same environment. Relayed once, out of band, when the endpoint
+   is created -- never committed here.
+3. Once `app.vibld.com` (L20) is live, update that webhook endpoint's `url`
+   to point at it (a Dashboard edit or one API call; the signing secret does
+   not change). Until then, deliveries queue and retry against a domain
+   that does not yet resolve to this Worker -- harmless, since nothing can
+   subscribe before both the code and the domain exist.
 
 ## Generated output
 

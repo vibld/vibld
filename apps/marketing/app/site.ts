@@ -29,6 +29,8 @@ export const SITE = {
    * committed; it lives on the `marketing` GitHub environment.
    */
   turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',
+  /** Issue #7 -- link the repository and the open-source, portable-code promise. */
+  repoUrl: 'https://github.com/vibld/vibld',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   /**
@@ -40,9 +42,8 @@ export const SITE = {
    * so it lists only profiles that actually exist -- an invented URL is worse
    * than an omitted one.
    */
-  github: 'https://github.com/vibld',
-  /** Absolute URL is filled in against SITE.url; see `metaFor`. */
-  ogImage: '/og.png',
+  /** The social card built by the brand system (issue #7). Absolute URL is filled in against SITE.url; see `metaFor`. */
+  ogImage: '/og-image.png',
   ogImageAlt:
     'Vibld — an AI application builder that generates conventional, portable projects.',
   /** One sentence, reused verbatim in schema, llms.txt and the OG card. */
@@ -201,7 +202,7 @@ export function organizationSchema() {
           logo: new URL('/favicon.svg', SITE.url).toString(),
           description: SITE.summary,
           email: SITE.emails.hello,
-          sameAs: [SITE.github],
+          sameAs: [SITE.repoUrl],
           address: {
             '@type': 'PostalAddress',
             streetAddress: '285 W Wieuca Rd NE STE 62715',

@@ -6,6 +6,23 @@
   // as of" date in Cloudflare's table, so no compatibility_date turns it on.
   "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
 
+  // docs/decisions.md L20: app.vibld.com serves the builder. Also the fix for
+  // a real bug: CLERK_FRONTEND_API_URL above is a *live* Clerk instance, and
+  // a live instance's Frontend API refuses any request whose Origin isn't
+  // vibld.com or a subdomain of it (confirmed directly against Clerk's own
+  // API -- "The Request HTTP Origin header must be equal to or a subdomain of
+  // the requesting URL"). Every *.workers.dev URL this Worker has ever been
+  // reachable at, Clerk itself has silently refused to load on.
+  //
+  // A custom domain route provisions its own DNS record on deploy -- no
+  // separate DNS step -- but only if the deploying token can manage it: the
+  // documented CLOUDFLARE_API_TOKEN scope for this workflow is "Workers
+  // Scripts: Edit" only (README.md, deploy-web-preview.yml), which is not
+  // enough. Needs DNS edit (or the "Cloudflare Workers Custom Domains"
+  // permission group) added on the vibld.com zone before this can deploy --
+  // see the PR this shipped in for the exact one-time step.
+  "routes": [{ "pattern": "app.vibld.com", "custom_domain": true }],
+
   // The Worker handles /api/* only; everything else is served straight from
   // the built SPA. Explicit routing is used rather than the implicit
   // Sec-Fetch-Mode heuristic so an API path can never fall through to
@@ -20,17 +37,15 @@
 
   // ANTHROPIC_API_KEY is a Worker secret, set out of band and never committed.
   //
-  // The two values below are public identifiers rather than secrets: the team
-  // domain is the Access login hostname and the AUD tag names the Access
-  // application. /api/plan verifies each request's Access token against them,
-  // and refuses every request unless all three are present.
+  // docs/decisions.md L5: Cloudflare Access is off. CLERK_FRONTEND_API_URL is
+  // the only identity setting left -- a public identifier, not a secret.
+  // /api/plan and /api/config both verify each request's Clerk token against
+  // it, and refuse every request unless it and a provider key are present.
   "vars": {
     // Which model service answers /api/plan. "anthropic" or "deepseek".
     // The deploy workflow reads this to decide which key must be present
     // before it will deploy.
     "VIBLD_PROVIDER": "deepseek",
-    "ACCESS_TEAM_DOMAIN": "chris-brock-llc.cloudflareaccess.com",
-    "ACCESS_AUD": "5d652184451045c3fde8eca6a09ebaa59fd4704666b94d839bebde5cf992d5d7",
 
     // Clerk's Frontend API URL -- a public identifier, not a secret. Used as
     // both the JWT issuer to match and the base for the JWKS fetch
@@ -38,18 +53,17 @@
     // CLERK_PUBLISHABLE_KEY are Worker/build secrets set out of band.
     "CLERK_FRONTEND_API_URL": "https://clerk.vibld.com",
 
-    // Micro-USD one user may spend per UTC day: 4000000 == $4.00.
-    //
     // A run reserves its worst case up front -- with a 64000-token output
     // ceiling that is about $1.61 -- and is reconciled to what it actually
-    // cost once it finishes. So this does not buy two runs a day: it buys as
-    // many as fit once each is settled at its real price, while still
-    // requiring $1.61 of headroom before any single run may start.
+    // cost once it finishes.
     //
-    // The per-user ceiling is also the aggregate one -- (users x ceiling) is
-    // the most the account can be billed in a day, which works because Access
-    // keeps the user set small and enumerable.
-    "VIBLD_DAILY_MICRO_USD": "4000000",
+    // What one user may spend now comes from their subscribed tier
+    // (docs/decisions.md L35-L39: Free $1/mo, Build $10/mo, Ship $40/mo,
+    // plus top-up credit), not a flat env var -- see worker/entitlement.ts.
+    // No VIBLD_FREE_MONTHLY_MICRO_USD here on purpose: its $1.00 default
+    // already matches L36, and Build/Ship are not operator-configurable at
+    // all (their included spend is fixed by the accepted price table). Set
+    // it only to correct the Free tier's own figure.
     "VIBLD_MAX_IN_FLIGHT": "2",
     // No VIBLD_USD_MICRO_PER_* here on purpose. An explicit price overrides
     // the chosen model's own rate, so pinning Anthropic's 5/25 while running
@@ -77,6 +91,22 @@
       "namespace_id": "1002",
       "simple": { "limit": 10, "period": 60 },
     },
+    // docs/decisions.md L29: "a per-IP WAF rate limit" required before
+    // Cloudflare Access comes off. PLAN_BURST/PLAN_SUSTAINED above are keyed
+    // on the caller's Clerk user id -- real protection once someone is
+    // signed in, but no defense at all against a flood of requests that
+    // never gets that far (garbage/expired tokens still cost a JWKS
+    // verification each). This is the same Workers Rate Limiting mechanism,
+    // just keyed on CF-Connecting-IP instead, and checked before identity is
+    // resolved -- an actual zone-level WAF rule would need Cloudflare
+    // account/zone permissions this deployment's token doesn't have (see
+    // apps/web/README.md's Deploying section), so this is the equivalent
+    // control achievable from inside the Worker itself.
+    {
+      "name": "IP_BURST",
+      "namespace_id": "1003",
+      "simple": { "limit": 20, "period": 60 },
+    },
   ],
 
   // The spend ceiling. Also not provisioned: the object is created on first
@@ -88,12 +118,23 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserBudget"] }],
 
+  // Durable generation (docs/decisions.md L26). A Workflow binding is
+  // declared independently of durable_objects above -- Workflows are built
+  // on Durable Objects internally, but that is Cloudflare's implementation
+  // detail, not something this binding needs a migrations entry for.
+  "workflows": [
+    {
+      "name": "vibld-generation",
+      "binding": "GENERATION_WORKFLOW",
+      "class_name": "GenerationWorkflow",
+    },
+  ],
+
   // The control plane (docs/decisions.md L24/L25): D1 for generation
   // metadata, R2 for the file content it points at. Provisioned already --
-  // see apps/web/migrations/ for the schema. worker/generation-store.ts is
-  // not wired into request handling yet: there is no authenticated principal
-  // to own a project until Clerk lands (L1), and writing that wiring before
-  // there is anyone to test it against would be guessing at the shape.
+  // see apps/web/migrations/ for the schema. Wired into request handling by
+  // GenerationWorkflow (worker/generation-workflow.ts), the only thing that
+  // constructs worker/generation-store.ts now.
   "d1_databases": [
     {
       "binding": "DB",
@@ -104,4 +145,16 @@
   "r2_buckets": [
     { "binding": "PROJECT_CONTENT", "bucket_name": "vibld-control-plane" },
   ],
+
+  // Sandbox execution (docs/decisions.md L7-L11) -- see
+  // apps/preview/README.md for why it lives in its own Worker.
+  // PREVIEW_INTERNAL_SECRET is a Worker secret, set out of band and shared
+  // with @vibld/preview's copy of the same value.
+  "services": [{ "binding": "PREVIEW", "service": "vibld-preview" }],
+
+  // Stripe billing (docs/decisions.md L12-L15). STRIPE_SECRET_KEY and
+  // STRIPE_WEBHOOK_SECRET are Worker secrets, set out of band -- see
+  // apps/web/README.md's "Billing" section. Off-peak UTC time, arbitrarily;
+  // nothing about the reconcile depends on when it runs.
+  "triggers": { "crons": ["17 9 * * *"] },
 }

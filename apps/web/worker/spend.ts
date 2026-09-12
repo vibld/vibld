@@ -86,6 +86,17 @@ export interface TokenUsage {
   outputTokens: number;
 }
 
+/**
+ * Reserved key for the account-wide ledger, sharing `USER_BUDGET`'s namespace
+ * with every per-user key rather than needing a second binding. Safe as long
+ * as it can never collide with a real identity: per-user keys are Clerk user
+ * ids (docs/decisions.md L3), which are always prefixed "user_", and this is
+ * not one. Shared between `index.ts` (which reserves against it) and
+ * `generation-workflow.ts` (which settles it), so the two cannot drift onto
+ * different keys for the same ledger.
+ */
+export const ACCOUNT_BUDGET_KEY = '__account__';
+
 export function microUsdOf(usage: TokenUsage, prices: TokenPrices): number {
   return Math.ceil(
     usage.inputTokens * prices.inputMicroUsd +
@@ -124,10 +135,10 @@ export function worstCaseMicroUsd(
 
 export type SpendVerdict =
   | { allow: true }
-  | { allow: false; reason: 'daily-ceiling' | 'too-many-in-flight' };
+  | { allow: false; reason: 'period-ceiling' | 'too-many-in-flight' };
 
 export interface SpendQuestion {
-  /** Already spent or reserved today, in micro-USD. */
+  /** Already spent or reserved in the current period, in micro-USD. */
   spentMicroUsd: number;
   /** Runs started and not yet settled. */
   inFlight: number;
@@ -153,12 +164,22 @@ export function decide(question: SpendQuestion): SpendVerdict {
     question.spentMicroUsd + question.worstCaseMicroUsd >
     question.ceilingMicroUsd
   ) {
-    return { allow: false, reason: 'daily-ceiling' };
+    return { allow: false, reason: 'period-ceiling' };
   }
   return { allow: true };
 }
 
-/** The UTC day a run belongs to. Ceilings reset at 00:00 UTC. */
+/**
+ * The UTC day a run belongs to. `budget.ts`'s `UserBudget` groups spend by
+ * whatever key it is given; this is the account-wide ceiling's key
+ * (docs/decisions.md L29, genuinely daily) -- `monthKey` below is the
+ * per-user one (L35-L39, a monthly tier allowance).
+ */
 export function dayKey(at: number): string {
   return new Date(at).toISOString().slice(0, 10);
+}
+
+/** The UTC calendar month a run belongs to, e.g. "2026-09". */
+export function monthKey(at: number): string {
+  return new Date(at).toISOString().slice(0, 7);
 }

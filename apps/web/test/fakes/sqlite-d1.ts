@@ -48,6 +48,16 @@ class SqliteD1Statement implements D1PreparedStatement {
     const row = statement.get(...(this.#values as never[]));
     return (row as T | undefined) ?? null;
   }
+
+  async all<T = Record<string, unknown>>(): Promise<D1Result<T>> {
+    const statement = this.#db.prepare(this.#sql);
+    const rows = statement.all(...(this.#values as never[]));
+    return {
+      results: rows as T[],
+      success: true,
+      meta: { changes: 0, last_row_id: 0 },
+    };
+  }
 }
 
 export class SqliteD1Database implements D1Database {

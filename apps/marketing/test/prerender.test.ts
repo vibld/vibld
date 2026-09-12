@@ -280,8 +280,8 @@ describe('social and structured metadata', () => {
     }
     // twitter:card promises a large image; it has to exist on disk.
     assert.ok(
-      existsSync(join(CLIENT, 'og.png')),
-      'public/og.png did not build',
+      existsSync(join(CLIENT, 'og-image.png')),
+      'public/og-image.png did not build',
     );
   });
 
@@ -304,6 +304,6 @@ describe('social and structured metadata', () => {
     const org = JSON.parse(block![1])['@graph'].find(
       (node: { '@type': string }) => node['@type'] === 'Organization',
     );
-    assert.ok(org.sameAs.includes(SITE.github));
+    assert.ok(org.sameAs.includes(SITE.repoUrl));
   });
 });

@@ -24,9 +24,10 @@ pnpm --filter @vibld/marketing test
 ## What's here today
 
 A coming-soon page (L22): wordmark, tagline, one paragraph, a waitlist form,
-an illustration of how Vibld works, and a footer linking every legal
-document. Nothing else — no pricing, about or contact pages yet; those come
-with the marketing site's next phase, not this one.
+a link to the open-source repository, an illustration of how Vibld works,
+and a footer linking every legal document. Nothing else — no pricing, about
+or contact pages yet; those come with the marketing site's next phase, not
+this one.
 
 Eight legal documents (L23), governed by Georgia law with venue in Gwinnett
 County: Terms of Service (including a DMCA notice procedure), Privacy Policy,
@@ -39,6 +40,35 @@ change it there, not in eight places.
 These are boilerplate drafts, not legal advice. Have a Georgia attorney read
 the Terms and Privacy Policy before the first payment is taken (see the
 Refund Policy, which exists ahead of any billing on purpose).
+
+## Brand (Issue #7)
+
+Deferred under D28(c) until "the product works" -- picked back up once it
+did. Before drawing anything, the repository already had _two_
+uncoordinated palettes: `apps/web`'s violet `theme.css` (the builder's own
+product UI) and this app's warm `app.css` (already live on the coming-soon
+page and in `public/favicon.svg`). Rather than invent a third, this
+formalizes the second one -- the mark and palette that were already here,
+just never assembled into an actual system:
+
+- **Mark**: the checkmark-V path already in `public/favicon.svg`, unchanged.
+  `SiteHeader` now renders it beside the wordmark instead of text alone.
+- **Palette**: `--color-accent`/`--color-ink`/`--color-paper` etc., already
+  in `app.css` -- no new colors introduced.
+- **Type**: `--font-display` (Georgia) for headlines only, added to
+  `app.css`. Kept to a system font on purpose, same reason `--font-sans` and
+  `--font-mono` already are -- the Cookie Notice says this site makes no
+  third-party requests, and a webfont link would make that false.
+- **Social cards**: `public/og-image.png` (1200×630) and
+  `public/apple-touch-icon.png` (180×180), both rendered locally from plain
+  HTML/SVG at build time -- no generative image tool, nothing that touches
+  the network. `metaFor()` in `app/site.ts` now emits `og:image` and
+  `twitter:image` pointing at the former; every route gets it for free.
+- **Repository link**: `SITE.repoUrl`, referenced from the homepage's new
+  "View the code on GitHub" line.
+
+`apps/web`'s own violet theme is untouched -- issue #7's acceptance
+criteria scope this to the public brand expression, not product UI.
 
 ## The waitlist
 

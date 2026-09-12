@@ -37,6 +37,13 @@ export {
   styleDirection,
 } from './style-presets.ts';
 export type { StylePreset, StylePresetId } from './style-presets.ts';
+export {
+  MARKETING_PAGE_PATTERNS,
+  SAAS_SCREEN_PATTERNS,
+  patternGuidance,
+  selectPatterns,
+} from './patterns.ts';
+export type { PagePattern } from './patterns.ts';
 export { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 export {
   createDeepseekPlanClient,

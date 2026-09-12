@@ -126,6 +126,76 @@ jobs:
           fi
           echo "Synced the model credentials that are configured." >> "$GITHUB_STEP_SUMMARY"
 
+      # Shared with @vibld/preview's own copy of the same value (see
+      # deploy-sandbox-service.yml) -- apps/web's /api/preview uses it to
+      # authenticate to that Worker over the PREVIEW service binding.
+      # Optional here: an unset value means /api/preview answers "not
+      # configured" rather than the whole deploy failing (docs/decisions.md
+      # L7-L11 is additive to a deployment that already works without it).
+      - name: Sync the preview service secret to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW_INTERNAL_SECRET: ${{ secrets.PREVIEW_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PREVIEW_INTERNAL_SECRET" ]; then
+            printf '%s' "$PREVIEW_INTERNAL_SECRET" | pnpm dlx wrangler@4.129.1 secret put PREVIEW_INTERNAL_SECRET
+            echo "Synced PREVIEW_INTERNAL_SECRET." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "PREVIEW_INTERNAL_SECRET not set -- /api/preview stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Stripe billing (docs/decisions.md L12-L15). Optional, same as
+      # PREVIEW_INTERNAL_SECRET above: unset means handlePlan's budget gate
+      # and /api/billing/* answer "not configured" rather than the whole
+      # deploy failing -- billing is additive to a deployment that already
+      # works without it.
+      - name: Sync Stripe credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$STRIPE_SECRET_KEY" ]; then
+            printf '%s' "$STRIPE_SECRET_KEY" | pnpm dlx wrangler@4.129.1 secret put STRIPE_SECRET_KEY
+            echo "Synced STRIPE_SECRET_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "STRIPE_SECRET_KEY not set -- billing stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$STRIPE_WEBHOOK_SECRET" ]; then
+            printf '%s' "$STRIPE_WEBHOOK_SECRET" | pnpm dlx wrangler@4.129.1 secret put STRIPE_WEBHOOK_SECRET
+            echo "Synced STRIPE_WEBHOOK_SECRET." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "STRIPE_WEBHOOK_SECRET not set -- /api/stripe/webhook stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # L44's nightly provider-balance check. Optional, same rule as every
+      # secret above: unset means the check still runs and logs, it just
+      # cannot send. A separate copy from apps/marketing's own
+      # RESEND_API_KEY -- Cloudflare Secrets are per-Worker, not shared.
+      - name: Sync the Resend key to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RESEND_API_KEY" ]; then
+            printf '%s' "$RESEND_API_KEY" | pnpm dlx wrangler@4.129.1 secret put RESEND_API_KEY
+            echo "Synced RESEND_API_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "RESEND_API_KEY not set -- the L44 balance check still runs but cannot send an alert." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Deploy to Cloudflare Workers
         id: deploy
         shell: bash
@@ -136,7 +206,18 @@ jobs:
         run: |
           log="$RUNNER_TEMP/wrangler-deploy.log"
           pnpm dlx wrangler@4.129.1 deploy | tee "$log"
-          url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+
+          # A custom domain route (apps/web/wrangler.jsonc's "routes") makes
+          # wrangler disable the workers.dev preview URL by default -- its
+          # output then lists the domain under "Deployed ... triggers" as
+          # "  app.vibld.com (custom domain)" instead of printing a
+          # https://*.workers.dev line at all. Prefer that when present;
+          # fall back to the workers.dev line for a deployment with no
+          # custom domain configured.
+          url="$(sed -n 's/^[[:space:]]*\([A-Za-z0-9.-]*\) (custom domain)$/https:\/\/\1/p' "$log" | head -n 1 || true)"
+          if [ -z "$url" ]; then
+            url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+          fi
           if [ -n "$url" ]; then
             echo "url=$url" >> "$GITHUB_OUTPUT"
             echo "Deployed the builder shell to $url" >> "$GITHUB_STEP_SUMMARY"

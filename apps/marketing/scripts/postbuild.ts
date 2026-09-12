@@ -103,7 +103,7 @@ enough to review, not merely exportable.
 
 ## Source
 
-- [Source repository](${SITE.github}): the builder is open source.
+- [Source repository](${SITE.repoUrl}): the builder is open source.
 
 ## Legal
 

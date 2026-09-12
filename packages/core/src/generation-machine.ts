@@ -21,6 +21,7 @@ export class GenerationMachine {
   #state: GenerationState = 'idle';
   #accepted?: ProjectSnapshot;
   #staged?: ProjectSnapshot;
+  #summary?: string;
   #cancelled = false;
   #running = false;
 
@@ -63,6 +64,7 @@ export class GenerationMachine {
         ...request,
         base: request.base ?? this.#accepted,
       });
+      this.#summary = plan.summary;
 
       if (this.#cancelled) {
         return this.#cancelledResult();
@@ -94,6 +96,7 @@ export class GenerationMachine {
           accepted: this.accepted,
           staged: structuredClone(this.#staged),
           errors: [...validation.errors],
+          summary: this.#summary,
         };
       }
 
@@ -105,6 +108,7 @@ export class GenerationMachine {
         accepted: this.accepted,
         staged: structuredClone(this.#staged),
         errors: [],
+        summary: this.#summary,
       };
     } catch (error) {
       this.#state = 'failed';
@@ -113,6 +117,7 @@ export class GenerationMachine {
         accepted: this.accepted,
         staged: this.#staged ? structuredClone(this.#staged) : undefined,
         errors: [error instanceof Error ? error.message : String(error)],
+        summary: this.#summary,
       };
     } finally {
       this.#running = false;
@@ -126,6 +131,7 @@ export class GenerationMachine {
       accepted: this.accepted,
       staged: this.#staged ? structuredClone(this.#staged) : undefined,
       errors: [],
+      summary: this.#summary,
     };
   }
 }

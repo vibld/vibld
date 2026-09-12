@@ -7,6 +7,7 @@ import {
   parseGenerationRequest,
   parseKnowledge,
   parseModel,
+  parsePreviewRequest,
   parseStylePreset,
 } from '../worker/request-guard.ts';
 
@@ -403,5 +404,88 @@ describe('parseModel', () => {
     );
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /no anthropic credential/);
+  });
+});
+
+describe('parsePreviewRequest', () => {
+  it('accepts a non-empty file list', () => {
+    const result = parsePreviewRequest({
+      files: [{ path: 'src/App.tsx', content: 'x' }],
+    });
+    assert.deepEqual(result, {
+      ok: true,
+      value: [{ path: 'src/App.tsx', content: 'x' }],
+    });
+  });
+
+  it('rejects a missing "files"', () => {
+    const result = parsePreviewRequest({});
+    assert.equal(result.ok, false);
+  });
+
+  it('rejects an empty file list -- there is nothing to preview', () => {
+    const result = parsePreviewRequest({ files: [] });
+    assert.equal(result.ok, false);
+  });
+
+  it('rejects a body that is not an object', () => {
+    const result = parsePreviewRequest(null);
+    assert.equal(result.ok, false);
+  });
+
+  it('applies the same per-file limits parseGenerationRequest does', () => {
+    const result = parsePreviewRequest(
+      { files: [{ path: 'a'.repeat(10), content: 'x' }] },
+      { ...DEFAULT_LIMITS, maxPathChars: 5 },
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /characters or fewer/);
+  });
+
+  it('rejects more files than the deployment allows', () => {
+    const files = Array.from({ length: 3 }, (_, index) => ({
+      path: `src/File${index}.tsx`,
+      content: 'x',
+    }));
+    const result = parsePreviewRequest(
+      { files },
+      { ...DEFAULT_LIMITS, maxFiles: 2 },
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /at most 2 files/);
+  });
+
+  it('rejects a file missing a string path or content', () => {
+    assert.equal(parsePreviewRequest({ files: [{ content: 'x' }] }).ok, false);
+    assert.equal(parsePreviewRequest({ files: [{ path: 'a.tsx' }] }).ok, false);
+  });
+
+  it('rejects a path that escapes the project root', () => {
+    // /api/preview is the first place a path is used to write an actual
+    // file on an actual filesystem (worker/preview-sandbox.ts's writeProject);
+    // this is a real boundary check, not the client-side one
+    // src/generation/validator.ts already applies before staging.
+    for (const path of [
+      '../etc/passwd',
+      'src/../../etc/passwd',
+      '/etc/passwd',
+      'C:\\Windows\\System32',
+      'src\\App.tsx',
+      'src//App.tsx',
+      './App.tsx',
+      '',
+    ]) {
+      const result = parsePreviewRequest({
+        files: [{ path, content: 'x' }],
+      });
+      assert.equal(result.ok, false, `expected "${path}" to be rejected`);
+    }
+  });
+
+  it('accepts an ordinary nested relative path', () => {
+    const result = parsePreviewRequest({
+      files: [{ path: 'src/components/Nav.tsx', content: 'x' }],
+    });
+    assert.equal(result.ok, true);
   });
 });

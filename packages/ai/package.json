@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./style-presets": "./src/style-presets.ts",
+    "./patterns": "./src/patterns.ts",
     "./limits": "./src/limits.ts"
   },
   "scripts": {

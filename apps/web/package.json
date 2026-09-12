@@ -18,7 +18,8 @@
     "@vibld/ai": "workspace:*",
     "@vibld/core": "workspace:*",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "stripe": "22.6.2"
   },
   "devDependencies": {
     "@types/node": "26.4.1",

@@ -110,6 +110,22 @@ body {
   align-items: center;
 }
 
+.auth-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  min-height: 100vh;
+  padding: 3rem 1.25rem;
+  background: var(--bg);
+}
+
+.auth-gate__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
 .shell__body {
   display: grid;
   grid-template-columns: minmax(20rem, 27rem) minmax(0, 1fr);
@@ -412,6 +428,60 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #ffffff;
+}
+
+.preview__sandbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.preview__expiry {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.preview__shares {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.6rem;
+}
+
+.preview__shares-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.preview__share-warning {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.preview__share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview__share-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+
+.preview__share-url {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .codepane {
@@ -1026,6 +1096,31 @@ body {
   font-size: var(--text-xs);
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+
+/* --- Billing status -------------------------------------------------------
+ * The header's tier/usage readout and its upgrade/portal buttons. Reuses
+ * `.models__select`, `.button`, `.chip` and `.pane-note` rather than
+ * introducing its own control styling -- the same choice `ModelPicker` and
+ * `ExportButton` make. */
+.billing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.billing__usage {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.billing__upgrade {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 /* --- Model picker --------------------------------------------------------
