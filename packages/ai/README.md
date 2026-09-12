@@ -74,8 +74,8 @@ public URL lets anyone spend the account's model budget.
 7 complete colour systems), `patterns.ts` (10 marketing
 page types, 6 SaaS screens), `palettes.ts` (15 product-type colour, typography
 and feel defaults), `motion.ts` (16 motion recipes), `surfaces.ts` (5
-painting techniques) and `diagrams.ts` (5 diagram types plus the connector
-craft) are closed-set,
+painting techniques), `diagrams.ts` (5 diagram types plus the connector
+craft) and `primitives.ts` (5 interactive controls) are closed-set,
 keyword-matched retrieval -- the same shape, for the same reason: a request's
 own text selects a handful of relevant, concrete guidance to append to the
 prompt, never an arbitrary string a caller supplies directly
@@ -170,6 +170,39 @@ grant and conveys no trademark rights, which the cataloguer does not hold; on
 that basis the owner directed that the archetypes drawn from it ship
 de-named, which is what `style-presets.ts` does. A test enforces it on the id,
 chip name and caption.
+
+### The one dependency
+
+`STACK` says no component library, and carves out exactly one exception: a
+dialog, popover, dropdown menu, select, combobox or tooltip is built with
+`@base-ui/react` rather than out of divs. `primitives.ts` is the other half of
+that, carrying the import shape and anatomy for each.
+
+The line is not "a good library" but "hand-rolling this produces a defect the
+person who asked cannot see". A div-based dropdown looks correct to whoever
+requested it and is unusable by keyboard, and that is the one failure mode a
+generator cannot leave to the person reviewing its output.
+
+What stops the exception dissolving the rest of the rule is that Base UI is
+unstyled. A styled component library would replace the plain-CSS identity
+generated projects have; an unstyled behaviour primitive leaves every visual
+decision and every token where it was, so the dependency buys behaviour, not
+appearance.
+
+Adapted from the `pick-ui-library` skill in
+[emilkowalski/skills](https://github.com/emilkowalski/skills) (MIT). One
+library is taken from its list of a dozen; charts, state management,
+className helpers and virtualization are convenience rather than correctness,
+and its animation recommendation would contradict `MOTION BASELINE`, which is
+plain-CSS-first on purpose.
+
+The package name and all six subpaths were checked against the published
+package on the registry rather than recalled. That mattered: the predecessor
+name `@base-ui-components/react` still exists and is stuck on an old release
+candidate, so a remembered import would have installed cleanly and then
+matched none of this. Its two `date-fns` peer dependencies were checked too,
+and are optional, so `npm install` stays a single package. No version is
+pinned, for the same reason no browser is named in `motion.ts`.
 
 ### Diagrams
 

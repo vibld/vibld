@@ -82,6 +82,14 @@ export {
 } from './diagrams.ts';
 export type { DiagramType } from './diagrams.ts';
 export {
+  PRIMITIVE_BASICS,
+  PRIMITIVE_RECIPES,
+  findPrimitive,
+  primitiveGuidance,
+  selectPrimitives,
+} from './primitives.ts';
+export type { PrimitiveRecipe } from './primitives.ts';
+export {
   PRODUCT_PALETTES,
   findPalette,
   paletteGuidance,

@@ -17,6 +17,7 @@ import { patternGuidance } from './patterns.ts';
 import { motionGuidance } from './motion.ts';
 import { surfaceGuidance } from './surfaces.ts';
 import { diagramGuidance } from './diagrams.ts';
+import { primitiveGuidance } from './primitives.ts';
 import { paletteGuidance } from './palettes.ts';
 import { styleDnaGuidance } from './style-dna.ts';
 import type { StyleDna } from './style-dna.ts';
@@ -310,6 +311,12 @@ Preserve anything the request does not ask you to change.`,
   // the model reaching for an <img> to a file it cannot produce.
   const diagram = diagramGuidance(request.prompt);
   if (diagram) parts.push(diagram);
+
+  // The one dependency STACK allows. Naming a library without its import
+  // shape is how a model invents an API and ships a project that does not
+  // build, so the how travels with the permission.
+  const primitives = primitiveGuidance(request.prompt);
+  if (primitives) parts.push(primitives);
 
   // Only when no style preset was chosen: a preset like "dark" already
   // carries its own colour direction, and a product-type default should

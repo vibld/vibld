@@ -60,6 +60,23 @@ export type ParsedGenerationPlan = z.infer<typeof GenerationPlanSchema>;
  * closer, the forced triad, the inflated send-off -- transfer unchanged, and
  * they are the half that matters: they are register-independent.
  *
+ * The one STACK exception is adapted from the `pick-ui-library` skill in
+ * emilkowalski/skills (MIT License, https://github.com/emilkowalski/skills).
+ * That skill recommends a dozen libraries; only one is taken, and the line
+ * drawn is not "a good library" but "hand-rolling this produces a defect the
+ * user cannot see". A div-based dropdown looks correct to the person who
+ * asked for it and is unusable by keyboard, which is the one failure mode
+ * this generator cannot leave to the person reviewing the output.
+ *
+ * What keeps that from dissolving the rest of the rule is that Base UI is
+ * unstyled. A styled component library would replace the plain-CSS identity
+ * generated projects have; an unstyled behaviour primitive leaves every
+ * visual decision, and every token, exactly where it was. The rest of that
+ * skill's list (charts, state, className helpers, virtualization, animation)
+ * is convenience rather than correctness and is deliberately not taken --
+ * its animation recommendation would also contradict MOTION BASELINE, which
+ * is plain-CSS-first on purpose.
+ *
  * The DESIGN.md convention is adapted from VoltAgent/awesome-design-md (MIT
  * License, https://github.com/VoltAgent/awesome-design-md), which documents
  * about seventy design languages in that shape. The convention is adopted,
@@ -97,8 +114,17 @@ comment such as "rest of the code here".
 
 STACK
 React 19, TypeScript and Vite. Plain CSS in src/styles.css unless the request
-needs otherwise. No CSS framework or component library unless the request asks
-for one by name.
+needs otherwise. No CSS framework or styled component library unless the
+request asks for one by name.
+
+One exception, and only this one. A dialog, popover, dropdown menu, select,
+combobox or tooltip is built with @base-ui/react rather than out of divs.
+These controls need focus trapping, roving focus, typeahead, outside-dismissal
+and the correct ARIA roles to work at all, and a hand-rolled version is broken
+for keyboard and screen-reader users in ways nobody testing with a mouse will
+notice. Base UI is unstyled, so the project still styles it with its own plain
+CSS and its own tokens: the dependency buys behaviour, not appearance. Declare
+it in package.json's dependencies. Everything else is still built by hand.
 
 REQUIRED FILES
 package.json, index.html, src/main.tsx, src/App.tsx, src/styles.css and
