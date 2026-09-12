@@ -87,17 +87,28 @@ export function parseReferenceTarget(
  * not trying to be a readability extractor.
  */
 export function extractReadableText(html: string): string {
+  // `\s*` before the closing `>` -- CodeQL correctly flagged the original
+  // pattern (a bare `<\/script>`) for missing a real closing tag like
+  // `</script >` or `</script\n>`, which would let script content fall
+  // through into "extracted text" unstripped.
   const withoutScripts = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ');
+    .replace(/<script[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style[^>]*>[\s\S]*?<\/style\s*>/gi, ' ');
   const withoutTags = withoutScripts.replace(/<[^>]+>/g, ' ');
+  // `&amp;` decoded LAST, not first: decoding it first turns a page's own
+  // literal, doubly-encoded `&amp;lt;` into `&lt;` in time for the `&lt;`
+  // rule below to decode it again into a real `<` -- reconstituting markup
+  // the source page had safely escaped (CodeQL's "double escaping or
+  // unescaping" finding). None of `&lt;`/`&gt;`/`&quot;`/`&#39;`/`&nbsp;`
+  // can themselves produce a new `&amp;` match, so running them before
+  // `&amp;` is the one order that decodes each entity exactly once.
   const unescaped = withoutTags
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
-    .replace(/&#0?39;/gi, "'");
+    .replace(/&#0?39;/gi, "'")
+    .replace(/&amp;/gi, '&');
   return unescaped
     .replace(/[ \t\f\v]+/g, ' ')
     .replace(/\n\s*\n+/g, '\n\n')

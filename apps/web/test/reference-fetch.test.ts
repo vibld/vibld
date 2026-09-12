@@ -68,6 +68,30 @@ describe('extractReadableText', () => {
     const text = extractReadableText('<script>only(script)</script>');
     assert.equal(text, '');
   });
+
+  it('strips a script/style element whose closing tag has whitespace before ">"', () => {
+    // CodeQL js/incomplete-html-attribute-sanitization: a bare `</script>`
+    // pattern misses this real-world closing-tag shape and lets the
+    // script's contents leak through as "text".
+    const text = extractReadableText(
+      '<style>.a{color:red}</style ><script>alert(1)</script\n>Visible',
+    );
+    assert.ok(!text.includes('alert'));
+    assert.ok(!text.includes('color:red'));
+    assert.match(text, /Visible/);
+  });
+
+  it('does not double-unescape a page\'s own literal "&amp;lt;" into a real "<"', () => {
+    // CodeQL js/double-escaping: decoding &amp; before &lt;/&gt; turns a
+    // source page's doubly-encoded entity (which decodes once to the
+    // literal text "&lt;") into an actual "<" -- reconstituting markup the
+    // source page had safely escaped.
+    const text = extractReadableText(
+      '<p>Use &amp;lt;div&amp;gt; like this</p>',
+    );
+    assert.match(text, /&lt;div&gt;/);
+    assert.ok(!text.includes('<div>'));
+  });
 });
 
 describe('fetchReferenceContext', () => {
