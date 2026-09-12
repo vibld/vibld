@@ -110,6 +110,20 @@ describe('fetchReferenceContext', () => {
     }
   });
 
+  it('sends a real browser User-Agent -- a Worker default reads as a script to many WAFs', async () => {
+    // Reproduces the reported bug: an ordinary marketing site 403ing every
+    // request because a bare Worker fetch carries no User-Agent at all.
+    let sentHeaders: Record<string, string> | undefined;
+    await fetchReferenceContext('https://example.com/', {
+      fetchImpl: (async (_url: string, init?: RequestInit) => {
+        sentHeaders = init?.headers as Record<string, string>;
+        return htmlResponse('<p>x</p>');
+      }) as unknown as typeof fetch,
+    });
+    assert.ok(sentHeaders?.['user-agent']);
+    assert.match(sentHeaders!['user-agent'], /Mozilla/);
+  });
+
   it('rejects an invalid URL before ever fetching', async () => {
     let called = false;
     const result = await fetchReferenceContext('not a url', {
