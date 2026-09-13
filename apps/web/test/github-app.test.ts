@@ -218,6 +218,14 @@ describe('minting an installation token', () => {
         status: 403,
         headers: { 'x-ratelimit-remaining': '0' },
       }),
+      // A secondary limit, which GitHub documents as arriving with neither
+      // header and only a message.
+      new Response(
+        JSON.stringify({
+          message: 'You have exceeded a secondary rate limit.',
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      ),
     ]) {
       const result = await mintInstallationToken(
         credentials,

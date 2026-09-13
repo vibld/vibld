@@ -501,6 +501,27 @@ describe('a 403 that is not revoked access', () => {
     if (!result.ok) assert.match(result.error, /30 seconds/);
   });
 
+  it('reads a secondary limit that arrives with no useful headers', async () => {
+    // GitHub documents that either header may be absent on a secondary
+    // limit, and says so in the body instead. A predicate gated on the two
+    // headers calls that revoked access.
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      failOn: {
+        path: '/git/trees',
+        status: 403,
+        message:
+          'You have exceeded a secondary rate limit and have been temporarily blocked from content creation.',
+      },
+    });
+    const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.error, /rate limiting/);
+      assert.doesNotMatch(result.error, /no longer has access/);
+    }
+  });
+
   it('still reads a plain 403 as revoked access', async () => {
     const { doFetch } = fakeGitHub({
       base: 'base-commit',

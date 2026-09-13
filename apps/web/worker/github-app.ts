@@ -217,6 +217,41 @@ export async function signAppJwt(
 export const GITHUB_API = 'https://api.github.com';
 
 /**
+ * Whether a refusal is GitHub asking for patience rather than saying no, and
+ * what to tell the caller if it is.
+ *
+ * In one place because both this file and `github-push.ts` have to read it
+ * the same way, and because it took three tries to get right. A 403 means
+ * revoked access or a rate limit; a 429 means a rate limit; and a secondary
+ * limit can arrive as a 403 with neither `retry-after` nor a zeroed
+ * `x-ratelimit-remaining`, which is documented and which a predicate gated
+ * on those two headers calls revoked access. GitHub says so in the body in
+ * that case, so the body is read too.
+ *
+ * Getting this backwards tells someone to reconnect an App that is working
+ * perfectly well, and leaves them no wiser about the wait that would have
+ * fixed it.
+ */
+export function rateLimitMessage(
+  status: number,
+  headers: Headers,
+  body: Record<string, unknown>,
+): string | null {
+  const retryAfter = headers.get('retry-after');
+  const message = typeof body.message === 'string' ? body.message : '';
+  const limited =
+    status === 429 ||
+    (status === 403 &&
+      (headers.get('x-ratelimit-remaining') === '0' ||
+        retryAfter !== null ||
+        /rate limit/i.test(message)));
+  if (!limited) return null;
+  return retryAfter
+    ? `GitHub is rate limiting this app. Try again in ${retryAfter} seconds.`
+    : 'GitHub is rate limiting this app. Try again shortly.';
+}
+
+/**
  * The User-Agent GitHub asks every API client to send. Its docs make this a
  * requirement rather than a courtesy, and requests without one are refused.
  */
@@ -286,23 +321,22 @@ export async function mintInstallationToken(
     return { ok: false, error: 'GitHub could not be reached.' };
   }
 
-  // The same three-way reading the repository calls do. A rate limit is not
-  // revoked access, and telling someone to reconnect a working App because
-  // GitHub asked them to wait is the wrong instruction twice over.
-  const retryAfter = response.headers.get('retry-after');
-  const rateLimited =
-    response.status === 429 ||
-    (response.status === 403 &&
-      (response.headers.get('x-ratelimit-remaining') === '0' ||
-        retryAfter !== null));
-  if (rateLimited) {
-    return {
-      ok: false,
-      error: retryAfter
-        ? `GitHub is rate limiting this app. Try again in ${retryAfter} seconds.`
-        : 'GitHub is rate limiting this app. Try again shortly.',
-    };
+  // Read the body first: a secondary rate limit can come back as a 403 with
+  // no useful headers at all, and only its message says so.
+  let refusal: Record<string, unknown> = {};
+  if (!response.ok) {
+    try {
+      refusal = ((await response.clone().json()) ?? {}) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      refusal = {};
+    }
   }
+  const limited = rateLimitMessage(response.status, response.headers, refusal);
+  if (limited) return { ok: false, error: limited };
+
   if (response.status === 404 || response.status === 401) {
     return {
       ok: false,

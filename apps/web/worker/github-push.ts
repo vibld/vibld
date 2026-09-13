@@ -27,7 +27,11 @@
 
 import type { ProjectFile } from '@vibld/core';
 
-import { GITHUB_API, GITHUB_USER_AGENT } from './github-app.ts';
+import {
+  GITHUB_API,
+  GITHUB_USER_AGENT,
+  rateLimitMessage,
+} from './github-app.ts';
 
 /** Where a push is going. None of this is secret. */
 export interface PushTarget {
@@ -171,24 +175,12 @@ async function call(
   if (response.ok) return { ok: true, status: response.status, body: record };
 
   // A 403 means two different things, and sending someone to reconnect an
-  // App that is working perfectly well is the wrong one. GitHub uses it both
-  // for revoked access and for exhausting a rate limit, and only the headers
-  // tell them apart. It also uses a plain 429 for the same thing, which
-  // needs no headers to recognise.
-  const rateLimited =
-    response.status === 429 ||
-    (response.status === 403 &&
-      (response.headers.get('x-ratelimit-remaining') === '0' ||
-        response.headers.get('retry-after') !== null));
-  if (rateLimited) {
-    const retryAfter = response.headers.get('retry-after');
-    return {
-      ok: false,
-      status: response.status,
-      error: retryAfter
-        ? `GitHub is rate limiting this app. Try again in ${retryAfter} seconds.`
-        : 'GitHub is rate limiting this app. Try again shortly.',
-    };
+  // App that is working perfectly well is the wrong one. `rateLimitMessage`
+  // holds the whole of that reading, in one place, because this file and
+  // `github-app.ts` have to agree about it.
+  const limited = rateLimitMessage(response.status, response.headers, record);
+  if (limited) {
+    return { ok: false, status: response.status, error: limited };
   }
   if (response.status === 401 || response.status === 403) {
     return {
