@@ -13,7 +13,7 @@ import { SITE } from '../site';
  */
 export function meta() {
   return [
-    { title: `Page not found — ${SITE.name}` },
+    { title: `Page not found | ${SITE.name}` },
     { name: 'robots', content: 'noindex' },
     {
       name: 'description',

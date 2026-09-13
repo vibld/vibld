@@ -45,7 +45,7 @@ export const SITE = {
   /** The social card built by the brand system (issue #7). Absolute URL is filled in against SITE.url; see `metaFor`. */
   ogImage: '/og-image.png',
   ogImageAlt:
-    'Vibld — an AI application builder that generates conventional, portable projects.',
+    'Vibld: an AI application builder that generates conventional, portable projects.',
   /** One sentence, reused verbatim in schema, llms.txt and the OG card. */
   summary:
     'Vibld is an AI application builder that turns a conversation into a working project and generates a conventional, portable codebase you can read, own and take with you.',
@@ -74,53 +74,53 @@ export const LEGAL_DOCS: LegalDoc[] = [
   {
     slug: 'terms',
     label: 'Terms of Service',
-    title: `Terms of Service | `,
+    title: `Terms of Service | ${SITE.name}`,
     description:
       'The agreement between you and Chris Brock LLC for using Vibld and its waitlist.',
   },
   {
     slug: 'privacy',
     label: 'Privacy Policy',
-    title: `Privacy Policy | `,
+    title: `Privacy Policy | ${SITE.name}`,
     description:
       'What Vibld collects, why, how long it is kept, and how to request access or deletion.',
   },
   {
     slug: 'acceptable-use',
     label: 'Acceptable Use Policy',
-    title: `Acceptable Use Policy | `,
+    title: `Acceptable Use Policy | ${SITE.name}`,
     description: 'What may and may not be built, sent or hosted through Vibld.',
   },
   {
     slug: 'security',
     label: 'Security & Vulnerability Disclosure',
-    title: `Security & Vulnerability Disclosure | `,
+    title: `Security & Vulnerability Disclosure | ${SITE.name}`,
     description:
       'How to report a vulnerability, and the safe harbor for good-faith research.',
   },
   {
     slug: 'subprocessors',
     label: 'Subprocessors',
-    title: `Subprocessors | `,
+    title: `Subprocessors | ${SITE.name}`,
     description:
       'The services Vibld uses to operate, and what each one is used for.',
   },
   {
     slug: 'cookies',
     label: 'Cookie Notice',
-    title: `Cookie Notice | `,
+    title: `Cookie Notice | ${SITE.name}`,
     description: 'What this site stores in your browser today, and why.',
   },
   {
     slug: 'refunds',
     label: 'Refund Policy',
-    title: `Refund Policy | `,
+    title: `Refund Policy | ${SITE.name}`,
     description: 'How refunds work for paid Vibld plans.',
   },
   {
     slug: 'licenses',
     label: 'Open-Source Notices',
-    title: `Open-Source Notices | `,
+    title: `Open-Source Notices | ${SITE.name}`,
     description:
       'The license terms covering Vibld’s core and its starter templates.',
   },
@@ -129,13 +129,13 @@ export const LEGAL_DOCS: LegalDoc[] = [
 export const ROUTES: SiteRoute[] = [
   {
     path: '/',
-    title: ` | ${SITE.tagline}`,
+    title: `${SITE.name} | ${SITE.tagline}`,
     description:
       'Vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
   },
   {
     path: '/legal',
-    title: `Legal | `,
+    title: `Legal | ${SITE.name}`,
     description: 'Every policy governing Vibld and this site, in one place.',
   },
   ...LEGAL_DOCS.map((doc) => ({

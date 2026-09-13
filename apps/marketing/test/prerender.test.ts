@@ -97,6 +97,25 @@ describe('page metadata', () => {
     );
   });
 
+  it('names the brand in every page title', () => {
+    // Searching "vibld" returns Bible-study sites, so the <title> is the
+    // strongest on-page signal that this site is the Vibld entity. A sweep
+    // over the title strings once dropped ${SITE.name} from all ten of them
+    // and left a dangling separator; nothing caught it, because the titles
+    // were still present and still unique.
+    for (const route of ROUTES) {
+      const title = /<title>([^<]*)<\/title>/.exec(read(route.path))?.[1] ?? '';
+      assert.ok(
+        title.includes(SITE.name),
+        `${route.path} title does not name ${SITE.name}: ${JSON.stringify(title)}`,
+      );
+      assert.ok(
+        !/^[\s|]|[\s|]$/.test(title),
+        `${route.path} title has a dangling separator: ${JSON.stringify(title)}`,
+      );
+    }
+  });
+
   it('uses absolute URLs in canonical and social metadata', () => {
     for (const route of ROUTES) {
       const html = read(route.path);
