@@ -446,8 +446,14 @@ export function handleGitHubCallback(request: Request): Response {
   const url = new URL(request.url);
   const code = url.searchParams.get('code') ?? '';
   const state = url.searchParams.get('state') ?? '';
+  // Forwarded because the bounded read below needs it, not because it is
+  // trusted: it only moves an installation to the front of a list GitHub
+  // gave us for this user, and one that is not in that list changes nothing.
+  const installation = url.searchParams.get('installation_id') ?? '';
   const target = new URL('/', url.origin);
-  target.hash = `github=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+  target.hash =
+    `github=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}` +
+    (installation ? `&installation=${encodeURIComponent(installation)}` : '');
   if (!code || !state) target.hash = 'github=incomplete';
   return new Response(null, {
     status: 302,
@@ -488,7 +494,12 @@ export async function handleGitHubComplete(
   } catch {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
-  const { code, state } = (body ?? {}) as { code?: unknown; state?: unknown };
+  const { code, state, installation } = (body ?? {}) as {
+    code?: unknown;
+    state?: unknown;
+    installation?: unknown;
+  };
+  const hinted = Number(installation);
   if (
     typeof code !== 'string' ||
     typeof state !== 'string' ||
@@ -529,9 +540,18 @@ export async function handleGitHubComplete(
   // rather than one installation chosen here. The `installation_id` on the
   // redirect only decides what is offered first, and an id that is not
   // theirs simply does not match anything.
+  // The installation just used goes first, because reading them all is a
+  // call each and so is capped. Without this, somebody who installed on
+  // their eleventh account would never be offered it and, with the user
+  // token gone by then, could never reach it at all: the cap would stop
+  // being a limit and start being a dead end.
+  const ordered = [...installations.value].sort(
+    (a, b) => Number(b.id === hinted) - Number(a.id === hinted),
+  );
+
   const repositories = await connectableRepositories(
     token.token,
-    installations.value,
+    ordered,
     doFetch,
   );
   if (!repositories.ok) return githubProblem(repositories);

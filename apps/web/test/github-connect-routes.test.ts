@@ -775,3 +775,97 @@ describe('starting a connection, for the browser to remember', () => {
     );
   });
 });
+
+/**
+ * More installations than the read is willing to make calls for.
+ *
+ * Reading every installation is one call each, so it is capped. That cap is
+ * a limit right up until the installation somebody just used falls outside
+ * it, at which point it becomes a dead end: the user token is gone once the
+ * exchange ends, so an installation not read here can never be reached.
+ */
+describe('when the account reaches more installations than are read', () => {
+  const MANY = Array.from({ length: 12 }, (_, index) => ({
+    id: 100 + index,
+    account: { login: `account-${index}` },
+  }));
+  const REPOS = Object.fromEntries(
+    MANY.map((installation) => [
+      installation.id,
+      [
+        {
+          name: `repo-${installation.id}`,
+          default_branch: 'main',
+          owner: { login: 'acme' },
+          permissions: { push: true },
+        },
+      ],
+    ]),
+  );
+  // The last one GitHub lists, well outside the cap.
+  const LATE = MANY[11]!.id;
+
+  async function complete(body: Record<string, string>) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, ...body }),
+      env(db),
+      PRINCIPAL,
+      githubFor(MANY, REPOS),
+      NOW,
+    );
+    return (await response.json()) as {
+      repositories: { installationId: number; repo: string }[];
+    };
+  }
+
+  it('offers the installation just used even when it is listed last', async () => {
+    const body = await complete({ installation: String(LATE) });
+    assert.ok(
+      body.repositories.some((choice) => choice.installationId === LATE),
+      'the installation the user just chose was never read',
+    );
+  });
+
+  it('does not offer it when nothing points at it', async () => {
+    // Shows the previous test is about the hint rather than about the cap
+    // happening to be generous.
+    const body = await complete({});
+    assert.equal(
+      body.repositories.some((choice) => choice.installationId === LATE),
+      false,
+    );
+  });
+
+  it('ignores a hint that names an installation the user cannot reach', async () => {
+    // Still only a reordering of what GitHub said this account can reach.
+    const body = await complete({ installation: '999999' });
+    assert.ok(body.repositories.length > 0);
+    assert.equal(
+      body.repositories.some((choice) => choice.installationId === 999999),
+      false,
+    );
+  });
+});
+
+describe('the redirect passing the installation along', () => {
+  it('carries it so the exchange can prefer it', () => {
+    const response = handleGitHubCallback(
+      new Request(
+        'https://app.vibld.com/api/github/callback?code=c&state=s&installation_id=77',
+      ),
+    );
+    assert.match(response.headers.get('location')!, /installation=77/);
+  });
+
+  it('leaves it out when GitHub did not send one', () => {
+    const response = handleGitHubCallback(
+      new Request('https://app.vibld.com/api/github/callback?code=c&state=s'),
+    );
+    assert.equal(
+      response.headers.get('location')!.includes('installation='),
+      false,
+    );
+  });
+});
