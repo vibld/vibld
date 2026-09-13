@@ -46,6 +46,20 @@ export interface PushRequest {
   /** The commit subject. */
   message: string;
   /**
+   * The commit to build on, pinned by whoever is retrying.
+   *
+   * The other half of making a retry produce the same commit. Fixing the
+   * dates is not enough while the parent is still read from the remote: if
+   * the base branch advances between an attempt whose reply was lost and the
+   * next one, the "same" commit is built on a different parent and is a
+   * different object. A caller that records this on its first attempt and
+   * passes it back gets one commit however many times it tries.
+   *
+   * Absent means read the base branch, which is right for a first attempt
+   * and wrong for a retry. The binding store will carry it.
+   */
+  baseSha?: string;
+  /**
    * Who the commit is by, and when.
    *
    * Fixed rather than left to GitHub, because it is what makes the commit
@@ -152,6 +166,24 @@ async function call(
 
   if (response.ok) return { ok: true, status: response.status, body: record };
 
+  // A 403 means two different things, and sending someone to reconnect an
+  // App that is working perfectly well is the wrong one. GitHub uses it both
+  // for revoked access and for exhausting a rate limit, and only the headers
+  // tell them apart.
+  const rateLimited =
+    response.status === 403 &&
+    (response.headers.get('x-ratelimit-remaining') === '0' ||
+      response.headers.get('retry-after') !== null);
+  if (rateLimited) {
+    const retryAfter = response.headers.get('retry-after');
+    return {
+      ok: false,
+      status: response.status,
+      error: retryAfter
+        ? `GitHub is rate limiting this app. Try again in ${retryAfter} seconds.`
+        : 'GitHub is rate limiting this app. Try again shortly.',
+    };
+  }
   if (response.status === 401 || response.status === 403) {
     return {
       ok: false,
@@ -339,12 +371,9 @@ export async function pushCheckpoint(
     };
   }
 
-  const base = await refCommit(
-    token,
-    doFetch,
-    repo,
-    `heads/${target.baseBranch}`,
-  );
+  const base = request.baseSha
+    ? ({ found: true, sha: request.baseSha } as const)
+    : await refCommit(token, doFetch, repo, `heads/${target.baseBranch}`);
   if ('error' in base) return { ok: false, error: base.error };
   if (!base.found) {
     // Two causes, one status code, and they need different sentences. A

@@ -44,7 +44,12 @@ function fakeGitHub(state: {
   /** An already-open pull request for the branch. */
   openPull?: string;
   /** Force a failure on the call whose path contains this. */
-  failOn?: { path: string; status: number; message?: string };
+  failOn?: {
+    path: string;
+    status: number;
+    message?: string;
+    headers?: Record<string, string>;
+  };
   /**
    * The branch is absent when first read and present by the time the ref is
    * written: another retry winning the race. Its commit carries this tree.
@@ -70,9 +75,15 @@ function fakeGitHub(state: {
       });
 
     if (state.failOn && path.includes(state.failOn.path)) {
-      return json(
-        { message: state.failOn.message ?? 'nope' },
-        state.failOn.status,
+      return new Response(
+        JSON.stringify({ message: state.failOn.message ?? 'nope' }),
+        {
+          status: state.failOn.status,
+          headers: {
+            'content-type': 'application/json',
+            ...(state.failOn.headers ?? {}),
+          },
+        },
       );
     }
 
@@ -415,5 +426,79 @@ describe('a lookup that fails rather than disagrees', () => {
       assert.equal(result.conflict, undefined);
       assert.doesNotMatch(result.error, /already exists/);
     }
+  });
+});
+
+describe('a 403 that is not revoked access', () => {
+  it('reads a rate limit as a rate limit', async () => {
+    // GitHub uses 403 for both, and only the headers tell them apart.
+    // Sending someone to reconnect an App that is working perfectly well is
+    // the wrong one of the two.
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      failOn: {
+        path: '/git/trees',
+        status: 403,
+        headers: { 'x-ratelimit-remaining': '0' },
+      },
+    });
+    const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.error, /rate limiting/);
+      assert.doesNotMatch(result.error, /no longer has access/);
+    }
+  });
+
+  it('passes on how long to wait when GitHub says', async () => {
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      failOn: {
+        path: '/git/trees',
+        status: 403,
+        headers: { 'retry-after': '60' },
+      },
+    });
+    const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /60 seconds/);
+  });
+
+  it('still reads a plain 403 as revoked access', async () => {
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      failOn: { path: '/git/trees', status: 403 },
+    });
+    const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /no longer has access/);
+  });
+});
+
+describe('the parent a retry commits onto', () => {
+  it('uses the pinned base rather than re-reading the branch', async () => {
+    // Fixing the dates is not enough while the parent is read from the
+    // remote: a base branch that advances between a lost reply and the retry
+    // makes the "same" commit a different object.
+    const { doFetch, calls } = fakeGitHub({ base: 'base-has-moved-on' });
+    await pushCheckpoint(
+      'ghs_x',
+      { ...REQUEST, baseSha: 'what-the-first-attempt-saw' },
+      doFetch,
+    );
+    const commit = calls.find((c) => c.path.endsWith('/git/commits'));
+    assert.deepEqual(commit?.body?.parents, ['what-the-first-attempt-saw']);
+    assert.equal(
+      calls.some((c) => c.path.endsWith('/git/ref/heads/main')),
+      false,
+      're-read a base branch it had been given',
+    );
+  });
+
+  it('reads the base branch when nothing is pinned', async () => {
+    const { doFetch, calls } = fakeGitHub({ base: 'base-commit' });
+    await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    const commit = calls.find((c) => c.path.endsWith('/git/commits'));
+    assert.deepEqual(commit?.body?.parents, ['base-commit']);
   });
 });
