@@ -11,7 +11,11 @@ import {
   handleGitHubDisconnect,
   handleGitHubStatus,
 } from '../worker/github-handlers.ts';
-import { signChoice, signState } from '../worker/github-connect.ts';
+import {
+  signChoice,
+  signState,
+  userInstallations,
+} from '../worker/github-connect.ts';
 import { GitHubStore } from '../worker/github-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
@@ -867,5 +871,114 @@ describe('the redirect passing the installation along', () => {
       response.headers.get('location')!.includes('installation='),
       false,
     );
+  });
+});
+
+/**
+ * An installation GitHub's own list never mentions.
+ *
+ * The list is paged, so an account with many installations can have the one
+ * it just used fall outside what was read. Sorting the list cannot rescue
+ * something that is not in it, so the installation named on the way back is
+ * read directly. That gives up nothing: reading an installation's
+ * repositories as the user is itself the authorization check.
+ */
+describe('when the list does not mention the installation just used', () => {
+  const LISTED = [{ id: 1, account: { login: 'listed' } }];
+
+  async function complete(hint: string, repos: Record<number, unknown[]>) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: hint }),
+      env(db),
+      PRINCIPAL,
+      githubFor(LISTED, repos),
+      NOW,
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as {
+        repositories?: { installationId: number; repo: string }[];
+      },
+    };
+  }
+
+  const repo = (name: string) => ({
+    name,
+    default_branch: 'main',
+    owner: { login: 'acme' },
+    permissions: { push: true },
+  });
+
+  it('offers it anyway when GitHub says the user can reach it', async () => {
+    const { body } = await complete('500', {
+      1: [repo('listed-one')],
+      500: [repo('unlisted-one')],
+    });
+    assert.ok(
+      body.repositories?.some((choice) => choice.installationId === 500),
+      'an installation outside the list was never read',
+    );
+  });
+
+  it('offers nothing extra when GitHub says the user cannot', async () => {
+    // A forged id looks exactly like this, and the 404 is the answer.
+    const { body } = await complete('999999', { 1: [repo('listed-one')] });
+    assert.deepEqual(
+      body.repositories?.map((choice) => choice.repo),
+      ['listed-one'],
+    );
+  });
+
+  it('is not fooled into reading nonsense', async () => {
+    const { body } = await complete('not-a-number', {
+      1: [repo('listed-one')],
+    });
+    assert.deepEqual(
+      body.repositories?.map((choice) => choice.repo),
+      ['listed-one'],
+    );
+  });
+});
+
+describe('the installation list itself', () => {
+  it('is paged through rather than read once', async () => {
+    // GitHub's default page is 30, and the list decides what can be offered.
+    const asked: string[] = [];
+    const first = 'https://api.github.com/user/installations?per_page=100';
+    const second =
+      'https://api.github.com/user/installations?per_page=100&page=2';
+    const doFetch = (async (url: string) => {
+      asked.push(url);
+      if (url === first) {
+        return new Response(
+          JSON.stringify({
+            installations: [{ id: 1, account: { login: 'a' } }],
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              link: `<${second}>; rel="next"`,
+            },
+          },
+        );
+      }
+      return new Response(
+        JSON.stringify({ installations: [{ id: 2, account: { login: 'b' } }] }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await userInstallations('ghu_user', doFetch);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(
+        result.value.map((installation) => installation.id),
+        [1, 2],
+      );
+    }
+    assert.equal(asked.length, 2);
   });
 });

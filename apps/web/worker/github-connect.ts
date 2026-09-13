@@ -500,26 +500,42 @@ export async function userInstallations(
   token: string,
   doFetch: typeof fetch = fetch,
 ): Promise<Reachable<UserInstallation[]>> {
-  const reply = await readAsUser(token, '/user/installations', doFetch);
-  if (!reply.ok) return reply;
-
-  const raw = reply.value.installations;
-  if (!Array.isArray(raw)) {
-    return {
-      ok: false,
-      error: 'GitHub returned a reply Vibld could not read.',
-      reason: 'unreadable',
-    };
-  }
   const installations: UserInstallation[] = [];
-  for (const entry of raw) {
-    const record = (entry ?? {}) as { id?: unknown; account?: unknown };
-    const account = (record.account ?? {}) as { login?: unknown };
-    if (typeof record.id !== 'number') continue;
-    installations.push({
-      id: record.id,
-      account: typeof account.login === 'string' ? account.login : 'unknown',
-    });
+  // GitHub's default page here is 30, which is smaller than it looks: the
+  // list decides what can be offered, so a page boundary is another place
+  // for an installation to go missing permanently.
+  let path: string | null = '/user/installations?per_page=100';
+
+  for (let page = 0; page < MAX_INSTALLATION_PAGES && path; page += 1) {
+    let following: string | null = null;
+    const reply: Reachable<Record<string, unknown>> = await readAsUser(
+      token,
+      path,
+      doFetch,
+      (response) => {
+        following = nextPage(response);
+      },
+    );
+    if (!reply.ok) return reply;
+    path = following;
+
+    const raw = reply.value.installations;
+    if (!Array.isArray(raw)) {
+      return {
+        ok: false,
+        error: 'GitHub returned a reply Vibld could not read.',
+        reason: 'unreadable',
+      };
+    }
+    for (const entry of raw) {
+      const record = (entry ?? {}) as { id?: unknown; account?: unknown };
+      const account = (record.account ?? {}) as { login?: unknown };
+      if (typeof record.id !== 'number') continue;
+      installations.push({
+        id: record.id,
+        account: typeof account.login === 'string' ? account.login : 'unknown',
+      });
+    }
   }
   return { ok: true, value: installations };
 }
@@ -541,6 +557,7 @@ export async function userInstallations(
  */
 const MAX_INSTALLATIONS_READ = 10;
 const MAX_REPOSITORY_PAGES = 5;
+const MAX_INSTALLATION_PAGES = 5;
 
 /**
  * Everything this person could connect, across every installation they can

@@ -545,9 +545,22 @@ export async function handleGitHubComplete(
   // their eleventh account would never be offered it and, with the user
   // token gone by then, could never reach it at all: the cap would stop
   // being a limit and start being a dead end.
-  const ordered = [...installations.value].sort(
-    (a, b) => Number(b.id === hinted) - Number(a.id === hinted),
-  );
+  // Read directly rather than merely sorted to the front, so it is reachable
+  // wherever it sits in GitHub's list and however that list is paged. This
+  // gives up nothing: reading an installation's repositories *as the user*
+  // is itself the authorization check, and GitHub answers 404 for one they
+  // cannot reach, which `connectableRepositories` then skips.
+  const listed = installations.value;
+  const wanted =
+    Number.isInteger(hinted) && hinted > 0
+      ? (listed.find((candidate) => candidate.id === hinted) ?? {
+          id: hinted,
+          account: 'unknown',
+        })
+      : null;
+  const ordered = wanted
+    ? [wanted, ...listed.filter((candidate) => candidate.id !== wanted.id)]
+    : listed;
 
   const repositories = await connectableRepositories(
     token.token,
