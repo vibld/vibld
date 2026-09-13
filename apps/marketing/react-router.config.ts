@@ -13,5 +13,7 @@ import { ROUTE_PATHS } from './app/site';
  */
 export default {
   ssr: false,
-  prerender: ROUTE_PATHS,
+  // '/404' is prerendered but deliberately absent from ROUTE_PATHS, so it
+  // stays out of the sitemap; postbuild.ts relocates it to /404.html.
+  prerender: [...ROUTE_PATHS, '/404'],
 } satisfies Config;

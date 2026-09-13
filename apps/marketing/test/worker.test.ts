@@ -364,3 +364,208 @@ describe('preview deployments', () => {
     assert.equal(response.headers.get('x-robots-tag'), null);
   });
 });
+
+/**
+ * What the dataset actually receives.
+ *
+ * The waitlist endpoint answered correctly in every case below before these
+ * tests existed. What it got wrong was the datapoint it wrote alongside the
+ * answer, which no status-code assertion can see.
+ */
+function recordingEnv() {
+  const points: { blobs: (string | null)[]; indexes: string[] }[] = [];
+  return {
+    env: {
+      ...ENV,
+      ANALYTICS: {
+        writeDataPoint(point: {
+          blobs?: (string | null)[];
+          indexes?: string[];
+        }) {
+          points.push({
+            blobs: point.blobs ?? [],
+            indexes: point.indexes ?? [],
+          });
+        },
+      },
+    },
+    points,
+    signups: () => points.filter((point) => point.indexes[0] === 'signup'),
+  };
+}
+
+describe('what the waitlist records', () => {
+  it('counts a contact Resend created', async () => {
+    mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('{}', { status: 201 }),
+    );
+    const { env, signups } = recordingEnv();
+    const response = await worker.fetch(
+      jsonRequest({ email: 'chris@example.com', company: '' }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.equal(signups().length, 1);
+  });
+
+  it('does not count a duplicate, while still telling the person they are on the list', async () => {
+    // A returning visitor re-submitting an address that is already on the list
+    // created no contact. Counting it inflates the conversion rate and files
+    // an old contact under whatever campaign brought them back, which are the
+    // two numbers this dataset exists to answer.
+    mock.method(
+      globalThis,
+      'fetch',
+      async () =>
+        new Response('{"message":"Contact already exists"}', { status: 409 }),
+    );
+    const { env, signups } = recordingEnv();
+    const response = await worker.fetch(
+      jsonRequest({ email: 'chris@example.com', company: '' }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(signups(), []);
+  });
+
+  it('does not count a signup that failed', async () => {
+    mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('{"message":"internal error"}', { status: 500 }),
+    );
+    const { env, signups } = recordingEnv();
+    await worker.fetch(
+      jsonRequest({ email: 'chris@example.com', company: '' }),
+      env,
+    );
+    assert.deepEqual(signups(), []);
+  });
+
+  it('files a no-JavaScript form post under the page it was posted from', async () => {
+    // The supported fallback: without JavaScript the hidden page_url is the
+    // empty value the page was prerendered with. Falling back to the Worker's
+    // own URL filed every such signup under /api/waitlist, a path nobody
+    // visited, splitting the home page's numbers rather than rounding them.
+    mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('{}', { status: 201 }),
+    );
+    const { env, signups } = recordingEnv();
+    const request = new Request('https://vibld.com/api/waitlist', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'text/html',
+        referer: 'https://vibld.com/?utm_source=newsletter',
+      },
+      body: new URLSearchParams({
+        email: 'chris@example.com',
+        company: '',
+        'cf-turnstile-response': '',
+        page_url: '',
+        page_referrer: '',
+      }).toString(),
+    });
+    await worker.fetch(request, env);
+    const [signup] = signups();
+    assert.ok(signup, 'the signup was not recorded at all');
+    // blobs: [kind, path, referrer, source, medium, campaign, country]
+    assert.equal(signup.blobs[1], '/');
+    assert.equal(signup.blobs[3], 'newsletter');
+  });
+
+  it('never takes a path from another site', async () => {
+    // Referer is whatever the caller sends. Trusting a cross-origin one would
+    // let anyone write paths into our own traffic report by posting a form.
+    mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('{}', { status: 201 }),
+    );
+    const { env, signups } = recordingEnv();
+    const request = new Request('https://vibld.com/api/waitlist', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'text/html',
+        referer: 'https://elsewhere.example/their/page',
+      },
+      body: new URLSearchParams({
+        email: 'chris@example.com',
+        company: '',
+        'cf-turnstile-response': '',
+      }).toString(),
+    });
+    await worker.fetch(request, env);
+    const [signup] = signups();
+    assert.ok(signup);
+    assert.equal(signup.blobs[1], '/');
+  });
+});
+
+describe('attribution a caller cannot forge', () => {
+  it('refuses a page_url pointing at another site', async () => {
+    // /api/hit and /api/waitlist both take unauthenticated posts, so a
+    // page_url that is trusted on sight lets anyone write paths and campaigns
+    // into this site's traffic report from anywhere.
+    mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('{}', { status: 201 }),
+    );
+    const { env, signups } = recordingEnv();
+    await worker.fetch(
+      jsonRequest({
+        email: 'chris@example.com',
+        company: '',
+        page_url: 'https://elsewhere.example/their/page?utm_source=fake',
+      }),
+      env,
+    );
+    const [signup] = signups();
+    assert.ok(signup);
+    // blobs: [kind, path, referrer, source, medium, campaign, country]
+    assert.equal(signup.blobs[1], '/');
+    assert.equal(signup.blobs[3], '');
+  });
+
+  it('refuses a forged page_url on the pageview beacon too', async () => {
+    const { env, points } = recordingEnv();
+    const request = new Request('https://vibld.com/api/hit', {
+      method: 'POST',
+      body: new URLSearchParams({
+        page_url: 'https://elsewhere.example/their/page?utm_campaign=fake',
+        page_referrer: '',
+      }).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const response = await worker.fetch(request, env);
+    assert.equal(response.status, 204);
+    const [hit] = points.filter((point) => point.indexes[0] === 'pageview');
+    assert.ok(hit);
+    assert.equal(hit.blobs[1], '/');
+    assert.equal(hit.blobs[5], '');
+  });
+
+  it('still believes a page_url on this site', async () => {
+    // The check must not cost the real case, which is every genuine visitor.
+    const { env, points } = recordingEnv();
+    const request = new Request('https://vibld.com/api/hit', {
+      method: 'POST',
+      body: new URLSearchParams({
+        page_url: 'https://vibld.com/legal/privacy?utm_campaign=launch',
+        page_referrer: '',
+      }).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    await worker.fetch(request, env);
+    const [hit] = points.filter((point) => point.indexes[0] === 'pageview');
+    assert.ok(hit);
+    assert.equal(hit.blobs[1], '/legal/privacy');
+    assert.equal(hit.blobs[5], 'launch');
+  });
+});

@@ -1,4 +1,11 @@
 import {
+  type AnalyticsDataset,
+  type Attribution,
+  attributionFrom,
+  pathOf,
+  record,
+} from './analytics.ts';
+import {
   isTurnstileVerified,
   parseWaitlistSubmission,
   resendContactRequest,
@@ -19,6 +26,8 @@ export interface Env {
    * has ever required to keep working.
    */
   TURNSTILE_SECRET_KEY?: string;
+  /** Workers Analytics Engine dataset. Absent in local dev; see worker/analytics.ts. */
+  ANALYTICS?: AnalyticsDataset;
   /**
    * The prerendered build, bound by wrangler.jsonc's `assets`. Only reached
    * on a preview deployment: production routes non-API requests straight to
@@ -52,12 +61,17 @@ export default {
     if (url.pathname === '/api/waitlist' && request.method === 'POST') {
       return handleWaitlist(request, env);
     }
-    // Preview only. `wrangler.preview.jsonc` sets `run_worker_first: true`,
-    // so every request arrives here and is served from the same prerendered
-    // assets production serves, with the header that keeps a copy of the site
-    // out of the index. Production never takes this branch: VIBLD_NOINDEX is
-    // unset there, and `run_worker_first: ["/api/*"]` means a page request
-    // never reaches this Worker in the first place.
+    if (url.pathname === '/api/hit' && request.method === 'POST') {
+      return handleHit(request, env);
+    }
+    // Preview only, and last: this matches any path, so ahead of an /api/
+    // route it would serve that endpoint as a page. `wrangler.preview.jsonc`
+    // sets `run_worker_first: true`, so every request arrives here and is
+    // served from the same prerendered assets production serves, with the
+    // header that keeps a copy of the site out of the index. Production never
+    // takes this branch: VIBLD_NOINDEX is unset there, and
+    // `run_worker_first: ["/api/*"]` means a page request never reaches this
+    // Worker at all.
     if (env.VIBLD_NOINDEX === '1' && env.ASSETS) {
       return noindex(await env.ASSETS.fetch(request));
     }
@@ -114,6 +128,89 @@ const CONFIRMATION_PAGE = (message: string, ok: boolean) => `<!doctype html>
 <p><a href="/" style="color:#c2540a">← Back to vibld.com</a></p>
 </body>
 </html>`;
+
+/**
+ * Resolves the attribution the caller reported. The waitlist form and the
+ * page beacon both send the page's own URL and referrer, because the Worker
+ * sees only its own `/api/*` URL -- not the page the visitor was actually on.
+ *
+ * Two candidates, in order, and the same rule applied to both: it counts only
+ * if it names a page on this site.
+ *
+ * The rule is one function rather than a check at each branch because the
+ * first version of this checked only the `Referer` fallback and trusted
+ * whatever `page_url` a caller sent. `/api/hit` and `/api/waitlist` both take
+ * unauthenticated posts, so that was an open door: anyone could write
+ * `/their/page` and `utm_campaign=whatever` straight into this site's
+ * traffic report. Per-branch checks are how the second branch gets forgotten.
+ *
+ * The last resort is deliberately not `request.url`. The no-JavaScript form
+ * post is a supported path, and there `page_url` is the empty value the page
+ * was prerendered with, so falling back to the Worker's own URL filed every
+ * such signup under `/api/waitlist`: a path nobody visited, splitting the
+ * real page's numbers rather than merely rounding them. A browser sends
+ * `Referer` on a form navigation, and for a same-origin post it sends the
+ * full URL, so the query string and its UTM parameters survive with it.
+ *
+ * What this does not claim: a caller can still send a plausible same-host URL
+ * and be believed. Every field here is reported by the client and none of it
+ * can be proved. The check removes the ability to write arbitrary paths and
+ * campaigns from anywhere, which is worth having; it does not make an
+ * unauthenticated beacon trustworthy, and nothing short of not having one
+ * would.
+ */
+function attributionOf(
+  request: Request,
+  pageUrl: string,
+  pageReferrer: string,
+): { attribution: Attribution; path: string } {
+  const selfHost = new URL(request.url).hostname;
+  const url =
+    onThisSite(pageUrl, selfHost) ??
+    onThisSite(request.headers.get('referer'), selfHost) ??
+    '';
+  return {
+    attribution: attributionFrom(url, pageReferrer, selfHost),
+    // With nothing believable to go on, "/" is an honest guess at where a
+    // visitor was. `pathOf` answers "/" for a value it cannot parse.
+    path: pathOf(url),
+  };
+}
+
+/** A URL, but only when it names a page on this site. */
+function onThisSite(
+  candidate: string | null | undefined,
+  selfHost: string,
+): string | null {
+  if (!candidate) return null;
+  try {
+    return new URL(candidate).hostname === selfHost ? candidate : null;
+  } catch {
+    // Relative, malformed, or not a URL at all. All the same answer: this is
+    // not something to record a path from.
+    return null;
+  }
+}
+
+/**
+ * The pageview beacon. Answers 204 unconditionally and as early as possible:
+ * the caller is a fire-and-forget `sendBeacon` that ignores the response, and
+ * a failed measurement must never surface to a visitor.
+ */
+async function handleHit(request: Request, env: Env): Promise<Response> {
+  try {
+    const form = await request.formData();
+    const { attribution, path } = attributionOf(
+      request,
+      String(form.get('page_url') ?? ''),
+      String(form.get('page_referrer') ?? ''),
+    );
+    record(env.ANALYTICS, 'pageview', request, attribution, path);
+  } catch (error) {
+    console.error('hit failed', error);
+  }
+  return new Response(null, { status: 204 });
+}
 
 async function handleWaitlist(request: Request, env: Env): Promise<Response> {
   const html = wantsHtml(request);
@@ -181,19 +278,23 @@ async function handleWaitlist(request: Request, env: Env): Promise<Response> {
     env.RESEND_API_KEY,
   );
 
-  let resendOk = false;
+  // Three outcomes, not two. A duplicate is a success to the person and not a
+  // signup to the dataset, and collapsing the two into one boolean is what
+  // made the count wrong.
+  let outcome: 'created' | 'duplicate' | 'failed' = 'failed';
   try {
     const response = await fetch(url, init);
     if (response.ok) {
-      resendOk = true;
+      outcome = 'created';
     } else {
       // Resend does not document the status for a duplicate email (see
       // worker/waitlist.ts's comment). Treating "already exists" as success
       // means someone who signs up twice sees confirmation, not an error,
       // which is the experience that matters -- not the exact status code.
       const body = await response.text().catch(() => '');
-      resendOk = /already exists|duplicate/i.test(body);
-      if (!resendOk) {
+      if (/already exists|duplicate/i.test(body)) {
+        outcome = 'duplicate';
+      } else {
         console.error('Resend contact creation failed', response.status, body);
       }
     }
@@ -201,11 +302,26 @@ async function handleWaitlist(request: Request, env: Env): Promise<Response> {
     console.error('Resend request threw', error);
   }
 
-  if (!resendOk) {
+  if (outcome === 'failed') {
     const message = 'Something went wrong. Please try again in a moment.';
     return html
       ? htmlResponse(CONFIRMATION_PAGE(message, false), 502)
       : jsonResponse({ ok: false, error: message }, 502);
+  }
+
+  // Recorded only for a contact Resend actually created, so the signup count
+  // in the dataset means signups that exist, not submissions that were
+  // attempted. A returning visitor re-submitting an address that is already on
+  // the list created nothing, and counting it would inflate the conversion
+  // rate and re-attribute an old contact to whatever campaign brought them
+  // back -- the two numbers this dataset exists to answer.
+  if (outcome === 'created') {
+    const { attribution, path } = attributionOf(
+      request,
+      submission?.pageUrl ?? '',
+      submission?.pageReferrer ?? '',
+    );
+    record(env.ANALYTICS, 'signup', request, attribution, path);
   }
 
   const message = "You're on the list. We'll email you when Vibld is ready.";

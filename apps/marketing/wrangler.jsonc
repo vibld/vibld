@@ -8,12 +8,19 @@
   "assets": {
     "directory": "./build/client",
     "binding": "ASSETS",
-    // Every declared route (see app/site.ts) is prerendered to its own
-    // index.html. This only matters for a path that was never declared --
-    // the client ErrorBoundary in app/root.tsx renders the "page not found"
-    // message after hydration, the same way a conventional static host's
-    // SPA fallback works.
-    "not_found_handling": "single-page-application",
+    // Serve build/client/404.html, with a real 404 status, for any path that
+    // does not match an asset. The previous "single-page-application" value
+    // answered 200 with the home page for every unknown URL, which made
+    // robots.txt, sitemap.xml and any invented path look to a crawler like
+    // real pages with duplicate content.
+    "not_found_handling": "404-page",
+
+    // Serve every page at its slash-free path. That is the form metaFor()
+    // puts in the canonical tag and postbuild.ts puts in the sitemap; the
+    // default (auto-trailing-slash) served /legal/privacy/ while the
+    // canonical pointed at /legal/privacy, so every canonical named a URL
+    // that redirected.
+    "html_handling": "drop-trailing-slash",
     "run_worker_first": ["/api/*"],
   },
 
@@ -31,6 +38,15 @@
   "vars": {
     "VIBLD_WAITLIST_SEGMENT_ID": "6a463d34-31bc-4f24-ba0b-f30bfb5c7660",
   },
+
+  // First-party, cookieless analytics. Cloudflare Web Analytics cannot be
+  // used here: its automatic mode injects a beacon by rewriting HTML at the
+  // edge, which does not happen for a Worker serving its own assets, and an
+  // automatically-configured site exposes no manual snippet token. See
+  // worker/analytics.ts.
+  "analytics_engine_datasets": [
+    { "binding": "ANALYTICS", "dataset": "vibld_marketing" },
+  ],
 
   // RESEND_API_KEY is a Worker secret, set out of band by the deploy
   // workflow and never committed. Without it, /api/waitlist answers 503
