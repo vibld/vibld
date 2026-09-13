@@ -19,8 +19,18 @@ import {
   parseKnowledge,
   parseModel,
   parsePreviewRequest,
+  parseAdminTopupRequest,
+  parseReferenceUrl,
+  parseStyleDna,
   parseStylePreset,
 } from './request-guard.ts';
+import { fetchReferenceContext } from './reference-fetch.ts';
+import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
+import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
+import {
+  clerkLookupConfigured,
+  findClerkUserIdByEmail,
+} from './clerk-lookup.ts';
 import { decideModel, grantedFor } from './model-access.ts';
 import {
   ACCOUNT_BUDGET_KEY,
@@ -51,6 +61,11 @@ import {
   stopPreview,
 } from './preview-client.ts';
 import type { ServiceBinding } from './preview-client.ts';
+import {
+  autoPublishConfigured,
+  buildProject,
+  publishProject,
+} from './publish-client.ts';
 import {
   billingConfigured,
   handleBillingCheckout,
@@ -148,6 +163,26 @@ export interface Env {
   /** Worker secret, shared with @vibld/preview -- see preview-client.ts. */
   PREVIEW_INTERNAL_SECRET?: string;
   /**
+   * Cloudflare auto-publish's serving Worker (ADR-0010; see
+   * apps/publish/README.md). `/api/publish` is unavailable, not open, when
+   * this, `PUBLISH_INTERNAL_SECRET`, `PREVIEW` or `PREVIEW_INTERNAL_SECRET`
+   * is unset -- publishing needs both apps/preview's build step and
+   * apps/publish's store, the same fail-closed rule `isConfigured` already
+   * applies to generation.
+   */
+  PUBLISH?: ServiceBinding;
+  /** Worker secret, shared with @vibld/publish -- see publish-client.ts. */
+  PUBLISH_INTERNAL_SECRET?: string;
+  /**
+   * Publishing runs a real build and writes real storage, so it gets its
+   * own burst gate keyed on the caller rather than riding PLAN_BURST's --
+   * a naive flood here costs sandbox compute and R2 writes, not model spend,
+   * so the ceiling that matters is a different one. Optional and permissive
+   * for the same reason PLAN_BURST is: a speed bump, not the boundary
+   * (there is no ledger to size a hard limit against yet).
+   */
+  PUBLISH_BURST?: RateLimit;
+  /**
    * Stripe billing (docs/decisions.md L12-L15). Worker secret, live-mode --
    * see billing-handlers.ts. `/api/billing/*` and `/api/stripe/webhook` are
    * unavailable, not open, when this or `STRIPE_WEBHOOK_SECRET` is unset,
@@ -169,6 +204,23 @@ export interface Env {
   VIBLD_ALERT_EMAIL?: string;
   /** The alert's From address. Default: alerts@notifications.vibld.com. */
   VIBLD_ALERT_FROM?: string;
+  /**
+   * Platform admins (docs/decisions.md L4): a GitHub Actions secret,
+   * comma-separated verified emails, synced to the Worker on deploy the
+   * same way `VIBLD_MODEL_POLICY` already is. Checked via
+   * `platform-admins.ts`'s `isPlatformAdmin` against `policyIdentity`,
+   * never `userId` -- this predates Clerk and is human-edited by email,
+   * the same exception `VIBLD_MODEL_POLICY` is.
+   */
+  VIBLD_PLATFORM_ADMINS?: string;
+  /**
+   * Worker secret. Lets `/api/admin/*` resolve an email an admin typed into
+   * the Clerk user id the ledger actually keys on -- see clerk-lookup.ts.
+   * `/api/admin/*` is unavailable, not open, when this or
+   * `VIBLD_PLATFORM_ADMINS` is unset, the same fail-closed rule
+   * `isConfigured` already applies to generation.
+   */
+  CLERK_SECRET_KEY?: string;
 }
 
 /** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
@@ -192,7 +244,7 @@ function json(body: unknown, status = 200): Response {
 
 /**
  * Generation is available only when the key AND Clerk are configured.
- * Missing configuration means unavailable, never "open" — an
+ * Missing configuration means unavailable, never "open" -- an
  * unauthenticated endpoint on a public URL lets anyone spend the account's
  * model budget, so the failure has to be closed.
  */
@@ -360,7 +412,9 @@ async function handleBillingStatus(
     const usage = await env.USER_BUDGET.getByName(principal.userId).usageFor(
       allowancePeriodKey(now),
     );
-    const topupCreditMicroUsd = await billing.totalTopupCreditMicroUsd(
+    // Stripe top-ups and admin-granted credit (L4) combined -- see
+    // `totalSpendableCreditMicroUsd`'s own comment.
+    const topupCreditMicroUsd = await billing.totalSpendableCreditMicroUsd(
       principal.userId,
     );
     const topupUsage = await env.USER_BUDGET.getByName(
@@ -393,6 +447,125 @@ async function handleBillingStatus(
       503,
     );
   }
+}
+
+function adminConfigured(env: Env): boolean {
+  return Boolean(
+    env.VIBLD_PLATFORM_ADMINS && clerkLookupConfigured(env) && env.DB,
+  );
+}
+
+/**
+ * The one check every `/api/admin/*` handler makes before anything else:
+ * Clerk-verified identity, then platform-admin membership. Both endpoints
+ * below call this rather than trusting the shell's own `isAdmin` readout
+ * (`/api/config`) -- that field only decides whether the shell *offers* the
+ * tool, the same "picker is a convenience, this endpoint is the boundary"
+ * rule `handlePlan`'s model check already follows (ADR-0006).
+ */
+async function requireAdmin(
+  request: Request,
+  env: Env,
+): Promise<{ denied: Response } | { denied: null; adminEmail: string }> {
+  if (!adminConfigured(env)) {
+    return {
+      denied: json(
+        {
+          error: 'The admin credit tool is not configured for this deployment.',
+        },
+        503,
+      ),
+    };
+  }
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return { denied: resolved.denied };
+  const { principal } = resolved;
+  if (
+    !isPlatformAdmin(
+      { email: principal.email, emailVerified: principal.emailVerified },
+      parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+    )
+  ) {
+    return { denied: json({ error: 'Not authorized.' }, 403) };
+  }
+  return { denied: null, adminEmail: principal.policyIdentity };
+}
+
+/**
+ * GET -> a user's current spendable credit and admin-grant history, looked
+ * up by email. What the admin tool shows before granting more, so a repeat
+ * visit does not mean guessing whether an earlier grant already landed.
+ */
+async function handleAdminUser(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+
+  const admin = await requireAdmin(request, env);
+  if (admin.denied) return admin.denied;
+
+  const email = new URL(request.url).searchParams.get('email');
+  if (!email)
+    return json({ error: 'A "email" query parameter is required.' }, 400);
+
+  const lookup = await findClerkUserIdByEmail(env, email);
+  if (!lookup.ok) return json({ error: lookup.error }, 404);
+
+  const billing = new BillingStore(env.DB!);
+  const [creditMicroUsd, grants] = await Promise.all([
+    billing.totalSpendableCreditMicroUsd(lookup.userId),
+    billing.listAdminCredits(lookup.userId),
+  ]);
+  return json({
+    userId: lookup.userId,
+    spendableCreditMicroUsd: creditMicroUsd,
+    grants: grants.map((grant) => ({
+      creditUsdCents: grant.creditUsdCents,
+      grantedByEmail: grant.grantedByEmail,
+      note: grant.note,
+      createdAt: grant.createdAt,
+    })),
+  });
+}
+
+/** POST -> grant a user manual spend credit (docs/decisions.md L4). */
+async function handleAdminTopup(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+
+  const admin = await requireAdmin(request, env);
+  if (admin.denied) return admin.denied;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const parsed = parseAdminTopupRequest(body);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+
+  const lookup = await findClerkUserIdByEmail(env, parsed.value.email);
+  if (!lookup.ok) return json({ error: lookup.error }, 404);
+
+  const billing = new BillingStore(env.DB!);
+  const id = crypto.randomUUID();
+  await billing.grantAdminCredit(
+    id,
+    lookup.userId,
+    parsed.value.amountUsdCents,
+    admin.adminEmail,
+    parsed.value.note,
+  );
+  // The row itself is the audit trail; this line is only for a live
+  // `wrangler tail` to catch the same grant in real time.
+  console.log(
+    `admin credit granted: ${admin.adminEmail} -> ${lookup.userId} (${parsed.value.amountUsdCents}c)`,
+  );
+
+  return json({
+    ok: true,
+    userId: lookup.userId,
+    creditUsdCents: parsed.value.amountUsdCents,
+  });
 }
 
 async function handlePlan(
@@ -463,9 +636,31 @@ async function handlePlan(
     return json({ error: style.error }, style.status);
   }
 
+  const styleDna = parseStyleDna(body);
+  if (!styleDna.ok) {
+    return json({ error: styleDna.error }, styleDna.status);
+  }
+
   const knowledge = parseKnowledge(body);
   if (!knowledge.ok) {
     return json({ error: knowledge.error }, knowledge.status);
+  }
+
+  const referenceUrl = parseReferenceUrl(body);
+  if (!referenceUrl.ok) {
+    return json({ error: referenceUrl.error }, referenceUrl.status);
+  }
+  // Fetched here, before anything is reserved against the caller's budget --
+  // the same reasoning as every other validation above. A failed fetch is
+  // reported and the request stops; it never silently proceeds without the
+  // reference material the caller specifically asked for.
+  let referenceContext: string | undefined;
+  if (referenceUrl.value) {
+    const fetched = await fetchReferenceContext(referenceUrl.value);
+    if (!fetched.ok) {
+      return json({ error: fetched.error }, 422);
+    }
+    referenceContext = fetched.text;
   }
 
   const chosenModel = parseModel(body, configuredProviders(env));
@@ -526,7 +721,8 @@ async function handlePlan(
     // guard above has already refused to exceed.
     DEFAULT_LIMITS.maxPromptChars +
       DEFAULT_LIMITS.maxTotalContentChars +
-      DEFAULT_LIMITS.maxKnowledgeChars,
+      DEFAULT_LIMITS.maxKnowledgeChars +
+      MAX_REFERENCE_CHARS,
   );
 
   // Layer three: what the caller's own subscription actually buys them
@@ -543,7 +739,9 @@ async function handlePlan(
       DEFAULT_FREE_INCLUDED_MICRO_USD,
     );
     const monthlyAllowance = monthlyAllowanceMicroUsd(tier, freeAllowance);
-    const topupCeiling = await billing.totalTopupCreditMicroUsd(
+    // Stripe top-ups and admin-granted credit (L4) combined -- see
+    // `totalSpendableCreditMicroUsd`'s own comment.
+    const topupCeiling = await billing.totalSpendableCreditMicroUsd(
       principal.userId,
     );
 
@@ -604,7 +802,11 @@ async function handlePlan(
         prompt: parsed.value.prompt,
         base: parsed.value.base,
         ...(style.value ? { style: style.value } : {}),
+        ...(Object.keys(styleDna.value).length > 0
+          ? { styleDna: styleDna.value }
+          : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+        ...(referenceContext ? { referenceContext } : {}),
         model: effectiveModel,
         userId: principal.userId,
         ...(principal.email ? { email: principal.email } : {}),
@@ -833,6 +1035,87 @@ async function handlePreviewShare(
   return json({ error: 'Use GET, POST or DELETE.' }, 405);
 }
 
+/**
+ * Cloudflare auto-publish (ADR-0010, docs/decisions.md L40): build the
+ * caller's own project, then publish the result. `files` is the accepted
+ * checkpoint's own source -- the same client-supplied shape `/api/preview`
+ * already takes (`parsePreviewRequest`), not something this Worker reads
+ * back from D1/R2 itself. Thin by design, same reason `handlePreview` is:
+ * every real decision (how a build runs, where it is served from) belongs
+ * to apps/preview and apps/publish, not here.
+ */
+async function handlePublish(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'POST') {
+    return json({ error: 'Use POST.' }, 405);
+  }
+  if (!autoPublishConfigured(env)) {
+    return json(
+      { error: 'Publishing is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  // A real build and a real R2 write, not a model call -- its own gate
+  // rather than PLAN_BURST's, and checked after identity (unlike IP_BURST)
+  // since it is priced per caller, not per flood.
+  if (env.PUBLISH_BURST) {
+    try {
+      const result = await env.PUBLISH_BURST.limit({
+        key: `publish:${principal.userId}`,
+      });
+      if (!result.success) {
+        return json(
+          { error: 'Too many publish requests. Try again shortly.' },
+          429,
+        );
+      }
+    } catch (error) {
+      console.error('publish rate limiter unavailable', error);
+    }
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const parsed = parsePreviewRequest(body);
+  if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+
+  const { slug } = (body ?? {}) as { slug?: unknown };
+  if (slug !== undefined && (typeof slug !== 'string' || slug.length === 0)) {
+    return json({ error: '"slug" must be a non-empty string.' }, 400);
+  }
+
+  const built = await buildProject(env, principal.userId, parsed.value);
+  if (!built.ok) return json({ error: built.error }, 422);
+
+  // One project per Clerk user, same convention `handlePlan` already uses --
+  // there is no multi-project UI yet.
+  const projectId = principal.userId;
+  const published = await publishProject(
+    env,
+    principal.userId,
+    projectId,
+    slug,
+    built.files,
+  );
+  if (!published.ok) {
+    return json({ error: published.error }, published.status);
+  }
+  return json({
+    slug: published.slug,
+    url: published.url,
+    skipped: built.skipped,
+  });
+}
+
 /** The slice of Cloudflare's ExecutionContext this Worker uses. */
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -884,6 +1167,13 @@ export default {
           provider,
         })),
         defaultModel: decided.ok ? decided.model : null,
+        // So the shell knows whether to offer the admin credit tool at all --
+        // `/api/admin/*` itself re-checks this independently either way
+        // (ADR-0006), the same as every other grant this endpoint reports.
+        isAdmin: isPlatformAdmin(
+          { email: principal.email, emailVerified: principal.emailVerified },
+          parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+        ),
       });
     }
 
@@ -897,6 +1187,10 @@ export default {
 
     if (pathname === '/api/preview/share') {
       return handlePreviewShare(request, env);
+    }
+
+    if (pathname === '/api/publish') {
+      return handlePublish(request, env);
     }
 
     if (pathname === '/api/billing/status') {
@@ -913,6 +1207,14 @@ export default {
 
     if (pathname === '/api/stripe/webhook') {
       return handleStripeWebhook(request, env);
+    }
+
+    if (pathname === '/api/admin/user') {
+      return handleAdminUser(request, env);
+    }
+
+    if (pathname === '/api/admin/topup') {
+      return handleAdminTopup(request, env);
     }
 
     return json({ error: 'Not found.' }, 404);

@@ -649,4 +649,12 @@ describe('what the deployment can serve survives a reset', () => {
     session.reset();
     assert.equal(session.getState().models.length, 2);
   });
+
+  it('keeps isAdmin, the same probe-once reasoning', () => {
+    const session = createSession();
+    assert.equal(session.getState().isAdmin, false);
+    session.setIsAdmin(true);
+    session.reset();
+    assert.equal(session.getState().isAdmin, true);
+  });
 });

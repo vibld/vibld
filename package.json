@@ -8,6 +8,7 @@
   "scripts": {
     "build": "turbo run build",
     "check": "turbo run check",
+    "check:style": "node scripts/no-em-dash.mjs",
     "dev": "turbo run dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

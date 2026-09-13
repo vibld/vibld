@@ -5,6 +5,7 @@ import { deriveBrief } from '../src/generation/brief.ts';
 import { buildProjectFiles } from '../src/generation/plan-builder.ts';
 import {
   DEFAULT_LIMITS,
+  contrastWarnings,
   pathProblem,
   validateSnapshot,
 } from '../src/generation/validator.ts';
@@ -73,5 +74,85 @@ describe('staged project validation', () => {
     const result = validateSnapshot(snapshot([]));
     assert.equal(result.ok, false);
     assert.ok(result.errors.includes('The staged project contains no files'));
+  });
+});
+
+describe('contrastWarnings', () => {
+  const snapshot = (css: string): ProjectSnapshot => ({
+    revision: 'r1',
+    files: [{ path: 'src/styles.css', content: css }],
+  });
+
+  it('reports a failing pair with both values and the measured ratio', () => {
+    const warnings = contrastWarnings(
+      snapshot(':root { --primary: #FF385C; --primary-foreground: #FFFFFF; }'),
+    );
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /src\/styles\.css/);
+    assert.match(warnings[0], /#FF385C/);
+    assert.match(warnings[0], /3\.5\d:1/);
+  });
+
+  it('says nothing when every declared pair passes', () => {
+    assert.deepEqual(
+      contrastWarnings(
+        snapshot(
+          ':root { --primary: #1D4ED8; --primary-foreground: #FFFFFF; }',
+        ),
+      ),
+      [],
+    );
+  });
+
+  it('checks every stylesheet, not only the one the prompt names', () => {
+    const warnings = contrastWarnings({
+      revision: 'r1',
+      files: [
+        { path: 'src/styles.css', content: ':root { --a: #000000; }' },
+        {
+          path: 'src/tokens.css',
+          content:
+            ':root { --primary: #FF385C; --primary-foreground: #FFFFFF; }',
+        },
+      ],
+    });
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /src\/tokens\.css/);
+  });
+});
+
+describe('validateSnapshot and contrast', () => {
+  it('warns without failing, because the project still works', () => {
+    const result = validateSnapshot({
+      revision: 'r1',
+      files: [
+        { path: 'package.json', content: '{}' },
+        { path: 'index.html', content: '<!doctype html>' },
+        { path: 'src/main.tsx', content: '' },
+        { path: 'src/App.tsx', content: '' },
+        {
+          path: 'src/styles.css',
+          content:
+            ':root { --primary: #FF385C; --primary-foreground: #FFFFFF; }',
+        },
+      ],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.warnings?.length, 1);
+  });
+
+  it('omits the channel entirely when there is nothing to say', () => {
+    const result = validateSnapshot({
+      revision: 'r1',
+      files: [
+        { path: 'package.json', content: '{}' },
+        { path: 'index.html', content: '<!doctype html>' },
+        { path: 'src/main.tsx', content: '' },
+        { path: 'src/App.tsx', content: '' },
+      ],
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.warnings, undefined);
   });
 });

@@ -20,6 +20,8 @@
   --success-bg: var(--signal-dim);
   --error: var(--danger);
   --error-bg: var(--danger-dim);
+  --caution: var(--warn);
+  --caution-bg: var(--warn-dim);
 
   font-family: var(--font-sans);
   font-size: var(--text-base);
@@ -578,9 +580,50 @@ body {
   gap: 0.2rem;
 }
 
+.dna {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.4rem 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.dna__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.dna__label {
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.dna__select {
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  color: inherit;
+  min-width: 0;
+}
+
+.dna__select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .console__entry--error,
 .problems__item {
   color: var(--error);
+}
+
+/* A warning is not a failure: the run was accepted and the project works.
+   It reads as something to look at, not something that went wrong. */
+.console__entry--warn {
+  color: var(--caution);
 }
 
 .empty {
@@ -1020,6 +1063,17 @@ body {
   margin-top: 0.35rem;
 }
 
+.styles__group {
+  display: block;
+  margin-top: 0.6rem;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.styles__group:first-of-type {
+  margin-top: 0.35rem;
+}
+
 .chip--style {
   border-radius: 999px;
 }
@@ -1049,6 +1103,25 @@ body {
 
 .pane-note--error {
   color: var(--danger);
+}
+
+.publish-button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+
+.publish-button__slug {
+  font: inherit;
+  font-size: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  color: inherit;
+  padding: 0.3rem 0.55rem;
+  width: 10rem;
 }
 
 /* --- Standing instructions -----------------------------------------------

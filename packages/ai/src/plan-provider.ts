@@ -14,6 +14,13 @@ import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
+import { motionGuidance } from './motion.ts';
+import { surfaceGuidance } from './surfaces.ts';
+import { diagramGuidance } from './diagrams.ts';
+import { primitiveGuidance } from './primitives.ts';
+import { paletteGuidance } from './palettes.ts';
+import { styleDnaGuidance } from './style-dna.ts';
+import type { StyleDna } from './style-dna.ts';
 import {
   ProviderContextError,
   ProviderRefusalError,
@@ -54,6 +61,20 @@ export interface ModelProviderOptions {
    * is not is unbounded -- see MAX_KNOWLEDGE_CHARS.
    */
   knowledge?: string;
+  /**
+   * Extracted text from a reference URL the caller wants this build to
+   * emulate. Already fetched and trimmed to MAX_REFERENCE_CHARS by
+   * `apps/web/worker/reference-fetch.ts` -- this adapter only places it in
+   * the prompt, the same division of labour it already has with `knowledge`.
+   */
+  referenceContext?: string;
+  /**
+   * Standing visual preferences, as a closed set of dimension/value pairs.
+   * Unlike `knowledge` this is not the user's prose, so it is validated
+   * against the catalogue rather than trusted, and unlike `style` it is
+   * several independent choices rather than one named direction.
+   */
+  styleDna?: StyleDna;
 }
 
 export const DEFAULT_MODEL = 'claude-opus-5';
@@ -78,7 +99,7 @@ export const DEFAULT_EFFORT: PlanEffort = 'high';
  *
  * It is a drop-in peer of `FakeModelProvider`: same contract, same call shape,
  * so the runner, the state machine and the UI are unchanged. CI keeps using
- * the fake — nothing here runs without credentials (ADR-0007).
+ * the fake -- nothing here runs without credentials (ADR-0007).
  */
 /**
  * Turns a prompt into a validated `GenerationPlan`, whichever service answers.
@@ -100,6 +121,8 @@ export class PlanProvider implements ModelProvider {
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #style?: StylePresetId;
   readonly #knowledge?: string;
+  readonly #referenceContext?: string;
+  readonly #styleDna?: StyleDna;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
@@ -111,13 +134,21 @@ export class PlanProvider implements ModelProvider {
     this.#onProgress = options.onProgress;
     this.#style = options.style;
     this.#knowledge = options.knowledge;
+    this.#referenceContext = options.referenceContext;
+    this.#styleDna = options.styleDna;
     this.id = `${client.id}:${this.#model}`;
   }
 
   async generate(request: GenerationRequest): Promise<GenerationPlan> {
     const completion = await this.#client.createPlan({
       system: PLAN_SYSTEM_PROMPT,
-      prompt: buildUserPrompt(request, this.#style, this.#knowledge),
+      prompt: buildUserPrompt(
+        request,
+        this.#style,
+        this.#knowledge,
+        this.#referenceContext,
+        this.#styleDna,
+      ),
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,
@@ -189,9 +220,30 @@ export function buildUserPrompt(
   request: GenerationRequest,
   style?: string | null,
   knowledge?: string | null,
+  referenceContext?: string | null,
+  styleDna?: StyleDna | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
+
+  // The reference site comes right after the request itself: it exists to
+  // serve *this* ask ("build it like that"), not to stand for every future
+  // turn the way `knowledge` does, so it is scoped tightly to the request it
+  // sits beside. Already truncated to MAX_REFERENCE_CHARS by whoever fetched
+  // it (`apps/web/worker/reference-fetch.ts`) -- this function trusts that
+  // and does not re-check the length, the same trust it places in `request`.
+  const reference = referenceContext?.trim();
+  if (reference) {
+    parts.push(
+      `Reference material for this request, extracted from a page the user
+pointed at (visible text only -- markup, scripts and styles are already
+stripped). Use it as inspiration for structure, tone and content per the
+request above; it is a starting point to adapt, not a template to reproduce
+verbatim:
+
+${reference}`,
+    );
+  }
 
   // Standing instructions come straight after the request and before
   // everything else, because they are the user's own words about every turn
@@ -241,6 +293,45 @@ Preserve anything the request does not ask you to change.`,
   // guidance, so it comes before the purely visual style direction below.
   const guidance = patternGuidance(request.prompt);
   if (guidance) parts.push(guidance);
+
+  // Motion recipes are technique, not taste, so unlike the palette below
+  // they are not suppressed by an explicit style preset: a request for a
+  // drawer wants the drawer curve whether or not "Brutalism" was picked.
+  const motion = motionGuidance(request.prompt);
+  if (motion) parts.push(motion);
+
+  // Surface techniques are technique too, and not suppressed by a preset for
+  // the same reason: "Aurora UI" says a page should have flowing gradient
+  // fields, and this says how to paint one in plain CSS.
+  const surfaces = surfaceGuidance(request.prompt);
+  if (surfaces) parts.push(surfaces);
+
+  // A diagram is its own deliverable rather than a treatment of the page, so
+  // it is not suppressed by a preset either. The craft rules are what stop
+  // the model reaching for an <img> to a file it cannot produce.
+  const diagram = diagramGuidance(request.prompt);
+  if (diagram) parts.push(diagram);
+
+  // The one dependency STACK allows. Naming a library without its import
+  // shape is how a model invents an API and ships a project that does not
+  // build, so the how travels with the permission.
+  const primitives = primitiveGuidance(request.prompt);
+  if (primitives) parts.push(primitives);
+
+  // Only when no style preset was chosen: a preset like "dark" already
+  // carries its own colour direction, and a product-type default should
+  // never compete with an explicit one (see palettes.ts's own comment).
+  if (!style) {
+    const palette = paletteGuidance(request.prompt);
+    if (palette) parts.push(palette);
+  }
+
+  // Standing visual preferences sit with the other standing guidance and
+  // before the preset, for the same reason the palette does: a named
+  // direction chosen for this run should be the last word before the
+  // request itself.
+  const dna = styleDna ? styleDnaGuidance(styleDna) : null;
+  if (dna) parts.push(dna);
 
   // Last, and explicitly subordinate to the request. A preset is a starting
   // point; an instruction the user actually typed outranks it.

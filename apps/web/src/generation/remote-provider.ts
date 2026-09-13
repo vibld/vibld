@@ -4,6 +4,7 @@ import type {
   ModelProvider,
 } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import { getClerkToken } from '../auth/clerk-token.ts';
 
 /**
@@ -114,8 +115,16 @@ export interface RemoteModelProviderOptions {
    * closed set -- the browser is not trusted to have sent a real one.
    */
   style?: StylePresetId | null;
+  styleDna?: StyleDna | null;
   /** Standing instructions for the project, sent with every turn. */
   knowledge?: string | null;
+  /**
+   * A page to fetch and use as inspiration for this one request. The Worker
+   * does the actual fetching and text extraction (`reference-fetch.ts`) --
+   * the browser only ever sends the URL, never fetches third-party content
+   * itself.
+   */
+  referenceUrl?: string | null;
   /**
    * The chosen model, by id. The Worker checks it against the catalogue and
    * against its own credentials -- the browser is not trusted to have picked
@@ -137,7 +146,9 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #signal?: AbortSignal;
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
   readonly #style: StylePresetId | null;
+  readonly #styleDna: StyleDna | null;
   readonly #knowledge: string | null;
+  readonly #referenceUrl: string | null;
   readonly #model: string | null;
   readonly #getToken: () => Promise<string | null>;
 
@@ -148,7 +159,9 @@ export class RemoteModelProvider implements ModelProvider {
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style ?? null;
+    this.#styleDna = options.styleDna ?? null;
     this.#knowledge = options.knowledge ?? null;
+    this.#referenceUrl = options.referenceUrl ?? null;
     this.#model = options.model ?? null;
     this.#getToken = options.getToken ?? getClerkToken;
   }
@@ -165,7 +178,11 @@ export class RemoteModelProvider implements ModelProvider {
         prompt: request.prompt,
         base: request.base,
         ...(this.#style ? { style: this.#style } : {}),
+        ...(this.#styleDna && Object.keys(this.#styleDna).length > 0
+          ? { styleDna: this.#styleDna }
+          : {}),
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
+        ...(this.#referenceUrl ? { referenceUrl: this.#referenceUrl } : {}),
         ...(this.#model ? { model: this.#model } : {}),
       }),
       signal: this.#signal,
@@ -232,6 +249,13 @@ export interface DeploymentConfig {
   generation: GenerationMode;
   models: ModelOption[];
   defaultModel: string | null;
+  /**
+   * Whether the signed-in caller is a platform admin (docs/decisions.md
+   * L4). Only decides whether the shell *offers* the admin credit tool --
+   * `/api/admin/*` re-checks this itself at the trusted boundary either
+   * way (ADR-0006), same as the model grants this same response reports.
+   */
+  isAdmin: boolean;
 }
 
 /**
@@ -247,6 +271,7 @@ const UNCONFIGURED: DeploymentConfig = {
   generation: 'fake',
   models: [],
   defaultModel: null,
+  isAdmin: false,
 };
 
 let probe: Promise<DeploymentConfig> | undefined;
@@ -285,6 +310,7 @@ export function detectDeploymentConfig(
         generation?: unknown;
         models?: unknown;
         defaultModel?: unknown;
+        isAdmin?: unknown;
       };
       // Every field is checked. This is the deployment's own endpoint, but a
       // shape that drifted would otherwise put `undefined` in a <select> and
@@ -303,6 +329,7 @@ export function detectDeploymentConfig(
         models,
         defaultModel:
           typeof body.defaultModel === 'string' ? body.defaultModel : null,
+        isAdmin: body.isAdmin === true,
       };
     } catch {
       return UNCONFIGURED;

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { BuilderSession } from './generation/session.ts';
 import type { BuilderState } from './generation/session.ts';
 import { loadKnowledge } from './generation/knowledge-store.ts';
+import { loadStyleDna } from './generation/style-dna-store.ts';
 import {
   detectDeploymentConfig,
   resetGenerationModeProbe,
@@ -28,6 +29,7 @@ export function useBuilderSession(): {
     // an effect: an effect would render one frame with them missing, and
     // under StrictMode would run twice.
     created.setKnowledge(loadKnowledge());
+    created.setStyleDna(loadStyleDna());
     // What this deployment can serve. The picker stays hidden until it
     // answers, which is correct: there is no choice to offer yet, and a
     // failed probe is not worth surfacing here -- the run itself reports it.
@@ -35,6 +37,7 @@ export function useBuilderSession(): {
       .then((config) => {
         created.setModels(config.models);
         created.setModel(config.defaultModel);
+        created.setIsAdmin(config.isAdmin);
       })
       .catch(() => {});
     return created;
@@ -51,6 +54,7 @@ export function useBuilderSession(): {
         if (!signedIn) {
           session.setModels([]);
           session.setModel(null);
+          session.setIsAdmin(false);
           return;
         }
         resetGenerationModeProbe();
@@ -58,6 +62,7 @@ export function useBuilderSession(): {
           .then((config) => {
             session.setModels(config.models);
             session.setModel(config.defaultModel);
+            session.setIsAdmin(config.isAdmin);
           })
           .catch(() => {});
       }),

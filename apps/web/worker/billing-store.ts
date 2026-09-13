@@ -25,6 +25,35 @@ interface CustomerRow {
   stripe_customer_id: string;
 }
 
+export interface AdminCreditRecord {
+  id: string;
+  userId: string;
+  creditUsdCents: number;
+  grantedByEmail: string;
+  note: string | null;
+  createdAt: string;
+}
+
+interface AdminCreditRow {
+  id: string;
+  user_id: string;
+  credit_usd_cents: number;
+  granted_by_email: string;
+  note: string | null;
+  created_at: string;
+}
+
+function toAdminCreditRecord(row: AdminCreditRow): AdminCreditRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    creditUsdCents: row.credit_usd_cents,
+    grantedByEmail: row.granted_by_email,
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
 interface SubscriptionRow {
   stripe_subscription_id: string;
   user_id: string;
@@ -201,6 +230,83 @@ export class BillingStore {
       .first<{ total: number }>();
     // 1 cent = 10,000 micro-USD ($1 = 1,000,000 micro-USD).
     return (row?.total ?? 0) * 10_000;
+  }
+
+  /**
+   * A platform admin's manual grant (docs/decisions.md L4) -- support,
+   * goodwill, or testing credit with no Stripe Checkout Session behind it.
+   * `id` is the caller's to choose (a fresh UUID in practice) rather than
+   * autoincrement, so a retried request can be made idempotent by the
+   * caller if that ever matters -- the same reasoning `recordTopup`'s own
+   * `ON CONFLICT ... DO NOTHING` serves for a real Stripe session id.
+   */
+  async grantAdminCredit(
+    id: string,
+    userId: string,
+    creditUsdCents: number,
+    grantedByEmail: string,
+    note: string | null,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_admin_credits
+           (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO NOTHING`,
+      )
+      .bind(id, userId, creditUsdCents, grantedByEmail, note, now)
+      .run();
+  }
+
+  /**
+   * This user's admin-granted credit (L4), summed the same way
+   * `totalTopupCreditMicroUsd` sums Stripe top-ups -- including the same
+   * 12-month window, since both feed the same spendable-credit bucket
+   * (`totalSpendableCreditMicroUsd` below; `budget.ts`'s
+   * `"<userId>:topup"` ledger draws down against the combined total, not
+   * against either source individually).
+   */
+  async totalAdminCreditMicroUsd(userId: string): Promise<number> {
+    const row = await this.#db
+      .prepare(
+        `SELECT COALESCE(SUM(credit_usd_cents), 0) AS total
+         FROM billing_admin_credits
+         WHERE user_id = ?1 AND created_at > datetime('now', '-12 months')`,
+      )
+      .bind(userId)
+      .first<{ total: number }>();
+    return (row?.total ?? 0) * 10_000;
+  }
+
+  /**
+   * What "credit remaining" actually means everywhere it is spent or shown:
+   * Stripe top-ups plus admin grants, combined. `handlePlan`'s Layer three
+   * and `handleBillingStatus`'s readout both call this rather than either
+   * total alone, so a user's spendable balance is never missing half its
+   * sources in one of the two places that reads it.
+   */
+  async totalSpendableCreditMicroUsd(userId: string): Promise<number> {
+    const [topup, admin] = await Promise.all([
+      this.totalTopupCreditMicroUsd(userId),
+      this.totalAdminCreditMicroUsd(userId),
+    ]);
+    return topup + admin;
+  }
+
+  /** Recent admin grants for a user, newest first -- an admin tool's own audit view. */
+  async listAdminCredits(userId: string): Promise<AdminCreditRecord[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT id, user_id, credit_usd_cents, granted_by_email, note, created_at
+         FROM billing_admin_credits
+         WHERE user_id = ?1
+         ORDER BY created_at DESC
+         LIMIT 20`,
+      )
+      .bind(userId)
+      .all<AdminCreditRow>();
+    return result.results.map(toAdminCreditRecord);
   }
 
   async recordTopup(

@@ -1,6 +1,9 @@
+import { AdminPanel } from './components/AdminPanel.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
+import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
 import { describeMode } from './generation/labels.ts';
+import { saveStyleDna } from './generation/style-dna-store.ts';
 import { saveKnowledge } from './generation/knowledge-store.ts';
 import { LifecycleBar } from './components/LifecycleBar.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
@@ -65,10 +68,19 @@ function Builder() {
                 saveKnowledge(value);
               }}
             />
+            <StyleDnaPanel
+              styleDna={state.styleDna}
+              disabled={state.running}
+              onChange={(value) => {
+                session.setStyleDna(value);
+                saveStyleDna(value);
+              }}
+            />
+            {state.isAdmin ? <AdminPanel /> : null}
             <PromptPanel
               state={state}
-              onSubmit={(prompt, mode, style) => {
-                void session.submit(prompt, mode, style);
+              onSubmit={(prompt, mode, style, referenceUrl) => {
+                void session.submit(prompt, mode, style, referenceUrl);
               }}
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}

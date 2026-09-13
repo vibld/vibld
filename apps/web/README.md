@@ -95,8 +95,21 @@ added (or reissuing) before the next deploy runs.
 Run the **Deploy web preview** workflow from the Actions tab. It is
 `workflow_dispatch` only, so it never runs on its own. The workflow fails fast
 with a clear message if either secret is missing, and on success records the
-deployed URL on the environment and in the run summary — so the current preview
+deployed URL on the environment and in the run summary -- so the current preview
 URL is always visible on the repository's Environments page.
+
+The workflow applies any pending `migrations/` file against `vibld-control-plane`
+(`wrangler d1 migrations apply --remote`) before it deploys the Worker --
+idempotent, so a run with nothing new to apply is a no-op. This step's own
+absence was a real production incident: 0002_billing.sql and
+0003_publish.sql both merged and sat unapplied against the live database for
+two days, and every `/api/plan` call failed with "Usage accounting is
+unavailable" until it was caught and applied by hand. If a future migration
+ever needs applying between deploys, run it the same way this workflow does:
+
+```bash
+pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote
+```
 
 To deploy from a workstation instead, authenticate wrangler yourself and run:
 
@@ -126,14 +139,14 @@ deterministic fake otherwise. The footer names the provider that actually ran,
 so the UI never implies AI when it is running the stub.
 
 **The browser never holds a provider credential.** The key is a Worker secret,
-and `@vibld/ai` is imported only from `worker/`, never from `src/` — a build
+and `@vibld/ai` is imported only from `worker/`, never from `src/` -- a build
 check confirms the model SDK stays out of the client bundle (ADR-0006).
 
 ### Streaming
 
 `/api/plan` returns a server-sent event stream, not a buffered JSON body. A
 generation runs for a minute or more with no model output to forward, and a
-buffered response sends nothing until it finishes — long enough that browsers,
+buffered response sends nothing until it finishes -- long enough that browsers,
 mobile networks and intermediate proxies abandon the connection. The failure
 then surfaces as an opaque network error (Safari reports `Load failed`) rather
 than anything about the generation.
@@ -154,6 +167,30 @@ cannot outlive its request.
 are **all** present. Missing configuration means refused, never open: an
 unauthenticated endpoint on a public URL would let anyone spend the account's
 model budget.
+
+### Reference URL ("copy from or emulate")
+
+`PromptPanel` offers an optional URL alongside the prompt on each request.
+`handlePlan` fetches it server-side (`worker/reference-fetch.ts`) before a
+Workflow is even created -- a bad or unreachable URL is refused the same way
+a bad style or model choice is, before anything is billed. The page's markup
+is reduced to plain visible text (scripts, styles and tags stripped, capped
+at `MAX_REFERENCE_CHARS`) and placed in the prompt as material to draw on,
+explicitly subordinate to the request itself (`@vibld/ai`'s
+`buildUserPrompt`) -- never sent to the model as raw HTML, and never fetched
+by the browser directly.
+
+Refused before any network call is made: non-http(s) schemes, and a small
+hostname denylist (loopback, link-local/cloud-metadata addresses,
+`*.internal`) as defense in depth on top of what Cloudflare's own `fetch()`
+already refuses to route to. The fetch itself is capped at 8 seconds and 512
+KB read; a non-2xx response, a non-HTML/text content type, or a page with no
+extractable text is reported back as a normal validation error rather than
+silently generating without it.
+
+The URL is scoped to the request it was submitted with -- unlike standing
+instructions, it is cleared from the field once sent, so an unrelated
+follow-up prompt never re-fetches a page nobody meant it for.
 
 The Worker verifies the Clerk session JWT itself (`worker/principal.ts`,
 `worker/clerk-auth.ts`) rather than trusting the browser's session cookie --
@@ -211,7 +248,7 @@ Two things this costs, both accepted rather than solved here:
    → API Keys**, e.g. `https://clerk.vibld.com`).
 2. Set `CLERK_FRONTEND_API_URL` in `wrangler.jsonc`'s `vars` -- a public
    identifier, not a secret -- then redeploy.
-3. Add the provider key as a Worker secret — it must never be committed:
+3. Add the provider key as a Worker secret -- it must never be committed:
    `wrangler secret put ANTHROPIC_API_KEY`
 4. Add `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` to the `preview`
    environment (the deploy workflow's Build step inlines the publishable key
@@ -292,10 +329,8 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
   → **Waitlist** → **Save** (done). Approve or deny requests at
   `https://dashboard.clerk.com/~/users/waitlist`.
 - `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) is set on the
-  deployment, but nothing reads it yet -- `platform-admins.ts`'s
-  `isPlatformAdmin` exists and is tested, but no endpoint calls it. There is
-  no admin-only surface to gate until one exists; wiring it in ahead of that
-  would be guessing at a shape nothing has tested yet.
+  deployment -- see "Admin: manual credit grants" below for its first
+  consumer.
 
 ### Abuse controls required before Access came off (docs/decisions.md L29)
 
@@ -395,6 +430,51 @@ a share only ever makes sense against a preview that is actually running.
 2. Add `PREVIEW_INTERNAL_SECRET` (a long random value) to the `preview`
    environment here, the same value used when deploying `@vibld/preview`.
    The **Deploy web preview** workflow syncs it to this Worker.
+
+## Cloudflare auto-publish (ADR-0010, docs/decisions.md L40)
+
+`POST /api/publish` -- body `{ "files": [{ "path", "content" }, ...],
+"slug"? }` (the same file shape `/api/preview` already takes). Builds the
+caller's own project for real (`@vibld/preview`'s `buildProject`, over the
+same service binding `/api/preview` uses) and, if that succeeds, publishes
+the result (`@vibld/publish`'s `/internal/publish`, a second Worker --
+see `apps/publish/README.md`). `slug` is required on a project's first
+publish and optional after (the existing slug is reused). Returns
+`{ slug, url, skipped }` on success -- `skipped` lists any binary asset
+paths the build produced that could not be published yet (see
+`apps/publish/README.md`'s own text-only limitation). Answers `503` when
+any of `PREVIEW`, `PREVIEW_INTERNAL_SECRET`, `PUBLISH` or
+`PUBLISH_INTERNAL_SECRET` is unset, the same fail-closed rule
+`isConfigured` already applies to `/api/plan`.
+
+Gated by its own `PUBLISH_BURST` rate limit, keyed on the caller's Clerk
+user id (checked after identity, unlike `IP_BURST`) -- publishing runs a
+real sandbox build and a real R2 write, priced per caller rather than per
+flood, so it does not ride `PLAN_BURST`'s ceiling.
+
+### In the builder shell
+
+The Code tab's `PublishButton` (next to `ExportButton`, both keyed on
+`state.acceptedSnapshot`) calls `/api/publish`
+(`src/generation/publish-client.ts`, the browser-side mirror of
+`worker/publish-client.ts`). A slug is required on first publish; the
+component remembers the slug its own successful publish returned for the
+rest of the page's lifetime, so a later click in the same session
+republishes without asking again -- there is no endpoint yet to ask "what
+slug does this project already have" on a fresh page load, so a returning
+visitor re-enters it once. On success, shows the live URL (and which
+binary asset paths, if any, were skipped); on failure, the error inline.
+
+**Not built yet:** the opt-in custom-domain step ADR-0010 describes.
+
+### Setup
+
+1. Deploy `@vibld/preview` (above) and `@vibld/publish` (see its own
+   README) first -- this Worker's two service bindings only route
+   successfully once both exist.
+2. Add `PUBLISH_INTERNAL_SECRET` (a long random value, distinct from
+   `PREVIEW_INTERNAL_SECRET`) to the `preview` environment here, the same
+   value used when deploying `@vibld/publish`.
 
 ## Billing (docs/decisions.md L12-L15)
 
@@ -528,6 +608,48 @@ wrapper and URL-shaped response parsing it calls are JSX-free
    not change). Until then, deliveries queue and retry against a domain
    that does not yet resolve to this Worker -- harmless, since nothing can
    subscribe before both the code and the domain exist.
+
+## Admin: manual credit grants (docs/decisions.md L4)
+
+The first consumer of `platform-admins.ts`'s `isPlatformAdmin`: a platform
+admin can grant a user spend credit outside the Stripe top-up flow --
+support, goodwill, or testing. `AdminPanel` in the builder shell offers
+this to anyone `/api/config`'s `isAdmin` field says is a platform admin;
+`/api/admin/user` (GET, by email) and `/api/admin/topup` (POST) both
+re-check admin membership themselves regardless of what the shell showed
+(ADR-0006) -- the picker is a convenience, the endpoint is the boundary.
+
+A grant lands in its own `billing_admin_credits` table, not as a row in
+`billing_topups`: every row in that table came from a real Stripe Checkout
+Session (see `billing-store.ts`'s own comment), which is exactly what the
+nightly `reconcileSubscriptions` assumes. `BillingStore.totalSpendableCreditMicroUsd`
+combines both tables into the one balance `handlePlan`'s budget gate and
+`/api/billing/status`'s readout actually spend against and show -- a grant
+is immediately usable, and immediately visible in the user's own "top-up
+remaining" figure. Grants expire after 12 months, the same window L36 gives
+a purchased top-up.
+
+`/api/admin/*` accepts an email, not a Clerk user id -- what an admin
+helping a user actually has -- and resolves it server-side
+(`clerk-lookup.ts`, a raw call to Clerk's Backend API rather than a new
+SDK dependency, the same choice `clerk-auth.ts` already made for session
+verification). A single grant is capped at $500 (`request-guard.ts`'s
+`MAX_ADMIN_TOPUP_USD_CENTS`) so a typo cannot hand out an enormous sum;
+grant again for more.
+
+### Setup
+
+1. `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) and
+   `CLERK_SECRET_KEY` (https://dashboard.clerk.com/~/api-keys -- the
+   **Secret keys** section) both go on the `preview` environment here. The
+   **Deploy web preview** workflow syncs both to this Worker, the same way
+   it already syncs `STRIPE_SECRET_KEY` above. Both are optional in the
+   same fail-closed sense every other secret here is: unset means
+   `/api/admin/*` answers "not configured", not open.
+2. `migrations/0004_admin_credits.sql` needs no manual step -- the
+   **Deploy web preview** workflow's migration-apply step (see "Hosted
+   preview" → "Deploying" above) picks up any pending migration
+   automatically on the next deploy.
 
 ## Generated output
 

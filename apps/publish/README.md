@@ -50,40 +50,40 @@ apps/preview, so it has no Docker build step at deploy time.
 
 ## What this does not do yet
 
-**This ships the serving half only.** `/internal/publish` accepts a
-project's already-built static files (`ProjectFile[]`, the same shape
-apps/preview's `/internal/preview/start` already takes) and stores/serves
-them -- it does not itself run a production build. Nothing in this
-codebase currently turns a generated project's source into built static
-output outside of a live dev server (`apps/preview`'s `PreviewSandbox` runs
-`npm run dev`, not `npm run build`); wiring an actual "Publish" action in
-apps/web means deciding how and where that build step runs, which is a
-separate piece of work, not assumed here.
+`/internal/publish` itself only ever accepted already-built static files
+(`ProjectFile[]`, the same shape apps/preview's `/internal/preview/start`
+already takes) -- it has never run a build itself, by design (this
+Worker's job is storing and serving, not building). `apps/web`'s
+`POST /api/publish` now supplies that missing piece: it calls
+apps/preview's `buildProject` first, then hands this Worker the result --
+see `apps/web/README.md`'s "Cloudflare auto-publish" section for the full
+path. `apps/web/worker/index.ts`'s `handlePublish` also gates that
+endpoint with its own `PUBLISH_BURST` rate limit, the same shape
+`PLAN_BURST` uses -- so the "no real caller yet to gate" reasoning this
+section used to give is resolved.
 
-Also not built here, per ADR-0010's own scoping:
+Still not built, per ADR-0010's own scoping:
 
 - The opt-in custom-domain step (the user's own pasted Cloudflare token).
-- Rate limiting / storage quota on `/internal/publish` (ADR-0010's
-  Consequences section flags this as needed before this is reachable from
-  a real user action -- follow the `PLAN_BURST`/`IP_BURST` pattern
-  `apps/web/worker/index.ts`'s `handlePlan` already uses, once there is a
-  caller to gate).
+- Storage quota per user/plan tier (only a request-rate limit exists so
+  far, not a cap on how much R2 storage one account may occupy).
 - Slug release/reclaim rules after a project is deleted.
+- Binary assets (images, fonts): `apps/preview`'s `buildProject` skips
+  them rather than mis-serve them, since this Worker's own R2 usage is
+  text-only today (see `publish-store.ts`'s module comment). A build that
+  emits any reports which paths were skipped in its response.
 
 ## Deploying
 
 **No new Cloudflare resources to create.** This Worker binds the exact
 `database_id`/`bucket_name` apps/web's `wrangler.jsonc` already uses;
 Cloudflare allows the same D1 database and R2 bucket to be bound into more
-than one Worker. Before the first deploy, apply the new table's migration
-against that database the same way `migrations/0001` and `0002` were
-applied (`vibld-control-plane`, from a workstation with the real
-`CLOUDFLARE_API_TOKEN` -- this environment has no such credential, so this
-one step has to happen from wherever those two were run):
-
-```bash
-pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote
-```
+than one Worker. The **Deploy publish service** workflow applies any pending
+`migrations/` file against that database (`wrangler d1 migrations apply
+--remote`, run from apps/web since that is where the migrations directory
+lives) before it deploys the Worker -- no manual step needed. (0002 and 0003
+themselves went unapplied against production for two days before this
+automation existed -- see apps/web/README.md's "Deploying" section.)
 
 One-time: add a **`PUBLISH_INTERNAL_SECRET`** secret (a long random value,
 distinct from `PREVIEW_INTERNAL_SECRET` -- a leak of one must not
@@ -95,10 +95,11 @@ this account) plus **DNS: Edit** on the `vibld-preview.dev` zone, for the
 wildcard route -- the same permissions apps/preview's own token already
 has, since it is the same zone.
 
-There is no `deploy-publish.yml` workflow yet -- add one mirroring
-`deploy-web-preview.yml`'s Cloudflare-credential-check and secret-sync
-steps once `/internal/publish` has a real caller in apps/web. Until then,
-deploy from a workstation:
+Run the **Deploy publish service** workflow from the Actions tab
+(`workflow_dispatch` only) before apps/web calls `/api/publish` for the
+first time.
+
+To deploy from a workstation instead:
 
 ```bash
 pnpm --filter @vibld/publish deploy

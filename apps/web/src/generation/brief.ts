@@ -66,21 +66,25 @@ const SECTION_CONTENT: Record<
   pricing: {
     heading: 'Pricing',
     body: 'Straightforward plans. Placeholder figures for review.',
-    items: ['Starter — $0 / month', 'Team — $29 / month', 'Scale — Contact us'],
+    items: [
+      'Starter -- $0 / month',
+      'Team -- $29 / month',
+      'Scale -- Contact us',
+    ],
   },
   testimonials: {
     heading: 'What people say',
     body: 'Placeholder quotes. Replace them before publishing.',
     items: [
-      '"Shipped our marketing site in an afternoon." — Placeholder Name',
-      '"The exported project was just a normal Vite app." — Placeholder Name',
+      '"Shipped our marketing site in an afternoon." -- Placeholder Name',
+      '"The exported project was just a normal Vite app." -- Placeholder Name',
     ],
   },
   faq: {
     heading: 'Frequently asked questions',
     body: 'Answers you can edit directly in the generated source.',
     items: [
-      'Can I export this project? Yes — it is a conventional npm project.',
+      'Can I export this project? Yes -- it is a conventional npm project.',
       'Do I need Vibld to build it? No. npm install and npm run build are enough.',
     ],
   },

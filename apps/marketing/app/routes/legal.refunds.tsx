@@ -13,7 +13,7 @@ export default function Refunds() {
     <LegalPage title={DOC.label} updated={UPDATED}>
       <p>
         Vibld does not yet have paid plans, so nothing on this page applies
-        today — joining the waitlist never involves a payment. This policy is
+        today. Joining the waitlist never involves a payment. This policy is
         published in advance of billing so its terms are set before anyone is
         charged, not adjusted afterward.
       </p>
@@ -56,7 +56,7 @@ export default function Refunds() {
       <p>
         This policy is a commitment for how billing will work, published ahead
         of the feature itself. We will confirm and, if needed, expand it before
-        the first payment is ever collected — not after.
+        the first payment is ever collected, not after.
       </p>
     </LegalPage>
   );

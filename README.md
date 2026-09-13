@@ -69,7 +69,7 @@ pnpm format:check
 pnpm check        # lint, type-check and test every workspace
 ```
 
-Format, type and test checks run for real across `packages/core`, `packages/ai` and `apps/web`, and CI runs them on every pull request alongside CodeQL. A green `pnpm check` still is not product validation: it says the code compiles and its unit tests pass, not that a generated site is any good. [Issue #2](https://github.com/vibld/vibld/issues/2) tracks what is still missing — human-review and DCO enforcement through repository protections.
+Format, type and test checks run for real across `packages/core`, `packages/ai` and `apps/web`, and CI runs them on every pull request alongside CodeQL. A green `pnpm check` still is not product validation: it says the code compiles and its unit tests pass, not that a generated site is any good. [Issue #2](https://github.com/vibld/vibld/issues/2) tracks what is still missing -- human-review and DCO enforcement through repository protections.
 
 ## Contributing
 

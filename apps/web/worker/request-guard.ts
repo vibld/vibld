@@ -2,6 +2,8 @@ import type { GenerationRequest } from '@vibld/core';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
 import { findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
+import { sanitizeStyleDna } from '@vibld/ai/style-dna';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
 /**
@@ -21,6 +23,7 @@ export interface GuardLimits {
   maxTotalPathChars: number;
   maxTotalContentChars: number;
   maxKnowledgeChars: number;
+  maxReferenceUrlChars: number;
 }
 
 export const DEFAULT_LIMITS: GuardLimits = {
@@ -39,7 +42,14 @@ export const DEFAULT_LIMITS: GuardLimits = {
   // letting the provider throw after the request has been paid for.
   maxTotalContentChars: MAX_BASE_CONTENT_CHARS,
   maxKnowledgeChars: MAX_KNOWLEDGE_CHARS,
+  // A URL, not content -- generous next to a real address bar's limit, tight
+  // next to what a request could otherwise pad the body with.
+  maxReferenceUrlChars: 2048,
 };
+
+/** A typo that adds an extra digit should not be able to grant $10,000. */
+export const MAX_ADMIN_TOPUP_USD_CENTS = 500_00;
+export const MAX_ADMIN_TOPUP_NOTE_CHARS = 500;
 
 export interface GuardFailure {
   status: number;
@@ -269,6 +279,29 @@ export function parseStylePreset(
 }
 
 /**
+ * Validate standing visual preferences.
+ *
+ * Sanitized rather than rejected, which is the opposite of `parseStylePreset`
+ * above, and deliberately. A style preset is one deliberate choice, so an
+ * unrecognised id means something went wrong and saying so is useful. This is
+ * nine independent optional dimensions carried across every turn: a value
+ * that has since been renamed should cost the user that one dimension, not
+ * their whole request. Anything unknown is dropped by `sanitizeStyleDna`,
+ * so the closed-set property holds either way -- nothing a caller sends
+ * reaches the prompt unless it is already in the catalogue.
+ */
+export function parseStyleDna(body: unknown): GuardResult<StyleDna> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { styleDna } = body as { styleDna?: unknown };
+  if (styleDna === undefined || styleDna === null) {
+    return { ok: true, value: {} };
+  }
+  return { ok: true, value: sanitizeStyleDna(styleDna) };
+}
+
+/**
  * Validate the project's standing instructions.
  *
  * Unlike a style preset this is the caller's own prose, and that is fine: it
@@ -300,6 +333,103 @@ export function parseKnowledge(
   // Empty or whitespace-only is the same as none: it should not become an
   // empty section in the prompt that says nothing.
   return { ok: true, value: knowledge.trim().length > 0 ? knowledge : null };
+}
+
+/**
+ * Validate the shape of an optional "copy from or emulate" URL.
+ *
+ * Only the shape: a string within a sane length. Whether it is actually
+ * reachable, points at http(s), or resolves to something this deployment
+ * should fetch is `reference-fetch.ts`'s job, which needs a real `fetch` and
+ * so cannot live in this file's pure-function set (this module's own
+ * comment). Rejecting a non-string/oversized value here still matters on its
+ * own: it is caught before a network call is ever made for it.
+ */
+export function parseReferenceUrl(
+  body: unknown,
+  limits: GuardLimits = DEFAULT_LIMITS,
+): GuardResult<string | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { referenceUrl } = body as { referenceUrl?: unknown };
+  if (
+    referenceUrl === undefined ||
+    referenceUrl === null ||
+    referenceUrl === ''
+  ) {
+    return { ok: true, value: null };
+  }
+  if (typeof referenceUrl !== 'string') {
+    return fail(400, '"referenceUrl" must be a string.');
+  }
+  if (referenceUrl.length > limits.maxReferenceUrlChars) {
+    return fail(
+      413,
+      `"referenceUrl" must be ${limits.maxReferenceUrlChars} characters or fewer.`,
+    );
+  }
+  return { ok: true, value: referenceUrl };
+}
+
+export interface AdminTopupRequest {
+  email: string;
+  amountUsdCents: number;
+  note: string | null;
+}
+
+/**
+ * Validate an admin credit grant's shape (docs/decisions.md L4). Whether the
+ * caller is actually an admin is checked separately, at the trusted
+ * boundary (`isPlatformAdmin`, per ADR-0006) -- this is only "is the body
+ * well-formed", the same division every other `parse*` in this file keeps.
+ */
+export function parseAdminTopupRequest(
+  body: unknown,
+): GuardResult<AdminTopupRequest> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { email, amountUsdCents, note } = body as {
+    email?: unknown;
+    amountUsdCents?: unknown;
+    note?: unknown;
+  };
+  if (typeof email !== 'string' || email.trim().length === 0) {
+    return fail(400, 'A non-empty "email" is required.');
+  }
+  if (
+    typeof amountUsdCents !== 'number' ||
+    !Number.isInteger(amountUsdCents) ||
+    amountUsdCents <= 0
+  ) {
+    return fail(400, '"amountUsdCents" must be a positive integer.');
+  }
+  if (amountUsdCents > MAX_ADMIN_TOPUP_USD_CENTS) {
+    return fail(
+      400,
+      `"amountUsdCents" must be ${MAX_ADMIN_TOPUP_USD_CENTS} or fewer -- grant again for more.`,
+    );
+  }
+  if (note !== undefined && note !== null) {
+    if (typeof note !== 'string') {
+      return fail(400, '"note" must be a string.');
+    }
+    if (note.length > MAX_ADMIN_TOPUP_NOTE_CHARS) {
+      return fail(
+        413,
+        `"note" must be ${MAX_ADMIN_TOPUP_NOTE_CHARS} characters or fewer.`,
+      );
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      email: email.trim(),
+      amountUsdCents,
+      note: typeof note === 'string' && note.trim().length > 0 ? note : null,
+    },
+  };
 }
 
 /**

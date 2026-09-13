@@ -14,11 +14,13 @@ import type {
 } from '@vibld/core';
 import type { ModelProvider } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import type { ModelOption } from './remote-provider.ts';
 import type { ProjectBrief } from './brief.ts';
 import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
 import { buildPlan } from './plan-builder.ts';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import { createValidator } from './validator.ts';
 import {
   ObservingGenerationStore,
@@ -42,7 +44,7 @@ export type BuilderStatus =
 export interface TimelineEntry {
   id: number;
   at: number;
-  level: 'info' | 'error';
+  level: 'info' | 'warn' | 'error';
   message: string;
 }
 
@@ -87,10 +89,17 @@ export interface BuilderState {
    * something that was said once, they are a condition on everything said.
    */
   knowledge: string;
+  styleDna: StyleDna;
   /** The chosen model id, or null for the deployment's default. */
   model: string | null;
   /** What this deployment can serve. Empty until the probe answers. */
   models: ModelOption[];
+  /**
+   * Whether the signed-in caller is a platform admin (docs/decisions.md
+   * L4) -- decides only whether `AdminPanel` renders. `false` until the
+   * `/api/config` probe answers, the same as `models` above.
+   */
+  isAdmin: boolean;
 }
 
 /** One prompt and what became of it. */
@@ -133,6 +142,8 @@ export interface SessionOptions {
     style?: StylePresetId | null,
     knowledge?: string | null,
     model?: string | null,
+    referenceUrl?: string | null,
+    styleDna?: StyleDna | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -172,8 +183,10 @@ function initialState(budget: RunUsageReport): BuilderState {
     progress: null,
     transcript: [],
     knowledge: '',
+    styleDna: {},
     model: null,
     models: [],
+    isAdmin: false,
   };
 }
 
@@ -190,6 +203,8 @@ async function defaultResolveProvider(
   style?: StylePresetId | null,
   knowledge?: string | null,
   model?: string | null,
+  referenceUrl?: string | null,
+  styleDna?: StyleDna | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -199,6 +214,8 @@ async function defaultResolveProvider(
         ...(style ? { style } : {}),
         ...(knowledge ? { knowledge } : {}),
         ...(model ? { model } : {}),
+        ...(referenceUrl ? { referenceUrl } : {}),
+        ...(styleDna && Object.keys(styleDna).length > 0 ? { styleDna } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -247,6 +264,8 @@ export class BuilderSession {
     style?: StylePresetId | null,
     knowledge?: string | null,
     model?: string | null,
+    referenceUrl?: string | null,
+    styleDna?: StyleDna | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -292,6 +311,26 @@ export class BuilderSession {
     this.#emit();
   }
 
+  /** Record whether the signed-in caller is a platform admin, once the probe answers. */
+  setIsAdmin(isAdmin: boolean): void {
+    if (this.#disposed || isAdmin === this.#state.isAdmin) return;
+    this.#state = { ...this.#state, isAdmin };
+    this.#emit();
+  }
+
+  /**
+   * Replace the project's standing visual preferences.
+   *
+   * Stored as the selection, not as prose: the same choice produces the same
+   * guidance every turn, which is the whole reason this is not more text in
+   * the knowledge field.
+   */
+  setStyleDna(styleDna: StyleDna): void {
+    if (this.#disposed) return;
+    this.#state = { ...this.#state, styleDna };
+    this.#emit();
+  }
+
   /** Replace the project's standing instructions. */
   setKnowledge(knowledge: string): void {
     if (this.#disposed || knowledge === this.#state.knowledge) return;
@@ -310,7 +349,7 @@ export class BuilderSession {
    */
   reset(): void {
     if (this.#disposed) return;
-    const { knowledge, model, models } = this.#state;
+    const { knowledge, model, models, isAdmin } = this.#state;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
@@ -321,6 +360,7 @@ export class BuilderSession {
       knowledge,
       model,
       models,
+      isAdmin,
     };
     this.#emit();
   }
@@ -329,6 +369,7 @@ export class BuilderSession {
     prompt: string,
     mode: PlanMode = 'succeed',
     style: StylePresetId | null = null,
+    referenceUrl: string | null = null,
   ): Promise<void> {
     const trimmed = prompt.trim();
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
@@ -346,10 +387,15 @@ export class BuilderSession {
       (sum, file) => sum + file.path.length + file.content.length,
       0,
     );
+    // A reference URL's actual content is not known until the Worker fetches
+    // it, so this counts the worst case (`MAX_REFERENCE_CHARS`) rather than
+    // zero -- the same reasoning as `baseChars`: an estimate that ignores a
+    // real cost is not an estimate a budget can be checked against.
     const inputTokens =
       estimateTokens(trimmed) +
       estimateTokensForChars(baseChars) +
-      estimateTokensForChars(this.#state.knowledge.length);
+      estimateTokensForChars(this.#state.knowledge.length) +
+      (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0);
     let reservation;
     try {
       reservation = this.#ledger.reserve({
@@ -447,6 +493,8 @@ export class BuilderSession {
         style,
         this.#state.knowledge,
         this.#state.model,
+        referenceUrl,
+        this.#state.styleDna,
       );
     } catch (error) {
       reservation.release();
@@ -530,10 +578,16 @@ export class BuilderSession {
           revision: accepted.revision,
           providerId: resolved.id,
         }),
-        timeline: this.#append(
-          state.timeline,
-          'info',
-          `Checkpoint accepted at revision ${accepted.revision}`,
+        // Warnings belong on the accepted path, which is the point of them:
+        // the project works and still has something worth looking at. They
+        // follow the acceptance line so the run reads as a success first.
+        timeline: (result.warnings ?? []).reduce(
+          (timeline, warning) => this.#append(timeline, 'warn', warning),
+          this.#append(
+            state.timeline,
+            'info',
+            `Checkpoint accepted at revision ${accepted.revision}`,
+          ),
         ),
       }));
       return;

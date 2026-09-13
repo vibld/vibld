@@ -74,53 +74,53 @@ export const LEGAL_DOCS: LegalDoc[] = [
   {
     slug: 'terms',
     label: 'Terms of Service',
-    title: `Terms of Service — ${SITE.name}`,
+    title: `Terms of Service | `,
     description:
       'The agreement between you and Chris Brock LLC for using Vibld and its waitlist.',
   },
   {
     slug: 'privacy',
     label: 'Privacy Policy',
-    title: `Privacy Policy — ${SITE.name}`,
+    title: `Privacy Policy | `,
     description:
       'What Vibld collects, why, how long it is kept, and how to request access or deletion.',
   },
   {
     slug: 'acceptable-use',
     label: 'Acceptable Use Policy',
-    title: `Acceptable Use Policy — ${SITE.name}`,
+    title: `Acceptable Use Policy | `,
     description: 'What may and may not be built, sent or hosted through Vibld.',
   },
   {
     slug: 'security',
     label: 'Security & Vulnerability Disclosure',
-    title: `Security & Vulnerability Disclosure — ${SITE.name}`,
+    title: `Security & Vulnerability Disclosure | `,
     description:
       'How to report a vulnerability, and the safe harbor for good-faith research.',
   },
   {
     slug: 'subprocessors',
     label: 'Subprocessors',
-    title: `Subprocessors — ${SITE.name}`,
+    title: `Subprocessors | `,
     description:
       'The services Vibld uses to operate, and what each one is used for.',
   },
   {
     slug: 'cookies',
     label: 'Cookie Notice',
-    title: `Cookie Notice — ${SITE.name}`,
+    title: `Cookie Notice | `,
     description: 'What this site stores in your browser today, and why.',
   },
   {
     slug: 'refunds',
     label: 'Refund Policy',
-    title: `Refund Policy — ${SITE.name}`,
+    title: `Refund Policy | `,
     description: 'How refunds work for paid Vibld plans.',
   },
   {
     slug: 'licenses',
     label: 'Open-Source Notices',
-    title: `Open-Source Notices — ${SITE.name}`,
+    title: `Open-Source Notices | `,
     description:
       'The license terms covering Vibld’s core and its starter templates.',
   },
@@ -129,13 +129,13 @@ export const LEGAL_DOCS: LegalDoc[] = [
 export const ROUTES: SiteRoute[] = [
   {
     path: '/',
-    title: `${SITE.name} — ${SITE.tagline}`,
+    title: ` | ${SITE.tagline}`,
     description:
-      'Vibld is an AI application builder that generates conventional, portable projects — no proprietary runtime, no lock-in. Join the waitlist.',
+      'Vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
   },
   {
     path: '/legal',
-    title: `Legal — ${SITE.name}`,
+    title: `Legal | `,
     description: 'Every policy governing Vibld and this site, in one place.',
   },
   ...LEGAL_DOCS.map((doc) => ({

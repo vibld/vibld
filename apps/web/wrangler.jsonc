@@ -107,6 +107,14 @@
       "namespace_id": "1003",
       "simple": { "limit": 20, "period": 60 },
     },
+    // ADR-0010: publishing runs a real sandbox build and a real R2 write,
+    // priced per caller rather than per flood -- keyed on the caller's
+    // Clerk user id like PLAN_BURST, checked after identity, not before.
+    {
+      "name": "PUBLISH_BURST",
+      "namespace_id": "1004",
+      "simple": { "limit": 3, "period": 60 },
+    },
   ],
 
   // The spend ceiling. Also not provisioned: the object is created on first
@@ -150,7 +158,15 @@
   // apps/preview/README.md for why it lives in its own Worker.
   // PREVIEW_INTERNAL_SECRET is a Worker secret, set out of band and shared
   // with @vibld/preview's copy of the same value.
-  "services": [{ "binding": "PREVIEW", "service": "vibld-preview" }],
+  //
+  // ADR-0010's serving Worker. PUBLISH_INTERNAL_SECRET is a Worker secret,
+  // set out of band and shared with @vibld/publish's copy of the same
+  // value -- deliberately not PREVIEW_INTERNAL_SECRET, since a leak of one
+  // must not compromise the other.
+  "services": [
+    { "binding": "PREVIEW", "service": "vibld-preview" },
+    { "binding": "PUBLISH", "service": "vibld-publish" },
+  ],
 
   // Stripe billing (docs/decisions.md L12-L15). STRIPE_SECRET_KEY and
   // STRIPE_WEBHOOK_SECRET are Worker secrets, set out of band -- see

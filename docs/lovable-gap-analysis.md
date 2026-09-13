@@ -3,7 +3,7 @@
 Grounded in sources that can be checked, not recall:
 
 - **open-lovable** (firecrawl/open-lovable, MIT) read from a working copy of
-  the repository — route names, prompt text and schemas quoted below are read
+  the repository -- route names, prompt text and schemas quoted below are read
   from its source, not remembered.
 - **Lovable's own product surface** read from its MCP server's catalogue
   (`list_connectors`, `list_design_systems`, `list_template_projects`) against
@@ -44,7 +44,7 @@ open-lovable takes a fourth path that needs no infrastructure. Its
 rather than for file contents or for a file list:
 
 ```ts
-// app/api/analyze-edit-intent/route.ts — the schema, verbatim
+// app/api/analyze-edit-intent/route.ts -- the schema, verbatim
 const searchPlanSchema = z.object({
   editType: z.enum([
     'UPDATE_COMPONENT', 'ADD_FEATURE', 'FIX_ISSUE', 'UPDATE_STYLE',
@@ -60,37 +60,37 @@ const searchPlanSchema = z.object({
 ```
 
 Its own comment is the point: `// Schema for the AI's search plan - not file
-selection!` The model is given a one-line summary per file — path, component
-name, what it renders — and answers with what to grep for. Exact search then
+selection!` The model is given a one-line summary per file -- path, component
+name, what it renders -- and answers with what to grep for. Exact search then
 finds the files. `expectedMatches` and `fallbackSearch` exist because the
 first plan can miss.
 
 This matters because ADR-0007 prescribes "exact file/symbol search combined
 with semantic retrieval", and this is the exact-search half working **without
-the semantic half** — no vector store, no embedding provider, no disclosure to
+the semantic half** -- no vector store, no embedding provider, no disclosure to
 one. It is a credible middle option between "send everything" and "wait for
 #12", and ADR-0009 should have listed it. Its cost is one extra model call per
 turn and the risk that a bad search plan sends the wrong files.
 
 Not a recommendation. It needs measuring against the current approach before
-anyone should prefer it — and the current approach has the advantage that it
+anyone should prefer it -- and the current approach has the advantage that it
 cannot silently miss a file.
 
 ## Lovable's product surface
 
 From the MCP catalogue, against a real workspace:
 
-- **90 standard connectors** — OAuth API integrations across sales, marketing,
+- **90 standard connectors** -- OAuth API integrations across sales, marketing,
   messaging, ecommerce, analytics, CMS and data warehouses.
-- **6 seamless integrations** — zero-config: Lovable Cloud (its own backend),
+- **6 seamless integrations** -- zero-config: Lovable Cloud (its own backend),
   an AI gateway, Stripe, Paddle, Shopify, external Supabase.
 - **17 MCP servers** the agent can be given, including Figma, Linear, Notion,
   PostHog, Sentry.
 - **Design systems and template projects** as first-class workspace objects
   (`design_systems`, `template_projects`) that a new project starts from.
-- **Project and workspace knowledge** — persistent instructions the agent
-  carries across turns — and **workspace skills**, reusable named workflows.
-- **Plan mode** — discuss the approach before any code is written.
+- **Project and workspace knowledge** -- persistent instructions the agent
+  carries across turns -- and **workspace skills**, reusable named workflows.
+- **Plan mode** -- discuss the approach before any code is written.
 
 The connector count is the moat, and it is not a moat Vibld should try to
 cross by breadth. Two observations instead:
@@ -100,7 +100,7 @@ cross by breadth. Two observations instead:
    user-owned, reusable one. The step from one to the other is small.
 2. **Project knowledge** is standing instructions that survive turns. With the
    transcript (#55) and project context (#58) in place, this is a small
-   addition with an outsized effect on a long session — and it is the piece
+   addition with an outsized effect on a long session -- and it is the piece
    that stops someone re-typing "keep it dark, no rounded corners" every turn.
 
 _Inferred:_ Lovable's editor is chat-left / preview-right with Visual Edits
@@ -112,8 +112,8 @@ they sit behind the same gap as everything in the first table.
 
 1. **Run the generated project.** Everything else of consequence is behind it:
    preview, the error-repair loop, Visual Edits, Themes. It needs a decision
-   about _where_ — a sandbox service, or an in-browser compiler in a
-   `sandbox="allow-scripts"` frame — that has cost and security consequences in
+   about _where_ -- a sandbox service, or an in-browser compiler in a
+   `sandbox="allow-scripts"` frame -- that has cost and security consequences in
    both directions.
 2. **Project knowledge.** Small, unblocked, and compounding.
 3. **User-owned design systems**, generalising #56.
