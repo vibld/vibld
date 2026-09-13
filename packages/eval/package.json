@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@vibld/ai": "workspace:*",
     "@vibld/core": "workspace:*"
   },
   "devDependencies": {
