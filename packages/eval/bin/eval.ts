@@ -13,7 +13,12 @@ import {
   runCostCents,
   selectCaseIds,
 } from '../src/live.ts';
-import { formatReport, summarise } from '../src/report.ts';
+import {
+  formatReport,
+  formatStability,
+  stability,
+  summarise,
+} from '../src/report.ts';
 import { SCENARIOS, runScenario } from '../src/scenarios.ts';
 
 /**
@@ -40,14 +45,28 @@ import { SCENARIOS, runScenario } from '../src/scenarios.ts';
  * leave files from a previous run that this generation did not produce, so the
  * directory would stop matching the project being reported and could build or
  * render from a stale config absent from the snapshot.
+ *
+ * `alsoClear` is for the first write of a repeated set, which has a second
+ * directory to answer for. Repeats write into `run-N` below the case
+ * directory, and clearing only the leaf leaves whatever the case directory
+ * held before: a previous single-run invocation's project files sitting beside
+ * the run directories, or `run-4` and `run-5` from a larger count. Either way
+ * the candidate tree stops matching the stability report that describes it,
+ * which is the same defect clearing the leaf exists to prevent, one level up.
+ *
+ * It is cleared here rather than before the loop so it is still governed by
+ * the plan: a first run that cannot be written truthfully must destroy
+ * nothing, including the previous candidate it would have replaced.
  */
 async function writeProject(
   root: string,
   files: { path: string; content: string }[],
+  alsoClear?: string,
 ): Promise<void> {
   const plan = planWrites(root, files);
   if (!plan.ok) throw new Error(plan.error);
 
+  if (alsoClear) await rm(alsoClear, { recursive: true, force: true });
   await rm(root, { recursive: true, force: true });
   const byTarget = new Map(
     plan.writes.map((write) => [write.path, write.target]),
@@ -84,6 +103,15 @@ async function main(): Promise<number> {
   }
 
   if (!live.enabled) {
+    // Said rather than silently ignored. The stub returns the same plan every
+    // time, so repeating a case against it would print N identical rows and
+    // measure nothing, but someone who set the variable and saw one run each
+    // would reasonably conclude the flag does not work.
+    if (env.VIBLD_EVAL_RUNS && env.VIBLD_EVAL_RUNS.trim() !== '1') {
+      console.log(
+        'VIBLD_EVAL_RUNS is ignored without VIBLD_EVAL_LIVE: the stub is deterministic, so repeating a case against it measures nothing.',
+      );
+    }
     const results: CaseResult[] = [];
     for (const testCase of cases) {
       const provider = new FakeModelProvider([stubPlan(testCase)]);
@@ -98,33 +126,63 @@ async function main(): Promise<number> {
 
   // Live. One report per model, so the comparison is readable side by side
   // rather than as one pooled score that hides which model earned what.
+  //
+  // Repeats are the inner loop, so each case is run its full number of times
+  // before the next one starts. That keeps a case's runs adjacent in the
+  // report, and it means an interrupted run has finished answering the
+  // reliability question for the cases it got to rather than having one
+  // sample of everything.
   let allAccepted = true;
   let totalCents = 0;
+  const repeated = live.runs > 1;
   for (const model of live.models) {
     const results: CaseResult[] = [];
     for (const testCase of cases) {
-      const projectId = `${model}:${testCase.id}`;
-      const run = createLiveRun(env, model, projectId);
-      const result = await runCase(testCase, run.provider, {
-        store: run.store,
-        projectId,
-      });
-      results.push(result);
-      if (result.outcome !== 'accepted') allAccepted = false;
+      // Whether this case's directory has been dealt with yet. Tracked rather
+      // than keyed on the first attempt, because a first run that produced
+      // nothing writes nothing, and the clearing is owed to whichever run
+      // writes first. A single run needs none of this: it writes to the case
+      // directory itself, which `writeProject` already clears.
+      let caseRootCleared = live.runs === 1;
+      for (let attempt = 1; attempt <= live.runs; attempt += 1) {
+        const projectId = repeated
+          ? `${model}:${testCase.id}#${attempt}`
+          : `${model}:${testCase.id}`;
+        const run = createLiveRun(env, model, projectId);
+        const result = await runCase(testCase, run.provider, {
+          store: run.store,
+          projectId,
+        });
+        results.push(result);
+        if (result.outcome !== 'accepted') allAccepted = false;
 
-      const cents = runCostCents(model, run.usage);
-      if (cents !== null) totalCents += cents;
+        const cents = runCostCents(model, run.usage);
+        if (cents !== null) totalCents += cents;
 
-      if (live.outDir) {
-        const project = await acceptedProject(run);
-        if (project) {
-          const root = join(live.outDir, model, testCase.id);
-          await writeProject(root, project.files);
-          console.log(`  wrote ${project.files.length} files to ${root}`);
+        if (live.outDir) {
+          const project = await acceptedProject(run);
+          if (project) {
+            // Each repeat gets its own directory. Without that the last run
+            // would clear and replace the ones before it, so the variance the
+            // repeats were paid for would exist only in the printed tally and
+            // the directory would hold one arbitrary sample of it. A single
+            // run keeps the original path, since there is nothing to separate.
+            const caseRoot = join(live.outDir, model, testCase.id);
+            const root = repeated ? join(caseRoot, `run-${attempt}`) : caseRoot;
+            await writeProject(
+              root,
+              project.files,
+              caseRootCleared ? undefined : caseRoot,
+            );
+            caseRootCleared = true;
+            console.log(`  wrote ${project.files.length} files to ${root}`);
+          }
         }
       }
     }
     console.log(formatReport(summarise(results, model)));
+    const table = formatStability(stability(results));
+    if (table) console.log(table);
   }
   console.log(`\nMeasured spend across all models: ${totalCents.toFixed(3)}c`);
 

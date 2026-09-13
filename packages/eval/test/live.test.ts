@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import {
+  MAX_RUNS,
   containedPath,
   liveProblems,
+  liveRuns,
   planWrites,
   readLiveOptions,
   runCostCents,
@@ -323,5 +325,87 @@ describe('liveProblems refuses a repeated model', () => {
       VIBLD_EVAL_MODELS: 'claude-opus-5,deepseek-flash,gpt-5.6-luna',
     });
     assert.deepEqual(liveProblems(options, KEYED), []);
+  });
+});
+
+describe('liveRuns', () => {
+  it('is one when nobody asked for repeats', () => {
+    for (const value of [undefined, '', '  ']) {
+      assert.equal(liveRuns(value), 1, String(value));
+    }
+  });
+
+  it('reads a whole number, with surrounding space', () => {
+    assert.equal(liveRuns('3'), 3);
+    assert.equal(liveRuns(' 3 '), 3);
+    assert.equal(liveRuns(String(MAX_RUNS)), MAX_RUNS);
+  });
+
+  it('refuses everything that is not a count', () => {
+    // "1e2" is the one that matters: Number() reads it as a hundred, so a
+    // parser built on Number() alone would multiply the bill by 100 for a
+    // value that does not look like a number to the person who typed it.
+    // The rest are the ordinary typos, refused for the same reason.
+    for (const value of [
+      '1e2',
+      '3.0',
+      '3x',
+      '-1',
+      '0',
+      '0x3',
+      '+3',
+      'three',
+      '3,4',
+      String(MAX_RUNS + 1),
+      '300',
+    ]) {
+      assert.equal(liveRuns(value), null, value);
+    }
+  });
+});
+
+describe('repeated runs', () => {
+  it('refuses a live run whose repeat count cannot be read', () => {
+    const options = readLiveOptions({
+      VIBLD_EVAL_LIVE: '1',
+      VIBLD_EVAL_MODELS: 'claude-opus-5',
+      VIBLD_EVAL_RUNS: '300',
+    });
+    const problems = liveProblems(options, {
+      ...KEYED,
+      VIBLD_EVAL_RUNS: '300',
+    });
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!, /VIBLD_EVAL_RUNS/);
+  });
+
+  it('never falls back to a run count nobody asked for', () => {
+    // The fallback in readLiveOptions exists to keep the shape valid, not to
+    // let a bad value through. If the refusal above ever stopped firing, this
+    // would be a live run silently doing one pass where 300 was typed, which
+    // is the wrong direction to fail in only because it is cheap.
+    const env = {
+      VIBLD_EVAL_LIVE: '1',
+      VIBLD_EVAL_MODELS: 'claude-opus-5',
+      VIBLD_EVAL_RUNS: 'three',
+    };
+    assert.equal(readLiveOptions(env).runs, 1);
+    assert.notDeepEqual(
+      liveProblems(readLiveOptions(env), { ...KEYED, ...env }),
+      [],
+    );
+  });
+
+  it('carries a valid count through, and points a duplicate model at it', () => {
+    const env = {
+      VIBLD_EVAL_LIVE: '1',
+      VIBLD_EVAL_MODELS: 'claude-opus-5,claude-opus-5',
+      VIBLD_EVAL_RUNS: '3',
+    };
+    const options = readLiveOptions(env);
+    assert.equal(options.runs, 3);
+    const problems = liveProblems(options, { ...KEYED, ...env });
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!, /VIBLD_EVAL_RUNS/);
   });
 });
