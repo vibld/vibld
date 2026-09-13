@@ -151,3 +151,32 @@ export {
 export type { ModelChoice } from './model-catalogue.ts';
 export { allowedModels, grantedIds, parseModelPolicy } from './model-policy.ts';
 export type { ModelPolicy, PolicyParse } from './model-policy.ts';
+export {
+  hexToHsl,
+  hslToHex,
+  normaliseHue,
+  readableOn,
+  shadeAgainst,
+  shadeMeeting,
+  shiftLightness,
+} from './color-space.ts';
+export type { Hsl } from './color-space.ts';
+export {
+  REQUIRED_PAIRS,
+  derivePalette,
+  paletteFailures,
+  seedFromHex,
+} from './palette-derive.ts';
+export type {
+  DerivedPalette,
+  PaletteColors,
+  PaletteMode,
+  PaletteScheme,
+  PaletteSeed,
+} from './palette-derive.ts';
+export {
+  PALETTE_LIBRARY,
+  findLibraryPalette,
+  matchLibraryPalette,
+  paletteSummaries,
+} from './palette-library.ts';
