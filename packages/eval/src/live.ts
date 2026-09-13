@@ -161,24 +161,45 @@ export type CaseSelection =
 /**
  * Which cases `--case` asked for.
  *
- * A bare or empty `--case` is an error rather than "all of them", and that is
- * the whole point of this returning a result instead of a list. Falling back
- * to the full set is harmless against the stub and expensive live:
- * `--case "$CASE"` with an unset variable would quietly run every case
- * against every configured model, which is the full suite billed several
- * times over for what was meant to be one generation. The safe direction for
- * a flag that selects work is to refuse, never to widen.
+ * Anything this does not understand is an error. That is the whole design,
+ * and the first attempt at it was not enough: rejecting only a missing value
+ * still let `--case=vibld-marketing`, `--cases x`, or a plain typo fall
+ * through to "no selection", and no selection means the full set. Against the
+ * stub that is merely wrong. Live it is every case against every configured
+ * model, billed, for what was meant to be one generation.
+ *
+ * So the rule is not "reject the mistakes we thought of". It is that a flag
+ * deciding how much work gets paid for refuses every token it cannot account
+ * for, and widening is never a fallback. `--case=<id>` is accepted because it
+ * is a normal spelling of the same intent, not because the parser tolerates
+ * unknowns.
  */
 export function selectCaseIds(argv: string[]): CaseSelection {
   const ids: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] !== '--case') continue;
-    const value = argv[i + 1];
-    if (value === undefined || value.trim() === '' || value.startsWith('--')) {
-      return { ok: false, error: '--case needs a case id.' };
+    const token = argv[i]!;
+
+    if (token.startsWith('--case=')) {
+      const value = token.slice('--case='.length).trim();
+      if (value === '') return { ok: false, error: '--case needs a case id.' };
+      ids.push(value);
+      continue;
     }
-    ids.push(value);
-    i += 1;
+
+    if (token === '--case') {
+      const value = argv[i + 1];
+      if (value === undefined || value.trim() === '' || value.startsWith('-')) {
+        return { ok: false, error: '--case needs a case id.' };
+      }
+      ids.push(value);
+      i += 1;
+      continue;
+    }
+
+    return {
+      ok: false,
+      error: `Unrecognised argument "${token}". Only --case <id> is understood.`,
+    };
   }
   return { ok: true, ids };
 }
@@ -200,4 +221,57 @@ export function containedPath(root: string, filePath: string): string | null {
   // kept while a real "../" escape is refused.
   if (rel.split(sep)[0] === '..') return null;
   return target;
+}
+
+export interface PlannedWrite {
+  path: string;
+  target: string;
+}
+
+export type WritePlan =
+  { ok: true; writes: PlannedWrite[] } | { ok: false; error: string };
+
+/**
+ * Every destination a snapshot would write to, refused as a whole if any of
+ * them is unsafe or if two of them are the same file.
+ *
+ * Two paths that differ only in case are distinct to the validator upstream,
+ * which compares exactly, and the same file on a case-insensitive volume,
+ * which is what macOS and Windows give you by default. Writing both would let
+ * the second silently replace the first while the run still reports the full
+ * file count, so the directory on disk would not be the project being
+ * reported. Since the point of writing candidates out is to compare what the
+ * models actually produced, a directory that quietly disagrees with the
+ * report is worse than a refusal.
+ *
+ * Planned before anything is written, and before the directory is cleared,
+ * so a snapshot that cannot be written truthfully destroys nothing.
+ */
+export function planWrites(
+  root: string,
+  files: readonly { path: string; content: string }[],
+): WritePlan {
+  const writes: PlannedWrite[] = [];
+  const claimed = new Map<string, string>();
+  for (const file of files) {
+    const target = containedPath(root, file.path);
+    if (target === null) {
+      return {
+        ok: false,
+        error: `refusing to write outside ${root}: ${file.path}`,
+      };
+    }
+    // Lower-cased only to detect the collision, never to write by.
+    const key = target.toLowerCase();
+    const claimant = claimed.get(key);
+    if (claimant !== undefined) {
+      return {
+        ok: false,
+        error: `"${file.path}" and "${claimant}" are the same file on a case-insensitive volume.`,
+      };
+    }
+    claimed.set(key, file.path);
+    writes.push({ path: file.path, target });
+  }
+  return { ok: true, writes };
 }

@@ -6,9 +6,9 @@ import { runCase } from '../src/harness.ts';
 import type { CaseResult } from '../src/harness.ts';
 import {
   acceptedProject,
-  containedPath,
   createLiveRun,
   liveProblems,
+  planWrites,
   readLiveOptions,
   runCostCents,
   selectCaseIds,
@@ -30,28 +30,30 @@ import { SCENARIOS, runScenario } from '../src/scenarios.ts';
 /**
  * Write a generated project out so it can be read, run and ported.
  *
- * The directory is cleared first. Overwriting in place would leave files from
- * a previous run that this generation did not produce, so the directory would
- * stop matching the project being reported and could build or render from a
- * stale config that no longer exists in the snapshot. Comparing designs across
- * models is the entire point, and a candidate directory that is part one run
- * and part another is worse than no output at all.
+ * Planned in full before anything happens, so a snapshot that cannot be
+ * written truthfully (an escaping path, or two paths that are the same file on
+ * a case-insensitive volume) is refused while the previous candidate is still
+ * intact. Clearing first and discovering the problem halfway through would
+ * destroy the run it was meant to be compared against.
  *
- * Every path is then checked to still sit under that directory. The validator
- * already refuses an escaping path before promotion, so this is the second of
- * two checks rather than the only one, but a function that writes model output
- * to a filesystem should not rely on that.
+ * The directory is cleared once the plan holds. Overwriting in place would
+ * leave files from a previous run that this generation did not produce, so the
+ * directory would stop matching the project being reported and could build or
+ * render from a stale config absent from the snapshot.
  */
 async function writeProject(
   root: string,
   files: { path: string; content: string }[],
 ): Promise<void> {
+  const plan = planWrites(root, files);
+  if (!plan.ok) throw new Error(plan.error);
+
   await rm(root, { recursive: true, force: true });
+  const byTarget = new Map(
+    plan.writes.map((write) => [write.path, write.target]),
+  );
   for (const file of files) {
-    const target = containedPath(root, file.path);
-    if (target === null) {
-      throw new Error(`refusing to write outside ${root}: ${file.path}`);
-    }
+    const target = byTarget.get(file.path)!;
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, file.content, 'utf8');
   }

@@ -7,11 +7,19 @@ export {
   containedPath,
   createLiveRun,
   liveProblems,
+  planWrites,
   readLiveOptions,
   runCostCents,
   selectCaseIds,
 } from './live.ts';
-export type { CaseSelection, LiveEnv, LiveOptions, LiveRun } from './live.ts';
+export type {
+  CaseSelection,
+  LiveEnv,
+  LiveOptions,
+  LiveRun,
+  PlannedWrite,
+  WritePlan,
+} from './live.ts';
 export { checkPortability } from './portability.ts';
 export type { PortabilityProblem } from './portability.ts';
 export { formatReport, summarise } from './report.ts';

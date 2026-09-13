@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   containedPath,
   liveProblems,
+  planWrites,
   readLiveOptions,
   runCostCents,
   selectCaseIds,
@@ -191,5 +192,77 @@ describe('containedPath', () => {
     // A prefix check on ".." would throw this away. It is a legitimate name.
     const target = containedPath('/out/opus/case', '..rc');
     assert.equal(target, resolve('/out/opus/case/..rc'));
+  });
+});
+
+describe('selectCaseIds refuses anything it cannot account for', () => {
+  // The first fix only closed the empty-value path. These are the forms that
+  // still reached "no selection", and no selection meant the full set: every
+  // case against every configured model, billed.
+  it('refuses the equals spelling with no value, and accepts it with one', () => {
+    assert.deepEqual(selectCaseIds(['--case=vibld-marketing']), {
+      ok: true,
+      ids: ['vibld-marketing'],
+    });
+    assert.equal(selectCaseIds(['--case=']).ok, false);
+  });
+
+  it('refuses a near-miss flag rather than silently running everything', () => {
+    for (const argv of [['--cases', 'x'], ['--csae', 'x'], ['--case-id=x']]) {
+      const result = selectCaseIds(argv);
+      assert.equal(result.ok, false, argv.join(' '));
+      if (!result.ok) assert.match(result.error, /Unrecognised argument/);
+    }
+  });
+
+  it('refuses a bare positional argument', () => {
+    assert.equal(selectCaseIds(['vibld-marketing']).ok, false);
+  });
+
+  it('refuses a value that is really the next flag', () => {
+    assert.equal(selectCaseIds(['--case', '-v']).ok, false);
+  });
+});
+
+describe('planWrites', () => {
+  it('plans every file of a well-formed snapshot', () => {
+    const plan = planWrites('/out/opus/case', [
+      { path: 'package.json', content: '{}' },
+      { path: 'src/App.tsx', content: 'x' },
+    ]);
+    assert.equal(plan.ok, true);
+    if (plan.ok) assert.equal(plan.writes.length, 2);
+  });
+
+  it('refuses two paths that are one file on a case-insensitive volume', () => {
+    // Distinct to the validator, which compares exactly; the same file on the
+    // default macOS and Windows volumes. Writing both would report a file
+    // count the directory does not have.
+    const plan = planWrites('/out/opus/case', [
+      { path: 'src/App.tsx', content: 'first' },
+      { path: 'src/app.tsx', content: 'second' },
+    ]);
+    assert.equal(plan.ok, false);
+    if (!plan.ok)
+      assert.match(plan.error, /same file on a case-insensitive volume/);
+  });
+
+  it('refuses an escaping path', () => {
+    const plan = planWrites('/out/opus/case', [
+      { path: '../escaped.txt', content: 'x' },
+    ]);
+    assert.equal(plan.ok, false);
+    if (!plan.ok) assert.match(plan.error, /refusing to write outside/);
+  });
+
+  it('plans nothing at all when any single file is refused', () => {
+    // The reason this returns a plan instead of writing as it goes: the
+    // directory is cleared only once the whole snapshot is known to be
+    // writable, so a bad file never destroys the run it would be compared to.
+    const plan = planWrites('/out/opus/case', [
+      { path: 'package.json', content: '{}' },
+      { path: '../escaped.txt', content: 'x' },
+    ]);
+    assert.equal(plan.ok, false);
   });
 });
