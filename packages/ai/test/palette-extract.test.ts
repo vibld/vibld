@@ -373,33 +373,66 @@ describe('a reference palette and the product type', () => {
 });
 
 describe('a page built to be expensive to read', () => {
-  it('scans a hostile document in linear time', () => {
-    // Not a hypothetical. The first version of the ground scan looked
-    // lazily for the next `{`, which backtracks from every delimiter it
-    // passed; 60,000 semicolons with no brace after them cost 3.3 seconds,
-    // and the scan cap allows three times that. This runs in a Worker, on a
-    // page the deployment did not choose, inside somebody's CPU budget.
-    const hostile = `<style>${';'.repeat(180_000)}</style>`;
-    const started = Date.now();
-    paletteFromPage(hostile);
-    const took = Date.now() - started;
-    assert.ok(took < 1_000, `took ${took}ms`);
+  /**
+   * The cost of scanning a page of this size, in milliseconds.
+   *
+   * Best of three rather than one reading, because a shared runner will
+   * happily descend on any single measurement.
+   */
+  function costOf(page: string): number {
+    let best = Number.POSITIVE_INFINITY;
+    for (let run = 0; run < 3; run += 1) {
+      const started = Date.now();
+      paletteFromPage(page);
+      best = Math.min(best, Date.now() - started);
+    }
+    return best;
+  }
+
+  /**
+   * Growth between a page and one four times its size.
+   *
+   * The property worth asserting is the shape of the cost, not a number of
+   * milliseconds: linear work grows about fourfold, and the backtracking
+   * this guards against grows about sixteenfold. A wall-clock ceiling asserts
+   * the speed of the runner instead, which is why the first version of this
+   * test passed here at 209ms and failed in CI at 1101ms against its own
+   * 1000ms budget. Both measurements here happen on the same machine, so
+   * whatever that machine is cancels out.
+   *
+   * Ten is between four and sixteen with room on both sides for a noisy
+   * runner, and the absolute ceiling below still catches a regression that
+   * somehow grows evenly.
+   */
+  function growthFactor(unit: (size: number) => string): number {
+    const small = Math.max(1, costOf(unit(45_000)));
+    const large = costOf(unit(180_000));
+    return large / small;
+  }
+
+  it('scans a document of delimiters without backtracking over them', () => {
+    // 180,000 semicolons with no brace after them cost 25 seconds under a
+    // lazy scan for the next `{`. This runs in a Worker, on a page the
+    // deployment does not choose, inside a CPU budget somebody else pays
+    // for.
+    const page = (size: number) => `<style>${';'.repeat(size)}</style>`;
+    const factor = growthFactor(page);
+    assert.ok(factor < 10, `grew ${factor.toFixed(1)}x for 4x the input`);
+    assert.ok(costOf(page(180_000)) < 10_000, 'took more than ten seconds');
   });
 
-  it('is not slowed down by a page full of unclosed media queries', () => {
-    const hostile = `<style>${'@media '.repeat(20_000)}</style>`;
-    const started = Date.now();
-    paletteFromPage(hostile);
-    const took = Date.now() - started;
-    assert.ok(took < 1_000, `took ${took}ms`);
+  it('is not slowed down by unclosed media queries', () => {
+    const page = (size: number) =>
+      `<style>${'@media '.repeat(Math.floor(size / 7))}</style>`;
+    const factor = growthFactor(page);
+    assert.ok(factor < 10, `grew ${factor.toFixed(1)}x for 4x the input`);
   });
 
-  it('is not slowed down by a page full of unclosed body tags', () => {
-    const hostile = `${'<body '.repeat(20_000)}<p>x</p>`;
-    const started = Date.now();
-    paletteFromPage(hostile);
-    const took = Date.now() - started;
-    assert.ok(took < 1_000, `took ${took}ms`);
+  it('is not slowed down by unclosed body tags', () => {
+    const page = (size: number) =>
+      `${'<body '.repeat(Math.floor(size / 6))}<p>x</p>`;
+    const factor = growthFactor(page);
+    assert.ok(factor < 10, `grew ${factor.toFixed(1)}x for 4x the input`);
   });
 });
 
