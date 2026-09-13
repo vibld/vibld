@@ -549,14 +549,39 @@ describe('what actually counts as the page saying so', () => {
     }
   });
 
-  it('takes the root from the rightmost compound selector', () => {
-    for (const selector of ['.dark body', 'html.theme-dark', ':root.dark']) {
+  it('reads a root rule that carries no condition', () => {
+    for (const selector of ['html', 'body', ':root', 'html body', 'html, .x']) {
       const found = paletteFromPage(
         `<style>${selector}{background:#0d1117}</style>` +
           '<p style="color:#39d353">x</p>',
       );
       assert.ok(found, selector);
       assert.equal(found.mode, 'dark', selector);
+    }
+  });
+
+  it('ignores a root rule whose condition it cannot check', () => {
+    // `html.dark` applies only if the root carries that class, and knowing
+    // that means tracking the classes the root has and how the rules naming
+    // them rank, which is most of a CSS engine. A theme rule that is not in
+    // force would otherwise reverse the mode of the page it sits in.
+    //
+    // The fallback when nothing unconditional is found is the brand colour,
+    // which is where this started. A missing answer is recoverable; a
+    // confident wrong one builds a light page for a dark site.
+    for (const selector of [
+      '.dark body',
+      'html.theme-dark',
+      ':root.dark',
+      ':root[data-theme="dark"]',
+      'body#app',
+    ]) {
+      const found = paletteFromPage(
+        `<style>body{background:#fbfbfb}${selector}{background:#0d1117}</style>` +
+          '<p style="color:#0b5fff">x</p>',
+      );
+      assert.ok(found, selector);
+      assert.equal(found.mode, 'light', selector);
     }
   });
 });
@@ -886,5 +911,69 @@ describe('links the browser would never load', () => {
       ),
       ['https://example.com/real.css'],
     );
+  });
+});
+
+describe('a script the scan window cuts in half', () => {
+  it('does not follow a link left live by the truncation', () => {
+    // A script that opens inside the window and closes outside it has no
+    // closing tag to match, so its payload stood as live markup and a
+    // `<link>` quoted in it was fetched. The cap was quietly undoing the
+    // stripping at its own boundary.
+    const filler = '<p>x</p>'.repeat(3_000);
+    const html =
+      '<link rel="stylesheet" href="/real.css">' +
+      `${filler}<script>var t = '<link rel="stylesheet" href="/ghost.css">';` +
+      'y'.repeat(200_000) +
+      '</script>';
+    assert.deepEqual(sameOriginStylesheets(html, 'https://example.com/'), [
+      'https://example.com/real.css',
+    ]);
+  });
+
+  it('does not cut the page short at an ordinary closed style block', () => {
+    // The check has to be for a missing closer, not for an opener: cutting
+    // from any opener to the end deletes the rest of a perfectly normal
+    // page at its first `<style>`.
+    const found = paletteFromPage(
+      '<style>body{background:#0d1117}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+});
+
+describe('stylesheets the browser would not apply to a screen', () => {
+  it('skips a print stylesheet', () => {
+    // A print sheet forces a white ground, so counting it turns every dark
+    // site that has one into a light site.
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<link rel="stylesheet" media="print" href="/print.css">' +
+          '<link rel="stylesheet" href="/screen.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/screen.css'],
+    );
+  });
+
+  it('keeps sheets that do apply, including feature queries', () => {
+    for (const media of [
+      'all',
+      'screen',
+      'screen and (min-width: 40em)',
+      '(min-width: 40em)',
+      '',
+    ]) {
+      assert.deepEqual(
+        sameOriginStylesheets(
+          `<link rel="stylesheet" media="${media}" href="/a.css">`,
+          'https://example.com/',
+        ),
+        ['https://example.com/a.css'],
+        media,
+      );
+    }
   });
 });

@@ -130,7 +130,36 @@ const SCRIPT_BLOCK = new RegExp(
  * either side of a removed span is accidentally joined into a new tag.
  */
 function markupOnly(html: string): string {
-  return html.replace(HTML_COMMENT, ' ').replace(SCRIPT_BLOCK, ' ');
+  const stripped = html.replace(HTML_COMMENT, ' ').replace(SCRIPT_BLOCK, ' ');
+  return withoutUnclosedRawText(stripped);
+}
+
+/**
+ * The document cut off at the first `<script>` or `<style>` that never
+ * closes.
+ *
+ * This is what the scan cap makes of any script that starts inside the
+ * window and ends outside it: its closing tag is simply not there to match,
+ * so the payload stands as live markup and a `<link>` quoted inside it gets
+ * fetched. That is the one thing stripping scripts exists to prevent, and
+ * the cap was quietly reintroducing it at the boundary.
+ *
+ * The opener has to be checked for an actual missing closer rather than
+ * assumed: a pattern that cuts from any opener to the end deletes the rest
+ * of a page at its first perfectly ordinary `<style>`.
+ */
+function withoutUnclosedRawText(html: string): string {
+  const openers = new RegExp(`<(script|style)${NAME_ENDS}[^>]{0,2000}>`, 'gi');
+  for (const opener of html.matchAll(openers)) {
+    const at = opener.index ?? 0;
+    const closer = new RegExp(
+      `</${(opener[1] ?? '').toLowerCase()}${NAME_ENDS}[^>]{0,2000}>`,
+      'gi',
+    );
+    closer.lastIndex = at + opener[0].length;
+    if (closer.exec(html) === null) return html.slice(0, at);
+  }
+  return html;
 }
 
 const META_TAG = new RegExp(`<meta${NAME_ENDS}([^>]*)>`, 'gi');
@@ -232,30 +261,42 @@ function backgroundsIn(block: string): string[] {
 }
 
 /**
- * Whether this selector list actually selects the document root.
+ * Whether this selector list states something about the page itself,
+ * unconditionally.
  *
- * Tokenised rather than pattern-matched, because CSS punctuation is not word
- * characters and a word boundary therefore fires inside `.body`, `#body`,
- * `[data-body]`, `.html-preview` and `body-copy`. Every one of those is an
- * ordinary component whose background would otherwise decide what the whole
- * page's mode is.
+ * Every compound has to be the root element or the root pseudo-class and
+ * nothing else: `html`, `body`, `:root`, `html body`. A condition of any
+ * kind disqualifies it, so `html.dark`, `body.theme`, `.dark body` and
+ * `:root[data-theme]` are all read as saying nothing here.
  *
- * The rightmost compound selector is the one the rule is about: in
- * `.dark body` the subject is `body`, and in `body .card` it is `.card`. So
- * the subject is taken and then required to begin with the element or the
- * pseudo-class itself, with nothing glued to it.
+ * That is narrower than a browser, deliberately, and it is the second time
+ * this function has changed for the same reason. It began as a word-boundary
+ * match, which fired inside `.body` and `body-copy`; it became a tokeniser
+ * that took the rightmost compound, which fired on `html.dark` whether or
+ * not the page had that class. Answering that properly means tracking which
+ * classes the root actually carries and how the rules that mention them
+ * rank, which is most of a CSS engine, and the fifth review round in a row
+ * to find another place a regex and a browser disagree is evidence about the
+ * approach rather than about the regex.
+ *
+ * So this no longer approximates the cascade. It reads the statements that
+ * cannot be misread and ignores the rest, and when a page says nothing it
+ * can be sure of, `readGroundMode` returns null and the caller falls back to
+ * the brand colour. A missing answer is recoverable. A confident wrong one
+ * builds a light page for a dark site.
+ *
+ * `html, .sidebar { ... }` still counts, because the `html` half of that list
+ * applies unconditionally whatever the other half does.
  */
-function selectsRoot(selectorList: string): boolean {
+function statesTheRootUnconditionally(selectorList: string): boolean {
+  const root = new RegExp(`^(?:html|body|:root)${NAME_ENDS}$`, 'i');
   for (const selector of selectorList.split(',')) {
     const compounds = selector
       .trim()
       .split(/[\s>+~]+/)
       .filter(Boolean);
-    const subject = compounds[compounds.length - 1];
-    if (!subject) continue;
-    if (new RegExp(`^(?:html|body|:root)${NAME_ENDS}`, 'i').test(subject)) {
-      return true;
-    }
+    if (compounds.length === 0) continue;
+    if (compounds.every((compound) => root.test(compound))) return true;
   }
   return false;
 }
@@ -323,7 +364,7 @@ function readGroundMode(
       css.slice(0, MAX_SCAN_CHARS).replace(CSS_COMMENT, ' '),
     );
     for (const rule of rules.matchAll(CSS_RULE)) {
-      if (!selectsRoot(rule[1] ?? '')) continue;
+      if (!statesTheRootUnconditionally(rule[1] ?? '')) continue;
       const block = rule[2] ?? '';
       // The last applicable one, not the first. Two root rules both setting
       // `color-scheme` are not ambiguous: the browser takes the later, the
@@ -696,6 +737,23 @@ export function sameOriginStylesheets(
   return stylesheetLinks(html, pageUrl, limit).map((link) => link.url);
 }
 
+/**
+ * Whether a `media` attribute is one a screen matches.
+ *
+ * Deliberately generous: anything naming `screen` or `all` counts, as does
+ * a bare feature query like `(min-width: 40em)`, because those describe
+ * which screen rather than whether. Only a query that names another medium
+ * and not `screen` is excluded.
+ */
+function appliesOnScreen(media: string): boolean {
+  const value = media.trim().toLowerCase();
+  if (value.length === 0) return true;
+  if (/\b(?:screen|all)\b/.test(value)) return true;
+  return !/\b(?:print|speech|aural|braille|tty|tv|projection|handheld)\b/.test(
+    value,
+  );
+}
+
 /** The same links, each with where in the document it was written. */
 function stylesheetLinks(
   html: string,
@@ -753,6 +811,13 @@ function stylesheetLinks(
     if (!rel.trim().toLowerCase().split(/\s+/).includes('stylesheet')) {
       continue;
     }
+    // A sheet the browser does not apply on a screen says nothing about
+    // what the page looks like on one. Print stylesheets in particular
+    // force a white ground, which would turn every dark site that has one
+    // into a light site. Absent, empty, `all` and anything mentioning
+    // `screen` count; everything else does not.
+    const media = attribute(attributes, 'media');
+    if (media && !appliesOnScreen(media)) continue;
     const value = attribute(attributes, 'href');
     if (!value) continue;
 
