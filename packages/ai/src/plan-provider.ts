@@ -20,6 +20,8 @@ import { diagramGuidance } from './diagrams.ts';
 import { primitiveGuidance } from './primitives.ts';
 import { paletteGuidance } from './palettes.ts';
 import { styleDnaGuidance } from './style-dna.ts';
+import { referencePaletteGuidance } from './palette-derive.ts';
+import type { DerivedPalette } from './palette-derive.ts';
 import type { StyleDna } from './style-dna.ts';
 import {
   ProviderContextError,
@@ -68,6 +70,13 @@ export interface ModelProviderOptions {
    * the prompt, the same division of labour it already has with `knowledge`.
    */
   referenceContext?: string;
+  /**
+   * A palette derived from the reference site, when one could be. Supplied
+   * by the same code that fetched the reference text, because both come off
+   * the same response and re-fetching to get the second would be a second
+   * request for one page.
+   */
+  palette?: DerivedPalette;
   /**
    * Standing visual preferences, as a closed set of dimension/value pairs.
    * Unlike `knowledge` this is not the user's prose, so it is validated
@@ -122,6 +131,7 @@ export class PlanProvider implements ModelProvider {
   readonly #style?: StylePresetId;
   readonly #knowledge?: string;
   readonly #referenceContext?: string;
+  readonly #palette?: DerivedPalette;
   readonly #styleDna?: StyleDna;
 
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
@@ -135,6 +145,7 @@ export class PlanProvider implements ModelProvider {
     this.#style = options.style;
     this.#knowledge = options.knowledge;
     this.#referenceContext = options.referenceContext;
+    this.#palette = options.palette;
     this.#styleDna = options.styleDna;
     this.id = `${client.id}:${this.#model}`;
   }
@@ -148,6 +159,7 @@ export class PlanProvider implements ModelProvider {
         this.#knowledge,
         this.#referenceContext,
         this.#styleDna,
+        this.#palette,
       ),
       model: this.#model,
       maxTokens: this.#maxTokens,
@@ -222,6 +234,7 @@ export function buildUserPrompt(
   knowledge?: string | null,
   referenceContext?: string | null,
   styleDna?: StyleDna | null,
+  palette?: DerivedPalette | null,
 ): string {
   const base = request.base;
   const parts = [request.prompt];
@@ -318,12 +331,26 @@ Preserve anything the request does not ask you to change.`,
   const primitives = primitiveGuidance(request.prompt);
   if (primitives) parts.push(primitives);
 
-  // Only when no style preset was chosen: a preset like "dark" already
-  // carries its own colour direction, and a product-type default should
-  // never compete with an explicit one (see palettes.ts's own comment).
+  // Colour, in one place, with one precedence.
+  //
+  //   1. what the request itself says  (always wins, it is the user's words)
+  //   2. a chosen style preset         (already carries a colour direction)
+  //   3. the reference site's palette  (they pointed at it; it is evidence)
+  //   4. the product-type default      (a guess from keywords, and last)
+  //
+  // Three is new and sits where it does deliberately. Someone who supplies a
+  // reference URL and no colours has expressed a preference more specific
+  // than any keyword match can be, so it outranks the catalogue default; and
+  // someone who typed a colour has expressed one more specific still, so it
+  // does not outrank the request. Only one of these is ever emitted, because
+  // two colour systems in one prompt is how a model ends up averaging them.
   if (!style) {
-    const palette = paletteGuidance(request.prompt);
-    if (palette) parts.push(palette);
+    const fromReference = palette ? referencePaletteGuidance(palette) : null;
+    const fromProductType = fromReference
+      ? null
+      : paletteGuidance(request.prompt);
+    const chosen = fromReference ?? fromProductType;
+    if (chosen) parts.push(chosen);
   }
 
   // Standing visual preferences sit with the other standing guidance and

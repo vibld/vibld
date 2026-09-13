@@ -1,4 +1,6 @@
 import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
+import { paletteFromPage, sameOriginStylesheets } from '@vibld/ai';
+import type { ExtractedPalette } from '@vibld/ai';
 
 /**
  * Fetches a caller-supplied "copy from or emulate" URL and reduces it to the
@@ -15,7 +17,8 @@ import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
  */
 
 export type ReferenceFetchResult =
-  { ok: true; text: string } | { ok: false; error: string };
+  | { ok: true; text: string; palette: ExtractedPalette | null }
+  | { ok: false; error: string };
 
 /** How long a fetch may take before this gives up and reports it. */
 const FETCH_TIMEOUT_MS = 8_000;
@@ -42,6 +45,56 @@ const FETCH_USER_AGENT =
  * cap ever applies.
  */
 const MAX_FETCH_BYTES = 512 * 1024;
+
+/**
+ * How much of a linked stylesheet is read, and how long it may take.
+ *
+ * Smaller and shorter than the page's own budget on purpose. The stylesheet
+ * is a bonus: the request already has its text and can complete without it,
+ * so it gets a slice of the latency someone is waiting inside of rather than
+ * a second full allowance. A sheet that is slow or enormous is dropped and
+ * the run carries on.
+ */
+const MAX_STYLESHEET_BYTES = 256 * 1024;
+const STYLESHEET_TIMEOUT_MS = 4_000;
+
+/**
+ * The page's own stylesheets, as text, skipping any that misbehaves.
+ *
+ * Every failure here is swallowed deliberately. This exists to improve a
+ * palette guess; nothing about it is worth failing a generation over, and a
+ * reference site whose CSS 404s is not a reason to refuse the request.
+ */
+async function readStylesheets(
+  html: string,
+  pageUrl: string,
+  doFetch: typeof fetch,
+): Promise<string[]> {
+  const urls = sameOriginStylesheets(html, pageUrl);
+  const sheets: string[] = [];
+  for (const url of urls) {
+    // Re-validated even though same-origin already implies the page's own
+    // host passed: this module does not get to be the one place that starts
+    // trusting a URL because of where it came from.
+    const target = parseReferenceTarget(url);
+    if (!target.ok) continue;
+    try {
+      const response = await doFetch(target.value.toString(), {
+        signal: AbortSignal.timeout(STYLESHEET_TIMEOUT_MS),
+        headers: {
+          accept: 'text/css,*/*;q=0.1',
+          'user-agent': FETCH_USER_AGENT,
+        },
+      });
+      if (!response.ok || !response.body) continue;
+      sheets.push(await readCapped(response.body, MAX_STYLESHEET_BYTES));
+    } catch {
+      // Timed out, refused, or the body died partway. Not this feature's
+      // problem to report.
+    }
+  }
+  return sheets;
+}
 
 /**
  * Hostnames Cloudflare's own platform already refuses to route `fetch()` to
@@ -167,6 +220,8 @@ async function readCapped(
 export interface ReferenceFetchOptions {
   fetchImpl?: typeof fetch;
   maxChars?: number;
+  /** Set false to skip the stylesheet fetches. Tests that count requests use it. */
+  readStylesheets?: boolean;
 }
 
 export async function fetchReferenceContext(
@@ -232,8 +287,16 @@ export async function fetchReferenceContext(
     };
   }
 
+  // Read from the markup before it is thrown away, and from the page's own
+  // stylesheets, which is where most sites actually keep their colours.
+  const stylesheets =
+    options.readStylesheets === false
+      ? []
+      : await readStylesheets(raw, target.value.toString(), doFetch);
+
   return {
     ok: true,
     text: text.length > maxChars ? `${text.slice(0, maxChars)}…` : text,
+    palette: paletteFromPage(raw, stylesheets),
   };
 }

@@ -333,3 +333,51 @@ export function seedFromHex(
     scheme,
   };
 }
+
+/**
+ * The CSS a derived palette becomes, as the model is asked to write it.
+ *
+ * Same token names and same shape as `paletteGuidance` in `palettes.ts`, so
+ * whichever source supplied the colours the model sees one format and the
+ * generated `src/styles.css` looks the same either way.
+ *
+ * The wording is firmer than the product-type default's, and deliberately.
+ * A keyword-matched palette is a guess and says so ("in the absence of a
+ * stated palette"); this one was derived from a page the user chose, which
+ * is the strongest signal short of them typing hex values.
+ */
+export function paletteCss(palette: DerivedPalette): string {
+  const c = palette.colors;
+  return `:root {
+  --background: ${c.background}; --foreground: ${c.foreground};
+  --card: ${c.card}; --card-foreground: ${c.cardForeground};
+  --muted: ${c.muted}; --muted-foreground: ${c.mutedForeground};
+  --primary: ${c.primary}; --primary-foreground: ${c.onPrimary};
+  --secondary: ${c.secondary}; --secondary-foreground: ${c.onSecondary};
+  --accent: ${c.accent}; --accent-foreground: ${c.onAccent};
+  --border: ${c.border};
+  --destructive: ${c.destructive}; --destructive-foreground: ${c.onDestructive};
+}`;
+}
+
+/**
+ * The section a reference-derived palette contributes to the prompt.
+ *
+ * Every pair in it has already been solved against WCAG AA, which is why the
+ * instruction is to use these values rather than to be inspired by them: the
+ * guarantee only holds if the numbers survive. A model that "adjusts" them
+ * is re-opening exactly the question this package spent a contrast solver
+ * answering.
+ */
+export function referencePaletteGuidance(palette: DerivedPalette): string {
+  return `Colour palette for this build, derived from the reference site the
+user pointed at. ${palette.note}
+
+Use these exact values as the CSS custom properties in src/styles.css. Every
+foreground and background pair here has already been checked against WCAG AA,
+so use the values as given rather than adjusting them; a colour the user
+actually typed in the request above still wins over any of them. This is a
+${palette.mode} palette, so build the page for a ${palette.mode} ground.
+
+${paletteCss(palette)}`;
+}

@@ -180,3 +180,11 @@ export {
   matchLibraryPalette,
   paletteSummaries,
 } from './palette-library.ts';
+export {
+  dominantBrandColor,
+  paletteFromPage,
+  readColorLiterals,
+  readPageColors,
+  sameOriginStylesheets,
+} from './palette-extract.ts';
+export type { ExtractedPalette, PageColors } from './palette-extract.ts';

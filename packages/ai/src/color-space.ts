@@ -231,3 +231,58 @@ export function shiftLightness(hex: string, delta: number): string | null {
   if (!hsl) return null;
   return hslToHex({ ...hsl, lightness: clamp(hsl.lightness + delta, 0, 100) });
 }
+
+/**
+ * `oklch(L C H)` to a six-digit hex, or null if the values are not usable.
+ *
+ * This is the matrix maths the header says generation deliberately avoids,
+ * and it is here for the opposite job: reading. Tailwind 4 emits every one of
+ * its colours as `oklch()`, which makes it the format a large share of modern
+ * sites now publish, and `palette-extract.ts` found exactly zero colours on
+ * vibld.com's own stylesheet without it. Generating still uses HSL, because
+ * generation is judged on measured sRGB contrast and does not need a
+ * perceptual space to get there. Reading does not get to choose its input.
+ *
+ * `L` may be written `0.704` or `70.4%`; both are accepted because both
+ * appear in the wild. Out-of-gamut results are clamped per channel, which is
+ * what a browser does with them too.
+ *
+ * Coefficients are Björn Ottosson's OKLab definition, via OKLab to linear
+ * sRGB and then the sRGB transfer function.
+ */
+export function oklchToHex(
+  lightness: number,
+  chroma: number,
+  hue: number,
+): string | null {
+  if (![lightness, chroma, hue].every((value) => Number.isFinite(value))) {
+    return null;
+  }
+  const l = clamp(lightness, 0, 1);
+  const c = Math.max(0, chroma);
+  const radians = (normaliseHue(hue) * Math.PI) / 180;
+  const a = c * Math.cos(radians);
+  const b = c * Math.sin(radians);
+
+  const lRoot = l + 0.3963377774 * a + 0.2158037573 * b;
+  const mRoot = l - 0.1055613458 * a - 0.0638541728 * b;
+  const sRoot = l - 0.0894841775 * a - 1.291485548 * b;
+  const lLinear = lRoot ** 3;
+  const mLinear = mRoot ** 3;
+  const sLinear = sRoot ** 3;
+
+  const linear = [
+    4.0767416621 * lLinear - 3.3077115913 * mLinear + 0.2309699292 * sLinear,
+    -1.2684380046 * lLinear + 2.6097574011 * mLinear - 0.3413193965 * sLinear,
+    -0.0041960863 * lLinear - 0.7034186147 * mLinear + 1.707614701 * sLinear,
+  ];
+
+  const encode = (channel: number): number => {
+    const value = clamp(channel, 0, 1);
+    return value <= 0.0031308
+      ? value * 12.92
+      : 1.055 * value ** (1 / 2.4) - 0.055;
+  };
+
+  return `#${linear.map((channel) => channelToHex(encode(channel))).join('')}`;
+}
