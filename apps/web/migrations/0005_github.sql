@@ -49,10 +49,17 @@ CREATE TABLE github_bindings (
 -- branch that may have moved -- which makes the "same" commit a different
 -- object and the push happen twice.
 --
--- Keyed by revision, not by user, because the revision is the operation:
--- two attempts at one checkpoint are one row, and that is the point.
+-- Keyed by the destination as well as the revision, because the operation is
+-- "push this checkpoint *to this repository*". A sha names a commit in one
+-- repository and nothing at all in another, so a user who reconnects from one
+-- repository to another and pushes the same checkpoint must resolve a fresh
+-- parent: reusing the recorded one builds a commit on a parent the new
+-- destination has never heard of, GitHub refuses it, and every retry reads
+-- the same stale row and refuses again.
 CREATE TABLE github_pushes (
   user_id TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
   revision TEXT NOT NULL,
 
   -- Resolved once, before the first ambiguous write, and reused by every
@@ -70,7 +77,7 @@ CREATE TABLE github_pushes (
   started_at TEXT NOT NULL,
   finished_at TEXT,
 
-  PRIMARY KEY (user_id, revision)
+  PRIMARY KEY (user_id, owner, repo, revision)
 );
 
 CREATE INDEX idx_github_pushes_user ON github_pushes(user_id, started_at);

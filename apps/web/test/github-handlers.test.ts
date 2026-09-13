@@ -298,7 +298,12 @@ describe('pushing a checkpoint', () => {
     const { doFetch } = fakeGitHub({ base: 'base-commit' });
     await handleGitHubPush(pushRequest(), env(db), PRINCIPAL, doFetch, NOW);
 
-    const attempt = await store.push('user_1', 'r7');
+    const attempt = await store.push({
+      userId: 'user_1',
+      owner: 'acme',
+      repo: 'site',
+      revision: 'r7',
+    });
     assert.equal(attempt?.commitSha, 'the-commit');
     assert.equal(attempt?.treeSha, 'the-tree');
     assert.ok(attempt?.finishedAt);
@@ -492,5 +497,52 @@ describe('when the token cannot be minted', () => {
     assert.equal(response.status, 502);
     const body = (await response.json()) as { reconnect?: boolean };
     assert.equal(body.reconnect, undefined);
+  });
+});
+
+/**
+ * Reconnecting to a different repository starts a different operation.
+ *
+ * The recorded parent exists so a retry of one push commits onto the sha the
+ * first attempt used. That is only true while both attempts are aimed at the
+ * same repository: a sha from one repository names nothing in another, so
+ * reusing it builds a commit on a parent the destination has never heard of.
+ */
+describe('pushing the same checkpoint to a second repository', () => {
+  it('resolves a parent in the repository it is actually pushing to', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+
+    await store.bind(GRANT);
+    const first = fakeGitHub({ base: 'base-in-acme-site' });
+    await handleGitHubPush(
+      pushRequest(),
+      env(db),
+      PRINCIPAL,
+      first.doFetch,
+      NOW,
+    );
+
+    // The user connects somewhere else and pushes the same checkpoint.
+    await store.bind({ ...GRANT, owner: 'acme', repo: 'other-site' });
+    const second = fakeGitHub({ base: 'base-in-other-site' });
+    const response = await handleGitHubPush(
+      pushRequest(),
+      env(db),
+      PRINCIPAL,
+      second.doFetch,
+      NOW,
+    );
+
+    assert.equal(response.status, 200);
+    const commit = second.calls.find(
+      (call) => call.method === 'POST' && call.path.endsWith('/git/commits'),
+    );
+    assert.ok(commit, 'no commit was created in the second repository');
+    assert.deepEqual(
+      (commit.body as { parents: string[] }).parents,
+      ['base-in-other-site'],
+      'committed onto a parent from the repository it was disconnected from',
+    );
   });
 });

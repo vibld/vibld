@@ -200,7 +200,16 @@ export async function handleGitHubPush(
   // same files then commit onto a different parent and become a second
   // commit. `beginPush` inserts or does nothing, so the first attempt's
   // parent is the one every retry gets back.
-  const recorded = await store.push(principal.userId, revision);
+  // The destination is part of which push this is, not a detail of it: a sha
+  // from one repository names nothing in another, so a user who reconnects
+  // elsewhere and pushes the same checkpoint resolves a fresh parent there.
+  const key = {
+    userId: principal.userId,
+    owner: binding.owner,
+    repo: binding.repo,
+    revision,
+  };
+  const recorded = await store.push(key);
   let baseSha = recorded?.baseSha;
   if (!baseSha) {
     const base = await resolveBase(token.token, target, doFetch);
@@ -209,8 +218,7 @@ export async function handleGitHubPush(
   }
 
   const attempt = await store.beginPush({
-    userId: principal.userId,
-    revision,
+    ...key,
     baseSha,
     branch: branchForRevision(revision)!,
     startedAt: now.toISOString(),
@@ -251,7 +259,7 @@ export async function handleGitHubPush(
     );
   }
 
-  await store.finishPush(principal.userId, revision, {
+  await store.finishPush(key, {
     commitSha: pushed.pushed.commitSha,
     treeSha: pushed.pushed.treeSha,
     ...(pushed.pushed.pullRequestUrl

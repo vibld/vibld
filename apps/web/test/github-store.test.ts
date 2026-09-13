@@ -129,10 +129,19 @@ describe('whether a grant may still be pushed on', () => {
 describe('recording a push', () => {
   const ATTEMPT = {
     userId: 'user_1',
+    owner: 'acme',
+    repo: 'site',
     revision: 'r7',
     baseSha: 'base-when-we-started',
     branch: 'vibld/r7',
     startedAt: '2026-09-13T12:00:00.000Z',
+  };
+
+  const KEY = {
+    userId: 'user_1',
+    owner: 'acme',
+    repo: 'site',
+    revision: 'r7',
   };
 
   it('returns the row it wrote', async () => {
@@ -164,9 +173,26 @@ describe('recording a push', () => {
     await store.beginPush(ATTEMPT);
     await store.beginPush(ATTEMPT);
     await store.beginPush(ATTEMPT);
-    const found = await store.push('user_1', 'r7');
+    const found = await store.push(KEY);
     assert.ok(found);
     assert.equal(found.branch, 'vibld/r7');
+  });
+
+  it('keeps two repositories apart at the same revision', async () => {
+    // A parent sha means something in the repository it came from and
+    // nothing in any other, so the destination is part of which push this
+    // is. Sharing the row across repositories hands the second push a
+    // parent the second repository has never heard of.
+    const store = newStore();
+    await store.beginPush(ATTEMPT);
+    const elsewhere = await store.beginPush({
+      ...ATTEMPT,
+      repo: 'other-site',
+      baseSha: 'the-other-repository-base',
+    });
+    assert.equal(elsewhere.baseSha, 'the-other-repository-base');
+    const original = await store.push(KEY);
+    assert.equal(original?.baseSha, 'base-when-we-started');
   });
 
   it('keeps two users apart at the same revision', async () => {
@@ -178,20 +204,20 @@ describe('recording a push', () => {
       baseSha: 'their-own-base',
     });
     assert.equal(other.baseSha, 'their-own-base');
-    const mine = await store.push('user_1', 'r7');
+    const mine = await store.push(KEY);
     assert.equal(mine?.baseSha, 'base-when-we-started');
   });
 
   it('records what the push established when it lands', async () => {
     const store = newStore();
     await store.beginPush(ATTEMPT);
-    await store.finishPush('user_1', 'r7', {
+    await store.finishPush(KEY, {
       commitSha: 'abc',
       treeSha: 'def',
       pullRequestUrl: 'https://github.com/acme/site/pull/9',
       finishedAt: '2026-09-13T12:01:00.000Z',
     });
-    const found = await store.push('user_1', 'r7');
+    const found = await store.push(KEY);
     assert.equal(found?.commitSha, 'abc');
     assert.equal(found?.pullRequestUrl, 'https://github.com/acme/site/pull/9');
     assert.equal(found?.finishedAt, '2026-09-13T12:01:00.000Z');
@@ -202,18 +228,18 @@ describe('recording a push', () => {
     // a missing link, which the client already reports that way.
     const store = newStore();
     await store.beginPush(ATTEMPT);
-    await store.finishPush('user_1', 'r7', {
+    await store.finishPush(KEY, {
       commitSha: 'abc',
       treeSha: 'def',
       finishedAt: '2026-09-13T12:01:00.000Z',
     });
-    const found = await store.push('user_1', 'r7');
+    const found = await store.push(KEY);
     assert.equal(found?.commitSha, 'abc');
     assert.equal(found?.pullRequestUrl, null);
   });
 
   it('has nothing for a checkpoint nobody has pushed', async () => {
     const store = newStore();
-    assert.equal(await store.push('user_1', 'never'), null);
+    assert.equal(await store.push({ ...KEY, revision: 'never' }), null);
   });
 });

@@ -40,6 +40,8 @@ interface BindingRow {
 /** What an attempt at one checkpoint has established so far. */
 export interface PushAttempt {
   userId: string;
+  owner: string;
+  repo: string;
   revision: string;
   /** The parent this push resolved before it began writing. */
   baseSha: string;
@@ -53,6 +55,8 @@ export interface PushAttempt {
 
 interface PushRow {
   user_id: string;
+  owner: string;
+  repo: string;
   revision: string;
   base_sha: string;
   branch: string;
@@ -80,6 +84,8 @@ function toBinding(row: BindingRow): RepositoryBinding {
 function toAttempt(row: PushRow): PushAttempt {
   return {
     userId: row.user_id,
+    owner: row.owner,
+    repo: row.repo,
     revision: row.revision,
     baseSha: row.base_sha,
     branch: row.branch,
@@ -89,6 +95,20 @@ function toAttempt(row: PushRow): PushAttempt {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };
+}
+
+/**
+ * Which push, exactly: one checkpoint aimed at one repository.
+ *
+ * The destination is part of the identity rather than a detail of it. The
+ * recorded parent only means anything inside the repository it came from, so
+ * "revision r7" is not one operation, "r7 into acme/site" is.
+ */
+export interface PushKey {
+  userId: string;
+  owner: string;
+  repo: string;
+  revision: string;
 }
 
 /**
@@ -199,20 +219,19 @@ export class GitHubStore {
    * the first one committed against.
    */
   async beginPush(
-    attempt: Pick<
-      PushAttempt,
-      'userId' | 'revision' | 'baseSha' | 'branch' | 'startedAt'
-    >,
+    attempt: PushKey & Pick<PushAttempt, 'baseSha' | 'branch' | 'startedAt'>,
   ): Promise<PushAttempt> {
     await this.#db
       .prepare(
         `INSERT INTO github_pushes (
-           user_id, revision, base_sha, branch, started_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(user_id, revision) DO NOTHING`,
+           user_id, owner, repo, revision, base_sha, branch, started_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(user_id, owner, repo, revision) DO NOTHING`,
       )
       .bind(
         attempt.userId,
+        attempt.owner,
+        attempt.repo,
         attempt.revision,
         attempt.baseSha,
         attempt.branch,
@@ -222,9 +241,10 @@ export class GitHubStore {
 
     const row = await this.#db
       .prepare(
-        `SELECT * FROM github_pushes WHERE user_id = ?1 AND revision = ?2`,
+        `SELECT * FROM github_pushes
+         WHERE user_id = ?1 AND owner = ?2 AND repo = ?3 AND revision = ?4`,
       )
-      .bind(attempt.userId, attempt.revision)
+      .bind(attempt.userId, attempt.owner, attempt.repo, attempt.revision)
       .first<PushRow>();
     if (!row) {
       // The insert either wrote a row or found one already there, so this
@@ -236,8 +256,7 @@ export class GitHubStore {
 
   /** What a push established, once it is known to have landed. */
   async finishPush(
-    userId: string,
-    revision: string,
+    key: PushKey,
     result: {
       commitSha: string;
       treeSha: string;
@@ -248,13 +267,15 @@ export class GitHubStore {
     await this.#db
       .prepare(
         `UPDATE github_pushes
-         SET commit_sha = ?3, tree_sha = ?4, pull_request_url = ?5,
-             finished_at = ?6
-         WHERE user_id = ?1 AND revision = ?2`,
+         SET commit_sha = ?5, tree_sha = ?6, pull_request_url = ?7,
+             finished_at = ?8
+         WHERE user_id = ?1 AND owner = ?2 AND repo = ?3 AND revision = ?4`,
       )
       .bind(
-        userId,
-        revision,
+        key.userId,
+        key.owner,
+        key.repo,
+        key.revision,
         result.commitSha,
         result.treeSha,
         result.pullRequestUrl ?? null,
@@ -264,12 +285,13 @@ export class GitHubStore {
   }
 
   /** An attempt, for a caller deciding whether there is anything to resume. */
-  async push(userId: string, revision: string): Promise<PushAttempt | null> {
+  async push(key: PushKey): Promise<PushAttempt | null> {
     const row = await this.#db
       .prepare(
-        `SELECT * FROM github_pushes WHERE user_id = ?1 AND revision = ?2`,
+        `SELECT * FROM github_pushes
+         WHERE user_id = ?1 AND owner = ?2 AND repo = ?3 AND revision = ?4`,
       )
-      .bind(userId, revision)
+      .bind(key.userId, key.owner, key.repo, key.revision)
       .first<PushRow>();
     return row ? toAttempt(row) : null;
   }
