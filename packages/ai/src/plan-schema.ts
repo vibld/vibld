@@ -127,9 +127,16 @@ CSS and its own tokens: the dependency buys behaviour, not appearance. Declare
 it in package.json's dependencies. Everything else is still built by hand.
 
 REQUIRED FILES
-package.json, index.html, src/main.tsx, src/App.tsx, src/styles.css and
-DESIGN.md must always be present. package.json must declare "dev", "build",
-"lint" and "typecheck" scripts and must not depend on any Vibld package.
+package.json, index.html, src/main.tsx, src/App.tsx, src/styles.css,
+README.md and DESIGN.md must always be present. package.json must declare
+"dev", "build", "lint" and "typecheck" scripts and must not depend on any
+Vibld package.
+
+README.md is what someone who has never heard of Vibld reads first: what the
+project is, how to install it, how to run it, and how to build it, using the
+scripts package.json actually declares. It is the portability promise in
+practice (ADR-0002), so write it for a stranger with a terminal, not as a
+summary of the request.
 
 DESIGN.md
 A short record of the design decisions this project actually made, so the

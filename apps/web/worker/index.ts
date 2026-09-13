@@ -32,6 +32,7 @@ import {
   findClerkUserIdByEmail,
 } from './clerk-lookup.ts';
 import { decideModel, grantedFor } from './model-access.ts';
+import { grantSignupCreditOnce } from './signup-credit.ts';
 import {
   ACCOUNT_BUDGET_KEY,
   dayKey,
@@ -82,6 +83,7 @@ export interface Env {
   ANTHROPIC_API_KEY?: string;
   /** Worker secret. Never reaches the browser. */
   DEEPSEEK_API_KEY?: string;
+  OPENAI_API_KEY?: string;
   /** "anthropic" or "deepseek". Explicit beats inferred; see selectProvider. */
   VIBLD_PROVIDER?: string;
   /**
@@ -124,6 +126,22 @@ export interface Env {
    * knob (`entitlement.ts`'s `TIER_INCLUDED_MICRO_USD`).
    */
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
+  /**
+   * Cents of one-time credit a new account is granted on its first
+   * authenticated request. Defaults to 100 ($1.00); "0" stops the grant.
+   *
+   * Separate money from VIBLD_FREE_MONTHLY_MICRO_USD above, which resets
+   * every month. This does not reset, and is spent from the same top-up
+   * bucket as Stripe purchases and admin grants. See signup-credit.ts.
+   */
+  VIBLD_SIGNUP_CREDIT_USD_CENTS?: string;
+  /**
+   * ISO 8601. Only accounts created at or after this instant receive the
+   * credit above. Unset means no grants at all: any default early enough to
+   * catch new accounts also catches every account that already exists, and
+   * this is money. See signup-credit.ts.
+   */
+  VIBLD_SIGNUP_CREDIT_FROM?: string;
   /** Runs one user may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
   /**
@@ -250,9 +268,9 @@ function json(body: unknown, status = 200): Response {
  */
 function isConfigured(env: Env): boolean {
   return Boolean(
-    // Either provider's key configures the endpoint. Which one it selects is
+    // Any provider's key configures the endpoint. Which one it selects is
     // `selectProvider`'s business, not this gate's.
-    (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY) &&
+    (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY || env.OPENAI_API_KEY) &&
     clerkConfigured(env) &&
     // The ledger is part of the grant, not an optimisation: a deployment
     // that cannot account for spend must not be able to spend.
@@ -402,6 +420,10 @@ async function handleBillingStatus(
   try {
     const now = Date.now();
     const billing = new BillingStore(env.DB);
+    // Before the balance is read, so a brand new account sees its welcome
+    // credit on the very first load rather than after a refresh. Idempotent
+    // on a deterministic id, so calling it on every status request is free.
+    await grantSignupCreditOnce(billing, principal.userId, env);
     const subscription = await billing.findActiveSubscription(principal.userId);
     const tier = tierFor(subscription);
     const freeAllowance = positiveInt(
@@ -732,6 +754,11 @@ async function handlePlan(
   try {
     const now = Date.now();
     const billing = new BillingStore(env.DB!);
+    // Also here, and not only in handleBillingStatus: a client that never
+    // calls the status endpoint must not be refused its first generation for
+    // want of a credit it was promised. The deterministic id means whichever
+    // path arrives first wins and the other is a no-op.
+    await grantSignupCreditOnce(billing, principal.userId, env);
     const subscription = await billing.findActiveSubscription(principal.userId);
     const tier = tierFor(subscription);
     const freeAllowance = positiveInt(

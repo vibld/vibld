@@ -146,5 +146,13 @@ export async function checkProviderBalances(
     }
   }
 
+  // DeepSeek is the only provider checked, and that is a property of the
+  // providers rather than an omission here: neither Anthropic nor OpenAI
+  // exposes an account balance to the same key used for generation, so there
+  // is nothing this Worker could read without a second, higher-privilege
+  // credential it deliberately does not hold. Spend on those two is visible
+  // in their own dashboards and, for what Vibld itself bills, in the credit
+  // ledger. `checked` says which were actually looked at, so a quiet run is
+  // not mistaken for a healthy one.
   return { checked, alerted };
 }

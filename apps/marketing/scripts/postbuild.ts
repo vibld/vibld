@@ -90,9 +90,9 @@ related to Bible study software; the name is a contraction of "vibe" and
 
 ## Status
 
-Vibld has not launched. ${absolute('/')} currently collects email addresses for
-a waitlist ahead of an invitation-only alpha. There is no public product to
-sign up for yet.
+Vibld has not launched publicly. ${absolute('/')} collects email addresses for
+a waitlist ahead of an invitation-only alpha. The builder itself is live at
+${SITE.appUrl} for accounts that already have access; there is no open signup.
 
 ## What makes it different
 
@@ -104,6 +104,7 @@ enough to review, not merely exportable.
 ## Source
 
 - [Source repository](${SITE.repoUrl}): the builder is open source.
+- [The builder](${SITE.appUrl}): the product itself, for existing accounts.
 
 ## Legal
 

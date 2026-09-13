@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { GenerationPlanSchema } from './plan-schema.ts';
+import { findModel } from './model-catalogue.ts';
 import type { PlanClient, PlanCompletion, PlanRequest } from './client.ts';
 
 /**
@@ -70,13 +71,31 @@ export function createAnthropicPlanClient(
       // Reading the raw response first means the stop reason is known before
       // anything is parsed, so a truncated plan is named as truncated. The
       // schema is still enforced -- the provider validates it a layer up.
+
+      // `effort` is not universal. Haiku 4.5 rejects it with a 400, so the
+      // catalogue records which models accept it and the parameter is omitted
+      // rather than sent hopefully. An unknown model is assumed to accept it:
+      // the catalogue is the closed set every caller is checked against, so
+      // reaching here with an id it does not hold means a test double, and
+      // silently dropping effort there would hide a real mistake.
+      const known = findModel(request.model);
+      const effort =
+        known && !known.supportsEffort ? undefined : request.effort;
+
+      // Never ask for more output than the model will produce. Past its
+      // ceiling the request is rejected outright rather than truncated, which
+      // would read as an outage rather than as the wrong model for the job.
+      const maxTokens = known
+        ? Math.min(request.maxTokens, known.maxOutputTokens)
+        : request.maxTokens;
+
       const stream = client.messages.stream(
         {
           model: request.model,
-          max_tokens: request.maxTokens,
+          max_tokens: maxTokens,
           system: request.system,
           output_config: {
-            effort: request.effort,
+            ...(effort ? { effort } : {}),
             format: zodOutputFormat(GenerationPlanSchema),
           },
           messages: [{ role: 'user', content: request.prompt }],

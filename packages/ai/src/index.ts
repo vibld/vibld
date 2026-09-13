@@ -120,6 +120,16 @@ export {
 } from './deepseek-client.ts';
 export type { DeepseekPlanClientOptions } from './deepseek-client.ts';
 export {
+  createOpenaiPlanClient,
+  mapResponseStatus,
+  OPENAI_BASE_URL,
+  planJsonSchema,
+  readOutputText,
+  readRefusal,
+  readResponseStream,
+} from './openai-client.ts';
+export type { OpenaiPlanClientOptions } from './openai-client.ts';
+export {
   DEFAULT_MODELS,
   configuredProviders,
   createPlanClient,
@@ -128,10 +138,13 @@ export {
   resolveModel,
   selectProvider,
 } from './select-client.ts';
+export { PROVIDER_NAMES } from './select-client.ts';
 export type { ProviderEnv, ProviderName } from './select-client.ts';
 export {
+  LEGACY_MODEL_IDS,
   MODEL_CATALOGUE,
   availableModels,
+  canonicalModelId,
   findModel,
   isKnownModel,
 } from './model-catalogue.ts';

@@ -162,6 +162,9 @@ importers:
 
   packages/eval:
     dependencies:
+      '@vibld/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@vibld/core':
         specifier: workspace:*
         version: link:../core

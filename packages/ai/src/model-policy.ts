@@ -15,6 +15,7 @@
  * boundary -- a hidden option is still a reachable one.
  */
 
+import { canonicalModelId } from './model-catalogue.ts';
 import type { ModelChoice } from './model-catalogue.ts';
 
 export interface ModelPolicy {
@@ -124,12 +125,26 @@ export function allowedModels(
   if (parsed === null) return [...deployable];
 
   if (!parsed.ok) {
+    // Output price first, then input as a tie-break. Without the tie-break
+    // two models at the same output rate leave the winner to catalogue order,
+    // so adding a provider could silently change which model a malformed
+    // policy degrades everyone to. Ties are not hypothetical: DeepSeek Flash
+    // and GPT-5.6 Luna both output at 1.2.
     const cheapest = [...deployable].sort(
-      (a, b) => a.outputMicroUsd - b.outputMicroUsd,
+      (a, b) =>
+        a.outputMicroUsd - b.outputMicroUsd ||
+        a.inputMicroUsd - b.inputMicroUsd,
     )[0];
     return cheapest ? [cheapest] : [];
   }
 
-  const granted = new Set(grantedIds(parsed.policy, principal));
+  // Through `canonicalModelId` first. A policy is a deployment secret written
+  // before this catalogue changed, so an id it grants may since have been
+  // renamed. Intersecting the raw strings would filter such a policy to
+  // nothing, and an empty grant is a 403 on every request rather than a
+  // degraded one -- the deployment simply stops generating the moment it ships.
+  const granted = new Set(
+    grantedIds(parsed.policy, principal).map(canonicalModelId),
+  );
   return deployable.filter((model) => granted.has(model.id));
 }

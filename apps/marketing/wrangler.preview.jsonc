@@ -1,0 +1,54 @@
+{
+  // A reviewable copy of vibld.com on a throwaway hostname, so a change to
+  // the marketing site can be looked at before it replaces the front door.
+  // Deployed by .github/workflows/deploy-marketing-preview.yml.
+  //
+  // Separate from wrangler.jsonc rather than a `--name` override, because the
+  // difference that matters is not the name: it is that this config has no
+  // custom_domain routes. A deploy that inherited those would take over
+  // vibld.com, which is the exact accident a preview exists to avoid.
+  "name": "vibld-marketing-preview",
+  "compatibility_date": "2026-09-10",
+
+  "main": "./worker/index.ts",
+  "assets": {
+    "directory": "./build/client",
+    "binding": "ASSETS",
+    // Both of these mirror wrangler.jsonc deliberately. A preview whose
+    // crawler-facing behaviour differs from production is a preview of a
+    // different site: with the defaults, an invented path and /sitemap.xml
+    // answer 200 with the home page here while answering 404 and real XML
+    // there, and pages serve at /legal/privacy/ here and /legal/privacy
+    // there. Those are exactly the things worth looking at before shipping.
+    "not_found_handling": "404-page",
+    "html_handling": "drop-trailing-slash",
+    // Every request, not just /api/*, unlike production. The Worker has to
+    // see a page request to attach the noindex header below; production keeps
+    // serving pages straight from the asset store without invoking it.
+    "run_worker_first": true,
+  },
+
+  // workers.dev rather than a subdomain of vibld.com: no DNS record, nothing
+  // to clean up, and no chance of a half-finished design sitting on the real
+  // domain. Wrangler prints the assigned URL on deploy.
+  "workers_dev": true,
+
+  "vars": {
+    "VIBLD_WAITLIST_SEGMENT_ID": "6a463d34-31bc-4f24-ba0b-f30bfb5c7660",
+    // A preview is a byte-for-byte copy of the live site on a public
+    // hostname. Indexed, it competes with vibld.com for a name that already
+    // returns other things when searched, so a copy that can outrank the
+    // original would be worse than having no preview at all.
+    "VIBLD_NOINDEX": "1",
+  },
+
+  // No analytics_engine_datasets binding, deliberately. A review pass is not
+  // traffic, and pointing a preview at the production dataset would put it in
+  // the numbers. `record` no-ops when the binding is absent, so the beacon
+  // still answers 204 and nothing is written -- see worker/analytics.ts.
+
+  // RESEND_API_KEY is deliberately not synced to this Worker. Without it
+  // /api/waitlist answers 503 rather than writing to the real waitlist
+  // segment, which is what a preview should do: a signup from a review pass
+  // is not a signup.
+}
