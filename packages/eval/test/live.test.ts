@@ -409,3 +409,18 @@ describe('repeated runs', () => {
     assert.match(problems[0]!, /VIBLD_EVAL_RUNS/);
   });
 });
+
+describe('a "--" forwarded by pnpm', () => {
+  it('is refused, and the message says what to do about it', () => {
+    // pnpm does not eat the separator, so `run eval -- --case x` reaches the
+    // script with an extra argument. Refusing is right and stays right: it is
+    // what stopped a live run that would have been billed. The message is what
+    // needed fixing, since this package's README taught that spelling.
+    const selection = selectCaseIds(['--', '--case', 'vibld-marketing']);
+    assert.equal(selection.ok, false);
+    assert.match(
+      selection.ok ? '' : selection.error,
+      /Remove the "--".*run eval --case/,
+    );
+  });
+});

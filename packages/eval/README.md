@@ -4,7 +4,7 @@ Repeatable evidence that generation works, and that it fails safely.
 
 ```sh
 pnpm --filter @vibld/eval run eval                      # the set, against the stub
-pnpm --filter @vibld/eval run eval -- --case vibld-marketing   # one case
+pnpm --filter @vibld/eval run eval --case vibld-marketing   # one case
 pnpm --filter @vibld/eval test                          # the same checks, as a CI gate
 ```
 
@@ -39,7 +39,7 @@ good website. This is how to find out:
 VIBLD_EVAL_LIVE=1 \
 VIBLD_EVAL_MODELS=claude-opus-5,claude-sonnet-5,gpt-5.6-luna \
 VIBLD_EVAL_OUT=./candidates \
-pnpm --filter @vibld/eval run eval -- --case vibld-marketing
+pnpm --filter @vibld/eval run eval --case vibld-marketing
 ```
 
 Each model runs the selected cases independently and gets its own report, so
@@ -60,7 +60,7 @@ VIBLD_EVAL_LIVE=1 \
 VIBLD_EVAL_MODELS=claude-opus-5,gpt-5.6-luna \
 VIBLD_EVAL_RUNS=3 \
 VIBLD_EVAL_OUT=./candidates \
-pnpm --filter @vibld/eval run eval -- --case vibld-marketing
+pnpm --filter @vibld/eval run eval --case vibld-marketing
 ```
 
 Each model then prints a stability table under its report:

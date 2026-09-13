@@ -150,7 +150,7 @@ jobs:
           echo "Running: ${args[*]}"
 
           set +e
-          pnpm --filter @vibld/eval run eval -- "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/bakeoff.log"
+          pnpm --filter @vibld/eval run eval "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/bakeoff.log"
           status=${PIPESTATUS[0]}
           set -e
 
