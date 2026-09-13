@@ -1,5 +1,6 @@
 import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { paletteFromPage, sameOriginStylesheets } from '@vibld/ai';
+import type { Stylesheet } from '@vibld/ai';
 import type { ExtractedPalette } from '@vibld/ai';
 
 /**
@@ -95,6 +96,12 @@ async function fetchValidated(
   start: URL,
   doFetch: typeof fetch,
   init: RequestInit,
+  // When set, every hop must stay on this origin. The stylesheet scan
+  // promises to read the page's own origin and nowhere else, and a redirect
+  // off it is a way to break that promise without the URL in the markup ever
+  // saying so: `/theme.css` answering 302 to another site is a sheet the
+  // caller never named deciding the palette.
+  stayOn?: string,
 ): Promise<{ response: Response; url: URL } | null> {
   let target = start;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -116,6 +123,7 @@ async function fetchValidated(
     }
     const checked = parseReferenceTarget(next);
     if (!checked.ok) return null;
+    if (stayOn && checked.value.origin !== stayOn) return null;
     target = checked.value;
   }
   // Out of hops. A chain this long is not answering.
@@ -133,7 +141,7 @@ async function readStylesheets(
   html: string,
   pageUrl: string,
   doFetch: typeof fetch,
-): Promise<string[]> {
+): Promise<Stylesheet[]> {
   const urls = sameOriginStylesheets(html, pageUrl);
   if (urls.length === 0) return [];
 
@@ -146,17 +154,25 @@ async function readStylesheets(
       const target = parseReferenceTarget(url);
       if (!target.ok) return null;
       try {
-        const landed = await fetchValidated(target.value, doFetch, {
-          signal: deadline,
-          headers: {
-            accept: 'text/css,*/*;q=0.1',
-            'user-agent': FETCH_USER_AGENT,
+        const landed = await fetchValidated(
+          target.value,
+          doFetch,
+          {
+            signal: deadline,
+            headers: {
+              accept: 'text/css,*/*;q=0.1',
+              'user-agent': FETCH_USER_AGENT,
+            },
           },
-        });
+          target.value.origin,
+        );
         if (!landed) return null;
         const { response } = landed;
         if (!response.ok || !response.body) return null;
-        return await readCapped(response.body, MAX_STYLESHEET_BYTES);
+        return {
+          url,
+          text: await readCapped(response.body, MAX_STYLESHEET_BYTES),
+        };
       } catch {
         // Timed out, refused, or the body died partway. Not this feature's
         // problem to report.
@@ -164,7 +180,7 @@ async function readStylesheets(
       }
     }),
   );
-  return fetched.filter((sheet): sheet is string => sheet !== null);
+  return fetched.filter((sheet): sheet is Stylesheet => sheet !== null);
 }
 
 /**
@@ -387,6 +403,13 @@ export async function fetchReferenceContext(
   return {
     ok: true,
     text: text.length > maxChars ? `${text.slice(0, maxChars)}…` : text,
-    palette: paletteFromPage(raw, stylesheets),
+    // The landing URL goes with them, so a `<style>` written after a
+    // `<link>` can outrank the sheet it overrides, as it does in a browser.
+    palette: paletteFromPage(
+      raw,
+      stylesheets,
+      'analogous',
+      landedAt.toString(),
+    ),
   };
 }

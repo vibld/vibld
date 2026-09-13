@@ -244,6 +244,43 @@ describe('fetchReferenceContext', () => {
     );
   });
 
+  it('will not let a stylesheet redirect off the page origin', async () => {
+    // Same-origin is the promise stylesheet discovery makes, and a redirect
+    // is a way to break it without the markup ever saying so: the URL in
+    // the page is the site's own, and the sheet that answers is not.
+    const asked: string[] = [];
+    const result = await fetchReferenceContext('https://example.com/', {
+      fetchImpl: (async (url: string) => {
+        asked.push(url);
+        if (url.endsWith('theme.css')) {
+          return redirectTo('https://cdn.elsewhere.net/theme.css');
+        }
+        if (url.includes('elsewhere')) return htmlResponse('a{color:#c0392b}');
+        return htmlResponse(PAGE_WITH_SHEET);
+      }) as unknown as typeof fetch,
+    });
+    assert.equal(result.ok, true);
+    assert.ok(
+      !asked.some((url) => url.includes('elsewhere')),
+      `fetched ${asked.join(', ')}`,
+    );
+  });
+
+  it('still follows a stylesheet redirect that stays on the page origin', async () => {
+    const asked: string[] = [];
+    await fetchReferenceContext('https://example.com/', {
+      fetchImpl: (async (url: string) => {
+        asked.push(url);
+        if (url.endsWith('theme.css')) return redirectTo('/css/theme.css');
+        if (url.endsWith('/css/theme.css')) {
+          return htmlResponse('a{color:#c0392b}');
+        }
+        return htmlResponse(PAGE_WITH_SHEET);
+      }) as unknown as typeof fetch,
+    });
+    assert.ok(asked.includes('https://example.com/css/theme.css'));
+  });
+
   it('gives up on a redirect loop rather than following it forever', async () => {
     let asked = 0;
     const result = await fetchReferenceContext('https://example.com/a', {

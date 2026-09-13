@@ -97,6 +97,22 @@ const NAME_ENDS_BEHIND = '(?<![\\w-])';
 const HTML_COMMENT = /<!--[\s\S]{0,20000}?-->/g;
 const CSS_COMMENT = /\/\*[\s\S]{0,20000}?\*\//g;
 const STYLE_BLOCK = /<style\b[^>]{0,2000}>([\s\S]{0,200000}?)<\/style\s*>/gi;
+const SCRIPT_BLOCK = /<script\b[^>]{0,2000}>[\s\S]{0,200000}?<\/script\s*>/gi;
+
+/**
+ * The document with the parts a browser does not treat as markup removed.
+ *
+ * A commented-out `<link>`, or a `<link ...>` quoted inside a script
+ * payload, is a tag the page is carrying rather than one it loads. Read off
+ * the raw document they both look live, and the difference is a request
+ * this Worker makes that no browser would.
+ *
+ * The replacement keeps a space rather than closing the gap, so nothing
+ * either side of a removed span is accidentally joined into a new tag.
+ */
+function markupOnly(html: string): string {
+  return html.replace(HTML_COMMENT, ' ').replace(SCRIPT_BLOCK, ' ');
+}
 
 const META_TAG = new RegExp(`<meta${NAME_ENDS}([^>]*)>`, 'gi');
 
@@ -243,27 +259,24 @@ function selectsRoot(selectorList: string): boolean {
  */
 function readGroundMode(
   html: string,
-  stylesheets: readonly string[],
+  stylesheets: readonly Stylesheet[],
+  pageUrl: string | undefined,
 ): PaletteMode | null {
-  // The markup with its comments taken out, because a rule somebody
-  // commented out is a rule the browser does not apply.
-  const text = withoutDarkOverrides(
-    html.slice(0, MAX_SCAN_CHARS).replace(HTML_COMMENT, ' '),
-  );
+  const text = withoutDarkOverrides(markupOnly(html.slice(0, MAX_SCAN_CHARS)));
 
   const meta = metaContent(text, 'color-scheme');
   const declared = meta ? schemeWord(meta) : null;
   if (declared) return declared;
 
-  let scoped: PaletteMode | null = null;
   // Kept apart because they do not rank the same way. Among rules the later
   // one wins, which is the cascade; between a rule and the element's own
-  // `style` the inline one wins, whichever came first in the file, which is
+  // `style` the inline one wins wherever it sits in the file, which is
   // specificity. Collapsing the two into one list and taking the first
-  // qualifying literal got both backwards: `body{background:#fff}
-  // body{background:#111}` renders dark and was read as light.
+  // qualifying literal got both backwards.
   const fromRules: string[] = [];
   const fromInline: string[] = [];
+  let inlineScheme: PaletteMode | null = null;
+  let ruleScheme: PaletteMode | null = null;
 
   // The root elements themselves. A page that writes its ground inline, as
   // `<body style="background:#0d1117">`, is stating it as plainly as a
@@ -277,7 +290,7 @@ function readGroundMode(
     // property syntax, and reading only `style` called that dark site light.
     // A `color-scheme:` written anywhere on `html` or `body` is the page
     // saying it whichever attribute carries it.
-    scoped ??= schemeIn(attributes);
+    inlineScheme = schemeIn(attributes) ?? inlineScheme;
     const style = attribute(attributes, 'style');
     if (style) fromInline.push(...backgroundsIn(style));
     const legacy = attribute(attributes, 'bgcolor');
@@ -286,38 +299,75 @@ function readGroundMode(
     if (legacy) fromRules.push(...readColorLiterals(legacy));
   }
 
-  // Only actual CSS: the page's own `<style>` blocks and the sheets it
-  // links, never the raw document. Feeding the whole document to the rule
-  // pattern reads CSS out of a `<script type="application/json">` payload,
-  // where `;body{color-scheme:dark}` inside a string is text a site is
-  // carrying rather than a rule it applies, and that text was allowed to
-  // override the page's real background.
-  for (const css of [...styleBlocks(text), ...stylesheets]) {
+  for (const css of cssInDocumentOrder(text, stylesheets, pageUrl)) {
     const rules = withoutDarkOverrides(
       css.slice(0, MAX_SCAN_CHARS).replace(CSS_COMMENT, ' '),
     );
     for (const rule of rules.matchAll(CSS_RULE)) {
       if (!selectsRoot(rule[1] ?? '')) continue;
       const block = rule[2] ?? '';
-      scoped ??= schemeIn(block);
+      // The last applicable one, not the first. Two root rules both setting
+      // `color-scheme` are not ambiguous: the browser takes the later, the
+      // same way it takes the later background, and keeping the first was
+      // this scan disagreeing with itself.
+      ruleScheme = schemeIn(block) ?? ruleScheme;
       fromRules.push(...backgroundsIn(block));
     }
   }
-  if (scoped) return scoped;
 
+  const scheme = inlineScheme ?? ruleScheme;
+  if (scheme) return scheme;
   return modeOf(fromInline) ?? modeOf(fromRules);
 }
 
 /**
- * The contents of each `<style>` block, which is where a document keeps CSS
- * it means rather than CSS it merely contains.
+ * A stylesheet the caller fetched, and where it was linked from.
+ *
+ * The URL is what puts it back in its place in the document. Without it a
+ * sheet can only be assumed to come before every inline block, which is
+ * usually true and is wrong exactly when a page links a theme and then
+ * overrides it in a `<style>` further down.
  */
-function styleBlocks(html: string): string[] {
-  const found: string[] = [];
-  for (const block of html.matchAll(STYLE_BLOCK)) {
-    found.push(block[1] ?? '');
+export interface Stylesheet {
+  url: string;
+  text: string;
+}
+
+/**
+ * Every piece of CSS the document applies, in the order it applies them.
+ *
+ * Order is the whole point: `modeOf` takes the last ground, so scanning all
+ * the style blocks and then all the linked sheets hands the page to the
+ * sheet no matter where it was linked. A `<style>` after a `<link>`
+ * overrides it in a browser and has to here.
+ *
+ * A sheet passed without a URL cannot be placed, so it goes first, which is
+ * where a linked sheet usually is.
+ */
+function cssInDocumentOrder(
+  markup: string,
+  stylesheets: readonly Stylesheet[],
+  pageUrl: string | undefined,
+): string[] {
+  const byUrl = new Map(stylesheets.map((sheet) => [sheet.url, sheet.text]));
+  const placed = new Set<string>();
+  const ordered: { at: number; css: string }[] = [];
+
+  for (const block of markup.matchAll(STYLE_BLOCK)) {
+    ordered.push({ at: block.index ?? 0, css: block[1] ?? '' });
   }
-  return found;
+  for (const link of pageUrl ? stylesheetLinks(markup, pageUrl) : []) {
+    const text = byUrl.get(link.url);
+    if (text === undefined) continue;
+    placed.add(link.url);
+    ordered.push({ at: link.at, css: text });
+  }
+  ordered.sort((one, other) => one.at - other.at);
+
+  const unplaced = stylesheets
+    .filter((sheet) => !placed.has(sheet.url))
+    .map((sheet) => sheet.text);
+  return [...unplaced, ...ordered.map((entry) => entry.css)];
 }
 
 /**
@@ -458,8 +508,14 @@ export interface PageColors {
  */
 export function readPageColors(
   html: string,
-  stylesheets: readonly string[] = [],
+  stylesheets: readonly (string | Stylesheet)[] = [],
+  pageUrl?: string,
 ): PageColors {
+  // A bare string is a sheet whose place in the document is unknown, which
+  // is the shape most callers and every test uses.
+  const sheets: Stylesheet[] = stylesheets.map((sheet) =>
+    typeof sheet === 'string' ? { url: '', text: sheet } : sheet,
+  );
   const head = html.slice(0, MAX_SCAN_CHARS);
 
   let themeColor: string | null = null;
@@ -470,14 +526,14 @@ export function readPageColors(
   }
 
   const literals = readColorLiterals(head);
-  for (const sheet of stylesheets) {
-    literals.push(...readColorLiterals(sheet));
+  for (const sheet of sheets) {
+    literals.push(...readColorLiterals(sheet.text));
   }
 
   return {
     themeColor,
     literals,
-    groundMode: readGroundMode(head, stylesheets),
+    groundMode: readGroundMode(head, sheets, pageUrl),
   };
 }
 
@@ -557,10 +613,11 @@ export interface ExtractedPalette {
  */
 export function paletteFromPage(
   html: string,
-  stylesheets: readonly string[] = [],
+  stylesheets: readonly (string | Stylesheet)[] = [],
   scheme: PaletteScheme = 'analogous',
+  pageUrl?: string,
 ): ExtractedPalette | null {
-  const colors = readPageColors(html, stylesheets);
+  const colors = readPageColors(html, stylesheets, pageUrl);
   const source = dominantBrandColor(colors);
   if (!source) return null;
 
@@ -617,6 +674,15 @@ export function sameOriginStylesheets(
   pageUrl: string,
   limit = 2,
 ): string[] {
+  return stylesheetLinks(html, pageUrl, limit).map((link) => link.url);
+}
+
+/** The same links, each with where in the document it was written. */
+function stylesheetLinks(
+  html: string,
+  pageUrl: string,
+  limit = 2,
+): { url: string; at: number }[] {
   let origin: URL;
   try {
     origin = new URL(pageUrl);
@@ -646,11 +712,15 @@ export function sameOriginStylesheets(
     }
   }
 
-  const found: string[] = [];
+  const found: { url: string; at: number }[] = [];
   const seen = new Set<string>();
-  const links = html
-    .slice(0, MAX_SCAN_CHARS)
-    .matchAll(new RegExp(`<link${NAME_ENDS}([^>]*)>`, 'gi'));
+  // Markup only, for the reason the rule scan is: a `<link>` inside a
+  // comment or quoted in a script payload is a tag the page is carrying,
+  // not one the browser loads, and following it made this Worker fetch a
+  // URL no browser would have asked for.
+  const links = markupOnly(html.slice(0, MAX_SCAN_CHARS)).matchAll(
+    new RegExp(`<link${NAME_ENDS}([^>]*)>`, 'gi'),
+  );
 
   for (const link of links) {
     const attributes = link[1] ?? '';
@@ -677,7 +747,7 @@ export function sameOriginStylesheets(
     const absolute = resolved.toString();
     if (seen.has(absolute)) continue;
     seen.add(absolute);
-    found.push(absolute);
+    found.push({ url: absolute, at: link.index ?? 0 });
     if (found.length >= limit) break;
   }
   return found;

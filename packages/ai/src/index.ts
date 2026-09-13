@@ -187,4 +187,8 @@ export {
   readPageColors,
   sameOriginStylesheets,
 } from './palette-extract.ts';
-export type { ExtractedPalette, PageColors } from './palette-extract.ts';
+export type {
+  ExtractedPalette,
+  PageColors,
+  Stylesheet,
+} from './palette-extract.ts';

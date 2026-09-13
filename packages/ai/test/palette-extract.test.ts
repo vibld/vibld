@@ -748,3 +748,89 @@ describe('links that are not stylesheet links', () => {
     );
   });
 });
+
+describe('the order a document applies its CSS in', () => {
+  it('lets a style block override a stylesheet linked before it', () => {
+    // Scanning every style block and then every sheet hands the page to the
+    // sheet wherever it was linked. A `<style>` after a `<link>` overrides
+    // it in a browser.
+    const found = paletteFromPage(
+      '<link rel="stylesheet" href="/theme.css">' +
+        '<style>body{background:#fbfbfb}</style>' +
+        '<p style="color:#0b5fff">x</p>',
+      [
+        {
+          url: 'https://example.com/theme.css',
+          text: 'body{background:#0d1117}',
+        },
+      ],
+      'analogous',
+      'https://example.com/',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('lets a stylesheet linked after a style block override it', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#fbfbfb}</style>' +
+        '<link rel="stylesheet" href="/theme.css">' +
+        '<p style="color:#39d353">x</p>',
+      [
+        {
+          url: 'https://example.com/theme.css',
+          text: 'body{background:#0d1117}',
+        },
+      ],
+      'analogous',
+      'https://example.com/',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('takes the later of two root color-scheme declarations', () => {
+    // The same source order the backgrounds already followed. Keeping the
+    // first was this scan disagreeing with itself.
+    const found = paletteFromPage(
+      '<style>body{color-scheme:light}body{color-scheme:dark}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('still lets a scheme on the root element outrank a rule', () => {
+    const found = paletteFromPage(
+      '<html class="[color-scheme:dark]">' +
+        '<style>body{color-scheme:light}</style>' +
+        '<p style="color:#39d353">x</p></html>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+});
+
+describe('links the browser would never load', () => {
+  it('ignores a commented-out stylesheet link', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<!-- <link rel="stylesheet" href="/ghost.css"> -->' +
+          '<link rel="stylesheet" href="/real.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/real.css'],
+    );
+  });
+
+  it('ignores a stylesheet link quoted inside a script', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<script>var t = \'<link rel="stylesheet" href="/ghost.css">\';</script>' +
+          '<link rel="stylesheet" href="/real.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/real.css'],
+    );
+  });
+});
