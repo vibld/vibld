@@ -206,6 +206,20 @@ async function call(
   return { ok: false, status: response.status, error: message };
 }
 
+/**
+ * A value placed into a GitHub API path, encoded.
+ *
+ * Git allows characters in a branch name that mean something else in a URL.
+ * `release#1` is a legal ref, and interpolated raw it puts `#1` in the
+ * fragment: the request asks for `heads/release`, which either reports the
+ * configured branch missing or, if a branch by that shorter name exists,
+ * silently pins the wrong parent. The separators are the caller's, so this
+ * encodes a segment at a time and leaves the slashes alone.
+ */
+function encodePath(value: string): string {
+  return value.split('/').map(encodeURIComponent).join('/');
+}
+
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -226,7 +240,7 @@ async function refCommit(
 > {
   const reply = await call(token, doFetch, {
     method: 'GET',
-    path: `/repos/${target.owner}/${target.repo}/git/ref/${ref}`,
+    path: `/repos/${encodePath(target.owner)}/${encodePath(target.repo)}/git/ref/${encodePath(ref)}`,
   });
   if (!reply.ok) {
     if (reply.status === 404) return { found: false };
@@ -256,7 +270,7 @@ async function commitTree(
 ): Promise<{ sha: string } | { error: string }> {
   const reply = await call(token, doFetch, {
     method: 'GET',
-    path: `/repos/${target.owner}/${target.repo}/git/commits/${commitSha}`,
+    path: `/repos/${encodePath(target.owner)}/${encodePath(target.repo)}/git/commits/${encodePath(commitSha)}`,
   });
   if (!reply.ok) return { error: reply.error };
   const tree = (reply.body.tree ?? {}) as { sha?: unknown };
@@ -282,7 +296,7 @@ async function hasAnyBranch(
 ): Promise<boolean | { error: string }> {
   const reply = await call(token, doFetch, {
     method: 'GET',
-    path: `/repos/${target.owner}/${target.repo}/git/matching-refs/heads/`,
+    path: `/repos/${encodePath(target.owner)}/${encodePath(target.repo)}/git/matching-refs/heads/`,
   });
   // An empty repository answers 409 here rather than an empty list, which is
   // itself the answer.
@@ -365,7 +379,7 @@ export async function pushCheckpoint(
   // semantics the generation machine already has.
   const treeReply = await call(token, doFetch, {
     method: 'POST',
-    path: `/repos/${repo.owner}/${repo.repo}/git/trees`,
+    path: `/repos/${encodePath(repo.owner)}/${encodePath(repo.repo)}/git/trees`,
     body: {
       tree: files.map((file) => ({
         path: file.path,
@@ -421,7 +435,7 @@ export async function pushCheckpoint(
 
   const commitReply = await call(token, doFetch, {
     method: 'POST',
-    path: `/repos/${repo.owner}/${repo.repo}/git/commits`,
+    path: `/repos/${encodePath(repo.owner)}/${encodePath(repo.repo)}/git/commits`,
     body: {
       message,
       tree: treeSha,
@@ -442,7 +456,7 @@ export async function pushCheckpoint(
   // Create-only. There is no `force` here and there is not going to be one.
   const refReply = await call(token, doFetch, {
     method: 'POST',
-    path: `/repos/${repo.owner}/${repo.repo}/git/refs`,
+    path: `/repos/${encodePath(repo.owner)}/${encodePath(repo.repo)}/git/refs`,
     body: { ref: `refs/heads/${branch}`, sha: commitSha },
   });
   if (!refReply.ok) {
@@ -528,7 +542,7 @@ async function ensurePullRequest(
 
   const open = await call(token, doFetch, {
     method: 'GET',
-    path: `/repos/${owner}/${repo}/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=open`,
+    path: `/repos/${encodePath(owner)}/${encodePath(repo)}/pulls?head=${encodeURIComponent(`${owner}:${branch}`)}&state=open`,
   });
   if (open.ok) {
     const list = Array.isArray(open.body) ? (open.body as unknown[]) : [];
@@ -540,7 +554,7 @@ async function ensurePullRequest(
 
   const created = await call(token, doFetch, {
     method: 'POST',
-    path: `/repos/${owner}/${repo}/pulls`,
+    path: `/repos/${encodePath(owner)}/${encodePath(repo)}/pulls`,
     body: {
       title: request.pullRequest.title,
       body: request.pullRequest.body,

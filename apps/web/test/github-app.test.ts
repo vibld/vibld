@@ -208,6 +208,31 @@ describe('minting an installation token', () => {
     }
   });
 
+  it('reads a rate limit as a rate limit, not as revoked access', async () => {
+    // The same three-way reading the repository calls do. Telling someone to
+    // reconnect a working App because GitHub asked them to wait is the wrong
+    // instruction twice over.
+    for (const response of [
+      new Response('', { status: 429, headers: { 'retry-after': '45' } }),
+      new Response('', {
+        status: 403,
+        headers: { 'x-ratelimit-remaining': '0' },
+      }),
+    ]) {
+      const result = await mintInstallationToken(
+        credentials,
+        42,
+        SCOPE,
+        (async () => response.clone()) as unknown as typeof fetch,
+      );
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.match(result.error, /rate limiting/);
+        assert.doesNotMatch(result.error, /no longer has access/);
+      }
+    }
+  });
+
   it('reports an unreachable GitHub as unreachable', async () => {
     const result = await mintInstallationToken(
       credentials,

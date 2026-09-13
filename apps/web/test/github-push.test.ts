@@ -511,3 +511,51 @@ describe('a 403 that is not revoked access', () => {
     if (!result.ok) assert.match(result.error, /no longer has access/);
   });
 });
+
+describe('refs with characters that mean something in a URL', () => {
+  it('encodes the base branch instead of losing half of it', async () => {
+    // `release#1` is a legal git ref. Interpolated raw, `#1` becomes the URL
+    // fragment and the request asks for `heads/release`: either the branch
+    // is reported missing, or a shorter branch by that name silently
+    // supplies the wrong parent.
+    const asked: string[] = [];
+    const doFetch = (async (url: string) => {
+      asked.push(url);
+      return new Response(JSON.stringify({ object: { sha: 'x' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveBase(
+      'ghs_x',
+      { owner: 'acme', repo: 'site', baseBranch: 'release#1' },
+      doFetch,
+    );
+    assert.ok(
+      asked[0]?.endsWith('/git/ref/heads/release%231'),
+      `asked for ${asked[0]}`,
+    );
+  });
+
+  it('leaves the separators alone while encoding the parts', async () => {
+    const asked: string[] = [];
+    const doFetch = (async (url: string) => {
+      asked.push(url);
+      return new Response(JSON.stringify({ object: { sha: 'x' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    await resolveBase(
+      'ghs_x',
+      { owner: 'acme', repo: 'site', baseBranch: 'release/2026' },
+      doFetch,
+    );
+    assert.ok(
+      asked[0]?.endsWith('/git/ref/heads/release/2026'),
+      `asked for ${asked[0]}`,
+    );
+  });
+});

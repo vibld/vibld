@@ -286,6 +286,23 @@ export async function mintInstallationToken(
     return { ok: false, error: 'GitHub could not be reached.' };
   }
 
+  // The same three-way reading the repository calls do. A rate limit is not
+  // revoked access, and telling someone to reconnect a working App because
+  // GitHub asked them to wait is the wrong instruction twice over.
+  const retryAfter = response.headers.get('retry-after');
+  const rateLimited =
+    response.status === 429 ||
+    (response.status === 403 &&
+      (response.headers.get('x-ratelimit-remaining') === '0' ||
+        retryAfter !== null));
+  if (rateLimited) {
+    return {
+      ok: false,
+      error: retryAfter
+        ? `GitHub is rate limiting this app. Try again in ${retryAfter} seconds.`
+        : 'GitHub is rate limiting this app. Try again shortly.',
+    };
+  }
   if (response.status === 404 || response.status === 401) {
     return {
       ok: false,
