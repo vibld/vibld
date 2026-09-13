@@ -8,6 +8,7 @@ import {
   handleGitHubCallback,
   handleGitHubConnect,
   handleGitHubDisconnect,
+  handleGitHubStatus,
 } from '../worker/github-handlers.ts';
 import { signChoice, signState } from '../worker/github-connect.ts';
 import { GitHubStore } from '../worker/github-store.ts';
@@ -626,5 +627,70 @@ describe('a user with the app on more than one account', () => {
       NOW,
     );
     assert.equal(response.status, 409);
+  });
+});
+
+/**
+ * Pushing and connecting are configured separately, so the status has to
+ * report them separately. A panel that reads one boolean offers a Connect
+ * button on a deployment that cannot connect, and the user finds out by
+ * being handed a 503.
+ */
+describe('what the status tells the builder it can offer', () => {
+  const APP = {
+    VIBLD_GITHUB_APP_ID: '123',
+    VIBLD_GITHUB_PRIVATE_KEY: 'a-key',
+  };
+  const OAUTH = {
+    VIBLD_GITHUB_CLIENT_ID: CREDENTIALS.clientId,
+    VIBLD_GITHUB_CLIENT_SECRET: CREDENTIALS.clientSecret,
+  };
+
+  async function statusWith(extra: Record<string, string>) {
+    const db = new SqliteD1Database(SCHEMA);
+    const response = await handleGitHubStatus(
+      new Request('https://app.vibld.com/api/github/status'),
+      { DB: db as unknown as D1Database, ...extra },
+      PRINCIPAL,
+      NOW,
+    );
+    return (await response.json()) as {
+      configured: boolean;
+      canPush?: boolean;
+      canConnect?: boolean;
+    };
+  }
+
+  it('says it can do both when both halves are there', async () => {
+    const body = await statusWith({ ...APP, ...OAUTH });
+    assert.deepEqual(
+      [body.configured, body.canPush, body.canConnect],
+      [true, true, true],
+    );
+  });
+
+  it('says it cannot connect when only the app half is there', async () => {
+    // The case that would otherwise offer a button returning 503.
+    const body = await statusWith(APP);
+    assert.deepEqual(
+      [body.configured, body.canPush, body.canConnect],
+      [true, true, false],
+    );
+  });
+
+  it('says it cannot push when only the oauth half is there', async () => {
+    const body = await statusWith(OAUTH);
+    assert.deepEqual(
+      [body.configured, body.canPush, body.canConnect],
+      [true, false, true],
+    );
+  });
+
+  it('says it can do nothing when neither half is there', async () => {
+    const body = await statusWith({});
+    assert.deepEqual(
+      [body.configured, body.canPush, body.canConnect],
+      [false, false, false],
+    );
   });
 });

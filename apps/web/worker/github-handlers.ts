@@ -338,15 +338,33 @@ export async function handleGitHubStatus(
   now: Date = new Date(),
 ): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
-  if (!githubConfigured(env)) return json({ configured: false });
+
+  // Two capabilities, reported separately, because they are configured
+  // separately and a panel that conflates them offers a button that cannot
+  // work. A deployment with the App key but no OAuth credentials can push on
+  // a binding it already has and cannot make new ones; one with the OAuth
+  // half and no App key is the other way round.
+  const canPush = githubConfigured(env);
+  const canConnect = githubConnectConfigured(env);
+  if (!canPush && !canConnect) {
+    return json({ configured: false, canPush: false, canConnect: false });
+  }
 
   const store = new GitHubStore(env.DB!);
   const state = await store.usableBinding(principal.userId, now);
   if (!state.usable) {
-    return json({ configured: true, connected: false, reason: state.reason });
+    return json({
+      configured: true,
+      canPush,
+      canConnect,
+      connected: false,
+      reason: state.reason,
+    });
   }
   return json({
     configured: true,
+    canPush,
+    canConnect,
     connected: true,
     owner: state.binding.owner,
     repo: state.binding.repo,
