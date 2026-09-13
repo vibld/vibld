@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -89,6 +96,38 @@ describe('a live run with repeats', () => {
       // Non-zero because one run failed. A gate that passed here would report
       // an unreliable model as a good one.
       assert.equal(status, 1, stdout);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves nothing behind from whatever was written there before', () => {
+    // A repeat writes into run-N, so clearing only that leaf leaves the case
+    // directory holding whatever it held before: an earlier single run's
+    // project files beside the run directories, or run-4 and run-5 from a
+    // larger count. The tree then describes a set of runs that never happened,
+    // which is exactly what clearing the leaf is for, one level up.
+    const out = mkdtempSync(join(tmpdir(), 'vibld-eval-'));
+    const caseRoot = join(out, 'deepseek-flash', 'vibld-marketing');
+    try {
+      mkdirSync(join(caseRoot, 'src'), { recursive: true });
+      writeFileSync(join(caseRoot, 'package.json'), '{"stale":true}', 'utf8');
+      writeFileSync(join(caseRoot, 'src/App.tsx'), '// from a single run\n');
+      mkdirSync(join(caseRoot, 'run-9'), { recursive: true });
+      writeFileSync(join(caseRoot, 'run-9/package.json'), '{"stale":true}');
+
+      const { stdout } = runEval(out);
+
+      assert.equal(existsSync(join(caseRoot, 'package.json')), false, stdout);
+      assert.equal(existsSync(join(caseRoot, 'src')), false, stdout);
+      assert.equal(existsSync(join(caseRoot, 'run-9')), false, stdout);
+      for (const run of ['run-1', 'run-2', 'run-3']) {
+        assert.equal(
+          existsSync(join(caseRoot, run, 'package.json')),
+          true,
+          run,
+        );
+      }
     } finally {
       rmSync(out, { recursive: true, force: true });
     }

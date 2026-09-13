@@ -45,14 +45,28 @@ import { SCENARIOS, runScenario } from '../src/scenarios.ts';
  * leave files from a previous run that this generation did not produce, so the
  * directory would stop matching the project being reported and could build or
  * render from a stale config absent from the snapshot.
+ *
+ * `alsoClear` is for the first write of a repeated set, which has a second
+ * directory to answer for. Repeats write into `run-N` below the case
+ * directory, and clearing only the leaf leaves whatever the case directory
+ * held before: a previous single-run invocation's project files sitting beside
+ * the run directories, or `run-4` and `run-5` from a larger count. Either way
+ * the candidate tree stops matching the stability report that describes it,
+ * which is the same defect clearing the leaf exists to prevent, one level up.
+ *
+ * It is cleared here rather than before the loop so it is still governed by
+ * the plan: a first run that cannot be written truthfully must destroy
+ * nothing, including the previous candidate it would have replaced.
  */
 async function writeProject(
   root: string,
   files: { path: string; content: string }[],
+  alsoClear?: string,
 ): Promise<void> {
   const plan = planWrites(root, files);
   if (!plan.ok) throw new Error(plan.error);
 
+  if (alsoClear) await rm(alsoClear, { recursive: true, force: true });
   await rm(root, { recursive: true, force: true });
   const byTarget = new Map(
     plan.writes.map((write) => [write.path, write.target]),
@@ -124,6 +138,12 @@ async function main(): Promise<number> {
   for (const model of live.models) {
     const results: CaseResult[] = [];
     for (const testCase of cases) {
+      // Whether this case's directory has been dealt with yet. Tracked rather
+      // than keyed on the first attempt, because a first run that produced
+      // nothing writes nothing, and the clearing is owed to whichever run
+      // writes first. A single run needs none of this: it writes to the case
+      // directory itself, which `writeProject` already clears.
+      let caseRootCleared = live.runs === 1;
       for (let attempt = 1; attempt <= live.runs; attempt += 1) {
         const projectId = repeated
           ? `${model}:${testCase.id}#${attempt}`
@@ -147,10 +167,14 @@ async function main(): Promise<number> {
             // repeats were paid for would exist only in the printed tally and
             // the directory would hold one arbitrary sample of it. A single
             // run keeps the original path, since there is nothing to separate.
-            const root = repeated
-              ? join(live.outDir, model, testCase.id, `run-${attempt}`)
-              : join(live.outDir, model, testCase.id);
-            await writeProject(root, project.files);
+            const caseRoot = join(live.outDir, model, testCase.id);
+            const root = repeated ? join(caseRoot, `run-${attempt}`) : caseRoot;
+            await writeProject(
+              root,
+              project.files,
+              caseRootCleared ? undefined : caseRoot,
+            );
+            caseRootCleared = true;
             console.log(`  wrote ${project.files.length} files to ${root}`);
           }
         }
