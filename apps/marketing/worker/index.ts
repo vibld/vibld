@@ -133,18 +133,48 @@ const CONFIRMATION_PAGE = (message: string, ok: boolean) => `<!doctype html>
  * Resolves the attribution the caller reported. The waitlist form and the
  * page beacon both send the page's own URL and referrer, because the Worker
  * sees only its own `/api/*` URL -- not the page the visitor was actually on.
+ *
+ * When the caller reported nothing, the `Referer` header is the next best
+ * answer and the last resort is deliberately not `request.url`. The
+ * no-JavaScript form post is a supported path, and there `page_url` is the
+ * empty value the page was prerendered with, so falling back to the Worker's
+ * own URL filed every such signup under `/api/waitlist`: a path nobody
+ * visited, splitting the real page's numbers rather than merely rounding
+ * them. A browser sends `Referer` on a form navigation, and for a same-origin
+ * post it sends the full URL, so the query string and its UTM parameters
+ * survive with it.
  */
 function attributionOf(
   request: Request,
   pageUrl: string,
   pageReferrer: string,
 ): { attribution: Attribution; path: string } {
-  const url = pageUrl || request.url;
   const selfHost = new URL(request.url).hostname;
+  const url = pageUrl || sameOriginReferer(request, selfHost) || '';
   return {
     attribution: attributionFrom(url, pageReferrer, selfHost),
+    // Not `request.url`: with nothing to go on, "/" is an honest guess at
+    // where a visitor was, and `/api/waitlist` is a claim that is always
+    // wrong. `pathOf` answers "/" for a value it cannot parse.
     path: pathOf(url),
   };
+}
+
+/**
+ * The `Referer` header, but only when it names a page on this site.
+ *
+ * A cross-origin post carries the other site's URL, and using it would record
+ * that site's path as one of ours -- attribution anyone could write to by
+ * posting a form from anywhere.
+ */
+function sameOriginReferer(request: Request, selfHost: string): string | null {
+  const referer = request.headers.get('referer');
+  if (!referer) return null;
+  try {
+    return new URL(referer).hostname === selfHost ? referer : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -233,19 +263,23 @@ async function handleWaitlist(request: Request, env: Env): Promise<Response> {
     env.RESEND_API_KEY,
   );
 
-  let resendOk = false;
+  // Three outcomes, not two. A duplicate is a success to the person and not a
+  // signup to the dataset, and collapsing the two into one boolean is what
+  // made the count wrong.
+  let outcome: 'created' | 'duplicate' | 'failed' = 'failed';
   try {
     const response = await fetch(url, init);
     if (response.ok) {
-      resendOk = true;
+      outcome = 'created';
     } else {
       // Resend does not document the status for a duplicate email (see
       // worker/waitlist.ts's comment). Treating "already exists" as success
       // means someone who signs up twice sees confirmation, not an error,
       // which is the experience that matters -- not the exact status code.
       const body = await response.text().catch(() => '');
-      resendOk = /already exists|duplicate/i.test(body);
-      if (!resendOk) {
+      if (/already exists|duplicate/i.test(body)) {
+        outcome = 'duplicate';
+      } else {
         console.error('Resend contact creation failed', response.status, body);
       }
     }
@@ -253,21 +287,27 @@ async function handleWaitlist(request: Request, env: Env): Promise<Response> {
     console.error('Resend request threw', error);
   }
 
-  if (!resendOk) {
+  if (outcome === 'failed') {
     const message = 'Something went wrong. Please try again in a moment.';
     return html
       ? htmlResponse(CONFIRMATION_PAGE(message, false), 502)
       : jsonResponse({ ok: false, error: message }, 502);
   }
 
-  // Recorded only after Resend accepted the contact, so the signup count in
-  // the dataset means signups that exist, not submissions that were attempted.
-  const { attribution, path } = attributionOf(
-    request,
-    submission?.pageUrl ?? '',
-    submission?.pageReferrer ?? '',
-  );
-  record(env.ANALYTICS, 'signup', request, attribution, path);
+  // Recorded only for a contact Resend actually created, so the signup count
+  // in the dataset means signups that exist, not submissions that were
+  // attempted. A returning visitor re-submitting an address that is already on
+  // the list created nothing, and counting it would inflate the conversion
+  // rate and re-attribute an old contact to whatever campaign brought them
+  // back -- the two numbers this dataset exists to answer.
+  if (outcome === 'created') {
+    const { attribution, path } = attributionOf(
+      request,
+      submission?.pageUrl ?? '',
+      submission?.pageReferrer ?? '',
+    );
+    record(env.ANALYTICS, 'signup', request, attribution, path);
+  }
 
   const message = "You're on the list. We'll email you when Vibld is ready.";
   return html
