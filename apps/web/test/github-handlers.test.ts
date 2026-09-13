@@ -546,3 +546,119 @@ describe('pushing the same checkpoint to a second repository', () => {
     );
   });
 });
+
+/**
+ * The same distinction as the mint, one seam further along.
+ *
+ * `call` in `github-push.ts` classifies each refusal and keeps the status,
+ * and the whole benefit is lost if every push failure reaches the browser as
+ * a 409. A conflict is something a person has to resolve; a rate limit or a
+ * dropped connection is something to retry, and calling the second the first
+ * puts the user in a dialog they cannot act on.
+ */
+describe('when the push itself fails', () => {
+  function githubThatRefuses(refusal: () => Response) {
+    return (async (url: string) => {
+      const path = url.replace('https://api.github.com', '');
+      if (path.endsWith('/access_tokens')) {
+        return new Response(
+          JSON.stringify({ token: 'ghs_x', expires_at: 'later' }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (path.endsWith('/git/ref/heads/main')) {
+        return new Response(JSON.stringify({ object: { sha: 'base' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return refusal();
+    }) as unknown as typeof fetch;
+  }
+
+  async function pushWith(doFetch: typeof fetch) {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    return handleGitHubPush(pushRequest(), env(db), PRINCIPAL, doFetch, NOW);
+  }
+
+  it('reports a rate limit during the push as one, not as a conflict', async () => {
+    const response = await pushWith(
+      githubThatRefuses(
+        () =>
+          new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+            status: 403,
+            headers: {
+              'content-type': 'application/json',
+              'retry-after': '30',
+            },
+          }),
+      ),
+    );
+    assert.equal(response.status, 429);
+    const body = (await response.json()) as {
+      error: string;
+      reconnect?: boolean;
+    };
+    assert.equal(body.reconnect, undefined);
+    assert.match(body.error, /rate limiting/);
+  });
+
+  it('reports a GitHub server error as retryable, not as a conflict', async () => {
+    const response = await pushWith(
+      githubThatRefuses(() => new Response('{}', { status: 500 })),
+    );
+    assert.equal(response.status, 502);
+  });
+
+  it('asks for a reconnect when the push finds access gone', async () => {
+    const response = await pushWith(
+      githubThatRefuses(
+        () =>
+          new Response(JSON.stringify({ message: 'Bad credentials' }), {
+            status: 401,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { reconnect?: boolean };
+    assert.equal(body.reconnect, true);
+  });
+
+  it('refuses a repository with no commits rather than calling it a conflict', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const doFetch = (async (url: string) => {
+      const path = url.replace('https://api.github.com', '');
+      if (path.endsWith('/access_tokens')) {
+        return new Response(
+          JSON.stringify({ token: 'ghs_x', expires_at: 'later' }),
+          { status: 201, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      // No base ref, and no branches at all: an empty repository.
+      if (path.includes('/git/ref/heads/main')) {
+        return new Response(JSON.stringify({ message: 'Not Found' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubPush(
+      pushRequest(),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error: string };
+    assert.match(body.error, /no commits yet/);
+  });
+});

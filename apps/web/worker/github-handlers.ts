@@ -17,12 +17,14 @@ import {
   githubAppCredentials,
   mintInstallationToken,
   type GitHubAppEnv,
+  type GitHubFailure,
   type InstallationToken,
 } from './github-app.ts';
 import {
   branchForRevision,
   pushCheckpoint,
   resolveBase,
+  type PushConflict,
   type PushTarget,
 } from './github-push.ts';
 import { GitHubStore, type BindingState } from './github-store.ts';
@@ -92,16 +94,47 @@ function bindingProblem(state: Extract<BindingState, { usable: false }>) {
  * reason picks the status, and `reconnect` is set only when reconnecting is
  * actually the fix.
  */
-function mintProblem(token: Extract<InstallationToken, { ok: false }>) {
-  if (token.reason === 'access') {
-    return json({ error: token.error, reconnect: true }, 409);
+function statusFor(reason: GitHubFailure): number {
+  switch (reason) {
+    case 'invalid':
+      return 400;
+    // Something is there that this push would overwrite, or the grant is
+    // gone. Both need a person, not a retry.
+    case 'conflict':
+    case 'access':
+      return 409;
+    case 'rate-limited':
+      return 429;
+    case 'config':
+      return 503;
+    // Unreachable, refused, or a reply that could not be read: GitHub's
+    // problem or a passing one, and retrying is the thing to do rather than
+    // asking the user to fix anything.
+    case 'unreachable':
+    case 'refused':
+    case 'unreadable':
+      return 502;
   }
-  if (token.reason === 'rate-limited') return json({ error: token.error }, 429);
-  if (token.reason === 'config') return json({ error: token.error }, 503);
-  // Unreachable, refused, or a reply that could not be read: GitHub's
-  // problem or a passing one, and retrying is the thing to do rather than
-  // reconnecting anything.
-  return json({ error: token.error }, 502);
+}
+
+/** Only a lost grant is worth reconnecting for. */
+function githubProblem(failure: {
+  error: string;
+  reason: GitHubFailure;
+  conflict?: PushConflict;
+}): Response {
+  return json(
+    {
+      error: failure.error,
+      ...(failure.reason === 'access' ? { reconnect: true } : {}),
+      ...(failure.conflict ? { conflict: failure.conflict } : {}),
+    },
+    statusFor(failure.reason),
+  );
+}
+
+function mintProblem(token: Extract<InstallationToken, { ok: false }>) {
+  return githubProblem(token);
 }
 
 /**
@@ -213,7 +246,7 @@ export async function handleGitHubPush(
   let baseSha = recorded?.baseSha;
   if (!baseSha) {
     const base = await resolveBase(token.token, target, doFetch);
-    if (!base.ok) return json({ error: base.error }, 409);
+    if (!base.ok) return githubProblem(base);
     baseSha = base.sha;
   }
 
@@ -249,15 +282,7 @@ export async function handleGitHubPush(
     doFetch,
   );
 
-  if (!pushed.ok) {
-    return json(
-      {
-        error: pushed.error,
-        ...(pushed.conflict ? { conflict: pushed.conflict } : {}),
-      },
-      409,
-    );
-  }
+  if (!pushed.ok) return githubProblem(pushed);
 
   await store.finishPush(key, {
     commitSha: pushed.pushed.commitSha,

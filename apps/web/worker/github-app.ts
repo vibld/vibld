@@ -258,25 +258,35 @@ export function rateLimitMessage(
 export const GITHUB_USER_AGENT = 'Vibld (+https://vibld.com)';
 
 /**
- * Why a mint failed, for a caller deciding what to do about it.
+ * Why something failed, for a caller deciding what to do about it.
  *
  * The sentence is for the person; this is for the code. Only `access` means
  * the grant is actually broken and worth re-approving. Telling someone to
  * reconnect a working App because GitHub was briefly unreachable is the
  * mistake `rateLimitMessage` above exists to avoid, and it is just as easy
  * to make one layer up by treating every failure as the same failure.
+ *
+ * One vocabulary shared by `github-app.ts` and `github-push.ts` rather than
+ * one each: two lists of reasons that mean the same things drift, and the
+ * caller then needs two mappings that have to agree.
  */
-export type TokenFailure =
+export type GitHubFailure =
+  /** This deployment cannot talk to GitHub at all. */
   | 'config'
-  | 'unreachable'
+  /** The request could never work, whatever GitHub is doing. */
+  | 'invalid'
+  /** Something is already there, and it is not what this push would write. */
+  | 'conflict'
   | 'rate-limited'
+  /** 401/403: the grant really is gone, and reconnecting is the fix. */
   | 'access'
+  | 'unreachable'
   | 'refused'
   | 'unreadable';
 
 export type InstallationToken =
   | { ok: true; token: string; expiresAt: string }
-  | { ok: false; error: string; reason: TokenFailure };
+  | { ok: false; error: string; reason: GitHubFailure };
 
 /**
  * An installation access token for this installation, or a reason it could
