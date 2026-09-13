@@ -34,6 +34,12 @@ function hostFor(env: Record<string, string>): string {
         ANTHROPIC_API_KEY: 'not-a-real-key',
         DEEPSEEK_API_KEY: 'not-a-real-key',
         OPENAI_API_KEY: 'not-a-real-key',
+        // Blanked before each case's overrides. Inherited from whoever ran
+        // the suite, a VIBLD_MODEL would decide the provider for the cases
+        // that mean to name none, and they would fail on that machine and
+        // nowhere else. `resolveModel` treats empty as unset, deliberately.
+        VIBLD_MODEL: '',
+        VIBLD_PROVIDER: '',
         ...env,
       },
     },

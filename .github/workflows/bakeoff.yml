@@ -95,10 +95,16 @@ jobs:
           count() { printf '%s' "$1" | tr ',' '\n' | grep -c '[^[:space:]]' || true; }
           models=$(count "$MODELS")
           cases=$(count "$CASES")
+          # 10# because bash reads a leading zero as octal while `liveRuns`
+          # reads it with Number(). Unforced, "010" printed 8 runs here and
+          # billed 10, so the line that exists to say what this costs would
+          # have understated it by a quarter, and "08" and "09" aborted the
+          # step outright as invalid octal. Measured for all five.
+          runs=$((10#$RUNS))
           {
             echo "## Scope"
             echo
-            echo "$models models x $cases cases x $RUNS runs = **$((models * cases * RUNS)) generations**, all of them billed."
+            echo "$models models x $cases cases x $runs runs = **$((models * cases * runs)) generations**, all of them billed."
             echo
             echo "Measured spend is reported at the end of the run, from the usage each provider reported."
           } >> "$GITHUB_STEP_SUMMARY"
