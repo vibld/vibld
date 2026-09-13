@@ -666,6 +666,67 @@ grant again for more.
    preview" → "Deploying" above) picks up any pending migration
    automatically on the next deploy.
 
+## Pushing to GitHub (issue #13, docs/decisions.md L30/L42a)
+
+A checkpoint can be pushed to a repository the user connected: a branch
+`vibld/<revision>`, one commit carrying the generated files, and a pull
+request against the repository's default branch. `/api/github/status` (GET)
+tells the builder what is connected; `/api/github/push` (POST) does the
+push. Both take the same `files` shape `/api/preview` does, plus a
+`revision`.
+
+Nothing about it is stored as a user credential. ADR-0006 separates two
+classes, and the App's private key is the Vibld-infrastructure kind: a
+Worker secret that signs a short-lived JWT, which mints an **installation
+token scoped to the single repository the user approved** (`repositories`
+and `permissions` are both sent on the mint, so a token cannot reach the
+rest of an installation). That token lives for the length of one push and
+is never written down. What persists is the binding itself in
+`github_bindings`: an installation id, a repository, a branch, who approved
+it and when, and when the grant expires (90 days). A revoked grant keeps
+its row and blocks new work rather than disappearing.
+
+A push is made safe to retry rather than assumed to happen once (ADR-0007).
+The parent commit is resolved and **written to `github_pushes` before the
+first call that can succeed without saying so**, and `beginPush` inserts or
+does nothing, so every retry of a checkpoint gets the parent the first
+attempt used. The commit's author and committer dates come from that same
+recorded row. Both together are what make a retry produce the identical
+git object instead of a second commit: git objects are content-addressed,
+so a different parent or a different timestamp is a different commit, and
+an attempt whose reply was lost would otherwise push twice. `pushCheckpoint`
+then reconciles what is already there rather than assuming a clean start.
+
+`/api/github/push` has its own burst gate (`GITHUB_BURST`, keyed on the
+Clerk user id and checked after identity) for the same reason publishing
+does: a flood here costs GitHub API quota and writes into a real
+repository.
+
+### Setup
+
+1. Create the App at https://github.com/settings/apps/new. Repository
+   permissions: **Contents: Read and write** and **Pull requests: Read and
+   write**, nothing else. Webhook: unchecked. "Where can this GitHub App be
+   installed": **Any account**.
+2. On the App's page, **Generate a private key**. The `.pem` downloads once.
+   Paste its whole contents (including the `BEGIN`/`END` lines) into a new
+   secret `VIBLD_GITHUB_PRIVATE_KEY` on the `preview` environment at
+   https://github.com/vibld/vibld/settings/environments -- never into a
+   chat, an email, or this repository. The App ID shown at the top of the
+   same page goes into `VIBLD_GITHUB_APP_ID` there too.
+3. The **Deploy web preview** workflow syncs both to this Worker on the next
+   deploy, the same way it already syncs `STRIPE_SECRET_KEY` above, and
+   `migrations/0005_github.sql` is applied by that workflow's
+   migration-apply step. Both secrets are optional in the same fail-closed
+   sense as every other secret here: unset means `/api/github/*` answers
+   "not configured", not open.
+
+GitHub downloads a PKCS#1 key ("BEGIN RSA PRIVATE KEY") and WebCrypto
+imports only PKCS#8, so `github-app.ts` wraps the DER itself rather than
+asking for a converted key. `test/github-app.test.ts` signs with both forms
+and verifies against the public key, because a wrong ASN.1 wrapper is the
+kind of mistake that only shows up in production.
+
 ## Generated output
 
 Generated projects are conventional and portable (ADR-0002): React, TypeScript

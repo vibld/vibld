@@ -6,7 +6,11 @@ import {
   resolveModel,
 } from '@vibld/ai';
 
-import { clerkConfigured, resolvePrincipal } from './principal.ts';
+import {
+  clerkConfigured,
+  resolvePrincipal,
+  type Principal,
+} from './principal.ts';
 import { UserBudget } from './budget.ts';
 import type { Reservation } from './budget.ts';
 import { GenerationWorkflow } from './generation-workflow.ts';
@@ -76,6 +80,7 @@ import {
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
 import { BillingStore } from './billing-store.ts';
+import { handleGitHubPush, handleGitHubStatus } from './github-handlers.ts';
 import { createStripeClient } from './stripe-client.ts';
 
 export interface Env {
@@ -200,6 +205,23 @@ export interface Env {
    * (there is no ledger to size a hard limit against yet).
    */
   PUBLISH_BURST?: RateLimit;
+  /**
+   * The GitHub App this deployment pushes with (issue #13). Both are Worker
+   * secrets and both are Vibld's own infrastructure credential, never a
+   * user's (ADR-0006): the private key signs a JWT, the JWT mints an
+   * installation token scoped to the one repository a user connected, and
+   * that token lives for the length of a push and is never written down.
+   * Unset means `/api/github/*` answers "not configured", the same
+   * fail-closed rule publishing and billing already use.
+   */
+  VIBLD_GITHUB_APP_ID?: string;
+  VIBLD_GITHUB_PRIVATE_KEY?: string;
+  /**
+   * A push is several GitHub API calls and a write to somebody's repository,
+   * so it gets its own gate keyed on the caller, for the same reason
+   * PUBLISH_BURST has one rather than riding PLAN_BURST's.
+   */
+  GITHUB_BURST?: RateLimit;
   /**
    * Stripe billing (docs/decisions.md L12-L15). Worker secret, live-mode --
    * see billing-handlers.ts. `/api/billing/*` and `/api/stripe/webhook` are
@@ -1155,6 +1177,23 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * Identify the caller, then hand off to a GitHub handler.
+ *
+ * The handlers in `github-handlers.ts` take a principal rather than resolving
+ * one, so they stay testable without a Clerk session and the identity rules
+ * stay here with every other route's.
+ */
+async function handleGitHub(
+  request: Request,
+  env: Env,
+  handler: (principal: Principal) => Promise<Response>,
+): Promise<Response> {
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  return handler(resolved.principal);
+}
+
 /** The slice of Cloudflare's ExecutionContext this Worker uses. */
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -1246,6 +1285,18 @@ export default {
 
     if (pathname === '/api/stripe/webhook') {
       return handleStripeWebhook(request, env);
+    }
+
+    if (pathname === '/api/github/status') {
+      return handleGitHub(request, env, (principal) =>
+        handleGitHubStatus(request, env, principal),
+      );
+    }
+
+    if (pathname === '/api/github/push') {
+      return handleGitHub(request, env, (principal) =>
+        handleGitHubPush(request, env, principal),
+      );
     }
 
     if (pathname === '/api/admin/user') {

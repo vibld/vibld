@@ -202,6 +202,35 @@ jobs:
             echo "STRIPE_WEBHOOK_SECRET not set -- /api/stripe/webhook stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The GitHub App that pushes a checkpoint to a user's repository
+      # (issue #13). Optional, same rule as every secret above: unset means
+      # /api/github/* answers "not configured" rather than the deploy
+      # failing.
+      #
+      # VIBLD_GITHUB_PRIVATE_KEY is the .pem GitHub generated for the App,
+      # pasted whole into the environment secret (BEGIN/END lines and all).
+      # It never travels any other way: not by email, not through a chat, and
+      # not into this repository. `printf %s` rather than a heredoc so the
+      # newlines inside it survive, and it is piped straight into wrangler so
+      # it is never an argument any process listing could show.
+      - name: Sync the GitHub App credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VIBLD_GITHUB_APP_ID" ] && [ -n "$VIBLD_GITHUB_PRIVATE_KEY" ]; then
+            printf '%s' "$VIBLD_GITHUB_APP_ID" | pnpm dlx wrangler@4.129.1 secret put VIBLD_GITHUB_APP_ID
+            printf '%s' "$VIBLD_GITHUB_PRIVATE_KEY" | pnpm dlx wrangler@4.129.1 secret put VIBLD_GITHUB_PRIVATE_KEY
+            echo "Synced the GitHub App credentials." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_GITHUB_APP_ID/VIBLD_GITHUB_PRIVATE_KEY not both set -- /api/github/* stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # L44's nightly provider-balance check. Optional, same rule as every
       # secret above: unset means the check still runs and logs, it just
       # cannot send. A separate copy from apps/marketing's own

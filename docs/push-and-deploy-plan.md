@@ -227,9 +227,24 @@ a credential that redeploys production.
 | Grant expired                           | Same shape; re-approval, not a silent re-auth                                 |
 | Branch already exists, different commit | Both shas, and a choice: new branch, or stop                                  |
 | Ambiguous push (timeout after step 3)   | Nothing on retry -- the reconciliation finds the commit and reports success   |
-| Repo empty (no base ref)                | Handled: first commit has no parent                                           |
+| Repo empty (no base ref)                | Refused, with that reason, rather than guessed at (see below)                 |
 | Project over the size cap               | Refused before the API call, like the prompt guard already does               |
 | GitHub rate limit / 5xx                 | Retry with backoff **only** after reconciling remote state                    |
+
+### On the empty-repository row
+
+That row said the first commit simply has no parent, which is true of git and
+not obviously true of the API path this uses. `resolveBase` distinguishes the
+two cases it can tell apart from outside: a repository with branches but not
+the named base branch, and a repository with no branches at all. The second is
+reported as "the repository has no commits yet" rather than committed into,
+because whether `POST /git/refs` creates the default branch on an
+uninitialised repository is not something this implementation has verified
+against a real one, and a guess that is wrong writes into somebody's
+repository. Correcting this is cheap once there is an App installation to test
+against: initialise an empty repository, push a checkpoint, and either the row
+above goes back to "handled" or the refusal stays and is the documented
+behaviour.
 
 ## Testing
 

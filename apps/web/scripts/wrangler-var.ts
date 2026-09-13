@@ -15,12 +15,18 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** wrangler.jsonc is JSON with comments and trailing commas. */
-export function readVars(raw: string): Record<string, string> {
+export function readConfig(raw: string): {
+  vars?: Record<string, string>;
+  ratelimits?: { name: string; namespace_id: string }[];
+} {
   const stripped = raw
     .replace(/^\s*\/\/.*$/gm, '')
     .replace(/,(\s*[}\]])/g, '$1');
-  const parsed = JSON.parse(stripped) as { vars?: Record<string, string> };
-  return parsed.vars ?? {};
+  return JSON.parse(stripped);
+}
+
+export function readVars(raw: string): Record<string, string> {
+  return readConfig(raw).vars ?? {};
 }
 
 /** Only when run directly: importing this for `readVars` must not exit. */
