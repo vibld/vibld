@@ -177,6 +177,42 @@ export const MODEL_CATALOGUE: readonly ModelChoice[] = [
 
 const BY_ID = new Map(MODEL_CATALOGUE.map((model) => [model.id, model]));
 
+/**
+ * Model ids that were once real and are no longer in the catalogue, mapped to
+ * what replaced them.
+ *
+ * This exists because a grant lives outside this repository. `VIBLD_MODEL_POLICY`
+ * is a deployment secret naming model ids, so removing an id from the catalogue
+ * does not remove it from the policies already deployed. A policy granting only
+ * a removed id still parses as valid, intersects the catalogue to nothing, and
+ * `decideModel` turns an empty grant into a 403 on every request: the whole
+ * deployment stops generating, at deploy time, for the principals that policy
+ * covers.
+ *
+ * `deepseek-v4-flash` is the case that forced this. It was the production
+ * default under VIBLD_PROVIDER=deepseek and does not appear in DeepSeek's
+ * pricing reference, so it was replaced by `deepseek-flash`.
+ *
+ * An alias is deliberately not a catalogue entry. A removed id must never be
+ * sent to a provider (that is a 400 from a model that does not exist), so this
+ * resolves to the canonical id at the policy boundary and everything
+ * downstream, including the request itself, only ever sees the canonical one.
+ */
+export const LEGACY_MODEL_IDS: Readonly<Record<string, string>> = {
+  'deepseek-v4-flash': 'deepseek-flash',
+};
+
+/**
+ * The current id for a model id, following one legacy alias if there is one.
+ *
+ * Unknown ids pass through unchanged rather than throwing: this is used on
+ * caller-supplied and policy-supplied strings, and rejecting an unknown model
+ * is `decideModel`'s job, not this function's.
+ */
+export function canonicalModelId(id: string): string {
+  return LEGACY_MODEL_IDS[id] ?? id;
+}
+
 export function findModel(id: string): ModelChoice | null {
   return BY_ID.get(id) ?? null;
 }

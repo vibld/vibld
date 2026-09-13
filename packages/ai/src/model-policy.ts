@@ -15,6 +15,7 @@
  * boundary -- a hidden option is still a reachable one.
  */
 
+import { canonicalModelId } from './model-catalogue.ts';
 import type { ModelChoice } from './model-catalogue.ts';
 
 export interface ModelPolicy {
@@ -137,6 +138,13 @@ export function allowedModels(
     return cheapest ? [cheapest] : [];
   }
 
-  const granted = new Set(grantedIds(parsed.policy, principal));
+  // Through `canonicalModelId` first. A policy is a deployment secret written
+  // before this catalogue changed, so an id it grants may since have been
+  // renamed. Intersecting the raw strings would filter such a policy to
+  // nothing, and an empty grant is a 403 on every request rather than a
+  // degraded one -- the deployment simply stops generating the moment it ships.
+  const granted = new Set(
+    grantedIds(parsed.policy, principal).map(canonicalModelId),
+  );
   return deployable.filter((model) => granted.has(model.id));
 }
