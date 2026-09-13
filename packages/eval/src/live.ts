@@ -260,6 +260,18 @@ export function selectCaseIds(argv: string[]): CaseSelection {
       continue;
     }
 
+    // Still refused, but named: pnpm forwards a literal "--" to the script
+    // rather than eating it, so the documented `run eval -- --case x` arrived
+    // here as an extra argument. This package's own README taught that
+    // spelling, so the message says what to do rather than leaving someone to
+    // work out which of their arguments was the unrecognised one.
+    if (token === '--') {
+      return {
+        ok: false,
+        error:
+          'Remove the "--": pnpm passes it through to the script, so write `pnpm --filter @vibld/eval run eval --case <id>`.',
+      };
+    }
     return {
       ok: false,
       error: `Unrecognised argument "${token}". Only --case <id> is understood.`,
