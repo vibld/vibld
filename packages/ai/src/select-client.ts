@@ -18,7 +18,7 @@ export type ProviderName = 'anthropic' | 'deepseek';
 /** Defaults per provider. Each is that provider's own current fast model. */
 export const DEFAULT_MODELS: Record<ProviderName, string> = {
   anthropic: 'claude-opus-5',
-  deepseek: 'deepseek-v4-flash',
+  deepseek: 'deepseek-flash',
 };
 
 export interface ProviderEnv {
