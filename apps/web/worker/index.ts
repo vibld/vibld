@@ -135,6 +135,13 @@ export interface Env {
    * bucket as Stripe purchases and admin grants. See signup-credit.ts.
    */
   VIBLD_SIGNUP_CREDIT_USD_CENTS?: string;
+  /**
+   * ISO 8601. Only accounts created at or after this instant receive the
+   * credit above. Unset means no grants at all: any default early enough to
+   * catch new accounts also catches every account that already exists, and
+   * this is money. See signup-credit.ts.
+   */
+  VIBLD_SIGNUP_CREDIT_FROM?: string;
   /** Runs one user may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
   /**

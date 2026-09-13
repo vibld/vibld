@@ -1,24 +1,30 @@
 /**
  * The one-time credit a new account starts with.
  *
- * Granted lazily rather than from a Clerk `user.created` webhook: that would
- * be a second endpoint, a second signing secret, and a new way for a signup
- * to silently not get its credit if the webhook is misconfigured. The first
- * authenticated request a user makes is just as good a signal that the
- * account exists, and it cannot arrive late.
+ * Two separate questions, and conflating them was the bug in the first
+ * version of this file: "has this user already been granted it" and "is this
+ * user a new account at all". The deterministic id answers the first
+ * perfectly and says nothing about the second, so a grant keyed only on the
+ * id would pay every pre-existing user the moment it shipped -- a credit
+ * advertised for new accounts arriving instead as a retroactive payout to
+ * everybody who came back.
  *
- * What makes that safe is the id. `billing_admin_credits` has
- * `ON CONFLICT(id) DO NOTHING`, so a deterministic id per user means the
- * grant lands exactly once no matter how many requests race it or how many
- * call sites invoke it. This is deliberately not a "have they got one
- * already?" read followed by a write, which is the version with a race in it.
+ * So eligibility is a cohort, defined by an explicit cutoff:
+ * `VIBLD_SIGNUP_CREDIT_FROM`. Accounts created on or after it are new;
+ * everyone else is not. Unset means nothing is granted, because a rollout
+ * that pays out cannot have a default.
  *
- * This is separate money from the free monthly allowance
- * (`DEFAULT_FREE_INCLUDED_MICRO_USD`, also $1). The allowance resets every
- * month; this does not, and it is spent from the top-up bucket alongside
- * Stripe purchases and admin grants.
+ * Granted lazily on the first authenticated request rather than from a Clerk
+ * `user.created` webhook: that would be a second endpoint, a second signing
+ * secret, and a new way for a signup to silently not get its credit.
+ *
+ * The write stays idempotent through `ON CONFLICT(id) DO NOTHING`, so
+ * correctness never rests on the read below. That read exists only to avoid
+ * asking Clerk the same question on every request forever.
  */
 
+import { fetchClerkUserCreatedAt } from './clerk-lookup.ts';
+import type { ClerkLookupEnv } from './clerk-lookup.ts';
 import type { BillingStore } from './billing-store.ts';
 
 /** $1.00, as `grantAdminCredit` counts it. */
@@ -33,21 +39,45 @@ export const SIGNUP_GRANT_ACTOR = 'system@vibld.com';
 
 export const SIGNUP_GRANT_NOTE = 'Welcome credit on account creation';
 
-export interface SignupCreditEnv {
+export interface SignupCreditEnv extends ClerkLookupEnv {
   /**
-   * Cents. Defaults to 100. Set it to "0" to stop granting entirely, which
-   * is the switch to reach for if new accounts ever start being created
-   * faster than people are creating them.
+   * Cents. Defaults to 100. "0" stops the grant, which is the switch to reach
+   * for if accounts ever start being created faster than people are creating
+   * them.
    */
   VIBLD_SIGNUP_CREDIT_USD_CENTS?: string | undefined;
+  /**
+   * ISO 8601. Only accounts created at or after this instant are granted the
+   * credit. Set it to the moment the offer starts.
+   *
+   * **Unset means no grants at all.** There is no safe default: any value
+   * early enough to catch genuinely new accounts also catches every account
+   * that already exists, and this is money. An operator naming the date is
+   * the only way this can be both correct and deliberate.
+   */
+  VIBLD_SIGNUP_CREDIT_FROM?: string | undefined;
 }
+
+/**
+ * Why a request did or did not result in a grant. Returned rather than logged
+ * so the tests can assert on it, and so a caller can say something useful
+ * instead of failing silently.
+ */
+export type SignupGrantOutcome =
+  | 'granted'
+  | 'already-granted'
+  | 'disabled'
+  | 'no-cohort-configured'
+  | 'not-in-cohort'
+  | 'age-unknown'
+  | 'error';
 
 /**
  * How much a new account gets, in cents.
  *
  * An unreadable value falls back to the default rather than to zero. Getting
- * this wrong in the generous direction costs a dollar per account; getting it
- * wrong in the other direction silently stops every new user receiving what
+ * this wrong in the generous direction costs a dollar per account in the
+ * cohort; the other direction silently stops every new user receiving what
  * they were promised, and nothing would report it.
  */
 export function signupCreditCents(env: SignupCreditEnv): number {
@@ -60,31 +90,62 @@ export function signupCreditCents(env: SignupCreditEnv): number {
   return parsed;
 }
 
-/** One id per user, forever. The whole idempotency of this rests on it. */
+/**
+ * The instant the offer starts, or null when none is configured or the value
+ * cannot be read.
+ *
+ * An unparseable cutoff resolves to null, which grants nobody anything. That
+ * is the opposite of the amount's fallback above, and deliberately so: a
+ * typo in an amount overpays one cohort by a known factor, while a typo in a
+ * date could silently widen the cohort to every account ever created.
+ */
+export function signupCohortStart(env: SignupCreditEnv): number | null {
+  const raw = env.VIBLD_SIGNUP_CREDIT_FROM?.trim();
+  if (raw === undefined || raw === '') return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** One id per user, forever. The idempotency of the write rests on it. */
 export function signupGrantId(userId: string): string {
   return `signup:${userId}`;
 }
 
 /**
- * Grant the welcome credit if this user has never had it.
+ * Grant the welcome credit to a new account that has not had it.
  *
  * Never throws: a failed grant must not fail the request it rode in on. A
- * user who does not get their dollar on this request gets it on the next one,
- * because the id makes retrying free.
- *
- * Returns whether a grant was attempted, which is what the tests assert on.
- * It is deliberately not "was one inserted": the insert is a no-op on a
- * repeat by design, and distinguishing the two would need the extra read this
- * exists to avoid.
+ * user who misses it on one request gets it on the next, because the id makes
+ * retrying free.
  */
 export async function grantSignupCreditOnce(
-  billing: Pick<BillingStore, 'grantAdminCredit'>,
+  billing: Pick<BillingStore, 'grantAdminCredit' | 'findAdminCredit'>,
   userId: string,
   env: SignupCreditEnv,
-): Promise<boolean> {
+  fetchImpl: typeof fetch = fetch,
+): Promise<SignupGrantOutcome> {
   const cents = signupCreditCents(env);
-  if (cents <= 0) return false;
+  if (cents <= 0) return 'disabled';
+
+  const cohortStart = signupCohortStart(env);
+  if (cohortStart === null) return 'no-cohort-configured';
+
   try {
+    // Cheapest question first. Once a user has their grant this is the only
+    // work any later request does, so the Clerk lookup below happens at most
+    // once per account rather than on every request forever.
+    if (await billing.findAdminCredit(signupGrantId(userId))) {
+      return 'already-granted';
+    }
+
+    const createdAt = await fetchClerkUserCreatedAt(env, userId, fetchImpl);
+    // An account whose age cannot be established is not a new account. The
+    // safe direction here is the stingy one: a genuinely new user gets their
+    // credit on a later request once Clerk answers, while the other choice
+    // pays out to everyone during any Clerk outage.
+    if (createdAt === null) return 'age-unknown';
+    if (createdAt < cohortStart) return 'not-in-cohort';
+
     await billing.grantAdminCredit(
       signupGrantId(userId),
       userId,
@@ -92,8 +153,8 @@ export async function grantSignupCreditOnce(
       SIGNUP_GRANT_ACTOR,
       SIGNUP_GRANT_NOTE,
     );
-    return true;
+    return 'granted';
   } catch {
-    return false;
+    return 'error';
   }
 }
