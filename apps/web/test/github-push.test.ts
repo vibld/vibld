@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { branchForRevision, pushCheckpoint } from '../worker/github-push.ts';
+import {
+  branchForRevision,
+  pushCheckpoint,
+  resolveBase,
+} from '../worker/github-push.ts';
 
 const FILES = [
   { path: 'index.html', content: '<h1>hi</h1>' },
@@ -11,6 +15,9 @@ const FILES = [
 const REQUEST = {
   target: { owner: 'acme', repo: 'site', baseBranch: 'main' },
   files: FILES,
+  // Resolved by `resolveBase` and held by the caller, so a retry commits
+  // onto the same parent however the base branch has moved.
+  baseSha: 'base-commit',
   revision: 'r7',
   message: 'Vibld checkpoint r7',
   // Fixed, which is what makes the commit object deterministic.
@@ -382,20 +389,22 @@ describe('when GitHub says no', () => {
   });
 });
 
-describe('a base branch that is not there', () => {
+describe('resolving the base commit', () => {
+  it('returns the commit the base branch points at', async () => {
+    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+    const result = await resolveBase('ghs_x', REQUEST.target, doFetch);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.sha, 'base-commit');
+  });
+
   it('says the branch is gone when the repository has history', async () => {
     // A renamed or deleted base branch answers 404 exactly like an empty
     // repository does, and building a parentless commit for it would make a
     // branch related to nothing.
-    const { doFetch, calls } = fakeGitHub({ branches: ['trunk', 'dev'] });
-    const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    const { doFetch } = fakeGitHub({ branches: ['trunk', 'dev'] });
+    const result = await resolveBase('ghs_x', REQUEST.target, doFetch);
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /main no longer exists/);
-    assert.equal(
-      calls.some((c) => c.method === 'POST' && c.path.endsWith('/git/commits')),
-      false,
-      'committed onto a base that is not there',
-    );
   });
 
   it('says the repository is empty when it has no branches at all', async () => {
@@ -403,9 +412,23 @@ describe('a base branch that is not there', () => {
     // empty repository through this API is a different flow, and claiming a
     // path that has never run is worse than saying what to do instead.
     const { doFetch } = fakeGitHub({ branches: [] });
-    const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    const result = await resolveBase('ghs_x', REQUEST.target, doFetch);
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /no commits yet/);
+  });
+
+  it('is a separate step so the caller can record it first', async () => {
+    // The parent has to exist on the caller's side before anything
+    // ambiguous happens. A push that resolved its own parent and then lost
+    // the reply to the commit call left nothing to pin, and the retry read
+    // a branch that may have moved.
+    const { doFetch, calls } = fakeGitHub({ base: 'base-commit' });
+    await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    assert.equal(
+      calls.some((c) => c.path.endsWith('/git/ref/heads/main')),
+      false,
+      'the push read the base branch itself',
+    );
   });
 });
 
@@ -464,6 +487,20 @@ describe('a 403 that is not revoked access', () => {
     if (!result.ok) assert.match(result.error, /60 seconds/);
   });
 
+  it('reads a 429 as a rate limit without needing headers', async () => {
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      failOn: {
+        path: '/git/trees',
+        status: 429,
+        headers: { 'retry-after': '30' },
+      },
+    });
+    const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /30 seconds/);
+  });
+
   it('still reads a plain 403 as revoked access', async () => {
     const { doFetch } = fakeGitHub({
       base: 'base-commit',
@@ -472,33 +509,5 @@ describe('a 403 that is not revoked access', () => {
     const result = await pushCheckpoint('ghs_x', REQUEST, doFetch);
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /no longer has access/);
-  });
-});
-
-describe('the parent a retry commits onto', () => {
-  it('uses the pinned base rather than re-reading the branch', async () => {
-    // Fixing the dates is not enough while the parent is read from the
-    // remote: a base branch that advances between a lost reply and the retry
-    // makes the "same" commit a different object.
-    const { doFetch, calls } = fakeGitHub({ base: 'base-has-moved-on' });
-    await pushCheckpoint(
-      'ghs_x',
-      { ...REQUEST, baseSha: 'what-the-first-attempt-saw' },
-      doFetch,
-    );
-    const commit = calls.find((c) => c.path.endsWith('/git/commits'));
-    assert.deepEqual(commit?.body?.parents, ['what-the-first-attempt-saw']);
-    assert.equal(
-      calls.some((c) => c.path.endsWith('/git/ref/heads/main')),
-      false,
-      're-read a base branch it had been given',
-    );
-  });
-
-  it('reads the base branch when nothing is pinned', async () => {
-    const { doFetch, calls } = fakeGitHub({ base: 'base-commit' });
-    await pushCheckpoint('ghs_x', REQUEST, doFetch);
-    const commit = calls.find((c) => c.path.endsWith('/git/commits'));
-    assert.deepEqual(commit?.body?.parents, ['base-commit']);
   });
 });

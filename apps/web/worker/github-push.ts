@@ -46,19 +46,23 @@ export interface PushRequest {
   /** The commit subject. */
   message: string;
   /**
-   * The commit to build on, pinned by whoever is retrying.
+   * The commit to build on. Required, and resolved by `resolveBase` before
+   * this is called.
    *
-   * The other half of making a retry produce the same commit. Fixing the
+   * The other half of making a retry produce the same commit, and it has to
+   * be the caller's to hold rather than something read in here. Fixing the
    * dates is not enough while the parent is still read from the remote: if
    * the base branch advances between an attempt whose reply was lost and the
    * next one, the "same" commit is built on a different parent and is a
-   * different object. A caller that records this on its first attempt and
-   * passes it back gets one commit however many times it tries.
+   * different object.
    *
-   * Absent means read the base branch, which is right for a first attempt
-   * and wrong for a retry. The binding store will carry it.
+   * It was optional for one commit, which was worse than either choice: the
+   * documented first-attempt path read the base internally, so a caller
+   * whose reply was lost had nothing to pin and re-read a branch that may
+   * have moved. Resolving it is a separate step now, so the value exists
+   * before the write that can go missing, and the caller can record it.
    */
-  baseSha?: string;
+  baseSha: string;
   /**
    * Who the commit is by, and when.
    *
@@ -169,11 +173,13 @@ async function call(
   // A 403 means two different things, and sending someone to reconnect an
   // App that is working perfectly well is the wrong one. GitHub uses it both
   // for revoked access and for exhausting a rate limit, and only the headers
-  // tell them apart.
+  // tell them apart. It also uses a plain 429 for the same thing, which
+  // needs no headers to recognise.
   const rateLimited =
-    response.status === 403 &&
-    (response.headers.get('x-ratelimit-remaining') === '0' ||
-      response.headers.get('retry-after') !== null);
+    response.status === 429 ||
+    (response.status === 403 &&
+      (response.headers.get('x-ratelimit-remaining') === '0' ||
+        response.headers.get('retry-after') !== null));
   if (rateLimited) {
     const retryAfter = response.headers.get('retry-after');
     return {
@@ -288,6 +294,48 @@ async function hasAnyBranch(
 }
 
 /**
+ * The commit the push will build on, resolved once and then held.
+ *
+ * Its own step, and exported, because the caller has to be able to write it
+ * down before anything ambiguous happens. A push that resolves its own
+ * parent and then loses the reply to `POST /git/commits` leaves the caller
+ * with nothing to pin, and the retry reads a branch that may have moved on:
+ * the commit is then built on a different parent and is a different object,
+ * which is the whole failure the pinning exists to prevent.
+ *
+ * The two ways this can come back empty need different sentences, because a
+ * base branch renamed or deleted out from under the binding is not an empty
+ * repository, and treating it as one would build a commit related to
+ * nothing.
+ */
+export async function resolveBase(
+  token: string,
+  target: PushTarget,
+  doFetch: typeof fetch = fetch,
+): Promise<{ ok: true; sha: string } | { ok: false; error: string }> {
+  const repo = { owner: target.owner, repo: target.repo };
+  const base = await refCommit(
+    token,
+    doFetch,
+    repo,
+    `heads/${target.baseBranch}`,
+  );
+  if ('error' in base) return { ok: false, error: base.error };
+  if (base.found) return { ok: true, sha: base.sha };
+
+  const branches = await hasAnyBranch(token, doFetch, repo);
+  if (typeof branches !== 'boolean') {
+    return { ok: false, error: branches.error };
+  }
+  return {
+    ok: false,
+    error: branches
+      ? `The branch ${target.baseBranch} no longer exists in ${repo.owner}/${repo.repo}.`
+      : `${repo.owner}/${repo.repo} has no commits yet. Add a first commit there, then push from Vibld.`,
+  };
+}
+
+/**
  * The push, in the order that makes a retry safe.
  *
  * The tree is built before the ref is read, deliberately. Building a tree has
@@ -371,34 +419,13 @@ export async function pushCheckpoint(
     };
   }
 
-  const base = request.baseSha
-    ? ({ found: true, sha: request.baseSha } as const)
-    : await refCommit(token, doFetch, repo, `heads/${target.baseBranch}`);
-  if ('error' in base) return { ok: false, error: base.error };
-  if (!base.found) {
-    // Two causes, one status code, and they need different sentences. A
-    // renamed or deleted base branch in a repository that has history is not
-    // an empty repository, and building a parentless commit for it makes a
-    // branch related to nothing and a pull request that cannot be opened.
-    const branches = await hasAnyBranch(token, doFetch, repo);
-    if (typeof branches !== 'boolean') {
-      return { ok: false, error: branches.error };
-    }
-    return {
-      ok: false,
-      error: branches
-        ? `The branch ${target.baseBranch} no longer exists in ${repo.owner}/${repo.repo}.`
-        : `${repo.owner}/${repo.repo} has no commits yet. Add a first commit there, then push from Vibld.`,
-    };
-  }
-
   const commitReply = await call(token, doFetch, {
     method: 'POST',
     path: `/repos/${repo.owner}/${repo.repo}/git/commits`,
     body: {
       message,
       tree: treeSha,
-      parents: [base.sha],
+      parents: [request.baseSha],
       author: request.committer,
       committer: request.committer,
     },
