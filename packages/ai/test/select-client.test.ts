@@ -23,7 +23,7 @@ describe('selectProvider', () => {
     // forty times as much as they meant to.
     assert.throws(
       () => selectProvider({ VIBLD_PROVIDER: 'deepsek' }),
-      /must be "anthropic" or "deepseek"/,
+      /must be one of anthropic, deepseek, openai/,
     );
   });
 
@@ -60,7 +60,7 @@ describe('selectProvider', () => {
 describe('defaultModelFor', () => {
   it('gives each provider its own model, never the other one’s', () => {
     // Sending "claude-opus-5" to DeepSeek is a 400 that reads like an outage.
-    assert.equal(defaultModelFor('deepseek'), 'deepseek-v4-flash');
+    assert.equal(defaultModelFor('deepseek'), 'deepseek-flash');
     assert.equal(defaultModelFor('anthropic'), 'claude-opus-5');
   });
 });
@@ -98,13 +98,13 @@ describe('resolveModel', () => {
     for (const blank of ['', '   ', '\n']) {
       assert.equal(
         resolveModel({ VIBLD_PROVIDER: 'deepseek', VIBLD_MODEL: blank }),
-        'deepseek-v4-flash',
+        'deepseek-flash',
       );
     }
   });
 
   it('falls back to the selected provider, never the other one', () => {
-    assert.equal(resolveModel({ DEEPSEEK_API_KEY: 'k' }), 'deepseek-v4-flash');
+    assert.equal(resolveModel({ DEEPSEEK_API_KEY: 'k' }), 'deepseek-flash');
     assert.equal(resolveModel({ ANTHROPIC_API_KEY: 'k' }), 'claude-opus-5');
   });
 
@@ -157,10 +157,12 @@ describe('configuredProviders', () => {
     assert.deepEqual(configuredProviders({ DEEPSEEK_API_KEY: 'k' }), {
       anthropic: false,
       deepseek: true,
+      openai: false,
     });
     assert.deepEqual(configuredProviders({}), {
       anthropic: false,
       deepseek: false,
+      openai: false,
     });
   });
 });

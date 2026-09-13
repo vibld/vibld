@@ -22,6 +22,7 @@ import type { ModelChoice } from '@vibld/ai';
 export interface ModelAccessEnv {
   ANTHROPIC_API_KEY?: string | undefined;
   DEEPSEEK_API_KEY?: string | undefined;
+  OPENAI_API_KEY?: string | undefined;
   VIBLD_PROVIDER?: string | undefined;
   VIBLD_MODEL?: string | undefined;
   VIBLD_MODEL_POLICY?: string | undefined;

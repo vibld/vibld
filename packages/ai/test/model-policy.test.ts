@@ -11,9 +11,9 @@ const ALL = MODEL_CATALOGUE;
 const ids = (models: { id: string }[]) => models.map((m) => m.id).sort();
 
 const POLICY = JSON.stringify({
-  default: ['deepseek-v4-flash'],
+  default: ['deepseek-flash'],
   users: { 'Chris@Drummond.com': ['claude-opus-5', 'deepseek-v4-pro'] },
-  domains: { 'drummond.com': ['deepseek-v4-flash', 'deepseek-v4-pro'] },
+  domains: { 'drummond.com': ['deepseek-flash', 'deepseek-v4-pro'] },
 });
 
 describe('parseModelPolicy', () => {
@@ -28,7 +28,7 @@ describe('parseModelPolicy', () => {
     const parsed = parseModelPolicy(POLICY);
     assert.equal(parsed?.ok, true);
     if (parsed?.ok) {
-      assert.deepEqual(parsed.policy.default, ['deepseek-v4-flash']);
+      assert.deepEqual(parsed.policy.default, ['deepseek-flash']);
       // Identities are compared lower-cased; nobody types their own address
       // the same way twice.
       assert.ok(parsed.policy.users?.['chris@drummond.com']);
@@ -76,7 +76,7 @@ describe('grantedIds', () => {
 
   it('falls to the domain when no user matches', () => {
     assert.deepEqual(grantedIds(p!, 'someone@drummond.com'), [
-      'deepseek-v4-flash',
+      'deepseek-flash',
       'deepseek-v4-pro',
     ]);
   });
@@ -105,11 +105,11 @@ describe('grantedIds', () => {
 
   it('falls to the default for anyone unmatched', () => {
     assert.deepEqual(grantedIds(p!, 'stranger@elsewhere.com'), [
-      'deepseek-v4-flash',
+      'deepseek-flash',
     ]);
     // A principal with no domain at all must not crash the lookup.
-    assert.deepEqual(grantedIds(p!, 'service-account'), ['deepseek-v4-flash']);
-    assert.deepEqual(grantedIds(p!, ''), ['deepseek-v4-flash']);
+    assert.deepEqual(grantedIds(p!, 'service-account'), ['deepseek-flash']);
+    assert.deepEqual(grantedIds(p!, ''), ['deepseek-flash']);
   });
 });
 
@@ -128,7 +128,7 @@ describe('allowedModels', () => {
       'deepseek-v4-pro',
     ]);
     assert.deepEqual(ids(allowedModels(parsed, 'stranger@x.com', ALL)), [
-      'deepseek-v4-flash',
+      'deepseek-flash',
     ]);
   });
 
@@ -137,10 +137,10 @@ describe('allowedModels', () => {
     // otherwise offer a run that fails after the user waited for it.
     const deepseekOnly = ALL.filter((m) => m.provider === 'deepseek');
     const parsed = parseModelPolicy(
-      JSON.stringify({ default: ['claude-opus-5', 'deepseek-v4-flash'] }),
+      JSON.stringify({ default: ['claude-opus-5', 'deepseek-flash'] }),
     );
     assert.deepEqual(ids(allowedModels(parsed, 'a@b.com', deepseekOnly)), [
-      'deepseek-v4-flash',
+      'deepseek-flash',
     ]);
   });
 
@@ -156,11 +156,17 @@ describe('allowedModels', () => {
     const broken = parseModelPolicy('{not json');
     const allowed = allowedModels(broken, 'chris@drummond.com', ALL);
     assert.equal(allowed.length, 1);
-    assert.equal(allowed[0]!.id, 'deepseek-v4-flash');
-    assert.ok(
-      allowed[0]!.outputMicroUsd ===
-        Math.min(...ALL.map((m) => m.outputMicroUsd)),
+    // Asserted as a property rather than as an id: which model is cheapest
+    // moves whenever the catalogue does, and pinning the id turns that into a
+    // failure that says nothing about what actually broke.
+    const lowestOutput = Math.min(...ALL.map((m) => m.outputMicroUsd));
+    assert.equal(allowed[0]!.outputMicroUsd, lowestOutput);
+    const lowestInputAtThatOutput = Math.min(
+      ...ALL.filter((m) => m.outputMicroUsd === lowestOutput).map(
+        (m) => m.inputMicroUsd,
+      ),
     );
+    assert.equal(allowed[0]!.inputMicroUsd, lowestInputAtThatOutput);
   });
 
   it('grants nothing on a malformed policy when nothing is deployable', () => {

@@ -610,11 +610,11 @@ describe('BuilderSession model choice', () => {
 
   it('survives starting over, like the other preferences', () => {
     const session = createSession();
-    session.setModel('deepseek-v4-flash');
+    session.setModel('deepseek-flash');
     session.reset();
     // A model chosen for a reason should not silently revert to the
     // deployment default when the project is discarded.
-    assert.equal(session.getState().model, 'deepseek-v4-flash');
+    assert.equal(session.getState().model, 'deepseek-flash');
   });
 
   it('ignores a set that changes nothing', () => {
@@ -640,7 +640,7 @@ describe('what the deployment can serve survives a reset', () => {
         provider: 'anthropic',
       },
       {
-        id: 'deepseek-v4-flash',
+        id: 'deepseek-flash',
         label: 'DeepSeek V4 Flash',
         note: 'n',
         provider: 'deepseek',

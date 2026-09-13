@@ -77,6 +77,7 @@ export interface GenerationWorkflowEnv {
   USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'settle'>>;
   ANTHROPIC_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
+  OPENAI_API_KEY?: string;
   VIBLD_PROVIDER?: string;
   VIBLD_MODEL?: string;
 }

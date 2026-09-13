@@ -152,7 +152,7 @@ describe('createDeepseekPlanClient', () => {
     await client.createPlan({
       system: 'SYSTEM',
       prompt: 'a landing page',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       maxTokens: 64_000,
       effort: 'high',
     });
@@ -183,7 +183,7 @@ describe('createDeepseekPlanClient', () => {
     }).createPlan({
       system: 's',
       prompt: 'p',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       maxTokens: 100,
       effort: 'high',
     });
@@ -207,7 +207,7 @@ describe('createDeepseekPlanClient', () => {
     }).createPlan({
       system: 's',
       prompt: 'p',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       maxTokens: 64_000,
       effort: 'high',
     });
@@ -231,7 +231,7 @@ describe('createDeepseekPlanClient', () => {
     }).createPlan({
       system: 'a'.repeat(200),
       prompt: 'b'.repeat(200),
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       maxTokens: 64_000,
       effort: 'high',
     });
@@ -250,7 +250,7 @@ describe('createDeepseekPlanClient', () => {
         createDeepseekPlanClient({ apiKey: '', fetchImpl: impl }).createPlan({
           system: 's',
           prompt: 'p',
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-flash',
           maxTokens: 10,
           effort: 'high',
         }),
@@ -270,7 +270,7 @@ describe('createDeepseekPlanClient', () => {
         }).createPlan({
           system: 's',
           prompt: 'p',
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-flash',
           maxTokens: 10,
           effort: 'high',
         }),
@@ -292,7 +292,7 @@ describe('the provider above, driven by DeepSeek', () => {
   it('produces a validated plan end to end', async () => {
     const plan = await new PlanProvider(
       clientReturning(contentFrames(JSON.stringify(PLAN))),
-      { model: 'deepseek-v4-flash' },
+      { model: 'deepseek-flash' },
     ).generate({ prompt: 'a landing page' });
     assert.deepEqual(plan, PLAN);
   });
@@ -303,7 +303,7 @@ describe('the provider above, driven by DeepSeek', () => {
       () =>
         new PlanProvider(
           clientReturning(contentFrames('{"summary":"cut off mid', 'length')),
-          { model: 'deepseek-v4-flash', maxTokens: DEFAULT_MAX_TOKENS },
+          { model: 'deepseek-flash', maxTokens: DEFAULT_MAX_TOKENS },
         ).generate({ prompt: 'x' }),
       ProviderTruncationError,
     );
@@ -317,7 +317,7 @@ describe('the provider above, driven by DeepSeek', () => {
       () =>
         new PlanProvider(
           clientReturning(contentFrames('{"summary":"no files at all"}')),
-          { model: 'deepseek-v4-flash' },
+          { model: 'deepseek-flash' },
         ).generate({ prompt: 'x' }),
       ProviderShapeError,
     );
@@ -327,7 +327,7 @@ describe('the provider above, driven by DeepSeek', () => {
     await assert.rejects(
       () =>
         new PlanProvider(clientReturning(contentFrames('')), {
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-flash',
         }).generate({ prompt: 'x' }),
       ProviderShapeError,
     );
@@ -345,7 +345,7 @@ describe('the provider above, driven by DeepSeek', () => {
           }),
         ),
         {
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-flash',
           onUsage: (reported) => {
             usage = reported;
           },

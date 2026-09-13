@@ -1,17 +1,27 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { MODEL_CATALOGUE } from '@vibld/ai/model-catalogue';
 import { decideModel, grantedFor } from '../worker/model-access.ts';
 
-const BOTH = { ANTHROPIC_API_KEY: 'a', DEEPSEEK_API_KEY: 'd' };
+/** Every provider keyed, so "everything configured" really means everything. */
+const ALL_KEYED = {
+  ANTHROPIC_API_KEY: 'a',
+  DEEPSEEK_API_KEY: 'd',
+  OPENAI_API_KEY: 'o',
+};
 const POLICY = JSON.stringify({
-  default: ['deepseek-v4-flash'],
+  default: ['deepseek-flash'],
   users: { 'chris@drummond.com': ['claude-opus-5', 'deepseek-v4-pro'] },
 });
 
 describe('grantedFor', () => {
   it('offers everything configured when no policy is set', () => {
-    const granted = grantedFor(BOTH, 'anyone@example.com');
-    assert.equal(granted.length, 3);
+    const granted = grantedFor(ALL_KEYED, 'anyone@example.com');
+    // Asserted against the catalogue rather than a literal: the count moves
+    // whenever a model is added, and a hard-coded number turns that into a
+    // failure that says nothing about what actually changed.
+    assert.equal(granted.length, MODEL_CATALOGUE.length);
+    assert.ok(granted.length >= 6);
   });
 
   it('applies both filters: deployable, then granted', () => {
@@ -20,27 +30,27 @@ describe('grantedFor', () => {
       {
         DEEPSEEK_API_KEY: 'd',
         VIBLD_MODEL_POLICY: JSON.stringify({
-          default: ['claude-opus-5', 'deepseek-v4-flash'],
+          default: ['claude-opus-5', 'deepseek-flash'],
         }),
       },
       'a@b.com',
     );
     assert.deepEqual(
       granted.map((m) => m.id),
-      ['deepseek-v4-flash'],
+      ['deepseek-flash'],
     );
   });
 });
 
 describe('decideModel', () => {
-  const env = { ...BOTH, VIBLD_MODEL_POLICY: POLICY };
+  const env = { ...ALL_KEYED, VIBLD_MODEL_POLICY: POLICY };
 
   it('honours a choice the principal is granted', () => {
     const decision = decideModel(
       env,
       'chris@drummond.com',
       'claude-opus-5',
-      'deepseek-v4-flash',
+      'deepseek-flash',
     );
     assert.equal(decision.ok, true);
     if (decision.ok) assert.equal(decision.model, 'claude-opus-5');
@@ -53,7 +63,7 @@ describe('decideModel', () => {
       env,
       'stranger@x.com',
       'claude-opus-5',
-      'deepseek-v4-flash',
+      'deepseek-flash',
     );
     assert.equal(decision.ok, false);
     if (!decision.ok) {
@@ -71,7 +81,7 @@ describe('decideModel', () => {
     // withheld -- the exact failure this exists to prevent.
     const decision = decideModel(env, 'stranger@x.com', null, 'claude-opus-5');
     assert.equal(decision.ok, true);
-    if (decision.ok) assert.equal(decision.model, 'deepseek-v4-flash');
+    if (decision.ok) assert.equal(decision.model, 'deepseek-flash');
   });
 
   it('uses the deployment default when the principal is granted it', () => {
@@ -87,7 +97,7 @@ describe('decideModel', () => {
 
   it('refuses everything when the principal is granted nothing', () => {
     const decision = decideModel(
-      { ...BOTH, VIBLD_MODEL_POLICY: JSON.stringify({ default: [] }) },
+      { ...ALL_KEYED, VIBLD_MODEL_POLICY: JSON.stringify({ default: [] }) },
       'nobody@x.com',
       null,
       'claude-opus-5',
@@ -102,11 +112,19 @@ describe('decideModel', () => {
 
   it('degrades a malformed policy to the cheapest, for everyone', () => {
     // Escalating on a typo would hand Opus to every caller.
-    const broken = { ...BOTH, VIBLD_MODEL_POLICY: '{not json' };
+    const broken = { ...ALL_KEYED, VIBLD_MODEL_POLICY: '{not json' };
+    // Which model is cheapest moves whenever the catalogue does, so this
+    // computes it the way allowedModels does rather than pinning an id.
+    const lowestOutput = Math.min(
+      ...MODEL_CATALOGUE.map((m) => m.outputMicroUsd),
+    );
+    const cheapest = MODEL_CATALOGUE.filter(
+      (m) => m.outputMicroUsd === lowestOutput,
+    ).sort((a, b) => a.inputMicroUsd - b.inputMicroUsd)[0]!;
     for (const who of ['chris@drummond.com', 'stranger@x.com']) {
       const decision = decideModel(broken, who, null, 'claude-opus-5');
       assert.equal(decision.ok, true, who);
-      if (decision.ok) assert.equal(decision.model, 'deepseek-v4-flash');
+      if (decision.ok) assert.equal(decision.model, cheapest.id);
     }
     // And a chosen expensive model is still refused under a broken policy.
     const refused = decideModel(
@@ -120,12 +138,7 @@ describe('decideModel', () => {
 
   it('is unaffected by how the caller cases their identity', () => {
     for (const who of ['CHRIS@DRUMMOND.COM', ' chris@Drummond.com ']) {
-      const decision = decideModel(
-        env,
-        who,
-        'claude-opus-5',
-        'deepseek-v4-flash',
-      );
+      const decision = decideModel(env, who, 'claude-opus-5', 'deepseek-flash');
       assert.equal(decision.ok, true, who);
     }
   });
@@ -137,7 +150,7 @@ describe('decideModel', () => {
       env,
       'unknown',
       'claude-opus-5',
-      'deepseek-v4-flash',
+      'deepseek-flash',
     );
     assert.equal(decision.ok, false);
   });
