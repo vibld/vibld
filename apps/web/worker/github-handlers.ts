@@ -28,12 +28,25 @@ import {
   type PushTarget,
 } from './github-push.ts';
 import { GitHubStore, type BindingState } from './github-store.ts';
+import {
+  authorizeUrl,
+  exchangeCode,
+  githubOAuthCredentials,
+  installationRepositories,
+  signChoice,
+  signState,
+  userInstallations,
+  verifyChoice,
+  verifyState,
+  type GitHubOAuthEnv,
+  type RepositoryChoice,
+} from './github-connect.ts';
 import type { Principal } from './principal.ts';
 
 /** How long a grant lasts before it has to be approved again (ADR-0006). */
 const GRANT_DAYS = 90;
 
-export interface GitHubHandlerEnv extends GitHubAppEnv {
+export interface GitHubHandlerEnv extends GitHubAppEnv, GitHubOAuthEnv {
   DB?: D1Database;
   GITHUB_BURST?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -42,6 +55,15 @@ export interface GitHubHandlerEnv extends GitHubAppEnv {
 
 export function githubConfigured(env: GitHubHandlerEnv): boolean {
   return Boolean(env.DB && githubAppCredentials(env));
+}
+
+/**
+ * Connecting needs the OAuth half as well as the App half, and is reported
+ * separately: a deployment can be able to push on a binding it already has
+ * while being unable to make new ones.
+ */
+export function githubConnectConfigured(env: GitHubHandlerEnv): boolean {
+  return Boolean(env.DB && githubOAuthCredentials(env));
 }
 
 function json(body: unknown, status = 200): Response {
@@ -338,4 +360,248 @@ export function grantExpiry(now: Date = new Date()): string {
   return new Date(
     now.getTime() + GRANT_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
+}
+
+/**
+ * Where GitHub sends the browser back to. Derived from the request rather
+ * than configured, so preview and production each come back to themselves.
+ */
+function callbackUrl(request: Request): string {
+  return new URL(
+    '/api/github/callback',
+    new URL(request.url).origin,
+  ).toString();
+}
+
+/**
+ * Step one: hand the browser somewhere to go.
+ *
+ * Deliberately does not redirect. The caller is an authenticated `fetch`
+ * from the builder carrying a bearer token, and a 302 to GitHub would be
+ * followed by that fetch rather than by the person, sending the
+ * Authorization header somewhere it does not belong. The URL goes back as
+ * data and the page navigates.
+ */
+export async function handleGitHubConnect(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+  const state = await signState(credentials, principal.userId, now.getTime());
+  return json({ url: authorizeUrl(credentials, state, callbackUrl(request)) });
+}
+
+/**
+ * Step two: find out who came back, and what they may choose.
+ *
+ * The `installation_id` GitHub puts on this redirect is read as a
+ * preference and never as permission. What decides anything is the user
+ * token: `userInstallations` answers, from GitHub, which installations this
+ * account can actually reach, and an id that is not in that answer is
+ * ignored exactly as a forged one would be.
+ */
+export async function handleGitHubCallback(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  doFetch: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  if (!code || !state) {
+    return json({ error: 'That connection link is incomplete.' }, 400);
+  }
+
+  // Checked against the signed-in caller, not merely checked. A state that
+  // verifies but names somebody else is somebody else's authorization being
+  // walked into this session, which is the thing it exists to stop.
+  const startedBy = await verifyState(credentials, state, now.getTime());
+  if (!startedBy || startedBy !== principal.userId) {
+    return json(
+      { error: 'That connection attempt has expired. Start again.' },
+      400,
+    );
+  }
+
+  const token = await exchangeCode(credentials, code, doFetch);
+  if (!token.ok) return githubProblem(token);
+
+  const installations = await userInstallations(token.token, doFetch);
+  if (!installations.ok) return githubProblem(installations);
+  if (installations.value.length === 0) {
+    return json(
+      {
+        error:
+          'The Vibld GitHub App is not installed on any account you can reach. Install it, then connect again.',
+        install: true,
+      },
+      409,
+    );
+  }
+
+  // The hint from the redirect, honoured only when it is one of the
+  // installations GitHub just said this person can reach.
+  const hinted = Number(url.searchParams.get('installation_id'));
+  const chosen =
+    installations.value.find((candidate) => candidate.id === hinted) ??
+    installations.value[0]!;
+
+  const repositories = await installationRepositories(
+    token.token,
+    chosen.id,
+    doFetch,
+  );
+  if (!repositories.ok) return githubProblem(repositories);
+
+  return json({
+    installation: { id: chosen.id, account: chosen.account },
+    // Every installation this person has, so the builder can offer a switch
+    // without starting the whole flow again.
+    installations: installations.value,
+    repositories: repositories.value,
+    // What the bind call may choose from, signed. See `signChoice`.
+    ticket: await signChoice(
+      credentials,
+      principal.userId,
+      chosen.id,
+      repositories.value,
+      now.getTime(),
+    ),
+  });
+}
+
+function sameRepository(
+  a: RepositoryChoice,
+  b: { owner: string; repo: string },
+) {
+  return (
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase()
+  );
+}
+
+/**
+ * Step three: write the binding the user picked.
+ *
+ * The repository is not taken from the request. It is matched against the
+ * list the callback signed, and the binding is written from the matched
+ * entry, so the destination and its default branch are the ones GitHub
+ * reported rather than the ones the browser sent.
+ */
+export async function handleGitHubBind(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { ticket, owner, repo } = (body ?? {}) as {
+    ticket?: unknown;
+    owner?: unknown;
+    repo?: unknown;
+  };
+  if (
+    typeof ticket !== 'string' ||
+    typeof owner !== 'string' ||
+    typeof repo !== 'string'
+  ) {
+    return json(
+      { error: '"ticket", "owner" and "repo" are all required.' },
+      400,
+    );
+  }
+
+  const verified = await verifyChoice(credentials, ticket, now.getTime());
+  if (!verified || verified.userId !== principal.userId) {
+    return json(
+      { error: 'That connection attempt has expired. Start again.' },
+      400,
+    );
+  }
+
+  const match = verified.repositories.find((candidate) =>
+    sameRepository(candidate, { owner, repo }),
+  );
+  if (!match) {
+    return json(
+      { error: 'That repository was not one of the ones you were offered.' },
+      403,
+    );
+  }
+
+  const store = new GitHubStore(env.DB!);
+  await store.bind({
+    userId: principal.userId,
+    installationId: verified.installationId,
+    owner: match.owner,
+    repo: match.repo,
+    defaultBranch: match.defaultBranch,
+    grantedAt: now.toISOString(),
+    grantedByEmail: principal.policyIdentity,
+    expiresAt: grantExpiry(now),
+  });
+
+  return json({
+    owner: match.owner,
+    repo: match.repo,
+    defaultBranch: match.defaultBranch,
+    expiresAt: grantExpiry(now),
+  });
+}
+
+/**
+ * Stop pushing to the connected repository.
+ *
+ * Marks the grant revoked rather than deleting it, and says nothing about
+ * whether there was one: "disconnected" is the same answer either way, so
+ * this cannot be used to ask whether somebody has connected something.
+ */
+export async function handleGitHubDisconnect(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env) && !githubConnectConfigured(env)) {
+    return json(
+      { error: 'GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+  await new GitHubStore(env.DB!).revoke(principal.userId, now);
+  return json({ connected: false });
 }

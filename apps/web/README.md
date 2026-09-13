@@ -668,22 +668,6 @@ grant again for more.
 
 ## Pushing to GitHub (issue #13, docs/decisions.md L30/L42a)
 
-> **Not usable yet.** The push half is built and tested; the half that
-> records _which_ repository a user approved is not. `GitHubStore.bind` has
-> no caller outside tests, so `github_bindings` stays empty, `/api/github/status`
-> answers `reason: "none"` and a push is refused with a 409 asking for a
-> connection that cannot yet be made. Doing the App setup below changes
-> none of that on its own.
->
-> What is missing is the connect flow, and it is separate on purpose rather
-> than by omission. GitHub's post-install redirect is an unsigned GET
-> carrying `?installation_id=N`, so binding on it directly would let any
-> signed-in user claim somebody else's installation and push into their
-> repository. Closing that needs the user-to-server OAuth exchange and a
-> `GET /user/installations/{id}/repositories` check, which is a security
-> decision that deserves its own review rather than an addendum to this one.
-> Tracked in issue #121.
-
 A checkpoint can be pushed to a repository the user connected: a branch
 `vibld/<revision>`, one commit carrying the generated files, and a pull
 request against the repository's default branch. `/api/github/status` (GET)
@@ -730,12 +714,64 @@ repository.
    https://github.com/vibld/vibld/settings/environments -- never into a
    chat, an email, or this repository. The App ID shown at the top of the
    same page goes into `VIBLD_GITHUB_APP_ID` there too.
-3. The **Deploy web preview** workflow syncs both to this Worker on the next
-   deploy, the same way it already syncs `STRIPE_SECRET_KEY` above, and
+3. On the same page, under **Identifying and authorizing users**, set the
+   **Callback URL** to `https://app.vibld.com/api/github/callback` and tick
+   **Request user authorization (OAuth) during installation**. Then copy the
+   **Client ID** into `VIBLD_GITHUB_CLIENT_ID`, and use **Generate a new
+   client secret** for `VIBLD_GITHUB_CLIENT_SECRET`, both on the same
+   environment. Without these a deployment can push on a binding it already
+   has but cannot make new ones.
+4. The **Deploy web preview** workflow syncs all four to this Worker on the
+   next deploy, the same way it already syncs `STRIPE_SECRET_KEY` above, and
    `migrations/0005_github.sql` is applied by that workflow's
-   migration-apply step. Both secrets are optional in the same fail-closed
-   sense as every other secret here: unset means `/api/github/*` answers
-   "not configured", not open.
+   migration-apply step. All four are optional in the same fail-closed sense
+   as every other secret here: unset means `/api/github/*` answers "not
+   configured", not open.
+
+### Connecting a repository (issue #121)
+
+The part that decides _which_ repository, and the only part of this feature
+where the security is the feature rather than the error messages.
+
+GitHub redirects to the App's setup URL after an installation with
+`?installation_id=N` on the query string. That redirect is a plain GET: it is
+not signed, it carries no secret, and nothing about it proves the browser
+making the request had anything to do with the installation. Binding on it
+would let any signed-in user request the callback with somebody else's
+installation id and have Vibld push commits into a stranger's repository. A
+`state` nonce does not close that, because the attacker legitimately holds a
+nonce for their own session and it is the id beside it that is forged.
+
+So `installation_id` is read as a preference and never as permission. What
+establishes the right to bind is a user-to-server token:
+
+1. `/api/github/connect` returns the authorize URL, carrying a signed `state`.
+   It returns the URL rather than redirecting, because the caller is an
+   authenticated `fetch` from the builder and a 302 would be followed by that
+   fetch, sending its `Authorization` header to GitHub.
+2. `/api/github/callback` checks the `state` names the signed-in caller,
+   trades the `code` for a **user** token, and asks GitHub
+   `GET /user/installations` and
+   `GET /user/installations/{id}/repositories`. A forged installation id
+   fails by simply not being in the answer.
+3. `/api/github/bind` writes the binding, choosing from the list the callback
+   signed rather than from the request body, so the destination and its
+   default branch are the ones GitHub reported.
+
+The user token is used for those two reads and discarded. It is never
+stored: it proves who is connecting, and pushing has its own credential.
+ADR-0006 keeps those classes apart, and a token that can act as somebody
+across the whole of GitHub is the class this product does not hold.
+
+Between the callback and the bind there is nothing on the server to
+remember, because the callback signs what it established (this user, this
+installation, these repositories, at this time) and the bind call may only
+choose from what was signed. Repositories the user cannot push to, and
+archived ones, are left out at step 2: offering them means somebody picks
+one, waits, and is refused at the push instead of at the choice.
+
+Only `revoked_at` is set on disconnect, never a delete, so a grant that
+existed stays a fact.
 
 GitHub downloads a PKCS#1 key ("BEGIN RSA PRIVATE KEY") and WebCrypto
 imports only PKCS#8, so `github-app.ts` wraps the DER itself rather than
