@@ -67,3 +67,33 @@ describe('formatStability', () => {
     assert.match(table, /coffee: 3\/3 accepted$/m);
   });
 });
+
+describe('formatStability, a case that never varied', () => {
+  it('prints the tally alone when every run failed the same way', () => {
+    // As unanimous as three acceptances, and the tally already says so.
+    // Comparing accepted against runs called this varied and printed
+    // "provider error" three times, which is the noise the rule exists to
+    // suppress, in the row that needed it least.
+    const table = formatStability(
+      stability([
+        result('marketing', 'failed-provider'),
+        result('marketing', 'failed-provider'),
+        result('marketing', 'failed-provider'),
+      ]),
+    );
+    assert.match(table, /marketing: 0\/3 accepted$/m);
+  });
+
+  it('still names the outcomes when a failing case failed differently', () => {
+    const table = formatStability(
+      stability([
+        result('marketing', 'failed-provider'),
+        result('marketing', 'failed-validation'),
+      ]),
+    );
+    assert.match(
+      table,
+      /marketing: 0\/2 accepted \(provider error, failed validation\)/,
+    );
+  });
+});
