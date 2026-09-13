@@ -371,3 +371,34 @@ describe('a reference palette and the product type', () => {
     assert.equal(prompt.split('--primary:').length - 1, 1);
   });
 });
+
+describe('a page built to be expensive to read', () => {
+  it('scans a hostile document in linear time', () => {
+    // Not a hypothetical. The first version of the ground scan looked
+    // lazily for the next `{`, which backtracks from every delimiter it
+    // passed; 60,000 semicolons with no brace after them cost 3.3 seconds,
+    // and the scan cap allows three times that. This runs in a Worker, on a
+    // page the deployment did not choose, inside somebody's CPU budget.
+    const hostile = `<style>${';'.repeat(180_000)}</style>`;
+    const started = Date.now();
+    paletteFromPage(hostile);
+    const took = Date.now() - started;
+    assert.ok(took < 1_000, `took ${took}ms`);
+  });
+
+  it('is not slowed down by a page full of unclosed media queries', () => {
+    const hostile = `<style>${'@media '.repeat(20_000)}</style>`;
+    const started = Date.now();
+    paletteFromPage(hostile);
+    const took = Date.now() - started;
+    assert.ok(took < 1_000, `took ${took}ms`);
+  });
+
+  it('is not slowed down by a page full of unclosed body tags', () => {
+    const hostile = `${'<body '.repeat(20_000)}<p>x</p>`;
+    const started = Date.now();
+    paletteFromPage(hostile);
+    const took = Date.now() - started;
+    assert.ok(took < 1_000, `took ${took}ms`);
+  });
+});

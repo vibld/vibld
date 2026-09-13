@@ -104,11 +104,26 @@ function metaContent(html: string, name: string): string | null {
  * `:root` are the ground by definition, and there is no counting to get
  * wrong.
  */
-const ROOT_RULE = /(?:^|[{}();])([^{}()]*?)\{([^{}]*)\}/g;
-const ROOT_SELECTOR = /(^|[\s,>+~])(html|body|:root)(\s*[,.:[]|\s|$)/i;
-const BACKGROUND_DECLARATION = /background(?:-color)?\s*:\s*([^;{}"']+)/gi;
+/**
+ * Every quantifier below is bounded, and that is the point of them.
+ *
+ * This reads somebody else's page inside a Worker with a CPU budget, so a
+ * pattern's worst case is an input an attacker gets to choose. The first
+ * version of this rule scanned lazily for the next `{`, which backtracks
+ * from every delimiter it passed: 60,000 semicolons with no brace after
+ * them cost 3.3 seconds, and the character cap allows three times that.
+ * Measured, not suspected.
+ *
+ * A selector longer than 300 characters and a declaration block longer than
+ * 4,000 are not real CSS, so refusing to look past either costs nothing and
+ * keeps the work linear in the size of the page.
+ */
+const ROOT_RULE =
+  /(?:^|[{};])[^{}]{0,300}?\b(?:html|body|:root)\b[^{}]{0,300}\{([^{}]{0,4000})\}/gi;
+const BACKGROUND_DECLARATION =
+  /background(?:-color)?\s*:\s*([^;{}"']{0,200})/gi;
 const BGCOLOR_ATTRIBUTE =
-  /<body\b[^>]*?\bbgcolor\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))/i;
+  /<body\b[^>]{0,2000}?\bbgcolor\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))/i;
 
 /**
  * `source` with every `prefers-color-scheme: dark` block removed.
@@ -119,7 +134,11 @@ const BGCOLOR_ATTRIBUTE =
  * media block contains rules and a rule contains braces.
  */
 function withoutDarkOverrides(source: string): string {
-  const opener = /@media[^{]*prefers-color-scheme\s*:\s*dark[^{]*\{/gi;
+  // Bounded for the reason the patterns above are: `@media` followed by a
+  // long run with no brace backtracks from every position it passed, and a
+  // media query is not a thousand characters long.
+  const opener =
+    /@media[^{]{0,500}prefers-color-scheme\s*:\s*dark[^{]{0,500}\{/gi;
   let out = '';
   let cursor = 0;
   for (const match of source.matchAll(opener)) {
@@ -227,9 +246,7 @@ function readGroundLiterals(source: string): string[] {
   }
 
   for (const rule of text.matchAll(ROOT_RULE)) {
-    const selector = rule[1] ?? '';
-    if (!ROOT_SELECTOR.test(selector)) continue;
-    for (const declaration of (rule[2] ?? '').matchAll(
+    for (const declaration of (rule[1] ?? '').matchAll(
       BACKGROUND_DECLARATION,
     )) {
       // A shorthand can be a gradient, a url, or `transparent`. Anything
