@@ -377,6 +377,28 @@ export async function mintInstallationToken(
       reason: 'access',
     };
   }
+  // A 422 on this endpoint means the installation cannot grant what was
+  // asked for. The body is fixed and constructed here, so the two causes are
+  // that the bound repository is no longer among the ones the installation
+  // covers (GitHub refuses to scope a token to a repository it was not
+  // granted), or that a permission this needs has not been approved. Neither
+  // is fixed by retrying, and calling them `refused` produces a 502 the
+  // caller will retry forever while the user is never told the one thing
+  // that would help.
+  //
+  // Deliberately every 422 rather than a message match: the exact sentence
+  // is not documented, and matching a string that is not a contract would
+  // fail open into that same silent retry loop the first time GitHub
+  // rewords it. The cost of being wrong the other way is one unnecessary
+  // re-approval.
+  if (response.status === 422) {
+    return {
+      ok: false,
+      error:
+        'That repository is no longer covered by the GitHub App installation. Approve it again to keep pushing.',
+      reason: 'access',
+    };
+  }
   if (!response.ok) {
     return {
       ok: false,

@@ -662,3 +662,40 @@ describe('when the push itself fails', () => {
     assert.match(body.error, /no commits yet/);
   });
 });
+
+/**
+ * A repository dropped from the installation's selection.
+ *
+ * GitHub refuses to scope a token to a repository the installation was not
+ * granted, and the refusal is a 422 rather than a 404. Read as an ordinary
+ * validation failure it becomes a retryable 502, so the client retries a
+ * call that cannot ever succeed and the user is never told the one thing
+ * that would fix it.
+ */
+describe('when the repository has left the installation', () => {
+  it('asks for re-approval rather than reporting something to retry', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const response = await handleGitHubPush(
+      pushRequest(),
+      env(db),
+      PRINCIPAL,
+      (async () =>
+        new Response(
+          JSON.stringify({
+            message:
+              'There is at least one repository that does not exist or is not accessible to the parent installation.',
+          }),
+          { status: 422, headers: { 'content-type': 'application/json' } },
+        )) as unknown as typeof fetch,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as {
+      error: string;
+      reconnect?: boolean;
+    };
+    assert.equal(body.reconnect, true);
+    assert.match(body.error, /Approve it again/);
+  });
+});
