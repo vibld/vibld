@@ -1,15 +1,17 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { FakeModelProvider } from '@vibld/core';
 import { CASES, stubPlan } from '../src/cases.ts';
 import { runCase } from '../src/harness.ts';
 import type { CaseResult } from '../src/harness.ts';
 import {
   acceptedProject,
+  containedPath,
   createLiveRun,
   liveProblems,
   readLiveOptions,
   runCostCents,
+  selectCaseIds,
 } from '../src/live.ts';
 import { formatReport, summarise } from '../src/report.ts';
 import { SCENARIOS, runScenario } from '../src/scenarios.ts';
@@ -25,35 +27,30 @@ import { SCENARIOS, runScenario } from '../src/scenarios.ts';
  * spends real money and so is never reached by a key merely being present.
  */
 
-/** `--case <id>` narrows the set. Anything else is left for the env to say. */
-function selectedCaseIds(argv: string[]): string[] {
-  const ids: string[] = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--case' && argv[i + 1]) {
-      ids.push(argv[i + 1]!);
-      i += 1;
-    }
-  }
-  return ids;
-}
-
 /**
  * Write a generated project out so it can be read, run and ported.
  *
- * Paths are joined and then checked to still sit under the target directory.
- * The validator already refuses an escaping path before promotion, so this is
- * the second of two checks rather than the only one, but a function that
- * writes model output to a filesystem should not rely on that.
+ * The directory is cleared first. Overwriting in place would leave files from
+ * a previous run that this generation did not produce, so the directory would
+ * stop matching the project being reported and could build or render from a
+ * stale config that no longer exists in the snapshot. Comparing designs across
+ * models is the entire point, and a candidate directory that is part one run
+ * and part another is worse than no output at all.
+ *
+ * Every path is then checked to still sit under that directory. The validator
+ * already refuses an escaping path before promotion, so this is the second of
+ * two checks rather than the only one, but a function that writes model output
+ * to a filesystem should not rely on that.
  */
 async function writeProject(
   root: string,
   files: { path: string; content: string }[],
 ): Promise<void> {
-  const base = resolve(root);
+  await rm(root, { recursive: true, force: true });
   for (const file of files) {
-    const target = resolve(join(base, file.path));
-    if (target !== base && !target.startsWith(`${base}/`)) {
-      throw new Error(`refusing to write outside ${base}: ${file.path}`);
+    const target = containedPath(root, file.path);
+    if (target === null) {
+      throw new Error(`refusing to write outside ${root}: ${file.path}`);
     }
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, file.content, 'utf8');
@@ -63,7 +60,12 @@ async function writeProject(
 async function main(): Promise<number> {
   const env = process.env;
   const live = readLiveOptions(env);
-  const wanted = selectedCaseIds(process.argv.slice(2));
+  const selection = selectCaseIds(process.argv.slice(2));
+  if (!selection.ok) {
+    console.error(selection.error);
+    return 1;
+  }
+  const wanted = selection.ids;
   const cases =
     wanted.length > 0 ? CASES.filter((c) => wanted.includes(c.id)) : CASES;
 

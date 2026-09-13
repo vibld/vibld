@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { InMemoryGenerationStore } from '@vibld/core';
 import { PlanProvider, createPlanClient, findModel } from '@vibld/ai';
 import type { ModelProvider, ProjectSnapshot } from '@vibld/core';
@@ -152,4 +153,51 @@ export async function acceptedProject(
   run: LiveRun,
 ): Promise<ProjectSnapshot | undefined> {
   return run.store.loadAccepted(run.projectId);
+}
+
+export type CaseSelection =
+  { ok: true; ids: string[] } | { ok: false; error: string };
+
+/**
+ * Which cases `--case` asked for.
+ *
+ * A bare or empty `--case` is an error rather than "all of them", and that is
+ * the whole point of this returning a result instead of a list. Falling back
+ * to the full set is harmless against the stub and expensive live:
+ * `--case "$CASE"` with an unset variable would quietly run every case
+ * against every configured model, which is the full suite billed several
+ * times over for what was meant to be one generation. The safe direction for
+ * a flag that selects work is to refuse, never to widen.
+ */
+export function selectCaseIds(argv: string[]): CaseSelection {
+  const ids: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] !== '--case') continue;
+    const value = argv[i + 1];
+    if (value === undefined || value.trim() === '' || value.startsWith('--')) {
+      return { ok: false, error: '--case needs a case id.' };
+    }
+    ids.push(value);
+    i += 1;
+  }
+  return { ok: true, ids };
+}
+
+/**
+ * Where a generated file may be written, or null if it may not be.
+ *
+ * Compared with `relative` rather than by string prefix. A prefix check has to
+ * name a separator, and naming "/" rejects every path on a platform that
+ * resolves to backslashes -- a check that reads as strict while actually
+ * being broken, and broken only after the models have been paid.
+ */
+export function containedPath(root: string, filePath: string): string | null {
+  const base = resolve(root);
+  const target = resolve(base, filePath);
+  const rel = relative(base, target);
+  if (rel === '' || isAbsolute(rel)) return null;
+  // Split rather than `startsWith("..")`, so a file honestly named "..rc" is
+  // kept while a real "../" escape is refused.
+  if (rel.split(sep)[0] === '..') return null;
+  return target;
 }

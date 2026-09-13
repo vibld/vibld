@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { liveProblems, readLiveOptions, runCostCents } from '../src/live.ts';
+import {
+  containedPath,
+  liveProblems,
+  readLiveOptions,
+  runCostCents,
+  selectCaseIds,
+} from '../src/live.ts';
 
 const KEYED = {
   ANTHROPIC_API_KEY: 'a',
@@ -126,5 +133,63 @@ describe('runCostCents', () => {
       }),
       null,
     );
+  });
+});
+
+describe('selectCaseIds', () => {
+  it('refuses a bare --case instead of running everything', () => {
+    // The expensive one. Against the stub this is merely wrong; live it is
+    // every case against every configured model, billed, for what was meant
+    // to be a single generation.
+    const result = selectCaseIds(['--case']);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /needs a case id/);
+  });
+
+  it('refuses an empty or blank --case', () => {
+    // `--case "$CASE"` with the variable unset arrives exactly like this.
+    for (const value of ['', '   ']) {
+      const result = selectCaseIds(['--case', value]);
+      assert.equal(result.ok, false, JSON.stringify(value));
+    }
+  });
+
+  it('refuses a --case that swallowed the next flag', () => {
+    const result = selectCaseIds(['--case', '--verbose']);
+    assert.equal(result.ok, false);
+  });
+
+  it('selects nothing when --case is absent, which means the whole set', () => {
+    const result = selectCaseIds([]);
+    assert.deepEqual(result, { ok: true, ids: [] });
+  });
+
+  it('collects every --case given', () => {
+    const result = selectCaseIds(['--case', 'a', '--case', 'b']);
+    assert.deepEqual(result, { ok: true, ids: ['a', 'b'] });
+  });
+});
+
+describe('containedPath', () => {
+  it('accepts a nested project path', () => {
+    const target = containedPath('/out/opus/case', 'src/App.tsx');
+    assert.equal(target, resolve('/out/opus/case/src/App.tsx'));
+  });
+
+  it('refuses an escape, the directory itself, and an absolute path', () => {
+    for (const path of [
+      '../escaped.txt',
+      'src/../../escaped.txt',
+      '.',
+      '/etc/passwd',
+    ]) {
+      assert.equal(containedPath('/out/opus/case', path), null, path);
+    }
+  });
+
+  it('keeps a file whose name merely starts with two dots', () => {
+    // A prefix check on ".." would throw this away. It is a legitimate name.
+    const target = containedPath('/out/opus/case', '..rc');
+    assert.equal(target, resolve('/out/opus/case/..rc'));
   });
 });

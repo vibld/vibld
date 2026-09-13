@@ -4,12 +4,14 @@ export { runCase } from './harness.ts';
 export type { CaseOutcome, CaseResult, HarnessOptions } from './harness.ts';
 export {
   acceptedProject,
+  containedPath,
   createLiveRun,
   liveProblems,
   readLiveOptions,
   runCostCents,
+  selectCaseIds,
 } from './live.ts';
-export type { LiveEnv, LiveOptions, LiveRun } from './live.ts';
+export type { CaseSelection, LiveEnv, LiveOptions, LiveRun } from './live.ts';
 export { checkPortability } from './portability.ts';
 export type { PortabilityProblem } from './portability.ts';
 export { formatReport, summarise } from './report.ts';
