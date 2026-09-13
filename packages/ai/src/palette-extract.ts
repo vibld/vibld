@@ -86,6 +86,17 @@ const OKLCH_PATTERN =
  */
 const NAME_ENDS = '(?![\\w-])';
 const NAME_BEGINS = '(?:^|[\\s/])';
+/** The same rule looking the other way: nothing joined onto the front. */
+const NAME_ENDS_BEHIND = '(?<![\\w-])';
+
+/**
+ * Bounded like everything else that walks a fetched page: an unterminated
+ * comment or style block must not send the scan off to the end of the
+ * document from every position that looks like an opener.
+ */
+const HTML_COMMENT = /<!--[\s\S]{0,20000}?-->/g;
+const CSS_COMMENT = /\/\*[\s\S]{0,20000}?\*\//g;
+const STYLE_BLOCK = /<style\b[^>]{0,2000}>([\s\S]{0,200000}?)<\/style\s*>/gi;
 
 const META_TAG = new RegExp(`<meta${NAME_ENDS}([^>]*)>`, 'gi');
 
@@ -135,8 +146,16 @@ const ROOT_TAG = new RegExp(`<(?:html|body)${NAME_ENDS}([^>]{0,2000})>`, 'gi');
 // the next rule needs in front of it, so consuming it made every second rule
 // in `body{...}body{...}` invisible.
 const CSS_RULE = /(?<![^{};])([^{}]{0,300})\{([^{}]{0,4000})\}/g;
-const BACKGROUND_DECLARATION =
-  /background(?:-color)?\s*:\s*([^;{}"']{0,200})/gi;
+/**
+ * A property name is not a suffix of another one. `--card-background:` ends
+ * in `background:`, so an unanchored pattern reads a custom property as a
+ * declaration on the root, and a rule defining `--page-background` and
+ * `--card-background` handed the page whichever came last.
+ */
+const BACKGROUND_DECLARATION = new RegExp(
+  `${NAME_ENDS_BEHIND}background(?:-color)?\\s*:\\s*([^;{}"']{0,200})`,
+  'gi',
+);
 
 /**
  * Not preceded by a letter or a hyphen, because `prefers-color-scheme:
@@ -145,8 +164,10 @@ const BACKGROUND_DECLARATION =
  * seven real sites come back dark, two of them wrong, and it hid the fact
  * that the background scan underneath was never being reached.
  */
-const COLOR_SCHEME_DECLARATION =
-  /(?<![-a-z])color-scheme\s*:\s*([a-z\s]{0,40})/i;
+const COLOR_SCHEME_DECLARATION = new RegExp(
+  `${NAME_ENDS_BEHIND}color-scheme\\s*:\\s*([a-z\\s]{0,40})`,
+  'i',
+);
 
 /** `dark` or `light` out of a `color-scheme` value, or null. */
 function schemeWord(value: string): PaletteMode | null {
@@ -220,8 +241,15 @@ function selectsRoot(selectorList: string): boolean {
  * Null when it sets none, which is the one case where guessing from the
  * brand colour beats having nothing.
  */
-function readGroundMode(source: string): PaletteMode | null {
-  const text = withoutDarkOverrides(source.slice(0, MAX_SCAN_CHARS));
+function readGroundMode(
+  html: string,
+  stylesheets: readonly string[],
+): PaletteMode | null {
+  // The markup with its comments taken out, because a rule somebody
+  // commented out is a rule the browser does not apply.
+  const text = withoutDarkOverrides(
+    html.slice(0, MAX_SCAN_CHARS).replace(HTML_COMMENT, ' '),
+  );
 
   const meta = metaContent(text, 'color-scheme');
   const declared = meta ? schemeWord(meta) : null;
@@ -258,15 +286,38 @@ function readGroundMode(source: string): PaletteMode | null {
     if (legacy) fromRules.push(...readColorLiterals(legacy));
   }
 
-  for (const rule of text.matchAll(CSS_RULE)) {
-    if (!selectsRoot(rule[1] ?? '')) continue;
-    const block = rule[2] ?? '';
-    scoped ??= schemeIn(block);
-    fromRules.push(...backgroundsIn(block));
+  // Only actual CSS: the page's own `<style>` blocks and the sheets it
+  // links, never the raw document. Feeding the whole document to the rule
+  // pattern reads CSS out of a `<script type="application/json">` payload,
+  // where `;body{color-scheme:dark}` inside a string is text a site is
+  // carrying rather than a rule it applies, and that text was allowed to
+  // override the page's real background.
+  for (const css of [...styleBlocks(text), ...stylesheets]) {
+    const rules = withoutDarkOverrides(
+      css.slice(0, MAX_SCAN_CHARS).replace(CSS_COMMENT, ' '),
+    );
+    for (const rule of rules.matchAll(CSS_RULE)) {
+      if (!selectsRoot(rule[1] ?? '')) continue;
+      const block = rule[2] ?? '';
+      scoped ??= schemeIn(block);
+      fromRules.push(...backgroundsIn(block));
+    }
   }
   if (scoped) return scoped;
 
   return modeOf(fromInline) ?? modeOf(fromRules);
+}
+
+/**
+ * The contents of each `<style>` block, which is where a document keeps CSS
+ * it means rather than CSS it merely contains.
+ */
+function styleBlocks(html: string): string[] {
+  const found: string[] = [];
+  for (const block of html.matchAll(STYLE_BLOCK)) {
+    found.push(block[1] ?? '');
+  }
+  return found;
 }
 
 /**
@@ -423,15 +474,11 @@ export function readPageColors(
     literals.push(...readColorLiterals(sheet));
   }
 
-  // The markup states the mode more often than a stylesheet does (that is
-  // where `color-scheme` and `bgcolor` live), so it is asked first and the
-  // sheets only settle it when the page itself is silent.
-  let groundMode = readGroundMode(head);
-  for (const sheet of stylesheets) {
-    if (groundMode) break;
-    groundMode = readGroundMode(sheet);
-  }
-  return { themeColor, literals, groundMode };
+  return {
+    themeColor,
+    literals,
+    groundMode: readGroundMode(head, stylesheets),
+  };
 }
 
 /**
@@ -607,7 +654,16 @@ export function sameOriginStylesheets(
 
   for (const link of links) {
     const attributes = link[1] ?? '';
-    if (!/\brel\s*=\s*["']?[^"'>]*\bstylesheet\b/i.test(attributes)) continue;
+    // Read as an attribute and compared token by token. The word-boundary
+    // pattern this replaces matched `data-rel="stylesheet"` and the rel
+    // token `stylesheet-preview`, and would then have fetched whatever the
+    // href pointed at as if it were CSS. It is the same boundary rule as the
+    // rest of the file; this was the one place still doing it by hand.
+    const rel = attribute(attributes, 'rel');
+    if (!rel) continue;
+    if (!rel.trim().toLowerCase().split(/\s+/).includes('stylesheet')) {
+      continue;
+    }
     const value = attribute(attributes, 'href');
     if (!value) continue;
 

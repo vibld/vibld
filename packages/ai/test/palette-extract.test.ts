@@ -656,3 +656,95 @@ describe('when a page sets its ground more than once', () => {
     assert.equal(found.mode, 'light');
   });
 });
+
+describe('text that merely contains CSS', () => {
+  it('does not read rules out of a script payload', () => {
+    // CSS inside a JSON string is text the site is carrying, not a rule it
+    // applies, and feeding the raw document to the rule pattern let it
+    // override the page's real background. The whitespace matters: without
+    // it the selector tokeniser happened to reject `";body` as a subject,
+    // which is luck rather than a defence.
+    const found = paletteFromPage(
+      '<style>body{background:#fbfbfb}</style>' +
+        '<script type="application/json">' +
+        '{"css":"; body{color-scheme:dark;background:#0d1117}"}' +
+        '</script><p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('does not read rules out of a commented-out line of script', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#fbfbfb}</style>' +
+        '<script>\n// body{background:#0d1117}\nvar x = 1;\n</script>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('does not read rules out of an HTML comment', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#fbfbfb}</style>' +
+        '<!--\nbody{background:#0d1117}\n-->' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('does not read rules out of a CSS comment', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#fbfbfb} /*\nbody{background:#0d1117}\n*/</style>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('still reads rules from a linked stylesheet', () => {
+    const found = paletteFromPage('<p style="color:#39d353">x</p>', [
+      'body{background:#0d1117}',
+    ]);
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+});
+
+describe('a property name is not a suffix of another', () => {
+  it('does not read a custom property as a root background', () => {
+    // `--card-background:` ends in `background:`, so an unanchored pattern
+    // hands the page whichever custom property came last.
+    const found = paletteFromPage(
+      '<style>:root{--page-background:#ffffff;--card-background:#111111}' +
+        'body{background:var(--page-background)}</style>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('does not read a custom property as a root color-scheme', () => {
+    const found = paletteFromPage(
+      '<style>:root{--my-color-scheme:dark}body{background:#fbfbfb}</style>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+});
+
+describe('links that are not stylesheet links', () => {
+  it('ignores data-rel and a rel token that merely starts with stylesheet', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<link data-rel="stylesheet" href="/a.css">' +
+          '<link rel="stylesheet-preview" href="/b.css">' +
+          '<link rel="preload stylesheet" href="/c.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/c.css'],
+    );
+  });
+});

@@ -175,53 +175,98 @@ describe('fetchReferenceContext', () => {
     if (!result.ok) assert.match(result.error, /No readable text/);
   });
 
+  function redirectTo(location: string, status = 302) {
+    return new Response(null, { status, headers: { location } });
+  }
+
+  const PAGE_WITH_SHEET =
+    '<html><head><link rel="stylesheet" href="theme.css"></head>' +
+    '<body><p>Widgets for everyone.</p></body></html>';
+
   it('resolves stylesheets against where the response landed, not where it was asked', async () => {
-    // A reference URL that redirects into a subdirectory: resolving
+    // A reference URL that really redirects into a subdirectory: resolving
     // `href="theme.css"` against the requested URL gives /theme.css, which
     // is not where the file is.
     const asked: string[] = [];
-    const page = htmlResponse(
-      '<html><head><link rel="stylesheet" href="theme.css"></head>' +
-        '<body><p>Widgets for everyone.</p></body></html>',
-    );
-    Object.defineProperty(page, 'url', {
-      value: 'https://example.com/products/page/',
-    });
     await fetchReferenceContext('https://example.com/old', {
       fetchImpl: (async (url: string) => {
         asked.push(url);
+        if (url === 'https://example.com/old') {
+          return redirectTo('https://example.com/products/page/');
+        }
         if (url.endsWith('.css')) return htmlResponse('a{color:#c0392b}');
-        return page;
+        return htmlResponse(PAGE_WITH_SHEET);
       }) as unknown as typeof fetch,
     });
     assert.deepEqual(asked, [
       'https://example.com/old',
+      'https://example.com/products/page/',
       'https://example.com/products/page/theme.css',
     ]);
   });
 
-  it('will not follow a redirect into a host it would have refused', async () => {
-    // The final URL becomes the base for same-origin stylesheet fetching, so
-    // it goes back through the same guard the requested URL did. Otherwise
-    // "same origin as the page" quietly means "same origin as wherever the
-    // page sent us".
+  it('refuses a page redirect into a host it would not have fetched', async () => {
+    // `fetch` follows redirects itself unless told not to, which undoes the
+    // guard entirely: the only URL checked would be the one before the
+    // redirect. The metadata address is why this matters.
     const asked: string[] = [];
-    const page = htmlResponse(
-      '<html><head><link rel="stylesheet" href="theme.css"></head>' +
-        '<body><p>Widgets for everyone.</p></body></html>',
-    );
-    Object.defineProperty(page, 'url', { value: 'http://169.254.169.254/' });
-    await fetchReferenceContext('https://example.com/', {
+    const result = await fetchReferenceContext('https://example.com/', {
       fetchImpl: (async (url: string) => {
         asked.push(url);
-        if (url.endsWith('.css')) return htmlResponse('a{color:#c0392b}');
-        return page;
+        if (url === 'https://example.com/') {
+          return redirectTo('http://169.254.169.254/latest/meta-data/');
+        }
+        return htmlResponse('<p>secrets</p>');
       }) as unknown as typeof fetch,
     });
+    assert.equal(result.ok, false);
+    assert.deepEqual(asked, ['https://example.com/']);
+  });
+
+  it('refuses a stylesheet redirect into a host it would not have fetched', async () => {
+    const asked: string[] = [];
+    const result = await fetchReferenceContext('https://example.com/', {
+      fetchImpl: (async (url: string) => {
+        asked.push(url);
+        if (url.endsWith('theme.css')) {
+          return redirectTo('http://127.0.0.1/admin');
+        }
+        if (url.includes('127.0.0.1')) return htmlResponse('a{color:#c0392b}');
+        return htmlResponse(PAGE_WITH_SHEET);
+      }) as unknown as typeof fetch,
+    });
+    // The page still succeeds: a stylesheet is a bonus, never a reason to
+    // fail a run.
+    assert.equal(result.ok, true);
     assert.ok(
-      !asked.some((url) => url.includes('169.254')),
+      !asked.some((url) => url.includes('127.0.0.1')),
       `fetched ${asked.join(', ')}`,
     );
+  });
+
+  it('gives up on a redirect loop rather than following it forever', async () => {
+    let asked = 0;
+    const result = await fetchReferenceContext('https://example.com/a', {
+      fetchImpl: (async (url: string) => {
+        asked += 1;
+        return redirectTo(url.endsWith('/a') ? '/b' : '/a');
+      }) as unknown as typeof fetch,
+    });
+    assert.equal(result.ok, false);
+    assert.ok(asked <= 7, `made ${asked} requests`);
+  });
+
+  it('follows an ordinary same-site redirect', async () => {
+    const result = await fetchReferenceContext('https://example.com/old', {
+      fetchImpl: (async (url: string) =>
+        url.endsWith('/old')
+          ? redirectTo('https://example.com/new')
+          : htmlResponse(
+              '<p>Widgets for everyone.</p>',
+            )) as unknown as typeof fetch,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.match(result.text, /Widgets/);
   });
 
   it('fetches the stylesheets together, so their timeouts do not stack', async () => {

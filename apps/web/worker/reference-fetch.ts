@@ -69,6 +69,60 @@ const MAX_STYLESHEET_BYTES = 256 * 1024;
 const STYLESHEET_PHASE_MS = 4_000;
 
 /**
+ * How many redirects are followed, each of them checked.
+ *
+ * More than a handful is a loop or a tracker, and neither is a reference
+ * page worth waiting for.
+ */
+const MAX_REDIRECTS = 5;
+
+/**
+ * A fetch that validates every hop rather than only the first.
+ *
+ * `fetch` follows redirects itself by default, which quietly undoes the
+ * guard on the URL: `/theme.css` answering 302 to `http://169.254.169.254/`
+ * is a request this Worker makes to the metadata address having checked
+ * nothing, because the only URL `parseReferenceTarget` ever saw was the one
+ * before the redirect. Checking the URL a caller typed and then letting the
+ * network choose the next one is not a boundary.
+ *
+ * So redirects are manual and each destination goes through the same guard
+ * as the first. The landing URL is returned alongside the response, because
+ * `response.url` is empty under manual redirects and the caller needs to
+ * know where it ended up to resolve relative links against it.
+ */
+async function fetchValidated(
+  start: URL,
+  doFetch: typeof fetch,
+  init: RequestInit,
+): Promise<{ response: Response; url: URL } | null> {
+  let target = start;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const response = await doFetch(target.toString(), {
+      ...init,
+      redirect: 'manual',
+    });
+    const location =
+      response.status >= 300 && response.status <= 399
+        ? response.headers.get('location')
+        : null;
+    if (!location) return { response, url: target };
+
+    let next: string;
+    try {
+      next = new URL(location, target).toString();
+    } catch {
+      return null;
+    }
+    const checked = parseReferenceTarget(next);
+    if (!checked.ok) return null;
+    target = checked.value;
+  }
+  // Out of hops. A chain this long is not answering.
+  return null;
+}
+
+/**
  * The page's own stylesheets, as text, skipping any that misbehaves.
  *
  * Every failure here is swallowed deliberately. This exists to improve a
@@ -92,13 +146,15 @@ async function readStylesheets(
       const target = parseReferenceTarget(url);
       if (!target.ok) return null;
       try {
-        const response = await doFetch(target.value.toString(), {
+        const landed = await fetchValidated(target.value, doFetch, {
           signal: deadline,
           headers: {
             accept: 'text/css,*/*;q=0.1',
             'user-agent': FETCH_USER_AGENT,
           },
         });
+        if (!landed) return null;
+        const { response } = landed;
         if (!response.ok || !response.body) return null;
         return await readCapped(response.body, MAX_STYLESHEET_BYTES);
       } catch {
@@ -250,14 +306,27 @@ export async function fetchReferenceContext(
   const maxChars = options.maxChars ?? MAX_REFERENCE_CHARS;
 
   let response: Response;
+  let landedAt: URL;
   try {
-    response = await doFetch(target.value.toString(), {
+    // The page's own redirects are checked too, and for the same reason the
+    // stylesheets' are: the guard has to apply to the URL actually fetched,
+    // not only to the one the user typed. One deadline covers the whole
+    // chain rather than resetting at every hop.
+    const landed = await fetchValidated(target.value, doFetch, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
         accept: 'text/html,text/plain;q=0.9,*/*;q=0.1',
         'user-agent': FETCH_USER_AGENT,
       },
     });
+    if (!landed) {
+      return {
+        ok: false,
+        error: 'The reference URL redirected somewhere it cannot be followed.',
+      };
+    }
+    response = landed.response;
+    landedAt = landed.url;
   } catch (error) {
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
     return {
@@ -304,20 +373,16 @@ export async function fetchReferenceContext(
 
   // Read from the markup before it is thrown away, and from the page's own
   // stylesheets, which is where most sites actually keep their colours.
-  //
   // Resolved against where the response actually came from, not where it was
   // asked for. A reference URL that redirects from `/old` to `/products/x/`
   // turns `href="theme.css"` into the wrong absolute URL if the original is
-  // used as the base, and the sheet 404s. The final URL is put back through
-  // `parseReferenceTarget` first: a redirect is somewhere the caller did not
-  // name, so "same origin as the page" must not be allowed to mean "same
-  // origin as wherever the page happened to send us".
-  const landed = parseReferenceTarget(response.url);
-  const base = landed.ok ? landed.value.toString() : target.value.toString();
+  // used as the base, and the sheet 404s. Every hop that got here has
+  // already been through `parseReferenceTarget`, so the landing URL is one
+  // this module decided to reach rather than one the network chose for it.
   const stylesheets =
     options.readStylesheets === false
       ? []
-      : await readStylesheets(raw, base, doFetch);
+      : await readStylesheets(raw, landedAt.toString(), doFetch);
 
   return {
     ok: true,
