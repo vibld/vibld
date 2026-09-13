@@ -86,17 +86,35 @@ jobs:
       # that answers nothing is not a success. The noindex check matters just
       # as much: this is a copy of vibld.com on a public hostname, and an
       # indexable copy would compete with the site it is previewing.
+      #
+      # The availability check retries, because the first version of this did
+      # not and failed a perfectly good deploy: it asked 0.2 seconds after
+      # wrangler returned and got a 404 from a workers.dev route that was not
+      # serving yet. Failing on that teaches people to ignore this job, which
+      # is exactly what must not happen to the noindex assertion below.
+      #
+      # The noindex check deliberately does not retry. Once the site answers,
+      # a missing header is a real fault rather than a timing artefact.
       - name: Smoke test the preview
         shell: bash
         run: |
           set -euo pipefail
           url="${{ steps.deploy.outputs.url }}"
           headers="$RUNNER_TEMP/headers.txt"
-          status="$(curl -s -o /dev/null -D "$headers" -w '%{http_code}' --max-time 20 "$url/" || echo "000")"
+
+          status=000
+          for attempt in $(seq 1 12); do
+            status="$(curl -s -o /dev/null -D "$headers" -w '%{http_code}' --max-time 20 "$url/" || echo "000")"
+            [ "$status" = "200" ] && break
+            echo "attempt $attempt: $url/ answered $status, waiting for the route to serve"
+            sleep 5
+          done
+
           if [ "$status" != "200" ]; then
-            echo "::error::$url/ answered $status"
+            echo "::error::$url/ still answered $status after about a minute. The upload succeeded, so this is the route not serving rather than a build problem."
             exit 1
           fi
+
           if ! grep -qi '^x-robots-tag:.*noindex' "$headers"; then
             echo "::error::$url/ is missing the noindex header. Refusing to call this preview ready: an indexable copy of vibld.com competes with the real site."
             exit 1
