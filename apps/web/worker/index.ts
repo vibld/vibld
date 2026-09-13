@@ -83,6 +83,7 @@ import { BillingStore } from './billing-store.ts';
 import {
   handleGitHubBind,
   handleGitHubCallback,
+  handleGitHubComplete,
   handleGitHubConnect,
   handleGitHubDisconnect,
   handleGitHubPush,
@@ -1313,9 +1314,19 @@ export default {
       );
     }
 
+    // Deliberately outside `handleGitHub`. GitHub returns here through a
+    // top-level browser navigation, which carries no Authorization header,
+    // so resolving a principal would reject every real callback with a 401.
+    // It does no work and holds no authority: it hands the code and state to
+    // the app, which completes the exchange on a request that can be
+    // authenticated.
     if (pathname === '/api/github/callback') {
+      return handleGitHubCallback(request);
+    }
+
+    if (pathname === '/api/github/complete') {
       return handleGitHub(request, env, (principal) =>
-        handleGitHubCallback(request, env, principal),
+        handleGitHubComplete(request, env, principal),
       );
     }
 

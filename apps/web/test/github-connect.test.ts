@@ -435,3 +435,76 @@ describe('the ticket a verified callback issues', () => {
     assert.deepEqual(verified?.repositories, []);
   });
 });
+
+/**
+ * More than one page of repositories.
+ *
+ * The same reasoning as reading every installation: the user token is gone
+ * once the callback ends, so a repository left off this list can never be
+ * chosen afterwards. An installation with more than a hundred repositories
+ * would otherwise have its tail silently unreachable, which reads as a
+ * missing repository rather than as a limit.
+ */
+describe('paging through an installation with many repositories', () => {
+  function pagedGitHub(
+    pages: Record<string, { repos: string[]; next?: string }>,
+  ) {
+    const asked: string[] = [];
+    const doFetch = (async (url: string) => {
+      asked.push(url);
+      const page = pages[url];
+      if (!page) return json({ message: 'Not Found' }, 404);
+      return json(
+        {
+          repositories: page.repos.map((name) => ({
+            name,
+            default_branch: 'main',
+            owner: { login: 'acme' },
+            permissions: { push: true },
+          })),
+        },
+        200,
+        page.next ? { link: `<${page.next}>; rel="next"` } : {},
+      );
+    }) as unknown as typeof fetch;
+    return { doFetch, asked };
+  }
+
+  const FIRST =
+    'https://api.github.com/user/installations/42/repositories?per_page=100';
+  const SECOND =
+    'https://api.github.com/user/installations/42/repositories?per_page=100&page=2';
+
+  it('follows the next link rather than stopping at the first page', async () => {
+    const { doFetch } = pagedGitHub({
+      [FIRST]: { repos: ['one'], next: SECOND },
+      [SECOND]: { repos: ['two'] },
+    });
+    const result = await installationRepositories('ghu_user', 42, doFetch);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(
+        result.value.map((choice) => choice.repo),
+        ['one', 'two'],
+      );
+    }
+  });
+
+  it('stops when GitHub offers no next link', async () => {
+    const { doFetch, asked } = pagedGitHub({ [FIRST]: { repos: ['only'] } });
+    const result = await installationRepositories('ghu_user', 42, doFetch);
+    assert.equal(result.ok, true);
+    assert.equal(asked.length, 1);
+  });
+
+  it('stops following rather than trusting a server to end the loop', async () => {
+    // A `next` that always points somewhere is not a loop to run against
+    // somebody else's server.
+    const { doFetch, asked } = pagedGitHub({
+      [FIRST]: { repos: ['a'], next: FIRST },
+    });
+    const result = await installationRepositories('ghu_user', 42, doFetch);
+    assert.equal(result.ok, true);
+    assert.ok(asked.length <= 5, `followed ${asked.length} pages`);
+  });
+});

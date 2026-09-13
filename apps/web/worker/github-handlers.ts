@@ -415,26 +415,66 @@ export async function handleGitHubConnect(
   }
   const credentials = githubOAuthCredentials(env)!;
   const state = await signState(credentials, principal.userId, now.getTime());
-  return json({ url: authorizeUrl(credentials, state, callbackUrl(request)) });
+  // The state goes back to the caller as well as into the URL. The browser
+  // keeps it and compares it on the way back, which is what stops somebody
+  // pairing their own `code` with a link they send to a signed-in user: a
+  // state the browser did not issue does not match the one it stored.
+  return json({
+    url: authorizeUrl(credentials, state, callbackUrl(request)),
+    state,
+  });
 }
 
 /**
- * Step two: find out who came back, and what they may choose.
+ * Where GitHub lands, and the only route here that cannot be authenticated.
  *
- * The `installation_id` GitHub puts on this redirect is read as a
- * preference and never as permission. What decides anything is the user
- * token: `userInstallations` answers, from GitHub, which installations this
- * account can actually reach, and an id that is not in that answer is
- * ignored exactly as a forged one would be.
+ * GitHub returns through a top-level browser navigation, which carries no
+ * `Authorization` header, so there is no Clerk session to resolve: a route
+ * that demanded one would reject every real callback before it did anything.
+ *
+ * So this one does no work and holds no authority. It hands the `code` and
+ * `state` to the app, in the fragment, and the app completes the exchange
+ * with a request that *can* be authenticated. The fragment is not sent to
+ * any server, which keeps a single-use code out of request logs on the way
+ * through.
+ *
+ * The redirect target is built here rather than taken from the request,
+ * because a callback that forwarded to a URL somebody else chose would be an
+ * open redirect with an OAuth code attached to it.
  */
-export async function handleGitHubCallback(
+export function handleGitHubCallback(request: Request): Response {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code') ?? '';
+  const state = url.searchParams.get('state') ?? '';
+  const target = new URL('/', url.origin);
+  target.hash = `github=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+  if (!code || !state) target.hash = 'github=incomplete';
+  return new Response(null, {
+    status: 302,
+    headers: { location: target.toString(), 'cache-control': 'no-store' },
+  });
+}
+
+/**
+ * Step three: find out who came back, and what they may choose.
+ *
+ * Authenticated, unlike the redirect that precedes it, because the app calls
+ * it with a `fetch` that carries the Clerk token. The `state` must verify
+ * *and* name that caller: verifying alone would let somebody else's
+ * authorization be completed inside this session.
+ *
+ * Nothing from GitHub's redirect is treated as permission. The user token is
+ * what decides, and `userInstallations` answers, from GitHub, which
+ * installations this account can actually reach.
+ */
+export async function handleGitHubComplete(
   request: Request,
   env: GitHubHandlerEnv,
   principal: Principal,
   doFetch: typeof fetch = fetch,
   now: Date = new Date(),
 ): Promise<Response> {
-  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
   if (!githubConnectConfigured(env)) {
     return json(
       { error: 'Connecting a GitHub repository is not configured here.' },
@@ -442,10 +482,19 @@ export async function handleGitHubCallback(
     );
   }
   const credentials = githubOAuthCredentials(env)!;
-  const url = new URL(request.url);
-  const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
-  if (!code || !state) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { code, state } = (body ?? {}) as { code?: unknown; state?: unknown };
+  if (
+    typeof code !== 'string' ||
+    typeof state !== 'string' ||
+    !code ||
+    !state
+  ) {
     return json({ error: 'That connection link is incomplete.' }, 400);
   }
 
@@ -487,13 +536,9 @@ export async function handleGitHubCallback(
   );
   if (!repositories.ok) return githubProblem(repositories);
 
-  const hinted = Number(url.searchParams.get('installation_id'));
-  const offered = [...repositories.value].sort((a, b) => {
-    const hintedFirst =
-      Number(b.installationId === hinted) - Number(a.installationId === hinted);
-    if (hintedFirst !== 0) return hintedFirst;
-    return `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`);
-  });
+  const offered = [...repositories.value].sort((a, b) =>
+    `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`),
+  );
 
   return json({
     installations: installations.value,

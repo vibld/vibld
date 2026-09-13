@@ -745,22 +745,35 @@ nonce for their own session and it is the id beside it that is forged.
 So `installation_id` is read as a preference and never as permission. What
 establishes the right to bind is a user-to-server token:
 
-1. `/api/github/connect` returns the authorize URL, carrying a signed `state`.
-   It returns the URL rather than redirecting, because the caller is an
-   authenticated `fetch` from the builder and a 302 would be followed by that
-   fetch, sending its `Authorization` header to GitHub.
-2. `/api/github/callback` checks the `state` names the signed-in caller,
-   trades the `code` for a **user** token, and asks GitHub
-   `GET /user/installations` and
+1. `/api/github/connect` returns the authorize URL and the signed `state` it
+   contains. It returns the URL rather than redirecting, because the caller
+   is an authenticated `fetch` from the builder and a 302 would be followed
+   by that fetch, sending its `Authorization` header to GitHub. The app keeps
+   the state and compares it on the way back, so a link somebody else crafted
+   carries a state the browser never issued.
+2. `/api/github/callback` is where GitHub lands, and the only route here that
+   is not authenticated. GitHub returns through a top-level browser
+   navigation, which carries no `Authorization` header, so a route that
+   demanded a Clerk session would reject every real callback with a 401. It
+   does no work and holds no authority: it puts the `code` and `state` in the
+   fragment (never sent to a server) and redirects to the app. Its redirect
+   target is built from this origin rather than taken from the request, or it
+   would be an open redirect with an OAuth code attached.
+3. `/api/github/complete` is the authenticated half, called by the app with a
+   `fetch` that can carry the Clerk token. The `state` must verify _and_ name
+   that caller, because verifying alone would let somebody else's
+   authorization be completed inside this session. It trades the `code` for a
+   **user** token and asks GitHub `GET /user/installations` and
    `GET /user/installations/{id}/repositories`. A forged installation id
    fails by simply not being in the answer.
-3. `/api/github/bind` writes the binding, choosing from the list the callback
+4. `/api/github/bind` writes the binding, choosing from the list that was
    signed rather than from the request body, so the destination and its
    default branch are the ones GitHub reported.
 
-Every installation the person reaches is read at step 2, not just the one
+Every installation the person reaches is read at step 3, not just the one
 the redirect named, and each repository carries the installation it would be
-pushed through. Offering one and naming the rest would be a dead end rather
+pushed through. Repository lists are paged through rather than read once, for
+the same reason. Offering one and naming the rest would be a dead end rather
 than a limit: reading another installation needs the user token, and that is
 gone as soon as the callback ends. The fan-out is capped, and one
 installation failing does not lose the others.

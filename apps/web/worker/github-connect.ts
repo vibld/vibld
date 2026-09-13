@@ -411,22 +411,37 @@ export interface ConnectableRepository extends RepositoryChoice {
 export type Reachable<T> =
   { ok: true; value: T } | { ok: false; error: string; reason: GitHubFailure };
 
+/** The `next` link of a paginated reply, if there is another page. */
+function nextPage(response: Response): string | null {
+  const link = response.headers.get('link');
+  if (!link) return null;
+  for (const part of link.split(',')) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
 async function readAsUser(
   token: string,
   path: string,
   doFetch: typeof fetch,
+  onPage?: (response: Response) => void,
 ): Promise<Reachable<Record<string, unknown>>> {
   let response: Response;
   try {
-    response = await doFetch(`${GITHUB_API}${path}`, {
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-        'user-agent': GITHUB_USER_AGENT,
+    response = await doFetch(
+      path.startsWith('http') ? path : `${GITHUB_API}${path}`,
+      {
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': GITHUB_USER_AGENT,
+        },
+        redirect: 'manual',
       },
-      redirect: 'manual',
-    });
+    );
   } catch {
     return {
       ok: false,
@@ -434,6 +449,7 @@ async function readAsUser(
       reason: 'unreachable',
     };
   }
+  onPage?.(response);
 
   let body: Record<string, unknown> = {};
   try {
@@ -511,6 +527,9 @@ export async function userInstallations(
 /** Reading every installation is a call each, so the fan-out is bounded. */
 const MAX_INSTALLATIONS_READ = 10;
 
+/** And each installation's repositories can run to several pages. */
+const MAX_REPOSITORY_PAGES = 5;
+
 /**
  * Everything this person could connect, across every installation they can
  * reach.
@@ -572,22 +591,47 @@ export async function installationRepositories(
   installationId: number,
   doFetch: typeof fetch = fetch,
 ): Promise<Reachable<RepositoryChoice[]>> {
-  const reply = await readAsUser(
-    token,
-    `/user/installations/${encodeURIComponent(String(installationId))}/repositories?per_page=100`,
-    doFetch,
-  );
-  if (!reply.ok) return reply;
-
-  const raw = reply.value.repositories;
-  if (!Array.isArray(raw)) {
-    return {
-      ok: false,
-      error: 'GitHub returned a reply Vibld could not read.',
-      reason: 'unreadable',
-    };
-  }
   const choices: RepositoryChoice[] = [];
+  let path: string | null =
+    `/user/installations/${encodeURIComponent(String(installationId))}/repositories?per_page=100`;
+
+  // Followed rather than read once, for the same reason every installation
+  // is read rather than one: the user token is gone when the callback ends,
+  // so a repository left off this list can never be chosen afterwards. An
+  // installation with more than a hundred repositories would otherwise have
+  // its tail silently unreachable. Bounded, because "follow every link
+  // GitHub offers" is not a loop to write against somebody else's server.
+  for (let page = 0; page < MAX_REPOSITORY_PAGES && path; page += 1) {
+    let following: string | null = null;
+    const reply: Reachable<Record<string, unknown>> = await readAsUser(
+      token,
+      path,
+      doFetch,
+      (response) => {
+        following = nextPage(response);
+      },
+    );
+    if (!reply.ok) return reply;
+    path = following;
+
+    const raw = reply.value.repositories;
+    if (!Array.isArray(raw)) {
+      return {
+        ok: false,
+        error: 'GitHub returned a reply Vibld could not read.',
+        reason: 'unreadable',
+      };
+    }
+    collectRepositories(raw, choices);
+  }
+  return { ok: true, value: choices };
+}
+
+/** One page of GitHub's repository list, filtered to what may be offered. */
+function collectRepositories(
+  raw: unknown[],
+  choices: RepositoryChoice[],
+): void {
   for (const entry of raw) {
     const record = (entry ?? {}) as {
       name?: unknown;
@@ -615,5 +659,4 @@ export async function installationRepositories(
           : 'main',
     });
   }
-  return { ok: true, value: choices };
 }

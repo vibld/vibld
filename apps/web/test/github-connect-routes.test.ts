@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import {
   handleGitHubBind,
   handleGitHubCallback,
+  handleGitHubComplete,
   handleGitHubConnect,
   handleGitHubDisconnect,
   handleGitHubStatus,
@@ -77,11 +78,10 @@ const ACME_SITE = {
 };
 
 function callbackRequest(params: Record<string, string>): Request {
-  const url = new URL('https://app.vibld.com/api/github/callback');
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-  return new Request(url, { method: 'GET' });
+  return new Request('https://app.vibld.com/api/github/complete', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
 }
 
 describe('starting a connection', () => {
@@ -122,7 +122,7 @@ describe('coming back from GitHub', () => {
   it('offers the repositories the user can actually write to', async () => {
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ code: 'the-code', state, installation_id: '42' }),
       env(db),
       PRINCIPAL,
@@ -150,7 +150,7 @@ describe('coming back from GitHub', () => {
     // walked into this session.
     const db = new SqliteD1Database(SCHEMA);
     const theirState = await signState(CREDENTIALS, 'user_2', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ code: 'the-code', state: theirState }),
       env(db),
       PRINCIPAL,
@@ -162,7 +162,7 @@ describe('coming back from GitHub', () => {
 
   it('refuses a state this deployment never signed', async () => {
     const db = new SqliteD1Database(SCHEMA);
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ code: 'the-code', state: 'made.up' }),
       env(db),
       PRINCIPAL,
@@ -178,7 +178,7 @@ describe('coming back from GitHub', () => {
     // reach is what counts, and a forged id is simply not in that answer.
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({
         code: 'the-code',
         state,
@@ -206,7 +206,7 @@ describe('coming back from GitHub', () => {
   it('says to install the app when the user reaches none', async () => {
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ code: 'the-code', state }),
       env(db),
       PRINCIPAL,
@@ -221,7 +221,7 @@ describe('coming back from GitHub', () => {
   it('refuses a link with no code on it', async () => {
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ state }),
       env(db),
       PRINCIPAL,
@@ -495,7 +495,7 @@ describe('a user with the app on more than one account', () => {
   async function callback(params: Record<string, string> = {}) {
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ code: 'the-code', state, ...params }),
       env(db),
       PRINCIPAL,
@@ -599,7 +599,7 @@ describe('a user with the app on more than one account', () => {
     // connecting a repository on their own account.
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ code: 'the-code', state }),
       env(db),
       PRINCIPAL,
@@ -619,7 +619,7 @@ describe('a user with the app on more than one account', () => {
   it('reports the failure when no installation could be read at all', async () => {
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
-    const response = await handleGitHubCallback(
+    const response = await handleGitHubComplete(
       callbackRequest({ code: 'the-code', state }),
       env(db),
       PRINCIPAL,
@@ -691,6 +691,87 @@ describe('what the status tells the builder it can offer', () => {
     assert.deepEqual(
       [body.configured, body.canPush, body.canConnect],
       [false, false, false],
+    );
+  });
+});
+
+/**
+ * The redirect GitHub actually lands on.
+ *
+ * This is the route that was wrong, and the reason it was wrong is worth
+ * keeping: every test above hands a handler a principal, which quietly
+ * assumes one can exist. GitHub returns through a top-level browser
+ * navigation, which carries no Authorization header, so requiring a Clerk
+ * session here rejected every real callback with a 401 before it did
+ * anything. Testing the handler proved the handler; it could not prove the
+ * route was reachable.
+ */
+describe('the redirect GitHub lands on', () => {
+  it('needs no authentication at all', () => {
+    // The assertion that matters: it is a plain function of the request,
+    // with no principal and no env, so a route that cannot supply either
+    // still works.
+    const response = handleGitHubCallback(
+      new Request('https://app.vibld.com/api/github/callback?code=c&state=s'),
+    );
+    assert.equal(response.status, 302);
+  });
+
+  it('hands the code and state to the app in the fragment', () => {
+    // The fragment is never sent to a server, which keeps a single-use code
+    // out of request logs on the way through.
+    const response = handleGitHubCallback(
+      new Request(
+        'https://app.vibld.com/api/github/callback?code=the-code&state=the-state',
+      ),
+    );
+    const location = new URL(response.headers.get('location')!);
+    assert.equal(location.origin, 'https://app.vibld.com');
+    assert.equal(location.search, '');
+    assert.match(location.hash, /github=the-code/);
+    assert.match(location.hash, /state=the-state/);
+  });
+
+  it('stays on this origin whatever the request asks for', () => {
+    // A callback that forwarded somewhere the caller named would be an open
+    // redirect with an OAuth code attached to it.
+    const response = handleGitHubCallback(
+      new Request(
+        'https://app.vibld.com/api/github/callback?code=c&state=s&redirect_uri=https://evil.example/steal',
+      ),
+    );
+    const location = new URL(response.headers.get('location')!);
+    assert.equal(location.origin, 'https://app.vibld.com');
+  });
+
+  it('says so rather than passing an incomplete return through', () => {
+    const response = handleGitHubCallback(
+      new Request('https://app.vibld.com/api/github/callback'),
+    );
+    assert.equal(
+      new URL(response.headers.get('location')!).hash,
+      '#github=incomplete',
+    );
+  });
+});
+
+describe('starting a connection, for the browser to remember', () => {
+  it('returns the state as well as the URL', async () => {
+    // The app keeps this and compares it on the way back, so a link somebody
+    // else crafted carries a state the browser never issued.
+    const db = new SqliteD1Database(SCHEMA);
+    const response = await handleGitHubConnect(
+      new Request('https://app.vibld.com/api/github/connect'),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    const body = (await response.json()) as { url: string; state: string };
+    assert.ok(body.state);
+    assert.equal(
+      new URL(body.url).searchParams.get('state'),
+      body.state,
+      'the state handed back is not the one in the URL',
     );
   });
 });
