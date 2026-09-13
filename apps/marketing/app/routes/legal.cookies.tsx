@@ -19,16 +19,34 @@ export default function Cookies() {
 
       <h2>What we use today</h2>
       <p>
-        This site sets no first-party cookies, and runs no analytics,
-        advertising, or third-party tracking scripts. We do not use Google Fonts
-        or any other external font, script, or embed that would send your
-        browser to a third party just by loading a page.
+        We set no cookies of our own, and we run no advertising or tracking
+        scripts. We use no external fonts, and no social, video, or comment
+        embeds.
       </p>
       <p>
-        Cloudflare, our hosting provider, may set a small number of
+        The site does load one third-party script, on every page: Cloudflare
+        Turnstile, the anti-abuse check that sits on the waitlist form and
+        establishes that a submission came from a person rather than a bot. It
+        is served from <code>challenges.cloudflare.com</code>, so loading a page
+        contacts Cloudflare, and Turnstile may store values in your browser as
+        part of performing that check. Cloudflare states that it does not use
+        Turnstile to track users across sites or to build advertising profiles.
+      </p>
+      <p>
+        We do count page views, using our own first-party measurement rather
+        than a third-party analytics service. Nothing about it identifies you:
+        it sets no cookie, assigns no visitor or device identifier, and stores
+        no IP address. For each page view we record only the page path, the
+        <em>hostname</em> of the site that linked you here (never the full
+        referring URL), any campaign tags in the link you followed, and the
+        country your request came from. Those records are aggregate counts and
+        cannot be traced back to a person or linked across visits.
+      </p>
+      <p>
+        Cloudflare also hosts the site, and may set a small number of
         strictly-necessary cookies (for example, for security and abuse
-        prevention) as part of delivering the site. These are operational, not
-        used to track you across sites, and are covered by{' '}
+        prevention) as part of delivering it. These are operational, not used to
+        track you across sites, and are covered, along with Turnstile above, by{' '}
         <a
           href="https://www.cloudflare.com/privacypolicy/"
           rel="noopener noreferrer"

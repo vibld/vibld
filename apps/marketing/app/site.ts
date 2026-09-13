@@ -33,6 +33,22 @@ export const SITE = {
   repoUrl: 'https://github.com/vibld/vibld',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
+  /**
+   * Decisions BRAND-01 -- searching "vibld" returns Bible-study sites, because
+   * Google reads the word as a misspelling of "Bible". Nothing on-page fixes
+   * that directly; what does help is publishing an unambiguous entity, so the
+   * name, the logo, the source repository and the description below are the
+   * same everywhere they appear. `sameAs` is the strongest signal available,
+   * so it lists only profiles that actually exist -- an invented URL is worse
+   * than an omitted one.
+   */
+  /** The social card built by the brand system (issue #7). Absolute URL is filled in against SITE.url; see `metaFor`. */
+  ogImage: '/og-image.png',
+  ogImageAlt:
+    'Vibld: an AI application builder that generates conventional, portable projects.',
+  /** One sentence, reused verbatim in schema, llms.txt and the OG card. */
+  summary:
+    'Vibld is an AI application builder that turns a conversation into a working project and generates a conventional, portable codebase you can read, own and take with you.',
   mailingAddress: '285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342',
   governingLaw: 'the State of Georgia, USA, with venue in Gwinnett County',
   emails: {
@@ -58,53 +74,53 @@ export const LEGAL_DOCS: LegalDoc[] = [
   {
     slug: 'terms',
     label: 'Terms of Service',
-    title: `Terms of Service | `,
+    title: `Terms of Service | ${SITE.name}`,
     description:
       'The agreement between you and Chris Brock LLC for using Vibld and its waitlist.',
   },
   {
     slug: 'privacy',
     label: 'Privacy Policy',
-    title: `Privacy Policy | `,
+    title: `Privacy Policy | ${SITE.name}`,
     description:
       'What Vibld collects, why, how long it is kept, and how to request access or deletion.',
   },
   {
     slug: 'acceptable-use',
     label: 'Acceptable Use Policy',
-    title: `Acceptable Use Policy | `,
+    title: `Acceptable Use Policy | ${SITE.name}`,
     description: 'What may and may not be built, sent or hosted through Vibld.',
   },
   {
     slug: 'security',
     label: 'Security & Vulnerability Disclosure',
-    title: `Security & Vulnerability Disclosure | `,
+    title: `Security & Vulnerability Disclosure | ${SITE.name}`,
     description:
       'How to report a vulnerability, and the safe harbor for good-faith research.',
   },
   {
     slug: 'subprocessors',
     label: 'Subprocessors',
-    title: `Subprocessors | `,
+    title: `Subprocessors | ${SITE.name}`,
     description:
       'The services Vibld uses to operate, and what each one is used for.',
   },
   {
     slug: 'cookies',
     label: 'Cookie Notice',
-    title: `Cookie Notice | `,
+    title: `Cookie Notice | ${SITE.name}`,
     description: 'What this site stores in your browser today, and why.',
   },
   {
     slug: 'refunds',
     label: 'Refund Policy',
-    title: `Refund Policy | `,
+    title: `Refund Policy | ${SITE.name}`,
     description: 'How refunds work for paid Vibld plans.',
   },
   {
     slug: 'licenses',
     label: 'Open-Source Notices',
-    title: `Open-Source Notices | `,
+    title: `Open-Source Notices | ${SITE.name}`,
     description:
       'The license terms covering Vibld’s core and its starter templates.',
   },
@@ -113,13 +129,13 @@ export const LEGAL_DOCS: LegalDoc[] = [
 export const ROUTES: SiteRoute[] = [
   {
     path: '/',
-    title: ` | ${SITE.tagline}`,
+    title: `${SITE.name} | ${SITE.tagline}`,
     description:
       'Vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
   },
   {
     path: '/legal',
-    title: `Legal | `,
+    title: `Legal | ${SITE.name}`,
     description: 'Every policy governing Vibld and this site, in one place.',
   },
   ...LEGAL_DOCS.map((doc) => ({
@@ -140,7 +156,7 @@ export function routeFor(path: string): SiteRoute {
 export function metaFor(path: string) {
   const route = routeFor(path);
   const url = new URL(path, SITE.url).toString();
-  const image = new URL('/og-image.png', SITE.url).toString();
+  const image = new URL(SITE.ogImage, SITE.url).toString();
   return [
     { title: route.title },
     { name: 'description', content: route.description },
@@ -150,12 +166,62 @@ export function metaFor(path: string) {
     { property: 'og:title', content: route.title },
     { property: 'og:description', content: route.description },
     { property: 'og:url', content: url },
+    // twitter:card declares a large image, so one has to exist -- without
+    // og:image every share renders an empty card.
     { property: 'og:image', content: image },
     { property: 'og:image:width', content: '1200' },
     { property: 'og:image:height', content: '630' },
+    { property: 'og:image:alt', content: SITE.ogImageAlt },
+    { property: 'og:locale', content: 'en_US' },
     { name: 'twitter:card', content: 'summary_large_image' },
     { name: 'twitter:title', content: route.title },
     { name: 'twitter:description', content: route.description },
     { name: 'twitter:image', content: image },
+    { name: 'twitter:image:alt', content: SITE.ogImageAlt },
   ];
+}
+
+/**
+ * Organization and WebSite schema for the home page.
+ *
+ * React Router renders a `script:ld+json` meta descriptor as a JSON-LD block,
+ * so this rides along with the rest of the metadata rather than needing its
+ * own component.
+ */
+export function organizationSchema() {
+  return {
+    'script:ld+json': {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'Organization',
+          '@id': `${SITE.url}/#organization`,
+          name: SITE.name,
+          alternateName: 'Vibld by Chris Brock LLC',
+          url: SITE.url,
+          logo: new URL('/favicon.svg', SITE.url).toString(),
+          description: SITE.summary,
+          email: SITE.emails.hello,
+          sameAs: [SITE.repoUrl],
+          address: {
+            '@type': 'PostalAddress',
+            streetAddress: '285 W Wieuca Rd NE STE 62715',
+            addressLocality: 'Atlanta',
+            addressRegion: 'GA',
+            postalCode: '30342',
+            addressCountry: 'US',
+          },
+        },
+        {
+          '@type': 'WebSite',
+          '@id': `${SITE.url}/#website`,
+          name: SITE.name,
+          url: SITE.url,
+          description: SITE.summary,
+          inLanguage: 'en-US',
+          publisher: { '@id': `${SITE.url}/#organization` },
+        },
+      ],
+    },
+  };
 }

@@ -1,4 +1,11 @@
 import {
+  type AnalyticsDataset,
+  type Attribution,
+  attributionFrom,
+  pathOf,
+  record,
+} from './analytics.ts';
+import {
   isTurnstileVerified,
   parseWaitlistSubmission,
   resendContactRequest,
@@ -19,6 +26,8 @@ export interface Env {
    * has ever required to keep working.
    */
   TURNSTILE_SECRET_KEY?: string;
+  /** Workers Analytics Engine dataset. Absent in local dev; see worker/analytics.ts. */
+  ANALYTICS?: AnalyticsDataset;
 }
 
 /**
@@ -32,6 +41,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/api/waitlist' && request.method === 'POST') {
       return handleWaitlist(request, env);
+    }
+    if (url.pathname === '/api/hit' && request.method === 'POST') {
+      return handleHit(request, env);
     }
     return new Response('Not found', { status: 404 });
   },
@@ -70,6 +82,44 @@ const CONFIRMATION_PAGE = (message: string, ok: boolean) => `<!doctype html>
 <p><a href="/" style="color:#c2540a">← Back to vibld.com</a></p>
 </body>
 </html>`;
+
+/**
+ * Resolves the attribution the caller reported. The waitlist form and the
+ * page beacon both send the page's own URL and referrer, because the Worker
+ * sees only its own `/api/*` URL -- not the page the visitor was actually on.
+ */
+function attributionOf(
+  request: Request,
+  pageUrl: string,
+  pageReferrer: string,
+): { attribution: Attribution; path: string } {
+  const url = pageUrl || request.url;
+  const selfHost = new URL(request.url).hostname;
+  return {
+    attribution: attributionFrom(url, pageReferrer, selfHost),
+    path: pathOf(url),
+  };
+}
+
+/**
+ * The pageview beacon. Answers 204 unconditionally and as early as possible:
+ * the caller is a fire-and-forget `sendBeacon` that ignores the response, and
+ * a failed measurement must never surface to a visitor.
+ */
+async function handleHit(request: Request, env: Env): Promise<Response> {
+  try {
+    const form = await request.formData();
+    const { attribution, path } = attributionOf(
+      request,
+      String(form.get('page_url') ?? ''),
+      String(form.get('page_referrer') ?? ''),
+    );
+    record(env.ANALYTICS, 'pageview', request, attribution, path);
+  } catch (error) {
+    console.error('hit failed', error);
+  }
+  return new Response(null, { status: 204 });
+}
 
 async function handleWaitlist(request: Request, env: Env): Promise<Response> {
   const html = wantsHtml(request);
@@ -163,6 +213,15 @@ async function handleWaitlist(request: Request, env: Env): Promise<Response> {
       ? htmlResponse(CONFIRMATION_PAGE(message, false), 502)
       : jsonResponse({ ok: false, error: message }, 502);
   }
+
+  // Recorded only after Resend accepted the contact, so the signup count in
+  // the dataset means signups that exist, not submissions that were attempted.
+  const { attribution, path } = attributionOf(
+    request,
+    submission?.pageUrl ?? '',
+    submission?.pageReferrer ?? '',
+  );
+  record(env.ANALYTICS, 'signup', request, attribution, path);
 
   const message = "You're on the list. We'll email you when Vibld is ready.";
   return html
