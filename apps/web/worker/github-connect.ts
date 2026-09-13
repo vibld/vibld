@@ -524,10 +524,22 @@ export async function userInstallations(
   return { ok: true, value: installations };
 }
 
-/** Reading every installation is a call each, so the fan-out is bounded. */
+/**
+ * The bounds on what one exchange will read, and a warning about adding
+ * more of them.
+ *
+ * Anything not gathered while the user token is alive is not merely
+ * unlisted: the token is discarded when the exchange ends, so a repository
+ * or an installation left out here cannot be reached afterwards at all. Each
+ * of these bounds is therefore a limit only while what somebody wants is
+ * inside it, and a dead end the moment it is not. This flow has produced
+ * that same failure three times in different places.
+ *
+ * So a bound added here needs a way for the thing somebody actually asked
+ * for to be inside it. The installation they just used is moved to the front
+ * before the read below for exactly that reason.
+ */
 const MAX_INSTALLATIONS_READ = 10;
-
-/** And each installation's repositories can run to several pages. */
 const MAX_REPOSITORY_PAGES = 5;
 
 /**
