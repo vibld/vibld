@@ -257,8 +257,36 @@ export function rateLimitMessage(
  */
 export const GITHUB_USER_AGENT = 'Vibld (+https://vibld.com)';
 
+/**
+ * Why something failed, for a caller deciding what to do about it.
+ *
+ * The sentence is for the person; this is for the code. Only `access` means
+ * the grant is actually broken and worth re-approving. Telling someone to
+ * reconnect a working App because GitHub was briefly unreachable is the
+ * mistake `rateLimitMessage` above exists to avoid, and it is just as easy
+ * to make one layer up by treating every failure as the same failure.
+ *
+ * One vocabulary shared by `github-app.ts` and `github-push.ts` rather than
+ * one each: two lists of reasons that mean the same things drift, and the
+ * caller then needs two mappings that have to agree.
+ */
+export type GitHubFailure =
+  /** This deployment cannot talk to GitHub at all. */
+  | 'config'
+  /** The request could never work, whatever GitHub is doing. */
+  | 'invalid'
+  /** Something is already there, and it is not what this push would write. */
+  | 'conflict'
+  | 'rate-limited'
+  /** 401/403: the grant really is gone, and reconnecting is the fix. */
+  | 'access'
+  | 'unreachable'
+  | 'refused'
+  | 'unreadable';
+
 export type InstallationToken =
-  { ok: true; token: string; expiresAt: string } | { ok: false; error: string };
+  | { ok: true; token: string; expiresAt: string }
+  | { ok: false; error: string; reason: GitHubFailure };
 
 /**
  * An installation access token for this installation, or a reason it could
@@ -291,6 +319,7 @@ export async function mintInstallationToken(
     return {
       ok: false,
       error: 'Vibld is not configured to talk to GitHub correctly.',
+      reason: 'config',
     };
   }
 
@@ -318,7 +347,11 @@ export async function mintInstallationToken(
       },
     );
   } catch {
-    return { ok: false, error: 'GitHub could not be reached.' };
+    return {
+      ok: false,
+      error: 'GitHub could not be reached.',
+      reason: 'unreachable',
+    };
   }
 
   // Read the body first: a secondary rate limit can come back as a 403 with
@@ -335,18 +368,42 @@ export async function mintInstallationToken(
     }
   }
   const limited = rateLimitMessage(response.status, response.headers, refusal);
-  if (limited) return { ok: false, error: limited };
+  if (limited) return { ok: false, error: limited, reason: 'rate-limited' };
 
   if (response.status === 404 || response.status === 401) {
     return {
       ok: false,
       error: 'Vibld no longer has access to that repository on GitHub.',
+      reason: 'access',
+    };
+  }
+  // A 422 on this endpoint means the installation cannot grant what was
+  // asked for. The body is fixed and constructed here, so the two causes are
+  // that the bound repository is no longer among the ones the installation
+  // covers (GitHub refuses to scope a token to a repository it was not
+  // granted), or that a permission this needs has not been approved. Neither
+  // is fixed by retrying, and calling them `refused` produces a 502 the
+  // caller will retry forever while the user is never told the one thing
+  // that would help.
+  //
+  // Deliberately every 422 rather than a message match: the exact sentence
+  // is not documented, and matching a string that is not a contract would
+  // fail open into that same silent retry loop the first time GitHub
+  // rewords it. The cost of being wrong the other way is one unnecessary
+  // re-approval.
+  if (response.status === 422) {
+    return {
+      ok: false,
+      error:
+        'That repository is no longer covered by the GitHub App installation. Approve it again to keep pushing.',
+      reason: 'access',
     };
   }
   if (!response.ok) {
     return {
       ok: false,
       error: `GitHub refused the request (${response.status}).`,
+      reason: 'refused',
     };
   }
 
@@ -357,6 +414,7 @@ export async function mintInstallationToken(
     return {
       ok: false,
       error: 'GitHub returned a reply Vibld could not read.',
+      reason: 'unreadable',
     };
   }
   const record = (body ?? {}) as { token?: unknown; expires_at?: unknown };
@@ -364,6 +422,7 @@ export async function mintInstallationToken(
     return {
       ok: false,
       error: 'GitHub returned a reply Vibld could not read.',
+      reason: 'unreadable',
     };
   }
   return {

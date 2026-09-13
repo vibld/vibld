@@ -115,6 +115,16 @@
       "namespace_id": "1004",
       "simple": { "limit": 3, "period": 60 },
     },
+    // Issue #13: a push mints an installation token and writes commits and a
+    // branch into somebody's repository. Same reasoning as PUBLISH_BURST,
+    // keyed on the Clerk user id and checked after identity: the cost of a
+    // flood here lands on GitHub's API quota and on a real repository, not on
+    // model spend.
+    {
+      "name": "GITHUB_BURST",
+      "namespace_id": "1005",
+      "simple": { "limit": 5, "period": 60 },
+    },
   ],
 
   // The spend ceiling. Also not provisioned: the object is created on first

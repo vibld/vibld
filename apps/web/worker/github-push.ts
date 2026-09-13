@@ -31,6 +31,7 @@ import {
   GITHUB_API,
   GITHUB_USER_AGENT,
   rateLimitMessage,
+  type GitHubFailure,
 } from './github-app.ts';
 
 /** Where a push is going. None of this is secret. */
@@ -106,7 +107,18 @@ export interface PushConflict {
 
 export type PushResult =
   | { ok: true; pushed: PushedBranch }
-  | { ok: false; error: string; conflict?: PushConflict };
+  | {
+      ok: false;
+      error: string;
+      /**
+       * What kind of failure, so the caller can pick a status. Without it
+       * every failure here reads as a conflict, and a rate limit or a
+       * dropped connection is reported as something the user has to resolve
+       * rather than something to retry.
+       */
+      reason: GitHubFailure;
+      conflict?: PushConflict;
+    };
 
 /**
  * The branch a revision pushes to.
@@ -134,7 +146,7 @@ interface Call {
 
 type Reply =
   | { ok: true; status: number; body: Record<string, unknown> }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; reason: GitHubFailure };
 
 async function call(
   token: string,
@@ -159,7 +171,12 @@ async function call(
       redirect: 'manual',
     });
   } catch {
-    return { ok: false, status: 0, error: 'GitHub could not be reached.' };
+    return {
+      ok: false,
+      status: 0,
+      error: 'GitHub could not be reached.',
+      reason: 'unreachable',
+    };
   }
 
   if (response.status === 204) return { ok: true, status: 204, body: {} };
@@ -180,13 +197,19 @@ async function call(
   // `github-app.ts` have to agree about it.
   const limited = rateLimitMessage(response.status, response.headers, record);
   if (limited) {
-    return { ok: false, status: response.status, error: limited };
+    return {
+      ok: false,
+      status: response.status,
+      error: limited,
+      reason: 'rate-limited',
+    };
   }
   if (response.status === 401 || response.status === 403) {
     return {
       ok: false,
       status: response.status,
       error: 'Vibld no longer has access to that repository on GitHub.',
+      reason: 'access',
     };
   }
   // GitHub's own message is the useful part of a 422, and it is GitHub's
@@ -195,7 +218,12 @@ async function call(
     typeof record.message === 'string' && record.message.length < 200
       ? record.message
       : `GitHub refused the request (${response.status}).`;
-  return { ok: false, status: response.status, error: message };
+  return {
+    ok: false,
+    status: response.status,
+    error: message,
+    reason: 'refused',
+  };
 }
 
 /**
@@ -228,7 +256,9 @@ async function refCommit(
   target: Pick<PushTarget, 'owner' | 'repo'>,
   ref: string,
 ): Promise<
-  { found: true; sha: string } | { found: false } | { error: string }
+  | { found: true; sha: string }
+  | { found: false }
+  | { error: string; reason: GitHubFailure }
 > {
   const reply = await call(token, doFetch, {
     method: 'GET',
@@ -236,13 +266,16 @@ async function refCommit(
   });
   if (!reply.ok) {
     if (reply.status === 404) return { found: false };
-    return { error: reply.error };
+    return { error: reply.error, reason: reply.reason };
   }
   const object = (reply.body.object ?? {}) as { sha?: unknown };
   const sha = asString(object.sha);
   return sha
     ? { found: true, sha }
-    : { error: 'GitHub returned a ref Vibld could not read.' };
+    : {
+        error: 'GitHub returned a ref Vibld could not read.',
+        reason: 'unreadable',
+      };
 }
 
 /**
@@ -259,17 +292,20 @@ async function commitTree(
   doFetch: typeof fetch,
   target: Pick<PushTarget, 'owner' | 'repo'>,
   commitSha: string,
-): Promise<{ sha: string } | { error: string }> {
+): Promise<{ sha: string } | { error: string; reason: GitHubFailure }> {
   const reply = await call(token, doFetch, {
     method: 'GET',
     path: `/repos/${encodePath(target.owner)}/${encodePath(target.repo)}/git/commits/${encodePath(commitSha)}`,
   });
-  if (!reply.ok) return { error: reply.error };
+  if (!reply.ok) return { error: reply.error, reason: reply.reason };
   const tree = (reply.body.tree ?? {}) as { sha?: unknown };
   const sha = asString(tree.sha);
   return sha
     ? { sha }
-    : { error: 'GitHub returned a commit Vibld could not read.' };
+    : {
+        error: 'GitHub returned a commit Vibld could not read.',
+        reason: 'unreadable',
+      };
 }
 
 /**
@@ -285,7 +321,7 @@ async function hasAnyBranch(
   token: string,
   doFetch: typeof fetch,
   target: Pick<PushTarget, 'owner' | 'repo'>,
-): Promise<boolean | { error: string }> {
+): Promise<boolean | { error: string; reason: GitHubFailure }> {
   const reply = await call(token, doFetch, {
     method: 'GET',
     path: `/repos/${encodePath(target.owner)}/${encodePath(target.repo)}/git/matching-refs/heads/`,
@@ -294,7 +330,7 @@ async function hasAnyBranch(
   // itself the answer.
   if (!reply.ok) {
     if (reply.status === 409) return false;
-    return { error: reply.error };
+    return { error: reply.error, reason: reply.reason };
   }
   return Array.isArray(reply.body) && (reply.body as unknown[]).length > 0;
 }
@@ -318,7 +354,10 @@ export async function resolveBase(
   token: string,
   target: PushTarget,
   doFetch: typeof fetch = fetch,
-): Promise<{ ok: true; sha: string } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; sha: string }
+  | { ok: false; error: string; reason: GitHubFailure }
+> {
   const repo = { owner: target.owner, repo: target.repo };
   const base = await refCommit(
     token,
@@ -326,15 +365,20 @@ export async function resolveBase(
     repo,
     `heads/${target.baseBranch}`,
   );
-  if ('error' in base) return { ok: false, error: base.error };
+  if ('error' in base) {
+    return { ok: false, error: base.error, reason: base.reason };
+  }
   if (base.found) return { ok: true, sha: base.sha };
 
   const branches = await hasAnyBranch(token, doFetch, repo);
   if (typeof branches !== 'boolean') {
-    return { ok: false, error: branches.error };
+    return { ok: false, error: branches.error, reason: branches.reason };
   }
   return {
     ok: false,
+    // Neither a missing base branch nor an empty repository is something
+    // retrying fixes: the destination has to change or gain a commit.
+    reason: 'invalid',
     error: branches
       ? `The branch ${target.baseBranch} no longer exists in ${repo.owner}/${repo.repo}.`
       : `${repo.owner}/${repo.repo} has no commits yet. Add a first commit there, then push from Vibld.`,
@@ -358,10 +402,14 @@ export async function pushCheckpoint(
   const { target, files, revision, message } = request;
   const branch = branchForRevision(revision);
   if (!branch) {
-    return { ok: false, error: 'That checkpoint cannot be named as a branch.' };
+    return {
+      ok: false,
+      error: 'That checkpoint cannot be named as a branch.',
+      reason: 'invalid',
+    };
   }
   if (files.length === 0) {
-    return { ok: false, error: 'There is nothing to push.' };
+    return { ok: false, error: 'There is nothing to push.', reason: 'invalid' };
   }
 
   const repo = { owner: target.owner, repo: target.repo };
@@ -381,19 +429,29 @@ export async function pushCheckpoint(
       })),
     },
   });
-  if (!treeReply.ok) return { ok: false, error: treeReply.error };
+  if (!treeReply.ok) {
+    return { ok: false, error: treeReply.error, reason: treeReply.reason };
+  }
   const treeSha = asString(treeReply.body.sha);
   if (!treeSha) {
-    return { ok: false, error: 'GitHub returned a tree Vibld could not read.' };
+    return {
+      ok: false,
+      error: 'GitHub returned a tree Vibld could not read.',
+      reason: 'unreadable',
+    };
   }
 
   // Does the branch already exist? This is the reconciliation the plan calls
   // for: after an ambiguous failure the next attempt reads the remote first.
   const existing = await refCommit(token, doFetch, repo, `heads/${branch}`);
-  if ('error' in existing) return { ok: false, error: existing.error };
+  if ('error' in existing) {
+    return { ok: false, error: existing.error, reason: existing.reason };
+  }
   if (existing.found) {
     const landed = await commitTree(token, doFetch, repo, existing.sha);
-    if ('error' in landed) return { ok: false, error: landed.error };
+    if ('error' in landed) {
+      return { ok: false, error: landed.error, reason: landed.reason };
+    }
     if (landed.sha === treeSha) {
       // The previous attempt succeeded and its reply was lost. Report what is
       // already there rather than committing the same files again.
@@ -417,6 +475,7 @@ export async function pushCheckpoint(
     return {
       ok: false,
       error: `The branch ${branch} already exists and points somewhere else.`,
+      reason: 'conflict',
       conflict: {
         branch,
         existingSha: existing.sha,
@@ -436,12 +495,15 @@ export async function pushCheckpoint(
       committer: request.committer,
     },
   });
-  if (!commitReply.ok) return { ok: false, error: commitReply.error };
+  if (!commitReply.ok) {
+    return { ok: false, error: commitReply.error, reason: commitReply.reason };
+  }
   const commitSha = asString(commitReply.body.sha);
   if (!commitSha) {
     return {
       ok: false,
       error: 'GitHub returned a commit Vibld could not read.',
+      reason: 'unreadable',
     };
   }
 
@@ -459,10 +521,14 @@ export async function pushCheckpoint(
     // asks what won before calling it one.
     if (refReply.status === 422) {
       const now = await refCommit(token, doFetch, repo, `heads/${branch}`);
-      if ('error' in now) return { ok: false, error: now.error };
+      if ('error' in now) {
+        return { ok: false, error: now.error, reason: now.reason };
+      }
       if (now.found) {
         const landed = await commitTree(token, doFetch, repo, now.sha);
-        if ('error' in landed) return { ok: false, error: landed.error };
+        if ('error' in landed) {
+          return { ok: false, error: landed.error, reason: landed.reason };
+        }
         if (landed.sha === treeSha) {
           const pullRequestUrl = await ensurePullRequest(
             token,
@@ -484,6 +550,7 @@ export async function pushCheckpoint(
         return {
           ok: false,
           error: `The branch ${branch} already exists and points somewhere else.`,
+          reason: 'conflict',
           conflict: {
             branch,
             existingSha: now.sha,
@@ -492,7 +559,7 @@ export async function pushCheckpoint(
         };
       }
     }
-    return { ok: false, error: refReply.error };
+    return { ok: false, error: refReply.error, reason: refReply.reason };
   }
 
   const pullRequestUrl = await ensurePullRequest(
