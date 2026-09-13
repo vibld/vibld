@@ -71,11 +71,27 @@ const OKLCH_PATTERN =
  * name-then-content silently demotes the site's own declaration to an
  * ordinary counted literal.
  */
-const META_TAG = /<meta\b([^>]*)>/gi;
+/**
+ * What ends a name in HTML and in CSS, which is not what `\b` thinks.
+ *
+ * A word boundary sits either side of a hyphen, so `\bbody\b` fires inside
+ * `<body-copy>`, `.body-copy` and `data-body`, and `\bstyle\s*=` fires
+ * inside `data-style="..."`. Every one of those is a different thing wearing
+ * the name of a root element or a real attribute, and each was read as the
+ * genuine article: a custom element decided the page's mode, a data
+ * attribute was parsed as an inline style.
+ *
+ * So the rule is written once here and used at every name in this file,
+ * rather than at whichever one was being looked at when it last went wrong.
+ */
+const NAME_ENDS = '(?![\\w-])';
+const NAME_BEGINS = '(?:^|[\\s/])';
+
+const META_TAG = new RegExp(`<meta${NAME_ENDS}([^>]*)>`, 'gi');
 
 function attribute(attributes: string, name: string): string | null {
   const found = new RegExp(
-    `\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s">]+))`,
+    `${NAME_BEGINS}${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s">]+))`,
     'i',
   ).exec(attributes);
   return found?.[2] ?? found?.[3] ?? found?.[4] ?? null;
@@ -114,8 +130,11 @@ function metaContent(html: string, name: string): string | null {
  * and a tag past 2,000 are not real markup, so refusing to look further
  * costs nothing and keeps the work linear in the size of the page.
  */
-const ROOT_TAG = /<(?:html|body)\b([^>]{0,2000})>/gi;
-const CSS_RULE = /(?:^|[{};])([^{}]{0,300})\{([^{}]{0,4000})\}/g;
+const ROOT_TAG = new RegExp(`<(?:html|body)${NAME_ENDS}([^>]{0,2000})>`, 'gi');
+// A lookbehind rather than a consumed delimiter: a rule ends on the `}` that
+// the next rule needs in front of it, so consuming it made every second rule
+// in `body{...}body{...}` invisible.
+const CSS_RULE = /(?<![^{};])([^{}]{0,300})\{([^{}]{0,4000})\}/g;
 const BACKGROUND_DECLARATION =
   /background(?:-color)?\s*:\s*([^;{}"']{0,200})/gi;
 
@@ -178,7 +197,9 @@ function selectsRoot(selectorList: string): boolean {
       .filter(Boolean);
     const subject = compounds[compounds.length - 1];
     if (!subject) continue;
-    if (/^(?:html|body|:root)(?![\w-])/i.test(subject)) return true;
+    if (new RegExp(`^(?:html|body|:root)${NAME_ENDS}`, 'i').test(subject)) {
+      return true;
+    }
   }
   return false;
 }
@@ -207,7 +228,14 @@ function readGroundMode(source: string): PaletteMode | null {
   if (declared) return declared;
 
   let scoped: PaletteMode | null = null;
-  const grounds: string[] = [];
+  // Kept apart because they do not rank the same way. Among rules the later
+  // one wins, which is the cascade; between a rule and the element's own
+  // `style` the inline one wins, whichever came first in the file, which is
+  // specificity. Collapsing the two into one list and taking the first
+  // qualifying literal got both backwards: `body{background:#fff}
+  // body{background:#111}` renders dark and was read as light.
+  const fromRules: string[] = [];
+  const fromInline: string[] = [];
 
   // The root elements themselves. A page that writes its ground inline, as
   // `<body style="background:#0d1117">`, is stating it as plainly as a
@@ -223,24 +251,37 @@ function readGroundMode(source: string): PaletteMode | null {
     // saying it whichever attribute carries it.
     scoped ??= schemeIn(attributes);
     const style = attribute(attributes, 'style');
-    if (style) grounds.push(...backgroundsIn(style));
+    if (style) fromInline.push(...backgroundsIn(style));
     const legacy = attribute(attributes, 'bgcolor');
-    if (legacy) grounds.push(...readColorLiterals(legacy));
+    // A presentational attribute, which the cascade puts below a stylesheet
+    // rule rather than above it.
+    if (legacy) fromRules.push(...readColorLiterals(legacy));
   }
 
   for (const rule of text.matchAll(CSS_RULE)) {
     if (!selectsRoot(rule[1] ?? '')) continue;
     const block = rule[2] ?? '';
     scoped ??= schemeIn(block);
-    grounds.push(...backgroundsIn(block));
+    fromRules.push(...backgroundsIn(block));
   }
   if (scoped) return scoped;
 
-  for (const literal of grounds) {
-    const hsl = hexToHsl(literal);
+  return modeOf(fromInline) ?? modeOf(fromRules);
+}
+
+/**
+ * The mode of the last of these grounds that has one.
+ *
+ * The last rather than the first, because a stylesheet that sets a root
+ * background twice is not ambiguous: the browser applies the later one. A
+ * mid-tone ground has no mode, and saying so is better than rounding it to
+ * whichever side it happens to be nearer, so the scan keeps looking back
+ * through the earlier ones.
+ */
+function modeOf(grounds: readonly string[]): PaletteMode | null {
+  for (let at = grounds.length - 1; at >= 0; at -= 1) {
+    const hsl = hexToHsl(grounds[at]!);
     if (!hsl) continue;
-    // A mid-tone ground is neither, and saying so is better than rounding it
-    // to whichever side it happens to be nearer.
     if (hsl.lightness >= 60) return 'light';
     if (hsl.lightness <= 40) return 'dark';
   }
@@ -546,7 +587,7 @@ export function sameOriginStylesheets(
   // own origin, so a base pointing somewhere else makes the sheets
   // cross-origin and they are dropped, which is the right answer.
   let base = origin;
-  const declared = /<base\b([^>]{0,2000})>/i.exec(
+  const declared = new RegExp(`<base${NAME_ENDS}([^>]{0,2000})>`, 'i').exec(
     html.slice(0, MAX_SCAN_CHARS),
   );
   const href = declared ? attribute(declared[1] ?? '', 'href') : null;
@@ -560,15 +601,14 @@ export function sameOriginStylesheets(
 
   const found: string[] = [];
   const seen = new Set<string>();
-  const links = html.slice(0, MAX_SCAN_CHARS).matchAll(/<link\b([^>]*)>/gi);
+  const links = html
+    .slice(0, MAX_SCAN_CHARS)
+    .matchAll(new RegExp(`<link${NAME_ENDS}([^>]*)>`, 'gi'));
 
   for (const link of links) {
     const attributes = link[1] ?? '';
     if (!/\brel\s*=\s*["']?[^"'>]*\bstylesheet\b/i.test(attributes)) continue;
-    const href = /\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))/i.exec(
-      attributes,
-    );
-    const value = href?.[2] ?? href?.[3] ?? href?.[4];
+    const value = attribute(attributes, 'href');
     if (!value) continue;
 
     let resolved: URL;

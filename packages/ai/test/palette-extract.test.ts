@@ -577,3 +577,82 @@ describe('a document that declares a base', () => {
     );
   });
 });
+
+describe('names that only look like the real thing', () => {
+  // `\b` sits either side of a hyphen, so it fires inside `<body-copy>`,
+  // `data-style` and `data-name`. Each is a different thing wearing the name
+  // of a root element or a real attribute, and each was read as the genuine
+  // article. The rule is written once in the module now and used at every
+  // name in it.
+  it('does not scan a custom element as a document root', () => {
+    const found = paletteFromPage(
+      '<body style="background:#fbfbfb">' +
+        '<body-copy style="color-scheme:dark;background:#0d1117">x</body-copy>' +
+        '<p style="color:#0b5fff">x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('does not read a data attribute as an inline style', () => {
+    const found = paletteFromPage(
+      '<body data-style="background:#0d1117" style="background:#fbfbfb">' +
+        '<p style="color:#0b5fff">x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('does not read data-name as a meta tag name', () => {
+    const found = paletteFromPage(
+      '<meta data-name="theme-color" content="#00add8">' +
+        '<style>.a{color:#c0392b}.b{color:#c0392b}</style><p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.declared, false);
+    assert.equal(found.source, '#c0392b');
+  });
+
+  it('does not treat a custom link-alike as a stylesheet link', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<link-preview rel="stylesheet" href="/nope.css">' +
+          '<link rel="stylesheet" href="/real.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/real.css'],
+    );
+  });
+});
+
+describe('when a page sets its ground more than once', () => {
+  it('takes the later rule, as the browser does', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff}body{background:#111111}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('takes the later declaration within one block', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff;background:#111111}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('lets an inline style outrank a rule that came after it', () => {
+    // Specificity, not order: the element's own style attribute wins
+    // wherever the stylesheet sits in the file.
+    const found = paletteFromPage(
+      '<body style="background:#fbfbfb">' +
+        '<style>body{background:#111111}</style>' +
+        '<p style="color:#0b5fff">x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+});
