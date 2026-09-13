@@ -56,7 +56,17 @@ const MAX_FETCH_BYTES = 512 * 1024;
  * the run carries on.
  */
 const MAX_STYLESHEET_BYTES = 256 * 1024;
-const STYLESHEET_TIMEOUT_MS = 4_000;
+
+/**
+ * One deadline for the whole stylesheet phase, not one per sheet.
+ *
+ * Per-sheet timeouts stack: two sheets that both stall spend eight seconds
+ * between them, on top of the page fetch, which is the opposite of the
+ * "slice of the latency" this budget is supposed to be. The sheets are
+ * fetched together under a single clock, so the phase costs what it says it
+ * costs however many sheets there are.
+ */
+const STYLESHEET_PHASE_MS = 4_000;
 
 /**
  * The page's own stylesheets, as text, skipping any that misbehaves.
@@ -71,29 +81,34 @@ async function readStylesheets(
   doFetch: typeof fetch,
 ): Promise<string[]> {
   const urls = sameOriginStylesheets(html, pageUrl);
-  const sheets: string[] = [];
-  for (const url of urls) {
-    // Re-validated even though same-origin already implies the page's own
-    // host passed: this module does not get to be the one place that starts
-    // trusting a URL because of where it came from.
-    const target = parseReferenceTarget(url);
-    if (!target.ok) continue;
-    try {
-      const response = await doFetch(target.value.toString(), {
-        signal: AbortSignal.timeout(STYLESHEET_TIMEOUT_MS),
-        headers: {
-          accept: 'text/css,*/*;q=0.1',
-          'user-agent': FETCH_USER_AGENT,
-        },
-      });
-      if (!response.ok || !response.body) continue;
-      sheets.push(await readCapped(response.body, MAX_STYLESHEET_BYTES));
-    } catch {
-      // Timed out, refused, or the body died partway. Not this feature's
-      // problem to report.
-    }
-  }
-  return sheets;
+  if (urls.length === 0) return [];
+
+  const deadline = AbortSignal.timeout(STYLESHEET_PHASE_MS);
+  const fetched = await Promise.all(
+    urls.map(async (url) => {
+      // Re-validated even though same-origin already implies the page's own
+      // host passed: this module does not get to be the one place that
+      // starts trusting a URL because of where it came from.
+      const target = parseReferenceTarget(url);
+      if (!target.ok) return null;
+      try {
+        const response = await doFetch(target.value.toString(), {
+          signal: deadline,
+          headers: {
+            accept: 'text/css,*/*;q=0.1',
+            'user-agent': FETCH_USER_AGENT,
+          },
+        });
+        if (!response.ok || !response.body) return null;
+        return await readCapped(response.body, MAX_STYLESHEET_BYTES);
+      } catch {
+        // Timed out, refused, or the body died partway. Not this feature's
+        // problem to report.
+        return null;
+      }
+    }),
+  );
+  return fetched.filter((sheet): sheet is string => sheet !== null);
 }
 
 /**
@@ -289,10 +304,20 @@ export async function fetchReferenceContext(
 
   // Read from the markup before it is thrown away, and from the page's own
   // stylesheets, which is where most sites actually keep their colours.
+  //
+  // Resolved against where the response actually came from, not where it was
+  // asked for. A reference URL that redirects from `/old` to `/products/x/`
+  // turns `href="theme.css"` into the wrong absolute URL if the original is
+  // used as the base, and the sheet 404s. The final URL is put back through
+  // `parseReferenceTarget` first: a redirect is somewhere the caller did not
+  // name, so "same origin as the page" must not be allowed to mean "same
+  // origin as wherever the page happened to send us".
+  const landed = parseReferenceTarget(response.url);
+  const base = landed.ok ? landed.value.toString() : target.value.toString();
   const stylesheets =
     options.readStylesheets === false
       ? []
-      : await readStylesheets(raw, target.value.toString(), doFetch);
+      : await readStylesheets(raw, base, doFetch);
 
   return {
     ok: true,

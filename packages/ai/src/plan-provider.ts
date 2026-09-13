@@ -18,7 +18,7 @@ import { motionGuidance } from './motion.ts';
 import { surfaceGuidance } from './surfaces.ts';
 import { diagramGuidance } from './diagrams.ts';
 import { primitiveGuidance } from './primitives.ts';
-import { paletteGuidance } from './palettes.ts';
+import { paletteGuidance, productFeelGuidance } from './palettes.ts';
 import { styleDnaGuidance } from './style-dna.ts';
 import { referencePaletteGuidance } from './palette-derive.ts';
 import type { DerivedPalette } from './palette-derive.ts';
@@ -342,15 +342,24 @@ Preserve anything the request does not ask you to change.`,
   // reference URL and no colours has expressed a preference more specific
   // than any keyword match can be, so it outranks the catalogue default; and
   // someone who typed a colour has expressed one more specific still, so it
-  // does not outrank the request. Only one of these is ever emitted, because
-  // two colour systems in one prompt is how a model ends up averaging them.
+  // does not outrank the request. Only one colour system is ever emitted,
+  // because two in one prompt is how a model ends up averaging them.
+  //
+  // Only the colour system, though. The catalogue also knows this product
+  // type's fonts, radii, shadows and motion, and a reference site has no
+  // opinion on any of them: it supplied a palette, not a design language.
+  // Dropping the whole catalogue block when a reference palette arrives took
+  // all of that away as a side effect, so the non-colour half is emitted
+  // either way.
   if (!style) {
-    const fromReference = palette ? referencePaletteGuidance(palette) : null;
-    const fromProductType = fromReference
-      ? null
-      : paletteGuidance(request.prompt);
-    const chosen = fromReference ?? fromProductType;
-    if (chosen) parts.push(chosen);
+    if (palette) {
+      parts.push(referencePaletteGuidance(palette));
+      const feel = productFeelGuidance(request.prompt);
+      if (feel) parts.push(feel);
+    } else {
+      const fromProductType = paletteGuidance(request.prompt);
+      if (fromProductType) parts.push(fromProductType);
+    }
   }
 
   // Standing visual preferences sit with the other standing guidance and

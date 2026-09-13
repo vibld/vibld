@@ -38,7 +38,11 @@
 
 import { hexToHsl, oklchToHex } from './color-space.ts';
 import { derivePalette, seedFromHex } from './palette-derive.ts';
-import type { DerivedPalette, PaletteScheme } from './palette-derive.ts';
+import type {
+  DerivedPalette,
+  PaletteMode,
+  PaletteScheme,
+} from './palette-derive.ts';
 
 /** `#abc` and `#aabbcc`, the two forms a stylesheet actually uses. */
 const HEX_PATTERN = /#([0-9a-f]{3}|[0-9a-f]{6})\b/gi;
@@ -58,8 +62,81 @@ const RGB_PATTERN =
 const OKLCH_PATTERN =
   /oklch\(\s*([\d.]+)(%?)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:deg)?(?:[\s,/]+([\d.]+%?))?\s*\)/gi;
 
-const THEME_COLOR =
-  /<meta[^>]+name\s*=\s*["']theme-color["'][^>]*content\s*=\s*["']([^"']+)["'][^>]*>/i;
+/**
+ * `<meta ...>` tags, and one attribute out of a tag's attribute list.
+ *
+ * Parsed in two steps rather than as one pattern per tag shape, because HTML
+ * does not order attributes: `<meta content="#00add8" name="theme-color">`
+ * is exactly as valid as the other way round, and a pattern that insists on
+ * name-then-content silently demotes the site's own declaration to an
+ * ordinary counted literal.
+ */
+const META_TAG = /<meta\b([^>]*)>/gi;
+
+function attribute(attributes: string, name: string): string | null {
+  const found = new RegExp(
+    `\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s">]+))`,
+    'i',
+  ).exec(attributes);
+  return found?.[2] ?? found?.[3] ?? found?.[4] ?? null;
+}
+
+/** The `content` of the first `<meta name="...">` matching, or null. */
+function metaContent(html: string, name: string): string | null {
+  for (const tag of html.matchAll(META_TAG)) {
+    const attributes = tag[1] ?? '';
+    const declared = attribute(attributes, 'name');
+    if (!declared || declared.trim().toLowerCase() !== name) continue;
+    const content = attribute(attributes, 'content');
+    if (content) return content;
+  }
+  return null;
+}
+
+/**
+ * Where a page states its own ground.
+ *
+ * Only the root elements count. An earlier version counted every
+ * `background:` declaration it could find and got two of seven real sites
+ * wrong, both of them light sites called dark: a utility stylesheet defines
+ * a rule for every colour it offers, so counting declarations counts what a
+ * framework can do rather than what the page does. `html`, `body` and
+ * `:root` are the ground by definition, and there is no counting to get
+ * wrong.
+ */
+const ROOT_RULE = /(?:^|[{}();])([^{}()]*?)\{([^{}]*)\}/g;
+const ROOT_SELECTOR = /(^|[\s,>+~])(html|body|:root)(\s*[,.:[]|\s|$)/i;
+const BACKGROUND_DECLARATION = /background(?:-color)?\s*:\s*([^;{}"']+)/gi;
+const BGCOLOR_ATTRIBUTE =
+  /<body\b[^>]*?\bbgcolor\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))/i;
+
+/**
+ * `source` with every `prefers-color-scheme: dark` block removed.
+ *
+ * Those blocks are what a light site says when the reader has asked for
+ * dark, not what the site is. Left in, they make a light site with a dark
+ * mode read as dark. Brace-matched rather than pattern-matched, because a
+ * media block contains rules and a rule contains braces.
+ */
+function withoutDarkOverrides(source: string): string {
+  const opener = /@media[^{]*prefers-color-scheme\s*:\s*dark[^{]*\{/gi;
+  let out = '';
+  let cursor = 0;
+  for (const match of source.matchAll(opener)) {
+    const start = match.index;
+    if (start === undefined || start < cursor) continue;
+    let depth = 1;
+    let at = start + match[0].length;
+    while (at < source.length && depth > 0) {
+      if (source[at] === '{') depth += 1;
+      else if (source[at] === '}') depth -= 1;
+      at += 1;
+    }
+    out += source.slice(cursor, start);
+    cursor = at;
+  }
+  return out + source.slice(cursor);
+}
 
 /**
  * How much of the document is scanned for colours.
@@ -131,6 +208,84 @@ export interface PageColors {
   themeColor: string | null;
   /** Every colour literal in the document, in the order found. */
   literals: string[];
+  /**
+   * Whether the page itself is light or dark, when it says so or shows so.
+   * Null when there is no evidence either way, which is the only case where
+   * a guess from the brand colour is better than nothing.
+   */
+  groundMode: PaletteMode | null;
+}
+
+/** The colours a page sets on `html`, `body` or `:root`, in order. */
+function readGroundLiterals(source: string): string[] {
+  const text = withoutDarkOverrides(source.slice(0, MAX_SCAN_CHARS));
+  const found: string[] = [];
+
+  const body = BGCOLOR_ATTRIBUTE.exec(text);
+  if (body) {
+    found.push(...readColorLiterals(body[2] ?? body[3] ?? body[4] ?? ''));
+  }
+
+  for (const rule of text.matchAll(ROOT_RULE)) {
+    const selector = rule[1] ?? '';
+    if (!ROOT_SELECTOR.test(selector)) continue;
+    for (const declaration of (rule[2] ?? '').matchAll(
+      BACKGROUND_DECLARATION,
+    )) {
+      // A shorthand can be a gradient, a url, or `transparent`. Anything
+      // that is not a colour literal contributes nothing and is skipped.
+      found.push(...readColorLiterals(declaration[1] ?? ''));
+    }
+  }
+  return found;
+}
+
+/**
+ * Whether the page is a light page or a dark one, from the page's own words
+ * first and the colour it paints its root second.
+ *
+ * `color-scheme` is a site stating this outright, so it is taken as stated.
+ * Failing that, the first ground colour it actually sets decides. Null when
+ * it sets none, which is the one case where guessing from the brand colour
+ * beats having nothing.
+ */
+function readGroundMode(source: string): PaletteMode | null {
+  const text = source.slice(0, MAX_SCAN_CHARS);
+
+  // Not preceded by a letter or a hyphen, because `prefers-color-scheme:
+  // dark` contains `color-scheme: dark`, and a pattern that does not say so
+  // reads every site with a dark-mode media query as a dark site. That is
+  // not hypothetical: it made four of seven real sites come back dark, two
+  // of them wrong, and it hid the fact that the background scan underneath
+  // was never being reached.
+  const declared =
+    metaContent(text, 'color-scheme') ??
+    /(?<![-a-z])color-scheme\s*:\s*([a-z\s]+)/i.exec(
+      withoutDarkOverrides(text),
+    )?.[1] ??
+    null;
+  if (declared) {
+    // `dark light` means the site prefers dark and will do light; the first
+    // of the two named is the preference, and `only dark` says the same
+    // thing more firmly.
+    const first = declared
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .find((word) => word === 'dark' || word === 'light');
+    if (first === 'dark') return 'dark';
+    if (first === 'light') return 'light';
+  }
+
+  for (const literal of readGroundLiterals(text)) {
+    const hsl = hexToHsl(literal);
+    if (!hsl) continue;
+    // A mid-tone ground is neither, and saying so is better than rounding
+    // it to whichever side it is nearer.
+    if (hsl.lightness >= 60) return 'light';
+    if (hsl.lightness <= 40) return 'dark';
+  }
+  return null;
 }
 
 /**
@@ -147,9 +302,9 @@ export function readPageColors(
   const head = html.slice(0, MAX_SCAN_CHARS);
 
   let themeColor: string | null = null;
-  const declared = THEME_COLOR.exec(head);
-  if (declared?.[1]) {
-    const [literal] = readColorLiterals(declared[1]);
+  const declared = metaContent(head, 'theme-color');
+  if (declared) {
+    const [literal] = readColorLiterals(declared);
     themeColor = literal ?? null;
   }
 
@@ -157,7 +312,16 @@ export function readPageColors(
   for (const sheet of stylesheets) {
     literals.push(...readColorLiterals(sheet));
   }
-  return { themeColor, literals };
+
+  // The markup states the mode more often than a stylesheet does (that is
+  // where `color-scheme` and `bgcolor` live), so it is asked first and the
+  // sheets only settle it when the page itself is silent.
+  let groundMode = readGroundMode(head);
+  for (const sheet of stylesheets) {
+    if (groundMode) break;
+    groundMode = readGroundMode(sheet);
+  }
+  return { themeColor, literals, groundMode };
 }
 
 /**
@@ -219,6 +383,11 @@ export interface ExtractedPalette {
   source: string;
   /** Whether the site declared it or it was counted out of the CSS. */
   declared: boolean;
+  /**
+   * The mode the palette was built for, so a caller re-deriving it later
+   * gets the same one rather than re-guessing from the hex.
+   */
+  mode: PaletteMode;
 }
 
 /**
@@ -247,13 +416,20 @@ export function paletteFromPage(
   );
   if (!seed) return null;
 
-  const palette = derivePalette(seed);
+  // The page's own evidence outranks the seed's lightness. `seedFromHex`
+  // reads a mode off the colour because a bare hex is all it has; here there
+  // is a whole document, and what it says about its own ground beats an
+  // inference drawn from one accent.
+  const palette = derivePalette(
+    colors.groundMode ? { ...seed, mode: colors.groundMode } : seed,
+  );
   if (!palette) return null;
 
   return {
     palette,
     source,
     declared: colors.themeColor === source,
+    mode: palette.mode,
   };
 }
 

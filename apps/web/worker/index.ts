@@ -684,6 +684,7 @@ async function handlePlan(
   // costs a few hundred floating-point operations and re-establishes the
   // contrast guarantee where it is used rather than asserting it travelled.
   let referencePaletteSource: string | undefined;
+  let referencePaletteMode: 'light' | 'dark' | undefined;
   if (referenceUrl.value) {
     const fetched = await fetchReferenceContext(referenceUrl.value);
     if (!fetched.ok) {
@@ -691,6 +692,7 @@ async function handlePlan(
     }
     referenceContext = fetched.text;
     referencePaletteSource = fetched.palette?.source;
+    referencePaletteMode = fetched.palette?.mode;
   }
 
   const chosenModel = parseModel(body, configuredProviders(env));
@@ -843,6 +845,7 @@ async function handlePlan(
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
         ...(referenceContext ? { referenceContext } : {}),
         ...(referencePaletteSource ? { referencePaletteSource } : {}),
+        ...(referencePaletteMode ? { referencePaletteMode } : {}),
         model: effectiveModel,
         userId: principal.userId,
         ...(principal.email ? { email: principal.email } : {}),

@@ -226,3 +226,148 @@ describe('where a reference palette sits in the prompt', () => {
     assert.ok(prompt.includes(found!.palette.colors.primary));
   });
 });
+
+describe("the page's own mode", () => {
+  it('reads a dark page as dark even when its brand colour is bright', () => {
+    // The bug: mode was inferred from the seed colour's lightness, and the
+    // seed colour is an accent by construction (this module filters out
+    // near-black and near-white before counting). A bright accent on a dark
+    // site was classified light, and the guidance then told the model in so
+    // many words to build for a light ground.
+    const found = paletteFromPage(
+      '<meta name="theme-color" content="#39d353">' +
+        '<style>body{background:#0d1117}.c{background-color:#161b22}</style>' +
+        '<p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+    assert.equal(found.palette.mode, 'dark');
+    assert.deepEqual(paletteFailures(found.palette), []);
+  });
+
+  it('takes color-scheme at its word', () => {
+    const found = paletteFromPage(
+      '<meta name="color-scheme" content="dark light">' +
+        '<style>.a{color:#c0392b}.b{color:#c0392b}</style><p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('does not read a light page as dark because it offers a dark mode', () => {
+    // `prefers-color-scheme: dark` contains `color-scheme: dark`. A pattern
+    // that does not exclude the prefixed form calls every site with a
+    // dark-mode media query a dark site, which against seven real sites got
+    // four of them wrong and hid the fact that the background scan below was
+    // never reached.
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff}' +
+        '@media (prefers-color-scheme: dark){:root{color-scheme:dark}' +
+        'body{background:#111111}}' +
+        '.btn{color:#0b5fff}</style><p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('ignores a background set on something that is not the ground', () => {
+    // Counting every background declaration counts what a utility stylesheet
+    // can do rather than what the page does. Only html, body and :root are
+    // the ground.
+    const found = paletteFromPage(
+      '<style>.bg-black{background-color:#000}.bg-slate{background:#0f172a}' +
+        '.bg-ink{background:#111}body{background:#fbfbfb}</style>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('reads a light page as light', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff}.c{background:#f7f7f7}' +
+        '.btn{color:#0b5fff}</style><p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('falls back to the colour itself when the page says nothing', () => {
+    // No background declaration anywhere: a guess from the hex is then the
+    // only thing available, and better than refusing.
+    const found = paletteFromPage('<p style="color:#0b5fff">x</p>');
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+});
+
+describe('a meta tag written the other way round', () => {
+  it('honours theme-color with content before name', () => {
+    // HTML does not order attributes. A pattern that insists on
+    // name-then-content demotes the site's own declaration to an ordinary
+    // counted literal, and whichever colour happens to appear more often
+    // wins instead.
+    const found = paletteFromPage(
+      '<meta content="#00add8" name="theme-color">' +
+        '<style>.a{color:#c0392b}.b{color:#c0392b}.c{color:#c0392b}</style>' +
+        '<p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.source, '#00add8');
+    assert.equal(found.declared, true);
+  });
+});
+
+describe('a reference palette and the product type', () => {
+  // paletteGuidance carries more than colour: the product type's fonts,
+  // radii, shadows and motion durations travel in the same block. Dropping
+  // the block when a reference palette arrived took all of that with it, so
+  // pointing at a site quietly made the output less specified, not more.
+  const request = { prompt: 'a dashboard for a fintech product' };
+  const found = paletteFromPage('<meta name="theme-color" content="#00add8">');
+
+  it('replaces the catalogue colours', () => {
+    const prompt = buildUserPrompt(
+      request,
+      null,
+      null,
+      'text',
+      null,
+      found!.palette,
+    );
+    assert.ok(prompt.includes(found!.palette.colors.primary));
+    assert.doesNotMatch(prompt, /In the absence of a stated palette/);
+  });
+
+  it('keeps the fonts, radii, shadows and motion it has no opinion on', () => {
+    const prompt = buildUserPrompt(
+      request,
+      null,
+      null,
+      'text',
+      null,
+      found!.palette,
+    );
+    for (const token of [
+      '--radius-md',
+      '--shadow-medium',
+      '--duration-standard',
+    ]) {
+      assert.ok(prompt.includes(token), `${token} was dropped`);
+    }
+    assert.match(prompt, /Heading font:/);
+    assert.match(prompt, /fonts\.googleapis\.com/);
+  });
+
+  it('emits one colour system, not two', () => {
+    const prompt = buildUserPrompt(
+      request,
+      null,
+      null,
+      'text',
+      null,
+      found!.palette,
+    );
+    assert.equal(prompt.split('--primary:').length - 1, 1);
+  });
+});

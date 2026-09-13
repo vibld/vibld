@@ -802,6 +802,45 @@ export function selectPalette(promptText: string): ProductPalette | null {
 }
 
 /**
+ * Everything this catalogue knows about a product type except its colours.
+ *
+ * The colours are the part another source can outrank. A reference site the
+ * user pointed at supplies a palette and nothing else: it has no opinion on
+ * corner radius, on how long an overlay takes to open, or on what a fintech
+ * dashboard should be set in. Emitting `paletteGuidance` as one block made
+ * those inseparable, so supplying a reference URL quietly took the fonts,
+ * the radii, the shadows and the motion away with the colours it replaced.
+ *
+ * So the two halves are separable now. `paletteGuidance` is unchanged and
+ * still emits both together for the case where the catalogue supplies the
+ * colours; this is what the reference-palette path pairs with instead.
+ */
+export function productFeelGuidance(promptText: string): string | null {
+  const palette = selectPalette(promptText);
+  if (!palette) return null;
+  const { typography, feel } = palette;
+  return `This looks like a ${palette.name} product. Whatever the palette, default to this shape and motion in src/styles.css -- anything stated in the request above still wins:
+
+:root {
+  --radius-sm: ${feel.radius.sm}; --radius-md: ${feel.radius.md};
+  --radius-lg: ${feel.radius.lg}; --radius-pill: ${feel.radius.pill};
+  --shadow-low: ${feel.shadow.low};
+  --shadow-medium: ${feel.shadow.medium};
+  --shadow-high: ${feel.shadow.high};
+  --duration-quick: ${feel.motion.quick}; --duration-standard: ${feel.motion.standard};
+  --duration-slow: ${feel.motion.slow};
+}
+
+Use these as design tokens referenced by components (var(--radius-md), etc.), not as one-off values copy-pasted around the codebase. Heading font: ${typography.headingFont}. Body font: ${typography.bodyFont}. Import both with: @import url('${typography.googleFontsUrl}');
+
+Motion for this product type reads as ${feel.motion.personality}: --duration-quick for hover and press, --duration-standard for overlays and state changes, --duration-slow only for marketing-scale reveals. ${
+    feel.motion.overshoot === '0%'
+      ? 'No overshoot on entrances -- things arrive and stop.'
+      : `Entrances may overshoot by about ${feel.motion.overshoot} and settle.`
+  }`;
+}
+
+/**
  * The section appended to a request whose product type this catalogue
  * recognises, or null. Only called when the caller has not already chosen a
  * style preset (`plan-provider.ts`'s `buildUserPrompt`) -- a preset like

@@ -175,6 +175,85 @@ describe('fetchReferenceContext', () => {
     if (!result.ok) assert.match(result.error, /No readable text/);
   });
 
+  it('resolves stylesheets against where the response landed, not where it was asked', async () => {
+    // A reference URL that redirects into a subdirectory: resolving
+    // `href="theme.css"` against the requested URL gives /theme.css, which
+    // is not where the file is.
+    const asked: string[] = [];
+    const page = htmlResponse(
+      '<html><head><link rel="stylesheet" href="theme.css"></head>' +
+        '<body><p>Widgets for everyone.</p></body></html>',
+    );
+    Object.defineProperty(page, 'url', {
+      value: 'https://example.com/products/page/',
+    });
+    await fetchReferenceContext('https://example.com/old', {
+      fetchImpl: (async (url: string) => {
+        asked.push(url);
+        if (url.endsWith('.css')) return htmlResponse('a{color:#c0392b}');
+        return page;
+      }) as unknown as typeof fetch,
+    });
+    assert.deepEqual(asked, [
+      'https://example.com/old',
+      'https://example.com/products/page/theme.css',
+    ]);
+  });
+
+  it('will not follow a redirect into a host it would have refused', async () => {
+    // The final URL becomes the base for same-origin stylesheet fetching, so
+    // it goes back through the same guard the requested URL did. Otherwise
+    // "same origin as the page" quietly means "same origin as wherever the
+    // page sent us".
+    const asked: string[] = [];
+    const page = htmlResponse(
+      '<html><head><link rel="stylesheet" href="theme.css"></head>' +
+        '<body><p>Widgets for everyone.</p></body></html>',
+    );
+    Object.defineProperty(page, 'url', { value: 'http://169.254.169.254/' });
+    await fetchReferenceContext('https://example.com/', {
+      fetchImpl: (async (url: string) => {
+        asked.push(url);
+        if (url.endsWith('.css')) return htmlResponse('a{color:#c0392b}');
+        return page;
+      }) as unknown as typeof fetch,
+    });
+    assert.ok(
+      !asked.some((url) => url.includes('169.254')),
+      `fetched ${asked.join(', ')}`,
+    );
+  });
+
+  it('fetches the stylesheets together, so their timeouts do not stack', async () => {
+    // Two sheets under one deadline, not two deadlines in sequence. Proven
+    // by both requests being in flight before either has answered: a
+    // sequential loop cannot produce that ordering.
+    const started: string[] = [];
+    let firstSettled = false;
+    let secondStartedBeforeFirstSettled = false;
+    await fetchReferenceContext('https://example.com/', {
+      fetchImpl: (async (url: string) => {
+        if (url.endsWith('.css')) {
+          started.push(url);
+          if (started.length === 2 && !firstSettled) {
+            secondStartedBeforeFirstSettled = true;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          firstSettled = true;
+          return htmlResponse('a{color:#c0392b}');
+        }
+        return htmlResponse(
+          '<html><head>' +
+            '<link rel="stylesheet" href="/one.css">' +
+            '<link rel="stylesheet" href="/two.css">' +
+            '</head><body><p>Widgets for everyone.</p></body></html>',
+        );
+      }) as unknown as typeof fetch,
+    });
+    assert.equal(started.length, 2);
+    assert.ok(secondStartedBeforeFirstSettled, 'sheets were fetched in series');
+  });
+
   it('truncates text longer than maxChars', async () => {
     const long = 'word '.repeat(2000);
     const result = await fetchReferenceContext('https://example.com/', {

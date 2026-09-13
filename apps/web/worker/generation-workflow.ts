@@ -76,6 +76,11 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         // source is one hex; the solver turns it back into the same fifteen
         // tokens it produced when the page was fetched, and a value that no
         // longer derives is simply dropped rather than trusted.
+        //
+        // The mode travels alongside it because the hex cannot carry it: the
+        // colour a page is seeded from is an accent, so re-reading a mode
+        // off its lightness here would undo what the page itself said. It is
+        // accepted only as one of the two literals it can be.
         const referencePalette = params.referencePaletteSource
           ? (() => {
               const seed = seedFromHex(
@@ -84,7 +89,11 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
                 'From the reference site',
                 `Derived from ${params.referencePaletteSource}, the dominant colour of the page you pointed at.`,
               );
-              return seed ? derivePalette(seed) : null;
+              if (!seed) return null;
+              const mode = params.referencePaletteMode;
+              return derivePalette(
+                mode === 'light' || mode === 'dark' ? { ...seed, mode } : seed,
+              );
             })()
           : null;
 
