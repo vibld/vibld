@@ -668,6 +668,22 @@ grant again for more.
 
 ## Pushing to GitHub (issue #13, docs/decisions.md L30/L42a)
 
+> **Not usable yet.** The push half is built and tested; the half that
+> records _which_ repository a user approved is not. `GitHubStore.bind` has
+> no caller outside tests, so `github_bindings` stays empty, `/api/github/status`
+> answers `reason: "none"` and a push is refused with a 409 asking for a
+> connection that cannot yet be made. Doing the App setup below changes
+> none of that on its own.
+>
+> What is missing is the connect flow, and it is separate on purpose rather
+> than by omission. GitHub's post-install redirect is an unsigned GET
+> carrying `?installation_id=N`, so binding on it directly would let any
+> signed-in user claim somebody else's installation and push into their
+> repository. Closing that needs the user-to-server OAuth exchange and a
+> `GET /user/installations/{id}/repositories` check, which is a security
+> decision that deserves its own review rather than an addendum to this one.
+> Tracked in issue #121.
+
 A checkpoint can be pushed to a repository the user connected: a branch
 `vibld/<revision>`, one commit carrying the generated files, and a pull
 request against the repository's default branch. `/api/github/status` (GET)
