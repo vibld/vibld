@@ -294,6 +294,25 @@ export class BillingStore {
     return topup + admin;
   }
 
+  /**
+   * One grant by id, or undefined.
+   *
+   * Exists so a caller can tell whether a known grant has already been made
+   * without summing anything. `signup-credit.ts` uses it to skip an external
+   * lookup it would otherwise repeat on every request forever; correctness
+   * there still rests on the insert's own ON CONFLICT, not on this read.
+   */
+  async findAdminCredit(id: string): Promise<AdminCreditRecord | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT id, user_id, credit_usd_cents, granted_by_email, note, created_at
+         FROM billing_admin_credits WHERE id = ?1`,
+      )
+      .bind(id)
+      .first<AdminCreditRow>();
+    return row ? toAdminCreditRecord(row) : undefined;
+  }
+
   /** Recent admin grants for a user, newest first -- an admin tool's own audit view. */
   async listAdminCredits(userId: string): Promise<AdminCreditRecord[]> {
     const result = await this.#db

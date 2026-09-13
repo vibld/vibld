@@ -35,9 +35,22 @@ export function SiteHeader() {
             </svg>
             <span className="text-lg font-semibold tracking-tight">vibld</span>
           </Link>
-          <span className="hidden text-sm text-[var(--color-ink-muted)] sm:inline">
-            {SITE.tagline}
-          </span>
+          <div className="flex items-center gap-4">
+            <span className="hidden text-sm text-[var(--color-ink-muted)] sm:inline">
+              {SITE.tagline}
+            </span>
+            {/*
+              A plain anchor: app.vibld.com is a different Worker on a
+              different host, so routing to it client-side would 404 in the
+              router before the browser ever left this origin.
+            */}
+            <a
+              href={SITE.appUrl}
+              className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium text-[var(--color-accent-ink)] hover:underline hover:underline-offset-4"
+            >
+              Sign in
+            </a>
+          </div>
         </div>
       </header>
     </>

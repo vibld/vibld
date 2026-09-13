@@ -1,0 +1,104 @@
+name: Deploy marketing preview
+
+# Manual only, like the production deploy it shadows. This exists so a change
+# to vibld.com can be looked at on a real Worker before it becomes the front
+# door -- there was previously no way to see the marketing site anywhere but
+# production.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-marketing-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy the marketing preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # The same environment the production marketing deploy uses, so the
+    # Cloudflare credentials are configured in one place. This job needs only
+    # the two Cloudflare values: no Resend key is synced, deliberately.
+    environment:
+      name: marketing
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require deploy credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add both to the \"marketing\" environment (Settings -> Environments)." >&2
+            echo "This deploy needs only \"Workers Scripts: Edit\" -- unlike the production deploy, it creates no DNS records." >&2
+            exit 1
+          fi
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @vibld/marketing build
+
+      - name: Deploy the preview
+        id: deploy
+        shell: bash
+        working-directory: apps/marketing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/wrangler-preview.log"
+          pnpm dlx wrangler@4.129.1 deploy -c wrangler.preview.jsonc | tee "$log"
+
+          # The workers.dev subdomain is account-specific, so the URL is not
+          # knowable before the deploy. Wrangler prints it.
+          url="$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+          if [ -z "$url" ]; then
+            echo "::error::Deployed, but no workers.dev URL appeared in the output. Check that workers_dev is enabled for this account."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Marketing preview: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # The point of this deploy is a URL a person can open, so a green upload
+      # that answers nothing is not a success. The noindex check matters just
+      # as much: this is a copy of vibld.com on a public hostname, and an
+      # indexable copy would compete with the site it is previewing.
+      - name: Smoke test the preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${{ steps.deploy.outputs.url }}"
+          headers="$RUNNER_TEMP/headers.txt"
+          status="$(curl -s -o /dev/null -D "$headers" -w '%{http_code}' --max-time 20 "$url/" || echo "000")"
+          if [ "$status" != "200" ]; then
+            echo "::error::$url/ answered $status"
+            exit 1
+          fi
+          if ! grep -qi '^x-robots-tag:.*noindex' "$headers"; then
+            echo "::error::$url/ is missing the noindex header. Refusing to call this preview ready: an indexable copy of vibld.com competes with the real site."
+            exit 1
+          fi
+          echo "$url/ is live and noindex." >> "$GITHUB_STEP_SUMMARY"
