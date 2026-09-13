@@ -39,6 +39,25 @@ export const SIGNUP_GRANT_ACTOR = 'system@vibld.com';
 
 export const SIGNUP_GRANT_NOTE = 'Welcome credit on account creation';
 
+/**
+ * Written, at zero cents, against an account that is not in the cohort.
+ *
+ * Without it every pre-offer account asks Clerk the same question on every
+ * `/api/billing/status` and `/api/plan` request forever: an external call on
+ * a hot path, for a decision that can never change, that during a Clerk
+ * outage costs each of those requests the full 8-second timeout.
+ *
+ * Zero cents, so it sums to nothing wherever credit is totalled, and a note
+ * that says what it is, so the admin audit view is not left showing a
+ * mysterious empty grant.
+ *
+ * The consequence worth knowing: moving VIBLD_SIGNUP_CREDIT_FROM earlier
+ * later on will not retroactively pay someone already marked. That is
+ * deliberate. Widening a cohort backwards is the dangerous direction, and
+ * an admin grant is the right tool for paying a specific person.
+ */
+export const SIGNUP_DECLINED_NOTE = 'Not in the welcome-credit cohort';
+
 export interface SignupCreditEnv extends ClerkLookupEnv {
   /**
    * Cents. Defaults to 100. "0" stops the grant, which is the switch to reach
@@ -73,6 +92,27 @@ export type SignupGrantOutcome =
   | 'error';
 
 /**
+ * A full ISO 8601 instant: calendar date, time, and an explicit zone.
+ *
+ * Validated before `Date.parse` rather than trusting it, because `Date.parse`
+ * is far more permissive than "ISO instant" and permissive in the worst
+ * possible direction here. `Date.parse("0")` is 2000-01-01 and
+ * `Date.parse("99")` is 1999-01-01, both perfectly finite, so a cutoff
+ * mistyped as a bare number would silently admit every account created this
+ * century: exactly the retroactive payout the cohort exists to prevent.
+ *
+ * "0" is a likely typo rather than an exotic one: it is what disables
+ * VIBLD_SIGNUP_CREDIT_USD_CENTS, so reaching for it here is an easy mistake
+ * to make.
+ *
+ * An explicit zone is required for the same reason: "2026-09-13T00:00:00"
+ * with no zone is read in the runtime's local time, which makes the cohort
+ * boundary depend on where the Worker happens to run.
+ */
+const ISO_INSTANT =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
  * How much a new account gets, in cents.
  *
  * An unreadable value falls back to the default rather than to zero. Getting
@@ -102,6 +142,26 @@ export function signupCreditCents(env: SignupCreditEnv): number {
 export function signupCohortStart(env: SignupCreditEnv): number | null {
   const raw = env.VIBLD_SIGNUP_CREDIT_FROM?.trim();
   if (raw === undefined || raw === '') return null;
+  if (!ISO_INSTANT.test(raw)) return null;
+
+  // The shape can be right and the day still not exist. "2026-02-30" matches
+  // the pattern and does not throw: it rolls forward to March 2, so a cutoff
+  // would silently land two days from where it was written. Checked against
+  // the calendar rather than trusted.
+  const [year, month, day] = raw.slice(0, 10).split('-').map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
   const parsed = Date.parse(raw);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -144,7 +204,19 @@ export async function grantSignupCreditOnce(
     // credit on a later request once Clerk answers, while the other choice
     // pays out to everyone during any Clerk outage.
     if (createdAt === null) return 'age-unknown';
-    if (createdAt < cohortStart) return 'not-in-cohort';
+    if (createdAt < cohortStart) {
+      // Recorded, not merely returned. This decision is permanent, and the
+      // marker is what stops the Clerk call above repeating forever. Only
+      // `age-unknown` above stays retryable, because that one can change.
+      await billing.grantAdminCredit(
+        signupGrantId(userId),
+        userId,
+        0,
+        SIGNUP_GRANT_ACTOR,
+        SIGNUP_DECLINED_NOTE,
+      );
+      return 'not-in-cohort';
+    }
 
     await billing.grantAdminCredit(
       signupGrantId(userId),

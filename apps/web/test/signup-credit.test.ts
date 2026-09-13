@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import { BillingStore } from '../worker/billing-store.ts';
 import {
   DEFAULT_SIGNUP_CREDIT_USD_CENTS,
+  SIGNUP_DECLINED_NOTE,
   SIGNUP_GRANT_ACTOR,
   grantSignupCreditOnce,
   signupCohortStart,
@@ -98,6 +99,60 @@ describe('signupCohortStart', () => {
       );
     }
   });
+
+  it('refuses a bare number, which Date.parse would happily accept', () => {
+    // The whole fail-closed claim rested on Date.parse returning NaN for
+    // nonsense, and it does not: "0" is 2000-01-01 and "99" is 1999-01-01,
+    // both finite. A cutoff mistyped that way would admit every account
+    // created this century, the exact payout the cohort exists to prevent.
+    // "0" is a likely typo rather than an exotic one: it is what disables
+    // the amount variable.
+    for (const raw of ['0', '1', '99', '2026', '2026-09', '1700000000000']) {
+      assert.equal(
+        signupCohortStart({ VIBLD_SIGNUP_CREDIT_FROM: raw }),
+        null,
+        JSON.stringify(raw),
+      );
+    }
+  });
+
+  it('requires an explicit timezone', () => {
+    // Without one the instant is read in the runtime's local time, which
+    // makes the cohort boundary depend on where the Worker runs.
+    for (const raw of ['2026-09-13T00:00:00', '2026-09-13']) {
+      assert.equal(
+        signupCohortStart({ VIBLD_SIGNUP_CREDIT_FROM: raw }),
+        null,
+        JSON.stringify(raw),
+      );
+    }
+  });
+
+  it('refuses a day that does not exist rather than rolling it forward', () => {
+    // "2026-02-30" does not throw: it rolls to March 2, so the cutoff would
+    // land two days from where it was written.
+    for (const raw of ['2026-02-30T00:00:00Z', '2026-13-01T00:00:00Z']) {
+      assert.equal(
+        signupCohortStart({ VIBLD_SIGNUP_CREDIT_FROM: raw }),
+        null,
+        JSON.stringify(raw),
+      );
+    }
+    // A real leap day is still a real day.
+    assert.equal(
+      signupCohortStart({ VIBLD_SIGNUP_CREDIT_FROM: '2024-02-29T00:00:00Z' }),
+      Date.parse('2024-02-29T00:00:00Z'),
+    );
+  });
+
+  it('accepts an offset and fractional seconds', () => {
+    assert.equal(
+      signupCohortStart({
+        VIBLD_SIGNUP_CREDIT_FROM: '2026-09-13T00:00:00.500+02:00',
+      }),
+      Date.parse('2026-09-13T00:00:00.500+02:00'),
+    );
+  });
 });
 
 describe('grantSignupCreditOnce', () => {
@@ -116,6 +171,41 @@ describe('grantSignupCreditOnce', () => {
       await store.totalSpendableCreditMicroUsd('user_new'),
       1_000_000,
     );
+  });
+
+  it('asks Clerk once for an account outside the cohort, not every request', async () => {
+    // Without a recorded decision, findAdminCredit never matches for the
+    // whole pre-offer population, so every /api/billing/status and /api/plan
+    // request would call Clerk again for an answer that can never change,
+    // and during a Clerk outage would pay the full 8-second timeout each
+    // time, on a hot path.
+    const store = newStore();
+    let calls = 0;
+    const counting = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ created_at: BEFORE }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+
+    assert.equal(
+      await grantSignupCreditOnce(store, 'user_repeat', ENV, counting),
+      'not-in-cohort',
+    );
+    for (let i = 0; i < 4; i += 1) {
+      assert.equal(
+        await grantSignupCreditOnce(store, 'user_repeat', ENV, counting),
+        'already-granted',
+      );
+    }
+    assert.equal(calls, 1, 'Clerk should be asked exactly once');
+
+    // The marker must not be worth anything.
+    assert.equal(await store.totalSpendableCreditMicroUsd('user_repeat'), 0);
+    const recorded = await store.listAdminCredits('user_repeat');
+    assert.equal(recorded.length, 1);
+    assert.equal(recorded[0]!.creditUsdCents, 0);
+    assert.equal(recorded[0]!.note, SIGNUP_DECLINED_NOTE);
   });
 
   it('grants nothing to an account that already existed', async () => {
