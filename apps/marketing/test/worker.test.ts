@@ -291,3 +291,76 @@ describe('POST /api/waitlist, plain HTML form post', () => {
     assert.match(body, /You're on the list/);
   });
 });
+
+describe('preview deployments', () => {
+  /** Stands in for the asset binding wrangler.preview.jsonc provides. */
+  const assets = (
+    body = '<!doctype html><title>Vibld | Vibe. Build. Ship.</title>',
+  ) => ({
+    fetch: async () =>
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }),
+  });
+
+  it('serves pages with a noindex header when VIBLD_NOINDEX is set', async () => {
+    // The property the preview exists or dies on. A byte-for-byte copy of
+    // vibld.com on a public hostname, left indexable, competes with the real
+    // site for a name that already returns other things when searched.
+    const response = await worker.fetch(
+      new Request('https://preview.workers.dev/'),
+      {
+        ...ENV,
+        VIBLD_NOINDEX: '1',
+        ASSETS: assets(),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('x-robots-tag') ?? '', /noindex/);
+    assert.match(await response.text(), /Vibe\. Build\. Ship\./);
+  });
+
+  it('keeps the response otherwise intact', async () => {
+    // Rebuilding the response must not lose what the asset store said about
+    // it, or a preview stops being a faithful copy of what it previews.
+    const response = await worker.fetch(
+      new Request('https://preview.workers.dev/'),
+      {
+        ...ENV,
+        VIBLD_NOINDEX: '1',
+        ASSETS: assets(),
+      },
+    );
+    assert.equal(
+      response.headers.get('content-type'),
+      'text/html; charset=utf-8',
+    );
+  });
+
+  it('changes nothing in production, where the flag is unset', async () => {
+    // Production routes pages straight from the asset store and never invokes
+    // this Worker for them, so this branch must stay unreachable there even
+    // if an ASSETS binding exists.
+    const response = await worker.fetch(new Request('https://vibld.com/'), {
+      ...ENV,
+      ASSETS: assets(),
+    });
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get('x-robots-tag'), null);
+  });
+
+  it('still routes the waitlist on a preview rather than serving it as a page', async () => {
+    // The asset fallthrough is added after the /api/waitlist branch, not
+    // before it. A preview that swallowed its own API would look fine and be
+    // broken in the one place anyone would click.
+    const response = await worker.fetch(
+      jsonRequest({ email: 'someone@example.com' }),
+      { VIBLD_NOINDEX: '1', ASSETS: assets() },
+    );
+    // No RESEND_API_KEY on a preview, so this is the configured 503 rather
+    // than a 200 page. That it is not 200-with-HTML is the point.
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('x-robots-tag'), null);
+  });
+});
