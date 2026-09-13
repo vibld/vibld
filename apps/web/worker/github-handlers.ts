@@ -525,31 +525,20 @@ export async function handleGitHubComplete(
 
   const installations = await userInstallations(token.token, doFetch);
   if (!installations.ok) return githubProblem(installations);
-  if (installations.value.length === 0) {
-    return json(
-      {
-        error:
-          'The Vibld GitHub App is not installed on any account you can reach. Install it, then connect again.',
-        install: true,
-      },
-      409,
-    );
-  }
 
-  // Everything they could connect, across every installation they reach,
-  // rather than one installation chosen here. The `installation_id` on the
-  // redirect only decides what is offered first, and an id that is not
-  // theirs simply does not match anything.
-  // The installation just used goes first, because reading them all is a
-  // call each and so is capped. Without this, somebody who installed on
-  // their eleventh account would never be offered it and, with the user
-  // token gone by then, could never reach it at all: the cap would stop
-  // being a limit and start being a dead end.
-  // Read directly rather than merely sorted to the front, so it is reachable
-  // wherever it sits in GitHub's list and however that list is paged. This
-  // gives up nothing: reading an installation's repositories *as the user*
-  // is itself the authorization check, and GitHub answers 404 for one they
-  // cannot reach, which `connectableRepositories` then skips.
+  // Everything this person could connect, across every installation they
+  // reach. Reading them all is a call each, so it is bounded, and the
+  // installation named on the way back is handled specially so that bound
+  // cannot strand it:
+  //
+  //   in the list -> it goes first, costing what it always would;
+  //   not in the list -> it is read as its own probe, outside the bound.
+  //
+  // Reading it directly rather than looking for it is what makes it
+  // reachable wherever GitHub's list happens to put it, or page it. That
+  // gives up nothing, because reading an installation's repositories *as the
+  // user* is itself the authorization check: GitHub answers 404 for one they
+  // cannot reach, and a forged id gets exactly that.
   const listed = installations.value;
   const named = Number.isInteger(hinted) && hinted > 0;
   const inList = named && listed.some((candidate) => candidate.id === hinted);
@@ -572,6 +561,26 @@ export async function handleGitHubComplete(
     doFetch,
     probe,
   );
+  // Asked after the read, not before it. GitHub's list of a brand-new
+  // installation is not always current the instant it redirects, so checking
+  // first would tell somebody to install the App they had this second
+  // installed. The probe answers that case directly.
+  //
+  // It also wins over the probe's own failure. With no installations listed,
+  // a probe that 404s is confirming there is nothing there, and "that
+  // installation is not available to your account" is a true sentence that
+  // helps nobody: the thing to say is that the App needs installing.
+  const foundNothing = !repositories.ok || repositories.value.length === 0;
+  if (foundNothing && listed.length === 0) {
+    return json(
+      {
+        error:
+          'The Vibld GitHub App is not installed on any account you can reach. Install it, then connect again.',
+        install: true,
+      },
+      409,
+    );
+  }
   if (!repositories.ok) return githubProblem(repositories);
 
   const offered = [...repositories.value].sort((a, b) =>

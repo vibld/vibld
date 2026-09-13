@@ -1048,3 +1048,58 @@ describe('a hint that is not real, with the budget already full', () => {
     );
   });
 });
+
+/**
+ * The moment just after somebody installs the App.
+ *
+ * GitHub's `/user/installations` is not always current the instant it
+ * redirects from an installation. Checking the list for emptiness before
+ * reading anything therefore tells the person to install the App they have
+ * just this second installed, which is both wrong and impossible to act on.
+ * The id on the redirect names the thing that does not appear yet, so it is
+ * read directly, and only a read that finds nothing means nothing is there.
+ */
+describe('when the new installation has not reached the list yet', () => {
+  async function complete(hint: string, repos: Record<number, unknown[]>) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: hint }),
+      env(db),
+      PRINCIPAL,
+      githubFor([], repos),
+      NOW,
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as {
+        install?: boolean;
+        repositories?: { repo: string }[];
+      },
+    };
+  }
+
+  it('offers the new installation rather than saying to install it', async () => {
+    const { status, body } = await complete('55', {
+      55: [
+        {
+          name: 'just-installed',
+          default_branch: 'main',
+          owner: { login: 'acme' },
+          permissions: { push: true },
+        },
+      ],
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(
+      body.repositories?.map((choice) => choice.repo),
+      ['just-installed'],
+    );
+  });
+
+  it('still says to install when there is genuinely nothing', async () => {
+    const { status, body } = await complete('55', {});
+    assert.equal(status, 409);
+    assert.equal(body.install, true);
+  });
+});
