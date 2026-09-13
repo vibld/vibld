@@ -14,7 +14,13 @@
   "assets": {
     "directory": "./build/client",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    // Matched to wrangler.jsonc deliberately. A preview whose asset routing
+    // differs from production is reviewing a different site: an unknown path
+    // would 200 with the home page here and 404 there, and a trailing slash
+    // would resolve differently, so the one thing the preview exists to show
+    // would be the thing it gets wrong.
+    "not_found_handling": "404-page",
+    "html_handling": "drop-trailing-slash",
     // Every request, not just /api/*, unlike production. The Worker has to
     // see a page request to attach the noindex header below; production keeps
     // serving pages straight from the asset store without invoking it.

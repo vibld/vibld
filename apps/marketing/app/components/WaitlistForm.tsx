@@ -1,4 +1,5 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
+
 import { SITE } from '../site.ts';
 
 type Status = 'idle' | 'submitting' | 'success' | 'error';
@@ -25,6 +26,16 @@ export function WaitlistForm() {
   const [message, setMessage] = useState<string | null>(null);
   const emailId = useId();
   const honeypotId = useId();
+  const [pageUrl, setPageUrl] = useState('');
+  const [pageReferrer, setPageReferrer] = useState('');
+
+  // Read after mount, never during render: these do not exist while the page
+  // is being prerendered, and reading them in the render body would make the
+  // server and client markup disagree.
+  useEffect(() => {
+    setPageUrl(window.location.href);
+    setPageReferrer(document.referrer);
+  }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -115,6 +126,14 @@ export function WaitlistForm() {
             autoComplete="off"
           />
         </div>
+        {/*
+          Channel attribution. The Worker only sees its own /api/waitlist URL,
+          so the page reports where the visitor actually was. Filled by the
+          browser at submit time; an empty value (no JavaScript) is fine and
+          simply records the signup as direct.
+        */}
+        <input type="hidden" name="page_url" value={pageUrl} />
+        <input type="hidden" name="page_referrer" value={pageReferrer} />
         <button
           type="submit"
           disabled={status === 'submitting'}

@@ -40,8 +40,32 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <SiteFooter />
         <ScrollRestoration />
         <Scripts />
+        <PageviewBeacon />
       </body>
     </html>
+  );
+}
+
+/**
+ * Records a pageview against our own `/api/hit`.
+ *
+ * Inline and dependency-free on purpose: it runs before (and independently
+ * of) hydration, loads no third-party script, sets no cookie, and sends no
+ * identifier -- see worker/analytics.ts for exactly what is stored.
+ * `sendBeacon` is fire-and-forget and cannot delay or fail the page.
+ */
+function PageviewBeacon() {
+  const script = `try{
+  var d=new FormData();
+  d.append('page_url',location.href);
+  d.append('page_referrer',document.referrer);
+  navigator.sendBeacon('/api/hit',d);
+}catch(e){}`;
+  return (
+    <script
+      suppressHydrationWarning
+      dangerouslySetInnerHTML={{ __html: script }}
+    />
   );
 }
 

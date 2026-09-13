@@ -35,6 +35,14 @@ export interface WaitlistSubmission {
    * way, nothing proved a person is here.
    */
   turnstileToken: string;
+  /**
+   * The page the visitor submitted from, and what referred them there. The
+   * Worker only ever sees its own `/api/waitlist` URL, so attribution has to
+   * be reported by the form -- see the hidden fields in WaitlistForm.tsx.
+   * Both are optional: a submission without them is still a valid signup.
+   */
+  pageUrl: string;
+  pageReferrer: string;
 }
 
 export type WaitlistResult =
@@ -56,6 +64,9 @@ export async function parseWaitlistSubmission(
           typeof body['cf-turnstile-response'] === 'string'
             ? body['cf-turnstile-response']
             : '',
+        pageUrl: typeof body.page_url === 'string' ? body.page_url : '',
+        pageReferrer:
+          typeof body.page_referrer === 'string' ? body.page_referrer : '',
       };
     }
     const form = await request.formData();
@@ -65,6 +76,8 @@ export async function parseWaitlistSubmission(
       // The widget injects this field into the form itself (see
       // WaitlistForm.tsx) -- nothing here has to read it out separately.
       turnstileToken: String(form.get('cf-turnstile-response') ?? ''),
+      pageUrl: String(form.get('page_url') ?? ''),
+      pageReferrer: String(form.get('page_referrer') ?? ''),
     };
   } catch {
     return null;
