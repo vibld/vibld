@@ -10,7 +10,7 @@ pnpm --filter @vibld/eval test                          # the same checks, as a 
 
 ## What it measures
 
-**The versioned prompt set** (`src/cases.ts`). Five prompts, each with stated expectations: files the accepted project must contain, and content it must mention. A project that builds cleanly but never mentions coffee is not a coffee roaster's site, and that is a failure a compiler cannot see.
+**The versioned prompt set** (`src/cases.ts`). Six prompts, each with stated expectations: files the accepted project must contain, and content it must mention. A project that builds cleanly but never mentions coffee is not a coffee roaster's site, and that is a failure a compiler cannot see.
 
 The set is versioned because a score means nothing without knowing what was asked. Changing a prompt, adding one, or changing what counts as success changes the number -- so `PROMPT_SET_VERSION` moves with it, and every report carries it. Comparing runs across versions is comparing different exams.
 
@@ -22,7 +22,7 @@ The set is versioned because a score means nothing without knowing what was aske
 
 ## What it does not measure
 
-**Generation quality** by default. CI runs this against a deterministic stub, not a model -- so `5/5 accepted` says the machinery and the failure paths work, and says nothing about whether a model writes a good website. The report states this wherever it prints a score, because a number that looks like a quality measure will be read as one unless it is contradicted in place.
+**Generation quality** by default. CI runs this against a deterministic stub, not a model -- so `6/6 accepted` says the machinery and the failure paths work, and says nothing about whether a model writes a good website. The report states this wherever it prints a score, because a number that looks like a quality measure will be read as one unless it is contradicted in place.
 
 A real baseline needs a provider and an approved spend cap ([#9](https://github.com/vibld/vibld/issues/9), [#18](https://github.com/vibld/vibld/issues/18)). The proposed gate in [#10](https://github.com/vibld/vibld/issues/10) -- 10 prompts × 3 runs, at least 27/30 within two repair attempts -- is a target to calibrate against that baseline, not a reliability guarantee, and not something a stub can be measured against.
 
@@ -47,6 +47,44 @@ the comparison reads side by side instead of as one pooled score that hides
 which model earned what. `VIBLD_EVAL_OUT` writes each accepted project to
 `<out>/<model>/<case>/`, because the point of measuring generation is to look
 at what came out.
+
+### Repeated runs
+
+One generation says whether a model can do a thing. It cannot say whether it
+does it reliably, and the gate proposed in [#10](https://github.com/vibld/vibld/issues/10)
+is written in exactly those terms: 10 prompts, 3 runs each. `VIBLD_EVAL_RUNS`
+is that multiplier.
+
+```sh
+VIBLD_EVAL_LIVE=1 \
+VIBLD_EVAL_MODELS=claude-opus-5,gpt-5.6-luna \
+VIBLD_EVAL_RUNS=3 \
+VIBLD_EVAL_OUT=./candidates \
+pnpm --filter @vibld/eval run eval -- --case vibld-marketing
+```
+
+Each model then prints a stability table under its report:
+
+```
+Stability
+  vibld-marketing: 2/3 accepted (accepted, ignored the request, accepted)
+```
+
+Unanimous cases print the tally alone. The run-by-run outcomes are only
+interesting where the runs disagreed, and printing them everywhere would bury
+the rows that did.
+
+With repeats, `VIBLD_EVAL_OUT` writes to `<out>/<model>/<case>/run-N/`. Each
+repeat keeps its own directory, because otherwise the last run would clear and
+replace the ones before it and the variance the repeats were paid for would
+exist only in the printed tally.
+
+It multiplies the bill by the same number it multiplies the runs, so the value
+is read strictly: a whole number from 1 to 10, and nothing else. `1e2` is
+refused rather than read as a hundred, and a count above ten is refused rather
+than charged, since the difference between ten and a mistyped three hundred is
+the whole budget. Raising the ceiling is an edit to `MAX_RUNS` in
+`src/live.ts`.
 
 Spend is measured from the usage each provider reports, priced from the
 catalogue, and printed in cents. Cents rather than dollars because the

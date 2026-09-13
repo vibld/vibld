@@ -13,7 +13,12 @@ import {
   runCostCents,
   selectCaseIds,
 } from '../src/live.ts';
-import { formatReport, summarise } from '../src/report.ts';
+import {
+  formatReport,
+  formatStability,
+  stability,
+  summarise,
+} from '../src/report.ts';
 import { SCENARIOS, runScenario } from '../src/scenarios.ts';
 
 /**
@@ -84,6 +89,15 @@ async function main(): Promise<number> {
   }
 
   if (!live.enabled) {
+    // Said rather than silently ignored. The stub returns the same plan every
+    // time, so repeating a case against it would print N identical rows and
+    // measure nothing, but someone who set the variable and saw one run each
+    // would reasonably conclude the flag does not work.
+    if (env.VIBLD_EVAL_RUNS && env.VIBLD_EVAL_RUNS.trim() !== '1') {
+      console.log(
+        'VIBLD_EVAL_RUNS is ignored without VIBLD_EVAL_LIVE: the stub is deterministic, so repeating a case against it measures nothing.',
+      );
+    }
     const results: CaseResult[] = [];
     for (const testCase of cases) {
       const provider = new FakeModelProvider([stubPlan(testCase)]);
@@ -98,33 +112,53 @@ async function main(): Promise<number> {
 
   // Live. One report per model, so the comparison is readable side by side
   // rather than as one pooled score that hides which model earned what.
+  //
+  // Repeats are the inner loop, so each case is run its full number of times
+  // before the next one starts. That keeps a case's runs adjacent in the
+  // report, and it means an interrupted run has finished answering the
+  // reliability question for the cases it got to rather than having one
+  // sample of everything.
   let allAccepted = true;
   let totalCents = 0;
+  const repeated = live.runs > 1;
   for (const model of live.models) {
     const results: CaseResult[] = [];
     for (const testCase of cases) {
-      const projectId = `${model}:${testCase.id}`;
-      const run = createLiveRun(env, model, projectId);
-      const result = await runCase(testCase, run.provider, {
-        store: run.store,
-        projectId,
-      });
-      results.push(result);
-      if (result.outcome !== 'accepted') allAccepted = false;
+      for (let attempt = 1; attempt <= live.runs; attempt += 1) {
+        const projectId = repeated
+          ? `${model}:${testCase.id}#${attempt}`
+          : `${model}:${testCase.id}`;
+        const run = createLiveRun(env, model, projectId);
+        const result = await runCase(testCase, run.provider, {
+          store: run.store,
+          projectId,
+        });
+        results.push(result);
+        if (result.outcome !== 'accepted') allAccepted = false;
 
-      const cents = runCostCents(model, run.usage);
-      if (cents !== null) totalCents += cents;
+        const cents = runCostCents(model, run.usage);
+        if (cents !== null) totalCents += cents;
 
-      if (live.outDir) {
-        const project = await acceptedProject(run);
-        if (project) {
-          const root = join(live.outDir, model, testCase.id);
-          await writeProject(root, project.files);
-          console.log(`  wrote ${project.files.length} files to ${root}`);
+        if (live.outDir) {
+          const project = await acceptedProject(run);
+          if (project) {
+            // Each repeat gets its own directory. Without that the last run
+            // would clear and replace the ones before it, so the variance the
+            // repeats were paid for would exist only in the printed tally and
+            // the directory would hold one arbitrary sample of it. A single
+            // run keeps the original path, since there is nothing to separate.
+            const root = repeated
+              ? join(live.outDir, model, testCase.id, `run-${attempt}`)
+              : join(live.outDir, model, testCase.id);
+            await writeProject(root, project.files);
+            console.log(`  wrote ${project.files.length} files to ${root}`);
+          }
         }
       }
     }
     console.log(formatReport(summarise(results, model)));
+    const table = formatStability(stability(results));
+    if (table) console.log(table);
   }
   console.log(`\nMeasured spend across all models: ${totalCents.toFixed(3)}c`);
 

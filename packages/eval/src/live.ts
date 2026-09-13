@@ -22,6 +22,17 @@ export interface LiveOptions {
   enabled: boolean;
   /** Model ids to run. Each one runs the selected cases independently. */
   models: string[];
+  /**
+   * How many times each model runs each case. One unless asked otherwise.
+   *
+   * A single generation says whether a model can do a thing once. It cannot
+   * say whether it does it reliably, and the gate proposed in #10 is stated
+   * in exactly those terms (10 prompts, 3 runs each). This is the multiplier
+   * that makes that measurable, and it multiplies the bill by the same
+   * number, which is why `liveRuns` refuses anything it cannot read as a
+   * deliberate count.
+   */
+  runs: number;
   /** Where to write each run's project, if anywhere. */
   outDir?: string | undefined;
 }
@@ -29,6 +40,7 @@ export interface LiveOptions {
 export interface LiveEnv {
   VIBLD_EVAL_LIVE?: string | undefined;
   VIBLD_EVAL_MODELS?: string | undefined;
+  VIBLD_EVAL_RUNS?: string | undefined;
   VIBLD_EVAL_OUT?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
   DEEPSEEK_API_KEY?: string | undefined;
@@ -41,6 +53,33 @@ export interface LiveEnv {
 function optedIn(value: string | undefined): boolean {
   const flag = value?.trim().toLowerCase();
   return flag === '1' || flag === 'true' || flag === 'yes';
+}
+
+/**
+ * The most runs per case this will do without the number being changed here.
+ *
+ * Not a judgement that eleven runs is never worth it. It is that the question
+ * repeated runs answer is settled at three, the difference between three and
+ * ten is small, and the difference between ten and a mistyped three hundred
+ * is the whole budget. A ceiling that has to be raised on purpose costs an
+ * edit to this line; the absence of one costs whatever the typo was.
+ */
+export const MAX_RUNS = 10;
+
+/**
+ * How many runs per case, or null if the value is not a count.
+ *
+ * Strict by the same reasoning as everywhere else in this file: this number
+ * multiplies what a live run costs, so "3 " is fine, "3.0", "3x", "-1" and
+ * "1e2" are not. `Number()` would read the last of those as a hundred.
+ */
+export function liveRuns(value: string | undefined): number | null {
+  const raw = value?.trim();
+  if (raw === undefined || raw === '') return 1;
+  if (!/^\d+$/.test(raw)) return null;
+  const runs = Number(raw);
+  if (runs < 1 || runs > MAX_RUNS) return null;
+  return runs;
 }
 
 /**
@@ -58,6 +97,10 @@ export function readLiveOptions(env: LiveEnv): LiveOptions {
   return {
     enabled,
     models,
+    // Falls back to one so the shape is always valid; `liveProblems` is what
+    // refuses the run, so an unreadable value is reported rather than
+    // silently treated as a single run someone did not ask for.
+    runs: liveRuns(env.VIBLD_EVAL_RUNS) ?? 1,
     ...(env.VIBLD_EVAL_OUT ? { outDir: env.VIBLD_EVAL_OUT } : {}),
   };
 }
@@ -77,18 +120,22 @@ export function liveProblems(options: LiveOptions, env: LiveEnv): string[] {
       'VIBLD_EVAL_LIVE is set but VIBLD_EVAL_MODELS names no model.',
     );
   }
+  if (liveRuns(env.VIBLD_EVAL_RUNS) === null) {
+    problems.push(
+      `VIBLD_EVAL_RUNS must be a whole number from 1 to ${MAX_RUNS}, not "${env.VIBLD_EVAL_RUNS}".`,
+    );
+  }
   // Refused rather than quietly deduplicated. A repeated id pays for the whole
   // selected set twice, and with VIBLD_EVAL_OUT the second pass clears and
   // replaces the first at the same destination, so the spend buys output that
-  // no longer exists. Repeated runs for variance are a real thing to want
-  // (#9/#10 asks for three per prompt) and will need a flag that says so:
-  // until then a duplicate is a mistake, and guessing which was meant is the
-  // widening this file exists to avoid.
+  // no longer exists. Repeated runs for variance are what VIBLD_EVAL_RUNS is
+  // for, and it keeps each run's output; a repeated id is a mistake, and
+  // guessing which was meant is the widening this file exists to avoid.
   const seen = new Set<string>();
   for (const id of options.models) {
     if (seen.has(id)) {
       problems.push(
-        `VIBLD_EVAL_MODELS names ${id} more than once. Each model runs the set once.`,
+        `VIBLD_EVAL_MODELS names ${id} more than once. Use VIBLD_EVAL_RUNS to run a model repeatedly.`,
       );
       break;
     }

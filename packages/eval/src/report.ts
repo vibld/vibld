@@ -86,3 +86,62 @@ export function formatReport(report: EvalReport): string {
 
   return lines.join('\n');
 }
+
+/**
+ * How one case behaved across repeated runs.
+ *
+ * The per-run report already says what happened each time. What it cannot say
+ * is whether a model does a thing reliably or got lucky once, and that is the
+ * question #10's gate is written in terms of (10 prompts, 3 runs each). Three
+ * accepted runs and two accepted out of three are the same line in a pooled
+ * score and completely different answers.
+ */
+export interface CaseStability {
+  id: string;
+  runs: number;
+  accepted: number;
+  /** Every outcome, in the order the runs happened. */
+  outcomes: CaseOutcome[];
+}
+
+/**
+ * Group results by case, in the order the cases were first seen.
+ *
+ * Insertion order rather than sorted, so the table reads in the order the
+ * cases ran and lines up with the reports printed above it.
+ */
+export function stability(results: CaseResult[]): CaseStability[] {
+  const rows = new Map<string, CaseStability>();
+  for (const result of results) {
+    let row = rows.get(result.id);
+    if (!row) {
+      row = { id: result.id, runs: 0, accepted: 0, outcomes: [] };
+      rows.set(result.id, row);
+    }
+    row.runs += 1;
+    if (result.outcome === 'accepted') row.accepted += 1;
+    row.outcomes.push(result.outcome);
+  }
+  return [...rows.values()];
+}
+
+/**
+ * The stability table, or an empty string when nothing was repeated.
+ *
+ * A case that was accepted every time prints its tally and nothing else: the
+ * run-by-run outcomes are only interesting where they disagree, and printing
+ * them for the unanimous rows would bury the rows that do.
+ */
+export function formatStability(rows: CaseStability[]): string {
+  if (rows.every((row) => row.runs < 2)) return '';
+  const lines = ['\nStability'];
+  for (const row of rows) {
+    const tally = `${row.accepted}/${row.runs} accepted`;
+    const varied = row.accepted !== row.runs;
+    const detail = varied
+      ? ` (${row.outcomes.map((outcome) => OUTCOME_LABEL[outcome]).join(', ')})`
+      : '';
+    lines.push(`  ${row.id}: ${tally}${detail}`);
+  }
+  return lines.join('\n');
+}
