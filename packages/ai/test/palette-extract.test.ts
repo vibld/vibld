@@ -402,3 +402,145 @@ describe('a page built to be expensive to read', () => {
     assert.ok(took < 1_000, `took ${took}ms`);
   });
 });
+
+describe('what actually counts as the page saying so', () => {
+  it('reads a ground written inline on body', () => {
+    // `<body style="background:#0d1117">` states the ground as plainly as a
+    // stylesheet does. Reading only the legacy bgcolor attribute missed
+    // every site that writes it this way, and the mode fell back to the
+    // brand accent: a dark page with a bright accent came out light again.
+    const found = paletteFromPage(
+      '<meta name="theme-color" content="#39d353">' +
+        '<body style="background:#0d1117"><p>x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('reads a ground written inline on html', () => {
+    const found = paletteFromPage(
+      '<html style="background-color:#0d1117">' +
+        '<p style="color:#39d353">x</p></html>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('does not treat a data attribute as a declaration', () => {
+    // `data-color-scheme="dark"` is a hook a theme switcher reads, not a
+    // declaration, and the prefixed name is excluded for the same reason
+    // `prefers-color-scheme` is. The ground decides instead.
+    const found = paletteFromPage(
+      '<body data-color-scheme="dark" style="background:#fbfbfb">' +
+        '<p style="color:#0b5fff">x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('ignores color-scheme scoped to a component', () => {
+    // `.scheme-dark { color-scheme: dark }` is that component saying it, not
+    // the page. An unrestricted search returned dark on the first one it
+    // found, and could not tell it from the same words inside a comment or a
+    // script either.
+    const found = paletteFromPage(
+      '<style>.scheme-dark{color-scheme:dark}body{background:#fbfbfb}</style>' +
+        '<!-- color-scheme: dark -->' +
+        '<script>const s = "color-scheme: dark";</script>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('honours a scheme written on the root element in any attribute', () => {
+    // astro.build states it as a Tailwind arbitrary utility in the class
+    // list, not in a style attribute, and reading only `style` called that
+    // dark site light.
+    for (const tag of [
+      '<html class="text-gray-100 [color-scheme:dark] bg-dark-900">',
+      '<html style="color-scheme:dark">',
+      '<body class="[color-scheme:dark]">',
+    ]) {
+      const found = paletteFromPage(`${tag}<p style="color:#39d353">x</p>`);
+      assert.ok(found, tag);
+      assert.equal(found.mode, 'dark', tag);
+    }
+  });
+
+  it('still honours color-scheme on a root', () => {
+    const found = paletteFromPage(
+      '<style>:root{color-scheme:dark}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('does not mistake a component selector for the root element', () => {
+    // Word boundaries fire inside .body, #body, [data-body], .html-preview
+    // and body-copy, because CSS punctuation is not a word character. Each
+    // of those is an ordinary component whose background would otherwise
+    // decide the whole page's mode.
+    for (const selector of [
+      '.body',
+      '#body',
+      '[data-body]',
+      '.html-preview',
+      '.body-copy',
+      'body .card',
+    ]) {
+      const found = paletteFromPage(
+        `<style>${selector}{background:#0d1117}body{background:#fbfbfb}</style>` +
+          '<p style="color:#0b5fff">x</p>',
+      );
+      assert.ok(found, selector);
+      assert.equal(found.mode, 'light', selector);
+    }
+  });
+
+  it('takes the root from the rightmost compound selector', () => {
+    for (const selector of ['.dark body', 'html.theme-dark', ':root.dark']) {
+      const found = paletteFromPage(
+        `<style>${selector}{background:#0d1117}</style>` +
+          '<p style="color:#39d353">x</p>',
+      );
+      assert.ok(found, selector);
+      assert.equal(found.mode, 'dark', selector);
+    }
+  });
+});
+
+describe('a document that declares a base', () => {
+  it('resolves stylesheet hrefs against it', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<base href="/assets/"><link rel="stylesheet" href="theme.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/assets/theme.css'],
+    );
+  });
+
+  it('drops sheets a cross-origin base puts on another host', () => {
+    // A base elsewhere changes where a relative href points, not which
+    // origins may be reached.
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<base href="https://cdn.example.net/"><link rel=stylesheet href="a.css">',
+        'https://example.com/',
+      ),
+      [],
+    );
+  });
+
+  it('ignores a base it cannot parse', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<base href="::::"><link rel="stylesheet" href="/a.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/a.css'],
+    );
+  });
+});

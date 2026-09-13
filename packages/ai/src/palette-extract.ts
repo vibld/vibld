@@ -94,7 +94,7 @@ function metaContent(html: string, name: string): string | null {
 }
 
 /**
- * Where a page states its own ground.
+ * Where a page states its own ground, and how that is recognised.
  *
  * Only the root elements count. An earlier version counted every
  * `background:` declaration it could find and got two of seven real sites
@@ -103,27 +103,149 @@ function metaContent(html: string, name: string): string | null {
  * framework can do rather than what the page does. `html`, `body` and
  * `:root` are the ground by definition, and there is no counting to get
  * wrong.
- */
-/**
- * Every quantifier below is bounded, and that is the point of them.
  *
- * This reads somebody else's page inside a Worker with a CPU budget, so a
- * pattern's worst case is an input an attacker gets to choose. The first
- * version of this rule scanned lazily for the next `{`, which backtracks
- * from every delimiter it passed: 60,000 semicolons with no brace after
- * them cost 3.3 seconds, and the character cap allows three times that.
- * Measured, not suspected.
- *
- * A selector longer than 300 characters and a declaration block longer than
- * 4,000 are not real CSS, so refusing to look past either costs nothing and
- * keeps the work linear in the size of the page.
+ * Every quantifier here is bounded, and that is the point of them. This
+ * reads somebody else's page inside a Worker with a CPU budget, so a
+ * pattern's worst case is an input an attacker gets to choose. An earlier
+ * version scanned lazily for the next `{`, which backtracks from every
+ * delimiter it has passed: 60,000 semicolons with no brace after them cost
+ * 3.3 seconds, and the character cap allows three times that. Measured, not
+ * suspected. A selector past 300 characters, a declaration block past 4,000
+ * and a tag past 2,000 are not real markup, so refusing to look further
+ * costs nothing and keeps the work linear in the size of the page.
  */
-const ROOT_RULE =
-  /(?:^|[{};])[^{}]{0,300}?\b(?:html|body|:root)\b[^{}]{0,300}\{([^{}]{0,4000})\}/gi;
+const ROOT_TAG = /<(?:html|body)\b([^>]{0,2000})>/gi;
+const CSS_RULE = /(?:^|[{};])([^{}]{0,300})\{([^{}]{0,4000})\}/g;
 const BACKGROUND_DECLARATION =
   /background(?:-color)?\s*:\s*([^;{}"']{0,200})/gi;
-const BGCOLOR_ATTRIBUTE =
-  /<body\b[^>]{0,2000}?\bbgcolor\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))/i;
+
+/**
+ * Not preceded by a letter or a hyphen, because `prefers-color-scheme:
+ * dark` contains `color-scheme: dark`. A pattern that does not say so reads
+ * every site with a dark-mode media query as a dark site: that made four of
+ * seven real sites come back dark, two of them wrong, and it hid the fact
+ * that the background scan underneath was never being reached.
+ */
+const COLOR_SCHEME_DECLARATION =
+  /(?<![-a-z])color-scheme\s*:\s*([a-z\s]{0,40})/i;
+
+/** `dark` or `light` out of a `color-scheme` value, or null. */
+function schemeWord(value: string): PaletteMode | null {
+  // `dark light` means the site prefers dark and will do light; the first of
+  // the two named is the preference, and `only dark` says it more firmly.
+  const first = value
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .find((word) => word === 'dark' || word === 'light');
+  return first === 'dark' || first === 'light' ? first : null;
+}
+
+function schemeIn(block: string): PaletteMode | null {
+  const found = COLOR_SCHEME_DECLARATION.exec(block);
+  return found?.[1] ? schemeWord(found[1]) : null;
+}
+
+function backgroundsIn(block: string): string[] {
+  const found: string[] = [];
+  for (const declaration of block.matchAll(BACKGROUND_DECLARATION)) {
+    // A shorthand can be a gradient, a url, or `transparent`. Anything that
+    // is not a colour literal contributes nothing and is skipped.
+    found.push(...readColorLiterals(declaration[1] ?? ''));
+  }
+  return found;
+}
+
+/**
+ * Whether this selector list actually selects the document root.
+ *
+ * Tokenised rather than pattern-matched, because CSS punctuation is not word
+ * characters and a word boundary therefore fires inside `.body`, `#body`,
+ * `[data-body]`, `.html-preview` and `body-copy`. Every one of those is an
+ * ordinary component whose background would otherwise decide what the whole
+ * page's mode is.
+ *
+ * The rightmost compound selector is the one the rule is about: in
+ * `.dark body` the subject is `body`, and in `body .card` it is `.card`. So
+ * the subject is taken and then required to begin with the element or the
+ * pseudo-class itself, with nothing glued to it.
+ */
+function selectsRoot(selectorList: string): boolean {
+  for (const selector of selectorList.split(',')) {
+    const compounds = selector
+      .trim()
+      .split(/[\s>+~]+/)
+      .filter(Boolean);
+    const subject = compounds[compounds.length - 1];
+    if (!subject) continue;
+    if (/^(?:html|body|:root)(?![\w-])/i.test(subject)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the page is a light page or a dark one, from the page's own words
+ * first and the colour it paints its root second.
+ *
+ * `color-scheme` is a site stating this outright, so it is taken as stated,
+ * but only where it applies to the whole page: in the meta tag, on a root
+ * element's `style`, or in a rule whose subject is a root. A component that
+ * scopes `color-scheme: dark` to its own subtree is not the page saying it
+ * is dark, and the unrestricted search this replaces could not tell the
+ * difference (nor tell either of them from the same words inside a comment
+ * or a script).
+ *
+ * Failing that, the first ground colour the page actually sets decides.
+ * Null when it sets none, which is the one case where guessing from the
+ * brand colour beats having nothing.
+ */
+function readGroundMode(source: string): PaletteMode | null {
+  const text = withoutDarkOverrides(source.slice(0, MAX_SCAN_CHARS));
+
+  const meta = metaContent(text, 'color-scheme');
+  const declared = meta ? schemeWord(meta) : null;
+  if (declared) return declared;
+
+  let scoped: PaletteMode | null = null;
+  const grounds: string[] = [];
+
+  // The root elements themselves. A page that writes its ground inline, as
+  // `<body style="background:#0d1117">`, is stating it as plainly as a
+  // stylesheet does, and reading only the legacy `bgcolor` attribute missed
+  // every site that does.
+  for (const tag of text.matchAll(ROOT_TAG)) {
+    const attributes = tag[1] ?? '';
+    // The whole tag, not just its `style`, because a page can state its
+    // scheme on the root element through the class list too: astro.build
+    // writes `class="... [color-scheme:dark] ..."`, Tailwind's arbitrary
+    // property syntax, and reading only `style` called that dark site light.
+    // A `color-scheme:` written anywhere on `html` or `body` is the page
+    // saying it whichever attribute carries it.
+    scoped ??= schemeIn(attributes);
+    const style = attribute(attributes, 'style');
+    if (style) grounds.push(...backgroundsIn(style));
+    const legacy = attribute(attributes, 'bgcolor');
+    if (legacy) grounds.push(...readColorLiterals(legacy));
+  }
+
+  for (const rule of text.matchAll(CSS_RULE)) {
+    if (!selectsRoot(rule[1] ?? '')) continue;
+    const block = rule[2] ?? '';
+    scoped ??= schemeIn(block);
+    grounds.push(...backgroundsIn(block));
+  }
+  if (scoped) return scoped;
+
+  for (const literal of grounds) {
+    const hsl = hexToHsl(literal);
+    if (!hsl) continue;
+    // A mid-tone ground is neither, and saying so is better than rounding it
+    // to whichever side it happens to be nearer.
+    if (hsl.lightness >= 60) return 'light';
+    if (hsl.lightness <= 40) return 'dark';
+  }
+  return null;
+}
 
 /**
  * `source` with every `prefers-color-scheme: dark` block removed.
@@ -233,76 +355,6 @@ export interface PageColors {
    * a guess from the brand colour is better than nothing.
    */
   groundMode: PaletteMode | null;
-}
-
-/** The colours a page sets on `html`, `body` or `:root`, in order. */
-function readGroundLiterals(source: string): string[] {
-  const text = withoutDarkOverrides(source.slice(0, MAX_SCAN_CHARS));
-  const found: string[] = [];
-
-  const body = BGCOLOR_ATTRIBUTE.exec(text);
-  if (body) {
-    found.push(...readColorLiterals(body[2] ?? body[3] ?? body[4] ?? ''));
-  }
-
-  for (const rule of text.matchAll(ROOT_RULE)) {
-    for (const declaration of (rule[1] ?? '').matchAll(
-      BACKGROUND_DECLARATION,
-    )) {
-      // A shorthand can be a gradient, a url, or `transparent`. Anything
-      // that is not a colour literal contributes nothing and is skipped.
-      found.push(...readColorLiterals(declaration[1] ?? ''));
-    }
-  }
-  return found;
-}
-
-/**
- * Whether the page is a light page or a dark one, from the page's own words
- * first and the colour it paints its root second.
- *
- * `color-scheme` is a site stating this outright, so it is taken as stated.
- * Failing that, the first ground colour it actually sets decides. Null when
- * it sets none, which is the one case where guessing from the brand colour
- * beats having nothing.
- */
-function readGroundMode(source: string): PaletteMode | null {
-  const text = source.slice(0, MAX_SCAN_CHARS);
-
-  // Not preceded by a letter or a hyphen, because `prefers-color-scheme:
-  // dark` contains `color-scheme: dark`, and a pattern that does not say so
-  // reads every site with a dark-mode media query as a dark site. That is
-  // not hypothetical: it made four of seven real sites come back dark, two
-  // of them wrong, and it hid the fact that the background scan underneath
-  // was never being reached.
-  const declared =
-    metaContent(text, 'color-scheme') ??
-    /(?<![-a-z])color-scheme\s*:\s*([a-z\s]+)/i.exec(
-      withoutDarkOverrides(text),
-    )?.[1] ??
-    null;
-  if (declared) {
-    // `dark light` means the site prefers dark and will do light; the first
-    // of the two named is the preference, and `only dark` says the same
-    // thing more firmly.
-    const first = declared
-      .trim()
-      .toLowerCase()
-      .split(/\s+/)
-      .find((word) => word === 'dark' || word === 'light');
-    if (first === 'dark') return 'dark';
-    if (first === 'light') return 'light';
-  }
-
-  for (const literal of readGroundLiterals(text)) {
-    const hsl = hexToHsl(literal);
-    if (!hsl) continue;
-    // A mid-tone ground is neither, and saying so is better than rounding
-    // it to whichever side it is nearer.
-    if (hsl.lightness >= 60) return 'light';
-    if (hsl.lightness <= 40) return 'dark';
-  }
-  return null;
 }
 
 /**
@@ -477,11 +529,33 @@ export function sameOriginStylesheets(
   pageUrl: string,
   limit = 2,
 ): string[] {
-  let base: URL;
+  let origin: URL;
   try {
-    base = new URL(pageUrl);
+    origin = new URL(pageUrl);
   } catch {
     return [];
+  }
+
+  // `<base href>` is what the browser resolves relative URLs against, so it
+  // is what this has to resolve them against too: a page served at `/` with
+  // `<base href="/assets/">` links `theme.css` meaning `/assets/theme.css`,
+  // and resolving against the page instead fetches a path that is not there.
+  //
+  // It changes where a relative href points, not which origins may be
+  // reached. The same-origin test below still compares against the page's
+  // own origin, so a base pointing somewhere else makes the sheets
+  // cross-origin and they are dropped, which is the right answer.
+  let base = origin;
+  const declared = /<base\b([^>]{0,2000})>/i.exec(
+    html.slice(0, MAX_SCAN_CHARS),
+  );
+  const href = declared ? attribute(declared[1] ?? '', 'href') : null;
+  if (href) {
+    try {
+      base = new URL(href, origin);
+    } catch {
+      // A base this module cannot parse is a base it ignores.
+    }
   }
 
   const found: string[] = [];
@@ -503,7 +577,7 @@ export function sameOriginStylesheets(
     } catch {
       continue;
     }
-    if (resolved.origin !== base.origin) continue;
+    if (resolved.origin !== origin.origin) continue;
     const absolute = resolved.toString();
     if (seen.has(absolute)) continue;
     seen.add(absolute);
