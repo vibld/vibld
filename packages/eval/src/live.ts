@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { InMemoryGenerationStore } from '@vibld/core';
 import { PlanProvider, createPlanClient, findModel } from '@vibld/ai';
 import type { ModelProvider, ProjectSnapshot } from '@vibld/core';
@@ -76,6 +76,23 @@ export function liveProblems(options: LiveOptions, env: LiveEnv): string[] {
     problems.push(
       'VIBLD_EVAL_LIVE is set but VIBLD_EVAL_MODELS names no model.',
     );
+  }
+  // Refused rather than quietly deduplicated. A repeated id pays for the whole
+  // selected set twice, and with VIBLD_EVAL_OUT the second pass clears and
+  // replaces the first at the same destination, so the spend buys output that
+  // no longer exists. Repeated runs for variance are a real thing to want
+  // (#9/#10 asks for three per prompt) and will need a flag that says so:
+  // until then a duplicate is a mistake, and guessing which was meant is the
+  // widening this file exists to avoid.
+  const seen = new Set<string>();
+  for (const id of options.models) {
+    if (seen.has(id)) {
+      problems.push(
+        `VIBLD_EVAL_MODELS names ${id} more than once. Each model runs the set once.`,
+      );
+      break;
+    }
+    seen.add(id);
   }
   for (const id of options.models) {
     const model = findModel(id);
@@ -273,5 +290,34 @@ export function planWrites(
     claimed.set(key, file.path);
     writes.push({ path: file.path, target });
   }
+
+  // One destination being a directory on the way to another is the same kind
+  // of unwritable snapshot, and it is not caught above because "src" and
+  // "src/App.tsx" are genuinely different keys. Left to the write loop it
+  // fails with ENOTDIR or EISDIR partway through, which is precisely what
+  // planning ahead is meant to prevent: by then the previous candidate has
+  // already been cleared.
+  //
+  // Walked ancestor by ancestor rather than by comparing sorted neighbours.
+  // Sorting does not put an ancestor next to its descendant: "src.txt" sorts
+  // between "src" and "src/App.tsx", because "." precedes "/", so a
+  // neighbour check silently misses the very conflict it is looking for.
+  const base = resolve(root).toLowerCase();
+  for (const key of claimed.keys()) {
+    let parent = dirname(key);
+    while (parent.length > base.length && parent.startsWith(base)) {
+      const ancestor = claimed.get(parent);
+      if (ancestor !== undefined) {
+        return {
+          ok: false,
+          error: `"${ancestor}" is a file and a parent directory of "${claimed.get(key)!}".`,
+        };
+      }
+      const next = dirname(parent);
+      if (next === parent) break;
+      parent = next;
+    }
+  }
+
   return { ok: true, writes };
 }

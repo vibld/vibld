@@ -266,3 +266,62 @@ describe('planWrites', () => {
     assert.equal(plan.ok, false);
   });
 });
+
+describe('planWrites refuses a snapshot that cannot be written at all', () => {
+  const plan = (paths: string[]) =>
+    planWrites(
+      '/out/opus/case',
+      paths.map((path) => ({ path, content: 'x' })),
+    );
+
+  it('refuses a path that is both a file and a parent directory', () => {
+    // Distinct keys, so the case-collision check above does not see it. Left
+    // to the write loop it fails with ENOTDIR or EISDIR partway through,
+    // after the previous candidate has already been cleared.
+    const result = plan(['src', 'src/App.tsx']);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /file and a parent directory/);
+  });
+
+  it('catches the conflict even when sorting separates the two', () => {
+    // The reason this walks ancestors instead of comparing sorted neighbours.
+    // "." precedes "/", so "src.txt" sorts between "src" and "src/App.tsx"
+    // and a neighbour check misses the conflict entirely.
+    const result = plan(['src', 'src.txt', 'src/App.tsx']);
+    assert.equal(result.ok, false);
+  });
+
+  it('catches an ancestor several levels up', () => {
+    const result = plan(['a', 'a/b/c/d.txt']);
+    assert.equal(result.ok, false);
+  });
+
+  it('still allows a name that merely shares a prefix with a directory', () => {
+    // "src.txt" is not inside "src". Refusing it would reject valid output.
+    const result = plan(['src.txt', 'src/App.tsx']);
+    assert.equal(result.ok, true);
+  });
+});
+
+describe('liveProblems refuses a repeated model', () => {
+  it('names the duplicate rather than paying for the set twice', () => {
+    // Each pass pays for the whole selected set, and with VIBLD_EVAL_OUT the
+    // second clears and replaces the first at the same destination, so the
+    // spend buys output that no longer exists.
+    const options = readLiveOptions({
+      VIBLD_EVAL_LIVE: '1',
+      VIBLD_EVAL_MODELS: 'claude-opus-5,deepseek-flash,claude-opus-5',
+    });
+    const problems = liveProblems(options, KEYED);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!, /more than once/);
+  });
+
+  it('still accepts distinct models', () => {
+    const options = readLiveOptions({
+      VIBLD_EVAL_LIVE: '1',
+      VIBLD_EVAL_MODELS: 'claude-opus-5,deepseek-flash,gpt-5.6-luna',
+    });
+    assert.deepEqual(liveProblems(options, KEYED), []);
+  });
+});
