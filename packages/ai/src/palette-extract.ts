@@ -96,8 +96,27 @@ const NAME_ENDS_BEHIND = '(?<![\\w-])';
  */
 const HTML_COMMENT = /<!--[\s\S]{0,20000}?-->/g;
 const CSS_COMMENT = /\/\*[\s\S]{0,20000}?\*\//g;
-const STYLE_BLOCK = /<style\b[^>]{0,2000}>([\s\S]{0,200000}?)<\/style\s*>/gi;
-const SCRIPT_BLOCK = /<script\b[^>]{0,2000}>[\s\S]{0,200000}?<\/script\s*>/gi;
+/**
+ * Opening and closing tags, both ends held to the same name rule.
+ *
+ * An end tag is `</name` followed by anything up to the `>`, not `</name>`
+ * exactly: a browser ends a script at `</script foo>` and at `</script\t\n
+ * bar>`, and a pattern insisting on `\s*>` reads straight past both. That
+ * leaves a script standing as live markup, which is the one thing
+ * `markupOnly` exists to prevent, so it is a bypass rather than a missed
+ * case. CodeQL caught this one.
+ *
+ * `\b` will not do on the closing name either: it fires between `t` and
+ * `-`, so `</script-foo>` would count as the end of a script.
+ */
+const STYLE_BLOCK = new RegExp(
+  `<style${NAME_ENDS}[^>]{0,2000}>([\\s\\S]{0,200000}?)</style${NAME_ENDS}[^>]{0,2000}>`,
+  'gi',
+);
+const SCRIPT_BLOCK = new RegExp(
+  `<script${NAME_ENDS}[^>]{0,2000}>[\\s\\S]{0,200000}?</script${NAME_ENDS}[^>]{0,2000}>`,
+  'gi',
+);
 
 /**
  * The document with the parts a browser does not treat as markup removed.

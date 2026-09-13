@@ -374,65 +374,82 @@ describe('a reference palette and the product type', () => {
 
 describe('a page built to be expensive to read', () => {
   /**
-   * The cost of scanning a page of this size, in milliseconds.
+   * How much longer one big scan takes than four quarter-sized ones.
    *
-   * Best of three rather than one reading, because a shared runner will
-   * happily descend on any single measurement.
+   * Both sides do the same total work, 180,000 characters, so linear work
+   * comes out near 1 and the backtracking this guards against comes out near
+   * 4. Comparing equal totals rather than a small measurement against a
+   * large one is what makes it survive a busy runner: an earlier version
+   * compared 45,000 against 180,000, where the smaller reading was tens of
+   * milliseconds and a scheduler hiccup moved the ratio past its threshold.
+   * Here both sides accumulate the same couple of hundred milliseconds.
    */
-  function costOf(page: string): number {
-    let best = Number.POSITIVE_INFINITY;
-    for (let run = 0; run < 3; run += 1) {
+  function backtrackingFactor(scan: (size: number) => void): number {
+    // 40,000 and 160,000 rather than a quarter of the scan cap, so an inline
+    // `<style>` block's closing tag still falls inside the window at the
+    // larger size. At 180,000 the tag is cut off, the block is never found,
+    // and the scan the test is about does not happen at all.
+    const quarters = () => {
       const started = Date.now();
-      paletteFromPage(page);
-      best = Math.min(best, Date.now() - started);
+      for (let run = 0; run < 4; run += 1) scan(40_000);
+      return Date.now() - started;
+    };
+    const whole = () => {
+      const started = Date.now();
+      scan(160_000);
+      return Date.now() - started;
+    };
+    let best = Number.POSITIVE_INFINITY;
+    for (let round = 0; round < 3; round += 1) {
+      best = Math.min(best, whole() / Math.max(1, quarters()));
     }
     return best;
   }
 
-  /**
-   * Growth between a page and one four times its size.
-   *
-   * The property worth asserting is the shape of the cost, not a number of
-   * milliseconds: linear work grows about fourfold, and the backtracking
-   * this guards against grows about sixteenfold. A wall-clock ceiling asserts
-   * the speed of the runner instead, which is why the first version of this
-   * test passed here at 209ms and failed in CI at 1101ms against its own
-   * 1000ms budget. Both measurements here happen on the same machine, so
-   * whatever that machine is cancels out.
-   *
-   * Ten is between four and sixteen with room on both sides for a noisy
-   * runner, and the absolute ceiling below still catches a regression that
-   * somehow grows evenly.
-   */
-  function growthFactor(unit: (size: number) => string): number {
-    const small = Math.max(1, costOf(unit(45_000)));
-    const large = costOf(unit(180_000));
-    return large / small;
-  }
-
-  it('scans a document of delimiters without backtracking over them', () => {
+  it('scans a stylesheet of delimiters without backtracking over them', () => {
     // 180,000 semicolons with no brace after them cost 25 seconds under a
-    // lazy scan for the next `{`. This runs in a Worker, on a page the
-    // deployment does not choose, inside a CPU budget somebody else pays
-    // for.
-    const page = (size: number) => `<style>${';'.repeat(size)}</style>`;
-    const factor = growthFactor(page);
-    assert.ok(factor < 10, `grew ${factor.toFixed(1)}x for 4x the input`);
-    assert.ok(costOf(page(180_000)) < 10_000, 'took more than ten seconds');
+    // lazy scan for the next `{`. A stylesheet is where this input really
+    // arrives, and it is scanned whole rather than having to be found
+    // between tags.
+    const factor = backtrackingFactor((size) => {
+      paletteFromPage('<p style="color:#0b5fff">x</p>', [';'.repeat(size)]);
+    });
+    assert.ok(factor < 2.5, `four times the work cost ${factor.toFixed(1)}x`);
   });
 
-  it('is not slowed down by unclosed media queries', () => {
-    const page = (size: number) =>
-      `<style>${'@media '.repeat(Math.floor(size / 7))}</style>`;
-    const factor = growthFactor(page);
-    assert.ok(factor < 10, `grew ${factor.toFixed(1)}x for 4x the input`);
+  it('is not slowed down by unclosed media queries in a stylesheet', () => {
+    const factor = backtrackingFactor((size) => {
+      paletteFromPage('<p style="color:#0b5fff">x</p>', [
+        '@media '.repeat(Math.floor(size / 7)),
+      ]);
+    });
+    assert.ok(factor < 2.5, `four times the work cost ${factor.toFixed(1)}x`);
   });
 
-  it('is not slowed down by unclosed body tags', () => {
-    const page = (size: number) =>
-      `${'<body '.repeat(Math.floor(size / 6))}<p>x</p>`;
-    const factor = growthFactor(page);
-    assert.ok(factor < 10, `grew ${factor.toFixed(1)}x for 4x the input`);
+  it('is not slowed down by delimiters in an inline style block', () => {
+    // The markup path into the same rule scan. There is deliberately no
+    // test here for a page of unclosed `<body ` tags: the pattern that made
+    // those expensive was a lookahead for a `bgcolor` attribute, which no
+    // longer exists, and a measurement that reads the same with the bound
+    // removed is not a guard. The ceiling below still covers that shape.
+    const factor = backtrackingFactor((size) => {
+      paletteFromPage(
+        `<style>${';'.repeat(size)}</style><p style="color:#0b5fff">x</p>`,
+      );
+    });
+    assert.ok(factor < 2.5, `four times the work cost ${factor.toFixed(1)}x`);
+  });
+
+  it('bounds a hostile page in absolute terms too', () => {
+    // A regression that somehow grew evenly would pass the ratio. Ten
+    // seconds is far above anything measured (the worst is a third of a
+    // second) and far below the twenty-five the unbounded patterns cost.
+    const started = Date.now();
+    paletteFromPage(`${'<body '.repeat(30_000)}<p>x</p>`, [
+      ';'.repeat(180_000),
+    ]);
+    const took = Date.now() - started;
+    assert.ok(took < 10_000, `took ${took}ms`);
   });
 });
 
@@ -816,6 +833,43 @@ describe('links the browser would never load', () => {
     assert.deepEqual(
       sameOriginStylesheets(
         '<!-- <link rel="stylesheet" href="/ghost.css"> -->' +
+          '<link rel="stylesheet" href="/real.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/real.css'],
+    );
+  });
+
+  it('ignores a link in a script closed the way a browser closes one', () => {
+    // A browser ends a script at `</script foo>` and at `</script\t\n bar>`.
+    // A pattern insisting on `</script>` reads past both and the script
+    // stands as live markup again, which is a bypass of the whole point of
+    // stripping it.
+    for (const closer of [
+      '</script foo>',
+      '</script\t\n bar>',
+      '</script >',
+      '</SCRIPT>',
+    ]) {
+      assert.deepEqual(
+        sameOriginStylesheets(
+          `<script>var t = '<link rel="stylesheet" href="/ghost.css">';${closer}` +
+            '<link rel="stylesheet" href="/real.css">',
+          'https://example.com/',
+        ),
+        ['https://example.com/real.css'],
+        closer,
+      );
+    }
+  });
+
+  it('does not treat a custom element close as the end of a script', () => {
+    // `</script-foo>` is not the end of a script, and a word boundary says
+    // it is.
+    assert.deepEqual(
+      sameOriginStylesheets(
+        "<script>var t = '</script-foo>" +
+          '<link rel="stylesheet" href="/ghost.css">\';</script>' +
           '<link rel="stylesheet" href="/real.css">',
         'https://example.com/',
       ),
