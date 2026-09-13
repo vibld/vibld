@@ -383,11 +383,21 @@ function readGroundMode(
     // storing and not a declaration it applies.
     const declaring = `${style ?? ''} ${attribute(attributes, 'class') ?? ''}`;
     for (const scheme of schemesIn(declaring)) {
-      schemes.push({ ...scheme, rank: INLINE_RANK, order: order++ });
+      schemes.push({
+        ...scheme,
+        layered: false,
+        rank: INLINE_RANK,
+        order: order++,
+      });
     }
     if (style) {
       for (const ground of backgroundsIn(style)) {
-        grounds.push({ ...ground, rank: INLINE_RANK, order: order++ });
+        grounds.push({
+          ...ground,
+          layered: false,
+          rank: INLINE_RANK,
+          order: order++,
+        });
       }
     }
     const legacy = attribute(attributes, 'bgcolor');
@@ -397,6 +407,7 @@ function readGroundMode(
       for (const literal of readColorLiterals(legacy)) {
         grounds.push({
           important: false,
+          layered: false,
           rank: 0,
           order: order++,
           value: literal,
@@ -406,19 +417,20 @@ function readGroundMode(
   }
 
   for (const css of cssInDocumentOrder(text, stylesheets, pageUrl)) {
-    const rules = withoutAtRules(
-      css.slice(0, MAX_SCAN_CHARS).replace(CSS_COMMENT, ' '),
-    );
-    for (const rule of rules.matchAll(CSS_RULE)) {
-      const selector = rule[1] ?? '';
-      if (!statesTheRootUnconditionally(selector)) continue;
-      const rank = rootSpecificity(selector);
-      const block = rule[2] ?? '';
-      for (const scheme of schemesIn(block)) {
-        schemes.push({ ...scheme, rank, order: order++ });
-      }
-      for (const ground of backgroundsIn(block)) {
-        grounds.push({ ...ground, rank, order: order++ });
+    const trimmed = css.slice(0, MAX_SCAN_CHARS).replace(CSS_COMMENT, ' ');
+    for (const segment of applicableSegments(trimmed)) {
+      for (const rule of segment.text.matchAll(CSS_RULE)) {
+        const selector = rule[1] ?? '';
+        if (!statesTheRootUnconditionally(selector)) continue;
+        const rank = rootSpecificity(selector);
+        const layered = segment.layered;
+        const block = rule[2] ?? '';
+        for (const scheme of schemesIn(block)) {
+          schemes.push({ ...scheme, layered, rank, order: order++ });
+        }
+        for (const ground of backgroundsIn(block)) {
+          grounds.push({ ...ground, layered, rank, order: order++ });
+        }
       }
     }
   }
@@ -443,6 +455,13 @@ interface Ranked<T> {
    * inline declaration, which is the one case where inline does not win.
    */
   important: boolean;
+  /**
+   * Whether a cascade layer contains the declaration. An unlayered normal
+   * declaration outranks a layered one of any specificity, which is the
+   * point of layers; among important declarations the order reverses, which
+   * is also the point of them.
+   */
+  layered: boolean;
   /** Selector specificity. Higher wins outright. */
   rank: number;
   /** Position in the document. Later wins, but only at equal rank. */
@@ -455,6 +474,12 @@ function ranked<T>(entries: readonly Ranked<T>[]): T[] {
   return [...entries]
     .sort((one, other) => {
       if (one.important !== other.important) return one.important ? 1 : -1;
+      if (one.layered !== other.layered) {
+        // Unlayered wins among normal declarations, layered among
+        // important ones.
+        const unlayeredWins = one.layered ? -1 : 1;
+        return one.important ? -unlayeredWins : unlayeredWins;
+      }
       if (one.rank !== other.rank) return one.rank - other.rank;
       return one.order - other.order;
     })
@@ -542,38 +567,43 @@ function modeOf(grounds: readonly string[]): PaletteMode | null {
   return null;
 }
 
+/** A run of CSS that applies, and whether a cascade layer contains it. */
+interface Segment {
+  text: string;
+  layered: boolean;
+}
+
 /**
- * `source` with every at-rule removed, block and all.
+ * The parts of a stylesheet whose rules are in force, with at-rules resolved.
  *
- * A selector that looks unconditional is still conditional when something
- * encloses it: `@media print { body { background: #fff } }` says nothing
- * about a screen, and `@supports`, `@layer` and a viewport query are the
- * same shape. Checking the selector and not what it sits inside was the same
- * mistake as checking the rightmost compound and not the rest of it.
+ * Three kinds, and they are not the same kind of thing:
  *
- * All of them go, not just the ones that can be shown not to apply. A rule
- * whose condition cannot be verified says nothing here, and the page
- * usually has an unconditional ground elsewhere; when it does not, the
- * caller falls back to the brand colour. This subsumes the
- * `prefers-color-scheme: dark` stripping it replaces, which was the first
- * instance of exactly this problem.
+ * `@layer` is not a condition. It orders the cascade rather than gating it,
+ * so its rules always apply; they are kept, and marked, because an unlayered
+ * declaration outranks a layered one of any specificity.
  *
- * Brace-matched rather than pattern-matched, because a block contains rules
- * and a rule contains braces. Statement at-rules like `@import` end at a
- * semicolon and are removed as statements.
+ * `@media screen` and `@media all` are conditions this can settle: every
+ * screen matches them. They are kept as ordinary rules. A query with a
+ * feature in it (`(min-width: 40em)`) depends on the reader's window and is
+ * refused, because "possible on some screen" is not "in force on this one".
+ *
+ * Everything else goes, block and all: print, `@supports`, and any query
+ * that cannot be decided from the text. A rule whose condition cannot be
+ * verified says nothing here, and the page usually states its ground
+ * somewhere unconditional.
  */
-function withoutAtRules(source: string): string {
-  let out = '';
+function applicableSegments(source: string, layered = false): Segment[] {
+  const segments: Segment[] = [];
   let cursor = 0;
   for (let at = 0; at < source.length; at += 1) {
     if (source[at] !== '@') continue;
     if (at < cursor) continue;
 
     // Where this at-rule ends: the `{` that opens its block, or the `;`
-    // that ends it as a statement, whichever comes first.
+    // that ends it as a statement, whichever comes first. A media query is
+    // not a thousand characters long, and the bound keeps this linear on a
+    // page written to make it otherwise.
     let scan = at + 1;
-    // A media query is not a thousand characters long; the bound keeps this
-    // linear on a page written to make it otherwise.
     const limit = Math.min(source.length, scan + 1000);
     while (scan < limit && source[scan] !== '{' && source[scan] !== ';') {
       scan += 1;
@@ -584,10 +614,9 @@ function withoutAtRules(source: string): string {
     if (source[scan] === '{') {
       let depth = 1;
       // Quotes are skipped, because a brace inside a string is text rather
-      // than structure: `body::before{content:"}"}` ends the block early
-      // for a counter that cannot tell the difference, and what is left
-      // behind is the rest of a conditional block standing as
-      // unconditional rules.
+      // than structure: `body::before{content:"}"}` ends the block early for
+      // a counter that cannot tell the difference, and what is left behind
+      // is the rest of a conditional block standing as unconditional rules.
       let quote: string | null = null;
       while (ends < source.length && depth > 0) {
         const char = source[ends];
@@ -601,20 +630,25 @@ function withoutAtRules(source: string): string {
         ends += 1;
       }
     }
-    out += source.slice(cursor, at);
-    // `@layer` is not a condition. It orders the cascade rather than gating
-    // it, so the rules inside one always apply, and dropping the block for
-    // starting with `@` threw away the base styles of every site that uses
-    // layers -- which Tailwind emits by default. The contents are kept and
-    // scanned in turn, so a genuine conditional nested inside a layer is
-    // still removed.
-    if (source[scan] === '{' && /^@layer\b/i.test(source.slice(at, scan))) {
-      out += withoutAtRules(source.slice(scan + 1, ends - 1));
+
+    segments.push({ text: source.slice(cursor, at), layered });
+    if (source[scan] === '{') {
+      const prelude = source.slice(at, scan);
+      const inside = source.slice(scan + 1, ends - 1);
+      if (/^@layer\b/i.test(prelude)) {
+        segments.push(...applicableSegments(inside, true));
+      } else if (
+        /^@media\b/i.test(prelude) &&
+        alwaysOnScreen(prelude.replace(/^@media/i, ''))
+      ) {
+        segments.push(...applicableSegments(inside, layered));
+      }
     }
     cursor = ends;
     at = ends - 1;
   }
-  return out + source.slice(cursor);
+  segments.push({ text: source.slice(cursor), layered });
+  return segments;
 }
 
 /**
@@ -913,20 +947,52 @@ export function sameOriginStylesheets(
 }
 
 /**
- * Whether a `media` attribute is one a screen matches.
+ * Whether a media query is one a screen matches.
  *
- * Deliberately generous: anything naming `screen` or `all` counts, as does
- * a bare feature query like `(min-width: 40em)`, because those describe
- * which screen rather than whether. Only a query that names another medium
- * and not `screen` is excluded.
+ * A comma-separated list applies if any one of its queries does, and `not`
+ * inverts the query it leads. Detecting type names without reading the `not`
+ * gets both cases exactly backwards: `not screen` was accepted for
+ * containing `screen` and `not print` refused for containing `print`.
+ *
+ * Generous about feature queries on purpose: `(min-width: 40em)` describes
+ * which screen rather than whether, so it counts as applying. That is the
+ * right answer for deciding whether to fetch a sheet at all. Deciding
+ * whether its rules are in force is a different question, and
+ * `alwaysOnScreen` below is the stricter test used for that.
  */
 function appliesOnScreen(media: string): boolean {
   const value = media.trim().toLowerCase();
   if (value.length === 0) return true;
-  if (/\b(?:screen|all)\b/.test(value)) return true;
-  return !/\b(?:print|speech|aural|braille|tty|tv|projection|handheld)\b/.test(
-    value,
-  );
+
+  for (const query of value.split(',')) {
+    const one = query.trim();
+    const names = /\b(?:screen|all)\b/.test(one);
+    const other =
+      /\b(?:print|speech|aural|braille|tty|tv|projection|handheld)\b/.test(one);
+    if (/^not\b/.test(one)) {
+      // `not print` applies on a screen; `not screen` and `not all` do not.
+      if (!names) return true;
+      continue;
+    }
+    if (names || !other) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a media query is one a screen always matches, whatever the screen.
+ *
+ * Stricter than `appliesOnScreen`, and for a different decision: these rules
+ * are kept as if unconditional, so the query has to hold for every viewport
+ * rather than merely be possible on one. A feature condition makes it
+ * depend on the reader's window, which is not something this can know, so
+ * anything with a parenthesis is refused.
+ */
+function alwaysOnScreen(query: string): boolean {
+  const value = query.trim().toLowerCase();
+  if (value.includes('(')) return false;
+  if (value.length === 0) return false;
+  return value.split(',').some((one) => /^(?:screen|all)$/.test(one.trim()));
 }
 
 /** The same links, each with where in the document it was written. */

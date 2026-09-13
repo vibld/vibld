@@ -1205,3 +1205,64 @@ describe('a base tag the browser would not use', () => {
     );
   });
 });
+
+describe('layers, media types and negation', () => {
+  it('ranks an unlayered rule above a layered one', () => {
+    // The point of layers: an unlayered normal declaration wins whatever
+    // its specificity and wherever it sits. Unwrapping `@layer` made its
+    // rules visible and, until this, also made them ordinary.
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff}@layer base{body{background:#111111}}</style>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('reverses that among important declarations', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff!important}' +
+        '@layer base{body{background:#111111!important}}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('keeps a media block every screen matches', () => {
+    // If this is the page's only ground, dropping it leaves nothing and the
+    // mode falls back to the accent.
+    for (const query of ['screen', 'all', 'screen, print']) {
+      const found = paletteFromPage(
+        `<style>@media ${query}{body{background:#111111}}</style>` +
+          '<p style="color:#39d353">x</p>',
+      );
+      assert.ok(found, query);
+      assert.equal(found.mode, 'dark', query);
+    }
+  });
+
+  it('still drops a media block that depends on the window', () => {
+    // Possible on some screen is not in force on this one.
+    const found = paletteFromPage(
+      '<style>body{background:#111111}' +
+        '@media screen and (min-width: 40em){body{background:#ffffff}}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('reads not-screen and not-print the right way round', () => {
+    // Detecting the type name without reading the `not` gets both cases
+    // exactly backwards.
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<link rel="stylesheet" media="not screen" href="/a.css">' +
+          '<link rel="stylesheet" media="not print" href="/b.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/b.css'],
+    );
+  });
+});
