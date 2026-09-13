@@ -74,6 +74,22 @@ describe('every declared route is prerendered', () => {
 });
 
 describe('page metadata', () => {
+  it('gives every page a way into the product', () => {
+    // The gap this closes: the site had four calls to join the waitlist,
+    // nine legal pages, and no link to app.vibld.com anywhere. Someone who
+    // already had an account had no way in from the front door.
+    //
+    // Asserted on the built HTML of every route rather than on the component,
+    // because the header is what would quietly stop being rendered.
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      assert.ok(
+        html.includes(`href="${SITE.appUrl}"`),
+        `${route.path} has no link to the app`,
+      );
+    }
+  });
+
   it('names the site in every title, with nothing dangling', () => {
     // The check that was missing. An em-dash sweep rewrote
     // `X -- ${SITE.name}` as `X | `, which removed the site name from all

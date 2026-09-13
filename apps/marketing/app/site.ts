@@ -31,6 +31,17 @@ export const SITE = {
   turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',
   /** Issue #7 -- link the repository and the open-source, portable-code promise. */
   repoUrl: 'https://github.com/vibld/vibld',
+  /**
+   * The builder (docs/decisions.md L20). A separate host, so this is a plain
+   * anchor rather than a router Link.
+   *
+   * It exists here because until now this site had no link to the product at
+   * all: four calls to join the waitlist, nine legal pages, and no way in for
+   * someone who already has an account. `test/prerender.test.ts` asserts every
+   * page carries it, since "the front door has no handle" is exactly the kind
+   * of absence nobody notices by looking at the page.
+   */
+  appUrl: 'https://app.vibld.com',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   mailingAddress: '285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342',
