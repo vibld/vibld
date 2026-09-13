@@ -310,6 +310,14 @@ describe('crawler-facing files', () => {
     // file has to say plainly what the word means.
     assert.match(body, /vibe/i);
     assert.match(body, /Bible/);
+    // This file is read by assistants answering questions about Vibld, so a
+    // claim in it going stale is the same kind of problem as a stale legal
+    // page. It said there was no product to sign up for while every page
+    // header linked to the builder.
+    assert.ok(
+      body.includes(SITE.appUrl),
+      'llms.txt does not name the builder that every page links to',
+    );
   });
 });
 
