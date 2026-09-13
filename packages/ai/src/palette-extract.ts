@@ -229,8 +229,8 @@ const BACKGROUND_DECLARATION = new RegExp(
  * that the background scan underneath was never being reached.
  */
 const COLOR_SCHEME_DECLARATION = new RegExp(
-  `${NAME_ENDS_BEHIND}color-scheme\\s*:\\s*([a-z\\s]{0,40})`,
-  'i',
+  `${NAME_ENDS_BEHIND}color-scheme\\s*:\\s*([a-z\\s!]{0,40})`,
+  'gi',
 );
 
 /** `dark` or `light` out of a `color-scheme` value, or null. */
@@ -245,17 +245,41 @@ function schemeWord(value: string): PaletteMode | null {
   return first === 'dark' || first === 'light' ? first : null;
 }
 
-function schemeIn(block: string): PaletteMode | null {
-  const found = COLOR_SCHEME_DECLARATION.exec(block);
-  return found?.[1] ? schemeWord(found[1]) : null;
+/** A value written in a block, and whether it was marked important. */
+interface Declared<T> {
+  value: T;
+  important: boolean;
 }
 
-function backgroundsIn(block: string): string[] {
-  const found: string[] = [];
+const IMPORTANT = /!\s*important\s*$/i;
+
+/**
+ * Every `color-scheme` a block declares, in order.
+ *
+ * All of them rather than the first, because a block that writes the
+ * property twice is not ambiguous: CSS applies the last valid declaration,
+ * and a single `exec` returned the one the page had already overruled.
+ */
+function schemesIn(block: string): Declared<PaletteMode>[] {
+  const found: Declared<PaletteMode>[] = [];
+  for (const declaration of block.matchAll(COLOR_SCHEME_DECLARATION)) {
+    const raw = declaration[1] ?? '';
+    const mode = schemeWord(raw.replace(IMPORTANT, ''));
+    if (mode) found.push({ value: mode, important: IMPORTANT.test(raw) });
+  }
+  return found;
+}
+
+function backgroundsIn(block: string): Declared<string>[] {
+  const found: Declared<string>[] = [];
   for (const declaration of block.matchAll(BACKGROUND_DECLARATION)) {
+    const raw = declaration[1] ?? '';
+    const important = IMPORTANT.test(raw);
     // A shorthand can be a gradient, a url, or `transparent`. Anything that
     // is not a colour literal contributes nothing and is skipped.
-    found.push(...readColorLiterals(declaration[1] ?? ''));
+    for (const color of readColorLiterals(raw.replace(IMPORTANT, ''))) {
+      found.push({ value: color, important });
+    }
   }
   return found;
 }
@@ -333,10 +357,11 @@ function readGroundMode(
   // `style` the inline one wins wherever it sits in the file, which is
   // specificity. Collapsing the two into one list and taking the first
   // qualifying literal got both backwards.
-  const fromRules: Ranked<string>[] = [];
-  const fromInline: string[] = [];
-  let inlineScheme: PaletteMode | null = null;
-  const ruleSchemes: Ranked<PaletteMode>[] = [];
+  // One list each, not two: an inline style outranks every selector, but an
+  // important declaration outranks the inline style, so they have to be
+  // compared rather than consulted in turn.
+  const grounds: Ranked<string>[] = [];
+  const schemes: Ranked<PaletteMode>[] = [];
   let order = 0;
 
   // The root elements themselves. A page that writes its ground inline, as
@@ -357,14 +382,25 @@ function readGroundMode(
     // read `data-config="color-scheme:dark"`, which is a string a page is
     // storing and not a declaration it applies.
     const declaring = `${style ?? ''} ${attribute(attributes, 'class') ?? ''}`;
-    inlineScheme = schemeIn(declaring) ?? inlineScheme;
-    if (style) fromInline.push(...backgroundsIn(style));
+    for (const scheme of schemesIn(declaring)) {
+      schemes.push({ ...scheme, rank: INLINE_RANK, order: order++ });
+    }
+    if (style) {
+      for (const ground of backgroundsIn(style)) {
+        grounds.push({ ...ground, rank: INLINE_RANK, order: order++ });
+      }
+    }
     const legacy = attribute(attributes, 'bgcolor');
     // A presentational attribute, which the cascade puts below a stylesheet
     // rule rather than above it, and below every one of them.
     if (legacy) {
       for (const literal of readColorLiterals(legacy)) {
-        fromRules.push({ rank: 0, order: order++, value: literal });
+        grounds.push({
+          important: false,
+          rank: 0,
+          order: order++,
+          value: literal,
+        });
       }
     }
   }
@@ -378,21 +414,35 @@ function readGroundMode(
       if (!statesTheRootUnconditionally(selector)) continue;
       const rank = rootSpecificity(selector);
       const block = rule[2] ?? '';
-      const scheme = schemeIn(block);
-      if (scheme) ruleSchemes.push({ rank, order: order++, value: scheme });
-      for (const literal of backgroundsIn(block)) {
-        fromRules.push({ rank, order: order++, value: literal });
+      for (const scheme of schemesIn(block)) {
+        schemes.push({ ...scheme, rank, order: order++ });
+      }
+      for (const ground of backgroundsIn(block)) {
+        grounds.push({ ...ground, rank, order: order++ });
       }
     }
   }
 
-  const scheme = inlineScheme ?? winner(ruleSchemes);
+  const scheme = winner(schemes);
   if (scheme) return scheme;
-  return modeOf(fromInline) ?? modeOf(ranked(fromRules));
+  return modeOf(ranked(grounds));
 }
+
+/**
+ * Where an inline style sits among selector specificities: above all of
+ * them. It is not a specificity in the spec's sense, which is why it is a
+ * plain number here, and nothing in the accepted set can reach it.
+ */
+const INLINE_RANK = 1_000;
 
 /** A declaration, with what decides which of two of them applies. */
 interface Ranked<T> {
+  /**
+   * `!important`, which sits above everything else in the cascade, an
+   * inline style included. Without it an important rule loses to a normal
+   * inline declaration, which is the one case where inline does not win.
+   */
+  important: boolean;
   /** Selector specificity. Higher wins outright. */
   rank: number;
   /** Position in the document. Later wins, but only at equal rank. */
@@ -403,9 +453,11 @@ interface Ranked<T> {
 /** These sorted the way the cascade resolves them: least winning first. */
 function ranked<T>(entries: readonly Ranked<T>[]): T[] {
   return [...entries]
-    .sort((one, other) =>
-      one.rank === other.rank ? one.order - other.order : one.rank - other.rank,
-    )
+    .sort((one, other) => {
+      if (one.important !== other.important) return one.important ? 1 : -1;
+      if (one.rank !== other.rank) return one.rank - other.rank;
+      return one.order - other.order;
+    })
     .map((entry) => entry.value);
 }
 
@@ -525,9 +577,21 @@ function withoutAtRules(source: string): string {
     let ends = scan + 1;
     if (source[scan] === '{') {
       let depth = 1;
+      // Quotes are skipped, because a brace inside a string is text rather
+      // than structure: `body::before{content:"}"}` ends the block early
+      // for a counter that cannot tell the difference, and what is left
+      // behind is the rest of a conditional block standing as
+      // unconditional rules.
+      let quote: string | null = null;
       while (ends < source.length && depth > 0) {
-        if (source[ends] === '{') depth += 1;
-        else if (source[ends] === '}') depth -= 1;
+        const char = source[ends];
+        if (quote) {
+          if (char === '\\') ends += 1;
+          else if (char === quote) quote = null;
+        } else if (char === '"' || char === "'") {
+          quote = char;
+        } else if (char === '{') depth += 1;
+        else if (char === '}') depth -= 1;
         ends += 1;
       }
     }
@@ -873,8 +937,11 @@ function stylesheetLinks(
   // own origin, so a base pointing somewhere else makes the sheets
   // cross-origin and they are dropped, which is the right answer.
   let base = origin;
+  // From live markup, like the links below and the meta tags elsewhere. A
+  // commented-out or script-quoted `<base>` would otherwise redirect every
+  // real stylesheet link on the page to a path that is not there.
   const declared = new RegExp(`<base${NAME_ENDS}([^>]{0,2000})>`, 'i').exec(
-    html.slice(0, MAX_SCAN_CHARS),
+    markupOnly(html.slice(0, MAX_SCAN_CHARS)),
   );
   const href = declared ? attribute(declared[1] ?? '', 'href') : null;
   if (href) {

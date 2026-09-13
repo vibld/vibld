@@ -1073,3 +1073,103 @@ describe('a theme-color the browser would not use', () => {
     assert.equal(found.source, '#c0392b');
   });
 });
+
+describe('the rest of the cascade', () => {
+  it('lets an important rule beat a normal inline style', () => {
+    // The one case where inline does not win. Consulting inline first and
+    // the rules afterwards cannot express it, so importance is compared
+    // rather than ordered.
+    const found = paletteFromPage(
+      '<body style="background:#ffffff">' +
+        '<style>body{background:#111111!important}</style>' +
+        '<p style="color:#39d353">x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('keeps an inline style ahead of a normal rule', () => {
+    const found = paletteFromPage(
+      '<body style="background:#ffffff">' +
+        '<style>body{background:#111111}</style>' +
+        '<p style="color:#0b5fff">x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('does not let a later normal declaration beat an important one', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#111111!important}body{background:#ffffff}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('takes the last declaration when a block repeats the property', () => {
+    // A block writing the property twice is a fallback, not an ambiguity:
+    // CSS applies the last valid one and a single exec returned the one the
+    // page had already overruled.
+    const scheme = paletteFromPage(
+      '<style>body{color-scheme:light;color-scheme:dark}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(scheme);
+    assert.equal(scheme.mode, 'dark');
+
+    const ground = paletteFromPage(
+      '<style>body{background:#ffffff;background:#111111}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(ground);
+    assert.equal(ground.mode, 'dark');
+  });
+});
+
+describe('braces that are not structure', () => {
+  it('removes a whole at-rule containing a brace in a string', () => {
+    // The counter stopped at the brace inside `content`, so the rest of the
+    // print block was left behind as ordinary rules and its white ground
+    // reversed the page.
+    const found = paletteFromPage(
+      '<style>body{background:#111111}' +
+        '@media print{body::before{content:"}"}body{background:#ffffff}}' +
+        '</style><p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('handles an escaped quote inside that string', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#111111}' +
+        '@media print{body::before{content:"\\"}"}body{background:#ffffff}}' +
+        '</style><p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+});
+
+describe('a base tag the browser would not use', () => {
+  it('ignores a commented-out base', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<!-- <base href="/old/"> --><link rel="stylesheet" href="theme.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/theme.css'],
+    );
+  });
+
+  it('still honours a live base', () => {
+    assert.deepEqual(
+      sameOriginStylesheets(
+        '<base href="/assets/"><link rel="stylesheet" href="theme.css">',
+        'https://example.com/',
+      ),
+      ['https://example.com/assets/theme.css'],
+    );
+  });
+});
