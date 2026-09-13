@@ -1,0 +1,167 @@
+name: Model bakeoff
+
+# Runs the versioned prompt set against real models and keeps what they
+# produced. This is the only thing that answers "which model writes a good
+# website", which the stub cannot (packages/eval/README.md), and #9/#10 ask
+# for reliability rather than a single sample, so it runs each case more than
+# once and reports the spread.
+#
+# Manual only, and every run spends real money. The credentials live on the
+# "preview" environment, so any protection rule configured there gates the run
+# before a single step executes.
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: >-
+          Comma-separated model ids from the catalogue. Each one runs the
+          selected cases independently and gets its own report.
+        required: true
+        default: claude-opus-5,gpt-5.6-sol,deepseek-v4-pro
+      cases:
+        description: >-
+          Comma-separated case ids. Required, and deliberately so: blank means
+          every case in the set, which multiplies the bill by six.
+        required: true
+        default: vibld-marketing
+      runs:
+        description: >-
+          How many times each model runs each case. Three is what #10's gate
+          is written in terms of. This multiplies the bill by the same number.
+        required: true
+        default: '3'
+
+permissions:
+  contents: read
+
+# Never two at once. Not cancel-in-progress: a cancelled run has already paid
+# for whatever it generated, and cancelling it throws that away.
+concurrency:
+  group: bakeoff
+  cancel-in-progress: false
+
+jobs:
+  bakeoff:
+    name: Run the set against real models
+    runs-on: ubuntu-latest
+    # Generous, because a real generation takes minutes and the scope is an
+    # input. A run that would exceed this wants splitting by model rather than
+    # a bigger number here.
+    timeout-minutes: 60
+    environment: preview
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every refusal here is cheaper than the one the eval would reach after
+      # a model has been paid, and the blank-cases case is not a refusal the
+      # eval can make for us: to it, no selection is a valid request for the
+      # whole set.
+      - name: Check what this run would spend
+        shell: bash
+        env:
+          MODELS: ${{ inputs.models }}
+          CASES: ${{ inputs.cases }}
+          RUNS: ${{ inputs.runs }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CASES// /}" ]; then
+            echo "::error::No case named. Blank selects every case in the set, which is not something to arrive at by leaving a box empty."
+            exit 1
+          fi
+          if [ -z "${MODELS// /}" ]; then
+            echo "::error::No model named."
+            exit 1
+          fi
+          case "$RUNS" in
+            ''|*[!0-9]*) echo "::error::runs must be a whole number, not \"$RUNS\"."; exit 1 ;;
+          esac
+          count() { printf '%s' "$1" | tr ',' '\n' | grep -c '[^[:space:]]'; }
+          models=$(count "$MODELS")
+          cases=$(count "$CASES")
+          {
+            echo "## Scope"
+            echo
+            echo "$models models x $cases cases x $RUNS runs = **$((models * cases * RUNS)) generations**, all of them billed."
+            echo
+            echo "Measured spend is reported at the end of the run, from the usage each provider reported."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the bakeoff
+        id: bakeoff
+        shell: bash
+        env:
+          # Dispatch inputs are untrusted text. They are passed through the
+          # environment and only ever referenced as "$VAR"; interpolating
+          # ${{ inputs.* }} into this script would let a crafted value run
+          # shell commands in a step that holds every model key.
+          MODELS: ${{ inputs.models }}
+          CASES: ${{ inputs.cases }}
+          VIBLD_EVAL_LIVE: '1'
+          VIBLD_EVAL_MODELS: ${{ inputs.models }}
+          VIBLD_EVAL_RUNS: ${{ inputs.runs }}
+          VIBLD_EVAL_OUT: ${{ runner.temp }}/candidates
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -uo pipefail
+          # Built as an array rather than interpolated into a string, so a
+          # case id can never become a second argument or a shell operator.
+          #
+          # `printf '%s\n'`, with the newline, because `read` returns false on
+          # a final line that has none and the loop body is then skipped for
+          # it. With a single case that dropped the only --case, and no
+          # selection means the whole set: nine generations silently becoming
+          # fifty-four. The empty check below is the rule rather than the
+          # instance, since anything that leaves this list empty has the same
+          # consequence however it happened.
+          args=()
+          while IFS= read -r id; do
+            [ -n "$id" ] && args+=(--case "$id")
+          done < <(printf '%s\n' "$CASES" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
+          if [ ${#args[@]} -eq 0 ]; then
+            echo "::error::No case survived parsing \"$CASES\". Refusing rather than running the whole set."
+            exit 1
+          fi
+          echo "Running: ${args[*]}"
+
+          set +e
+          pnpm --filter @vibld/eval run eval -- "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/bakeoff.log"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo
+            echo '## Report'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/bakeoff.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      # Uploaded even when the run failed its expectations. Looking at what a
+      # model got wrong is most of the reason to write any of this out, and a
+      # failed case still cost what it cost.
+      - name: Upload the candidates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bakeoff-candidates
+          path: ${{ runner.temp }}/candidates
+          if-no-files-found: warn

@@ -13,12 +13,12 @@ on:
       provider:
         description: Which model service answers
         type: choice
-        options: [anthropic, deepseek]
+        options: [anthropic, deepseek, openai]
         default: anthropic
       model:
         description: >-
-          Optional model override. Leave blank for the provider's default
-          (claude-opus-5, or deepseek-v4-flash).
+          Optional model override, an id from the catalogue. Leave blank for
+          the provider's default.
         required: false
         default: ''
       build:
@@ -56,11 +56,13 @@ jobs:
           PROVIDER: ${{ inputs.provider }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # Only the selected provider's key is required. Checking both would
-          # block a DeepSeek run on a credential it never uses.
+          # Only the selected provider's key is required. Checking them all
+          # would block a run on a credential it never uses.
           case "$PROVIDER" in
             deepseek) key="$DEEPSEEK_API_KEY"; name=DEEPSEEK_API_KEY ;;
+            openai)   key="$OPENAI_API_KEY"; name=OPENAI_API_KEY ;;
             *)        key="$ANTHROPIC_API_KEY"; name=ANTHROPIC_API_KEY ;;
           esac
           if [ -z "$key" ]; then
@@ -94,6 +96,7 @@ jobs:
           VIBLD_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           {
             echo '## Prompt'
@@ -130,6 +133,7 @@ jobs:
           VIBLD_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           {
             echo
@@ -152,8 +156,8 @@ jobs:
 
       # Runs npm lifecycle scripts from a model-authored package.json. That is
       # arbitrary code on the runner, so this step deliberately holds no
-      # secrets -- ANTHROPIC_API_KEY is scoped to the generate step above. The
-      # runner is ephemeral and GITHUB_TOKEN is read-only.
+      # secrets -- every model key is scoped to the generation steps above.
+      # The runner is ephemeral and GITHUB_TOKEN is read-only.
       - name: Build the generated project
         if: ${{ inputs.build }}
         shell: bash
