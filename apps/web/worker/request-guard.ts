@@ -3,6 +3,7 @@ import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
 import { findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
+import type { ProviderName } from '@vibld/ai/select-client';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -445,7 +446,7 @@ export function parseAdminTopupRequest(
  */
 export function parseModel(
   body: unknown,
-  configured: { anthropic: boolean; deepseek: boolean },
+  configured: Record<ProviderName, boolean>,
 ): GuardResult<string | null> {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return fail(400, 'Body must be a JSON object.');

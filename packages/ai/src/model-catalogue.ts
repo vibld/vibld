@@ -20,11 +20,19 @@
  * facts, so they live beside the model rather than in the client that has to
  * respect them.
  *
- * Anthropic figures were taken from the model reference on 2026-09-13, not
- * recalled. The rest of the Claude line-up is deliberately absent: Opus 4.8,
+ * Anthropic and OpenAI figures were taken from each vendor's own reference on
+ * 2026-09-13, not recalled. The rest of the Claude line-up is deliberately absent: Opus 4.8,
  * 4.7 and 4.6 all cost exactly what Opus 5 costs and are older, and Sonnet 4.6
  * costs more than Sonnet 5 and is older, so offering them is offering someone
  * a worse run at the same price or a dearer one. Mythos 5.1 is access-gated.
+ *
+ * OpenAI's line-up is filtered the same way. The current generation is GPT-6
+ * Astra and the three GPT-5.6 tiers, all of which hold 1.05M of context and
+ * write up to 128K. The GPT-5.5, 5.4, 5.2, 5.1 and 5 families, the o-series
+ * and everything GPT-4 are all superseded by something at or below their own
+ * price. The `-pro` variants are left out for a different reason: at $30/$180
+ * a single generation could cost more than a month of the Build tier, which
+ * is not a choice to put behind a chip someone might tap out of curiosity.
  */
 
 import type { ProviderName } from './select-client.ts';
@@ -100,6 +108,50 @@ export const MODEL_CATALOGUE: readonly ModelChoice[] = [
     supportsEffort: false,
   },
   {
+    id: 'gpt-6-astra',
+    provider: 'openai',
+    label: 'GPT-6 Astra',
+    note: "OpenAI's flagship. Schema-enforced output.",
+    inputMicroUsd: 10,
+    outputMicroUsd: 50,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsEffort: true,
+  },
+  {
+    id: 'gpt-5.6-sol',
+    provider: 'openai',
+    label: 'GPT-5.6 Sol',
+    note: 'Strong and mid-priced. Schema-enforced output.',
+    inputMicroUsd: 4,
+    outputMicroUsd: 20,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsEffort: true,
+  },
+  {
+    id: 'gpt-5.6-terra',
+    provider: 'openai',
+    label: 'GPT-5.6 Terra',
+    note: 'The balanced OpenAI option. Schema-enforced output.',
+    inputMicroUsd: 2,
+    outputMicroUsd: 12,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsEffort: true,
+  },
+  {
+    id: 'gpt-5.6-luna',
+    provider: 'openai',
+    label: 'GPT-5.6 Luna',
+    note: 'Cheap, and still schema-enforced unlike the DeepSeek options.',
+    inputMicroUsd: 0.2,
+    outputMicroUsd: 1.2,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsEffort: true,
+  },
+  {
     id: 'deepseek-flash',
     provider: 'deepseek',
     label: 'DeepSeek Flash',
@@ -140,9 +192,8 @@ export function isKnownModel(value: unknown): value is string {
  * fails after the user has waited for it, so the picker is built from what
  * the deployment holds rather than from the whole catalogue.
  */
-export function availableModels(configured: {
-  anthropic: boolean;
-  deepseek: boolean;
-}): ModelChoice[] {
+export function availableModels(
+  configured: Record<ProviderName, boolean>,
+): ModelChoice[] {
   return MODEL_CATALOGUE.filter((model) => configured[model.provider]);
 }

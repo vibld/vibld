@@ -1,5 +1,6 @@
 import { createAnthropicPlanClient } from './anthropic-client.ts';
 import { createDeepseekPlanClient } from './deepseek-client.ts';
+import { createOpenaiPlanClient } from './openai-client.ts';
 import { findModel } from './model-catalogue.ts';
 import type { PlanClient } from './client.ts';
 
@@ -13,12 +14,13 @@ import type { PlanClient } from './client.ts';
  * keys are set and nothing says which, Anthropic stays the default rather
  * than the cheaper option quietly taking over a run someone is measuring.
  */
-export type ProviderName = 'anthropic' | 'deepseek';
+export type ProviderName = 'anthropic' | 'deepseek' | 'openai';
 
 /** Defaults per provider. Each is that provider's own current fast model. */
 export const DEFAULT_MODELS: Record<ProviderName, string> = {
   anthropic: 'claude-opus-5',
   deepseek: 'deepseek-flash',
+  openai: 'gpt-5.6-terra',
 };
 
 export interface ProviderEnv {
@@ -26,17 +28,35 @@ export interface ProviderEnv {
   VIBLD_MODEL?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
   DEEPSEEK_API_KEY?: string | undefined;
+  OPENAI_API_KEY?: string | undefined;
+}
+
+/** Every provider name, so a check over all of them cannot miss a new one. */
+export const PROVIDER_NAMES = [
+  'anthropic',
+  'deepseek',
+  'openai',
+] as const satisfies readonly ProviderName[];
+
+function isProviderName(value: string): value is ProviderName {
+  return (PROVIDER_NAMES as readonly string[]).includes(value);
 }
 
 export function selectProvider(env: ProviderEnv): ProviderName {
   const named = env.VIBLD_PROVIDER?.trim().toLowerCase();
-  if (named === 'deepseek' || named === 'anthropic') return named;
+  if (named && isProviderName(named)) return named;
   if (named) {
     throw new Error(
-      `VIBLD_PROVIDER must be "anthropic" or "deepseek", not "${named}".`,
+      `VIBLD_PROVIDER must be one of ${PROVIDER_NAMES.join(', ')}, not "${named}".`,
     );
   }
-  if (!env.ANTHROPIC_API_KEY && env.DEEPSEEK_API_KEY) return 'deepseek';
+  // Inference only when exactly one key is present. With none, or with more
+  // than one and nothing saying which, Anthropic stays the default rather
+  // than a cheaper provider quietly taking over a run someone is measuring.
+  if (!env.ANTHROPIC_API_KEY) {
+    if (env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) return 'deepseek';
+    if (env.OPENAI_API_KEY && !env.DEEPSEEK_API_KEY) return 'openai';
+  }
   return 'anthropic';
 }
 
@@ -61,13 +81,13 @@ export function resolveModel(env: ProviderEnv): string {
 }
 
 /** Which providers this deployment holds a key for. */
-export function configuredProviders(env: ProviderEnv): {
-  anthropic: boolean;
-  deepseek: boolean;
-} {
+export function configuredProviders(
+  env: ProviderEnv,
+): Record<ProviderName, boolean> {
   return {
     anthropic: Boolean(env.ANTHROPIC_API_KEY),
     deepseek: Boolean(env.DEEPSEEK_API_KEY),
+    openai: Boolean(env.OPENAI_API_KEY),
   };
 }
 
@@ -94,6 +114,11 @@ export function createPlanClient(
   if (provider === 'deepseek') {
     return createDeepseekPlanClient(
       env.DEEPSEEK_API_KEY ? { apiKey: env.DEEPSEEK_API_KEY } : {},
+    );
+  }
+  if (provider === 'openai') {
+    return createOpenaiPlanClient(
+      env.OPENAI_API_KEY ? { apiKey: env.OPENAI_API_KEY } : {},
     );
   }
   return createAnthropicPlanClient(

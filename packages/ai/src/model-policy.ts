@@ -124,8 +124,15 @@ export function allowedModels(
   if (parsed === null) return [...deployable];
 
   if (!parsed.ok) {
+    // Output price first, then input as a tie-break. Without the tie-break
+    // two models at the same output rate leave the winner to catalogue order,
+    // so adding a provider could silently change which model a malformed
+    // policy degrades everyone to. Ties are not hypothetical: DeepSeek Flash
+    // and GPT-5.6 Luna both output at 1.2.
     const cheapest = [...deployable].sort(
-      (a, b) => a.outputMicroUsd - b.outputMicroUsd,
+      (a, b) =>
+        a.outputMicroUsd - b.outputMicroUsd ||
+        a.inputMicroUsd - b.inputMicroUsd,
     )[0];
     return cheapest ? [cheapest] : [];
   }

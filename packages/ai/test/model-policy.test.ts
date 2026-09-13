@@ -156,11 +156,17 @@ describe('allowedModels', () => {
     const broken = parseModelPolicy('{not json');
     const allowed = allowedModels(broken, 'chris@drummond.com', ALL);
     assert.equal(allowed.length, 1);
-    assert.equal(allowed[0]!.id, 'deepseek-flash');
-    assert.ok(
-      allowed[0]!.outputMicroUsd ===
-        Math.min(...ALL.map((m) => m.outputMicroUsd)),
+    // Asserted as a property rather than as an id: which model is cheapest
+    // moves whenever the catalogue does, and pinning the id turns that into a
+    // failure that says nothing about what actually broke.
+    const lowestOutput = Math.min(...ALL.map((m) => m.outputMicroUsd));
+    assert.equal(allowed[0]!.outputMicroUsd, lowestOutput);
+    const lowestInputAtThatOutput = Math.min(
+      ...ALL.filter((m) => m.outputMicroUsd === lowestOutput).map(
+        (m) => m.inputMicroUsd,
+      ),
     );
+    assert.equal(allowed[0]!.inputMicroUsd, lowestInputAtThatOutput);
   });
 
   it('grants nothing on a malformed policy when nothing is deployable', () => {

@@ -10,7 +10,8 @@
     "./limits": "./src/limits.ts",
     "./contrast": "./src/contrast.ts",
     "./style-dna": "./src/style-dna.ts",
-    "./model-catalogue": "./src/model-catalogue.ts"
+    "./model-catalogue": "./src/model-catalogue.ts",
+    "./select-client": "./src/select-client.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

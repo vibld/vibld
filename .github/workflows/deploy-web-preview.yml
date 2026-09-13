@@ -85,6 +85,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VIBLD_MODEL_POLICY: ${{ secrets.VIBLD_MODEL_POLICY }}
         run: |
           set -euo pipefail
@@ -103,6 +104,7 @@ jobs:
 
           case "$provider" in
             deepseek) required=DEEPSEEK_API_KEY ;;
+            openai)   required=OPENAI_API_KEY ;;
             *)        required=ANTHROPIC_API_KEY ;;
           esac
           if [ -z "${!required}" ]; then
@@ -117,6 +119,9 @@ jobs:
           fi
           if [ -n "$DEEPSEEK_API_KEY" ]; then
             put DEEPSEEK_API_KEY "$DEEPSEEK_API_KEY"
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then
+            put OPENAI_API_KEY "$OPENAI_API_KEY"
           fi
           # Who may use which model. A secret rather than a var because it
           # names people and this repository is public. Unset means no policy:

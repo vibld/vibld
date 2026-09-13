@@ -23,7 +23,7 @@ describe('selectProvider', () => {
     // forty times as much as they meant to.
     assert.throws(
       () => selectProvider({ VIBLD_PROVIDER: 'deepsek' }),
-      /must be "anthropic" or "deepseek"/,
+      /must be one of anthropic, deepseek, openai/,
     );
   });
 
@@ -157,10 +157,12 @@ describe('configuredProviders', () => {
     assert.deepEqual(configuredProviders({ DEEPSEEK_API_KEY: 'k' }), {
       anthropic: false,
       deepseek: true,
+      openai: false,
     });
     assert.deepEqual(configuredProviders({}), {
       anthropic: false,
       deepseek: false,
+      openai: false,
     });
   });
 });

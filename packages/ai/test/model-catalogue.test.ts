@@ -6,7 +6,7 @@ import {
   findModel,
   isKnownModel,
 } from '../src/model-catalogue.ts';
-import { DEFAULT_MODELS } from '../src/select-client.ts';
+import { DEFAULT_MODELS, PROVIDER_NAMES } from '../src/select-client.ts';
 import { DEFAULT_MAX_TOKENS } from '../src/plan-provider.ts';
 
 describe('the model catalogue', () => {
@@ -14,7 +14,7 @@ describe('the model catalogue', () => {
     const ids = MODEL_CATALOGUE.map((model) => model.id);
     assert.equal(new Set(ids).size, ids.length);
     for (const model of MODEL_CATALOGUE) {
-      assert.ok(['anthropic', 'deepseek'].includes(model.provider), model.id);
+      assert.ok(PROVIDER_NAMES.includes(model.provider), model.id);
       assert.ok(model.label.length > 0 && model.note.length > 0, model.id);
     }
   });
@@ -88,15 +88,23 @@ describe('effort support', () => {
 
 describe('availableModels', () => {
   it('offers only what the deployment holds a key for', () => {
-    const anthropicOnly = availableModels({ anthropic: true, deepseek: false });
+    const anthropicOnly = availableModels({
+      anthropic: true,
+      deepseek: false,
+      openai: false,
+    });
     assert.ok(anthropicOnly.length >= 4);
     assert.ok(anthropicOnly.every((m) => m.provider === 'anthropic'));
 
-    const deepseekOnly = availableModels({ anthropic: false, deepseek: true });
+    const deepseekOnly = availableModels({
+      anthropic: false,
+      deepseek: true,
+      openai: false,
+    });
     assert.ok(deepseekOnly.every((m) => m.provider === 'deepseek'));
 
     assert.deepEqual(
-      availableModels({ anthropic: false, deepseek: false }),
+      availableModels({ anthropic: false, deepseek: false, openai: false }),
       [],
     );
   });

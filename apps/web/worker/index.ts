@@ -82,6 +82,7 @@ export interface Env {
   ANTHROPIC_API_KEY?: string;
   /** Worker secret. Never reaches the browser. */
   DEEPSEEK_API_KEY?: string;
+  OPENAI_API_KEY?: string;
   /** "anthropic" or "deepseek". Explicit beats inferred; see selectProvider. */
   VIBLD_PROVIDER?: string;
   /**
@@ -250,9 +251,9 @@ function json(body: unknown, status = 200): Response {
  */
 function isConfigured(env: Env): boolean {
   return Boolean(
-    // Either provider's key configures the endpoint. Which one it selects is
+    // Any provider's key configures the endpoint. Which one it selects is
     // `selectProvider`'s business, not this gate's.
-    (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY) &&
+    (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY || env.OPENAI_API_KEY) &&
     clerkConfigured(env) &&
     // The ledger is part of the grant, not an optimisation: a deployment
     // that cannot account for spend must not be able to spend.

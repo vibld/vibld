@@ -3,7 +3,12 @@ import { describe, it } from 'node:test';
 import { MODEL_CATALOGUE } from '@vibld/ai/model-catalogue';
 import { decideModel, grantedFor } from '../worker/model-access.ts';
 
-const BOTH = { ANTHROPIC_API_KEY: 'a', DEEPSEEK_API_KEY: 'd' };
+/** Every provider keyed, so "everything configured" really means everything. */
+const ALL_KEYED = {
+  ANTHROPIC_API_KEY: 'a',
+  DEEPSEEK_API_KEY: 'd',
+  OPENAI_API_KEY: 'o',
+};
 const POLICY = JSON.stringify({
   default: ['deepseek-flash'],
   users: { 'chris@drummond.com': ['claude-opus-5', 'deepseek-v4-pro'] },
@@ -11,7 +16,7 @@ const POLICY = JSON.stringify({
 
 describe('grantedFor', () => {
   it('offers everything configured when no policy is set', () => {
-    const granted = grantedFor(BOTH, 'anyone@example.com');
+    const granted = grantedFor(ALL_KEYED, 'anyone@example.com');
     // Asserted against the catalogue rather than a literal: the count moves
     // whenever a model is added, and a hard-coded number turns that into a
     // failure that says nothing about what actually changed.
@@ -38,7 +43,7 @@ describe('grantedFor', () => {
 });
 
 describe('decideModel', () => {
-  const env = { ...BOTH, VIBLD_MODEL_POLICY: POLICY };
+  const env = { ...ALL_KEYED, VIBLD_MODEL_POLICY: POLICY };
 
   it('honours a choice the principal is granted', () => {
     const decision = decideModel(
@@ -92,7 +97,7 @@ describe('decideModel', () => {
 
   it('refuses everything when the principal is granted nothing', () => {
     const decision = decideModel(
-      { ...BOTH, VIBLD_MODEL_POLICY: JSON.stringify({ default: [] }) },
+      { ...ALL_KEYED, VIBLD_MODEL_POLICY: JSON.stringify({ default: [] }) },
       'nobody@x.com',
       null,
       'claude-opus-5',
@@ -107,11 +112,19 @@ describe('decideModel', () => {
 
   it('degrades a malformed policy to the cheapest, for everyone', () => {
     // Escalating on a typo would hand Opus to every caller.
-    const broken = { ...BOTH, VIBLD_MODEL_POLICY: '{not json' };
+    const broken = { ...ALL_KEYED, VIBLD_MODEL_POLICY: '{not json' };
+    // Which model is cheapest moves whenever the catalogue does, so this
+    // computes it the way allowedModels does rather than pinning an id.
+    const lowestOutput = Math.min(
+      ...MODEL_CATALOGUE.map((m) => m.outputMicroUsd),
+    );
+    const cheapest = MODEL_CATALOGUE.filter(
+      (m) => m.outputMicroUsd === lowestOutput,
+    ).sort((a, b) => a.inputMicroUsd - b.inputMicroUsd)[0]!;
     for (const who of ['chris@drummond.com', 'stranger@x.com']) {
       const decision = decideModel(broken, who, null, 'claude-opus-5');
       assert.equal(decision.ok, true, who);
-      if (decision.ok) assert.equal(decision.model, 'deepseek-flash');
+      if (decision.ok) assert.equal(decision.model, cheapest.id);
     }
     // And a chosen expensive model is still refused under a broken policy.
     const refused = decideModel(

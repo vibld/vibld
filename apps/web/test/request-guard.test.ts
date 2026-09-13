@@ -493,7 +493,7 @@ describe('parseAdminTopupRequest', () => {
 });
 
 describe('parseModel', () => {
-  const both = { anthropic: true, deepseek: true };
+  const both = { anthropic: true, deepseek: true, openai: true };
 
   it('accepts no choice at all', () => {
     for (const body of [
@@ -536,7 +536,7 @@ describe('parseModel', () => {
     // Otherwise the run fails after the user has already waited for it.
     const result = parseModel(
       { prompt: 'x', model: 'claude-opus-5' },
-      { anthropic: false, deepseek: true },
+      { anthropic: false, deepseek: true, openai: false },
     );
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /no anthropic credential/);
