@@ -322,7 +322,7 @@ function readGroundMode(
   stylesheets: readonly Stylesheet[],
   pageUrl: string | undefined,
 ): PaletteMode | null {
-  const text = withoutDarkOverrides(markupOnly(html.slice(0, MAX_SCAN_CHARS)));
+  const text = markupOnly(html.slice(0, MAX_SCAN_CHARS));
 
   const meta = metaContent(text, 'color-scheme');
   const declared = meta ? schemeWord(meta) : null;
@@ -333,10 +333,11 @@ function readGroundMode(
   // `style` the inline one wins wherever it sits in the file, which is
   // specificity. Collapsing the two into one list and taking the first
   // qualifying literal got both backwards.
-  const fromRules: string[] = [];
+  const fromRules: Ranked<string>[] = [];
   const fromInline: string[] = [];
   let inlineScheme: PaletteMode | null = null;
-  let ruleScheme: PaletteMode | null = null;
+  const ruleSchemes: Ranked<PaletteMode>[] = [];
+  let order = 0;
 
   // The root elements themselves. A page that writes its ground inline, as
   // `<body style="background:#0d1117">`, is stating it as plainly as a
@@ -350,34 +351,68 @@ function readGroundMode(
     // property syntax, and reading only `style` called that dark site light.
     // A `color-scheme:` written anywhere on `html` or `body` is the page
     // saying it whichever attribute carries it.
-    inlineScheme = schemeIn(attributes) ?? inlineScheme;
     const style = attribute(attributes, 'style');
+    // `style` and `class`, not every attribute. Reading the whole tag was
+    // how astro.build's `class="[color-scheme:dark]"` was found, and it also
+    // read `data-config="color-scheme:dark"`, which is a string a page is
+    // storing and not a declaration it applies.
+    const declaring = `${style ?? ''} ${attribute(attributes, 'class') ?? ''}`;
+    inlineScheme = schemeIn(declaring) ?? inlineScheme;
     if (style) fromInline.push(...backgroundsIn(style));
     const legacy = attribute(attributes, 'bgcolor');
     // A presentational attribute, which the cascade puts below a stylesheet
-    // rule rather than above it.
-    if (legacy) fromRules.push(...readColorLiterals(legacy));
-  }
-
-  for (const css of cssInDocumentOrder(text, stylesheets, pageUrl)) {
-    const rules = withoutDarkOverrides(
-      css.slice(0, MAX_SCAN_CHARS).replace(CSS_COMMENT, ' '),
-    );
-    for (const rule of rules.matchAll(CSS_RULE)) {
-      if (!statesTheRootUnconditionally(rule[1] ?? '')) continue;
-      const block = rule[2] ?? '';
-      // The last applicable one, not the first. Two root rules both setting
-      // `color-scheme` are not ambiguous: the browser takes the later, the
-      // same way it takes the later background, and keeping the first was
-      // this scan disagreeing with itself.
-      ruleScheme = schemeIn(block) ?? ruleScheme;
-      fromRules.push(...backgroundsIn(block));
+    // rule rather than above it, and below every one of them.
+    if (legacy) {
+      for (const literal of readColorLiterals(legacy)) {
+        fromRules.push({ rank: 0, order: order++, value: literal });
+      }
     }
   }
 
-  const scheme = inlineScheme ?? ruleScheme;
+  for (const css of cssInDocumentOrder(text, stylesheets, pageUrl)) {
+    const rules = withoutAtRules(
+      css.slice(0, MAX_SCAN_CHARS).replace(CSS_COMMENT, ' '),
+    );
+    for (const rule of rules.matchAll(CSS_RULE)) {
+      const selector = rule[1] ?? '';
+      if (!statesTheRootUnconditionally(selector)) continue;
+      const rank = rootSpecificity(selector);
+      const block = rule[2] ?? '';
+      const scheme = schemeIn(block);
+      if (scheme) ruleSchemes.push({ rank, order: order++, value: scheme });
+      for (const literal of backgroundsIn(block)) {
+        fromRules.push({ rank, order: order++, value: literal });
+      }
+    }
+  }
+
+  const scheme = inlineScheme ?? winner(ruleSchemes);
   if (scheme) return scheme;
-  return modeOf(fromInline) ?? modeOf(fromRules);
+  return modeOf(fromInline) ?? modeOf(ranked(fromRules));
+}
+
+/** A declaration, with what decides which of two of them applies. */
+interface Ranked<T> {
+  /** Selector specificity. Higher wins outright. */
+  rank: number;
+  /** Position in the document. Later wins, but only at equal rank. */
+  order: number;
+  value: T;
+}
+
+/** These sorted the way the cascade resolves them: least winning first. */
+function ranked<T>(entries: readonly Ranked<T>[]): T[] {
+  return [...entries]
+    .sort((one, other) =>
+      one.rank === other.rank ? one.order - other.order : one.rank - other.rank,
+    )
+    .map((entry) => entry.value);
+}
+
+/** The one of these the cascade would apply, or null when there are none. */
+function winner<T>(entries: readonly Ranked<T>[]): T | null {
+  const sorted = ranked(entries);
+  return sorted.length > 0 ? sorted[sorted.length - 1]! : null;
 }
 
 /**
@@ -450,35 +485,92 @@ function modeOf(grounds: readonly string[]): PaletteMode | null {
 }
 
 /**
- * `source` with every `prefers-color-scheme: dark` block removed.
+ * `source` with every at-rule removed, block and all.
  *
- * Those blocks are what a light site says when the reader has asked for
- * dark, not what the site is. Left in, they make a light site with a dark
- * mode read as dark. Brace-matched rather than pattern-matched, because a
- * media block contains rules and a rule contains braces.
+ * A selector that looks unconditional is still conditional when something
+ * encloses it: `@media print { body { background: #fff } }` says nothing
+ * about a screen, and `@supports`, `@layer` and a viewport query are the
+ * same shape. Checking the selector and not what it sits inside was the same
+ * mistake as checking the rightmost compound and not the rest of it.
+ *
+ * All of them go, not just the ones that can be shown not to apply. A rule
+ * whose condition cannot be verified says nothing here, and the page
+ * usually has an unconditional ground elsewhere; when it does not, the
+ * caller falls back to the brand colour. This subsumes the
+ * `prefers-color-scheme: dark` stripping it replaces, which was the first
+ * instance of exactly this problem.
+ *
+ * Brace-matched rather than pattern-matched, because a block contains rules
+ * and a rule contains braces. Statement at-rules like `@import` end at a
+ * semicolon and are removed as statements.
  */
-function withoutDarkOverrides(source: string): string {
-  // Bounded for the reason the patterns above are: `@media` followed by a
-  // long run with no brace backtracks from every position it passed, and a
-  // media query is not a thousand characters long.
-  const opener =
-    /@media[^{]{0,500}prefers-color-scheme\s*:\s*dark[^{]{0,500}\{/gi;
+function withoutAtRules(source: string): string {
   let out = '';
   let cursor = 0;
-  for (const match of source.matchAll(opener)) {
-    const start = match.index;
-    if (start === undefined || start < cursor) continue;
-    let depth = 1;
-    let at = start + match[0].length;
-    while (at < source.length && depth > 0) {
-      if (source[at] === '{') depth += 1;
-      else if (source[at] === '}') depth -= 1;
-      at += 1;
+  for (let at = 0; at < source.length; at += 1) {
+    if (source[at] !== '@') continue;
+    if (at < cursor) continue;
+
+    // Where this at-rule ends: the `{` that opens its block, or the `;`
+    // that ends it as a statement, whichever comes first.
+    let scan = at + 1;
+    // A media query is not a thousand characters long; the bound keeps this
+    // linear on a page written to make it otherwise.
+    const limit = Math.min(source.length, scan + 1000);
+    while (scan < limit && source[scan] !== '{' && source[scan] !== ';') {
+      scan += 1;
     }
-    out += source.slice(cursor, start);
-    cursor = at;
+    if (scan >= limit) continue;
+
+    let ends = scan + 1;
+    if (source[scan] === '{') {
+      let depth = 1;
+      while (ends < source.length && depth > 0) {
+        if (source[ends] === '{') depth += 1;
+        else if (source[ends] === '}') depth -= 1;
+        ends += 1;
+      }
+    }
+    out += source.slice(cursor, at);
+    cursor = ends;
+    at = ends - 1;
   }
   return out + source.slice(cursor);
+}
+
+/**
+ * How specific an accepted root selector list is, as one comparable number.
+ *
+ * Source order is only the tie-breaker; between rules of different
+ * specificity the more specific wins wherever it sits, so
+ * `html body{background:#111} body{background:#fff}` renders dark and
+ * reading it in order calls it light.
+ *
+ * This is cheap only because the accepted set is so small. Every compound is
+ * `html`, `body` or `:root`, so there are no classes, ids or attributes to
+ * weigh: a pseudo-class outranks any number of type selectors, and type
+ * selectors are counted. Specificity in general is not this simple, and the
+ * reason this function can be is that everything else was refused.
+ */
+function rootSpecificity(selectorList: string): number {
+  let best = 0;
+  for (const selector of selectorList.split(',')) {
+    const compounds = selector
+      .trim()
+      .split(/[\s>+~]+/)
+      .filter(Boolean);
+    if (compounds.length === 0) continue;
+    const root = new RegExp(`^(?:html|body|:root)${NAME_ENDS}$`, 'i');
+    if (!compounds.every((compound) => root.test(compound))) continue;
+    let pseudo = 0;
+    let type = 0;
+    for (const compound of compounds) {
+      if (compound.toLowerCase() === ':root') pseudo += 1;
+      else type += 1;
+    }
+    best = Math.max(best, pseudo * 100 + type);
+  }
+  return best;
 }
 
 /**
@@ -579,7 +671,11 @@ export function readPageColors(
   const head = html.slice(0, MAX_SCAN_CHARS);
 
   let themeColor: string | null = null;
-  const declared = metaContent(head, 'theme-color');
+  // From live markup, like everything else that reads a tag: a commented-out
+  // or script-quoted `<meta name="theme-color">` was accepted here, and a
+  // declared colour outranks all the counted evidence, so an inactive tag
+  // decided the palette.
+  const declared = metaContent(markupOnly(head), 'theme-color');
   if (declared) {
     const [literal] = readColorLiterals(declared);
     themeColor = literal ?? null;

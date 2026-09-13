@@ -977,3 +977,99 @@ describe('stylesheets the browser would not apply to a screen', () => {
     }
   });
 });
+
+describe('what the cascade would actually apply', () => {
+  it('lets a more specific root rule beat a later one', () => {
+    // `html body` outranks `body`, so the page renders dark however late
+    // the white rule sits. Source order is the tie-breaker, not the rule.
+    const found = paletteFromPage(
+      '<style>html body{background:#111111}body{background:#ffffff}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('still takes the later of two rules at equal specificity', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff}body{background:#111111}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('ignores a root rule nested in an at-rule', () => {
+    // A selector that looks unconditional is still conditional when
+    // something encloses it. Print, a viewport query and @supports are all
+    // the same shape, and none of them is verified here.
+    for (const condition of [
+      '@media print',
+      '@media (min-width: 40em)',
+      '@supports (display: grid)',
+      '@layer theme',
+    ]) {
+      const found = paletteFromPage(
+        `<style>body{background:#111111}${condition}{body{background:#ffffff}}</style>` +
+          '<p style="color:#39d353">x</p>',
+      );
+      assert.ok(found, condition);
+      assert.equal(found.mode, 'dark', condition);
+    }
+  });
+
+  it('still ignores a dark-scheme media override', () => {
+    // The case the at-rule rule replaces: it was the first instance of
+    // exactly this problem, handled on its own.
+    const found = paletteFromPage(
+      '<style>body{background:#ffffff}' +
+        '@media (prefers-color-scheme: dark){body{background:#111111}}</style>' +
+        '<p style="color:#0b5fff">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+});
+
+describe('attributes that store CSS rather than apply it', () => {
+  it('does not read a data attribute as a scheme declaration', () => {
+    const found = paletteFromPage(
+      '<body data-config="color-scheme:dark" style="background:#ffffff">' +
+        '<p style="color:#0b5fff">x</p></body>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'light');
+  });
+
+  it('still reads the scheme from style and class', () => {
+    for (const tag of [
+      '<html style="color-scheme:dark">',
+      '<html class="text-gray-100 [color-scheme:dark]">',
+    ]) {
+      const found = paletteFromPage(`${tag}<p style="color:#39d353">x</p>`);
+      assert.ok(found, tag);
+      assert.equal(found.mode, 'dark', tag);
+    }
+  });
+});
+
+describe('a theme-color the browser would not use', () => {
+  it('ignores a commented-out theme-color', () => {
+    const found = paletteFromPage(
+      '<!-- <meta name="theme-color" content="#00add8"> -->' +
+        '<style>.a{color:#c0392b}.b{color:#c0392b}</style><p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.declared, false);
+    assert.equal(found.source, '#c0392b');
+  });
+
+  it('ignores a theme-color quoted inside a script', () => {
+    const found = paletteFromPage(
+      '<script>var t = \'<meta name="theme-color" content="#00add8">\';</script>' +
+        '<style>.a{color:#c0392b}.b{color:#c0392b}</style><p>x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.source, '#c0392b');
+  });
+});
