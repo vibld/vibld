@@ -1,3 +1,4 @@
+import { derivePalette, seedFromHex } from '@vibld/ai';
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import type { DurableGenerationResult } from '@vibld/core';
 import { PlanProvider, createPlanClient } from '@vibld/ai';
@@ -71,6 +72,22 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           this.env.DB,
           this.env.PROJECT_CONTENT,
         );
+        // Re-derived here rather than carried through the params. The
+        // source is one hex; the solver turns it back into the same fifteen
+        // tokens it produced when the page was fetched, and a value that no
+        // longer derives is simply dropped rather than trusted.
+        const referencePalette = params.referencePaletteSource
+          ? (() => {
+              const seed = seedFromHex(
+                params.referencePaletteSource,
+                'reference',
+                'From the reference site',
+                `Derived from ${params.referencePaletteSource}, the dominant colour of the page you pointed at.`,
+              );
+              return seed ? derivePalette(seed) : null;
+            })()
+          : null;
+
         const provider = new SanitizingModelProvider(
           new PlanProvider(createPlanClient(this.env, params.model), {
             model: params.model,
@@ -85,6 +102,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             ...(params.referenceContext
               ? { referenceContext: params.referenceContext }
               : {}),
+            ...(referencePalette ? { palette: referencePalette } : {}),
           }),
         );
         const outcome = await runGeneration(store, provider, params);

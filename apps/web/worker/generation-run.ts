@@ -51,6 +51,12 @@ export interface WorkflowParams {
    * something this Workflow goes and looks up itself.
    */
   referenceContext?: string;
+  /**
+   * The dominant colour of the reference page, as a six-digit hex. The
+   * palette is re-derived from it where it is used rather than carried
+   * whole, so the contrast guarantee is re-established on arrival.
+   */
+  referencePaletteSource?: string;
   model: string;
   userId: string;
   /** Display only (L3) -- never a ledger key. Carried through to the log line. */
