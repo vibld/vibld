@@ -169,7 +169,87 @@ describe('deriving a seed that did not come from the library', () => {
   });
 });
 
+describe('every surface, not just the page', () => {
+  // Written against the surfaces directly rather than through
+  // REQUIRED_PAIRS, so shortening that list cannot quietly retire the check.
+  const SURFACES = ['background', 'card', 'muted'] as const;
+
+  it('reads every text token on every surface it can land on', () => {
+    // The bug this exists for: muted-foreground was solved against the page
+    // and then used on the muted well, and all thirty-six entries came out
+    // below 4.5:1 on the pair that carries their own name. Nothing caught
+    // it, because the pair was not in the list. style-tokens.test.ts had
+    // been asserting that same pair on the hand-written catalogue the whole
+    // time.
+    for (const palette of PALETTE_LIBRARY) {
+      for (const token of [
+        'foreground',
+        'cardForeground',
+        'mutedForeground',
+      ] as const) {
+        for (const surface of SURFACES) {
+          const ratio = contrastRatio(
+            palette.colors[token],
+            palette.colors[surface],
+          );
+          assert.ok(
+            ratio !== null && ratio >= 4.5,
+            `${palette.id}: ${token} on ${surface} is ${ratio}`,
+          );
+        }
+      }
+    }
+  });
+
+  it('keeps a filled control visible on every surface', () => {
+    for (const palette of PALETTE_LIBRARY) {
+      for (const token of ['primary', 'destructive'] as const) {
+        for (const surface of SURFACES) {
+          const ratio = contrastRatio(
+            palette.colors[token],
+            palette.colors[surface],
+          );
+          assert.ok(
+            ratio !== null && ratio >= 3,
+            `${palette.id}: ${token} on ${surface} is ${ratio}`,
+          );
+        }
+      }
+    }
+  });
+
+  it('keeps the hairline visible on every surface it divides', () => {
+    for (const palette of PALETTE_LIBRARY) {
+      for (const surface of SURFACES) {
+        const ratio = contrastRatio(
+          palette.colors.border,
+          palette.colors[surface],
+        );
+        assert.ok(
+          ratio !== null && ratio >= 1.9,
+          `${palette.id}: border on ${surface} is ${ratio}`,
+        );
+      }
+    }
+  });
+});
+
 describe('the pairs themselves', () => {
+  it('checks each text token against each surface', () => {
+    // A token checked on one surface and used on three is the shape of the
+    // bug above, so the list has to be a product and this is what says so.
+    for (const token of ['foreground', 'cardForeground', 'mutedForeground']) {
+      for (const surface of ['background', 'card', 'muted']) {
+        assert.ok(
+          REQUIRED_PAIRS.some(
+            (pair) => pair.foreground === token && pair.background === surface,
+          ),
+          `${token} on ${surface} is never checked`,
+        );
+      }
+    }
+  });
+
   it('covers every token that carries text', () => {
     // If a token is added to the palette shape and not to REQUIRED_PAIRS, it
     // is unverified and nothing says so. This is the reminder.

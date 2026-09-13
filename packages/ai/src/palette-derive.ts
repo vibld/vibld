@@ -131,6 +131,58 @@ function surfaces(seed: PaletteSeed): {
 }
 
 /**
+ * The lowest ratio this colour reaches against any of those grounds.
+ *
+ * A palette does not get to choose which of its surfaces a colour lands on.
+ * A generated page puts body text in a card and in a sunken well as readily
+ * as on the page itself, and it draws the same hairline around all three, so
+ * the ratio that decides whether a colour is usable is its worst one, not
+ * its best.
+ */
+function weakestAgainst(color: string, grounds: readonly string[]): number {
+  let weakest = Number.POSITIVE_INFINITY;
+  for (const ground of grounds) {
+    const measured = contrastRatio(color, ground);
+    if (measured === null) return 0;
+    if (measured < weakest) weakest = measured;
+  }
+  return weakest === Number.POSITIVE_INFINITY ? 0 : weakest;
+}
+
+/**
+ * A shade of this hue that clears `ratio` against every one of `grounds`, or
+ * null if none does.
+ *
+ * `shadeAgainst` returns the least extreme shade that clears the ratio
+ * against the one ground it is given, which is the right answer for that
+ * ground and a trap for its neighbours: the margin is zero by construction,
+ * so a surface a few points of lightness away fails. That is not theory. It
+ * is what shipped in the first version of this file, where muted-foreground
+ * was solved against the page and then used on the muted well, and all
+ * thirty-six library palettes came out below 4.5:1 on the pair that carries
+ * their own name.
+ *
+ * So every ground is solved for and the candidate with the best worst case
+ * wins. Choosing by measurement rather than by reasoning about which ground
+ * is hardest means the rule holds whichever way the surfaces are stacked.
+ */
+function shadeAgainstAll(
+  hue: number,
+  saturation: number,
+  grounds: readonly string[],
+  ratio: number,
+): string | null {
+  let best: { color: string; weakest: number } | null = null;
+  for (const ground of grounds) {
+    const candidate = shadeAgainst(hue, saturation, ground, ratio);
+    if (!candidate) continue;
+    const weakest = weakestAgainst(candidate, grounds);
+    if (!best || weakest > best.weakest) best = { color: candidate, weakest };
+  }
+  return best && best.weakest >= ratio ? best.color : null;
+}
+
+/**
  * A fill of this hue that clears `FILL_RATIO` against the page and can carry
  * a readable label, or null if no lightness of it does both.
  *
@@ -143,7 +195,7 @@ function surfaces(seed: PaletteSeed): {
 function fillPair(
   hue: number,
   saturation: number,
-  background: string,
+  grounds: readonly string[],
   mode: PaletteMode,
 ): { fill: string; on: string } | null {
   // Walked from the lightness a brand fill usually sits at, outwards, so the
@@ -154,8 +206,7 @@ function fillPair(
     for (const lightness of [start - step, start + step]) {
       if (lightness < 14 || lightness > 88) continue;
       const fill = hslToHex({ hue, saturation, lightness });
-      const against = contrastRatio(fill, background);
-      if (against === null || against < FILL_RATIO) continue;
+      if (weakestAgainst(fill, grounds) < FILL_RATIO) continue;
       const on = readableOn(fill, AA_NORMAL_TEXT);
       if (!on) continue;
       return { fill, on: on.color };
@@ -178,15 +229,21 @@ export function derivePalette(seed: PaletteSeed): DerivedPalette | null {
   if (!ground) return null;
   const { background, card, muted } = ground;
 
+  // The three grounds anything else can land on. Every colour below is
+  // solved against all of them rather than against the page alone, because
+  // nothing downstream promises a button stays off a card or that body text
+  // stays out of a well.
+  const grounds = [background, card, muted] as const;
+
   const [secondaryRotation, accentRotation] = SCHEME_ROTATION[seed.scheme];
   const secondaryHue = normaliseHue(seed.hue + secondaryRotation);
   const accentHue = normaliseHue(seed.hue + accentRotation);
 
-  const primary = fillPair(seed.hue, seed.saturation, background, seed.mode);
+  const primary = fillPair(seed.hue, seed.saturation, grounds, seed.mode);
   const secondary = fillPair(
     secondaryHue,
     Math.max(18, seed.saturation - 26),
-    background,
+    grounds,
     seed.mode,
   );
   // Capped rather than boosted. Raising the accent's saturation above the
@@ -197,38 +254,39 @@ export function derivePalette(seed: PaletteSeed): DerivedPalette | null {
   const accent = fillPair(
     accentHue,
     Math.min(seed.saturation, 74),
-    background,
+    grounds,
     seed.mode,
   );
-  const destructive = fillPair(DESTRUCTIVE_HUE, 68, background, seed.mode);
+  const destructive = fillPair(DESTRUCTIVE_HUE, 68, grounds, seed.mode);
   if (!primary || !secondary || !accent || !destructive) return null;
 
   // Text is tinted with the page's hue at low saturation, so body copy on a
   // warm page is warm rather than a grey borrowed from somewhere else.
   const textSaturation = Math.min(seed.saturation, 22);
-  const foreground = shadeAgainst(
+  const foreground = shadeAgainstAll(
     seed.hue,
     textSaturation,
-    background,
+    grounds,
     BODY_TEXT_RATIO,
   );
-  const cardForeground = shadeAgainst(
+  const cardForeground = shadeAgainstAll(
     seed.hue,
     textSaturation,
-    card,
+    grounds,
     BODY_TEXT_RATIO,
   );
-  const mutedForeground = shadeAgainst(
+  const mutedForeground = shadeAgainstAll(
     seed.hue,
     textSaturation,
-    background,
+    grounds,
     AA_NORMAL_TEXT,
   );
   if (!foreground || !cardForeground || !mutedForeground) return null;
 
-  // A hairline, not text: it only has to be seen, so it is solved at the
-  // non-text threshold against the surface it divides.
-  const border = shadeAgainst(seed.hue, textSaturation, background, 1.9);
+  // A hairline, not text: it only has to be seen, so it is solved below the
+  // text threshold, but against every surface it can divide rather than just
+  // the page.
+  const border = shadeAgainstAll(seed.hue, textSaturation, grounds, 1.9);
   if (!border) return null;
 
   return {
@@ -256,19 +314,43 @@ export function derivePalette(seed: PaletteSeed): DerivedPalette | null {
   };
 }
 
-/** Every pair a derived palette promises, named, for tests to walk. */
+/** The three surfaces a generated page can put anything else on top of. */
+const SURFACES = ['background', 'card', 'muted'] as const;
+
+/** Text tokens, and the ratio each has to clear on every surface. */
+const TEXT_ON_SURFACES: readonly {
+  readonly token: keyof PaletteColors;
+  readonly ratio: number;
+}[] = [
+  { token: 'foreground', ratio: AA_NORMAL_TEXT },
+  { token: 'cardForeground', ratio: AA_NORMAL_TEXT },
+  { token: 'mutedForeground', ratio: AA_NORMAL_TEXT },
+  { token: 'primary', ratio: AA_LARGE_TEXT },
+  { token: 'destructive', ratio: AA_LARGE_TEXT },
+];
+
+/**
+ * Every pair a derived palette promises, named, for tests to walk.
+ *
+ * Built as a product rather than listed by hand, because listing by hand is
+ * how the first version of this file shipped thirty-six palettes whose
+ * muted-foreground failed on muted: the pair was not in the list, so nothing
+ * looked at it, and "every pair passes" was only ever a claim about the
+ * pairs somebody remembered to write down. A surface added to `SURFACES` is
+ * now a surface every text token is checked against.
+ */
 export const REQUIRED_PAIRS: readonly {
   readonly foreground: keyof PaletteColors;
   readonly background: keyof PaletteColors;
   readonly ratio: number;
 }[] = [
-  { foreground: 'foreground', background: 'background', ratio: AA_NORMAL_TEXT },
-  {
-    foreground: 'mutedForeground',
-    background: 'background',
-    ratio: AA_NORMAL_TEXT,
-  },
-  { foreground: 'cardForeground', background: 'card', ratio: AA_NORMAL_TEXT },
+  ...TEXT_ON_SURFACES.flatMap((entry) =>
+    SURFACES.map((surface) => ({
+      foreground: entry.token,
+      background: surface as keyof PaletteColors,
+      ratio: entry.ratio,
+    })),
+  ),
   { foreground: 'onPrimary', background: 'primary', ratio: AA_NORMAL_TEXT },
   { foreground: 'onSecondary', background: 'secondary', ratio: AA_NORMAL_TEXT },
   { foreground: 'onAccent', background: 'accent', ratio: AA_NORMAL_TEXT },
@@ -277,8 +359,14 @@ export const REQUIRED_PAIRS: readonly {
     background: 'destructive',
     ratio: AA_NORMAL_TEXT,
   },
-  { foreground: 'primary', background: 'background', ratio: AA_LARGE_TEXT },
-  { foreground: 'destructive', background: 'background', ratio: AA_LARGE_TEXT },
+  // A hairline is not text and not a control: it only has to be seen. The
+  // threshold is below AA's for that reason, and it is still enumerated,
+  // because an invisible border is a real defect and an unchecked one.
+  ...SURFACES.map((surface) => ({
+    foreground: 'border' as keyof PaletteColors,
+    background: surface as keyof PaletteColors,
+    ratio: 1.9,
+  })),
 ];
 
 /** Which of `REQUIRED_PAIRS` this palette fails, empty when it is sound. */
