@@ -17,6 +17,7 @@ import {
   githubAppCredentials,
   mintInstallationToken,
   type GitHubAppEnv,
+  type InstallationToken,
 } from './github-app.ts';
 import {
   branchForRevision,
@@ -79,6 +80,28 @@ function bindingProblem(state: Extract<BindingState, { usable: false }>) {
     },
     409,
   );
+}
+
+/**
+ * What to tell someone whose push could not get a token.
+ *
+ * Only a lost grant is worth re-approving. `github-app.ts` is careful to
+ * tell a rate limit apart from revoked access, and collapsing every failure
+ * into one 409 with `reconnect: true` throws that away and sends someone off
+ * to reinstall a working App because GitHub was briefly unreachable. So the
+ * reason picks the status, and `reconnect` is set only when reconnecting is
+ * actually the fix.
+ */
+function mintProblem(token: Extract<InstallationToken, { ok: false }>) {
+  if (token.reason === 'access') {
+    return json({ error: token.error, reconnect: true }, 409);
+  }
+  if (token.reason === 'rate-limited') return json({ error: token.error }, 429);
+  if (token.reason === 'config') return json({ error: token.error }, 503);
+  // Unreachable, refused, or a reply that could not be read: GitHub's
+  // problem or a passing one, and retrying is the thing to do rather than
+  // reconnecting anything.
+  return json({ error: token.error }, 502);
 }
 
 /**
@@ -163,7 +186,7 @@ export async function handleGitHubPush(
     doFetch,
     now.getTime(),
   );
-  if (!token.ok) return json({ error: token.error, reconnect: true }, 409);
+  if (!token.ok) return mintProblem(token);
 
   const target: PushTarget = {
     owner: binding.owner,

@@ -257,8 +257,26 @@ export function rateLimitMessage(
  */
 export const GITHUB_USER_AGENT = 'Vibld (+https://vibld.com)';
 
+/**
+ * Why a mint failed, for a caller deciding what to do about it.
+ *
+ * The sentence is for the person; this is for the code. Only `access` means
+ * the grant is actually broken and worth re-approving. Telling someone to
+ * reconnect a working App because GitHub was briefly unreachable is the
+ * mistake `rateLimitMessage` above exists to avoid, and it is just as easy
+ * to make one layer up by treating every failure as the same failure.
+ */
+export type TokenFailure =
+  | 'config'
+  | 'unreachable'
+  | 'rate-limited'
+  | 'access'
+  | 'refused'
+  | 'unreadable';
+
 export type InstallationToken =
-  { ok: true; token: string; expiresAt: string } | { ok: false; error: string };
+  | { ok: true; token: string; expiresAt: string }
+  | { ok: false; error: string; reason: TokenFailure };
 
 /**
  * An installation access token for this installation, or a reason it could
@@ -291,6 +309,7 @@ export async function mintInstallationToken(
     return {
       ok: false,
       error: 'Vibld is not configured to talk to GitHub correctly.',
+      reason: 'config',
     };
   }
 
@@ -318,7 +337,11 @@ export async function mintInstallationToken(
       },
     );
   } catch {
-    return { ok: false, error: 'GitHub could not be reached.' };
+    return {
+      ok: false,
+      error: 'GitHub could not be reached.',
+      reason: 'unreachable',
+    };
   }
 
   // Read the body first: a secondary rate limit can come back as a 403 with
@@ -335,18 +358,20 @@ export async function mintInstallationToken(
     }
   }
   const limited = rateLimitMessage(response.status, response.headers, refusal);
-  if (limited) return { ok: false, error: limited };
+  if (limited) return { ok: false, error: limited, reason: 'rate-limited' };
 
   if (response.status === 404 || response.status === 401) {
     return {
       ok: false,
       error: 'Vibld no longer has access to that repository on GitHub.',
+      reason: 'access',
     };
   }
   if (!response.ok) {
     return {
       ok: false,
       error: `GitHub refused the request (${response.status}).`,
+      reason: 'refused',
     };
   }
 
@@ -357,6 +382,7 @@ export async function mintInstallationToken(
     return {
       ok: false,
       error: 'GitHub returned a reply Vibld could not read.',
+      reason: 'unreadable',
     };
   }
   const record = (body ?? {}) as { token?: unknown; expires_at?: unknown };
@@ -364,6 +390,7 @@ export async function mintInstallationToken(
     return {
       ok: false,
       error: 'GitHub returned a reply Vibld could not read.',
+      reason: 'unreadable',
     };
   }
   return {

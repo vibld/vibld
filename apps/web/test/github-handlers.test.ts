@@ -424,3 +424,73 @@ describe('the status the builder reads', () => {
     assert.equal(body.configured, false);
   });
 });
+
+/**
+ * `github-app.ts` goes to some trouble to tell a rate limit apart from
+ * revoked access, and the whole benefit of that is lost if the route reports
+ * both the same way. Someone told to reconnect because GitHub was briefly
+ * unreachable reinstalls an App that was working, and is no wiser about the
+ * wait that would have fixed it.
+ */
+describe('when the token cannot be minted', () => {
+  async function pushAgainst(mint: Response) {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    return handleGitHubPush(
+      pushRequest(),
+      env(db),
+      PRINCIPAL,
+      (async () => mint.clone()) as unknown as typeof fetch,
+      NOW,
+    );
+  }
+
+  it('asks for a reconnect only when access is actually gone', async () => {
+    const response = await pushAgainst(
+      new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 }),
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { reconnect?: boolean };
+    assert.equal(body.reconnect, true);
+  });
+
+  it('reports a rate limit as one, and does not ask for a reconnect', async () => {
+    const response = await pushAgainst(
+      new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+        status: 403,
+        headers: { 'retry-after': '60' },
+      }),
+    );
+    assert.equal(response.status, 429);
+    const body = (await response.json()) as {
+      error: string;
+      reconnect?: boolean;
+    };
+    assert.equal(body.reconnect, undefined);
+    assert.match(body.error, /rate limiting/);
+  });
+
+  it('does not ask for a reconnect when GitHub is simply unreachable', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const response = await handleGitHubPush(
+      pushRequest(),
+      env(db),
+      PRINCIPAL,
+      (async () => {
+        throw new Error('connection reset');
+      }) as unknown as typeof fetch,
+      NOW,
+    );
+    assert.equal(response.status, 502);
+    const body = (await response.json()) as { reconnect?: boolean };
+    assert.equal(body.reconnect, undefined);
+  });
+
+  it('does not ask for a reconnect when GitHub returns a server error', async () => {
+    const response = await pushAgainst(new Response('', { status: 500 }));
+    assert.equal(response.status, 502);
+    const body = (await response.json()) as { reconnect?: boolean };
+    assert.equal(body.reconnect, undefined);
+  });
+});
