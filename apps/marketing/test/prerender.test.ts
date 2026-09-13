@@ -74,6 +74,36 @@ describe('every declared route is prerendered', () => {
 });
 
 describe('page metadata', () => {
+  it('names the site in every title, with nothing dangling', () => {
+    // The check that was missing. An em-dash sweep rewrote
+    // `X -- ${SITE.name}` as `X | `, which removed the site name from all
+    // ten titles rather than replacing the separator. Every title stayed
+    // non-empty and unique, so the assertions below passed while the home
+    // page's title no longer contained the word Vibld at all.
+    //
+    // The <title> is the strongest on-page signal that this site is the
+    // Vibld entity, and searching the name already returns other things, so
+    // losing it is not cosmetic.
+    for (const route of ROUTES) {
+      const title = /<title>([^<]*)<\/title>/.exec(read(route.path))?.[1] ?? '';
+      assert.ok(
+        title.includes(SITE.name),
+        `title for ${route.path} does not name the site: "${title}"`,
+      );
+      assert.equal(
+        title,
+        title.trim(),
+        `title for ${route.path} has surrounding whitespace: "${title}"`,
+      );
+      for (const separator of ['|', '-', ':']) {
+        assert.ok(
+          !title.startsWith(separator) && !title.endsWith(separator),
+          `title for ${route.path} has a dangling "${separator}": "${title}"`,
+        );
+      }
+    }
+  });
+
   it('gives every page a unique title and description', () => {
     const titles = new Set<string>();
     const descriptions = new Set<string>();
