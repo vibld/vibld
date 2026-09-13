@@ -45,6 +45,19 @@ export interface PushRequest {
   revision: string;
   /** The commit subject. */
   message: string;
+  /**
+   * Who the commit is by, and when.
+   *
+   * Fixed rather than left to GitHub, because it is what makes the commit
+   * object deterministic. Git objects are content-addressed, so a commit
+   * with the same message, tree, parents, author and committer is the same
+   * sha; leaving the date out means GitHub fills in the clock, and two
+   * attempts produce two different commits. With the date supplied, a
+   * commit created by an attempt whose reply was lost is re-created
+   * identically by the next one, and the orphan is the same object rather
+   * than a second one.
+   */
+  committer: { name: string; email: string; date: string };
   /** The pull request title and body. */
   pullRequest?: { title: string; body: string };
 }
@@ -188,20 +201,58 @@ async function refCommit(
     : { error: 'GitHub returned a ref Vibld could not read.' };
 }
 
-/** The tree a commit points at, for deciding whether a push already landed. */
+/**
+ * The tree a commit points at, for deciding whether a push already landed.
+ *
+ * The error is a separate answer from the tree, because collapsing them
+ * turns a dropped connection into a reported conflict: "the branch points
+ * somewhere else" would be said about a branch nobody managed to read. A
+ * conflict accuses someone of having moved the branch, so it has to be
+ * something this knows rather than something it assumes.
+ */
 async function commitTree(
   token: string,
   doFetch: typeof fetch,
   target: Pick<PushTarget, 'owner' | 'repo'>,
   commitSha: string,
-): Promise<string | null> {
+): Promise<{ sha: string } | { error: string }> {
   const reply = await call(token, doFetch, {
     method: 'GET',
     path: `/repos/${target.owner}/${target.repo}/git/commits/${commitSha}`,
   });
-  if (!reply.ok) return null;
+  if (!reply.ok) return { error: reply.error };
   const tree = (reply.body.tree ?? {}) as { sha?: unknown };
-  return asString(tree.sha);
+  const sha = asString(tree.sha);
+  return sha
+    ? { sha }
+    : { error: 'GitHub returned a commit Vibld could not read.' };
+}
+
+/**
+ * Whether the repository has any branches at all.
+ *
+ * Asked because a 404 on the base ref has two very different causes: a
+ * repository with no commits in it, and a base branch that was renamed or
+ * deleted out from under the binding. Treating the second as the first
+ * builds a parentless commit on a repository that has history, which is a
+ * branch related to nothing and a pull request that cannot be opened.
+ */
+async function hasAnyBranch(
+  token: string,
+  doFetch: typeof fetch,
+  target: Pick<PushTarget, 'owner' | 'repo'>,
+): Promise<boolean | { error: string }> {
+  const reply = await call(token, doFetch, {
+    method: 'GET',
+    path: `/repos/${target.owner}/${target.repo}/git/matching-refs/heads/`,
+  });
+  // An empty repository answers 409 here rather than an empty list, which is
+  // itself the answer.
+  if (!reply.ok) {
+    if (reply.status === 409) return false;
+    return { error: reply.error };
+  }
+  return Array.isArray(reply.body) && (reply.body as unknown[]).length > 0;
 }
 
 /**
@@ -256,7 +307,8 @@ export async function pushCheckpoint(
   if ('error' in existing) return { ok: false, error: existing.error };
   if (existing.found) {
     const landed = await commitTree(token, doFetch, repo, existing.sha);
-    if (landed === treeSha) {
+    if ('error' in landed) return { ok: false, error: landed.error };
+    if (landed.sha === treeSha) {
       // The previous attempt succeeded and its reply was lost. Report what is
       // already there rather than committing the same files again.
       const pullRequestUrl = await ensurePullRequest(
@@ -294,6 +346,22 @@ export async function pushCheckpoint(
     `heads/${target.baseBranch}`,
   );
   if ('error' in base) return { ok: false, error: base.error };
+  if (!base.found) {
+    // Two causes, one status code, and they need different sentences. A
+    // renamed or deleted base branch in a repository that has history is not
+    // an empty repository, and building a parentless commit for it makes a
+    // branch related to nothing and a pull request that cannot be opened.
+    const branches = await hasAnyBranch(token, doFetch, repo);
+    if (typeof branches !== 'boolean') {
+      return { ok: false, error: branches.error };
+    }
+    return {
+      ok: false,
+      error: branches
+        ? `The branch ${target.baseBranch} no longer exists in ${repo.owner}/${repo.repo}.`
+        : `${repo.owner}/${repo.repo} has no commits yet. Add a first commit there, then push from Vibld.`,
+    };
+  }
 
   const commitReply = await call(token, doFetch, {
     method: 'POST',
@@ -301,9 +369,9 @@ export async function pushCheckpoint(
     body: {
       message,
       tree: treeSha,
-      // An empty repository has no base ref, and a first commit has no
-      // parent. GitHub wants the field absent rather than empty.
-      ...(base.found ? { parents: [base.sha] } : {}),
+      parents: [base.sha],
+      author: request.committer,
+      committer: request.committer,
     },
   });
   if (!commitReply.ok) return { ok: false, error: commitReply.error };
@@ -323,13 +391,44 @@ export async function pushCheckpoint(
   });
   if (!refReply.ok) {
     // A ref that appeared between the read above and this write is another
-    // attempt winning the race, not a reason to overwrite it.
+    // attempt winning the race, not a reason to overwrite it. What it is not
+    // necessarily is a conflict: two retries of the same push race each
+    // other, and the winner writes the branch this one wanted. So the loser
+    // asks what won before calling it one.
     if (refReply.status === 422) {
-      return {
-        ok: false,
-        error: `The branch ${branch} already exists and points somewhere else.`,
-        conflict: { branch, existingSha: 'unknown', attemptedTreeSha: treeSha },
-      };
+      const now = await refCommit(token, doFetch, repo, `heads/${branch}`);
+      if ('error' in now) return { ok: false, error: now.error };
+      if (now.found) {
+        const landed = await commitTree(token, doFetch, repo, now.sha);
+        if ('error' in landed) return { ok: false, error: landed.error };
+        if (landed.sha === treeSha) {
+          const pullRequestUrl = await ensurePullRequest(
+            token,
+            doFetch,
+            request,
+            branch,
+          );
+          return {
+            ok: true,
+            pushed: {
+              branch,
+              commitSha: now.sha,
+              treeSha,
+              created: false,
+              ...(pullRequestUrl ? { pullRequestUrl } : {}),
+            },
+          };
+        }
+        return {
+          ok: false,
+          error: `The branch ${branch} already exists and points somewhere else.`,
+          conflict: {
+            branch,
+            existingSha: now.sha,
+            attemptedTreeSha: treeSha,
+          },
+        };
+      }
     }
     return { ok: false, error: refReply.error };
   }

@@ -126,16 +126,22 @@ describe('signing an App JWT', () => {
 
 describe('minting an installation token', () => {
   const credentials = { appId: '123', privateKey: PKCS1_PEM };
+  const SCOPE = { owner: 'acme', repo: 'site' };
 
   it('presents the JWT and returns the token', async () => {
     let seen: Record<string, string> | undefined;
     let url: string | undefined;
-    const result = await mintInstallationToken(credentials, 42, (async (
+    let sentBody: Record<string, unknown> | undefined;
+    const result = await mintInstallationToken(credentials, 42, SCOPE, (async (
       target: string,
       init?: RequestInit,
     ) => {
       url = target;
       seen = init?.headers as Record<string, string>;
+      sentBody = JSON.parse(String(init?.body ?? '{}')) as Record<
+        string,
+        unknown
+      >;
       return new Response(
         JSON.stringify({ token: 'ghs_x', expires_at: '2026-09-13T13:00:00Z' }),
         { status: 201, headers: { 'content-type': 'application/json' } },
@@ -147,6 +153,14 @@ describe('minting an installation token', () => {
     assert.match(seen?.authorization ?? '', /^Bearer ey/);
     // GitHub's docs make this a requirement, not a courtesy.
     assert.ok(seen?.['user-agent']);
+    // The point of passing the scope: an installation can cover many
+    // repositories, and a bodyless request would mint a token for all of
+    // them with every permission the installation holds.
+    assert.deepEqual(sentBody?.repositories, ['site']);
+    assert.deepEqual(sentBody?.permissions, {
+      contents: 'write',
+      pull_requests: 'write',
+    });
   });
 
   it('says the access is gone rather than reporting a status code', async () => {
@@ -157,6 +171,7 @@ describe('minting an installation token', () => {
       const result = await mintInstallationToken(
         credentials,
         42,
+        SCOPE,
         (async () => new Response('', { status })) as unknown as typeof fetch,
       );
       assert.equal(result.ok, false);
@@ -169,15 +184,17 @@ describe('minting an installation token', () => {
       await mintInstallationToken(
         { appId: '1', privateKey: 'broken' },
         42,
+        SCOPE,
         (async () =>
           new Response('', { status: 500 })) as unknown as typeof fetch,
       ),
-      await mintInstallationToken(credentials, 42, (async () => {
+      await mintInstallationToken(credentials, 42, SCOPE, (async () => {
         throw new Error(PKCS1_PEM);
       }) as unknown as typeof fetch),
       await mintInstallationToken(
         credentials,
         42,
+        SCOPE,
         (async () =>
           new Response('not json', { status: 200 })) as unknown as typeof fetch,
       ),
@@ -192,9 +209,14 @@ describe('minting an installation token', () => {
   });
 
   it('reports an unreachable GitHub as unreachable', async () => {
-    const result = await mintInstallationToken(credentials, 42, (async () => {
-      throw new Error('boom');
-    }) as unknown as typeof fetch);
+    const result = await mintInstallationToken(
+      credentials,
+      42,
+      SCOPE,
+      (async () => {
+        throw new Error('boom');
+      }) as unknown as typeof fetch,
+    );
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /could not be reached/);
   });

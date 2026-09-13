@@ -237,6 +237,17 @@ export type InstallationToken =
 export async function mintInstallationToken(
   credentials: GitHubAppCredentials,
   installationId: number,
+  /**
+   * The one repository this token may touch, and nothing else.
+   *
+   * An installation can cover many repositories, and a token minted without
+   * this covers all of them with every permission the installation holds.
+   * The push destination is a single repository the user approved, so the
+   * token is cut down to it: a token that leaks, or is reused by mistake,
+   * can then do to that repository what the user already agreed to and can
+   * do nothing at all to the rest.
+   */
+  scope: { owner: string; repo: string },
   doFetch: typeof fetch = fetch,
   now: number = Date.now(),
 ): Promise<InstallationToken> {
@@ -259,7 +270,16 @@ export async function mintInstallationToken(
           accept: 'application/vnd.github+json',
           'x-github-api-version': '2022-11-28',
           'user-agent': GITHUB_USER_AGENT,
+          'content-type': 'application/json',
         },
+        body: JSON.stringify({
+          repositories: [scope.repo],
+          // The least this feature can work with. `contents` writes the
+          // tree, the commit and the ref; `pull_requests` opens the pull
+          // request. Nothing here reads issues, actions, secrets or
+          // members, so nothing here asks for them.
+          permissions: { contents: 'write', pull_requests: 'write' },
+        }),
       },
     );
   } catch {
