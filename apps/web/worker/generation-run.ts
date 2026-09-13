@@ -51,6 +51,21 @@ export interface WorkflowParams {
    * something this Workflow goes and looks up itself.
    */
   referenceContext?: string;
+  /**
+   * The dominant colour of the reference page, as a six-digit hex. The
+   * palette is re-derived from it where it is used rather than carried
+   * whole, so the contrast guarantee is re-established on arrival.
+   */
+  referencePaletteSource?: string;
+  /**
+   * Whether that page was a light page or a dark one, as read from its own
+   * `color-scheme` or its own background declarations. Carried separately
+   * because the hex cannot say it: the dominant colour of a page is an
+   * accent, and an accent's lightness does not describe the ground behind
+   * it. Validated as one of two literals on arrival, same as the hex is
+   * validated by being re-parsed.
+   */
+  referencePaletteMode?: 'light' | 'dark';
   model: string;
   userId: string;
   /** Display only (L3) -- never a ledger key. Carried through to the log line. */

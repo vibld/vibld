@@ -677,12 +677,22 @@ async function handlePlan(
   // reported and the request stops; it never silently proceeds without the
   // reference material the caller specifically asked for.
   let referenceContext: string | undefined;
+  // The colour the reference page was seeded from, as a hex, not the palette
+  // it derives. Workflow params are JSON carried across a boundary, and a
+  // fifteen-token palette sent through one is fifteen values that arrive
+  // trusted. One hex re-derives the whole thing on the other side, which
+  // costs a few hundred floating-point operations and re-establishes the
+  // contrast guarantee where it is used rather than asserting it travelled.
+  let referencePaletteSource: string | undefined;
+  let referencePaletteMode: 'light' | 'dark' | undefined;
   if (referenceUrl.value) {
     const fetched = await fetchReferenceContext(referenceUrl.value);
     if (!fetched.ok) {
       return json({ error: fetched.error }, 422);
     }
     referenceContext = fetched.text;
+    referencePaletteSource = fetched.palette?.source;
+    referencePaletteMode = fetched.palette?.mode;
   }
 
   const chosenModel = parseModel(body, configuredProviders(env));
@@ -834,6 +844,8 @@ async function handlePlan(
           : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
         ...(referenceContext ? { referenceContext } : {}),
+        ...(referencePaletteSource ? { referencePaletteSource } : {}),
+        ...(referencePaletteMode ? { referencePaletteMode } : {}),
         model: effectiveModel,
         userId: principal.userId,
         ...(principal.email ? { email: principal.email } : {}),
