@@ -283,10 +283,14 @@ async function readCapped(
       if (done) break;
       if (!value) continue;
       const remaining = maxBytes - total;
-      chunks.push(
-        remaining < value.length ? value.subarray(0, remaining) : value,
-      );
-      total += value.length;
+      const kept =
+        remaining < value.length ? value.subarray(0, remaining) : value;
+      chunks.push(kept);
+      // What was kept, not what arrived. Counting the whole chunk made
+      // `total` overshoot the cap, and since it also sizes the buffer below,
+      // a response delivered in one large chunk allocated more than the cap
+      // allows and padded the decoded text with NUL bytes to fill it.
+      total += kept.length;
       if (total >= maxBytes) break;
     }
   } finally {

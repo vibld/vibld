@@ -110,7 +110,7 @@ const CSS_COMMENT = /\/\*[\s\S]{0,20000}?\*\//g;
  * `-`, so `</script-foo>` would count as the end of a script.
  */
 const STYLE_BLOCK = new RegExp(
-  `<style${NAME_ENDS}[^>]{0,2000}>([\\s\\S]{0,200000}?)</style${NAME_ENDS}[^>]{0,2000}>`,
+  `<style${NAME_ENDS}([^>]{0,2000})>([\\s\\S]{0,200000}?)</style${NAME_ENDS}[^>]{0,2000}>`,
   'gi',
 );
 const SCRIPT_BLOCK = new RegExp(
@@ -501,7 +501,13 @@ function cssInDocumentOrder(
   const ordered: { at: number; css: string }[] = [];
 
   for (const block of markup.matchAll(STYLE_BLOCK)) {
-    ordered.push({ at: block.index ?? 0, css: block[1] ?? '' });
+    // The same screen test the linked sheets get. A `<style media="print">`
+    // was being added to the screen cascade while `<link media="print">` was
+    // correctly excluded, which is the same sheet treated two ways
+    // depending on how the page chose to include it.
+    const media = attribute(block[1] ?? '', 'media');
+    if (media && !appliesOnScreen(media)) continue;
+    ordered.push({ at: block.index ?? 0, css: block[2] ?? '' });
   }
   for (const link of pageUrl ? stylesheetLinks(markup, pageUrl) : []) {
     const text = byUrl.get(link.url);
@@ -596,6 +602,15 @@ function withoutAtRules(source: string): string {
       }
     }
     out += source.slice(cursor, at);
+    // `@layer` is not a condition. It orders the cascade rather than gating
+    // it, so the rules inside one always apply, and dropping the block for
+    // starting with `@` threw away the base styles of every site that uses
+    // layers -- which Tailwind emits by default. The contents are kept and
+    // scanned in turn, so a genuine conditional nested inside a layer is
+    // still removed.
+    if (source[scan] === '{' && /^@layer\b/i.test(source.slice(at, scan))) {
+      out += withoutAtRules(source.slice(scan + 1, ends - 1));
+    }
     cursor = ends;
     at = ends - 1;
   }

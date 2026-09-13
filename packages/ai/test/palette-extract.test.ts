@@ -1007,7 +1007,6 @@ describe('what the cascade would actually apply', () => {
       '@media print',
       '@media (min-width: 40em)',
       '@supports (display: grid)',
-      '@layer theme',
     ]) {
       const found = paletteFromPage(
         `<style>body{background:#111111}${condition}{body{background:#ffffff}}</style>` +
@@ -1016,6 +1015,39 @@ describe('what the cascade would actually apply', () => {
       assert.ok(found, condition);
       assert.equal(found.mode, 'dark', condition);
     }
+  });
+
+  it('keeps a rule inside a cascade layer', () => {
+    // `@layer` orders the cascade rather than gating it, so the rules in one
+    // always apply. This test asserted the opposite until a review pointed
+    // out that Tailwind emits layers by default, which would have thrown
+    // away the base styles of every site built with it.
+    const found = paletteFromPage(
+      '<style>@layer base{body{background:#111111}}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('still drops a real condition nested inside a layer', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#111111}' +
+        '@layer base{@media print{body{background:#ffffff}}}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
+  });
+
+  it('ignores a style block the browser keeps off the screen', () => {
+    const found = paletteFromPage(
+      '<style>body{background:#111111}</style>' +
+        '<style media="print">body{background:#ffffff}</style>' +
+        '<p style="color:#39d353">x</p>',
+    );
+    assert.ok(found);
+    assert.equal(found.mode, 'dark');
   });
 
   it('still ignores a dark-scheme media override', () => {

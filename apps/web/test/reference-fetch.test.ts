@@ -336,6 +336,33 @@ describe('fetchReferenceContext', () => {
     assert.ok(secondStartedBeforeFirstSettled, 'sheets were fetched in series');
   });
 
+  it('does not pad the body when one chunk crosses the byte cap', async () => {
+    // The cap counted the whole chunk but kept only part of it, so the
+    // buffer was sized past the cap and the tail decoded as NUL bytes. A
+    // response delivered in one big chunk is the ordinary case, not a
+    // contrived one.
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(`<p>${'word '.repeat(200_000)}</p>`),
+        );
+        controller.close();
+      },
+    });
+    const result = await fetchReferenceContext('https://example.com/', {
+      fetchImpl: (async () =>
+        new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        })) as unknown as typeof fetch,
+      // Above the byte cap on purpose, so the padding is not hidden behind
+      // the character truncation that would otherwise cut it off unread.
+      maxChars: 2_000_000,
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.ok(!result.text.includes('\u0000'));
+  });
+
   it('truncates text longer than maxChars', async () => {
     const long = 'word '.repeat(2000);
     const result = await fetchReferenceContext('https://example.com/', {
