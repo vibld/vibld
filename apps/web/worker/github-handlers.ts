@@ -551,21 +551,26 @@ export async function handleGitHubComplete(
   // is itself the authorization check, and GitHub answers 404 for one they
   // cannot reach, which `connectableRepositories` then skips.
   const listed = installations.value;
-  const wanted =
-    Number.isInteger(hinted) && hinted > 0
-      ? (listed.find((candidate) => candidate.id === hinted) ?? {
-          id: hinted,
-          account: 'unknown',
-        })
-      : null;
-  const ordered = wanted
-    ? [wanted, ...listed.filter((candidate) => candidate.id !== wanted.id)]
+  const named = Number.isInteger(hinted) && hinted > 0;
+  const inList = named && listed.some((candidate) => candidate.id === hinted);
+
+  // Listed: move it to the front, and it costs what it always would.
+  // Not listed: read it as a separate probe, outside the budget. A hint that
+  // is forged or stale answers 404, and charging that answer to the budget
+  // would let a made-up id cost a real installation its place in the read.
+  const ordered = inList
+    ? [
+        listed.find((candidate) => candidate.id === hinted)!,
+        ...listed.filter((candidate) => candidate.id !== hinted),
+      ]
     : listed;
+  const probe = named && !inList ? { id: hinted, account: 'unknown' } : null;
 
   const repositories = await connectableRepositories(
     token.token,
     ordered,
     doFetch,
+    probe,
   );
   if (!repositories.ok) return githubProblem(repositories);
 

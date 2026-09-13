@@ -982,3 +982,69 @@ describe('the installation list itself', () => {
     assert.equal(asked.length, 2);
   });
 });
+
+/**
+ * A hint that answers 404, alongside a full budget.
+ *
+ * Reading the named installation directly is what makes one behind a page
+ * boundary reachable, but a forged or stale id gets read too, and its answer
+ * is a 404. If that read were charged to the budget, a made-up id would cost
+ * a real installation its place: with ten legitimate ones, the tenth would
+ * go unread and, the token being gone by then, become unbindable. A stranger
+ * should not be able to shrink somebody's choices by sending them a link.
+ */
+describe('a hint that is not real, with the budget already full', () => {
+  const TEN = Array.from({ length: 10 }, (_, index) => ({
+    id: 200 + index,
+    account: { login: `account-${index}` },
+  }));
+  const REPOS = Object.fromEntries(
+    TEN.map((installation) => [
+      installation.id,
+      [
+        {
+          name: `repo-${installation.id}`,
+          default_branch: 'main',
+          owner: { login: 'acme' },
+          permissions: { push: true },
+        },
+      ],
+    ]),
+  );
+  const LAST = TEN[9]!.id;
+
+  async function offered(hint?: string) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubComplete(
+      callbackRequest({
+        code: 'the-code',
+        state,
+        ...(hint ? { installation: hint } : {}),
+      }),
+      env(db),
+      PRINCIPAL,
+      githubFor(TEN, REPOS),
+      NOW,
+    );
+    const body = (await response.json()) as {
+      repositories: { installationId: number }[];
+    };
+    return body.repositories.map((choice) => choice.installationId);
+  }
+
+  it('does not cost a real installation its place in the read', async () => {
+    const withForged = await offered('999999');
+    assert.ok(
+      withForged.includes(LAST),
+      'a forged hint pushed a real installation out of the budget',
+    );
+  });
+
+  it('offers the same set with or without the forged hint', async () => {
+    assert.deepEqual(
+      (await offered('999999')).sort(),
+      (await offered()).sort(),
+    );
+  });
+});

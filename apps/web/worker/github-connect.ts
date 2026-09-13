@@ -577,14 +577,23 @@ export async function connectableRepositories(
   token: string,
   installations: readonly UserInstallation[],
   doFetch: typeof fetch = fetch,
+  /**
+   * One installation to read before the others and outside the budget.
+   *
+   * The caller uses this for an installation GitHub's list did not mention,
+   * which is usually the one somebody just chose from behind a page
+   * boundary and occasionally an id that is forged or stale. Either way the
+   * read answers it, but charging that answer to the budget would let a
+   * made-up id cost a real installation its place: with the cap full, the
+   * last legitimate one would go unread and so become unbindable.
+   */
+  probe: UserInstallation | null = null,
 ): Promise<Reachable<ConnectableRepository[]>> {
   const connectable: ConnectableRepository[] = [];
   let lastFailure: Extract<Reachable<never>, { ok: false }> | null = null;
   let read = 0;
 
-  for (const installation of installations) {
-    if (read >= MAX_INSTALLATIONS_READ) break;
-    read += 1;
+  const gather = async (installation: UserInstallation) => {
     const reply = await installationRepositories(
       token,
       installation.id,
@@ -592,11 +601,20 @@ export async function connectableRepositories(
     );
     if (!reply.ok) {
       lastFailure = reply;
-      continue;
+      return;
     }
     for (const choice of reply.value) {
       connectable.push({ ...choice, installationId: installation.id });
     }
+  };
+
+  if (probe) await gather(probe);
+
+  for (const installation of installations) {
+    if (installation.id === probe?.id) continue;
+    if (read >= MAX_INSTALLATIONS_READ) break;
+    read += 1;
+    await gather(installation);
   }
 
   // Only a failure when it cost every installation. Reporting a partial read
