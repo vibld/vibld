@@ -187,12 +187,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      # include-hidden-files for the same reason as the bakeoff: dotfiles are
+      # excluded by default since upload-artifact v4.4, and a project without
+      # its .gitignore is not the project that was generated. Nothing writes a
+      # secret into these directories; the model keys are scoped to the
+      # generation steps and never to a path under them.
       - name: Upload the generated project
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: generated-project
           path: ${{ runner.temp }}/generated
+          include-hidden-files: true
           if-no-files-found: ignore
 
       - name: Upload the iterated project
@@ -201,4 +207,5 @@ jobs:
         with:
           name: iterated-project
           path: ${{ runner.temp }}/iterated
+          include-hidden-files: true
           if-no-files-found: ignore

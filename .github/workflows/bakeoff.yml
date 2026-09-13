@@ -158,10 +158,18 @@ jobs:
       # Uploaded even when the run failed its expectations. Looking at what a
       # model got wrong is most of the reason to write any of this out, and a
       # failed case still cost what it cost.
+      #
+      # include-hidden-files because upload-artifact has excluded dotfiles by
+      # default since v4.4, and a conventional project has a .gitignore. A
+      # candidate missing it is not the project that was evaluated, which
+      # defeats keeping the output at all. The action excludes them by default
+      # to avoid uploading secrets by accident; nothing writes a secret here,
+      # since this tree is only ever the files a model returned.
       - name: Upload the candidates
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bakeoff-candidates
           path: ${{ runner.temp }}/candidates
+          include-hidden-files: true
           if-no-files-found: warn
