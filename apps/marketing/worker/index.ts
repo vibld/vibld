@@ -19,6 +19,25 @@ export interface Env {
    * has ever required to keep working.
    */
   TURNSTILE_SECRET_KEY?: string;
+  /**
+   * The prerendered build, bound by wrangler.jsonc's `assets`. Only reached
+   * on a preview deployment: production routes non-API requests straight to
+   * these assets without invoking this Worker at all.
+   *
+   * Typed by the one method this file calls rather than as `Fetcher`, which
+   * would mean pulling the Workers type package into an app that otherwise
+   * needs none of it.
+   */
+  ASSETS?: { fetch(request: Request): Promise<Response> };
+  /**
+   * Set to "1" on preview deployments only (wrangler.preview.jsonc).
+   *
+   * A preview of this site is a byte-for-byte copy of vibld.com on a public
+   * hostname. Left indexable it competes with the real site for the name,
+   * which is the exact problem the marketing work is trying to solve, so a
+   * copy that can outrank the original is worse than having no preview.
+   */
+  VIBLD_NOINDEX?: string;
 }
 
 /**
@@ -33,9 +52,34 @@ export default {
     if (url.pathname === '/api/waitlist' && request.method === 'POST') {
       return handleWaitlist(request, env);
     }
+    // Preview only. `wrangler.preview.jsonc` sets `run_worker_first: true`,
+    // so every request arrives here and is served from the same prerendered
+    // assets production serves, with the header that keeps a copy of the site
+    // out of the index. Production never takes this branch: VIBLD_NOINDEX is
+    // unset there, and `run_worker_first: ["/api/*"]` means a page request
+    // never reaches this Worker in the first place.
+    if (env.VIBLD_NOINDEX === '1' && env.ASSETS) {
+      return noindex(await env.ASSETS.fetch(request));
+    }
     return new Response('Not found', { status: 404 });
   },
 };
+
+/**
+ * The same response, told not to be indexed.
+ *
+ * Rebuilt rather than mutated: an immutable `Headers` on a response from a
+ * binding throws on `set`, and a preview that 500s is not a preview.
+ */
+function noindex(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set('x-robots-tag', 'noindex, nofollow');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 /** True for a plain HTML form post; false for a fetch() call expecting JSON. */
 function wantsHtml(request: Request): boolean {

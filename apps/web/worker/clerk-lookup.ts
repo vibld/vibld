@@ -79,3 +79,48 @@ export async function findClerkUserIdByEmail(
   }
   return { ok: true, userId: first.id };
 }
+
+/**
+ * When a Clerk account was created, as epoch milliseconds, or null when that
+ * cannot be established.
+ *
+ * Null is deliberately not "assume it is old" or "assume it is new": the
+ * caller decides, and `signup-credit.ts` treats it as not-eligible, because
+ * an account whose age is unknown is not a new account.
+ *
+ * `created_at` is documented as epoch milliseconds on Clerk's Backend API.
+ * Not verified against a live call from this environment: there is no Clerk
+ * secret here.
+ */
+export async function fetchClerkUserCreatedAt(
+  env: ClerkLookupEnv,
+  userId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number | null> {
+  if (!clerkLookupConfigured(env)) return null;
+
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}`,
+      {
+        headers: { authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return null;
+  }
+  const createdAt = (body as { created_at?: unknown }).created_at;
+  return typeof createdAt === 'number' && Number.isFinite(createdAt)
+    ? createdAt
+    : null;
+}

@@ -31,6 +31,17 @@ export const SITE = {
   turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',
   /** Issue #7 -- link the repository and the open-source, portable-code promise. */
   repoUrl: 'https://github.com/vibld/vibld',
+  /**
+   * The builder (docs/decisions.md L20). A separate host, so this is a plain
+   * anchor rather than a router Link.
+   *
+   * It exists here because until now this site had no link to the product at
+   * all: four calls to join the waitlist, nine legal pages, and no way in for
+   * someone who already has an account. `test/prerender.test.ts` asserts every
+   * page carries it, since "the front door has no handle" is exactly the kind
+   * of absence nobody notices by looking at the page.
+   */
+  appUrl: 'https://app.vibld.com',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   mailingAddress: '285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342',
@@ -58,53 +69,53 @@ export const LEGAL_DOCS: LegalDoc[] = [
   {
     slug: 'terms',
     label: 'Terms of Service',
-    title: `Terms of Service | `,
+    title: `Terms of Service | ${SITE.name}`,
     description:
       'The agreement between you and Chris Brock LLC for using Vibld and its waitlist.',
   },
   {
     slug: 'privacy',
     label: 'Privacy Policy',
-    title: `Privacy Policy | `,
+    title: `Privacy Policy | ${SITE.name}`,
     description:
       'What Vibld collects, why, how long it is kept, and how to request access or deletion.',
   },
   {
     slug: 'acceptable-use',
     label: 'Acceptable Use Policy',
-    title: `Acceptable Use Policy | `,
+    title: `Acceptable Use Policy | ${SITE.name}`,
     description: 'What may and may not be built, sent or hosted through Vibld.',
   },
   {
     slug: 'security',
     label: 'Security & Vulnerability Disclosure',
-    title: `Security & Vulnerability Disclosure | `,
+    title: `Security & Vulnerability Disclosure | ${SITE.name}`,
     description:
       'How to report a vulnerability, and the safe harbor for good-faith research.',
   },
   {
     slug: 'subprocessors',
     label: 'Subprocessors',
-    title: `Subprocessors | `,
+    title: `Subprocessors | ${SITE.name}`,
     description:
       'The services Vibld uses to operate, and what each one is used for.',
   },
   {
     slug: 'cookies',
     label: 'Cookie Notice',
-    title: `Cookie Notice | `,
+    title: `Cookie Notice | ${SITE.name}`,
     description: 'What this site stores in your browser today, and why.',
   },
   {
     slug: 'refunds',
     label: 'Refund Policy',
-    title: `Refund Policy | `,
+    title: `Refund Policy | ${SITE.name}`,
     description: 'How refunds work for paid Vibld plans.',
   },
   {
     slug: 'licenses',
     label: 'Open-Source Notices',
-    title: `Open-Source Notices | `,
+    title: `Open-Source Notices | ${SITE.name}`,
     description:
       'The license terms covering Vibld’s core and its starter templates.',
   },
@@ -113,13 +124,13 @@ export const LEGAL_DOCS: LegalDoc[] = [
 export const ROUTES: SiteRoute[] = [
   {
     path: '/',
-    title: ` | ${SITE.tagline}`,
+    title: `${SITE.name} | ${SITE.tagline}`,
     description:
       'Vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
   },
   {
     path: '/legal',
-    title: `Legal | `,
+    title: `Legal | ${SITE.name}`,
     description: 'Every policy governing Vibld and this site, in one place.',
   },
   ...LEGAL_DOCS.map((doc) => ({

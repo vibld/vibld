@@ -331,6 +331,21 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
 - `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) is set on the
   deployment -- see "Admin: manual credit grants" below for its first
   consumer.
+- `VIBLD_SIGNUP_CREDIT_FROM` decides who gets the welcome credit, and
+  **nobody gets it until this is set.** It names the instant the offer
+  starts, as a full ISO instant with a timezone (`2026-09-13T00:00:00Z`);
+  accounts created at or after it are in the cohort, and everyone else is
+  not. Set it on the `preview` environment at
+  https://github.com/vibld/vibld/settings/environments and the deploy
+  workflow syncs it to the Worker, refusing the deploy if the value is not
+  a real ISO instant rather than letting it look configured and grant
+  nothing.
+
+  There is deliberately no default. Any cutoff early enough to catch
+  genuinely new accounts also catches every account that already exists, so
+  a default would quietly pay the entire existing user base on the first
+  request after deploy. `VIBLD_SIGNUP_CREDIT_USD_CENTS` sets the amount
+  (default 100); `0` turns the grant off without touching the cutoff.
 
 ### Abuse controls required before Access came off (docs/decisions.md L29)
 
