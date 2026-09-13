@@ -32,7 +32,7 @@ import {
   authorizeUrl,
   exchangeCode,
   githubOAuthCredentials,
-  installationRepositories,
+  connectableRepositories,
   signChoice,
   signState,
   userInstallations,
@@ -458,32 +458,33 @@ export async function handleGitHubCallback(
     );
   }
 
-  // The hint from the redirect, honoured only when it is one of the
-  // installations GitHub just said this person can reach.
-  const hinted = Number(url.searchParams.get('installation_id'));
-  const chosen =
-    installations.value.find((candidate) => candidate.id === hinted) ??
-    installations.value[0]!;
-
-  const repositories = await installationRepositories(
+  // Everything they could connect, across every installation they reach,
+  // rather than one installation chosen here. The `installation_id` on the
+  // redirect only decides what is offered first, and an id that is not
+  // theirs simply does not match anything.
+  const repositories = await connectableRepositories(
     token.token,
-    chosen.id,
+    installations.value,
     doFetch,
   );
   if (!repositories.ok) return githubProblem(repositories);
 
+  const hinted = Number(url.searchParams.get('installation_id'));
+  const offered = [...repositories.value].sort((a, b) => {
+    const hintedFirst =
+      Number(b.installationId === hinted) - Number(a.installationId === hinted);
+    if (hintedFirst !== 0) return hintedFirst;
+    return `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`);
+  });
+
   return json({
-    installation: { id: chosen.id, account: chosen.account },
-    // Every installation this person has, so the builder can offer a switch
-    // without starting the whole flow again.
     installations: installations.value,
-    repositories: repositories.value,
+    repositories: offered,
     // What the bind call may choose from, signed. See `signChoice`.
     ticket: await signChoice(
       credentials,
       principal.userId,
-      chosen.id,
-      repositories.value,
+      offered,
       now.getTime(),
     ),
   });
@@ -565,7 +566,9 @@ export async function handleGitHubBind(
   const store = new GitHubStore(env.DB!);
   await store.bind({
     userId: principal.userId,
-    installationId: verified.installationId,
+    // The installation the matched entry came from, so a repository is
+    // always pushed through the installation it was actually read from.
+    installationId: match.installationId,
     owner: match.owner,
     repo: match.repo,
     defaultBranch: match.defaultBranch,

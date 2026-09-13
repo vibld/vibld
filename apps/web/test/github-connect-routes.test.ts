@@ -134,7 +134,12 @@ describe('coming back from GitHub', () => {
       ticket: string;
     };
     assert.deepEqual(body.repositories, [
-      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      {
+        installationId: 42,
+        owner: 'acme',
+        repo: 'site',
+        defaultBranch: 'main',
+      },
     ]);
     assert.ok(body.ticket);
   });
@@ -185,12 +190,15 @@ describe('coming back from GitHub', () => {
     );
     assert.equal(response.status, 200);
     const body = (await response.json()) as {
-      installation: { id: number };
-      repositories: { owner: string; repo: string }[];
+      repositories: { installationId: number; owner: string; repo: string }[];
     };
-    assert.equal(body.installation.id, 42);
     assert.deepEqual(body.repositories, [
-      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      {
+        installationId: 42,
+        owner: 'acme',
+        repo: 'site',
+        defaultBranch: 'main',
+      },
     ]);
   });
 
@@ -224,20 +232,12 @@ describe('coming back from GitHub', () => {
 });
 
 describe('binding the repository the user chose', () => {
-  const OFFERED = [{ owner: 'acme', repo: 'site', defaultBranch: 'trunk' }];
+  const OFFERED = [
+    { installationId: 42, owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
+  ];
 
-  async function ticketFor(
-    userId = 'user_1',
-    repositories = OFFERED,
-    installationId = 42,
-  ) {
-    return signChoice(
-      CREDENTIALS,
-      userId,
-      installationId,
-      repositories,
-      NOW.getTime(),
-    );
+  async function ticketFor(userId = 'user_1', repositories = OFFERED) {
+    return signChoice(CREDENTIALS, userId, repositories, NOW.getTime());
   }
 
   it('writes the binding from what was signed, not from the request', async () => {
@@ -320,8 +320,14 @@ describe('binding the repository the user chose', () => {
     const forged = await signChoice(
       { ...CREDENTIALS, clientSecret: 'not-the-secret' },
       'user_1',
-      999,
-      [{ owner: 'someone-else', repo: 'private', defaultBranch: 'main' }],
+      [
+        {
+          installationId: 999,
+          owner: 'someone-else',
+          repo: 'private',
+          defaultBranch: 'main',
+        },
+      ],
       NOW.getTime(),
     );
     const response = await handleGitHubBind(
@@ -449,5 +455,176 @@ describe('disconnecting', () => {
     );
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { connected: false });
+  });
+});
+
+/**
+ * More than one installation.
+ *
+ * One person can have the App on their own account and on an organisation.
+ * Reading a second installation's repositories needs the user token, and
+ * that is gone as soon as the callback ends, so anything not offered here
+ * cannot be reached later at all. Offering one installation and naming the
+ * rest would be a dead end rather than a limit.
+ */
+describe('a user with the app on more than one account', () => {
+  const BOTH = [
+    { id: 42, account: { login: 'chris' } },
+    { id: 77, account: { login: 'acme' } },
+  ];
+  const REPOS = {
+    42: [
+      {
+        name: 'personal',
+        default_branch: 'main',
+        owner: { login: 'chris' },
+        permissions: { push: true },
+      },
+    ],
+    77: [
+      {
+        name: 'work',
+        default_branch: 'main',
+        owner: { login: 'acme' },
+        permissions: { push: true },
+      },
+    ],
+  };
+
+  async function callback(params: Record<string, string> = {}) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubCallback(
+      callbackRequest({ code: 'the-code', state, ...params }),
+      env(db),
+      PRINCIPAL,
+      githubFor(BOTH, REPOS),
+      NOW,
+    );
+    return { db, response };
+  }
+
+  it('offers repositories from every installation, not just the first', async () => {
+    const { response } = await callback();
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      repositories: { installationId: number; owner: string; repo: string }[];
+    };
+    assert.deepEqual(
+      body.repositories.map((r) => `${r.owner}/${r.repo}`).sort(),
+      ['acme/work', 'chris/personal'],
+    );
+  });
+
+  it('puts the installation just used first, without hiding the others', async () => {
+    const { response } = await callback({ installation_id: '77' });
+    const body = (await response.json()) as {
+      repositories: { owner: string; repo: string }[];
+    };
+    assert.equal(
+      `${body.repositories[0]?.owner}/${body.repositories[0]?.repo}`,
+      'acme/work',
+    );
+    assert.equal(body.repositories.length, 2);
+  });
+
+  it('binds through the installation the chosen repository came from', async () => {
+    // The reason the installation travels with the repository: pushing
+    // acme/work through the personal installation would be refused, and the
+    // refusal would arrive at the first push rather than at the choice.
+    const { db, response } = await callback();
+    const body = (await response.json()) as { ticket: string };
+
+    const bound = await handleGitHubBind(
+      new Request('https://app.vibld.com/api/github/bind', {
+        method: 'POST',
+        body: JSON.stringify({
+          ticket: body.ticket,
+          owner: 'acme',
+          repo: 'work',
+        }),
+      }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(bound.status, 200);
+    const stored = await new GitHubStore(db as unknown as D1Database).binding(
+      'user_1',
+    );
+    assert.equal(stored?.installationId, 77);
+    assert.equal(stored?.repo, 'work');
+  });
+
+  it('binds through the right installation when the choice is not the first', async () => {
+    // Deliberately picks the entry that does not sort first. Without it,
+    // taking the installation from the head of the list passes by
+    // coincidence, which is what this test caught when it was written the
+    // other way round.
+    const { db, response } = await callback();
+    const body = (await response.json()) as {
+      ticket: string;
+      repositories: { owner: string; repo: string }[];
+    };
+    assert.notEqual(
+      `${body.repositories[0]?.owner}/${body.repositories[0]?.repo}`,
+      'chris/personal',
+      'the fixture no longer puts the chosen repository second',
+    );
+
+    const bound = await handleGitHubBind(
+      new Request('https://app.vibld.com/api/github/bind', {
+        method: 'POST',
+        body: JSON.stringify({
+          ticket: body.ticket,
+          owner: 'chris',
+          repo: 'personal',
+        }),
+      }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(bound.status, 200);
+    const stored = await new GitHubStore(db as unknown as D1Database).binding(
+      'user_1',
+    );
+    assert.equal(stored?.installationId, 42);
+    assert.equal(stored?.repo, 'personal');
+  });
+
+  it('still offers what it can read when one installation fails', async () => {
+    // An organisation removed from under the App should not stop somebody
+    // connecting a repository on their own account.
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubCallback(
+      callbackRequest({ code: 'the-code', state }),
+      env(db),
+      PRINCIPAL,
+      githubFor(BOTH, { 42: REPOS[42] }),
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      repositories: { owner: string; repo: string }[];
+    };
+    assert.deepEqual(
+      body.repositories.map((r) => `${r.owner}/${r.repo}`),
+      ['chris/personal'],
+    );
+  });
+
+  it('reports the failure when no installation could be read at all', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubCallback(
+      callbackRequest({ code: 'the-code', state }),
+      env(db),
+      PRINCIPAL,
+      githubFor(BOTH, {}),
+      NOW,
+    );
+    assert.equal(response.status, 409);
   });
 });

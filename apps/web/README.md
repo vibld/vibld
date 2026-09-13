@@ -758,6 +758,13 @@ establishes the right to bind is a user-to-server token:
    signed rather than from the request body, so the destination and its
    default branch are the ones GitHub reported.
 
+Every installation the person reaches is read at step 2, not just the one
+the redirect named, and each repository carries the installation it would be
+pushed through. Offering one and naming the rest would be a dead end rather
+than a limit: reading another installation needs the user token, and that is
+gone as soon as the callback ends. The fan-out is capped, and one
+installation failing does not lose the others.
+
 The user token is used for those two reads and discarded. It is never
 stored: it proves who is connecting, and pushing has its own credential.
 ADR-0006 keeps those classes apart, and a token that can act as somebody

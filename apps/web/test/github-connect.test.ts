@@ -349,18 +349,14 @@ describe('which repositories may be offered', () => {
  */
 describe('the ticket a verified callback issues', () => {
   const REPOS = [
-    { owner: 'acme', repo: 'site', defaultBranch: 'main' },
-    { owner: 'acme', repo: 'docs', defaultBranch: 'trunk' },
+    { installationId: 42, owner: 'acme', repo: 'site', defaultBranch: 'main' },
+    { installationId: 42, owner: 'acme', repo: 'docs', defaultBranch: 'trunk' },
   ];
 
   it('round-trips what the callback established', async () => {
-    const ticket = await signChoice(CREDENTIALS, 'user_1', 42, REPOS, NOW);
+    const ticket = await signChoice(CREDENTIALS, 'user_1', REPOS, NOW);
     const verified = await verifyChoice(CREDENTIALS, ticket, NOW + 1000);
-    assert.deepEqual(verified, {
-      userId: 'user_1',
-      installationId: 42,
-      repositories: REPOS,
-    });
+    assert.deepEqual(verified, { userId: 'user_1', repositories: REPOS });
   });
 
   it('refuses one this deployment did not sign', async () => {
@@ -369,21 +365,26 @@ describe('the ticket a verified callback issues', () => {
     const forged = await signChoice(
       { ...CREDENTIALS, clientSecret: 'not-the-secret' },
       'user_1',
-      42,
-      [{ owner: 'someone-else', repo: 'private', defaultBranch: 'main' }],
+      [
+        {
+          installationId: 999,
+          owner: 'someone-else',
+          repo: 'private',
+          defaultBranch: 'main',
+        },
+      ],
       NOW,
     );
     assert.equal(await verifyChoice(CREDENTIALS, forged, NOW), null);
   });
 
   it('refuses one whose repository list was edited after signing', async () => {
-    const ticket = await signChoice(CREDENTIALS, 'user_1', 42, REPOS, NOW);
+    const ticket = await signChoice(CREDENTIALS, 'user_1', REPOS, NOW);
     const [, signature] = ticket.split('.');
     const swapped = Buffer.from(
       JSON.stringify({
         u: 'user_1',
-        i: 42,
-        r: [['someone-else', 'private', 'main']],
+        r: [[999, 'someone-else', 'private', 'main']],
         t: NOW,
       }),
       'utf8',
@@ -397,7 +398,7 @@ describe('the ticket a verified callback issues', () => {
   });
 
   it('goes stale, so a verification is not good indefinitely', async () => {
-    const ticket = await signChoice(CREDENTIALS, 'user_1', 42, REPOS, NOW);
+    const ticket = await signChoice(CREDENTIALS, 'user_1', REPOS, NOW);
     assert.equal(
       await verifyChoice(CREDENTIALS, ticket, NOW + 16 * 60 * 1000),
       null,
@@ -407,20 +408,20 @@ describe('the ticket a verified callback issues', () => {
   it('names the user it was issued to, for the caller to check', async () => {
     // A ticket is not a bearer token: the caller compares this against its
     // own identity, so one user's ticket is no use in another's session.
-    const ticket = await signChoice(CREDENTIALS, 'user_1', 42, REPOS, NOW);
+    const ticket = await signChoice(CREDENTIALS, 'user_1', REPOS, NOW);
     const verified = await verifyChoice(CREDENTIALS, ticket, NOW);
     assert.equal(verified?.userId, 'user_1');
   });
 
   it('refuses a malformed repository entry rather than partly reading it', async () => {
     const payload = Buffer.from(
-      JSON.stringify({ u: 'user_1', i: 42, r: [['acme', 'site']], t: NOW }),
+      JSON.stringify({ u: 'user_1', r: [[42, 'acme', 'site']], t: NOW }),
       'utf8',
     )
       .toString('base64url')
       .replace(/=+$/, '');
     // Signed correctly, but structurally wrong: it must still be refused.
-    const ticket = await signChoice(CREDENTIALS, 'user_1', 42, [], NOW);
+    const ticket = await signChoice(CREDENTIALS, 'user_1', [], NOW);
     const [, goodSignature] = ticket.split('.');
     assert.equal(
       await verifyChoice(CREDENTIALS, `${payload}.${goodSignature}`, NOW),
@@ -429,7 +430,7 @@ describe('the ticket a verified callback issues', () => {
   });
 
   it('carries an empty list rather than pretending there is a choice', async () => {
-    const ticket = await signChoice(CREDENTIALS, 'user_1', 42, [], NOW);
+    const ticket = await signChoice(CREDENTIALS, 'user_1', [], NOW);
     const verified = await verifyChoice(CREDENTIALS, ticket, NOW);
     assert.deepEqual(verified?.repositories, []);
   });

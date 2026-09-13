@@ -224,16 +224,15 @@ const TICKET_LIFETIME_MS = 15 * 60 * 1000;
 export async function signChoice(
   credentials: GitHubOAuthCredentials,
   userId: string,
-  installationId: number,
-  repositories: readonly RepositoryChoice[],
+  repositories: readonly ConnectableRepository[],
   now: number = Date.now(),
 ): Promise<string> {
   return signPayload(
     credentials,
     {
       u: userId,
-      i: installationId,
       r: repositories.map((choice) => [
+        choice.installationId,
         choice.owner,
         choice.repo,
         choice.defaultBranch,
@@ -245,8 +244,7 @@ export async function signChoice(
 
 export interface VerifiedChoice {
   userId: string;
-  installationId: number;
-  repositories: RepositoryChoice[];
+  repositories: ConnectableRepository[];
 }
 
 /**
@@ -270,27 +268,24 @@ export async function verifyChoice(
     TICKET_LIFETIME_MS,
   );
   if (!parsed) return null;
-  if (typeof parsed.u !== 'string' || typeof parsed.i !== 'number') return null;
+  if (typeof parsed.u !== 'string') return null;
   if (!Array.isArray(parsed.r)) return null;
 
-  const repositories: RepositoryChoice[] = [];
+  const repositories: ConnectableRepository[] = [];
   for (const entry of parsed.r) {
-    if (!Array.isArray(entry) || entry.length !== 3) return null;
-    const [owner, repo, defaultBranch] = entry;
+    if (!Array.isArray(entry) || entry.length !== 4) return null;
+    const [installationId, owner, repo, defaultBranch] = entry;
     if (
+      typeof installationId !== 'number' ||
       typeof owner !== 'string' ||
       typeof repo !== 'string' ||
       typeof defaultBranch !== 'string'
     ) {
       return null;
     }
-    repositories.push({ owner, repo, defaultBranch });
+    repositories.push({ installationId, owner, repo, defaultBranch });
   }
-  return {
-    userId: parsed.u,
-    installationId: parsed.i,
-    repositories,
-  };
+  return { userId: parsed.u, repositories };
 }
 
 /**
@@ -398,6 +393,21 @@ export interface RepositoryChoice {
   defaultBranch: string;
 }
 
+/**
+ * A repository the user may connect, and the installation it would be
+ * pushed through.
+ *
+ * The installation travels *with* the repository rather than beside the
+ * list, because one person can have the App installed on several accounts
+ * and the whole set is offered at once. Carrying a single "chosen
+ * installation" instead meant the callback picked one and the others could
+ * not be reached at all: reading a second installation's repositories needs
+ * the user token, and that is gone by the time anyone could ask.
+ */
+export interface ConnectableRepository extends RepositoryChoice {
+  installationId: number;
+}
+
 export type Reachable<T> =
   { ok: true; value: T } | { ok: false; error: string; reason: GitHubFailure };
 
@@ -496,6 +506,56 @@ export async function userInstallations(
     });
   }
   return { ok: true, value: installations };
+}
+
+/** Reading every installation is a call each, so the fan-out is bounded. */
+const MAX_INSTALLATIONS_READ = 10;
+
+/**
+ * Everything this person could connect, across every installation they can
+ * reach.
+ *
+ * One call per installation, which is why it is capped. The alternative was
+ * to read only one and report the rest as names the user could see and not
+ * choose, which is a dead end rather than a limit: the user token is what
+ * makes this readable at all, and it is discarded as soon as the callback
+ * ends.
+ *
+ * A single installation failing does not lose the others. One organisation
+ * having been removed from under the App should not stop somebody connecting
+ * a repository on their own account.
+ */
+export async function connectableRepositories(
+  token: string,
+  installations: readonly UserInstallation[],
+  doFetch: typeof fetch = fetch,
+): Promise<Reachable<ConnectableRepository[]>> {
+  const connectable: ConnectableRepository[] = [];
+  let lastFailure: Extract<Reachable<never>, { ok: false }> | null = null;
+  let read = 0;
+
+  for (const installation of installations) {
+    if (read >= MAX_INSTALLATIONS_READ) break;
+    read += 1;
+    const reply = await installationRepositories(
+      token,
+      installation.id,
+      doFetch,
+    );
+    if (!reply.ok) {
+      lastFailure = reply;
+      continue;
+    }
+    for (const choice of reply.value) {
+      connectable.push({ ...choice, installationId: installation.id });
+    }
+  }
+
+  // Only a failure when it cost every installation. Reporting a partial read
+  // as success would quietly hide repositories somebody expected to see, and
+  // reporting it as failure would block a connection that can be made.
+  if (connectable.length === 0 && lastFailure) return lastFailure;
+  return { ok: true, value: connectable };
 }
 
 /**
