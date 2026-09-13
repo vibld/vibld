@@ -506,3 +506,66 @@ describe('what the waitlist records', () => {
     assert.equal(signup.blobs[1], '/');
   });
 });
+
+describe('attribution a caller cannot forge', () => {
+  it('refuses a page_url pointing at another site', async () => {
+    // /api/hit and /api/waitlist both take unauthenticated posts, so a
+    // page_url that is trusted on sight lets anyone write paths and campaigns
+    // into this site's traffic report from anywhere.
+    mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('{}', { status: 201 }),
+    );
+    const { env, signups } = recordingEnv();
+    await worker.fetch(
+      jsonRequest({
+        email: 'chris@example.com',
+        company: '',
+        page_url: 'https://elsewhere.example/their/page?utm_source=fake',
+      }),
+      env,
+    );
+    const [signup] = signups();
+    assert.ok(signup);
+    // blobs: [kind, path, referrer, source, medium, campaign, country]
+    assert.equal(signup.blobs[1], '/');
+    assert.equal(signup.blobs[3], '');
+  });
+
+  it('refuses a forged page_url on the pageview beacon too', async () => {
+    const { env, points } = recordingEnv();
+    const request = new Request('https://vibld.com/api/hit', {
+      method: 'POST',
+      body: new URLSearchParams({
+        page_url: 'https://elsewhere.example/their/page?utm_campaign=fake',
+        page_referrer: '',
+      }).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const response = await worker.fetch(request, env);
+    assert.equal(response.status, 204);
+    const [hit] = points.filter((point) => point.indexes[0] === 'pageview');
+    assert.ok(hit);
+    assert.equal(hit.blobs[1], '/');
+    assert.equal(hit.blobs[5], '');
+  });
+
+  it('still believes a page_url on this site', async () => {
+    // The check must not cost the real case, which is every genuine visitor.
+    const { env, points } = recordingEnv();
+    const request = new Request('https://vibld.com/api/hit', {
+      method: 'POST',
+      body: new URLSearchParams({
+        page_url: 'https://vibld.com/legal/privacy?utm_campaign=launch',
+        page_referrer: '',
+      }).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    await worker.fetch(request, env);
+    const [hit] = points.filter((point) => point.indexes[0] === 'pageview');
+    assert.ok(hit);
+    assert.equal(hit.blobs[1], '/legal/privacy');
+    assert.equal(hit.blobs[5], 'launch');
+  });
+});

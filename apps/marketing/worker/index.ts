@@ -134,15 +134,30 @@ const CONFIRMATION_PAGE = (message: string, ok: boolean) => `<!doctype html>
  * page beacon both send the page's own URL and referrer, because the Worker
  * sees only its own `/api/*` URL -- not the page the visitor was actually on.
  *
- * When the caller reported nothing, the `Referer` header is the next best
- * answer and the last resort is deliberately not `request.url`. The
- * no-JavaScript form post is a supported path, and there `page_url` is the
- * empty value the page was prerendered with, so falling back to the Worker's
- * own URL filed every such signup under `/api/waitlist`: a path nobody
- * visited, splitting the real page's numbers rather than merely rounding
- * them. A browser sends `Referer` on a form navigation, and for a same-origin
- * post it sends the full URL, so the query string and its UTM parameters
- * survive with it.
+ * Two candidates, in order, and the same rule applied to both: it counts only
+ * if it names a page on this site.
+ *
+ * The rule is one function rather than a check at each branch because the
+ * first version of this checked only the `Referer` fallback and trusted
+ * whatever `page_url` a caller sent. `/api/hit` and `/api/waitlist` both take
+ * unauthenticated posts, so that was an open door: anyone could write
+ * `/their/page` and `utm_campaign=whatever` straight into this site's
+ * traffic report. Per-branch checks are how the second branch gets forgotten.
+ *
+ * The last resort is deliberately not `request.url`. The no-JavaScript form
+ * post is a supported path, and there `page_url` is the empty value the page
+ * was prerendered with, so falling back to the Worker's own URL filed every
+ * such signup under `/api/waitlist`: a path nobody visited, splitting the
+ * real page's numbers rather than merely rounding them. A browser sends
+ * `Referer` on a form navigation, and for a same-origin post it sends the
+ * full URL, so the query string and its UTM parameters survive with it.
+ *
+ * What this does not claim: a caller can still send a plausible same-host URL
+ * and be believed. Every field here is reported by the client and none of it
+ * can be proved. The check removes the ability to write arbitrary paths and
+ * campaigns from anywhere, which is worth having; it does not make an
+ * unauthenticated beacon trustworthy, and nothing short of not having one
+ * would.
  */
 function attributionOf(
   request: Request,
@@ -150,29 +165,29 @@ function attributionOf(
   pageReferrer: string,
 ): { attribution: Attribution; path: string } {
   const selfHost = new URL(request.url).hostname;
-  const url = pageUrl || sameOriginReferer(request, selfHost) || '';
+  const url =
+    onThisSite(pageUrl, selfHost) ??
+    onThisSite(request.headers.get('referer'), selfHost) ??
+    '';
   return {
     attribution: attributionFrom(url, pageReferrer, selfHost),
-    // Not `request.url`: with nothing to go on, "/" is an honest guess at
-    // where a visitor was, and `/api/waitlist` is a claim that is always
-    // wrong. `pathOf` answers "/" for a value it cannot parse.
+    // With nothing believable to go on, "/" is an honest guess at where a
+    // visitor was. `pathOf` answers "/" for a value it cannot parse.
     path: pathOf(url),
   };
 }
 
-/**
- * The `Referer` header, but only when it names a page on this site.
- *
- * A cross-origin post carries the other site's URL, and using it would record
- * that site's path as one of ours -- attribution anyone could write to by
- * posting a form from anywhere.
- */
-function sameOriginReferer(request: Request, selfHost: string): string | null {
-  const referer = request.headers.get('referer');
-  if (!referer) return null;
+/** A URL, but only when it names a page on this site. */
+function onThisSite(
+  candidate: string | null | undefined,
+  selfHost: string,
+): string | null {
+  if (!candidate) return null;
   try {
-    return new URL(referer).hostname === selfHost ? referer : null;
+    return new URL(candidate).hostname === selfHost ? candidate : null;
   } catch {
+    // Relative, malformed, or not a URL at all. All the same answer: this is
+    // not something to record a path from.
     return null;
   }
 }
