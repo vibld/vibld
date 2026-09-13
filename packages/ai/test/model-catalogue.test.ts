@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  LEGACY_MODEL_IDS,
   MODEL_CATALOGUE,
   availableModels,
+  canonicalModelId,
   findModel,
   isKnownModel,
 } from '../src/model-catalogue.ts';
@@ -116,5 +118,32 @@ describe('isKnownModel', () => {
     assert.ok(!isKnownModel('claude-opus-5-20260401'));
     assert.ok(!isKnownModel('deepseek-v4-flash'));
     assert.ok(!isKnownModel(42));
+  });
+});
+
+describe('legacy model ids', () => {
+  it('every alias resolves to a model that is actually in the catalogue', () => {
+    // A dangling alias is worse than no alias: it reads as handled and still
+    // filters a policy to nothing. This is the check that fails if a future
+    // removal renames the replacement out from under an entry here.
+    for (const [legacy, current] of Object.entries(LEGACY_MODEL_IDS)) {
+      assert.ok(
+        findModel(current),
+        `${legacy} points at ${current}, which is not in the catalogue`,
+      );
+    }
+  });
+
+  it('never aliases an id that is still live', () => {
+    // An alias for a model that still exists would silently redirect real
+    // traffic away from the model someone asked for.
+    for (const legacy of Object.keys(LEGACY_MODEL_IDS)) {
+      assert.equal(findModel(legacy), null, `${legacy} is still a real model`);
+    }
+  });
+
+  it('passes unknown and current ids through untouched', () => {
+    assert.equal(canonicalModelId('claude-opus-5'), 'claude-opus-5');
+    assert.equal(canonicalModelId('not-a-model'), 'not-a-model');
   });
 });

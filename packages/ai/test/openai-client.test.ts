@@ -210,6 +210,17 @@ describe('createOpenaiPlanClient', () => {
     assert.equal(result.stopReason, 'end_turn');
   });
 
+  it('opts out of response storage', async () => {
+    // The Responses API stores by default, and this request carries the whole
+    // project. Picking an OpenAI model must not change where a user's code
+    // ends up, so the absence of this field is a privacy regression, not a
+    // stylistic one.
+    const seen: unknown[] = [];
+    await clientWith(sse(completed()), seen).createPlan(REQUEST);
+    const body = (seen[0] as { body: Record<string, unknown> }).body;
+    assert.equal(body.store, false);
+  });
+
   it('clamps max_output_tokens to the model ceiling', async () => {
     const seen: unknown[] = [];
     await clientWith(sse(completed()), seen).createPlan({

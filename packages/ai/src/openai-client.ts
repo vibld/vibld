@@ -241,6 +241,15 @@ export function createOpenaiPlanClient(
         body: JSON.stringify({
           model: request.model,
           max_output_tokens: maxOutputTokens,
+          // The Responses API stores responses by default, and what this
+          // request carries is the user's prompt, their standing instructions,
+          // any reference text, and every existing file in their project --
+          // `buildUserPrompt` sends the whole project back on each follow-up
+          // turn, so a multi-turn session would leave a copy of it server-side
+          // on every turn. The other two clients are stateless, and choosing a
+          // model from the picker must not quietly change the retention of
+          // someone's code. Nothing here ever retrieves a stored response.
+          store: false,
           // Streamed for the reason both other clients are: a whole project
           // takes minutes, and a request that long risks an HTTP timeout with
           // nothing to show for it.

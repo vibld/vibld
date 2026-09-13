@@ -1,6 +1,6 @@
 import type { GenerationRequest } from '@vibld/core';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
-import { findModel, isKnownModel } from '@vibld/ai';
+import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
 import type { ProviderName } from '@vibld/ai/select-client';
@@ -455,15 +455,24 @@ export function parseModel(
   if (model === undefined || model === null || model === '') {
     return { ok: true, value: null };
   }
-  if (!isKnownModel(model)) {
+  // Resolved before the closed-set check rather than after it. A renamed id
+  // is deliberately absent from the catalogue, because it must never reach a
+  // provider, so checking first would reject a saved or stale client naming
+  // the old model with a 400 here, before `decideModel` ever gets to resolve
+  // it. This does not widen the set: an alias only ever points at a model
+  // already in the catalogue, and the policy check still follows.
+  const wanted = typeof model === 'string' ? canonicalModelId(model) : model;
+  if (!isKnownModel(wanted)) {
     return fail(400, 'Unknown "model".');
   }
-  const choice = findModel(model);
+  const choice = findModel(wanted);
   if (!choice || !configured[choice.provider]) {
     return fail(
       400,
       `This deployment has no ${choice?.provider ?? 'matching'} credential, so it cannot use that model.`,
     );
   }
-  return { ok: true, value: model };
+  // The canonical id, not what the caller sent: everything downstream, the
+  // request to the provider included, must only ever see an id that exists.
+  return { ok: true, value: wanted };
 }

@@ -141,8 +141,10 @@ export {
 export { PROVIDER_NAMES } from './select-client.ts';
 export type { ProviderEnv, ProviderName } from './select-client.ts';
 export {
+  LEGACY_MODEL_IDS,
   MODEL_CATALOGUE,
   availableModels,
+  canonicalModelId,
   findModel,
   isKnownModel,
 } from './model-catalogue.ts';

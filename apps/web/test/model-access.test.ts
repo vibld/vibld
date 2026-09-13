@@ -155,3 +155,43 @@ describe('decideModel', () => {
     assert.equal(decision.ok, false);
   });
 });
+
+describe('a renamed model id reaching the endpoint', () => {
+  it('grants and runs it, resolved to the id the provider has', () => {
+    // Two failures in one: a deployment whose policy still names the old id
+    // would 403 on every request, and a saved or bookmarked request naming it
+    // would otherwise be sent to DeepSeek as a model that does not exist.
+    const legacyPolicy = JSON.stringify({ default: ['deepseek-v4-flash'] });
+    const env = { ...ALL_KEYED, VIBLD_MODEL_POLICY: legacyPolicy };
+
+    const granted = grantedFor(env, 'chris@drummond.com');
+    assert.deepEqual(
+      granted.map((model) => model.id),
+      ['deepseek-flash'],
+    );
+
+    const decision = decideModel(
+      env,
+      'chris@drummond.com',
+      'deepseek-v4-flash',
+      'deepseek-flash',
+    );
+    assert.ok(decision.ok);
+    assert.equal(decision.model, 'deepseek-flash');
+  });
+
+  it('still refuses a model the policy does not grant', () => {
+    // The alias resolves ids; it must not widen what anyone may spend on.
+    const env = {
+      ...ALL_KEYED,
+      VIBLD_MODEL_POLICY: JSON.stringify({ default: ['deepseek-v4-flash'] }),
+    };
+    const decision = decideModel(
+      env,
+      'chris@drummond.com',
+      'claude-opus-5',
+      'deepseek-flash',
+    );
+    assert.equal(decision.ok, false);
+  });
+});

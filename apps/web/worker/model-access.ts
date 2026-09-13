@@ -1,6 +1,7 @@
 import {
   allowedModels,
   availableModels,
+  canonicalModelId,
   configuredProviders,
   parseModelPolicy,
 } from '@vibld/ai';
@@ -73,18 +74,24 @@ export function decideModel(
   }
 
   if (chosen) {
+    // Canonicalised before it is checked or returned, so a saved request or a
+    // stale client naming a renamed model still runs, and so the id that
+    // reaches the provider is one the provider actually has.
+    const wanted = canonicalModelId(chosen);
     // A hidden option is still a reachable one: the picker not offering it
     // is not what stops it being used.
-    if (!granted.some((model) => model.id === chosen)) {
+    if (!granted.some((model) => model.id === wanted)) {
       return {
         ok: false,
         status: 403,
         error: `That model is not available to ${principal}.`,
       };
     }
-    return { ok: true, model: chosen, granted };
+    return { ok: true, model: wanted, granted };
   }
 
-  const preferred = granted.find((model) => model.id === fallback);
+  const preferred = granted.find(
+    (model) => model.id === canonicalModelId(fallback),
+  );
   return { ok: true, model: (preferred ?? granted[0]!).id, granted };
 }

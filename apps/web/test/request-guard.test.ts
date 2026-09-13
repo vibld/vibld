@@ -532,6 +532,32 @@ describe('parseModel', () => {
     }
   });
 
+  it('accepts a renamed model id, and returns the current one', () => {
+    // The guard runs before `decideModel`, so canonicalising only there left
+    // a saved or stale client naming the old id rejected with a 400 and the
+    // compatibility never actually reached. Asserted through the guard for
+    // that reason: a unit test against `decideModel` alone passes while the
+    // endpoint still refuses the request.
+    const result = parseModel(
+      { prompt: 'x', model: 'deepseek-v4-flash' },
+      both,
+    );
+    assert.equal(result.ok, true);
+    // The current id, never the one the caller sent: a renamed id must not
+    // reach the provider.
+    if (result.ok) assert.equal(result.value, 'deepseek-flash');
+  });
+
+  it('still refuses a renamed model when its provider has no key', () => {
+    // Resolving an alias must not bypass the credential check that follows.
+    const result = parseModel(
+      { prompt: 'x', model: 'deepseek-v4-flash' },
+      { anthropic: true, deepseek: false, openai: true },
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /no deepseek credential/);
+  });
+
   it('refuses a real model this deployment has no key for', () => {
     // Otherwise the run fails after the user has already waited for it.
     const result = parseModel(

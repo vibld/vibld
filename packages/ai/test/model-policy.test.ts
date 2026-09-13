@@ -176,3 +176,45 @@ describe('allowedModels', () => {
     );
   });
 });
+
+describe('a policy naming a model id that has since been renamed', () => {
+  // The failure this guards is a deploy-time outage, not a degraded run. A
+  // policy is a deployment secret written against an older catalogue, so it
+  // keeps granting ids this repository has moved on from. It still parses as
+  // valid, so it never reaches the malformed branch that degrades safely.
+  const LEGACY = JSON.stringify({ default: ['deepseek-v4-flash'] });
+
+  it('resolves the old id rather than filtering the principal to nothing', () => {
+    const allowed = allowedModels(
+      parseModelPolicy(LEGACY),
+      'chris@drummond.com',
+      ALL,
+    );
+    assert.deepEqual(ids(allowed), ['deepseek-flash']);
+  });
+
+  it('keeps granting the rest of a policy that mixes old and current ids', () => {
+    const mixed = JSON.stringify({
+      default: ['deepseek-v4-flash', 'claude-opus-5'],
+    });
+    const allowed = allowedModels(
+      parseModelPolicy(mixed),
+      'chris@drummond.com',
+      ALL,
+    );
+    assert.deepEqual(ids(allowed), ['claude-opus-5', 'deepseek-flash']);
+  });
+
+  it('still grants nothing for a policy that names no real model', () => {
+    // The alias must not turn an unknown id into a grant. A policy naming
+    // only models this catalogue never had is a misconfiguration, and
+    // resolving it to something would hand out a model nobody granted.
+    const bogus = JSON.stringify({ default: ['gpt-9-imaginary'] });
+    const allowed = allowedModels(
+      parseModelPolicy(bogus),
+      'chris@drummond.com',
+      ALL,
+    );
+    assert.deepEqual(ids(allowed), []);
+  });
+});
