@@ -36,8 +36,17 @@ let usage: PlanUsage | undefined;
 // Which service answers is configuration, not a constant: VIBLD_PROVIDER
 // picks, or the single key that is set does. An unset VIBLD_MODEL falls back
 // to the chosen provider's own model, never the other one's.
-const provider = new PlanProvider(createPlanClient(process.env), {
-  model: resolveModel(process.env),
+//
+// The model is resolved first and handed to the client, because a chosen
+// model decides which service answers. Without it the two were read
+// independently: the client from VIBLD_PROVIDER and the model from
+// VIBLD_MODEL, so VIBLD_PROVIDER=openai with an Anthropic model id sent that
+// id to OpenAI and got a 400 that reads like an outage. `providerForRequest`
+// has always said the model wins, and the Worker has always behaved that way;
+// this is the one caller that did not.
+const model = resolveModel(process.env);
+const provider = new PlanProvider(createPlanClient(process.env, model), {
+  model,
   onUsage: (reported) => {
     usage = reported;
   },

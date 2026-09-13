@@ -89,7 +89,10 @@ jobs:
           case "$RUNS" in
             ''|*[!0-9]*) echo "::error::runs must be a whole number, not \"$RUNS\"."; exit 1 ;;
           esac
-          count() { printf '%s' "$1" | tr ',' '\n' | grep -c '[^[:space:]]'; }
+          # `|| true` because grep exits 1 when it counts nothing, and this
+          # must not depend on how `set -e` treats a failing command
+          # substitution inside an assignment, which is not what it looks like.
+          count() { printf '%s' "$1" | tr ',' '\n' | grep -c '[^[:space:]]' || true; }
           models=$(count "$MODELS")
           cases=$(count "$CASES")
           {

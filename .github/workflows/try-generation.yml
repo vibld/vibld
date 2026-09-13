@@ -11,14 +11,15 @@ on:
         required: true
         default: A landing page for a cybersecurity SaaS with pricing, an FAQ and a contact form. Heavy animation. Navy, dark purple and neon yellow.
       provider:
-        description: Which model service answers
+        description: Which service answers when no model is named below
         type: choice
         options: [anthropic, deepseek, openai]
         default: anthropic
       model:
         description: >-
-          Optional model override, an id from the catalogue. Leave blank for
-          the provider's default.
+          Optional model override, an id from the catalogue. A named model
+          decides which service answers, so this wins over the choice above.
+          Leave blank for that provider's default.
         required: false
         default: ''
       build:
@@ -51,26 +52,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Require a model credential
-        env:
-          PROVIDER: ${{ inputs.provider }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          # Only the selected provider's key is required. Checking them all
-          # would block a run on a credential it never uses.
-          case "$PROVIDER" in
-            deepseek) key="$DEEPSEEK_API_KEY"; name=DEEPSEEK_API_KEY ;;
-            openai)   key="$OPENAI_API_KEY"; name=OPENAI_API_KEY ;;
-            *)        key="$ANTHROPIC_API_KEY"; name=ANTHROPIC_API_KEY ;;
-          esac
-          if [ -z "$key" ]; then
-            echo "::error::$name is not set on the 'preview' environment"
-            exit 1
-          fi
-          echo "Using $PROVIDER" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Enable Corepack
         run: corepack enable
 
@@ -82,6 +63,59 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # After install, because the answering provider is read from the
+      # catalogue rather than guessed. A named model decides which service
+      # answers (`providerForRequest`), so checking the key for the dropdown's
+      # provider would check the wrong credential whenever the two disagree,
+      # and fail mid-run on the one that was actually needed.
+      - name: Require the credential this run will actually use
+        env:
+          PROVIDER: ${{ inputs.provider }}
+          VIBLD_MODEL: ${{ inputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          # The model id is dispatch input, so it is read inside node from the
+          # environment rather than interpolated into anything.
+          #
+          # The status is tested explicitly rather than left to `set -e`, which
+          # does not reliably stop on a failing command substitution inside an
+          # assignment. Measured: `v="$(node -e 'process.exit(1)')"` under
+          # `set -euo pipefail` carried on with v empty, and an empty provider
+          # falls through the case below to the Anthropic key, so the guard
+          # would have checked a credential this run was never going to use.
+          if ! answering="$(node --experimental-strip-types -e '
+            const m = await import("./packages/ai/src/index.ts");
+            const id = (process.env.VIBLD_MODEL ?? "").trim();
+            const chosen = id ? m.findModel(id) : null;
+            if (id && !chosen) {
+              console.error(`::error::"${id}" is not a model in the catalogue.`);
+              process.exit(1);
+            }
+            process.stdout.write(chosen ? chosen.provider : process.env.PROVIDER);
+          ')"; then
+            exit 1
+          fi
+          if [ -z "$answering" ]; then
+            echo "::error::Could not work out which service would answer."
+            exit 1
+          fi
+          case "$answering" in
+            deepseek) key="$DEEPSEEK_API_KEY"; name=DEEPSEEK_API_KEY ;;
+            openai)   key="$OPENAI_API_KEY"; name=OPENAI_API_KEY ;;
+            *)        key="$ANTHROPIC_API_KEY"; name=ANTHROPIC_API_KEY ;;
+          esac
+          if [ -z "$key" ]; then
+            echo "::error::$name is not set on the 'preview' environment"
+            exit 1
+          fi
+          if [ -n "${VIBLD_MODEL// /}" ] && [ "$answering" != "$PROVIDER" ]; then
+            echo "Note: $VIBLD_MODEL is a $answering model, so $answering answers rather than $PROVIDER." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Using $answering" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate
         id: generate
