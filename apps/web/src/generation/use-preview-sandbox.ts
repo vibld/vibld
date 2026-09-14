@@ -43,6 +43,27 @@ export interface PreviewSandbox {
 }
 
 /**
+ * Whether the running sandbox is serving a checkpoint that has been moved on
+ * from.
+ *
+ * Here rather than in a component because two of them ask it now: the panel,
+ * which draws the sentence, and the tab badge, which says "live" from another
+ * tab entirely. Two copies of this would be two chances to drift, and the
+ * badge is the one nobody is looking at when it goes wrong.
+ */
+export function servingOlderThan(
+  sandbox: Pick<PreviewSandbox, 'status' | 'ranRevision'>,
+  acceptedRevision: string | undefined,
+): boolean {
+  return (
+    sandbox.status?.status === 'ready' &&
+    sandbox.ranRevision !== null &&
+    acceptedRevision !== undefined &&
+    acceptedRevision !== sandbox.ranRevision
+  );
+}
+
+/**
  * Owns the lifecycle of one sandbox preview (docs/decisions.md L7-L11) and
  * its share links (L10): start, poll until it settles, stop; mint or revoke
  * a share once it is ready.
