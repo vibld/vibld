@@ -244,6 +244,17 @@ jobs:
             echo "VIBLD_GITHUB_CLIENT_ID/VIBLD_GITHUB_CLIENT_SECRET not both set -- connecting a repository stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The key being present says nothing about what the App may do with it.
+      # A read-only App looks configured from every angle this workflow can
+      # see and answers 422 on every push, so the App is asked directly.
+      # Skipped when there is no App to ask about.
+      - name: Check what the GitHub App is allowed to do
+        working-directory: apps/web
+        env:
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+        run: node scripts/check-github-app.mjs
+
       # L44's nightly provider-balance check. Optional, same rule as every
       # secret above: unset means the check still runs and logs, it just
       # cannot send. A separate copy from apps/marketing's own

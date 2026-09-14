@@ -1,0 +1,32 @@
+# What the Vibld GitHub App is actually allowed to do.
+#
+# Separate from the deploy so the question can be answered without shipping
+# anything: it reads, it does not write, and it touches no Cloudflare
+# resource. The deploy runs the same script, so a misconfigured App is caught
+# there too rather than only when somebody remembers to ask.
+name: Check the GitHub App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # The App credentials live on this environment, next to every other
+    # secret the builder needs.
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ask GitHub what the App may do
+        working-directory: apps/web
+        env:
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+        run: node scripts/check-github-app.mjs
