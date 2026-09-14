@@ -60,6 +60,13 @@ export function AdminPanel() {
   const [lookup, setLookup] = useState<LookupState>({ phase: 'idle' });
   const [grant, setGrant] = useState<GrantState>({ phase: 'idle' });
   const lookups = useRef(createStatusGate());
+  /**
+   * The address the field names *now*. A keystroke during a request leaves
+   * every closure started before it holding the address from then, and the
+   * gate cannot tell the two apart: a read begun after the change is the
+   * newest read, whoever it is about.
+   */
+  const address = useRef('');
   const emailId = useId();
   const amountId = useId();
   const noteId = useId();
@@ -112,6 +119,7 @@ export function AdminPanel() {
    * itself to this one.
    */
   function changeEmail(next: string) {
+    address.current = next;
     setEmail(next);
     if (next.trim() === email.trim()) return;
     lookups.current.supersede();
@@ -168,6 +176,14 @@ export function AdminPanel() {
     // replaced the confirmation with a failure, which is the reading that
     // gets a grant made twice. It is safe to await unguarded because
     // `runLookup` now reports its own failure rather than throwing.
+    //
+    // Only while the field still names the address that was credited. If a
+    // keystroke moved it on while the grant was in flight, refreshing would
+    // put that user's balance and history back beside a form aimed at
+    // somebody else, which is exactly what `changeEmail` clears them to
+    // prevent. The confirmation above already names who was credited and
+    // how much, so nothing is lost by not asking again.
+    if (address.current.trim() !== trimmedEmail) return;
     await runLookup();
   }
 

@@ -251,6 +251,41 @@ describe('granting credit, as it is actually wired', () => {
     view.unmount();
   });
 
+  it('does not refresh the credited user beside a form aimed at somebody else', async () => {
+    // The refresh runs after the grant, so it starts a newer read than the
+    // keystroke that superseded everything before it, and the gate has no
+    // way to tell that it is about the address the field just left.
+    const topup = held(() =>
+      reply({ userId: 'user_alice', creditUsdCents: 250 }),
+    );
+    const calls = serving({
+      '/api/admin/user': () => reply(FOUND),
+      '/api/admin/topup': topup.answer,
+    });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.amount('2.50');
+    await view.grant();
+
+    await view.email('bob@example.com');
+    await topup.land();
+
+    assert.equal(
+      calls.filter((call) => call.url.includes('/api/admin/user')).length,
+      0,
+      'it looked up the address the field had already left',
+    );
+    assert.doesNotMatch(
+      view.text(),
+      /user_alice has/,
+      "it put one user's balance beside a form that would pay another",
+    );
+    // What did happen is still said, because it is the only record the
+    // money moved, and it names who got it.
+    assert.match(view.text(), /Granted \$2\.50 to user_alice/);
+    view.unmount();
+  });
+
   it('refuses an amount that is not money, without asking the server', async () => {
     const calls = serving({ '/api/admin/user': () => reply(FOUND) });
     const view = await mount();
