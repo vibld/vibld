@@ -235,14 +235,31 @@ describe('which installations the connecting user can reach', () => {
     assert.equal(auth, 'Bearer ghu_user');
   });
 
-  it('treats a 404 as not yours rather than as a server fault', async () => {
+  it('treats a 404 as nothing there rather than as a server fault', async () => {
     // This is what a forged installation id looks like coming back.
     const result = await installationRepositories('ghu_user', 999, (async () =>
       json({ message: 'Not Found' }, 404)) as unknown as typeof fetch);
     assert.equal(result.ok, false);
     if (!result.ok) {
-      assert.equal(result.reason, 'access');
+      assert.equal(result.reason, 'missing');
       assert.match(result.error, /not available to your GitHub account/);
+    }
+  });
+
+  it('tells a refusal apart from an absence', async () => {
+    // GitHub answers 403 for an organisation policy or an authorization the
+    // account has not granted. That person has an App they cannot reach, so
+    // reading it as "nothing is there" would tell them to install one they
+    // already have.
+    const result = await installationRepositories('ghu_user', 999, (async () =>
+      json(
+        { message: 'Resource protected by organization SAML enforcement' },
+        403,
+      )) as unknown as typeof fetch);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.reason, 'access');
+      assert.match(result.error, /organisation settings/);
     }
   });
 });

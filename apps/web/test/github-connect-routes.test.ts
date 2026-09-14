@@ -1191,3 +1191,71 @@ describe('when the list is empty and the probe fails for another reason', () => 
     assert.equal(body.install, true);
   });
 });
+
+/**
+ * An empty list and a probe GitHub refuses rather than cannot find.
+ *
+ * 403 and 404 both mean "you are not getting this", and they need different
+ * sentences. A 404 with nothing listed means nothing is installed. A 403 is
+ * an organisation policy or an ungranted authorization: that person has an
+ * App they cannot reach, and "install it" is advice they cannot act on.
+ */
+describe('when the probe is refused rather than absent', () => {
+  async function complete(probe: Response) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const doFetch = (async (url: string) => {
+      const target = new URL(url);
+      if (target.pathname === '/login/oauth/access_token') {
+        return new Response(JSON.stringify({ access_token: 'ghu_user' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.pathname === '/user/installations') {
+        return new Response(JSON.stringify({ installations: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return probe.clone();
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: '55' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as { install?: boolean; error: string },
+    };
+  }
+
+  it('does not tell them to install an App they cannot reach', async () => {
+    const { status, body } = await complete(
+      new Response(
+        JSON.stringify({
+          message: 'Resource protected by organization SAML enforcement',
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    assert.equal(status, 409);
+    assert.equal(body.install, undefined);
+    assert.match(body.error, /organisation settings/);
+  });
+
+  it('still says to install when GitHub cannot find it at all', async () => {
+    const { status, body } = await complete(
+      new Response(JSON.stringify({ message: 'Not Found' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    assert.equal(status, 409);
+    assert.equal(body.install, true);
+  });
+});

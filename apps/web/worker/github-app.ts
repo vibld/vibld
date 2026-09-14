@@ -278,8 +278,18 @@ export type GitHubFailure =
   /** Something is already there, and it is not what this push would write. */
   | 'conflict'
   | 'rate-limited'
-  /** 401/403: the grant really is gone, and reconnecting is the fix. */
+  /** 401/403: the grant really is gone, or a policy refuses it. */
   | 'access'
+  /**
+   * 404: GitHub has no such thing for this caller.
+   *
+   * Separate from `access` because they call for different sentences. A
+   * policy refusal means "you cannot reach this"; a 404 on an installation
+   * means there is nothing to reach, which for somebody with no
+   * installations at all is the difference between telling them to sort out
+   * their organisation's rules and telling them to install the App.
+   */
+  | 'missing'
   | 'unreachable'
   | 'refused'
   | 'unreadable';

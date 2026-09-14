@@ -465,10 +465,23 @@ async function readAsUser(
   // is what a forged installation id looks like. GitHub does not say "not
   // yours", it says the installation is not there, because as far as this
   // user is concerned it is not.
-  if (response.status === 404 || response.status === 403) {
+  if (response.status === 404) {
     return {
       ok: false,
       error: 'That installation is not available to your GitHub account.',
+      reason: 'missing',
+    };
+  }
+  // A 403 that is not a rate limit is a refusal rather than an absence: an
+  // organisation policy, or an authorization the account has not granted.
+  // Reported apart from the 404 because the answer differs, and because a
+  // caller reading "nothing is there" from it would tell somebody to install
+  // an App that is installed and forbidden.
+  if (response.status === 403) {
+    return {
+      ok: false,
+      error:
+        'GitHub refused access to that installation. Check your organisation settings, then try again.',
       reason: 'access',
     };
   }
