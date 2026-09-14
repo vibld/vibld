@@ -29,7 +29,15 @@ type GrantState =
    * cannot take the confirmation down with it.
    */
   | { phase: 'granted'; userId: string; creditUsdCents: number }
-  | { phase: 'failed'; error: string };
+  /**
+   * `address` is the one the refusal is about, `null` when the form was
+   * refused here rather than by the route. A message comes back worded by
+   * the route and may name an address inside it, so a refusal that arrives
+   * after the field moved on has to say whose it is: without that, "No user
+   * found for alice@example.com." sits under a form aimed at bob and reads
+   * as a verdict on bob.
+   */
+  | { phase: 'failed'; address: string | null; error: string };
 
 function formatUsd(micro: number): string {
   return `$${(micro / 1_000_000).toFixed(2)}`;
@@ -136,6 +144,7 @@ export function AdminPanel() {
     if (trimmedEmail === '' || !Number.isFinite(cents) || cents <= 0) {
       setGrant({
         phase: 'failed',
+        address: null,
         error: 'Enter the user’s email and a positive dollar amount.',
       });
       return;
@@ -148,7 +157,11 @@ export function AdminPanel() {
         note.trim() || null,
       );
       if (!result.ok) {
-        setGrant({ phase: 'failed', error: result.error });
+        setGrant({
+          phase: 'failed',
+          address: trimmedEmail,
+          error: result.error,
+        });
         return;
       }
       // The route says what it did and who it did it to. Saying it back is
@@ -161,11 +174,10 @@ export function AdminPanel() {
         userId: result.userId,
         creditUsdCents: result.creditUsdCents,
       });
-      setAmount('');
-      setNote('');
     } catch (error) {
       setGrant({
         phase: 'failed',
+        address: trimmedEmail,
         error: messageFor(error, 'The credit could not be granted.'),
       });
       return;
@@ -177,13 +189,17 @@ export function AdminPanel() {
     // gets a grant made twice. It is safe to await unguarded because
     // `runLookup` now reports its own failure rather than throwing.
     //
-    // Only while the field still names the address that was credited. If a
-    // keystroke moved it on while the grant was in flight, refreshing would
-    // put that user's balance and history back beside a form aimed at
-    // somebody else, which is exactly what `changeEmail` clears them to
-    // prevent. The confirmation above already names who was credited and
-    // how much, so nothing is lost by not asking again.
+    // Emptying the form and refreshing are both "ready for the next grant to
+    // this user", so both wait on the field still naming the one that was
+    // credited. If a keystroke moved it on while the grant was in flight,
+    // refreshing would put that user's balance and history back beside a
+    // form aimed at somebody else, which is exactly what `changeEmail`
+    // clears them to prevent, and emptying would take away what is being
+    // typed for the next one. The confirmation above already names who was
+    // credited and how much, so nothing is lost by not asking again.
     if (address.current.trim() !== trimmedEmail) return;
+    setAmount('');
+    setNote('');
     await runLookup();
   }
 
@@ -286,6 +302,7 @@ export function AdminPanel() {
       ) : null}
       {grant.phase === 'failed' ? (
         <p className="pane-note pane-note--error" role="alert">
+          {grant.address ? `Granting to ${grant.address} failed. ` : ''}
           {grant.error}
         </p>
       ) : null}

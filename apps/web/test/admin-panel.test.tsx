@@ -283,6 +283,35 @@ describe('granting credit, as it is actually wired', () => {
     // What did happen is still said, because it is the only record the
     // money moved, and it names who got it.
     assert.match(view.text(), /Granted \$2\.50 to user_alice/);
+    assert.equal(
+      view.container.querySelector<HTMLInputElement>('input[type="number"]')
+        ?.value,
+      '2.50',
+      'it emptied a form that is being filled in for somebody else',
+    );
+    view.unmount();
+  });
+
+  it('names the address a refusal was about', async () => {
+    // The route words the message, and it can name an address inside it.
+    // Landing under a form the field has moved on to, it reads as a verdict
+    // on whoever is named there now.
+    const topup = held(() =>
+      reply({ error: 'No user found for alice@example.com.' }, 404),
+    );
+    serving({
+      '/api/admin/user': () => reply(FOUND),
+      '/api/admin/topup': topup.answer,
+    });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.amount('2.50');
+    await view.grant();
+
+    await view.email('bob@example.com');
+    await topup.land();
+
+    assert.match(view.text(), /Granting to alice@example\.com failed/);
     view.unmount();
   });
 
