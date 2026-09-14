@@ -43,8 +43,29 @@ export function PreviewPanel({
   const statusMessage = describeStatus(sandbox.status);
   const running = sandbox.status !== null && sandbox.status.status !== 'failed';
 
+  // A sandbox is a live copy of the checkpoint it was started from, and
+  // accepting a later one does not change what it is serving. Left unsaid,
+  // the frame reads as "this is your project" while showing work that has
+  // been moved on from, which is the same thing the push and publish
+  // buttons were fixed for: the address is still live, it is just live on
+  // the previous checkpoint. The mock beside it is rebuilt from the
+  // accepted snapshot every time, so only the sandbox can say this.
+  const servingOlder =
+    sandbox.status?.status === 'ready' &&
+    sandbox.ranRevision !== null &&
+    state.acceptedSnapshot !== null &&
+    state.acceptedSnapshot.revision !== sandbox.ranRevision;
+
   return (
     <div className="preview">
+      {servingOlder ? (
+        <p className="pane-note" role="status">
+          This sandbox is running the checkpoint it was started from, not the
+          one accepted since. Restart it in the sandbox to run the current
+          project.
+        </p>
+      ) : null}
+
       {sandbox.status?.status === 'ready' ? (
         <iframe
           className="preview__frame"
@@ -87,7 +108,12 @@ export function PreviewPanel({
               type="button"
               className="chip"
               disabled={sandbox.pending}
-              onClick={() => sandbox.run(state.acceptedSnapshot!.files)}
+              onClick={() =>
+                sandbox.run(
+                  state.acceptedSnapshot!.files,
+                  state.acceptedSnapshot!.revision,
+                )
+              }
             >
               {sandbox.status?.status === 'ready'
                 ? 'Restart in sandbox'
