@@ -5,6 +5,7 @@ import {
   beginConnect,
   beginInstall,
   bindRepository,
+  pushSnapshot,
   claimHandoff,
   clearHandoff,
   completeClaimedConnect,
@@ -426,6 +427,134 @@ describe('taking the handoff off the URL', () => {
  * fail its own check, reporting that the connection did not come from this
  * browser when it did.
  */
+describe('pushing an accepted checkpoint', () => {
+  const SNAPSHOT = {
+    revision: 'r7',
+    files: [{ path: 'index.html', content: '<p>hi</p>' }],
+  };
+
+  it('sends the revision and the files the route keys on', async () => {
+    const sent: unknown[] = [];
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      (async (_url: string, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return json({ branch: 'vibld/r7', commitSha: 'abc', created: true });
+      }) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(sent[0], SNAPSHOT);
+  });
+
+  it('reads back what was written', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      (async () =>
+        json({
+          branch: 'vibld/r7',
+          commitSha: 'abc',
+          created: true,
+          pullRequestUrl: 'https://github.com/acme/site/pull/1',
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.pushed, {
+        branch: 'vibld/r7',
+        commitSha: 'abc',
+        created: true,
+        pullRequestUrl: 'https://github.com/acme/site/pull/1',
+      });
+    }
+  });
+
+  it('keeps "the branch was already there" as its own answer', async () => {
+    // What a retry looks like when the first reply was lost. Reporting it as
+    // a fresh push sends somebody looking for a commit nothing just made.
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      (async () =>
+        json({
+          branch: 'vibld/r7',
+          commitSha: 'abc',
+          created: false,
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.pushed.created, false);
+  });
+
+  it('reads an absent `created` as a push rather than as a no-op', async () => {
+    // The route always sends it, so absence means an older deployment. Of
+    // the two ways to be wrong, claiming a push found nothing to do is the
+    // more misleading.
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      (async () =>
+        json({
+          branch: 'vibld/r7',
+          commitSha: 'abc',
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.pushed.created, true);
+  });
+
+  it('carries `reconnect` rather than folding it into the sentence', async () => {
+    // A lost grant and a rate limit want different remedies, and the route
+    // already separates them. Collapsing that here is the mistake this
+    // feature has made more than any other.
+    const lost = await pushSnapshot(
+      SNAPSHOT,
+      (async () =>
+        json(
+          { error: 'Vibld’s access was withdrawn.', reconnect: true },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(lost.ok, false);
+    if (!lost.ok) assert.equal(lost.reconnect, true);
+
+    const limited = await pushSnapshot(
+      SNAPSHOT,
+      (async () =>
+        json(
+          { error: 'Too many pushes. Try again shortly.' },
+          429,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(limited.ok, false);
+    if (!limited.ok) assert.equal(limited.reconnect, undefined);
+  });
+
+  it('reports an unreadable success rather than inventing a branch', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      (async () => json({ ok: true })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+  });
+
+  it('reports being unable to reach Vibld as that', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      (async () => {
+        throw new Error('offline');
+      }) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /Could not reach Vibld/);
+  });
+});
+
 /**
  * Installing is a leg of the same flow, not a link out of it.
  *

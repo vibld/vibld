@@ -7,6 +7,7 @@ import { ExportButton } from './ExportButton.tsx';
 import { FileList } from './FileList.tsx';
 import { PreviewPanel } from './PreviewPanel.tsx';
 import { PublishButton } from './PublishButton.tsx';
+import { GitHubPushButton } from './GitHubPushButton.tsx';
 
 const TABS = [
   { id: 'preview', label: 'Preview' },
@@ -119,6 +120,7 @@ export function Workspace({ state }: { state: BuilderState }) {
                 <>
                   <ExportButton snapshot={state.acceptedSnapshot} />
                   <PublishButton snapshot={state.acceptedSnapshot} />
+                  <GitHubPushButton snapshot={state.acceptedSnapshot} />
                 </>
               ) : null}
               <FileList

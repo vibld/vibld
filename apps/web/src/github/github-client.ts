@@ -527,6 +527,96 @@ export async function bindRepository(
   return { ok: true, bound };
 }
 
+/** What a push wrote, as `/api/github/push` reports it. */
+export interface PushedSnapshot {
+  branch: string;
+  commitSha: string;
+  /**
+   * False when the branch was already there carrying this exact tree.
+   *
+   * The route distinguishes these and so does this, because they are
+   * different things to tell somebody: one moved their work, the other found
+   * it already moved. Collapsing them would report a commit that this push
+   * did not make.
+   */
+  created: boolean;
+  pullRequestUrl?: string;
+}
+
+export type PushResult =
+  | { ok: true; pushed: PushedSnapshot }
+  | { ok: false; error: string; reconnect?: boolean };
+
+/**
+ * Push an accepted checkpoint to the connected repository.
+ *
+ * `revision` and `files` are what the snapshot already holds, sent as they
+ * are: the route keys the operation on the revision so a retry of one
+ * checkpoint cannot become a second branch, which is the whole reason it is
+ * not a client-generated id.
+ *
+ * `reconnect` is carried through rather than folded into the sentence,
+ * because the two are different remedies and the route already separates
+ * them: a lost grant wants a fresh connection, and everything else does not.
+ */
+export async function pushSnapshot(
+  snapshot: { revision: string; files: { path: string; content: string }[] },
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<PushResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl('/api/github/push', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(await authHeaders(getToken)),
+      },
+      body: JSON.stringify({
+        revision: snapshot.revision,
+        files: snapshot.files,
+      }),
+    });
+  } catch {
+    return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
+  }
+
+  if (!response.ok) {
+    let error = 'Something went wrong talking to GitHub. Try again shortly.';
+    let reconnect = false;
+    try {
+      const body = (await response.json()) as {
+        error?: unknown;
+        reconnect?: unknown;
+      };
+      if (typeof body.error === 'string' && body.error) error = body.error;
+      reconnect = body.reconnect === true;
+    } catch {
+      // Keep the generic sentence.
+    }
+    return { ok: false, error, ...(reconnect ? { reconnect: true } : {}) };
+  }
+
+  const body = (await response.json()) as Partial<PushedSnapshot>;
+  if (typeof body.branch !== 'string' || typeof body.commitSha !== 'string') {
+    return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
+  }
+  return {
+    ok: true,
+    pushed: {
+      branch: body.branch,
+      commitSha: body.commitSha,
+      // Absent is read as "it made one" rather than as false. The route
+      // always sends it, so absence means an older deployment, and claiming
+      // a push found nothing to do is the more misleading of the two.
+      created: body.created !== false,
+      ...(typeof body.pullRequestUrl === 'string'
+        ? { pullRequestUrl: body.pullRequestUrl }
+        : {}),
+    },
+  };
+}
+
 /** Stop pushing to the connected repository. */
 export async function disconnectRepository(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
