@@ -383,6 +383,57 @@ describe('binding the chosen repository', () => {
   });
 });
 
+describe('ending a connection', () => {
+  const TO = { owner: 'acme', repo: 'site' };
+
+  it('says which repository it is ending', async () => {
+    // The route acts on whatever is bound when the request arrives, so a
+    // panel naming one repository must not end another.
+    const sent: unknown[] = [];
+    const done = await disconnectRepository(
+      TO,
+      (async (_url: string, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return json({ connected: false });
+      }) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(done.ok, true);
+    assert.deepEqual(sent[0], { owner: 'acme', repo: 'site' });
+  });
+
+  it('carries where the connection actually points when it was refused', async () => {
+    const done = await disconnectRepository(
+      TO,
+      (async () =>
+        json(
+          {
+            error: 'Vibld is connected to acme/other.',
+            movedTo: { owner: 'acme', repo: 'other' },
+          },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(done.ok, false);
+    if (!done.ok) {
+      assert.deepEqual(done.movedTo, { owner: 'acme', repo: 'other' });
+      assert.match(done.error, /acme\/other/);
+    }
+  });
+
+  it('says nothing about a move when the failure was not one', async () => {
+    const done = await disconnectRepository(
+      TO,
+      (async () =>
+        json({ error: 'Try again shortly.' }, 503)) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(done.ok, false);
+    if (!done.ok) assert.equal(done.movedTo, undefined);
+  });
+});
+
 describe('the status the panel reads', () => {
   it('passes the two capabilities through', async () => {
     const status = await fetchGitHubStatus(
@@ -739,6 +790,7 @@ describe('telling the rest of the builder the connection moved', () => {
       told += 1;
     });
     await disconnectRepository(
+      { owner: 'acme', repo: 'site' },
       (async () => json({ ok: true })) as unknown as typeof fetch,
       TOKEN,
     );

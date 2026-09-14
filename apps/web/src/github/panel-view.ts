@@ -15,7 +15,24 @@ export type PanelPhase =
   | { at: 'idle' }
   | { at: 'working'; note: string }
   | { at: 'choosing'; offer: ConnectOffer }
-  | { at: 'problem'; error: string; install?: boolean };
+  | {
+      at: 'problem';
+      error: string;
+      install?: boolean;
+      /**
+       * The repository this failure is about, when it names one.
+       *
+       * A refusal that says Vibld is connected somewhere else is only true
+       * of the connection as it stood when the route answered. The panel
+       * reads the connection again on the strength of it, and that read can
+       * come back naming a third repository, or none: the sentence is then
+       * describing a state nothing on screen is in.
+       *
+       * The push button's `moved` phase carries the same thing for the same
+       * reason. This is the third rule these two have needed separately.
+       */
+      about?: { owner: string; repo: string };
+    };
 
 export interface PanelProblem {
   error: string;
@@ -42,6 +59,19 @@ export type PanelSummary =
       repo?: string;
       defaultBranch?: string;
       pushing: Pushing;
+      /**
+       * What a Disconnect here would end, present only when both halves of
+       * the name are known.
+       *
+       * The route refuses a disconnect that does not say which repository
+       * it is for, because it acts on whatever is bound when the request
+       * arrives and a panel naming one repository must not end another. So
+       * offering the button without a name to send would be offering
+       * something that cannot work. The status carries both whenever it
+       * says `connected`, so this is absent only for a reply that has
+       * already contradicted itself.
+       */
+      disconnect?: { owner: string; repo: string };
     }
   | { connected: false; canConnect: boolean };
 
@@ -132,7 +162,19 @@ export function decidePanel(
     };
   }
 
-  if (phase.at === 'problem') {
+  // A failure that named a repository is only worth drawing while that is
+  // still the repository on screen. Withheld once the connection is known
+  // to be somewhere else, and kept while it is not yet known at all: in
+  // that window the sentence is the only thing saying why nothing happened.
+  const aboutSomewhereElse =
+    phase.at === 'problem' &&
+    phase.about !== undefined &&
+    status != null &&
+    (status.connected !== true ||
+      status.owner !== phase.about.owner ||
+      status.repo !== phase.about.repo);
+
+  if (phase.at === 'problem' && !aboutSomewhereElse) {
     view.problem = {
       error: phase.error,
       install: phase.install === true,
@@ -179,6 +221,9 @@ export function decidePanel(
                 : 'no',
           ...(status.owner === undefined ? {} : { owner: status.owner }),
           ...(status.repo === undefined ? {} : { repo: status.repo }),
+          ...(status.owner && status.repo
+            ? { disconnect: { owner: status.owner, repo: status.repo } }
+            : {}),
           ...(status.defaultBranch === undefined
             ? {}
             : { defaultBranch: status.defaultBranch }),

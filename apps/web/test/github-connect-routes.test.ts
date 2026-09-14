@@ -32,7 +32,7 @@ const CREDENTIALS = {
 const PRINCIPAL = { userId: 'user_1', policyIdentity: 'chris@example.com' };
 const NOW = new Date('2026-09-13T12:00:00.000Z');
 
-function env(db: SqliteD1Database) {
+function env(db: SqliteD1Database | D1Database) {
   return {
     DB: db as unknown as D1Database,
     VIBLD_GITHUB_CLIENT_ID: CREDENTIALS.clientId,
@@ -416,6 +416,62 @@ describe('binding the repository the user chose', () => {
   });
 });
 
+/** A binding row for the tests that need one already in place. */
+const GRANT_ROW = {
+  userId: 'user_1',
+  installationId: 42,
+  owner: 'acme',
+  repo: 'site',
+  defaultBranch: 'main',
+  grantedAt: NOW.toISOString(),
+  grantedByEmail: 'chris@example.com',
+  expiresAt: '2026-12-13T00:00:00.000Z',
+};
+
+/**
+ * A database that lets something happen between one write and the next read.
+ *
+ * The handler revokes by name and then reads to decide what to report, and
+ * the interesting failures live in the gap between those two statements.
+ * Nothing else here can open that gap: the store talks to SQLite
+ * synchronously, so a test that wanted to bind between them would have to
+ * ask for it.
+ */
+function afterFirstUpdate(
+  db: SqliteD1Database,
+  between: () => Promise<void>,
+): D1Database {
+  let pending = true;
+  const real = db as unknown as D1Database;
+  return {
+    prepare(sql: string) {
+      const statement = real.prepare(sql);
+      if (!sql.trimStart().toUpperCase().startsWith('UPDATE')) return statement;
+      const wrap = (bound: D1PreparedStatement): D1PreparedStatement =>
+        ({
+          ...bound,
+          bind: (...values: unknown[]) => wrap(bound.bind(...values)),
+          run: async () => {
+            const result = await bound.run();
+            if (pending) {
+              pending = false;
+              await between();
+            }
+            return result;
+          },
+        }) as unknown as D1PreparedStatement;
+      return wrap(statement);
+    },
+  } as unknown as D1Database;
+}
+
+function disconnectRequest(body: unknown): Request {
+  return new Request('https://app.vibld.com/api/github/disconnect', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 describe('disconnecting', () => {
   it('stops a push without deleting the record of the grant', async () => {
     const db = new SqliteD1Database(SCHEMA);
@@ -432,9 +488,7 @@ describe('disconnecting', () => {
     });
 
     const response = await handleGitHubDisconnect(
-      new Request('https://app.vibld.com/api/github/disconnect', {
-        method: 'POST',
-      }),
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
       env(db),
       PRINCIPAL,
       NOW,
@@ -448,18 +502,143 @@ describe('disconnecting', () => {
   });
 
   it('answers the same way when there was nothing connected', async () => {
-    // So it cannot be used to ask whether somebody has connected something.
+    // A disconnect that got what it asked for and a disconnect with nothing
+    // to do are the same answer, so neither the work nor the absence of it
+    // is reported differently.
     const db = new SqliteD1Database(SCHEMA);
     const response = await handleGitHubDisconnect(
-      new Request('https://app.vibld.com/api/github/disconnect', {
-        method: 'POST',
-      }),
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
       env(db),
       PRINCIPAL,
       NOW,
     );
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { connected: false });
+  });
+
+  it('refuses to end a connection it was not asked to end', async () => {
+    // The panel offering this reads the connection whenever it last looked,
+    // and the route acts on whatever is bound when the request arrives.
+    // Without this, somebody reading `acme/site` and pressing Disconnect
+    // ended `acme/other` if the binding had moved in another tab or on
+    // another device: undoing a connection they meant to keep and keeping
+    // one they meant to end, in one click, with nothing saying so.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind({ ...GRANT_ROW, owner: 'acme', repo: 'other' });
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as {
+      movedTo?: { owner: string; repo: string };
+    };
+    assert.deepEqual(body.movedTo, { owner: 'acme', repo: 'other' });
+
+    // And the connection it was not asked about is untouched.
+    const state = await store.usableBinding('user_1', NOW);
+    assert.equal(state.usable, true);
+  });
+
+  it('refuses one that does not say what it is ending', async () => {
+    // Required rather than optional, on the reasoning the push settled: a
+    // caller old enough to be sending no destination is the one most likely
+    // to be holding a binding that has moved.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind(GRANT_ROW);
+
+    const response = await handleGitHubDisconnect(
+      new Request('https://app.vibld.com/api/github/disconnect', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 400);
+    const state = await store.usableBinding('user_1', NOW);
+    assert.equal(state.usable, true);
+  });
+
+  it('says nothing about a grant the status already calls disconnected', async () => {
+    // An expired grant is one `/api/github/status` reports as
+    // `connected: false`. Reporting a conflict with it would have the panel
+    // saying "No repository connected" beside an error naming the
+    // repository it is connected to, and would put a name in front of
+    // somebody that the status route does not give them.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind({ ...GRANT_ROW, expiresAt: '2026-09-01T00:00:00.000Z' });
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'acme', repo: 'somewhere-else' }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      movedTo?: { owner: string; repo: string };
+    };
+    assert.deepEqual(body, { connected: false });
+    assert.equal(body.movedTo, undefined);
+  });
+
+  it('does not blame the repository it was asked about', async () => {
+    // Doubly raced: the guarded update fails against what was bound, and a
+    // bind then makes the row the repository the request named. The read
+    // after the failed write cannot see what refused it, so naming this one
+    // would say the repository somebody asked to disconnect is the reason
+    // for refusing to disconnect it.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind({ ...GRANT_ROW, owner: 'acme', repo: 'other' });
+
+    // Rebind to the requested repository the moment the guarded update has
+    // run and failed, which is the window the read sits in.
+    const raced = afterFirstUpdate(db, async () => {
+      await store.revoke('user_1', NOW);
+      await store.bind(GRANT_ROW);
+    });
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
+      env(raced),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { error: string };
+    assert.match(body.error, /changed while this was running/);
+    assert.doesNotMatch(
+      body.error,
+      /is not what this would have disconnected/,
+      'it named the repository the request asked about as the reason',
+    );
+  });
+
+  it('ends a connection named in the case GitHub would resolve', async () => {
+    // `acme/Site` and `acme/site` are one repository, and refusing that
+    // would be a refusal with nothing for anybody to correct.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind(GRANT_ROW);
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'Acme', repo: 'Site' }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const state = await store.usableBinding('user_1', NOW);
+    assert.equal(state.usable, false);
   });
 });
 

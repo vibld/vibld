@@ -126,6 +126,94 @@ describe('whether a grant may still be pushed on', () => {
   });
 });
 
+/**
+ * Revoking the repository that was named, and no other.
+ *
+ * The check and the write have to be one statement. Apart, a bind landing
+ * between reading the binding and revoking it takes the newly bound
+ * repository with it, which is the exact outcome naming one is meant to
+ * prevent: a click labelled `acme/site` ending `acme/other`. Putting the
+ * name in the `WHERE` clause is what makes the database decide instead of
+ * the gap between two calls.
+ */
+describe('ending a grant by name', () => {
+  it('revokes the repository it names', async () => {
+    const store = newStore();
+    await store.bind(GRANT);
+
+    assert.equal(
+      await store.revokeRepository('user_1', { owner: 'acme', repo: 'site' }),
+      true,
+    );
+    const state = await store.usableBinding('user_1');
+    assert.equal(state.usable, false);
+  });
+
+  it('leaves a repository it was not asked about alone', async () => {
+    // The race, as the database sees it: whatever the caller read a moment
+    // ago, this statement matches only the name it was given.
+    const store = newStore();
+    await store.bind({ ...GRANT, owner: 'acme', repo: 'other' });
+
+    assert.equal(
+      await store.revokeRepository('user_1', { owner: 'acme', repo: 'site' }),
+      false,
+    );
+    const state = await store.usableBinding('user_1');
+    assert.equal(state.usable, true, 'a grant nobody asked about was ended');
+  });
+
+  it('tells an owner apart from a name', async () => {
+    // `acme/site` and `other/site` are different repositories, which forks
+    // make ordinary.
+    const store = newStore();
+    await store.bind(GRANT);
+
+    assert.equal(
+      await store.revokeRepository('user_1', { owner: 'other', repo: 'site' }),
+      false,
+    );
+    assert.equal((await store.usableBinding('user_1')).usable, true);
+  });
+
+  it('matches the way GitHub resolves a name', async () => {
+    const store = newStore();
+    await store.bind(GRANT);
+
+    assert.equal(
+      await store.revokeRepository('user_1', { owner: 'Acme', repo: 'Site' }),
+      true,
+    );
+    assert.equal((await store.usableBinding('user_1')).usable, false);
+  });
+
+  it('changes nothing twice, and keeps the first time', async () => {
+    const store = newStore();
+    await store.bind(GRANT);
+    const first = new Date('2026-09-13T12:00:00.000Z');
+
+    assert.equal(
+      await store.revokeRepository(
+        'user_1',
+        { owner: 'acme', repo: 'site' },
+        first,
+      ),
+      true,
+    );
+    assert.equal(
+      await store.revokeRepository(
+        'user_1',
+        { owner: 'acme', repo: 'site' },
+        new Date('2026-09-14T12:00:00.000Z'),
+      ),
+      false,
+      'a second revocation reported work it did not do',
+    );
+    const row = await store.binding('user_1');
+    assert.equal(row?.revokedAt, first.toISOString());
+  });
+});
+
 describe('recording a push', () => {
   const ATTEMPT = {
     userId: 'user_1',

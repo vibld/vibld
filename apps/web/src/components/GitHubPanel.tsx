@@ -9,6 +9,7 @@ import {
   disconnectRepository,
   holdHandoff,
   fetchGitHubStatus,
+  noteConnectionChanged,
   onConnectionChanged,
 } from '../github/github-client.ts';
 import type {
@@ -227,11 +228,36 @@ export function GitHubConnection() {
     await refreshStatus();
   }
 
-  async function disconnect() {
+  async function disconnect(to: { owner: string; repo: string }) {
     setPhase({ at: 'working', note: 'Disconnecting…' });
-    const done = await disconnectRepository();
+    const done = await disconnectRepository(to);
     if (!done.ok) {
-      setPhase({ at: 'problem', error: done.error });
+      setPhase({
+        at: 'problem',
+        error: done.error,
+        // What the sentence is about, so it stops being drawn once the
+        // connection is known to be somewhere else again.
+        ...(done.movedTo ? { about: done.movedTo } : {}),
+      });
+      // The route is the only thing that can tell this browser its idea of
+      // the connection is out of date, so a refusal about the destination
+      // sends it back to read one. Announced rather than refreshed here,
+      // because the push button keeps its own copy of the status and would
+      // otherwise go on offering a push to the repository this just found
+      // out about, until somebody clicked it and was refused in turn. Same
+      // discovery, same announcement, as the push route's own mismatch.
+      if (done.movedTo) {
+        // Forgotten before it is read again, and not left to the refresh to
+        // replace. `refreshStatus` only commits a status it actually got,
+        // so a probe that fails would leave this panel showing "Connected
+        // to acme/site" beside an error the server has just written saying
+        // it is connected to somewhere else, and still offering to
+        // disconnect the wrong one. The push button was given this on #123
+        // for the same reason; the panel was not.
+        gate.current.supersede();
+        setStatus(null);
+        noteConnectionChanged();
+      }
       return;
     }
     // Same rule as binding: the write landed, so say so without depending on
@@ -256,6 +282,11 @@ export function GitHubConnection() {
   // not have caught.
   const view = decidePanel(phase, status);
   if (!view.show) return null;
+  // Held in a const for the same reason `picker` is: the callback below has
+  // to close over a definite destination rather than a field TypeScript can
+  // no longer prove is there by the time it runs.
+  const summaryDisconnect =
+    view.summary?.connected === true ? view.summary.disconnect : undefined;
   // Held in a const so the callback below closes over a definite offer rather
   // than reaching back into the view for a ticket TypeScript can no longer
   // prove is there.
@@ -327,9 +358,14 @@ export function GitHubConnection() {
           on <code>{view.summary.defaultBranch}</code>.
           {view.summary.pushing === 'no' &&
             ' Pushing is not configured on this deployment.'}{' '}
-          <button type="button" onClick={() => void disconnect()}>
-            Disconnect
-          </button>
+          {summaryDisconnect && (
+            <button
+              type="button"
+              onClick={() => void disconnect(summaryDisconnect)}
+            >
+              Disconnect
+            </button>
+          )}
         </p>
       )}
 

@@ -856,6 +856,91 @@ export async function handleGitHubDisconnect(
       503,
     );
   }
-  await new GitHubStore(env.DB!).revoke(principal.userId, now);
-  return json({ connected: false });
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  // The same guard the push has, for the same reason and with the same
+  // shape. This route used to act on whatever was bound when the request
+  // arrived, and the panel that offers it reads the connection whenever it
+  // last looked: somebody reading `acme/site` and pressing Disconnect
+  // disconnected `acme/other` if the binding had moved in another tab or on
+  // another device in between. Undoing a connection they meant to keep and
+  // keeping one they meant to end, in a single click, with nothing saying
+  // so.
+  //
+  // Required rather than optional, on the reasoning the push settled: a
+  // caller old enough to be sending no destination is the one most likely
+  // to be holding a binding that has moved.
+  const expected = parseExpectedRepository(body);
+  if (!expected) {
+    return json(
+      {
+        error: '"owner" and "repo" must say which repository this disconnects.',
+      },
+      400,
+    );
+  }
+
+  // One statement rather than a read and then a write. Apart, a bind landing
+  // in between would have the revocation take the newly bound repository,
+  // which is the outcome naming one exists to prevent.
+  const store = new GitHubStore(env.DB!);
+  if (await store.revokeRepository(principal.userId, expected, now)) {
+    return json({ connected: false });
+  }
+
+  // Nothing changed, and the statement does not say why. Reading now only
+  // decides what to report, so a binding that moves again while this runs
+  // costs an out-of-date sentence rather than a wrong write.
+  //
+  // `usableBinding` rather than the raw row, and by the same rule the status
+  // route answers on. A grant that has expired is one the status calls
+  // disconnected, so reporting a conflict with it would have the panel
+  // saying "No repository connected" beside an error naming the repository
+  // it is connected to, and would put a name in front of somebody that the
+  // status route does not give them.
+  const state = await store.usableBinding(principal.userId, now);
+
+  // Nothing to disconnect, or nothing left of it. The end state asked for is
+  // the state already in place, so this is a success rather than a quarrel
+  // about a destination that is not there: refusing here would leave a
+  // second click on a slow first one reporting a failure for work that is
+  // done.
+  if (!state.usable) return json({ connected: false });
+
+  const { binding } = state;
+
+  // The read found the repository the request named, which the update did
+  // not. Something bound it in between, so the row that refused the update
+  // is gone and this one cannot explain it: saying this repository "is not
+  // what this would have disconnected" would name the one that was asked
+  // for as the reason for refusing to disconnect it. Say what actually
+  // happened instead, and leave the retry to a second click rather than
+  // opening another window inside this request.
+  if (sameRepository(expected, binding)) {
+    return json(
+      {
+        error:
+          'The connection changed while this was running. Nothing was ' +
+          'disconnected. Try again.',
+        movedTo: { owner: binding.owner, repo: binding.repo },
+      },
+      409,
+    );
+  }
+
+  return json(
+    {
+      error:
+        `Vibld is connected to ${binding.owner}/${binding.repo}, which is not what this would have disconnected. ` +
+        `Nothing was changed. Check where Vibld is pointing, then try again.`,
+      movedTo: { owner: binding.owner, repo: binding.repo },
+    },
+    409,
+  );
 }

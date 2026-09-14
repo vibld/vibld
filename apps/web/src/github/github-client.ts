@@ -655,9 +655,12 @@ function conflictFrom(value: unknown): PushConflict | null {
  * caller holding it would have to guess whether its message still applies,
  * and guessing is what carrying the destination exists to avoid.
  */
-function destinationFrom(
-  value: unknown,
-): { owner: string; repo: string } | null {
+export interface Destination {
+  owner: string;
+  repo: string;
+}
+
+function destinationFrom(value: unknown): Destination | null {
   if (typeof value !== 'object' || value === null) return null;
   const { owner, repo } = value as Record<string, unknown>;
   if (typeof owner !== 'string' || !owner) return null;
@@ -688,7 +691,7 @@ export type PushResult =
        * the connection again; a bare flag would leave it repeating a
        * sentence about a repository it can no longer identify.
        */
-      movedTo?: { owner: string; repo: string };
+      movedTo?: Destination;
     };
 
 /**
@@ -740,7 +743,7 @@ export async function pushSnapshot(
     let error = 'Something went wrong talking to GitHub. Try again shortly.';
     let reconnect = false;
     let conflict: PushConflict | null = null;
-    let movedTo: { owner: string; repo: string } | null = null;
+    let movedTo: Destination | null = null;
     try {
       const body = (await response.json()) as {
         error?: unknown;
@@ -793,21 +796,48 @@ export async function pushSnapshot(
   };
 }
 
-/** Stop pushing to the connected repository. */
+/**
+ * Stop pushing to the connected repository.
+ *
+ * `to` is the repository the caller is showing, sent for the reason the push
+ * sends its own: the route acts on whatever is bound when the request
+ * arrives, and a panel naming one repository must not end the connection to
+ * another. Required, not optional, so it cannot be the requests holding the
+ * most out-of-date idea of the connection that skip the check.
+ */
 export async function disconnectRepository(
+  to: { owner: string; repo: string },
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; movedTo?: Destination }> {
   let response: Response;
   try {
     response = await fetchImpl('/api/github/disconnect', {
       method: 'POST',
-      headers: await authHeaders(getToken),
+      headers: {
+        'content-type': 'application/json',
+        ...(await authHeaders(getToken)),
+      },
+      body: JSON.stringify({ owner: to.owner, repo: to.repo }),
     });
   } catch {
     return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
   }
-  if (!response.ok) return { ok: false, error: await problemFrom(response) };
+  if (!response.ok) {
+    let error = 'Something went wrong talking to GitHub. Try again shortly.';
+    let movedTo: Destination | null = null;
+    try {
+      const body = (await response.json()) as {
+        error?: unknown;
+        movedTo?: unknown;
+      };
+      if (typeof body.error === 'string' && body.error) error = body.error;
+      movedTo = destinationFrom(body.movedTo);
+    } catch {
+      // Keep the generic sentence.
+    }
+    return { ok: false, error, ...(movedTo ? { movedTo } : {}) };
+  }
   announceConnectionChanged();
   return { ok: true };
 }
