@@ -81,29 +81,37 @@ function json(body: unknown, status = 200): Response {
  * act on, not an authentication error the browser will try to fix by
  * reloading.
  */
-function bindingProblem(state: Extract<BindingState, { usable: false }>) {
-  if (state.reason === 'none') {
-    return json(
-      { error: 'No GitHub repository is connected yet.', reconnect: true },
-      409,
-    );
+function bindingProblem(
+  state: Extract<BindingState, { usable: false }>,
+): Response {
+  // A switch rather than a chain ending in a bare `return`. With the chain,
+  // a fourth reason added to `BindingState` would silently be reported as
+  // expired, which is the one failure in this feature the compiler can
+  // actually prevent: every instance of it here has otherwise had to be
+  // found by review or by breaking the code to watch a test fail.
+  switch (state.reason) {
+    case 'none':
+      return json(
+        { error: 'No GitHub repository is connected yet.', reconnect: true },
+        409,
+      );
+    case 'revoked':
+      return json(
+        {
+          error: "Vibld's access to that repository was revoked.",
+          reconnect: true,
+        },
+        409,
+      );
+    case 'expired':
+      return json(
+        {
+          error: 'The GitHub connection has expired and needs approving again.',
+          reconnect: true,
+        },
+        409,
+      );
   }
-  if (state.reason === 'revoked') {
-    return json(
-      {
-        error: "Vibld's access to that repository was revoked.",
-        reconnect: true,
-      },
-      409,
-    );
-  }
-  return json(
-    {
-      error: 'The GitHub connection has expired and needs approving again.',
-      reconnect: true,
-    },
-    409,
-  );
 }
 
 /**
