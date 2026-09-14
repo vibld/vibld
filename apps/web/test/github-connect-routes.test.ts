@@ -863,6 +863,104 @@ describe('when the account reaches more installations than are read', () => {
     assert.deepEqual(body.omitted, ['account-10', 'account-11']);
   });
 
+  it('says a repository list was cut short, rather than signing it', async () => {
+    // A page bound inside one installation. Unlike a skipped account there
+    // is no route past it: reading the same installation again follows the
+    // same bound, so the only honest thing is to stop presenting the short
+    // list as the whole one.
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const doFetch = (async (url: string) => {
+      const target = new URL(url);
+      if (target.pathname === '/login/oauth/access_token') {
+        return json({ access_token: 'ghu_user' });
+      }
+      if (target.pathname === '/user/installations') {
+        return json({
+          installations: [{ id: 55, account: { login: 'acme' } }],
+        });
+      }
+      if (target.pathname === '/user/installations/55/repositories') {
+        // Always another page, so the bound is what stops it.
+        return new Response(
+          JSON.stringify({
+            repositories: [
+              {
+                name: `repo-${target.searchParams.get('page') ?? '1'}`,
+                default_branch: 'main',
+                owner: { login: 'acme' },
+                permissions: { push: true },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              link: '</user/installations/55/repositories?page=9>; rel="next"',
+            },
+          },
+        );
+      }
+      return json({ message: 'unexpected' }, 500);
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { truncated?: boolean };
+    assert.equal(body.truncated, true);
+  });
+
+  it('says the installation list itself was cut short', async () => {
+    // The other half of the same bound, and the one `omitted` cannot cover:
+    // an account past the last page GitHub was asked for is never listed, so
+    // it cannot be named as skipped either. Only the page bound knows.
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const doFetch = (async (url: string) => {
+      const target = new URL(url);
+      if (target.pathname === '/login/oauth/access_token') {
+        return json({ access_token: 'ghu_user' });
+      }
+      if (target.pathname === '/user/installations') {
+        // Always another page, so the bound is what stops it.
+        return new Response(
+          JSON.stringify({
+            installations: [{ id: 55, account: { login: 'acme' } }],
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              link: '</user/installations?page=9>; rel="next"',
+            },
+          },
+        );
+      }
+      if (target.pathname === '/user/installations/55/repositories') {
+        return json({ repositories: [ACME_SITE] });
+      }
+      return json({ message: 'unexpected' }, 500);
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as { truncated?: boolean };
+    assert.equal(body.truncated, true);
+  });
+
   it('says nothing about omissions when it read them all', async () => {
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
@@ -1011,7 +1109,7 @@ describe('the installation list itself', () => {
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.deepEqual(
-        result.value.map((installation) => installation.id),
+        result.value.items.map((installation) => installation.id),
         [1, 2],
       );
     }

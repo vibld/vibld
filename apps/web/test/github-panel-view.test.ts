@@ -343,6 +343,44 @@ describe('accounts the read budget never reached', () => {
   });
 });
 
+describe('a list GitHub paginates that was cut short', () => {
+  // Separate from an omitted account, and the difference is the remedy.
+  // Installing again reaches a skipped account, because a named installation
+  // is read outside the budget. It does nothing for a page bound inside a
+  // list: the next read follows the same bound. Offering the install button
+  // here would be offering something that cannot work.
+  it('says so', () => {
+    const view = decidePanel(
+      {
+        at: 'choosing',
+        offer: { repositories: [CHOICE], ticket: 'tkt', truncated: true },
+      },
+      CONFIGURED,
+    );
+    assert.equal(view.show && view.truncated, true);
+  });
+
+  it('says nothing when nothing was cut short', () => {
+    const view = decidePanel(
+      { at: 'choosing', offer: { repositories: [CHOICE], ticket: 'tkt' } },
+      CONFIGURED,
+    );
+    assert.equal(view.show && view.truncated, undefined);
+  });
+
+  it('is reported apart from the accounts that were skipped', () => {
+    const view = decidePanel(
+      {
+        at: 'choosing',
+        offer: { repositories: [CHOICE], ticket: 'tkt', omitted: ['globex'] },
+      },
+      CONFIGURED,
+    );
+    assert.deepEqual(view.show && view.omitted, ['globex']);
+    assert.equal(view.show && view.truncated, undefined);
+  });
+});
+
 describe('what is shown beside what', () => {
   it('leaves the summary out while a choice is being made', () => {
     const view = decidePanel(

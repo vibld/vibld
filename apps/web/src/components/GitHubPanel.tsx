@@ -2,6 +2,7 @@ import { Show } from '@clerk/react';
 import { useEffect, useRef, useState } from 'react';
 import {
   beginConnect,
+  beginInstall,
   bindRepository,
   claimHandoff,
   completeClaimedConnect,
@@ -135,6 +136,27 @@ function GitHubConnection() {
     };
   }, []);
 
+  /**
+   * Go and install the App, carrying a state that comes back.
+   *
+   * Not an anchor. A plain link to the installation page returns with an
+   * `installation_id` and no `state`, which the callback reports as
+   * incomplete and the app discards, so the installation happens and nothing
+   * hears about it. The id coming back is the whole point for an account the
+   * read budget skipped: a named installation is read directly and outside
+   * the budget, and without it installing again changes nothing, because
+   * GitHub's list may order that account past the budget once more.
+   */
+  async function install() {
+    setPhase({ at: 'working', note: 'Sending you to GitHub…' });
+    const started = await beginInstall();
+    if (!started.ok) {
+      setPhase({ at: 'problem', error: started.error });
+      return;
+    }
+    globalThis.location.assign(started.url);
+  }
+
   async function connect() {
     setPhase({ at: 'working', note: 'Sending you to GitHub…' });
     const started = await beginConnect();
@@ -227,13 +249,9 @@ function GitHubConnection() {
             {view.problem.install && (
               <>
                 {' '}
-                <a
-                  href="https://github.com/apps/vibld/installations/new"
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
+                <button type="button" onClick={() => void install()}>
                   Install the Vibld app
-                </a>
+                </button>
               </>
             )}
           </p>
@@ -260,14 +278,18 @@ function GitHubConnection() {
           {view.omitted.length === 1 ? 'account' : 'accounts'}:{' '}
           <strong>{view.omitted.join(', ')}</strong>. To connect a repository on
           one of those,{' '}
-          <a
-            href="https://github.com/apps/vibld/installations/new"
-            target="_blank"
-            rel="noreferrer noopener"
-          >
+          <button type="button" onClick={() => void install()}>
             install the Vibld app on that account
-          </a>{' '}
-          and connect again.
+          </button>
+          .
+        </p>
+      )}
+
+      {view.truncated && (
+        <p className="github-panel__truncated">
+          GitHub has more accounts or repositories than Vibld reads in one go,
+          so this list may be short. Installing again does not help here: the
+          same limit applies on the next read.
         </p>
       )}
 

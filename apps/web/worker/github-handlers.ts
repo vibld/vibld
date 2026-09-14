@@ -563,7 +563,7 @@ export async function handleGitHubComplete(
   // gives up nothing, because reading an installation's repositories *as the
   // user* is itself the authorization check: GitHub answers 404 for one they
   // cannot reach, and a forged id gets exactly that.
-  const listed = installations.value;
+  const listed = installations.value.items;
   const named = Number.isInteger(hinted) && hinted > 0;
 
   // The installation named on the way back is always the probe, whether or
@@ -633,13 +633,21 @@ export async function handleGitHubComplete(
   );
 
   return json({
-    installations: installations.value,
+    installations: listed,
     repositories: offered,
     // The accounts the read budget did not reach, so the panel can say so
     // rather than presenting a short list as the whole truth. Omitted from
     // the body when there are none, which is almost always.
     ...(repositories.value.omitted.length > 0
       ? { omitted: repositories.value.omitted }
+      : {}),
+    // Two different shortfalls, kept apart. `omitted` names accounts that
+    // can still be reached by installing again, which returns an id read
+    // outside the budget. `truncated` is a page bound inside a list, which
+    // installing again cannot move: the same bound applies on the next read.
+    // Collapsing them would offer a remedy that does not work.
+    ...(repositories.value.truncated || installations.value.more
+      ? { truncated: true }
       : {}),
     // What the bind call may choose from, signed. See `signChoice`.
     ticket: await signChoice(

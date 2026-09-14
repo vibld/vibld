@@ -263,7 +263,7 @@ describe('which installations the connecting user can reach', () => {
       })) as unknown as typeof fetch);
     assert.equal(result.ok, true);
     if (result.ok) {
-      assert.deepEqual(result.value, [
+      assert.deepEqual(result.value.items, [
         { id: 11, account: 'chris' },
         { id: 22, account: 'acme' },
       ]);
@@ -338,7 +338,7 @@ describe('which repositories may be offered', () => {
     );
     assert.equal(result.ok, true);
     if (result.ok) {
-      assert.deepEqual(result.value, [
+      assert.deepEqual(result.value.items, [
         { owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
       ]);
     }
@@ -363,7 +363,7 @@ describe('which repositories may be offered', () => {
       ]),
     );
     assert.equal(result.ok, true);
-    if (result.ok) assert.deepEqual(result.value, []);
+    if (result.ok) assert.deepEqual(result.value.items, []);
   });
 
   it('leaves out an archived repository', async () => {
@@ -380,7 +380,7 @@ describe('which repositories may be offered', () => {
       ]),
     );
     assert.equal(result.ok, true);
-    if (result.ok) assert.deepEqual(result.value, []);
+    if (result.ok) assert.deepEqual(result.value.items, []);
   });
 
   it('falls back to main when GitHub states no default branch', async () => {
@@ -392,7 +392,7 @@ describe('which repositories may be offered', () => {
       ]),
     );
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.value[0]?.defaultBranch, 'main');
+    if (result.ok) assert.equal(result.value.items[0]?.defaultBranch, 'main');
   });
 
   it('skips entries it cannot read rather than inventing them', async () => {
@@ -406,7 +406,7 @@ describe('which repositories may be offered', () => {
       ]),
     );
     assert.equal(result.ok, true);
-    if (result.ok) assert.deepEqual(result.value, []);
+    if (result.ok) assert.deepEqual(result.value.items, []);
   });
 });
 
@@ -556,7 +556,7 @@ describe('paging through an installation with many repositories', () => {
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.deepEqual(
-        result.value.map((choice) => choice.repo),
+        result.value.items.map((choice) => choice.repo),
         ['one', 'two'],
       );
     }

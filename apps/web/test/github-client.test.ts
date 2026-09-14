@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   beginConnect,
+  beginInstall,
   bindRepository,
   claimHandoff,
   clearHandoff,
@@ -425,6 +426,78 @@ describe('taking the handoff off the URL', () => {
  * fail its own check, reporting that the connection did not come from this
  * browser when it did.
  */
+/**
+ * Installing is a leg of the same flow, not a link out of it.
+ *
+ * GitHub carries a `state` through the installation flow only if one was
+ * supplied. Without it the callback arrives with an `installation_id` and no
+ * `state`, the worker turns that into `github=incomplete`, and the app
+ * discards it: the installation happens and nothing hears about it. For an
+ * account the read budget skipped, the id coming back is the entire point,
+ * because a named installation is read directly and outside the budget.
+ */
+describe('sending somebody to install the app', () => {
+  it('carries a state the browser has stored', async () => {
+    const store = storage();
+    const result = await beginInstall(
+      (async () =>
+        json({
+          url: 'https://github.com/login/oauth/authorize?x=1',
+          state: 'the-state',
+        })) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      const url = new URL(result.url);
+      assert.equal(
+        url.origin + url.pathname,
+        'https://github.com/apps/vibld/installations/new',
+      );
+      assert.equal(url.searchParams.get('state'), 'the-state');
+    }
+    // Stored, or the comparison on the way back refuses its own state.
+    assert.equal(takeRememberedState(store), 'the-state');
+  });
+
+  it('issues a fresh state rather than reusing a spent one', async () => {
+    // The completion that produced the offer already spent the stored state,
+    // so there is nothing to reuse: a state is good for one return trip.
+    const store = storage();
+    rememberState('already-spent', store);
+    takeRememberedState(store);
+    const result = await beginInstall(
+      (async () =>
+        json({
+          url: 'https://github.com/x',
+          state: 'brand-new',
+        })) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(new URL(result.url).searchParams.get('state'), 'brand-new');
+    }
+    assert.equal(takeRememberedState(store), 'brand-new');
+  });
+
+  it('reports a deployment that cannot start one', async () => {
+    const result = await beginInstall(
+      (async () =>
+        json(
+          { error: 'Connecting a GitHub repository is not configured here.' },
+          503,
+        )) as unknown as typeof fetch,
+      TOKEN,
+      storage(),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /not configured/);
+  });
+});
+
 describe('surviving an effect that runs twice', () => {
   it('gives the same handoff to a second read of a cleared URL', () => {
     forgetHandoffClaim();

@@ -527,10 +527,26 @@ async function readAsUser(
  * redirect carried, only what appears here may be bound, so a forged id
  * fails by simply not being in the list.
  */
+/**
+ * A list that may have been cut short, and says so.
+ *
+ * Both paged reads here stop at a bound, because following every link
+ * somebody else's server offers is not a loop worth writing. The bound is
+ * fine; returning a partial list as though it were the whole one is not,
+ * because the user token is discarded when the exchange ends. A caller that
+ * cannot tell a complete list from a truncated one will sign the short
+ * version as the complete set of things this person may bind.
+ */
+export interface Paged<T> {
+  items: T[];
+  /** A page GitHub offered and the bound refused to follow. */
+  more: boolean;
+}
+
 export async function userInstallations(
   token: string,
   doFetch: typeof fetch = fetch,
-): Promise<Reachable<UserInstallation[]>> {
+): Promise<Reachable<Paged<UserInstallation>>> {
   const installations: UserInstallation[] = [];
   // GitHub's default page here is 30, which is smaller than it looks: the
   // list decides what can be offered, so a page boundary is another place
@@ -568,7 +584,10 @@ export async function userInstallations(
       });
     }
   }
-  return { ok: true, value: installations };
+  // `path` still set means GitHub offered a page the bound refused. Said
+  // rather than swallowed: the caller signs what it is given as the complete
+  // set this person may bind.
+  return { ok: true, value: { items: installations, more: path !== null } };
 }
 
 /**
@@ -631,6 +650,16 @@ export interface Connectable {
    * these and the panel can say what it is.
    */
   omitted: string[];
+  /**
+   * Some list was cut short by a page bound.
+   *
+   * Separate from `omitted`, which names accounts that can still be reached
+   * by installing again. This one has no route: reading the same
+   * installation follows the same bound, so a repository past it cannot be
+   * offered by any path here. Reporting it is all that is available, and it
+   * beats signing a partial list as complete.
+   */
+  truncated: boolean;
 }
 
 export async function connectableRepositories(
@@ -653,6 +682,11 @@ export async function connectableRepositories(
   let lastFailure: Extract<Reachable<never>, { ok: false }> | null = null;
   let read = 0;
   let succeeded = 0;
+  // Set when some installation held more repositories than the page bound
+  // would follow. Unlike a skipped account there is no route to these:
+  // reading the installation again follows the same bound. So the only
+  // honest thing is to stop presenting the short list as the whole one.
+  let truncated = false;
 
   /** Reads one installation, and hands back its failure if it had one. */
   const gather = async (
@@ -668,7 +702,8 @@ export async function connectableRepositories(
       return reply;
     }
     succeeded += 1;
-    for (const choice of reply.value) {
+    if (reply.value.more) truncated = true;
+    for (const choice of reply.value.items) {
       connectable.push({ ...choice, installationId: installation.id });
     }
     return null;
@@ -717,7 +752,7 @@ export async function connectableRepositories(
   if (succeeded === 0 && lastFailure) return lastFailure;
   return {
     ok: true,
-    value: { repositories: connectable, read: succeeded, omitted },
+    value: { repositories: connectable, read: succeeded, omitted, truncated },
   };
 }
 
@@ -739,7 +774,7 @@ export async function installationRepositories(
   token: string,
   installationId: number,
   doFetch: typeof fetch = fetch,
-): Promise<Reachable<RepositoryChoice[]>> {
+): Promise<Reachable<Paged<RepositoryChoice>>> {
   const choices: RepositoryChoice[] = [];
   let path: string | null =
     `/user/installations/${encodeURIComponent(String(installationId))}/repositories?per_page=100`;
@@ -773,7 +808,7 @@ export async function installationRepositories(
     }
     collectRepositories(raw, choices);
   }
-  return { ok: true, value: choices };
+  return { ok: true, value: { items: choices, more: path !== null } };
 }
 
 /** One page of GitHub's repository list, filtered to what may be offered. */

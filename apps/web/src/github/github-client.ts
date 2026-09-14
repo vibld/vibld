@@ -49,6 +49,15 @@ export interface ConnectOffer {
    * installation id the server reads directly and outside the budget.
    */
   omitted?: string[];
+  /**
+   * Some list GitHub paginates was cut short by the server's page bound.
+   *
+   * Different from `omitted` and deliberately not merged with it: an omitted
+   * account can be reached by installing again, and this cannot, because the
+   * next read follows the same bound. Saying so is all that is available,
+   * and it beats presenting a partial list as the whole one.
+   */
+  truncated?: boolean;
 }
 
 /** What came back on the URL after GitHub sent the browser here. */
@@ -291,11 +300,13 @@ export async function fetchGitHubStatus(
  * state is stored *before* the browser leaves, since a state stored after
  * the navigation would never be stored at all.
  */
-export async function beginConnect(
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
-  getToken: () => Promise<string | null> = getClerkToken,
-  storage: Storage | null = safeStorage(),
-): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+async function issueState(
+  fetchImpl: typeof fetch,
+  getToken: () => Promise<string | null>,
+  storage: Storage | null,
+): Promise<
+  { ok: true; url: string; state: string } | { ok: false; error: string }
+> {
   let response: Response;
   try {
     response = await fetchImpl('/api/github/connect', {
@@ -311,7 +322,58 @@ export async function beginConnect(
     return { ok: false, error: 'Vibld could not start that connection.' };
   }
   rememberState(body.state, storage);
-  return { ok: true, url: body.url };
+  return { ok: true, url: body.url, state: body.state };
+}
+
+export async function beginConnect(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+  storage: Storage | null = safeStorage(),
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const started = await issueState(fetchImpl, getToken, storage);
+  return started.ok ? { ok: true, url: started.url } : started;
+}
+
+/**
+ * The App's installation page, which is where repository access is granted.
+ *
+ * The slug lives here rather than being configured, because it is the name
+ * in a public URL rather than a deployment secret.
+ */
+const INSTALL_URL = 'https://github.com/apps/vibld/installations/new';
+
+/**
+ * Send somebody to install the App, with a `state` that comes back.
+ *
+ * A plain link here is a dead end, and that is subtle enough to be worth
+ * spelling out. GitHub passes a `state` through the installation flow only
+ * if one was supplied, so a stateless install returns to the callback with
+ * an `installation_id` and no `state`; the callback turns anything missing
+ * either half into `github=incomplete`, and the app discards it. The
+ * installation happens and nothing hears about it.
+ *
+ * That matters most in the case this exists for. When an account was skipped
+ * by the read budget, the whole point of installing again is that the id
+ * comes back, because a named installation is read directly and outside the
+ * budget. Without the state, the id never arrives and re-installing changes
+ * nothing: GitHub's list may still order that account past the budget, so it
+ * is skipped again, forever.
+ *
+ * So this issues a fresh state the same way `beginConnect` does, stores it
+ * for the comparison on the way back, and carries it on the URL. Fresh
+ * rather than reused: the completion that produced this offer spent the
+ * stored one, and a state is good for exactly one return trip.
+ */
+export async function beginInstall(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+  storage: Storage | null = safeStorage(),
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const started = await issueState(fetchImpl, getToken, storage);
+  if (!started.ok) return started;
+  const url = new URL(INSTALL_URL);
+  url.searchParams.set('state', started.state);
+  return { ok: true, url: url.toString() };
 }
 
 export type CompleteResult =
@@ -380,6 +442,7 @@ export async function completeConnect(
     repositories?: unknown;
     ticket?: unknown;
     omitted?: unknown;
+    truncated?: unknown;
   };
   if (!Array.isArray(body.repositories) || typeof body.ticket !== 'string') {
     return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
@@ -393,6 +456,7 @@ export async function completeConnect(
       repositories: body.repositories as RepositoryChoice[],
       ticket: body.ticket,
       ...(omitted.length > 0 ? { omitted } : {}),
+      ...(body.truncated === true ? { truncated: true } : {}),
     },
   };
 }

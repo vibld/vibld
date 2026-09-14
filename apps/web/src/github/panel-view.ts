@@ -67,6 +67,15 @@ export type PanelView =
        * what keeps it a limit rather than a dead end.
        */
       omitted?: string[];
+      /**
+       * A list GitHub paginates was cut short, with no route past it.
+       *
+       * Kept apart from `omitted` because the remedies differ: an omitted
+       * account is reachable by installing again, and this is not, since
+       * the next read hits the same bound. Offering the install button for
+       * it would be offering something that cannot work.
+       */
+      truncated?: boolean;
     };
 
 const HIDDEN: PanelView = { show: false };
@@ -144,6 +153,10 @@ export function decidePanel(
   // did not look at three of your accounts".
   if (phase.at === 'choosing' && (phase.offer.omitted?.length ?? 0) > 0) {
     view.omitted = phase.offer.omitted;
+  }
+
+  if (phase.at === 'choosing' && phase.offer.truncated === true) {
+    view.truncated = true;
   }
 
   // Beside a failure, so a failed disconnect still shows what is connected,
