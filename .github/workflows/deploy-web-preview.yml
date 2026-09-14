@@ -213,6 +213,28 @@ jobs:
       # not into this repository. `printf %s` rather than a heredoc so the
       # newlines inside it survive, and it is piped straight into wrangler so
       # it is never an argument any process listing could show.
+      # Before anything replaces a live secret, not after.
+      #
+      # `wrangler secret put` writes straight to the running Worker, so a
+      # malformed or mismatched pair checked afterwards is already installed:
+      # the deploy then fails and looks safely blocked while every push on the
+      # live site is broken by the credentials this run just wrote. Checking
+      # first means a bad pair stops the run having changed nothing, and only
+      # credentials that answered GitHub are synced.
+      #
+      # It also says what the App may do, which the key being present does
+      # not: a read-only App looks configured from every angle the rest of
+      # this workflow can see and answers 422 on every push.
+      #
+      # Skipped when there is no App to ask about, like every other optional
+      # secret here.
+      - name: Check the GitHub App before syncing its credentials
+        working-directory: apps/web
+        env:
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+        run: node --experimental-strip-types scripts/check-github-app.ts
+
       - name: Sync the GitHub App credentials to the Worker
         shell: bash
         working-directory: apps/web
@@ -243,17 +265,6 @@ jobs:
           else
             echo "VIBLD_GITHUB_CLIENT_ID/VIBLD_GITHUB_CLIENT_SECRET not both set -- connecting a repository stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      # The key being present says nothing about what the App may do with it.
-      # A read-only App looks configured from every angle this workflow can
-      # see and answers 422 on every push, so the App is asked directly.
-      # Skipped when there is no App to ask about.
-      - name: Check what the GitHub App is allowed to do
-        working-directory: apps/web
-        env:
-          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
-          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
-        run: node scripts/check-github-app.mjs
 
       # L44's nightly provider-balance check. Optional, same rule as every
       # secret above: unset means the check still runs and logs, it just

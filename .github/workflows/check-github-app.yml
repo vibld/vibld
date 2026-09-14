@@ -29,4 +29,4 @@ jobs:
         env:
           VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
           VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
-        run: node scripts/check-github-app.mjs
+        run: node --experimental-strip-types scripts/check-github-app.ts
