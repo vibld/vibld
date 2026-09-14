@@ -111,7 +111,8 @@ const app = (await response.json()) as {
 
 /** Each installation, and what it has actually accepted. */
 async function installations(): Promise<
-  { ok: true; found: Installation[] } | { ok: false; status: number }
+  | { ok: true; found: Installation[]; more: boolean }
+  | { ok: false; status: number }
 > {
   const found: Installation[] = [];
   let path: string | null = '/app/installations?per_page=100';
@@ -124,11 +125,18 @@ async function installations(): Promise<
     const next = /<([^>]+)>;\s*rel="next"/.exec(
       reply.headers.get('link') ?? '',
     );
-    if (!next) break;
+    if (!next) {
+      path = null;
+      break;
+    }
     const url = new URL(next[1]);
     path = url.pathname + url.search;
   }
-  return { ok: true, found };
+  // A page the bound refused to follow. Said rather than swallowed: without
+  // it, "no installations are lagging" would mean "none of the ones I got
+  // round to looking at", which is the same silent truncation this pull
+  // request has already fixed three times elsewhere.
+  return { ok: true, found, more: path !== null };
 }
 
 const installed = await installations();
@@ -144,7 +152,7 @@ for (const [name, level] of Object.entries(app.permissions ?? {}).sort()) {
 }
 console.log(
   installed.ok
-    ? `Installations: ${installed.found.length}, of which ${verdict.lagging.length} have not accepted the App's current permissions`
+    ? `Installations: ${installed.found.length}${installed.more ? '+ (more than this check reads)' : ''}, of which ${verdict.lagging.length} have not accepted the App's current permissions`
     : `Installations: could not be read (HTTP ${installed.status}), so per-installation permissions were not checked`,
 );
 
@@ -168,12 +176,16 @@ if (summary) {
   const head = faults.length
     ? `GitHub App **${app.slug}**: ${faults.join('. ')}.`
     : `GitHub App **${app.slug}**: contents and pull requests are both write, and nothing else is held.`;
+  const partial =
+    installed.ok && installed.more
+      ? ` Only the first ${installed.found.length} installations were checked.`
+      : '';
   const lag = verdict.lagging.length
     ? `\n\n${verdict.lagging.length} installation(s) have not accepted the App's current permissions and answer 422 on every push: ${verdict.lagging
         .map((one) => `**${one.account}** (${one.short.join(', ')})`)
         .join(', ')}.`
     : '';
-  appendFileSync(summary, `${head}${lag}\n`);
+  appendFileSync(summary, `${head}${partial}${lag}\n`);
 }
 
 // Loud, and not fatal. An installation that has not accepted is somebody
@@ -188,6 +200,10 @@ for (const one of verdict.lagging) {
 if (!installed.ok) {
   console.error(
     `::warning::Could not read the App's installations (HTTP ${installed.status}), so per-installation permissions were not checked.`,
+  );
+} else if (installed.more) {
+  console.error(
+    `::warning::More installations exist than this check reads, so "${verdict.lagging.length} lagging" covers only the first ${installed.found.length}.`,
   );
 }
 
