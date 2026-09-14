@@ -210,6 +210,40 @@ export class GitHubStore {
   }
 
   /**
+   * Revoke a grant, but only if it is still the repository the caller named.
+   *
+   * The check and the write in one statement, because apart they are a
+   * race: a bind landing between reading the binding and revoking it would
+   * have the revocation take the newly bound repository, which is the exact
+   * outcome naming one is meant to prevent. The name is part of the `WHERE`
+   * clause, so the database decides.
+   *
+   * Returns whether a row changed. False does not say why: nothing bound,
+   * already revoked, and bound elsewhere all look the same from here, and
+   * telling them apart is the caller's business and only affects what it
+   * reports.
+   *
+   * `lower()` because GitHub resolves an owner and a name without regard to
+   * case, and SQLite's `=` does not. Both are ASCII, which is all `lower()`
+   * folds.
+   */
+  async revokeRepository(
+    userId: string,
+    repository: { owner: string; repo: string },
+    at = new Date(),
+  ): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE github_bindings SET revoked_at = ?2
+         WHERE user_id = ?1 AND revoked_at IS NULL
+           AND lower(owner) = lower(?3) AND lower(repo) = lower(?4)`,
+      )
+      .bind(userId, at.toISOString(), repository.owner, repository.repo)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
+  }
+
+  /**
    * The attempt at this checkpoint, started if it is not already there.
    *
    * The heart of the exactly-once story, and the reason it returns the row

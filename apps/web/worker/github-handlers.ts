@@ -886,7 +886,17 @@ export async function handleGitHubDisconnect(
     );
   }
 
+  // One statement rather than a read and then a write. Apart, a bind landing
+  // in between would have the revocation take the newly bound repository,
+  // which is the outcome naming one exists to prevent.
   const store = new GitHubStore(env.DB!);
+  if (await store.revokeRepository(principal.userId, expected, now)) {
+    return json({ connected: false });
+  }
+
+  // Nothing changed, and the statement does not say why. Reading now only
+  // decides what to report, so a binding that moves again while this runs
+  // costs an out-of-date sentence rather than a wrong write.
   const binding = await store.binding(principal.userId);
 
   // Nothing to disconnect, or nothing left of it. The end state asked for is
@@ -896,18 +906,13 @@ export async function handleGitHubDisconnect(
   // done.
   if (!binding || binding.revokedAt) return json({ connected: false });
 
-  if (!sameRepository(expected, binding)) {
-    return json(
-      {
-        error:
-          `Vibld is connected to ${binding.owner}/${binding.repo}, which is not what this would have disconnected. ` +
-          `Nothing was changed. Check where Vibld is pointing, then try again.`,
-        movedTo: { owner: binding.owner, repo: binding.repo },
-      },
-      409,
-    );
-  }
-
-  await store.revoke(principal.userId, now);
-  return json({ connected: false });
+  return json(
+    {
+      error:
+        `Vibld is connected to ${binding.owner}/${binding.repo}, which is not what this would have disconnected. ` +
+        `Nothing was changed. Check where Vibld is pointing, then try again.`,
+      movedTo: { owner: binding.owner, repo: binding.repo },
+    },
+    409,
+  );
 }
