@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createStatusGate, decidePanel } from '../src/github/panel-view.ts';
+import {
+  createStatusGate,
+  decidePanel,
+  NOTHING_PUSHABLE,
+} from '../src/github/panel-view.ts';
 import type { GitHubStatus } from '../src/github/github-client.ts';
 
 /**
@@ -21,6 +25,13 @@ const CONFIGURED: GitHubStatus = {
   canConnect: true,
   connected: false,
   reason: 'none',
+};
+
+const CHOICE = {
+  installationId: 1,
+  owner: 'acme',
+  repo: 'site',
+  defaultBranch: 'main',
 };
 
 const CONNECTED: GitHubStatus = {
@@ -64,7 +75,7 @@ describe('whether the panel appears at all', () => {
       { at: 'problem' as const, error: 'something went wrong' },
       {
         at: 'choosing' as const,
-        offer: { repositories: [], ticket: 'tkt' },
+        offer: { repositories: [CHOICE], ticket: 'tkt' },
       },
     ]) {
       const view = decidePanel(phase, null);
@@ -229,10 +240,52 @@ describe('which answer about the connection is allowed to win', () => {
   });
 });
 
+describe('an exchange that found nothing to offer', () => {
+  // The finding: a successful completion with no pushable repositories left
+  // an alert and nothing else. The picker draws no buttons for an empty
+  // list, and the summary carrying the Connect button was suppressed because
+  // the phase was `choosing`. The ticket is signed and empty, so it cannot
+  // pick up access granted afterwards: without an action here the only way
+  // on was a page reload.
+  const EMPTY = {
+    at: 'choosing' as const,
+    offer: { repositories: [], ticket: 'tkt' },
+  };
+
+  it('offers a way to start again', () => {
+    const view = decidePanel(EMPTY, CONFIGURED);
+    assert.equal(view.show && view.problem?.retry, true);
+  });
+
+  it('links to where the access is actually granted', () => {
+    const view = decidePanel(EMPTY, CONFIGURED);
+    assert.equal(view.show && view.problem?.install, true);
+    assert.equal(view.show && view.problem?.error, NOTHING_PUSHABLE);
+  });
+
+  it('draws no picker, because there is nothing to pick', () => {
+    const view = decidePanel(EMPTY, CONFIGURED);
+    assert.equal(view.show && view.picker, undefined);
+  });
+
+  it('keeps a connected repository visible beside it', () => {
+    // It is a failure, not a choice, so the rule that keeps the summary
+    // beside a failure applies: whatever is already connected stays on
+    // screen rather than vanishing behind an empty offer.
+    const view = decidePanel(EMPTY, CONNECTED);
+    assert.equal(view.show && view.summary?.connected, true);
+  });
+
+  it('withholds the retry the deployment could not honour', () => {
+    const view = decidePanel(EMPTY, { ...CONFIGURED, canConnect: false });
+    assert.equal(view.show && view.problem?.retry, false);
+  });
+});
+
 describe('what is shown beside what', () => {
   it('leaves the summary out while a choice is being made', () => {
     const view = decidePanel(
-      { at: 'choosing', offer: { repositories: [], ticket: 'tkt' } },
+      { at: 'choosing', offer: { repositories: [CHOICE], ticket: 'tkt' } },
       CONNECTED,
     );
     assert.equal(view.show && view.summary, undefined);

@@ -287,6 +287,8 @@ function GitHubConnection() {
   );
 }
 
+// Only ever given a non-empty offer: `decidePanel` turns an empty one into a
+// problem with a remedy, because an alert with no action is a dead end.
 function RepositoryPicker({
   offer,
   onChoose,
@@ -294,14 +296,6 @@ function RepositoryPicker({
   offer: ConnectOffer;
   onChoose: (choice: RepositoryChoice) => void;
 }) {
-  if (offer.repositories.length === 0) {
-    return (
-      <p role="alert">
-        None of the repositories Vibld can reach are ones you can push to. Check
-        the app’s repository access on GitHub, then connect again.
-      </p>
-    );
-  }
   return (
     <div>
       <p>Choose a repository to push to:</p>

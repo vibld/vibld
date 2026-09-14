@@ -57,6 +57,18 @@ export type PanelView =
 
 const HIDDEN: PanelView = { show: false };
 
+/**
+ * What a successful exchange that found nothing says.
+ *
+ * Here rather than in the JSX because it comes with an action: the signed
+ * ticket lists no repositories and cannot acquire one, so granting access on
+ * GitHub and then connecting again is the only route forward, and a message
+ * without that route is a dead end.
+ */
+export const NOTHING_PUSHABLE =
+  'None of the repositories Vibld can reach are ones you can push to. ' +
+  'Check the app’s repository access on GitHub, then connect again.';
+
 export function decidePanel(
   phase: PanelPhase,
   status: GitHubStatus | null,
@@ -71,6 +83,15 @@ export function decidePanel(
   const busy =
     phase.at === 'working' || phase.at === 'problem' || phase.at === 'choosing';
 
+  // An offer with nothing in it is not a choice. Treating it as one left the
+  // alert standing alone: the picker draws no buttons, and the summary that
+  // carries the Connect button is suppressed while choosing, so the only way
+  // on was a page reload somebody had to think of. The ticket is signed and
+  // empty, so it cannot pick up access granted afterwards either. It is a
+  // failure with a remedy, and it is shaped like one here.
+  const choosing =
+    phase.at === 'choosing' && phase.offer.repositories.length > 0;
+
   // Otherwise: nothing to offer on a deployment without GitHub configured,
   // the same silence `BillingStatusWidget` keeps when billing is not.
   if (!busy && !status?.configured) return HIDDEN;
@@ -78,6 +99,15 @@ export function decidePanel(
   const view: PanelView = { show: true };
 
   if (phase.at === 'working') view.working = phase.note;
+
+  if (phase.at === 'choosing' && !choosing) {
+    view.problem = {
+      error: NOTHING_PUSHABLE,
+      // The remedy is on GitHub, so the link to it belongs here.
+      install: true,
+      retry: status?.canConnect !== false,
+    };
+  }
 
   if (phase.at === 'problem') {
     view.problem = {
@@ -92,12 +122,12 @@ export function decidePanel(
     };
   }
 
-  if (phase.at === 'choosing') view.picker = phase.offer;
+  if (choosing && phase.at === 'choosing') view.picker = phase.offer;
 
   // Beside a failure, so a failed disconnect still shows what is connected,
   // but not beside a choice or a step in progress, which are about to replace
   // whatever it would say.
-  if (status?.configured && phase.at !== 'choosing' && phase.at !== 'working') {
+  if (status?.configured && !choosing && phase.at !== 'working') {
     view.summary = status.connected
       ? {
           connected: true,

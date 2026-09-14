@@ -1448,6 +1448,59 @@ describe('when the new installation has nothing to offer', () => {
     assert.deepEqual(body.repositories, []);
   });
 
+  it('offers the empty picker even when another installation failed', async () => {
+    // The finding: one installation read fine and held nothing pushable,
+    // another was rate-limited, and the branch tested the repository count
+    // rather than whether anything had been read. So somebody whose own
+    // installation answered perfectly well was handed an unrelated
+    // installation's error and told to retry something that was not wrong.
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const doFetch = (async (url: string) => {
+      const target = new URL(url);
+      if (target.pathname === '/login/oauth/access_token') {
+        return json({ access_token: 'ghu_user' });
+      }
+      if (target.pathname === '/user/installations') {
+        return json({
+          installations: [
+            { id: 55, account: { login: 'acme' } },
+            { id: 66, account: { login: 'other' } },
+          ],
+        });
+      }
+      if (target.pathname === '/user/installations/55/repositories') {
+        // Read fine, and holds nothing this person can push to.
+        return json({ repositories: [] });
+      }
+      if (target.pathname === '/user/installations/66/repositories') {
+        return new Response(JSON.stringify({ message: 'rate limited' }), {
+          status: 403,
+          headers: {
+            'content-type': 'application/json',
+            'x-ratelimit-remaining': '0',
+          },
+        });
+      }
+      return json({ message: 'unexpected' }, 500);
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: '55' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      repositories?: unknown[];
+      ticket?: string;
+    };
+    assert.deepEqual(body.repositories, []);
+    assert.ok(body.ticket, 'no ticket to pick from');
+  });
+
   it('still says to install when the probe finds no installation at all', async () => {
     const db = new SqliteD1Database(SCHEMA);
     const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());

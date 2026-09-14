@@ -296,6 +296,11 @@ export async function verifyChoice(
  * this endpoint handles both, sending them through installation first when
  * there is none.
  */
+/**
+ * Whoever changes the `redirect_uri` here changes it in `exchangeCode` too:
+ * GitHub compares the one sent at authorization against the one sent at
+ * exchange and refuses the pair when they differ.
+ */
 export function authorizeUrl(
   credentials: GitHubOAuthCredentials,
   state: string,
@@ -322,6 +327,7 @@ export type UserToken =
 export async function exchangeCode(
   credentials: GitHubOAuthCredentials,
   code: string,
+  redirectUri: string,
   doFetch: typeof fetch = fetch,
 ): Promise<UserToken> {
   let response: Response;
@@ -337,6 +343,13 @@ export async function exchangeCode(
         client_id: credentials.clientId,
         client_secret: credentials.clientSecret,
         code,
+        // Required because `authorizeUrl` sent one. GitHub compares the two
+        // and refuses the exchange with a redirect-URI mismatch when they
+        // differ, and an omitted one differs. Nothing here is verified by a
+        // fake: a mocked exchange answers with a token whatever the body
+        // says, so this line is the kind that passes every test and fails
+        // the first real callback.
+        redirect_uri: redirectUri,
       }),
       redirect: 'manual',
     });
@@ -672,7 +685,13 @@ export async function connectableRepositories(
   // partial read as success would quietly hide repositories somebody
   // expected to see, and reporting it as failure would block a connection
   // that can be made.
-  if (connectable.length === 0 && lastFailure) return lastFailure;
+  // `succeeded`, not the repository count. An installation that was read
+  // fine and simply holds nothing pushable is a successful read, and the
+  // empty picker says the useful thing about it. Testing the count instead
+  // hands somebody an unrelated installation's error when their own
+  // installation answered perfectly well, which is the same "count as a
+  // proxy for whether anything was read" mistake as the install prompt.
+  if (succeeded === 0 && lastFailure) return lastFailure;
   return { ok: true, value: { repositories: connectable, read: succeeded } };
 }
 

@@ -536,7 +536,15 @@ export async function handleGitHubComplete(
     );
   }
 
-  const token = await exchangeCode(credentials, code, doFetch);
+  // The same callback URL the authorization was started with, rebuilt from
+  // this request's origin exactly as `handleGitHubConnect` built it from
+  // its own. GitHub refuses the exchange when the two differ.
+  const token = await exchangeCode(
+    credentials,
+    code,
+    callbackUrl(request),
+    doFetch,
+  );
   if (!token.ok) return githubProblem(token);
 
   const installations = await userInstallations(token.token, doFetch);

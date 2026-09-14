@@ -392,7 +392,12 @@ export interface BoundRepository {
 
 export async function bindRepository(
   ticket: string,
-  choice: Pick<RepositoryChoice, 'owner' | 'repo'>,
+  // `defaultBranch` as well as the name, because the fallback below needs
+  // it. Narrowing this to owner and repo threw away the one authoritative
+  // answer already in hand, so a repository on `trunk` whose reply was
+  // unreadable and whose refresh then failed was shown as `main`: the
+  // fallback added to keep a success visible, showing it wrongly.
+  choice: Pick<RepositoryChoice, 'owner' | 'repo' | 'defaultBranch'>,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<
@@ -420,7 +425,7 @@ export async function bindRepository(
   let bound: BoundRepository = {
     owner: choice.owner,
     repo: choice.repo,
-    defaultBranch: 'main',
+    defaultBranch: choice.defaultBranch,
   };
   try {
     const body = (await response.json()) as Partial<BoundRepository>;
@@ -429,7 +434,9 @@ export async function bindRepository(
         owner: body.owner,
         repo: body.repo,
         defaultBranch:
-          typeof body.defaultBranch === 'string' ? body.defaultBranch : 'main',
+          typeof body.defaultBranch === 'string'
+            ? body.defaultBranch
+            : choice.defaultBranch,
         ...(typeof body.expiresAt === 'string'
           ? { expiresAt: body.expiresAt }
           : {}),

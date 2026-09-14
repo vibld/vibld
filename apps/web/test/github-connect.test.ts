@@ -128,10 +128,51 @@ describe('the authorize URL', () => {
   });
 });
 
+const CALLBACK = 'https://app.vibld.com/api/github/callback';
+
 describe('trading the code for a user token', () => {
+  it('sends back the redirect URI the authorization was started with', async () => {
+    // GitHub compares the `redirect_uri` on the exchange against the one on
+    // the authorize request and refuses the pair when they differ. An
+    // omitted one differs, so this fails on the first real callback and on
+    // no mocked one: a fake answers with a token whatever the body says.
+    const seen: string[] = [];
+    await exchangeCode(CREDENTIALS, 'the-code', CALLBACK, (async (
+      _url: string,
+      init?: RequestInit,
+    ) => {
+      seen.push(String(init?.body ?? ''));
+      return json({ access_token: 'ghu_user' });
+    }) as unknown as typeof fetch);
+    const body = JSON.parse(seen[0] ?? '{}') as { redirect_uri?: string };
+    assert.equal(body.redirect_uri, CALLBACK);
+  });
+
+  it('sends the same URI the authorize URL carries', async () => {
+    // The two are only right together, so they are asserted together: a
+    // change to one that misses the other is exactly the mismatch GitHub
+    // refuses.
+    const authorize = new URL(authorizeUrl(CREDENTIALS, 'the-state', CALLBACK));
+    const seen: string[] = [];
+    await exchangeCode(CREDENTIALS, 'the-code', CALLBACK, (async (
+      _url: string,
+      init?: RequestInit,
+    ) => {
+      seen.push(String(init?.body ?? ''));
+      return json({ access_token: 'ghu_user' });
+    }) as unknown as typeof fetch);
+    const body = JSON.parse(seen[0] ?? '{}') as { redirect_uri?: string };
+    assert.equal(body.redirect_uri, authorize.searchParams.get('redirect_uri'));
+  });
+
   it('reads the token out of a successful exchange', async () => {
-    const result = await exchangeCode(CREDENTIALS, 'the-code', (async () =>
-      json({ access_token: 'ghu_user' })) as unknown as typeof fetch);
+    const result = await exchangeCode(
+      CREDENTIALS,
+      'the-code',
+      CALLBACK,
+      (async () =>
+        json({ access_token: 'ghu_user' })) as unknown as typeof fetch,
+    );
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.token, 'ghu_user');
   });
@@ -139,11 +180,16 @@ describe('trading the code for a user token', () => {
   it('treats a refusal GitHub reports with a 200 as a refusal', async () => {
     // GitHub answers a bad or reused code with 200 and an `error` field, so
     // reading the status alone accepts a body with no token in it.
-    const result = await exchangeCode(CREDENTIALS, 'stale', (async () =>
-      json({
-        error: 'bad_verification_code',
-        error_description: 'The code passed is incorrect or expired.',
-      })) as unknown as typeof fetch);
+    const result = await exchangeCode(
+      CREDENTIALS,
+      'stale',
+      CALLBACK,
+      (async () =>
+        json({
+          error: 'bad_verification_code',
+          error_description: 'The code passed is incorrect or expired.',
+        })) as unknown as typeof fetch,
+    );
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'invalid');
   });
@@ -156,8 +202,12 @@ describe('trading the code for a user token', () => {
       json({ message: CREDENTIALS.clientSecret }, 500),
       new Response('not json', { status: 500 }),
     ]) {
-      const result = await exchangeCode(CREDENTIALS, 'the-code', (async () =>
-        reply.clone()) as unknown as typeof fetch);
+      const result = await exchangeCode(
+        CREDENTIALS,
+        'the-code',
+        CALLBACK,
+        (async () => reply.clone()) as unknown as typeof fetch,
+      );
       assert.equal(result.ok, false);
       if (!result.ok) {
         assert.equal(
@@ -173,7 +223,7 @@ describe('trading the code for a user token', () => {
     // A query string is the part of a request that ends up in logs and
     // proxies.
     const seen: { url: string; body: string }[] = [];
-    await exchangeCode(CREDENTIALS, 'the-code', (async (
+    await exchangeCode(CREDENTIALS, 'the-code', CALLBACK, (async (
       url: string,
       init?: RequestInit,
     ) => {
@@ -188,9 +238,14 @@ describe('trading the code for a user token', () => {
   });
 
   it('reports being unable to reach GitHub as that, not as a refusal', async () => {
-    const result = await exchangeCode(CREDENTIALS, 'the-code', (async () => {
-      throw new Error('connection reset');
-    }) as unknown as typeof fetch);
+    const result = await exchangeCode(
+      CREDENTIALS,
+      'the-code',
+      CALLBACK,
+      (async () => {
+        throw new Error('connection reset');
+      }) as unknown as typeof fetch,
+    );
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, 'unreachable');
   });

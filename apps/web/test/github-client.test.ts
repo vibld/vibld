@@ -275,7 +275,7 @@ describe('binding the chosen repository', () => {
     const sent: unknown[] = [];
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'acme', repo: 'site' },
+      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
       (async (_url: string, init?: RequestInit) => {
         sent.push(JSON.parse(String(init?.body)));
         return json({ owner: 'acme', repo: 'site' });
@@ -297,7 +297,7 @@ describe('binding the chosen repository', () => {
     // tell whether their repository connected.
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'ACME', repo: 'Site' },
+      { owner: 'ACME', repo: 'Site', defaultBranch: 'main' },
       (async () =>
         json({
           owner: 'acme',
@@ -323,7 +323,7 @@ describe('binding the chosen repository', () => {
     // An unreadable reply does not undo a write that succeeded.
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'acme', repo: 'site' },
+      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
       (async () =>
         new Response('not json', { status: 200 })) as unknown as typeof fetch,
       TOKEN,
@@ -335,10 +335,38 @@ describe('binding the chosen repository', () => {
     }
   });
 
+  it('keeps the chosen repository’s branch when the reply cannot be read', async () => {
+    // The finding: the fallback said `main` for a repository on `trunk`. The
+    // offer already carried the authoritative branch and the narrowed
+    // parameter threw it away, so the fallback added to keep a success
+    // visible showed it wrongly, and a failed refresh left that on screen.
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
+      (async () =>
+        new Response('not json', { status: 200 })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.bound.defaultBranch, 'trunk');
+  });
+
+  it('keeps it when the reply names no branch at all', async () => {
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
+      (async () =>
+        json({ owner: 'acme', repo: 'site' })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.bound.defaultBranch, 'trunk');
+  });
+
   it('surfaces the server’s sentence when it refuses', async () => {
     const result = await bindRepository(
       'stale',
-      { owner: 'acme', repo: 'site' },
+      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
       (async () =>
         json(
           { error: 'That connection attempt has expired. Start again.' },
