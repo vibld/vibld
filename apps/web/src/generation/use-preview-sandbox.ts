@@ -18,8 +18,17 @@ const SETTLED = new Set(['ready', 'failed']);
 export interface PreviewSandbox {
   status: PreviewStatus | null;
   pending: boolean;
-  /** Start (or restart) a preview of these files. */
-  run(files: ProjectFile[]): void;
+  /**
+   * The checkpoint the running preview was built from. A sandbox is a live
+   * copy of one checkpoint, not of "the project", so once a later one is
+   * accepted the frame is serving work that has been moved on from. It is
+   * kept here rather than in `PreviewPanel` because the panel is unmounted
+   * on a tab switch, which would take the knowledge with it while the
+   * sandbox it describes carried on running.
+   */
+  ranRevision: string | null;
+  /** Start (or restart) a preview of this checkpoint's files. */
+  run(files: ProjectFile[], revision: string): void;
   /** Stop the running preview, if any. */
   stop(): void;
   /** Every share grant issued for the current preview (docs/decisions.md L10). Empty once the preview itself stops or fails. */
@@ -46,6 +55,7 @@ export interface PreviewSandbox {
  */
 export function usePreviewSandbox(): PreviewSandbox {
   const [status, setStatus] = useState<PreviewStatus | null>(null);
+  const [ranRevision, setRanRevision] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -89,10 +99,11 @@ export function usePreviewSandbox(): PreviewSandbox {
     }, POLL_INTERVAL_MS);
   }
 
-  async function run(files: ProjectFile[]) {
+  async function run(files: ProjectFile[], revision: string) {
     stopPolling();
     setPending(true);
     setStatus(null);
+    setRanRevision(revision);
     try {
       const initial = await startSandboxPreview(files);
       setStatus(initial);
@@ -121,6 +132,7 @@ export function usePreviewSandbox(): PreviewSandbox {
       // UI forget about it.
     } finally {
       setStatus(null);
+      setRanRevision(null);
       setPending(false);
     }
   }
@@ -167,8 +179,9 @@ export function usePreviewSandbox(): PreviewSandbox {
 
   return {
     status,
+    ranRevision,
     pending,
-    run: (files) => void run(files),
+    run: (files, revision) => void run(files, revision),
     stop: () => void stop(),
     shares,
     sharePending,
