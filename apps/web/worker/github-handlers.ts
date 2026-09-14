@@ -570,8 +570,17 @@ export async function handleGitHubComplete(
   // a probe that 404s is confirming there is nothing there, and "that
   // installation is not available to your account" is a true sentence that
   // helps nobody: the thing to say is that the App needs installing.
-  const foundNothing = !repositories.ok || repositories.value.length === 0;
-  if (foundNothing && listed.length === 0) {
+  // `access` only, never any failure. A probe that 404s alongside an empty
+  // list is confirming there is nothing there; a rate limit or an
+  // unreachable GitHub says nothing of the kind, and answering those with
+  // "install the App" hides a retryable error behind an instruction that
+  // cannot help. `github-app.ts` separates these reasons precisely so this
+  // branch does not have to guess, and collapsing them here is the same
+  // mistake this feature has already made once at the push route.
+  const nothingThere = repositories.ok
+    ? repositories.value.length === 0
+    : repositories.reason === 'access';
+  if (nothingThere && listed.length === 0) {
     return json(
       {
         error:

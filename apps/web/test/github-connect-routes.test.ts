@@ -1103,3 +1103,91 @@ describe('when the new installation has not reached the list yet', () => {
     assert.equal(body.install, true);
   });
 });
+
+/**
+ * An empty list and a probe that failed for some other reason.
+ *
+ * "Install the App" is the right answer to a 404, which alongside an empty
+ * list confirms there is nothing there. It is the wrong answer to a rate
+ * limit or an unreachable GitHub, which say nothing about whether anything
+ * is installed: it hides a retryable error behind an instruction that cannot
+ * help, and sends somebody off to reinstall an App that may be working.
+ */
+describe('when the list is empty and the probe fails for another reason', () => {
+  async function complete(probeReply: () => Response) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const doFetch = (async (url: string) => {
+      const target = new URL(url);
+      if (target.pathname === '/login/oauth/access_token') {
+        return new Response(JSON.stringify({ access_token: 'ghu_user' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.pathname === '/user/installations') {
+        return new Response(JSON.stringify({ installations: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return probeReply();
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: '55' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as { install?: boolean; error: string },
+    };
+  }
+
+  it('reports a rate limit rather than telling them to install', async () => {
+    const { status, body } = await complete(
+      () =>
+        new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+          status: 403,
+          headers: {
+            'content-type': 'application/json',
+            'retry-after': '60',
+          },
+        }),
+    );
+    assert.equal(status, 429);
+    assert.equal(body.install, undefined);
+    assert.match(body.error, /rate limiting/);
+  });
+
+  it('reports GitHub being unreachable as that', async () => {
+    const { status, body } = await complete(() => {
+      throw new Error('connection reset');
+    });
+    assert.equal(status, 502);
+    assert.equal(body.install, undefined);
+  });
+
+  it('reports a server error as retryable', async () => {
+    const { status, body } = await complete(
+      () => new Response('{}', { status: 500 }),
+    );
+    assert.equal(status, 502);
+    assert.equal(body.install, undefined);
+  });
+
+  it('still says to install when the probe genuinely 404s', async () => {
+    const { status, body } = await complete(
+      () =>
+        new Response(JSON.stringify({ message: 'Not Found' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    assert.equal(status, 409);
+    assert.equal(body.install, true);
+  });
+});
