@@ -11,7 +11,7 @@ import type { GitHubStatus } from '../github/github-client.ts';
 // second copy of it here would be a second place for it to be wrong.
 import { createStatusGate } from '../github/panel-view.ts';
 import { decidePush } from '../github/push-view.ts';
-import type { PushPhase } from '../github/push-view.ts';
+import type { Destination, PushPhase } from '../github/push-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
 /**
@@ -58,7 +58,16 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       })();
     }
     probe();
-    const stop = onConnectionChanged(probe);
+    const stop = onConnectionChanged(() => {
+      // A push already in the air was aimed at the connection that has just
+      // changed. `decidePush` will not describe it beside a destination it
+      // did not go to, and this stops it landing on the phase at all, so a
+      // rebind does not leave the button busy on account of a request whose
+      // answer is about to be thrown away.
+      pushes.current.supersede();
+      setPhase({ at: 'idle' });
+      probe();
+    });
     return () => {
       stop();
       // Nothing in flight may land after this: the last word on an unmounted
@@ -79,9 +88,9 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     setPhase({ at: 'idle' });
   }, [snapshot.revision]);
 
-  async function push() {
+  async function push(to: Destination) {
     const current = pushes.current.begin();
-    setPhase({ at: 'pushing' });
+    setPhase({ at: 'pushing', to });
     const pushed = await pushSnapshot(snapshot);
     // The checkpoint this was for is no longer the one on screen. The push
     // itself stands -- the route keys it on the revision and the branch is
@@ -91,13 +100,14 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     if (!pushed.ok) {
       setPhase({
         at: 'problem',
+        to,
         error: pushed.error,
         ...(pushed.reconnect ? { reconnect: true } : {}),
         ...(pushed.conflict ? { conflict: pushed.conflict } : {}),
       });
       return;
     }
-    setPhase({ at: 'done', pushed: pushed.pushed });
+    setPhase({ at: 'done', to, pushed: pushed.pushed });
   }
 
   if (!clerkConfigured) return null;
@@ -106,7 +116,11 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
 
   return (
     <div className="github-push">
-      <button type="button" onClick={() => void push()} disabled={view.busy}>
+      <button
+        type="button"
+        onClick={() => void push(view.destination)}
+        disabled={view.busy}
+      >
         {view.busy
           ? 'Pushing…'
           : `Push to ${view.destination.owner}/${view.destination.repo}`}

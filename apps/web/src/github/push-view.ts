@@ -10,12 +10,36 @@ import type { PushConflict, PushedSnapshot } from './github-client.ts';
  * run. Every rule here is a decision rather than a rendering choice.
  */
 
+/** Somewhere a push went, or is going. */
+export interface Destination {
+  owner: string;
+  repo: string;
+}
+
+/**
+ * Every phase but idle records where it was aimed.
+ *
+ * The connection can change under a push: another builder binds a different
+ * repository, or the panel in the header rebinds while a request is in the
+ * air. The button's destination follows the connection, and a result kept
+ * from before it moved would be drawn beside the new name -- a pull request
+ * link into the repository it did go to, under a button offering to push
+ * somewhere else.
+ *
+ * Recorded here rather than only guarded in the component, because a
+ * component is where this feature's races have twice been found by reading
+ * rather than by the suite: the runner errors on JSX. Where the push went is
+ * a fact the caller has in hand at the moment it sends it, and carrying it
+ * makes "never describe a push as going somewhere it did not" a rule with a
+ * test rather than a sequence somebody has to trace.
+ */
 export type PushPhase =
   | { at: 'idle' }
-  | { at: 'pushing' }
-  | { at: 'done'; pushed: PushedSnapshot }
+  | { at: 'pushing'; to: Destination }
+  | { at: 'done'; to: Destination; pushed: PushedSnapshot }
   | {
       at: 'problem';
+      to: Destination;
       error: string;
       reconnect?: boolean;
       conflict?: PushConflict;
@@ -40,7 +64,7 @@ export type PushView =
   | {
       show: true;
       /** Where it would go, so the button never pushes somewhere unnamed. */
-      destination: { owner: string; repo: string };
+      destination: Destination;
       busy: boolean;
       problem?: {
         error: string;
@@ -75,11 +99,24 @@ export function decidePush(
   // missing field.
   if (status.canPush === false) return HIDDEN;
 
+  const destination: Destination = { owner: status.owner, repo: status.repo };
+
+  // Anything said about a push is said about this destination or not at all.
+  // A push still in flight to somewhere else is not this button's push
+  // either: it is not what a click here would start, and leaving the button
+  // disabled on its account would withhold a push nothing is doing.
+  const here =
+    phase.at === 'idle' ||
+    (phase.to.owner === destination.owner &&
+      phase.to.repo === destination.repo);
+
   const view: PushView = {
     show: true,
-    destination: { owner: status.owner, repo: status.repo },
-    busy: phase.at === 'pushing',
+    destination,
+    busy: here && phase.at === 'pushing',
   };
+
+  if (!here) return view;
 
   if (phase.at === 'problem') {
     view.problem = {

@@ -13,6 +13,9 @@ import type { GitHubStatus } from '../src/github/github-client.ts';
  * reviewer finds them.
  */
 
+/** The repository `CONNECTED` names, as a push records where it went. */
+const HERE = { owner: 'acme', repo: 'site' };
+
 const CONNECTED: GitHubStatus = {
   configured: true,
   canPush: true,
@@ -71,7 +74,7 @@ describe('whether there is anything to offer', () => {
 
 describe('while a push is in flight', () => {
   it('says so, rather than letting it be pressed twice', () => {
-    const view = decidePush({ at: 'pushing' }, CONNECTED);
+    const view = decidePush({ at: 'pushing', to: HERE }, CONNECTED);
     assert.equal(view.show && view.busy, true);
   });
 
@@ -86,6 +89,7 @@ describe('what it says about a push that happened', () => {
     const view = decidePush(
       {
         at: 'done',
+        to: HERE,
         pushed: { branch: 'vibld/r7', commitSha: 'abc', created: true },
       },
       CONNECTED,
@@ -103,6 +107,7 @@ describe('what it says about a push that happened', () => {
     const view = decidePush(
       {
         at: 'done',
+        to: HERE,
         pushed: { branch: 'vibld/r7', commitSha: 'abc', created: false },
       },
       CONNECTED,
@@ -114,6 +119,7 @@ describe('what it says about a push that happened', () => {
     const view = decidePush(
       {
         at: 'done',
+        to: HERE,
         pushed: {
           branch: 'vibld/r7',
           commitSha: 'abc',
@@ -133,6 +139,7 @@ describe('what it says about a push that happened', () => {
     const view = decidePush(
       {
         at: 'done',
+        to: HERE,
         pushed: { branch: 'vibld/r7', commitSha: 'abc', created: true },
       },
       CONNECTED,
@@ -141,10 +148,92 @@ describe('what it says about a push that happened', () => {
   });
 });
 
+describe('never describing a push as going where it did not', () => {
+  // The connection can move under a push: another builder binds a different
+  // repository, or the panel rebinds while a request is in the air. The
+  // button's destination follows the connection, so a result kept from
+  // before it moved would be drawn beside the new name.
+  const ELSEWHERE = { owner: 'acme', repo: 'other' };
+
+  it('withholds an outcome that was for somewhere else', () => {
+    const view = decidePush(
+      {
+        at: 'done',
+        to: ELSEWHERE,
+        pushed: {
+          branch: 'vibld/r7',
+          commitSha: 'abc',
+          created: true,
+          pullRequestUrl: 'https://github.com/acme/other/pull/1',
+        },
+      },
+      CONNECTED,
+    );
+    // The button still offers the connected repository. What it must not do
+    // is offer a link into the one the push actually went to.
+    assert.deepEqual(view.show && view.destination, HERE);
+    assert.equal(view.show && view.outcome, undefined);
+  });
+
+  it('withholds a failure that was for somewhere else', () => {
+    // A conflict carries the shas of the branch it collided with. Shown
+    // under another repository's name they describe a branch that is not
+    // there.
+    const view = decidePush(
+      {
+        at: 'problem',
+        to: ELSEWHERE,
+        error: 'The branch vibld/r7 already exists and points somewhere else.',
+        conflict: {
+          branch: 'vibld/r7',
+          existingSha: 'a'.repeat(40),
+          attemptedTreeSha: 'b'.repeat(40),
+        },
+      },
+      CONNECTED,
+    );
+    assert.equal(view.show && view.problem, undefined);
+  });
+
+  it('is not busy on account of a push to somewhere else', () => {
+    // Nothing is pushing here, so withholding the button would withhold a
+    // push that nothing is doing.
+    const view = decidePush({ at: 'pushing', to: ELSEWHERE }, CONNECTED);
+    assert.equal(view.show && view.busy, false);
+  });
+
+  it('withholds one that differs only in the owner', () => {
+    // `acme/site` and `other/site` are different repositories and a check
+    // that reads the name alone calls them the same one. Forks make that
+    // pairing ordinary rather than contrived.
+    const view = decidePush(
+      {
+        at: 'done',
+        to: { owner: 'other', repo: 'site' },
+        pushed: { branch: 'vibld/r7', commitSha: 'abc', created: true },
+      },
+      CONNECTED,
+    );
+    assert.equal(view.show && view.outcome, undefined);
+  });
+
+  it('still shows a push that was for this destination', () => {
+    const view = decidePush(
+      {
+        at: 'done',
+        to: { owner: 'acme', repo: 'site' },
+        pushed: { branch: 'vibld/r7', commitSha: 'abc', created: true },
+      },
+      CONNECTED,
+    );
+    assert.equal(view.show && view.outcome?.branch, 'vibld/r7');
+  });
+});
+
 describe('what it says about a push that failed', () => {
   it('shows the reason', () => {
     const view = decidePush(
-      { at: 'problem', error: 'GitHub could not be reached.' },
+      { at: 'problem', to: HERE, error: 'GitHub could not be reached.' },
       CONNECTED,
     );
     assert.equal(
@@ -161,6 +250,7 @@ describe('what it says about a push that failed', () => {
     const lost = decidePush(
       {
         at: 'problem',
+        to: HERE,
         error: 'Vibld’s access was withdrawn.',
         reconnect: true,
       },
@@ -169,7 +259,7 @@ describe('what it says about a push that failed', () => {
     assert.equal(lost.show && lost.problem?.reconnect, true);
 
     const transient = decidePush(
-      { at: 'problem', error: 'Too many pushes. Try again shortly.' },
+      { at: 'problem', to: HERE, error: 'Too many pushes. Try again shortly.' },
       CONNECTED,
     );
     assert.equal(transient.show && transient.problem?.reconnect, false);
@@ -182,6 +272,7 @@ describe('what it says about a push that failed', () => {
     const view = decidePush(
       {
         at: 'problem',
+        to: HERE,
         error: 'The branch vibld/r7 already exists and points somewhere else.',
         conflict: {
           branch: 'vibld/r7',
@@ -203,7 +294,7 @@ describe('what it says about a push that failed', () => {
     // assigning nothing read the same through `?.`, so checking the field
     // alone would pass either way and pin nothing.
     const view = decidePush(
-      { at: 'problem', error: 'Too many pushes. Try again shortly.' },
+      { at: 'problem', to: HERE, error: 'Too many pushes. Try again shortly.' },
       CONNECTED,
     );
     assert.deepEqual(view.show && view.problem, {
@@ -214,7 +305,10 @@ describe('what it says about a push that failed', () => {
 
   it('still names where it was going', () => {
     // A failure is where knowing the destination matters most.
-    const view = decidePush({ at: 'problem', error: 'nope' }, CONNECTED);
+    const view = decidePush(
+      { at: 'problem', to: HERE, error: 'nope' },
+      CONNECTED,
+    );
     assert.deepEqual(view.show && view.destination, {
       owner: 'acme',
       repo: 'site',
