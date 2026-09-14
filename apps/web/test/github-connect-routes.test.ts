@@ -1230,7 +1230,11 @@ describe('when the probe is refused rather than absent', () => {
     );
     return {
       status: response.status,
-      body: (await response.json()) as { install?: boolean; error: string },
+      body: (await response.json()) as {
+        install?: boolean;
+        reconnect?: boolean;
+        error: string;
+      },
     };
   }
 
@@ -1245,6 +1249,10 @@ describe('when the probe is refused rather than absent', () => {
     );
     assert.equal(status, 409);
     assert.equal(body.install, undefined);
+    // The assertion this test was missing when it was first written: an
+    // organisation policy is not fixed by signing in again, so telling the
+    // client to reconnect contradicts the sentence beside it.
+    assert.equal(body.reconnect, undefined);
     assert.match(body.error, /organisation settings/);
   });
 

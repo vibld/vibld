@@ -258,7 +258,7 @@ describe('which installations the connecting user can reach', () => {
       )) as unknown as typeof fetch);
     assert.equal(result.ok, false);
     if (!result.ok) {
-      assert.equal(result.reason, 'access');
+      assert.equal(result.reason, 'forbidden');
       assert.match(result.error, /organisation settings/);
     }
   });

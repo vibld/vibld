@@ -125,6 +125,7 @@ function statusFor(reason: GitHubFailure): number {
     case 'conflict':
     case 'access':
     case 'missing':
+    case 'forbidden':
       return 409;
     case 'rate-limited':
       return 429;
@@ -140,7 +141,13 @@ function statusFor(reason: GitHubFailure): number {
   }
 }
 
-/** Only a lost grant is worth reconnecting for. */
+/**
+ * Only a lost grant is worth reconnecting for.
+ *
+ * `forbidden` deliberately does not set it. A refusal by an organisation
+ * policy and an instruction to sign in again are contradictory advice, and
+ * following the flag sends somebody round a loop that ends where it started.
+ */
 function githubProblem(failure: {
   error: string;
   reason: GitHubFailure;

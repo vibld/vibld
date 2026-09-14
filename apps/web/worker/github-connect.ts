@@ -477,12 +477,17 @@ async function readAsUser(
   // Reported apart from the 404 because the answer differs, and because a
   // caller reading "nothing is there" from it would tell somebody to install
   // an App that is installed and forbidden.
+  // `forbidden`, not `access`: this is a user token, so a refusal is an
+  // organisation policy or an authorization the account has not granted, and
+  // signing in again lands in exactly the same place. The push path's 403 is
+  // a different thing (an installation token whose permission was withdrawn,
+  // which re-approving does restore) and keeps `access`.
   if (response.status === 403) {
     return {
       ok: false,
       error:
         'GitHub refused access to that installation. Check your organisation settings, then try again.',
-      reason: 'access',
+      reason: 'forbidden',
     };
   }
   if (response.status === 401) {
