@@ -175,6 +175,43 @@ describe('what it says about a push that failed', () => {
     assert.equal(transient.show && transient.problem?.reconnect, false);
   });
 
+  it('carries a conflict through with both shas', () => {
+    // The one failure the plan commits to reporting with both shas. The
+    // sentence names the branch and neither, so flattening it here would
+    // leave the promise unkeepable by anything downstream.
+    const view = decidePush(
+      {
+        at: 'problem',
+        error: 'The branch vibld/r7 already exists and points somewhere else.',
+        conflict: {
+          branch: 'vibld/r7',
+          existingSha: 'a'.repeat(40),
+          attemptedTreeSha: 'b'.repeat(40),
+        },
+      },
+      CONNECTED,
+    );
+    assert.deepEqual(view.show && view.problem?.conflict, {
+      branch: 'vibld/r7',
+      existingSha: 'a'.repeat(40),
+      attemptedTreeSha: 'b'.repeat(40),
+    });
+  });
+
+  it('says nothing about a conflict when there was none', () => {
+    // The whole object rather than the one field: assigning `undefined` and
+    // assigning nothing read the same through `?.`, so checking the field
+    // alone would pass either way and pin nothing.
+    const view = decidePush(
+      { at: 'problem', error: 'Too many pushes. Try again shortly.' },
+      CONNECTED,
+    );
+    assert.deepEqual(view.show && view.problem, {
+      error: 'Too many pushes. Try again shortly.',
+      reconnect: false,
+    });
+  });
+
   it('still names where it was going', () => {
     // A failure is where knowing the destination matters most.
     const view = decidePush({ at: 'problem', error: 'nope' }, CONNECTED);

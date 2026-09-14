@@ -1,7 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
-import { fetchGitHubStatus, pushSnapshot } from '../github/github-client.ts';
+import {
+  fetchGitHubStatus,
+  onConnectionChanged,
+  pushSnapshot,
+} from '../github/github-client.ts';
 import type { GitHubStatus } from '../github/github-client.ts';
+// The same latest-wins rule the connect panel needed, deliberately used
+// rather than written again: it is one generation counter with tests, and a
+// second copy of it here would be a second place for it to be wrong.
+import { createStatusGate } from '../github/panel-view.ts';
 import { decidePush } from '../github/push-view.ts';
 import type { PushPhase } from '../github/push-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
@@ -26,33 +34,66 @@ import { clerkConfigured } from '../auth/clerk-token.ts';
 export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [phase, setPhase] = useState<PushPhase>({ at: 'idle' });
+  const probes = useRef(createStatusGate());
+  const pushes = useRef(createStatusGate());
 
+  // Probed on mount and again whenever the connection changes. This
+  // component keeps its own copy of the status and the panel that binds a
+  // repository is a sibling of it, so without the subscription a bind made
+  // with the Code tab open leaves the button hidden and a disconnect leaves
+  // it up, still naming the repository that is gone.
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const current = await fetchGitHubStatus();
-      if (!cancelled && current) setStatus(current);
-    })();
+    const gate = probes.current;
+    function probe() {
+      gate.supersede();
+      const current = gate.begin();
+      // Forgotten before it is read again, so a probe that fails leaves the
+      // button hidden rather than naming a repository somebody has just
+      // disconnected. An unknown connection and a connection that is gone
+      // are not the same thing, but they offer the same thing: nothing.
+      setStatus(null);
+      void (async () => {
+        const read = await fetchGitHubStatus();
+        if (current() && read) setStatus(read);
+      })();
+    }
+    probe();
+    const stop = onConnectionChanged(probe);
     return () => {
-      cancelled = true;
+      stop();
+      // Nothing in flight may land after this: the last word on an unmounted
+      // component is a React warning and nothing a user sees.
+      gate.supersede();
     };
   }, []);
 
   // A different checkpoint is a different push. Without this, the branch
   // named by the last one stays on screen beside a project that has moved
   // on, which reads as though the new work is already on GitHub.
+  //
+  // Superseding as well as clearing, because clearing alone only hides the
+  // stale result until the request behind it lands: a push of the previous
+  // snapshot still in flight would then draw its branch beside the new one.
   useEffect(() => {
+    pushes.current.supersede();
     setPhase({ at: 'idle' });
   }, [snapshot.revision]);
 
   async function push() {
+    const current = pushes.current.begin();
     setPhase({ at: 'pushing' });
     const pushed = await pushSnapshot(snapshot);
+    // The checkpoint this was for is no longer the one on screen. The push
+    // itself stands -- the route keys it on the revision and the branch is
+    // there -- but saying so beside a different project would be describing
+    // work that is not the work in view.
+    if (!current()) return;
     if (!pushed.ok) {
       setPhase({
         at: 'problem',
         error: pushed.error,
         ...(pushed.reconnect ? { reconnect: true } : {}),
+        ...(pushed.conflict ? { conflict: pushed.conflict } : {}),
       });
       return;
     }
@@ -95,6 +136,16 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       {view.problem && (
         <p role="alert" className="github-push__problem">
           {view.problem.error}
+          {view.problem.conflict && (
+            <>
+              {' '}
+              That branch is at commit{' '}
+              <code>{view.problem.conflict.existingSha}</code>, and this
+              checkpoint builds tree{' '}
+              <code>{view.problem.conflict.attemptedTreeSha}</code>. Vibld never
+              overwrites a branch.
+            </>
+          )}
           {view.problem.reconnect &&
             ' Reconnect the repository in the GitHub panel.'}
         </p>

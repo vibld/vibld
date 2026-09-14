@@ -462,6 +462,51 @@ export async function completeConnect(
 }
 
 /** Write the binding for the repository the person picked. */
+const connectionListeners = new Set<() => void>();
+
+/**
+ * Hear that the connection changed, from wherever it was changed.
+ *
+ * Two places in the builder read `/api/github/status` and each keeps its own
+ * copy: the panel in the header and the push button in the Code tab. Until
+ * this, only the one that made the change learned of it. Binding a
+ * repository from the panel with the Code tab already open left the button
+ * hidden, because the status it read on mount said there was nothing to push
+ * to and nothing ever told it otherwise; disconnecting left the button up,
+ * naming a repository that is no longer connected.
+ *
+ * Published by the writes themselves rather than by the panel that calls
+ * them, because a bind changing the connection is a fact about the bind. A
+ * second caller elsewhere would otherwise have to remember to announce it,
+ * and the failure of remembering is silent.
+ *
+ * Returns the unsubscribe.
+ */
+export function onConnectionChanged(listener: () => void): () => void {
+  connectionListeners.add(listener);
+  return () => {
+    connectionListeners.delete(listener);
+  };
+}
+
+function announceConnectionChanged(): void {
+  // Over a copy, so this dispatch reaches exactly the listeners that were
+  // subscribed when the write landed: one that subscribes another while
+  // being called is reacting to this change, not asking to be told about it
+  // twice. (Removing during iteration needs no copy; a Set handles that.)
+  //
+  // Each one caught on its own. The write has already landed, and one
+  // subscriber throwing is neither a reason to report a successful bind as
+  // failed nor a reason for the rest not to hear about it.
+  for (const listener of [...connectionListeners]) {
+    try {
+      listener();
+    } catch {
+      // Not this write's problem, and not worth a provider's reply in a log.
+    }
+  }
+}
+
 export interface BoundRepository {
   owner: string;
   repo: string;
@@ -496,6 +541,11 @@ export async function bindRepository(
     return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
+
+  // Here rather than beside the return, so an unreadable reply still tells
+  // everyone else the connection moved. The write landed either way, and the
+  // fallback below is about what to show, not about whether it happened.
+  announceConnectionChanged();
 
   // The binding comes back in the reply, so the caller does not need a
   // second round trip to know what it just connected. That matters: a status
@@ -543,9 +593,55 @@ export interface PushedSnapshot {
   pullRequestUrl?: string;
 }
 
+/**
+ * A branch that is already there and points somewhere else.
+ *
+ * Carried out of the reply rather than left inside its sentence, because
+ * `docs/push-and-deploy-plan.md` commits to surfacing a conflict with both
+ * shas, and the sentence names the branch and neither. The reply is the only
+ * place they exist: nothing here can ask again, so reading past them loses
+ * them for good.
+ *
+ * The two are different kinds of object and are labelled as such wherever
+ * they are shown. `existingSha` is the commit the branch points at;
+ * `attemptedTreeSha` is the tree this checkpoint builds. Presenting them as
+ * a pair to compare would invite a comparison that means nothing.
+ */
+export interface PushConflict {
+  branch: string;
+  /** The commit the branch points at now. */
+  existingSha: string;
+  /** The tree this push built and wanted the branch to carry. */
+  attemptedTreeSha: string;
+}
+
+/**
+ * All three fields or none of it.
+ *
+ * A half-read conflict is worse than no conflict: it draws the sentence that
+ * promises both shas and then prints a blank where one of them should be,
+ * which reads as though the branch points at nothing.
+ */
+function conflictFrom(value: unknown): PushConflict | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { branch, existingSha, attemptedTreeSha } = value as Record<
+    string,
+    unknown
+  >;
+  if (typeof branch !== 'string' || !branch) return null;
+  if (typeof existingSha !== 'string' || !existingSha) return null;
+  if (typeof attemptedTreeSha !== 'string' || !attemptedTreeSha) return null;
+  return { branch, existingSha, attemptedTreeSha };
+}
+
 export type PushResult =
   | { ok: true; pushed: PushedSnapshot }
-  | { ok: false; error: string; reconnect?: boolean };
+  | {
+      ok: false;
+      error: string;
+      reconnect?: boolean;
+      conflict?: PushConflict;
+    };
 
 /**
  * Push an accepted checkpoint to the connected repository.
@@ -584,20 +680,37 @@ export async function pushSnapshot(
   if (!response.ok) {
     let error = 'Something went wrong talking to GitHub. Try again shortly.';
     let reconnect = false;
+    let conflict: PushConflict | null = null;
     try {
       const body = (await response.json()) as {
         error?: unknown;
         reconnect?: unknown;
+        conflict?: unknown;
       };
       if (typeof body.error === 'string' && body.error) error = body.error;
       reconnect = body.reconnect === true;
+      conflict = conflictFrom(body.conflict);
     } catch {
       // Keep the generic sentence.
     }
-    return { ok: false, error, ...(reconnect ? { reconnect: true } : {}) };
+    return {
+      ok: false,
+      error,
+      ...(reconnect ? { reconnect: true } : {}),
+      ...(conflict ? { conflict } : {}),
+    };
   }
 
-  const body = (await response.json()) as Partial<PushedSnapshot>;
+  // Guarded for the same reason the failure branch above is, and with more
+  // riding on it: this one is awaited by a button that has already gone
+  // busy, so a rejection here is not a thrown error anybody sees. It is a
+  // button that stays disabled until the page is reloaded.
+  let body: Partial<PushedSnapshot>;
+  try {
+    body = (await response.json()) as Partial<PushedSnapshot>;
+  } catch {
+    return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
+  }
   if (typeof body.branch !== 'string' || typeof body.commitSha !== 'string') {
     return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
   }
@@ -632,5 +745,6 @@ export async function disconnectRepository(
     return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
+  announceConnectionChanged();
   return { ok: true };
 }

@@ -1,5 +1,5 @@
 import type { GitHubStatus } from './github-client.ts';
-import type { PushedSnapshot } from './github-client.ts';
+import type { PushConflict, PushedSnapshot } from './github-client.ts';
 
 /**
  * Whether to offer a push, and what to say about one that happened.
@@ -14,7 +14,12 @@ export type PushPhase =
   | { at: 'idle' }
   | { at: 'pushing' }
   | { at: 'done'; pushed: PushedSnapshot }
-  | { at: 'problem'; error: string; reconnect?: boolean };
+  | {
+      at: 'problem';
+      error: string;
+      reconnect?: boolean;
+      conflict?: PushConflict;
+    };
 
 export interface PushOutcome {
   branch: string;
@@ -37,7 +42,17 @@ export type PushView =
       /** Where it would go, so the button never pushes somewhere unnamed. */
       destination: { owner: string; repo: string };
       busy: boolean;
-      problem?: { error: string; reconnect: boolean };
+      problem?: {
+        error: string;
+        reconnect: boolean;
+        /**
+         * Kept beside the sentence rather than folded into it, the same way
+         * `reconnect` is and for the same reason: it is the one failure the
+         * plan promises to report with both shas, and the sentence carries
+         * neither.
+         */
+        conflict?: PushConflict;
+      };
       outcome?: PushOutcome;
     };
 
@@ -67,7 +82,11 @@ export function decidePush(
   };
 
   if (phase.at === 'problem') {
-    view.problem = { error: phase.error, reconnect: phase.reconnect === true };
+    view.problem = {
+      error: phase.error,
+      reconnect: phase.reconnect === true,
+      ...(phase.conflict ? { conflict: phase.conflict } : {}),
+    };
   }
 
   if (phase.at === 'done') {
