@@ -62,6 +62,12 @@ export function PromptPanel({
     // a standing preference the way `knowledge` is -- clearing it means a
     // later, unrelated turn never re-fetches a page nobody meant it for.
     setReferenceUrl('');
+    // Same rule, and it costs more here. "Force a validation failure" is a
+    // thing to do to one run, not a setting: left ticked it quietly spends
+    // every later run on a checkpoint that is designed to be rejected, and
+    // the box is far enough up the form to be out of sight by the time the
+    // failure arrives. A tester who wants a second one can tick it again.
+    setFailNext(false);
   }
 
   return (
