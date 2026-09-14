@@ -289,6 +289,51 @@ describe('binding the chosen repository', () => {
     });
   });
 
+  it('hands back what was bound, so no second request is needed', async () => {
+    // The write has already landed by this point. A caller that had to fetch
+    // the status to know what it connected would show nothing at all when
+    // that second request failed, which is how somebody ends up unable to
+    // tell whether their repository connected.
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'ACME', repo: 'Site' },
+      (async () =>
+        json({
+          owner: 'acme',
+          repo: 'site',
+          defaultBranch: 'trunk',
+          expiresAt: '2026-12-13T00:00:00.000Z',
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      // GitHub's spelling, from the server, not the request's.
+      assert.deepEqual(result.bound, {
+        owner: 'acme',
+        repo: 'site',
+        defaultBranch: 'trunk',
+        expiresAt: '2026-12-13T00:00:00.000Z',
+      });
+    }
+  });
+
+  it('still reports what it asked for when the reply cannot be read', async () => {
+    // An unreadable reply does not undo a write that succeeded.
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'acme', repo: 'site' },
+      (async () =>
+        new Response('not json', { status: 200 })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.bound.owner, 'acme');
+      assert.equal(result.bound.repo, 'site');
+    }
+  });
+
   it('surfaces the server’s sentence when it refuses', async () => {
     const result = await bindRepository(
       'stale',

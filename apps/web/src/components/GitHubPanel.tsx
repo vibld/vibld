@@ -116,8 +116,23 @@ function GitHubConnection() {
       setPhase({ at: 'problem', error: bound.error });
       return;
     }
-    setStatus(await fetchGitHubStatus());
+    // Built from the reply rather than from a refresh. The write has already
+    // landed, so a status request that fails here must not leave somebody
+    // staring at nothing, unable to tell whether their repository connected.
+    // A refresh is still attempted, and only used if it answers.
+    setStatus((previous) => ({
+      configured: true,
+      canPush: previous?.canPush,
+      canConnect: previous?.canConnect,
+      connected: true,
+      owner: bound.bound.owner,
+      repo: bound.bound.repo,
+      defaultBranch: bound.bound.defaultBranch,
+      ...(bound.bound.expiresAt ? { expiresAt: bound.bound.expiresAt } : {}),
+    }));
     setPhase({ at: 'idle' });
+    const refreshed = await fetchGitHubStatus();
+    if (refreshed) setStatus(refreshed);
   }
 
   async function disconnect() {
@@ -127,8 +142,16 @@ function GitHubConnection() {
       setPhase({ at: 'problem', error: done.error });
       return;
     }
-    setStatus(await fetchGitHubStatus());
+    // Same rule as binding: the write landed, so say so without depending on
+    // a second request succeeding.
+    setStatus((previous) =>
+      previous
+        ? { ...previous, connected: false, reason: 'revoked' }
+        : previous,
+    );
     setPhase({ at: 'idle' });
+    const refreshed = await fetchGitHubStatus();
+    if (refreshed) setStatus(refreshed);
   }
 
   if (phase.at === 'loading') return null;

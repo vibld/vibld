@@ -1463,3 +1463,103 @@ describe('when the new installation has nothing to offer', () => {
     assert.equal(body.install, true);
   });
 });
+
+/**
+ * The chosen installation failing when GitHub's list *does* mention it.
+ *
+ * The ordinary case, and the one an earlier fix here missed: it tracked the
+ * chosen installation's failure only when the list had not mentioned it, so
+ * the common path still let a transient error on exactly the installation
+ * somebody picked be discarded the moment any other one succeeded.
+ */
+describe('when the chosen installation is listed and cannot be read', () => {
+  const BOTH = [
+    { id: 7, account: { login: 'chosen' } },
+    { id: 8, account: { login: 'other' } },
+  ];
+
+  async function complete(chosenReply: () => Response) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const doFetch = (async (url: string) => {
+      const target = new URL(url);
+      if (target.pathname === '/login/oauth/access_token') {
+        return new Response(JSON.stringify({ access_token: 'ghu_user' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.pathname === '/user/installations') {
+        return new Response(JSON.stringify({ installations: BOTH }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.pathname.includes('/user/installations/7/')) {
+        return chosenReply();
+      }
+      return new Response(
+        JSON.stringify({
+          repositories: [
+            {
+              name: 'unrelated',
+              default_branch: 'main',
+              owner: { login: 'acme' },
+              permissions: { push: true },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: '7' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as { repositories?: { repo: string }[] },
+    };
+  }
+
+  it('reports a rate limit rather than a list without the chosen one', async () => {
+    const { status, body } = await complete(
+      () =>
+        new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+          status: 403,
+          headers: {
+            'content-type': 'application/json',
+            'retry-after': '30',
+          },
+        }),
+    );
+    assert.equal(status, 429);
+    assert.equal(body.repositories, undefined);
+  });
+
+  it('reports an unreachable GitHub the same way', async () => {
+    const { status } = await complete(() => {
+      throw new Error('connection reset');
+    });
+    assert.equal(status, 502);
+  });
+
+  it('still offers the rest when the chosen one is definitively gone', async () => {
+    const { status, body } = await complete(
+      () =>
+        new Response(JSON.stringify({ message: 'Not Found' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(
+      body.repositories?.map((choice) => choice.repo),
+      ['unrelated'],
+    );
+  });
+});

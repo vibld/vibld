@@ -557,23 +557,29 @@ export async function handleGitHubComplete(
   // cannot reach, and a forged id gets exactly that.
   const listed = installations.value;
   const named = Number.isInteger(hinted) && hinted > 0;
-  const inList = named && listed.some((candidate) => candidate.id === hinted);
 
-  // Listed: move it to the front, and it costs what it always would.
-  // Not listed: read it as a separate probe, outside the budget. A hint that
-  // is forged or stale answers 404, and charging that answer to the budget
-  // would let a made-up id cost a real installation its place in the read.
-  const ordered = inList
-    ? [
-        listed.find((candidate) => candidate.id === hinted)!,
-        ...listed.filter((candidate) => candidate.id !== hinted),
-      ]
-    : listed;
-  const probe = named && !inList ? { id: hinted, account: 'unknown' } : null;
+  // The installation named on the way back is always the probe, whether or
+  // not GitHub's list mentions it. Being the probe is what makes its own
+  // failure distinguishable from an unrelated one, and that matters most in
+  // the ordinary case where it *is* listed: reading it as one of the crowd
+  // meant a transient error on exactly the installation somebody chose was
+  // indistinguishable from one on an installation they had never heard of,
+  // and so was discarded the moment any other succeeded.
+  //
+  // It also stays outside the budget. A forged or stale id answers 404, and
+  // charging that to the budget would let a made-up id in a link cost a real
+  // installation its place in the read. The loop below skips it either way,
+  // so nothing is read twice.
+  const probe = named
+    ? (listed.find((candidate) => candidate.id === hinted) ?? {
+        id: hinted,
+        account: 'unknown',
+      })
+    : null;
 
   const repositories = await connectableRepositories(
     token.token,
-    ordered,
+    listed,
     doFetch,
     probe,
   );

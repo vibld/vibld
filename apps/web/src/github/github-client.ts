@@ -326,12 +326,21 @@ export async function completeConnect(
 }
 
 /** Write the binding for the repository the person picked. */
+export interface BoundRepository {
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+  expiresAt?: string;
+}
+
 export async function bindRepository(
   ticket: string,
   choice: Pick<RepositoryChoice, 'owner' | 'repo'>,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; bound: BoundRepository } | { ok: false; error: string }
+> {
   let response: Response;
   try {
     response = await fetchImpl('/api/github/bind', {
@@ -346,7 +355,33 @@ export async function bindRepository(
     return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
-  return { ok: true };
+
+  // The binding comes back in the reply, so the caller does not need a
+  // second round trip to know what it just connected. That matters: a status
+  // refresh that fails after a write has already succeeded would otherwise
+  // leave somebody looking at nothing, unable to tell whether it worked.
+  let bound: BoundRepository = {
+    owner: choice.owner,
+    repo: choice.repo,
+    defaultBranch: 'main',
+  };
+  try {
+    const body = (await response.json()) as Partial<BoundRepository>;
+    if (typeof body.owner === 'string' && typeof body.repo === 'string') {
+      bound = {
+        owner: body.owner,
+        repo: body.repo,
+        defaultBranch:
+          typeof body.defaultBranch === 'string' ? body.defaultBranch : 'main',
+        ...(typeof body.expiresAt === 'string'
+          ? { expiresAt: body.expiresAt }
+          : {}),
+      };
+    }
+  } catch {
+    // The write landed; an unreadable reply does not undo it.
+  }
+  return { ok: true, bound };
 }
 
 /** Stop pushing to the connected repository. */
