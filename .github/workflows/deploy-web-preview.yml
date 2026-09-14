@@ -213,6 +213,28 @@ jobs:
       # not into this repository. `printf %s` rather than a heredoc so the
       # newlines inside it survive, and it is piped straight into wrangler so
       # it is never an argument any process listing could show.
+      # Before anything replaces a live secret, not after.
+      #
+      # `wrangler secret put` writes straight to the running Worker, so a
+      # malformed or mismatched pair checked afterwards is already installed:
+      # the deploy then fails and looks safely blocked while every push on the
+      # live site is broken by the credentials this run just wrote. Checking
+      # first means a bad pair stops the run having changed nothing, and only
+      # credentials that answered GitHub are synced.
+      #
+      # It also says what the App may do, which the key being present does
+      # not: a read-only App looks configured from every angle the rest of
+      # this workflow can see and answers 422 on every push.
+      #
+      # Skipped when there is no App to ask about, like every other optional
+      # secret here.
+      - name: Check the GitHub App before syncing its credentials
+        working-directory: apps/web
+        env:
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+        run: node --experimental-strip-types scripts/check-github-app.ts
+
       - name: Sync the GitHub App credentials to the Worker
         shell: bash
         working-directory: apps/web
@@ -221,6 +243,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
           VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+          VIBLD_GITHUB_CLIENT_ID: ${{ secrets.VIBLD_GITHUB_CLIENT_ID }}
+          VIBLD_GITHUB_CLIENT_SECRET: ${{ secrets.VIBLD_GITHUB_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           if [ -n "$VIBLD_GITHUB_APP_ID" ] && [ -n "$VIBLD_GITHUB_PRIVATE_KEY" ]; then
@@ -228,7 +252,18 @@ jobs:
             printf '%s' "$VIBLD_GITHUB_PRIVATE_KEY" | pnpm dlx wrangler@4.129.1 secret put VIBLD_GITHUB_PRIVATE_KEY
             echo "Synced the GitHub App credentials." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "VIBLD_GITHUB_APP_ID/VIBLD_GITHUB_PRIVATE_KEY not both set -- /api/github/* stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+            echo "VIBLD_GITHUB_APP_ID/VIBLD_GITHUB_PRIVATE_KEY not both set -- pushing to GitHub stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # The OAuth half, which is what lets somebody connect a repository
+          # in the first place. Synced separately because it gates a
+          # different thing: without it a deployment can still push on a
+          # binding it already has, it just cannot make new ones.
+          if [ -n "$VIBLD_GITHUB_CLIENT_ID" ] && [ -n "$VIBLD_GITHUB_CLIENT_SECRET" ]; then
+            printf '%s' "$VIBLD_GITHUB_CLIENT_ID" | pnpm dlx wrangler@4.129.1 secret put VIBLD_GITHUB_CLIENT_ID
+            printf '%s' "$VIBLD_GITHUB_CLIENT_SECRET" | pnpm dlx wrangler@4.129.1 secret put VIBLD_GITHUB_CLIENT_SECRET
+            echo "Synced the GitHub OAuth credentials." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_GITHUB_CLIENT_ID/VIBLD_GITHUB_CLIENT_SECRET not both set -- connecting a repository stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # L44's nightly provider-balance check. Optional, same rule as every

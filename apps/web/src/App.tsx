@@ -11,6 +11,7 @@ import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
 import { AuthGate, AuthStatus } from './auth/clerk.tsx';
 import { BillingStatusWidget } from './components/BillingStatus.tsx';
+import { GitHubPanel } from './components/GitHubPanel.tsx';
 
 /**
  * `AuthGate` is the outermost piece deliberately: `Builder` -- and the
@@ -52,6 +53,14 @@ function Builder() {
         */}
         <p className="shell__mode">{describeMode(state.providerId)}</p>
         <BillingStatusWidget />
+        {/*
+          In the header rather than beside Publish, because this is also
+          where GitHub lands. The callback puts its code and state in the
+          fragment and redirects here, so whatever handles that has to mount
+          on every page load; behind a workspace tab it would only run if
+          somebody happened to open the right one.
+        */}
+        <GitHubPanel />
         <AuthStatus />
       </header>
 

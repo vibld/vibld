@@ -80,7 +80,15 @@ import {
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
 import { BillingStore } from './billing-store.ts';
-import { handleGitHubPush, handleGitHubStatus } from './github-handlers.ts';
+import {
+  handleGitHubBind,
+  handleGitHubCallback,
+  handleGitHubComplete,
+  handleGitHubConnect,
+  handleGitHubDisconnect,
+  handleGitHubPush,
+  handleGitHubStatus,
+} from './github-handlers.ts';
 import { createStripeClient } from './stripe-client.ts';
 
 export interface Env {
@@ -216,6 +224,19 @@ export interface Env {
    */
   VIBLD_GITHUB_APP_ID?: string;
   VIBLD_GITHUB_PRIVATE_KEY?: string;
+  /**
+   * The OAuth half of the same App (issue #121). Connecting a repository has
+   * to establish that the person doing it controls the GitHub account,
+   * because GitHub's post-install redirect proves nothing on its own: it is
+   * an unsigned GET carrying an installation id. These let Vibld ask GitHub,
+   * as that user, which installations they can actually reach.
+   *
+   * Separate from the App id and key above because they gate different
+   * things: without these a deployment can still push on a binding it
+   * already has, it just cannot make new ones.
+   */
+  VIBLD_GITHUB_CLIENT_ID?: string;
+  VIBLD_GITHUB_CLIENT_SECRET?: string;
   /**
    * A push is several GitHub API calls and a write to somebody's repository,
    * so it gets its own gate keyed on the caller, for the same reason
@@ -1285,6 +1306,40 @@ export default {
 
     if (pathname === '/api/stripe/webhook') {
       return handleStripeWebhook(request, env);
+    }
+
+    if (pathname === '/api/github/connect') {
+      return handleGitHub(request, env, (principal) =>
+        handleGitHubConnect(request, env, principal),
+      );
+    }
+
+    // Deliberately outside `handleGitHub`. GitHub returns here through a
+    // top-level browser navigation, which carries no Authorization header,
+    // so resolving a principal would reject every real callback with a 401.
+    // It does no work and holds no authority: it hands the code and state to
+    // the app, which completes the exchange on a request that can be
+    // authenticated.
+    if (pathname === '/api/github/callback') {
+      return handleGitHubCallback(request);
+    }
+
+    if (pathname === '/api/github/complete') {
+      return handleGitHub(request, env, (principal) =>
+        handleGitHubComplete(request, env, principal),
+      );
+    }
+
+    if (pathname === '/api/github/bind') {
+      return handleGitHub(request, env, (principal) =>
+        handleGitHubBind(request, env, principal),
+      );
+    }
+
+    if (pathname === '/api/github/disconnect') {
+      return handleGitHub(request, env, (principal) =>
+        handleGitHubDisconnect(request, env, principal),
+      );
     }
 
     if (pathname === '/api/github/status') {

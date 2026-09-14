@@ -28,12 +28,25 @@ import {
   type PushTarget,
 } from './github-push.ts';
 import { GitHubStore, type BindingState } from './github-store.ts';
+import {
+  authorizeUrl,
+  exchangeCode,
+  githubOAuthCredentials,
+  connectableRepositories,
+  signChoice,
+  signState,
+  userInstallations,
+  verifyChoice,
+  verifyState,
+  type GitHubOAuthEnv,
+  type RepositoryChoice,
+} from './github-connect.ts';
 import type { Principal } from './principal.ts';
 
 /** How long a grant lasts before it has to be approved again (ADR-0006). */
 const GRANT_DAYS = 90;
 
-export interface GitHubHandlerEnv extends GitHubAppEnv {
+export interface GitHubHandlerEnv extends GitHubAppEnv, GitHubOAuthEnv {
   DB?: D1Database;
   GITHUB_BURST?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -42,6 +55,15 @@ export interface GitHubHandlerEnv extends GitHubAppEnv {
 
 export function githubConfigured(env: GitHubHandlerEnv): boolean {
   return Boolean(env.DB && githubAppCredentials(env));
+}
+
+/**
+ * Connecting needs the OAuth half as well as the App half, and is reported
+ * separately: a deployment can be able to push on a binding it already has
+ * while being unable to make new ones.
+ */
+export function githubConnectConfigured(env: GitHubHandlerEnv): boolean {
+  return Boolean(env.DB && githubOAuthCredentials(env));
 }
 
 function json(body: unknown, status = 200): Response {
@@ -59,29 +81,37 @@ function json(body: unknown, status = 200): Response {
  * act on, not an authentication error the browser will try to fix by
  * reloading.
  */
-function bindingProblem(state: Extract<BindingState, { usable: false }>) {
-  if (state.reason === 'none') {
-    return json(
-      { error: 'No GitHub repository is connected yet.', reconnect: true },
-      409,
-    );
+function bindingProblem(
+  state: Extract<BindingState, { usable: false }>,
+): Response {
+  // A switch rather than a chain ending in a bare `return`. With the chain,
+  // a fourth reason added to `BindingState` would silently be reported as
+  // expired, which is the one failure in this feature the compiler can
+  // actually prevent: every instance of it here has otherwise had to be
+  // found by review or by breaking the code to watch a test fail.
+  switch (state.reason) {
+    case 'none':
+      return json(
+        { error: 'No GitHub repository is connected yet.', reconnect: true },
+        409,
+      );
+    case 'revoked':
+      return json(
+        {
+          error: "Vibld's access to that repository was revoked.",
+          reconnect: true,
+        },
+        409,
+      );
+    case 'expired':
+      return json(
+        {
+          error: 'The GitHub connection has expired and needs approving again.',
+          reconnect: true,
+        },
+        409,
+      );
   }
-  if (state.reason === 'revoked') {
-    return json(
-      {
-        error: "Vibld's access to that repository was revoked.",
-        reconnect: true,
-      },
-      409,
-    );
-  }
-  return json(
-    {
-      error: 'The GitHub connection has expired and needs approving again.',
-      reconnect: true,
-    },
-    409,
-  );
 }
 
 /**
@@ -102,6 +132,8 @@ function statusFor(reason: GitHubFailure): number {
     // gone. Both need a person, not a retry.
     case 'conflict':
     case 'access':
+    case 'missing':
+    case 'forbidden':
       return 409;
     case 'rate-limited':
       return 429;
@@ -117,7 +149,13 @@ function statusFor(reason: GitHubFailure): number {
   }
 }
 
-/** Only a lost grant is worth reconnecting for. */
+/**
+ * Only a lost grant is worth reconnecting for.
+ *
+ * `forbidden` deliberately does not set it. A refusal by an organisation
+ * policy and an instruction to sign in again are contradictory advice, and
+ * following the flag sends somebody round a loop that ends where it started.
+ */
 function githubProblem(failure: {
   error: string;
   reason: GitHubFailure;
@@ -316,15 +354,33 @@ export async function handleGitHubStatus(
   now: Date = new Date(),
 ): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
-  if (!githubConfigured(env)) return json({ configured: false });
+
+  // Two capabilities, reported separately, because they are configured
+  // separately and a panel that conflates them offers a button that cannot
+  // work. A deployment with the App key but no OAuth credentials can push on
+  // a binding it already has and cannot make new ones; one with the OAuth
+  // half and no App key is the other way round.
+  const canPush = githubConfigured(env);
+  const canConnect = githubConnectConfigured(env);
+  if (!canPush && !canConnect) {
+    return json({ configured: false, canPush: false, canConnect: false });
+  }
 
   const store = new GitHubStore(env.DB!);
   const state = await store.usableBinding(principal.userId, now);
   if (!state.usable) {
-    return json({ configured: true, connected: false, reason: state.reason });
+    return json({
+      configured: true,
+      canPush,
+      canConnect,
+      connected: false,
+      reason: state.reason,
+    });
   }
   return json({
     configured: true,
+    canPush,
+    canConnect,
     connected: true,
     owner: state.binding.owner,
     repo: state.binding.repo,
@@ -338,4 +394,386 @@ export function grantExpiry(now: Date = new Date()): string {
   return new Date(
     now.getTime() + GRANT_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
+}
+
+/**
+ * Where GitHub sends the browser back to. Derived from the request rather
+ * than configured, so preview and production each come back to themselves.
+ */
+function callbackUrl(request: Request): string {
+  return new URL(
+    '/api/github/callback',
+    new URL(request.url).origin,
+  ).toString();
+}
+
+/**
+ * Step one: hand the browser somewhere to go.
+ *
+ * Deliberately does not redirect. The caller is an authenticated `fetch`
+ * from the builder carrying a bearer token, and a 302 to GitHub would be
+ * followed by that fetch rather than by the person, sending the
+ * Authorization header somewhere it does not belong. The URL goes back as
+ * data and the page navigates.
+ */
+export async function handleGitHubConnect(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+  const state = await signState(credentials, principal.userId, now.getTime());
+  // The state goes back to the caller as well as into the URL. The browser
+  // keeps it and compares it on the way back, which is what stops somebody
+  // pairing their own `code` with a link they send to a signed-in user: a
+  // state the browser did not issue does not match the one it stored.
+  return json({
+    url: authorizeUrl(credentials, state, callbackUrl(request)),
+    state,
+  });
+}
+
+/**
+ * Where GitHub lands, and the only route here that cannot be authenticated.
+ *
+ * GitHub returns through a top-level browser navigation, which carries no
+ * `Authorization` header, so there is no Clerk session to resolve: a route
+ * that demanded one would reject every real callback before it did anything.
+ *
+ * So this one does no work and holds no authority. It hands the `code` and
+ * `state` to the app, in the fragment, and the app completes the exchange
+ * with a request that *can* be authenticated. The fragment is not sent to
+ * any server, which keeps a single-use code out of request logs on the way
+ * through.
+ *
+ * The redirect target is built here rather than taken from the request,
+ * because a callback that forwarded to a URL somebody else chose would be an
+ * open redirect with an OAuth code attached to it.
+ */
+export function handleGitHubCallback(request: Request): Response {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code') ?? '';
+  const state = url.searchParams.get('state') ?? '';
+  // Forwarded because the bounded read below needs it, not because it is
+  // trusted: it only moves an installation to the front of a list GitHub
+  // gave us for this user, and one that is not in that list changes nothing.
+  const installation = url.searchParams.get('installation_id') ?? '';
+  const target = new URL('/', url.origin);
+  target.hash =
+    `github=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}` +
+    (installation ? `&installation=${encodeURIComponent(installation)}` : '');
+  if (!code || !state) target.hash = 'github=incomplete';
+  return new Response(null, {
+    status: 302,
+    headers: { location: target.toString(), 'cache-control': 'no-store' },
+  });
+}
+
+/**
+ * Step three: find out who came back, and what they may choose.
+ *
+ * Authenticated, unlike the redirect that precedes it, because the app calls
+ * it with a `fetch` that carries the Clerk token. The `state` must verify
+ * *and* name that caller: verifying alone would let somebody else's
+ * authorization be completed inside this session.
+ *
+ * Nothing from GitHub's redirect is treated as permission. The user token is
+ * what decides, and `userInstallations` answers, from GitHub, which
+ * installations this account can actually reach.
+ */
+export async function handleGitHubComplete(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  doFetch: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { code, state, installation } = (body ?? {}) as {
+    code?: unknown;
+    state?: unknown;
+    installation?: unknown;
+  };
+  const hinted = Number(installation);
+  if (
+    typeof code !== 'string' ||
+    typeof state !== 'string' ||
+    !code ||
+    !state
+  ) {
+    return json({ error: 'That connection link is incomplete.' }, 400);
+  }
+
+  // Checked against the signed-in caller, not merely checked. A state that
+  // verifies but names somebody else is somebody else's authorization being
+  // walked into this session, which is the thing it exists to stop.
+  const startedBy = await verifyState(credentials, state, now.getTime());
+  if (!startedBy || startedBy !== principal.userId) {
+    return json(
+      { error: 'That connection attempt has expired. Start again.' },
+      400,
+    );
+  }
+
+  // The same callback URL the authorization was started with, rebuilt from
+  // this request's origin exactly as `handleGitHubConnect` built it from
+  // its own. GitHub refuses the exchange when the two differ.
+  const token = await exchangeCode(
+    credentials,
+    code,
+    callbackUrl(request),
+    doFetch,
+  );
+  if (!token.ok) return githubProblem(token);
+
+  const installations = await userInstallations(token.token, doFetch);
+  if (!installations.ok) return githubProblem(installations);
+
+  // Everything this person could connect, across every installation they
+  // reach. Reading them all is a call each, so it is bounded, and the
+  // installation named on the way back is handled specially so that bound
+  // cannot strand it:
+  //
+  //   in the list -> it goes first, costing what it always would;
+  //   not in the list -> it is read as its own probe, outside the bound.
+  //
+  // Reading it directly rather than looking for it is what makes it
+  // reachable wherever GitHub's list happens to put it, or page it. That
+  // gives up nothing, because reading an installation's repositories *as the
+  // user* is itself the authorization check: GitHub answers 404 for one they
+  // cannot reach, and a forged id gets exactly that.
+  const listed = installations.value.items;
+  const named = Number.isInteger(hinted) && hinted > 0;
+
+  // The installation named on the way back is always the probe, whether or
+  // not GitHub's list mentions it. Being the probe is what makes its own
+  // failure distinguishable from an unrelated one, and that matters most in
+  // the ordinary case where it *is* listed: reading it as one of the crowd
+  // meant a transient error on exactly the installation somebody chose was
+  // indistinguishable from one on an installation they had never heard of,
+  // and so was discarded the moment any other succeeded.
+  //
+  // It also stays outside the budget. A forged or stale id answers 404, and
+  // charging that to the budget would let a made-up id in a link cost a real
+  // installation its place in the read. The loop below skips it either way,
+  // so nothing is read twice.
+  const probe = named
+    ? (listed.find((candidate) => candidate.id === hinted) ?? {
+        id: hinted,
+        account: 'unknown',
+      })
+    : null;
+
+  const repositories = await connectableRepositories(
+    token.token,
+    listed,
+    doFetch,
+    probe,
+  );
+  // Asked after the read, not before it. GitHub's list of a brand-new
+  // installation is not always current the instant it redirects, so checking
+  // first would tell somebody to install the App they had this second
+  // installed. The probe answers that case directly.
+  //
+  // It also wins over the probe's own failure. With no installations listed,
+  // a probe that 404s is confirming there is nothing there, and "that
+  // installation is not available to your account" is a true sentence that
+  // helps nobody: the thing to say is that the App needs installing.
+  // `missing` only, never any failure and not `access` either. A probe that
+  // 404s alongside an empty list is confirming there is nothing there. A
+  // rate limit or an unreachable GitHub says nothing of the kind. Nor does a
+  // 403, which is an organisation policy or an ungranted authorization: that
+  // person has an App they cannot reach, and telling them to install it is
+  // advice they cannot act on. `github-app.ts` separates these reasons
+  // precisely so this branch does not have to guess, and collapsing them
+  // here is the mistake this feature has already made twice.
+  // "Nothing was read", not "nothing was offered". A probe that succeeds and
+  // finds an installation with no pushable repositories in it has proved the
+  // App is installed, and telling that person to install it is both wrong
+  // and impossible to act on. What they need is the empty picker, which says
+  // there is nothing they can push to.
+  const nothingThere = repositories.ok
+    ? repositories.value.read === 0
+    : repositories.reason === 'missing';
+  if (nothingThere && listed.length === 0) {
+    return json(
+      {
+        error:
+          'The Vibld GitHub App is not installed on any account you can reach. Install it, then connect again.',
+        install: true,
+      },
+      409,
+    );
+  }
+  if (!repositories.ok) return githubProblem(repositories);
+
+  const offered = [...repositories.value.repositories].sort((a, b) =>
+    `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`),
+  );
+
+  return json({
+    installations: listed,
+    repositories: offered,
+    // The accounts the read budget did not reach, so the panel can say so
+    // rather than presenting a short list as the whole truth. Omitted from
+    // the body when there are none, which is almost always.
+    ...(repositories.value.omitted.length > 0
+      ? { omitted: repositories.value.omitted }
+      : {}),
+    // Two different shortfalls, kept apart. `omitted` names accounts that
+    // can still be reached by installing again, which returns an id read
+    // outside the budget. `truncated` is a page bound inside a list, which
+    // installing again cannot move: the same bound applies on the next read.
+    // Collapsing them would offer a remedy that does not work.
+    ...(repositories.value.truncated || installations.value.more
+      ? { truncated: true }
+      : {}),
+    // What the bind call may choose from, signed. See `signChoice`.
+    ticket: await signChoice(
+      credentials,
+      principal.userId,
+      offered,
+      now.getTime(),
+    ),
+  });
+}
+
+function sameRepository(
+  a: RepositoryChoice,
+  b: { owner: string; repo: string },
+) {
+  return (
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase()
+  );
+}
+
+/**
+ * Step three: write the binding the user picked.
+ *
+ * The repository is not taken from the request. It is matched against the
+ * list the callback signed, and the binding is written from the matched
+ * entry, so the destination and its default branch are the ones GitHub
+ * reported rather than the ones the browser sent.
+ */
+export async function handleGitHubBind(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { ticket, owner, repo } = (body ?? {}) as {
+    ticket?: unknown;
+    owner?: unknown;
+    repo?: unknown;
+  };
+  if (
+    typeof ticket !== 'string' ||
+    typeof owner !== 'string' ||
+    typeof repo !== 'string'
+  ) {
+    return json(
+      { error: '"ticket", "owner" and "repo" are all required.' },
+      400,
+    );
+  }
+
+  const verified = await verifyChoice(credentials, ticket, now.getTime());
+  if (!verified || verified.userId !== principal.userId) {
+    return json(
+      { error: 'That connection attempt has expired. Start again.' },
+      400,
+    );
+  }
+
+  const match = verified.repositories.find((candidate) =>
+    sameRepository(candidate, { owner, repo }),
+  );
+  if (!match) {
+    return json(
+      { error: 'That repository was not one of the ones you were offered.' },
+      403,
+    );
+  }
+
+  const store = new GitHubStore(env.DB!);
+  await store.bind({
+    userId: principal.userId,
+    // The installation the matched entry came from, so a repository is
+    // always pushed through the installation it was actually read from.
+    installationId: match.installationId,
+    owner: match.owner,
+    repo: match.repo,
+    defaultBranch: match.defaultBranch,
+    grantedAt: now.toISOString(),
+    grantedByEmail: principal.policyIdentity,
+    expiresAt: grantExpiry(now),
+  });
+
+  return json({
+    owner: match.owner,
+    repo: match.repo,
+    defaultBranch: match.defaultBranch,
+    expiresAt: grantExpiry(now),
+  });
+}
+
+/**
+ * Stop pushing to the connected repository.
+ *
+ * Marks the grant revoked rather than deleting it, and says nothing about
+ * whether there was one: "disconnected" is the same answer either way, so
+ * this cannot be used to ask whether somebody has connected something.
+ */
+export async function handleGitHubDisconnect(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env) && !githubConnectConfigured(env)) {
+    return json(
+      { error: 'GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+  await new GitHubStore(env.DB!).revoke(principal.userId, now);
+  return json({ connected: false });
 }

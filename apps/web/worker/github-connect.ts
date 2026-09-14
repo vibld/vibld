@@ -1,0 +1,846 @@
+/**
+ * Connecting a repository: proving who is connecting before anything is
+ * bound (issue #121).
+ *
+ * This file exists because of one fact about GitHub. After someone installs
+ * a GitHub App, GitHub redirects to the App's setup URL with
+ * `?installation_id=N` on the query string. That redirect is a plain GET.
+ * It is not signed, it carries no secret, and nothing about it proves the
+ * browser making the request had anything to do with the installation.
+ *
+ * So `installation_id` from the query is a hint and never an authority. Any
+ * signed-in user could request the callback with somebody else's
+ * installation id; if that wrote a binding, every later push would mint a
+ * token scoped to that installation and commit into a stranger's
+ * repository.
+ *
+ * What actually establishes the right to bind is a user-to-server token:
+ * the person authorizes Vibld as themselves, and `GET /user/installations`
+ * then answers, from GitHub, which installations *that account* can reach.
+ * The binding is chosen from that answer. A forged id is simply absent from
+ * it.
+ *
+ * The user token is used for those reads and discarded. It is never stored
+ * and never written down: it proves who is connecting, and the push path
+ * has its own credential (an installation token minted per push from the
+ * App key, scoped to one repository). ADR-0006 keeps those classes apart,
+ * and a user's GitHub token is the class this product does not hold.
+ */
+
+import {
+  GITHUB_API,
+  GITHUB_USER_AGENT,
+  rateLimitMessage,
+  type GitHubFailure,
+} from './github-app.ts';
+
+const GITHUB_OAUTH = 'https://github.com';
+
+/** How long the CSRF nonce on the authorize leg stays good. */
+const STATE_LIFETIME_MS = 10 * 60 * 1000;
+
+export interface GitHubOAuthEnv {
+  VIBLD_GITHUB_CLIENT_ID?: string;
+  VIBLD_GITHUB_CLIENT_SECRET?: string;
+}
+
+export interface GitHubOAuthCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+/**
+ * The OAuth half of the App, or null when this deployment has not been given
+ * it. Null rather than throwing, the same fail-closed shape
+ * `githubAppCredentials` uses: an unconfigured deployment does not offer the
+ * feature.
+ */
+export function githubOAuthCredentials(
+  env: GitHubOAuthEnv,
+): GitHubOAuthCredentials | null {
+  const clientId = env.VIBLD_GITHUB_CLIENT_ID?.trim();
+  const clientSecret = env.VIBLD_GITHUB_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret };
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function fromBase64Url(value: string): Uint8Array | null {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/');
+  try {
+    const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+async function hmac(secret: string, message: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(message),
+  );
+  return new Uint8Array(signature);
+}
+
+/** Constant time, so a comparison cannot be walked one byte at a time. */
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    difference |= a[index]! ^ b[index]!;
+  }
+  return difference === 0;
+}
+
+/**
+ * The `state` for the authorize leg: who started it, and when.
+ *
+ * A CSRF token, not a capability. It stops somebody else's authorization
+ * from being walked into this user's session, and it is deliberately *not*
+ * what decides whether a binding may be written -- that is the installation
+ * read below. Signing it means no table and no cleanup: a nonce that has to
+ * be stored and swept is a second failure mode for something whose whole job
+ * is to be short-lived.
+ *
+ * Keyed on the client secret rather than a new secret of its own. It is
+ * already required for this flow and already a Worker secret, and a
+ * deployment that lacks it cannot reach this code at all.
+ */
+export async function signState(
+  credentials: GitHubOAuthCredentials,
+  userId: string,
+  now: number = Date.now(),
+): Promise<string> {
+  return signPayload(credentials, { u: userId }, now);
+}
+
+/**
+ * A value this deployment issued, stamped with when.
+ *
+ * Signed rather than stored, for both the `state` above and the ticket
+ * below: neither needs a table, neither needs sweeping, and the thing they
+ * both are is a short-lived statement by this Worker about something it has
+ * already checked.
+ */
+async function signPayload(
+  credentials: GitHubOAuthCredentials,
+  fields: Record<string, unknown>,
+  now: number,
+): Promise<string> {
+  const payload = base64Url(
+    new TextEncoder().encode(JSON.stringify({ ...fields, t: now })),
+  );
+  const signature = base64Url(await hmac(credentials.clientSecret, payload));
+  return `${payload}.${signature}`;
+}
+
+async function verifyPayload(
+  credentials: GitHubOAuthCredentials,
+  token: string,
+  now: number,
+  lifetimeMs: number,
+): Promise<Record<string, unknown> | null> {
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) return null;
+
+  const expected = await hmac(credentials.clientSecret, payload);
+  const offered = fromBase64Url(signature);
+  if (!offered || !sameBytes(expected, offered)) return null;
+
+  const decoded = fromBase64Url(payload);
+  if (!decoded) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(decoded));
+  } catch {
+    return null;
+  }
+  const issued = parsed.t;
+  if (typeof issued !== 'number') return null;
+  // Expiry is checked after the signature, so an unsigned value is never
+  // merely called stale.
+  if (now - issued > lifetimeMs || issued > now + 60_000) return null;
+  return parsed;
+}
+
+/**
+ * The user a `state` belongs to, or null if it is not one this deployment
+ * issued to that user recently.
+ */
+export async function verifyState(
+  credentials: GitHubOAuthCredentials,
+  state: string,
+  now: number = Date.now(),
+): Promise<string | null> {
+  const parsed = await verifyPayload(
+    credentials,
+    state,
+    now,
+    STATE_LIFETIME_MS,
+  );
+  return parsed && typeof parsed.u === 'string' ? parsed.u : null;
+}
+
+/** How long a verified choice stays good before connecting again. */
+const TICKET_LIFETIME_MS = 15 * 60 * 1000;
+
+/**
+ * What the callback established, in a form the bind call can trust.
+ *
+ * The problem it solves: the callback proves, with a user token, which
+ * installation this person controls and which repositories inside it they
+ * may write to. The bind call arrives later, as a separate request, and the
+ * user token is gone by then because this product does not keep one.
+ *
+ * The alternatives are worse. Storing the token would make Vibld hold a
+ * credential that can act as the user across the whole of GitHub, which is
+ * exactly the class ADR-0006 says it does not hold. Re-reading at bind time
+ * would need that token anyway. Trusting the repository named in the request
+ * body would put us back where we started, with the browser asserting its
+ * own authorization.
+ *
+ * So the callback signs the answer it got: this user, this installation,
+ * these repositories, at this time. The bind call may then choose only from
+ * the list that was signed, and the set offered is exactly the set that can
+ * be bound.
+ */
+export async function signChoice(
+  credentials: GitHubOAuthCredentials,
+  userId: string,
+  repositories: readonly ConnectableRepository[],
+  now: number = Date.now(),
+): Promise<string> {
+  return signPayload(
+    credentials,
+    {
+      u: userId,
+      r: repositories.map((choice) => [
+        choice.installationId,
+        choice.owner,
+        choice.repo,
+        choice.defaultBranch,
+      ]),
+    },
+    now,
+  );
+}
+
+export interface VerifiedChoice {
+  userId: string;
+  repositories: ConnectableRepository[];
+}
+
+/**
+ * What a ticket says, if this deployment signed it recently.
+ *
+ * Returns the whole statement rather than a yes: the caller has to check the
+ * user it names against the caller's own identity, and pick from the
+ * repositories it lists. A ticket is not a bearer token for binding anything
+ * -- it is a record of what was verified, and it is useless for a repository
+ * that is not in it.
+ */
+export async function verifyChoice(
+  credentials: GitHubOAuthCredentials,
+  ticket: string,
+  now: number = Date.now(),
+): Promise<VerifiedChoice | null> {
+  const parsed = await verifyPayload(
+    credentials,
+    ticket,
+    now,
+    TICKET_LIFETIME_MS,
+  );
+  if (!parsed) return null;
+  if (typeof parsed.u !== 'string') return null;
+  if (!Array.isArray(parsed.r)) return null;
+
+  const repositories: ConnectableRepository[] = [];
+  for (const entry of parsed.r) {
+    if (!Array.isArray(entry) || entry.length !== 4) return null;
+    const [installationId, owner, repo, defaultBranch] = entry;
+    if (
+      typeof installationId !== 'number' ||
+      typeof owner !== 'string' ||
+      typeof repo !== 'string' ||
+      typeof defaultBranch !== 'string'
+    ) {
+      return null;
+    }
+    repositories.push({ installationId, owner, repo, defaultBranch });
+  }
+  return { userId: parsed.u, repositories };
+}
+
+/**
+ * Where to send the browser to start connecting.
+ *
+ * `/login/oauth/authorize` rather than the App's install page: a user who
+ * has already installed the App still has to prove they are that user, and
+ * this endpoint handles both, sending them through installation first when
+ * there is none.
+ */
+/**
+ * Whoever changes the `redirect_uri` here changes it in `exchangeCode` too:
+ * GitHub compares the one sent at authorization against the one sent at
+ * exchange and refuses the pair when they differ.
+ */
+export function authorizeUrl(
+  credentials: GitHubOAuthCredentials,
+  state: string,
+  redirectUri: string,
+): string {
+  const url = new URL('/login/oauth/authorize', GITHUB_OAUTH);
+  url.searchParams.set('client_id', credentials.clientId);
+  url.searchParams.set('state', state);
+  url.searchParams.set('redirect_uri', redirectUri);
+  return url.toString();
+}
+
+export type UserToken =
+  | { ok: true; token: string }
+  | { ok: false; error: string; reason: GitHubFailure };
+
+/**
+ * Trade the `code` from the redirect for a token that acts as the user.
+ *
+ * Nothing here ever puts `client_secret` or the resulting token into a
+ * message. Every failure is a fixed sentence, because the one thing an
+ * error string must never carry is the credential that produced it.
+ */
+export async function exchangeCode(
+  credentials: GitHubOAuthCredentials,
+  code: string,
+  redirectUri: string,
+  doFetch: typeof fetch = fetch,
+): Promise<UserToken> {
+  let response: Response;
+  try {
+    response = await doFetch(`${GITHUB_OAUTH}/login/oauth/access_token`, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'user-agent': GITHUB_USER_AGENT,
+      },
+      body: JSON.stringify({
+        client_id: credentials.clientId,
+        client_secret: credentials.clientSecret,
+        code,
+        // Required because `authorizeUrl` sent one. GitHub compares the two
+        // and refuses the exchange with a redirect-URI mismatch when they
+        // differ, and an omitted one differs. Nothing here is verified by a
+        // fake: a mocked exchange answers with a token whatever the body
+        // says, so this line is the kind that passes every test and fails
+        // the first real callback.
+        redirect_uri: redirectUri,
+      }),
+      redirect: 'manual',
+    });
+  } catch {
+    return {
+      ok: false,
+      error: 'GitHub could not be reached.',
+      reason: 'unreachable',
+    };
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = ((await response.json()) ?? {}) as Record<string, unknown>;
+  } catch {
+    body = {};
+  }
+
+  const limited = rateLimitMessage(response.status, response.headers, body);
+  if (limited) return { ok: false, error: limited, reason: 'rate-limited' };
+
+  // GitHub answers a refused exchange with 200 and an `error` field rather
+  // than a status, so the status alone is not the test. An expired or reused
+  // code lands here, and the answer is to start again rather than retry.
+  if (typeof body.error === 'string' || !response.ok) {
+    return {
+      ok: false,
+      error: 'That GitHub sign-in did not complete. Try connecting again.',
+      reason: 'invalid',
+    };
+  }
+
+  const token = body.access_token;
+  if (typeof token !== 'string' || token.length === 0) {
+    return {
+      ok: false,
+      error: 'GitHub returned a reply Vibld could not read.',
+      reason: 'unreadable',
+    };
+  }
+  return { ok: true, token };
+}
+
+/** An installation the connecting user can actually reach. */
+export interface UserInstallation {
+  id: number;
+  /** The user or organisation it is installed on, for the picker. */
+  account: string;
+}
+
+export interface RepositoryChoice {
+  owner: string;
+  repo: string;
+  defaultBranch: string;
+}
+
+/**
+ * A repository the user may connect, and the installation it would be
+ * pushed through.
+ *
+ * The installation travels *with* the repository rather than beside the
+ * list, because one person can have the App installed on several accounts
+ * and the whole set is offered at once. Carrying a single "chosen
+ * installation" instead meant the callback picked one and the others could
+ * not be reached at all: reading a second installation's repositories needs
+ * the user token, and that is gone by the time anyone could ask.
+ */
+export interface ConnectableRepository extends RepositoryChoice {
+  installationId: number;
+}
+
+export type Reachable<T> =
+  { ok: true; value: T } | { ok: false; error: string; reason: GitHubFailure };
+
+/** The `next` link of a paginated reply, if there is another page. */
+function nextPage(response: Response): string | null {
+  const link = response.headers.get('link');
+  if (!link) return null;
+  for (const part of link.split(',')) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+async function readAsUser(
+  token: string,
+  path: string,
+  doFetch: typeof fetch,
+  onPage?: (response: Response) => void,
+): Promise<Reachable<Record<string, unknown>>> {
+  let response: Response;
+  try {
+    response = await doFetch(
+      path.startsWith('http') ? path : `${GITHUB_API}${path}`,
+      {
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'user-agent': GITHUB_USER_AGENT,
+        },
+        redirect: 'manual',
+      },
+    );
+  } catch {
+    return {
+      ok: false,
+      error: 'GitHub could not be reached.',
+      reason: 'unreachable',
+    };
+  }
+  onPage?.(response);
+
+  let body: Record<string, unknown> = {};
+  try {
+    body = ((await response.json()) ?? {}) as Record<string, unknown>;
+  } catch {
+    body = {};
+  }
+
+  const limited = rateLimitMessage(response.status, response.headers, body);
+  if (limited) return { ok: false, error: limited, reason: 'rate-limited' };
+
+  // A 404 here is the interesting case and the reason this file exists: it
+  // is what a forged installation id looks like. GitHub does not say "not
+  // yours", it says the installation is not there, because as far as this
+  // user is concerned it is not.
+  if (response.status === 404) {
+    return {
+      ok: false,
+      error: 'That installation is not available to your GitHub account.',
+      reason: 'missing',
+    };
+  }
+  // A 403 that is not a rate limit is a refusal rather than an absence: an
+  // organisation policy, or an authorization the account has not granted.
+  // Reported apart from the 404 because the answer differs, and because a
+  // caller reading "nothing is there" from it would tell somebody to install
+  // an App that is installed and forbidden.
+  // `forbidden`, not `access`: this is a user token, so a refusal is an
+  // organisation policy or an authorization the account has not granted, and
+  // signing in again lands in exactly the same place. The push path's 403 is
+  // a different thing (an installation token whose permission was withdrawn,
+  // which re-approving does restore) and keeps `access`.
+  if (response.status === 403) {
+    return {
+      ok: false,
+      error:
+        'GitHub refused access to that installation. Check your organisation settings, then try again.',
+      reason: 'forbidden',
+    };
+  }
+  if (response.status === 401) {
+    return {
+      ok: false,
+      error: 'That GitHub sign-in has expired. Try connecting again.',
+      reason: 'invalid',
+    };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: `GitHub refused the request (${response.status}).`,
+      reason: 'refused',
+    };
+  }
+  return { ok: true, value: body };
+}
+
+/**
+ * The installations this GitHub account can reach.
+ *
+ * The authorization check, in one call. Whatever `installation_id` the
+ * redirect carried, only what appears here may be bound, so a forged id
+ * fails by simply not being in the list.
+ */
+/**
+ * A list that may have been cut short, and says so.
+ *
+ * Both paged reads here stop at a bound, because following every link
+ * somebody else's server offers is not a loop worth writing. The bound is
+ * fine; returning a partial list as though it were the whole one is not,
+ * because the user token is discarded when the exchange ends. A caller that
+ * cannot tell a complete list from a truncated one will sign the short
+ * version as the complete set of things this person may bind.
+ */
+export interface Paged<T> {
+  items: T[];
+  /** A page GitHub offered and the bound refused to follow. */
+  more: boolean;
+}
+
+export async function userInstallations(
+  token: string,
+  doFetch: typeof fetch = fetch,
+): Promise<Reachable<Paged<UserInstallation>>> {
+  const installations: UserInstallation[] = [];
+  // GitHub's default page here is 30, which is smaller than it looks: the
+  // list decides what can be offered, so a page boundary is another place
+  // for an installation to go missing permanently.
+  let path: string | null = '/user/installations?per_page=100';
+
+  for (let page = 0; page < MAX_INSTALLATION_PAGES && path; page += 1) {
+    let following: string | null = null;
+    const reply: Reachable<Record<string, unknown>> = await readAsUser(
+      token,
+      path,
+      doFetch,
+      (response) => {
+        following = nextPage(response);
+      },
+    );
+    if (!reply.ok) return reply;
+    path = following;
+
+    const raw = reply.value.installations;
+    if (!Array.isArray(raw)) {
+      return {
+        ok: false,
+        error: 'GitHub returned a reply Vibld could not read.',
+        reason: 'unreadable',
+      };
+    }
+    for (const entry of raw) {
+      const record = (entry ?? {}) as { id?: unknown; account?: unknown };
+      const account = (record.account ?? {}) as { login?: unknown };
+      if (typeof record.id !== 'number') continue;
+      installations.push({
+        id: record.id,
+        account: typeof account.login === 'string' ? account.login : 'unknown',
+      });
+    }
+  }
+  // `path` still set means GitHub offered a page the bound refused. Said
+  // rather than swallowed: the caller signs what it is given as the complete
+  // set this person may bind.
+  return { ok: true, value: { items: installations, more: path !== null } };
+}
+
+/**
+ * The bounds on what one exchange will read, and a warning about adding
+ * more of them.
+ *
+ * Anything not gathered while the user token is alive is not merely
+ * unlisted: the token is discarded when the exchange ends, so a repository
+ * or an installation left out here cannot be reached afterwards at all. Each
+ * of these bounds is therefore a limit only while what somebody wants is
+ * inside it, and a dead end the moment it is not. This flow has produced
+ * that same failure three times in different places.
+ *
+ * So a bound added here needs a way for the thing somebody actually asked
+ * for to be inside it. The installation they just used is moved to the front
+ * before the read below for exactly that reason.
+ */
+const MAX_INSTALLATIONS_READ = 10;
+const MAX_REPOSITORY_PAGES = 5;
+const MAX_INSTALLATION_PAGES = 5;
+
+/**
+ * Everything this person could connect, across every installation they can
+ * reach.
+ *
+ * One call per installation, which is why it is capped. The alternative was
+ * to read only one and report the rest as names the user could see and not
+ * choose, which is a dead end rather than a limit: the user token is what
+ * makes this readable at all, and it is discarded as soon as the callback
+ * ends.
+ *
+ * A single installation failing does not lose the others. One organisation
+ * having been removed from under the App should not stop somebody connecting
+ * a repository on their own account.
+ */
+export interface Connectable {
+  repositories: ConnectableRepository[];
+  /**
+   * How many installations were read without failing.
+   *
+   * Separate from the repository count because an installation with nothing
+   * pushable in it is still an installation. A caller deciding whether the
+   * App is installed at all has to tell "read one, it was empty" apart from
+   * "read nothing", and the repository list alone cannot.
+   */
+  read: number;
+  /**
+   * The accounts the budget left unread, by login.
+   *
+   * Empty almost always, and the whole point when it is not. Without a hint
+   * GitHub's callback carries no `installation_id`, which is the ordinary
+   * case for an App that is already installed, so nothing is read outside
+   * the budget and everything past it is simply dropped. Dropped silently,
+   * the user token is gone and those repositories become unreachable rather
+   * than merely unlisted: the fourth time this shape has appeared here.
+   *
+   * Naming them is what turns it back into a limit. The install link returns
+   * an `installation_id`, and an installation named on the way back is read
+   * directly and outside the budget, so there is a route to every one of
+   * these and the panel can say what it is.
+   */
+  omitted: string[];
+  /**
+   * Some list was cut short by a page bound.
+   *
+   * Separate from `omitted`, which names accounts that can still be reached
+   * by installing again. This one has no route: reading the same
+   * installation follows the same bound, so a repository past it cannot be
+   * offered by any path here. Reporting it is all that is available, and it
+   * beats signing a partial list as complete.
+   */
+  truncated: boolean;
+}
+
+export async function connectableRepositories(
+  token: string,
+  installations: readonly UserInstallation[],
+  doFetch: typeof fetch = fetch,
+  /**
+   * One installation to read before the others and outside the budget.
+   *
+   * The caller uses this for an installation GitHub's list did not mention,
+   * which is usually the one somebody just chose from behind a page
+   * boundary and occasionally an id that is forged or stale. Either way the
+   * read answers it, but charging that answer to the budget would let a
+   * made-up id cost a real installation its place: with the cap full, the
+   * last legitimate one would go unread and so become unbindable.
+   */
+  probe: UserInstallation | null = null,
+): Promise<Reachable<Connectable>> {
+  const connectable: ConnectableRepository[] = [];
+  let lastFailure: Extract<Reachable<never>, { ok: false }> | null = null;
+  let read = 0;
+  let succeeded = 0;
+  // Set when some installation held more repositories than the page bound
+  // would follow. Unlike a skipped account there is no route to these:
+  // reading the installation again follows the same bound. So the only
+  // honest thing is to stop presenting the short list as the whole one.
+  let truncated = false;
+
+  /** Reads one installation, and hands back its failure if it had one. */
+  const gather = async (
+    installation: UserInstallation,
+  ): Promise<Extract<Reachable<never>, { ok: false }> | null> => {
+    const reply = await installationRepositories(
+      token,
+      installation.id,
+      doFetch,
+    );
+    if (!reply.ok) {
+      lastFailure = reply;
+      return reply;
+    }
+    succeeded += 1;
+    if (reply.value.more) truncated = true;
+    for (const choice of reply.value.items) {
+      connectable.push({ ...choice, installationId: installation.id });
+    }
+    return null;
+  };
+
+  // The probe's own outcome is kept apart from the rest. It is the
+  // installation somebody just chose, so another one succeeding does not
+  // make its failure unimportant: without this, a transient error on exactly
+  // the repository they wanted returns a cheerful partial list that silently
+  // omits it, and the user token is gone before anyone could retry.
+  const probeFailure = probe ? await gather(probe) : null;
+
+  const omitted: string[] = [];
+  for (const installation of installations) {
+    if (installation.id === probe?.id) continue;
+    if (read >= MAX_INSTALLATIONS_READ) {
+      // Recorded rather than broken out of, so the caller can say which
+      // accounts were not looked at. Reading them is what the budget
+      // refuses; naming them costs nothing.
+      omitted.push(installation.account);
+      continue;
+    }
+    read += 1;
+    await gather(installation);
+  }
+
+  // A transient failure on the chosen installation is reported even when
+  // others succeeded, because retrying recovers it and nothing else will.
+  // A definitive one (it is not there, or a policy refuses it) is not: that
+  // answer will not change on a retry, and failing the whole connection
+  // would stop somebody binding a repository they can perfectly well reach,
+  // which is what a forged or stale id in the link would otherwise do to
+  // them.
+  if (probeFailure && !isDefinitive(probeFailure.reason)) return probeFailure;
+
+  // Otherwise only a failure when it cost every installation. Reporting a
+  // partial read as success would quietly hide repositories somebody
+  // expected to see, and reporting it as failure would block a connection
+  // that can be made.
+  // `succeeded`, not the repository count. An installation that was read
+  // fine and simply holds nothing pushable is a successful read, and the
+  // empty picker says the useful thing about it. Testing the count instead
+  // hands somebody an unrelated installation's error when their own
+  // installation answered perfectly well, which is the same "count as a
+  // proxy for whether anything was read" mistake as the install prompt.
+  if (succeeded === 0 && lastFailure) return lastFailure;
+  return {
+    ok: true,
+    value: { repositories: connectable, read: succeeded, omitted, truncated },
+  };
+}
+
+/** Whether retrying could change this answer. */
+function isDefinitive(reason: GitHubFailure): boolean {
+  return reason === 'missing' || reason === 'forbidden';
+}
+
+/**
+ * The repositories inside one installation that this user may pick.
+ *
+ * Asked as the user, not as the installation, so it answers "may this
+ * person choose this" rather than "does the App have it". Those differ: an
+ * App can be installed on a repository by an administrator and reached by
+ * nobody else, and binding on the second question would let a user push to
+ * a repository they cannot see.
+ */
+export async function installationRepositories(
+  token: string,
+  installationId: number,
+  doFetch: typeof fetch = fetch,
+): Promise<Reachable<Paged<RepositoryChoice>>> {
+  const choices: RepositoryChoice[] = [];
+  let path: string | null =
+    `/user/installations/${encodeURIComponent(String(installationId))}/repositories?per_page=100`;
+
+  // Followed rather than read once, for the same reason every installation
+  // is read rather than one: the user token is gone when the callback ends,
+  // so a repository left off this list can never be chosen afterwards. An
+  // installation with more than a hundred repositories would otherwise have
+  // its tail silently unreachable. Bounded, because "follow every link
+  // GitHub offers" is not a loop to write against somebody else's server.
+  for (let page = 0; page < MAX_REPOSITORY_PAGES && path; page += 1) {
+    let following: string | null = null;
+    const reply: Reachable<Record<string, unknown>> = await readAsUser(
+      token,
+      path,
+      doFetch,
+      (response) => {
+        following = nextPage(response);
+      },
+    );
+    if (!reply.ok) return reply;
+    path = following;
+
+    const raw = reply.value.repositories;
+    if (!Array.isArray(raw)) {
+      return {
+        ok: false,
+        error: 'GitHub returned a reply Vibld could not read.',
+        reason: 'unreadable',
+      };
+    }
+    collectRepositories(raw, choices);
+  }
+  return { ok: true, value: { items: choices, more: path !== null } };
+}
+
+/** One page of GitHub's repository list, filtered to what may be offered. */
+function collectRepositories(
+  raw: unknown[],
+  choices: RepositoryChoice[],
+): void {
+  for (const entry of raw) {
+    const record = (entry ?? {}) as {
+      name?: unknown;
+      default_branch?: unknown;
+      owner?: unknown;
+      archived?: unknown;
+      permissions?: unknown;
+    };
+    const owner = (record.owner ?? {}) as { login?: unknown };
+    const permissions = (record.permissions ?? {}) as { push?: unknown };
+    if (typeof record.name !== 'string' || typeof owner.login !== 'string') {
+      continue;
+    }
+    // A repository this person cannot write to is not one to offer. The push
+    // would be refused later, after they had chosen it and waited.
+    if (permissions.push !== true) continue;
+    // An archived repository is read-only on GitHub's side, so the same.
+    if (record.archived === true) continue;
+    choices.push({
+      owner: owner.login,
+      repo: record.name,
+      defaultBranch:
+        typeof record.default_branch === 'string' && record.default_branch
+          ? record.default_branch
+          : 'main',
+    });
+  }
+}

@@ -1,0 +1,688 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import {
+  beginConnect,
+  beginInstall,
+  bindRepository,
+  claimHandoff,
+  clearHandoff,
+  completeClaimedConnect,
+  completeConnect,
+  forgetHandoffClaim,
+  holdHandoff,
+  fetchGitHubStatus,
+  readHandoff,
+  rememberState,
+  takeRememberedState,
+} from '../src/github/github-client.ts';
+
+/** A `sessionStorage` that behaves, for the cases where it does. */
+function storage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => void values.set(key, value),
+    removeItem: (key: string) => void values.delete(key),
+    clear: () => values.clear(),
+    key: () => null,
+    get length() {
+      return values.size;
+    },
+  } as Storage;
+}
+
+/** One that refuses, as a private window or blocked site data does. */
+function hostileStorage(): Storage {
+  return {
+    getItem() {
+      throw new Error('blocked');
+    },
+    setItem() {
+      throw new Error('blocked');
+    },
+    removeItem() {
+      throw new Error('blocked');
+    },
+    clear() {},
+    key: () => null,
+    length: 0,
+  } as unknown as Storage;
+}
+
+function json(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+const TOKEN = async () => 'clerk-token';
+
+describe('reading what GitHub put on the URL', () => {
+  it('reads the code, state and installation out of the fragment', () => {
+    assert.deepEqual(
+      readHandoff('#github=the-code&state=the-state&installation=42'),
+      { code: 'the-code', state: 'the-state', installation: '42' },
+    );
+  });
+
+  it('works without an installation', () => {
+    assert.deepEqual(readHandoff('#github=c&state=s'), {
+      code: 'c',
+      state: 's',
+    });
+  });
+
+  it('is nothing when the fragment is not a return from GitHub', () => {
+    for (const hash of ['', '#', '#something=else', '#state=only']) {
+      assert.equal(readHandoff(hash), null);
+    }
+  });
+
+  it('is nothing when the callback reported an incomplete link', () => {
+    assert.equal(readHandoff('#github=incomplete'), null);
+  });
+});
+
+/**
+ * The defence that only exists here.
+ *
+ * Completing the exchange from the app is what makes the callback reachable
+ * at all, and it opens a door the server cannot close by itself: a crafted
+ * link can hand somebody else's `code` to a signed-in user, and completing
+ * it would offer them a stranger's repositories to push their own work into.
+ * The browser refusing a `state` it never issued is the whole of the fix.
+ */
+describe('refusing a connection this browser did not start', () => {
+  const HANDOFF = { code: 'the-code', state: 'the-state' };
+
+  it('completes one it did start', async () => {
+    const store = storage();
+    rememberState('the-state', store);
+    const result = await completeConnect(
+      HANDOFF,
+      (async () =>
+        json({ repositories: [], ticket: 'tkt' })) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, true);
+  });
+
+  it('refuses one carrying a state it never issued', async () => {
+    const store = storage();
+    rememberState('the-state-we-issued', store);
+    let called = false;
+    const result = await completeConnect(
+      { code: 'somebody-elses-code', state: 'their-state' },
+      (async () => {
+        called = true;
+        return json({ repositories: [], ticket: 'tkt' });
+      }) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, false);
+    assert.equal(called, false, 'the code was sent anyway');
+  });
+
+  it('refuses when nothing was remembered at all', async () => {
+    let called = false;
+    const result = await completeConnect(
+      HANDOFF,
+      (async () => {
+        called = true;
+        return json({ repositories: [], ticket: 'tkt' });
+      }) as unknown as typeof fetch,
+      TOKEN,
+      storage(),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(called, false);
+  });
+
+  it('refuses rather than proceeding when storage is blocked', async () => {
+    // A private window must fail closed. Treating "cannot remember" as
+    // "nothing to check" would turn the defence off exactly where it is
+    // hardest to notice.
+    const store = hostileStorage();
+    rememberState('the-state', store);
+    let called = false;
+    const result = await completeConnect(
+      HANDOFF,
+      (async () => {
+        called = true;
+        return json({ repositories: [], ticket: 'tkt' });
+      }) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, false);
+    assert.equal(called, false);
+  });
+
+  it('spends the remembered state, so a second link cannot reuse it', async () => {
+    const store = storage();
+    rememberState('the-state', store);
+    assert.equal(takeRememberedState(store), 'the-state');
+    assert.equal(takeRememberedState(store), null);
+  });
+
+  it('does not leave the state behind after completing', async () => {
+    const store = storage();
+    rememberState('the-state', store);
+    await completeConnect(
+      HANDOFF,
+      (async () =>
+        json({ repositories: [], ticket: 'tkt' })) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(takeRememberedState(store), null);
+  });
+});
+
+describe('starting a connection', () => {
+  it('remembers the state before handing back where to go', async () => {
+    const store = storage();
+    const result = await beginConnect(
+      (async () =>
+        json({
+          url: 'https://github.com/x',
+          state: 'issued',
+        })) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, true);
+    // Stored before the caller navigates, because a state stored after the
+    // browser leaves is never stored at all.
+    assert.equal(takeRememberedState(store), 'issued');
+  });
+
+  it('reports a deployment that cannot connect', async () => {
+    const result = await beginConnect(
+      (async () =>
+        json(
+          { error: 'Connecting a GitHub repository is not configured here.' },
+          503,
+        )) as unknown as typeof fetch,
+      TOKEN,
+      storage(),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /not configured/);
+  });
+
+  it('does not remember anything when the call fails', async () => {
+    const store = storage();
+    await beginConnect(
+      (async () => json({ error: 'nope' }, 500)) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(takeRememberedState(store), null);
+  });
+});
+
+describe('carrying the server’s answer back to the person', () => {
+  it('keeps the install flag so the panel can say what to do', async () => {
+    const store = storage();
+    rememberState('s', store);
+    const result = await completeConnect(
+      { code: 'c', state: 's' },
+      (async () =>
+        json(
+          { error: 'Not installed anywhere.', install: true },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.install, true);
+      assert.match(result.error, /Not installed/);
+    }
+  });
+
+  it('passes a policy refusal through without inventing a remedy', async () => {
+    const store = storage();
+    rememberState('s', store);
+    const result = await completeConnect(
+      { code: 'c', state: 's' },
+      (async () =>
+        json(
+          {
+            error:
+              'GitHub refused access to that installation. Check your organisation settings, then try again.',
+          },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.install, undefined);
+      assert.match(result.error, /organisation settings/);
+    }
+  });
+});
+
+describe('binding the chosen repository', () => {
+  it('sends the ticket with the choice', async () => {
+    const sent: unknown[] = [];
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      (async (_url: string, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return json({ owner: 'acme', repo: 'site' });
+      }) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(sent[0], {
+      ticket: 'the-ticket',
+      owner: 'acme',
+      repo: 'site',
+    });
+  });
+
+  it('hands back what was bound, so no second request is needed', async () => {
+    // The write has already landed by this point. A caller that had to fetch
+    // the status to know what it connected would show nothing at all when
+    // that second request failed, which is how somebody ends up unable to
+    // tell whether their repository connected.
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'ACME', repo: 'Site', defaultBranch: 'main' },
+      (async () =>
+        json({
+          owner: 'acme',
+          repo: 'site',
+          defaultBranch: 'trunk',
+          expiresAt: '2026-12-13T00:00:00.000Z',
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      // GitHub's spelling, from the server, not the request's.
+      assert.deepEqual(result.bound, {
+        owner: 'acme',
+        repo: 'site',
+        defaultBranch: 'trunk',
+        expiresAt: '2026-12-13T00:00:00.000Z',
+      });
+    }
+  });
+
+  it('still reports what it asked for when the reply cannot be read', async () => {
+    // An unreadable reply does not undo a write that succeeded.
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      (async () =>
+        new Response('not json', { status: 200 })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.bound.owner, 'acme');
+      assert.equal(result.bound.repo, 'site');
+    }
+  });
+
+  it('keeps the chosen repository’s branch when the reply cannot be read', async () => {
+    // The finding: the fallback said `main` for a repository on `trunk`. The
+    // offer already carried the authoritative branch and the narrowed
+    // parameter threw it away, so the fallback added to keep a success
+    // visible showed it wrongly, and a failed refresh left that on screen.
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
+      (async () =>
+        new Response('not json', { status: 200 })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.bound.defaultBranch, 'trunk');
+  });
+
+  it('keeps it when the reply names no branch at all', async () => {
+    const result = await bindRepository(
+      'the-ticket',
+      { owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
+      (async () =>
+        json({ owner: 'acme', repo: 'site' })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.bound.defaultBranch, 'trunk');
+  });
+
+  it('surfaces the server’s sentence when it refuses', async () => {
+    const result = await bindRepository(
+      'stale',
+      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      (async () =>
+        json(
+          { error: 'That connection attempt has expired. Start again.' },
+          400,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /expired/);
+  });
+});
+
+describe('the status the panel reads', () => {
+  it('passes the two capabilities through', async () => {
+    const status = await fetchGitHubStatus(
+      (async () =>
+        json({
+          configured: true,
+          canPush: true,
+          canConnect: false,
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(status?.canPush, true);
+    assert.equal(status?.canConnect, false);
+  });
+
+  it('is nothing rather than an error when it cannot be read', async () => {
+    // Nobody asked for this, so a panel that renders nothing is the right
+    // outcome, the same rule `fetchBillingStatus` follows.
+    const status = await fetchGitHubStatus(
+      (async () => {
+        throw new Error('offline');
+      }) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(status, null);
+  });
+});
+
+describe('taking the handoff off the URL', () => {
+  it('does not throw where there is no history to rewrite', () => {
+    // Runs in the test runner, which has no document. The panel calls this
+    // on mount, so throwing here would take the builder down with it.
+    assert.doesNotThrow(() => clearHandoff());
+  });
+});
+
+/**
+ * React runs effects twice in StrictMode, which development builds enable.
+ *
+ * Two separate hazards, and fixing only the first leaves the second. A plain
+ * read would have the first pass clear the fragment and the replay find
+ * nothing, so the connection stalls with no error anywhere. And two passes
+ * both completing would have the first spend the stored state and the second
+ * fail its own check, reporting that the connection did not come from this
+ * browser when it did.
+ */
+/**
+ * Installing is a leg of the same flow, not a link out of it.
+ *
+ * GitHub carries a `state` through the installation flow only if one was
+ * supplied. Without it the callback arrives with an `installation_id` and no
+ * `state`, the worker turns that into `github=incomplete`, and the app
+ * discards it: the installation happens and nothing hears about it. For an
+ * account the read budget skipped, the id coming back is the entire point,
+ * because a named installation is read directly and outside the budget.
+ */
+describe('sending somebody to install the app', () => {
+  it('carries a state the browser has stored', async () => {
+    const store = storage();
+    const result = await beginInstall(
+      (async () =>
+        json({
+          url: 'https://github.com/login/oauth/authorize?x=1',
+          state: 'the-state',
+        })) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      const url = new URL(result.url);
+      assert.equal(
+        url.origin + url.pathname,
+        'https://github.com/apps/vibld/installations/new',
+      );
+      assert.equal(url.searchParams.get('state'), 'the-state');
+    }
+    // Stored, or the comparison on the way back refuses its own state.
+    assert.equal(takeRememberedState(store), 'the-state');
+  });
+
+  it('issues a fresh state rather than reusing a spent one', async () => {
+    // The completion that produced the offer already spent the stored state,
+    // so there is nothing to reuse: a state is good for one return trip.
+    const store = storage();
+    rememberState('already-spent', store);
+    takeRememberedState(store);
+    const result = await beginInstall(
+      (async () =>
+        json({
+          url: 'https://github.com/x',
+          state: 'brand-new',
+        })) as unknown as typeof fetch,
+      TOKEN,
+      store,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(new URL(result.url).searchParams.get('state'), 'brand-new');
+    }
+    assert.equal(takeRememberedState(store), 'brand-new');
+  });
+
+  it('reports a deployment that cannot start one', async () => {
+    const result = await beginInstall(
+      (async () =>
+        json(
+          { error: 'Connecting a GitHub repository is not configured here.' },
+          503,
+        )) as unknown as typeof fetch,
+      TOKEN,
+      storage(),
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /not configured/);
+  });
+});
+
+describe('surviving an effect that runs twice', () => {
+  it('gives the same handoff to a second read of a cleared URL', () => {
+    forgetHandoffClaim();
+    const first = claimHandoff('#github=the-code&state=the-state');
+    // The replay sees an empty fragment, because the first pass cleared it.
+    const second = claimHandoff('');
+    assert.deepEqual(first, { code: 'the-code', state: 'the-state' });
+    assert.deepEqual(second, first);
+  });
+
+  it('is still nothing when there was never a handoff', () => {
+    forgetHandoffClaim();
+    assert.equal(claimHandoff(''), null);
+  });
+
+  it('spends the state once however many passes complete', async () => {
+    forgetHandoffClaim();
+    const store = storage();
+    rememberState('the-state', store);
+    const handoff = { code: 'c', state: 'the-state' };
+
+    let calls = 0;
+    const doFetch = (async () => {
+      calls += 1;
+      return json({ repositories: [], ticket: 'tkt' });
+    }) as unknown as typeof fetch;
+
+    const [a, b] = await Promise.all([
+      completeClaimedConnect(handoff, doFetch, TOKEN, store),
+      completeClaimedConnect(handoff, doFetch, TOKEN, store),
+    ]);
+
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, true, 'the second pass failed its own check');
+    assert.equal(calls, 1, 'the exchange ran twice');
+  });
+
+  it('does not start a second exchange after the first finished', async () => {
+    forgetHandoffClaim();
+    const store = storage();
+    rememberState('the-state', store);
+    const handoff = { code: 'c', state: 'the-state' };
+    let calls = 0;
+    const doFetch = (async () => {
+      calls += 1;
+      return json({ repositories: [], ticket: 'tkt' });
+    }) as unknown as typeof fetch;
+
+    await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+    const again = await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+    assert.equal(again.ok, true);
+    assert.equal(calls, 1);
+  });
+});
+
+/**
+ * How long that cache is allowed to live.
+ *
+ * Surviving the replay is the whole point of it, and surviving anything
+ * longer is a bug with teeth. The panel mounts inside `Show when="signed-in"`,
+ * so signing out unmounts it and signing in unmounts and mounts it again: a
+ * cache that outlives the mount replays the previous person's repository
+ * names to whoever signs in next on that browser, without a page load in
+ * between. It also replays a spent ticket to the same person, which can only
+ * fail by the time they click it.
+ *
+ * So it is held for as long as something is using it, and cleared when
+ * nothing is. The clearing is deferred, because StrictMode's unmount and
+ * remount happen with nothing in between, and a clear that ran there would
+ * take the replay's handoff away, which is the bug this cache exists to
+ * stop.
+ */
+describe('not outliving the mount that claimed it', () => {
+  /** Runs the deferred clear by hand, so a test never waits on a timer. */
+  function scheduler() {
+    const queue: (() => void)[] = [];
+    return {
+      defer: (run: () => void) => {
+        queue.push(run);
+        return () => {
+          const at = queue.indexOf(run);
+          if (at !== -1) queue.splice(at, 1);
+        };
+      },
+      settle() {
+        const due = queue.splice(0);
+        for (const run of due) run();
+      },
+      get pending() {
+        return queue.length;
+      },
+    };
+  }
+
+  it('forgets the handoff once the last holder lets go', () => {
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const release = holdHandoff(clock.defer);
+    claimHandoff('#github=the-code&state=the-state');
+
+    release();
+    clock.settle();
+
+    assert.equal(
+      claimHandoff(''),
+      null,
+      "a later mount was handed the previous mount's handoff",
+    );
+  });
+
+  it('keeps it across an unmount the remount follows immediately', () => {
+    // StrictMode: setup, cleanup, setup, with nothing in between. The
+    // deferred clear has not run by the time the replay takes hold again,
+    // and taking hold cancels it.
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const first = holdHandoff(clock.defer);
+    const claimed = claimHandoff('#github=the-code&state=the-state');
+
+    first();
+    const second = holdHandoff(clock.defer);
+    clock.settle();
+
+    assert.deepEqual(claimHandoff(''), claimed);
+    second();
+  });
+
+  it('keeps it while any other holder is still there', () => {
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const first = holdHandoff(clock.defer);
+    const second = holdHandoff(clock.defer);
+    claimHandoff('#github=the-code&state=the-state');
+
+    first();
+    assert.equal(clock.pending, 0, 'cleared while still in use');
+    clock.settle();
+    assert.ok(claimHandoff(''));
+
+    second();
+    clock.settle();
+    assert.equal(claimHandoff(''), null);
+  });
+
+  it('counts one release per hold however often it is called', () => {
+    // A cleanup that runs twice must not release somebody else's hold.
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const first = holdHandoff(clock.defer);
+    const second = holdHandoff(clock.defer);
+    claimHandoff('#github=the-code&state=the-state');
+
+    first();
+    first();
+    clock.settle();
+
+    assert.ok(claimHandoff(''), 'a repeated release freed a live hold');
+    second();
+  });
+
+  it('starts a new exchange for the next mount rather than replaying one', async () => {
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const store = storage();
+    rememberState('the-state', store);
+    const handoff = { code: 'c', state: 'the-state' };
+    let calls = 0;
+    const doFetch = (async () => {
+      calls += 1;
+      return json({ repositories: [], ticket: `tkt-${calls}` });
+    }) as unknown as typeof fetch;
+
+    const release = holdHandoff(clock.defer);
+    const first = await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+    release();
+    clock.settle();
+
+    // Whoever is signed in now: a fresh hold, and the same code offered
+    // again. What must not happen is the previous answer coming back.
+    holdHandoff(clock.defer);
+    rememberState('the-state', store);
+    const next = await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+
+    assert.equal(calls, 2, "the previous mount's offer was replayed");
+    assert.equal(first.ok && first.offer.ticket, 'tkt-1');
+    assert.equal(next.ok && next.offer.ticket, 'tkt-2');
+  });
+});
