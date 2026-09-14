@@ -1391,3 +1391,75 @@ describe('when the installation just chosen cannot be read', () => {
     );
   });
 });
+
+/**
+ * A brand-new installation that has nothing pushable in it.
+ *
+ * The probe succeeding is proof the App is installed, whatever it found.
+ * Reading "no repositories offered" as "no App installed" tells somebody to
+ * install what they have just installed, and the thing they actually need to
+ * hear is that none of its repositories are ones they can push to.
+ */
+describe('when the new installation has nothing to offer', () => {
+  async function complete(repositories: unknown[]) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: '55' }),
+      env(db),
+      PRINCIPAL,
+      githubFor([], { 55: repositories }),
+      NOW,
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as {
+        install?: boolean;
+        repositories?: unknown[];
+        ticket?: string;
+      },
+    };
+  }
+
+  it('offers an empty picker rather than saying to install it', async () => {
+    const { status, body } = await complete([]);
+    assert.equal(status, 200);
+    assert.equal(body.install, undefined);
+    assert.deepEqual(body.repositories, []);
+    assert.ok(body.ticket, 'no ticket to pick from');
+  });
+
+  it('does the same when everything in it is unpushable', async () => {
+    const { status, body } = await complete([
+      {
+        name: 'read-only',
+        owner: { login: 'acme' },
+        permissions: { push: false },
+      },
+      {
+        name: 'archived',
+        owner: { login: 'acme' },
+        archived: true,
+        permissions: { push: true },
+      },
+    ]);
+    assert.equal(status, 200);
+    assert.equal(body.install, undefined);
+    assert.deepEqual(body.repositories, []);
+  });
+
+  it('still says to install when the probe finds no installation at all', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: '55' }),
+      env(db),
+      PRINCIPAL,
+      githubFor([], {}),
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { install?: boolean };
+    assert.equal(body.install, true);
+  });
+});

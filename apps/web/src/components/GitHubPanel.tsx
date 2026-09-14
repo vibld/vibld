@@ -132,9 +132,19 @@ function GitHubConnection() {
   }
 
   if (phase.at === 'loading') return null;
-  // Nothing to offer on a deployment without the GitHub App configured, the
-  // same silence `BillingStatusWidget` keeps when billing is unconfigured.
-  if (!status?.configured) return null;
+
+  // A connection in flight outranks the status probe. `/api/github/status`
+  // is only how the panel decides what to offer; it is not what makes the
+  // panel meaningful. If it failed transiently while the exchange succeeded,
+  // hiding everything strands somebody whose code and state are already
+  // spent, holding a ticket they cannot see and cannot use before it
+  // expires.
+  const busy =
+    phase.at === 'working' || phase.at === 'problem' || phase.at === 'choosing';
+
+  // Otherwise: nothing to offer on a deployment without GitHub configured,
+  // the same silence `BillingStatusWidget` keeps when billing is not.
+  if (!busy && !status?.configured) return null;
 
   return (
     <section className="github-panel">
@@ -167,35 +177,45 @@ function GitHubConnection() {
         />
       )}
 
-      {phase.at !== 'choosing' && phase.at !== 'working' && (
-        <>
-          {status.connected ? (
-            <p>
-              Pushing to{' '}
-              <strong>
-                {status.owner}/{status.repo}
-              </strong>{' '}
-              on <code>{status.defaultBranch}</code>.{' '}
-              <button type="button" onClick={() => void disconnect()}>
-                Disconnect
-              </button>
-            </p>
-          ) : (
-            <p>
-              No repository connected.{' '}
-              {status.canConnect ? (
-                <button type="button" onClick={() => void connect()}>
-                  Connect a repository
+      {status?.configured &&
+        phase.at !== 'choosing' &&
+        phase.at !== 'working' && (
+          <>
+            {status.connected ? (
+              <p>
+                {/*
+                `canPush` rather than `connected` alone. A deployment with the
+                OAuth half and no App key lets a repository be connected and
+                answers every push with a 503, so saying "pushing to" it would
+                be describing something that cannot happen.
+              */}
+                {status.canPush ? 'Pushing to ' : 'Connected to '}
+                <strong>
+                  {status.owner}/{status.repo}
+                </strong>{' '}
+                on <code>{status.defaultBranch}</code>.
+                {!status.canPush &&
+                  ' Pushing is not configured on this deployment.'}{' '}
+                <button type="button" onClick={() => void disconnect()}>
+                  Disconnect
                 </button>
-              ) : (
-                // Said rather than shown as a button that cannot work:
-                // pushing and connecting are configured separately.
-                <span>Connecting is not configured on this deployment.</span>
-              )}
-            </p>
-          )}
-        </>
-      )}
+              </p>
+            ) : (
+              <p>
+                No repository connected.{' '}
+                {status.canConnect ? (
+                  <button type="button" onClick={() => void connect()}>
+                    Connect a repository
+                  </button>
+                ) : (
+                  // Said rather than shown as a button that cannot work:
+                  // pushing and connecting are configured separately.
+                  <span>Connecting is not configured on this deployment.</span>
+                )}
+              </p>
+            )}
+          </>
+        )}
     </section>
   );
 }

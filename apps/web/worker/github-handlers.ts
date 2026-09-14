@@ -594,8 +594,13 @@ export async function handleGitHubComplete(
   // advice they cannot act on. `github-app.ts` separates these reasons
   // precisely so this branch does not have to guess, and collapsing them
   // here is the mistake this feature has already made twice.
+  // "Nothing was read", not "nothing was offered". A probe that succeeds and
+  // finds an installation with no pushable repositories in it has proved the
+  // App is installed, and telling that person to install it is both wrong
+  // and impossible to act on. What they need is the empty picker, which says
+  // there is nothing they can push to.
   const nothingThere = repositories.ok
-    ? repositories.value.length === 0
+    ? repositories.value.read === 0
     : repositories.reason === 'missing';
   if (nothingThere && listed.length === 0) {
     return json(
@@ -609,7 +614,7 @@ export async function handleGitHubComplete(
   }
   if (!repositories.ok) return githubProblem(repositories);
 
-  const offered = [...repositories.value].sort((a, b) =>
+  const offered = [...repositories.value.repositories].sort((a, b) =>
     `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`),
   );
 

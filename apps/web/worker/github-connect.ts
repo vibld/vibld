@@ -591,6 +591,19 @@ const MAX_INSTALLATION_PAGES = 5;
  * having been removed from under the App should not stop somebody connecting
  * a repository on their own account.
  */
+export interface Connectable {
+  repositories: ConnectableRepository[];
+  /**
+   * How many installations were read without failing.
+   *
+   * Separate from the repository count because an installation with nothing
+   * pushable in it is still an installation. A caller deciding whether the
+   * App is installed at all has to tell "read one, it was empty" apart from
+   * "read nothing", and the repository list alone cannot.
+   */
+  read: number;
+}
+
 export async function connectableRepositories(
   token: string,
   installations: readonly UserInstallation[],
@@ -606,10 +619,11 @@ export async function connectableRepositories(
    * last legitimate one would go unread and so become unbindable.
    */
   probe: UserInstallation | null = null,
-): Promise<Reachable<ConnectableRepository[]>> {
+): Promise<Reachable<Connectable>> {
   const connectable: ConnectableRepository[] = [];
   let lastFailure: Extract<Reachable<never>, { ok: false }> | null = null;
   let read = 0;
+  let succeeded = 0;
 
   /** Reads one installation, and hands back its failure if it had one. */
   const gather = async (
@@ -624,6 +638,7 @@ export async function connectableRepositories(
       lastFailure = reply;
       return reply;
     }
+    succeeded += 1;
     for (const choice of reply.value) {
       connectable.push({ ...choice, installationId: installation.id });
     }
@@ -658,7 +673,7 @@ export async function connectableRepositories(
   // expected to see, and reporting it as failure would block a connection
   // that can be made.
   if (connectable.length === 0 && lastFailure) return lastFailure;
-  return { ok: true, value: connectable };
+  return { ok: true, value: { repositories: connectable, read: succeeded } };
 }
 
 /** Whether retrying could change this answer. */
