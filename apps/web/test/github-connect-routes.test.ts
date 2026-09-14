@@ -529,6 +529,30 @@ describe('disconnecting', () => {
     assert.equal(state.usable, true);
   });
 
+  it('says nothing about a grant the status already calls disconnected', async () => {
+    // An expired grant is one `/api/github/status` reports as
+    // `connected: false`. Reporting a conflict with it would have the panel
+    // saying "No repository connected" beside an error naming the
+    // repository it is connected to, and would put a name in front of
+    // somebody that the status route does not give them.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind({ ...GRANT_ROW, expiresAt: '2026-09-01T00:00:00.000Z' });
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'acme', repo: 'somewhere-else' }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      movedTo?: { owner: string; repo: string };
+    };
+    assert.deepEqual(body, { connected: false });
+    assert.equal(body.movedTo, undefined);
+  });
+
   it('ends a connection named in the case GitHub would resolve', async () => {
     // `acme/Site` and `acme/site` are one repository, and refusing that
     // would be a refusal with nothing for anybody to correct.

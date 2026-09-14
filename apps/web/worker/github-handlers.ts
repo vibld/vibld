@@ -897,15 +897,23 @@ export async function handleGitHubDisconnect(
   // Nothing changed, and the statement does not say why. Reading now only
   // decides what to report, so a binding that moves again while this runs
   // costs an out-of-date sentence rather than a wrong write.
-  const binding = await store.binding(principal.userId);
+  //
+  // `usableBinding` rather than the raw row, and by the same rule the status
+  // route answers on. A grant that has expired is one the status calls
+  // disconnected, so reporting a conflict with it would have the panel
+  // saying "No repository connected" beside an error naming the repository
+  // it is connected to, and would put a name in front of somebody that the
+  // status route does not give them.
+  const state = await store.usableBinding(principal.userId, now);
 
   // Nothing to disconnect, or nothing left of it. The end state asked for is
   // the state already in place, so this is a success rather than a quarrel
   // about a destination that is not there: refusing here would leave a
   // second click on a slow first one reporting a failure for work that is
   // done.
-  if (!binding || binding.revokedAt) return json({ connected: false });
+  if (!state.usable) return json({ connected: false });
 
+  const { binding } = state;
   return json(
     {
       error:
