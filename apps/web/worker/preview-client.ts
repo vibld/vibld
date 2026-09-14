@@ -112,6 +112,37 @@ async function call(
   return parseStatus(body);
 }
 
+/** Whether a service call that answers nothing but success or failure did. */
+export type ServiceOutcome = { ok: true } | { ok: false; error: string };
+
+/**
+ * The reply for a call that answers nothing but success or failure.
+ *
+ * 502 rather than 200 for a refusal, because the caller acts on it: a stop
+ * reported as done gets the next start handed the same sandbox back, and a
+ * revoke reported as done takes a still-live link out of the list. Kept
+ * here, beside the calls that produce the outcome, so the mapping is one
+ * thing that can be checked rather than a line repeated in each route.
+ */
+export function outcomeResponse(outcome: ServiceOutcome): Response {
+  return new Response(
+    JSON.stringify(outcome.ok ? { ok: true } : { error: outcome.error }),
+    {
+      status: outcome.ok ? 200 : 502,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    },
+  );
+}
+
+async function serviceError(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  const error = (body as { error?: unknown } | null)?.error;
+  return typeof error === 'string' ? error : fallback;
+}
+
 export function startPreview(
   env: PreviewServiceEnv,
   userId: string,
@@ -134,17 +165,31 @@ export function previewStatus(
   );
 }
 
+/**
+ * Stop the caller's preview.
+ *
+ * The reply is read rather than discarded. A stop that did not happen,
+ * reported as one that did, says a sandbox is gone while it is still
+ * running and still serving whatever it was serving -- and the next start
+ * is then handed that same sandbox back rather than a new one, under the
+ * new checkpoint's name.
+ */
 export async function stopPreview(
   env: PreviewServiceEnv,
   userId: string,
-): Promise<void> {
-  await env.PREVIEW!.fetch(
+): Promise<ServiceOutcome> {
+  const response = await env.PREVIEW!.fetch(
     new Request(new URL('/internal/preview/stop', INTERNAL_ORIGIN), {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders(env) },
       body: JSON.stringify({ userId }),
     }),
   );
+  if (response.ok) return { ok: true };
+  return {
+    ok: false,
+    error: await serviceError(response, 'Could not stop the preview.'),
+  };
 }
 
 /** L10: "Preview sharing is a signed, revocable, time-limited URL." One row per grant; a preview may have several active at once, each independently revocable. */
@@ -243,16 +288,30 @@ export async function listShares(
   return Array.isArray(shares) ? shares.filter(isPreviewShare) : [];
 }
 
+/**
+ * Revoke one share grant.
+ *
+ * The reply is read for the same reason as `stopPreview`'s, and it matters
+ * more here: a revoke that did not happen, reported as one that did, takes
+ * the link out of the list while anyone holding it can still view the
+ * running app. That is the opposite of what the warning beside the Share
+ * button promises (ADR-0006).
+ */
 export async function revokeShare(
   env: PreviewServiceEnv,
   userId: string,
   shareId: string,
-): Promise<void> {
-  await env.PREVIEW!.fetch(
+): Promise<ServiceOutcome> {
+  const response = await env.PREVIEW!.fetch(
     new Request(new URL('/internal/preview/share', INTERNAL_ORIGIN), {
       method: 'DELETE',
       headers: { 'content-type': 'application/json', ...authHeaders(env) },
       body: JSON.stringify({ userId, shareId }),
     }),
   );
+  if (response.ok) return { ok: true };
+  return {
+    ok: false,
+    error: await serviceError(response, 'Could not revoke that share link.'),
+  };
 }

@@ -61,6 +61,7 @@ import {
   listShares,
   previewConfigured,
   previewStatus,
+  outcomeResponse,
   revokeShare,
   startPreview,
   stopPreview,
@@ -1057,8 +1058,7 @@ async function handlePreview(request: Request, env: Env): Promise<Response> {
   }
 
   if (request.method === 'DELETE') {
-    await stopPreview(env, principal.userId);
-    return json({ ok: true });
+    return outcomeResponse(await stopPreview(env, principal.userId));
   }
 
   return json({ error: 'Use GET, POST or DELETE.' }, 405);
@@ -1110,8 +1110,7 @@ async function handlePreviewShare(
     if (typeof shareId !== 'string' || shareId.length === 0) {
       return json({ error: '"shareId" is required.' }, 400);
     }
-    await revokeShare(env, principal.userId, shareId);
-    return json({ ok: true });
+    return outcomeResponse(await revokeShare(env, principal.userId, shareId));
   }
 
   return json({ error: 'Use GET, POST or DELETE.' }, 405);

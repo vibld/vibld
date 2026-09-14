@@ -5,6 +5,7 @@ import {
   listShares,
   previewConfigured,
   previewStatus,
+  outcomeResponse,
   revokeShare,
   startPreview,
   stopPreview,
@@ -151,15 +152,44 @@ describe('previewStatus', () => {
 describe('stopPreview', () => {
   it('posts the userId to the stop endpoint', async () => {
     const { binding, calls } = fakeBinding(() => jsonResponse({ ok: true }));
-    await stopPreview(
+    const result = await stopPreview(
       { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
       'user_abc',
     );
+    assert.deepEqual(result, { ok: true });
     const request = calls[0]!;
     assert.equal(new URL(request.url).pathname, '/internal/preview/stop');
     assert.equal(request.method, 'POST');
     const body = await request.json();
     assert.equal(body.userId, 'user_abc');
+  });
+
+  it('reports a stop the service refused', async () => {
+    // Discarded, this reads as a preview that is gone while it is still
+    // running, and the next start is handed that same sandbox back under a
+    // newer checkpoint's name.
+    const { binding } = fakeBinding(() =>
+      jsonResponse({ error: 'The sandbox is busy.' }, 503),
+    );
+    const result = await stopPreview(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+    );
+    assert.deepEqual(result, { ok: false, error: 'The sandbox is busy.' });
+  });
+
+  it('still reports a refusal it cannot read a reason from', async () => {
+    const { binding } = fakeBinding(
+      () => new Response('nope', { status: 500 }),
+    );
+    const result = await stopPreview(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'Could not stop the preview.',
+    });
   });
 });
 
@@ -271,18 +301,56 @@ describe('listShares', () => {
 });
 
 describe('revokeShare', () => {
-  it('sends the userId and shareId to the share endpoint as a DELETE', async () => {
-    const { binding, calls } = fakeBinding(() => jsonResponse({ ok: true }));
-    await revokeShare(
+  it('reports a revoke the service refused', async () => {
+    // The sharpest case of the same rule: reported as done, the link comes
+    // out of the caller's list while anyone holding it can still view the
+    // running app, which is the opposite of what the Share warning says.
+    const { binding } = fakeBinding(() =>
+      jsonResponse({ error: 'That grant could not be revoked.' }, 502),
+    );
+    const result = await revokeShare(
       { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
       'user_abc',
       'share_1',
     );
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'That grant could not be revoked.',
+    });
+  });
+
+  it('sends the userId and shareId to the share endpoint as a DELETE', async () => {
+    const { binding, calls } = fakeBinding(() => jsonResponse({ ok: true }));
+    const result = await revokeShare(
+      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+      'user_abc',
+      'share_1',
+    );
+    assert.deepEqual(result, { ok: true });
     const request = calls[0]!;
     assert.equal(new URL(request.url).pathname, '/internal/preview/share');
     assert.equal(request.method, 'DELETE');
     const body = await request.json();
     assert.equal(body.userId, 'user_abc');
     assert.equal(body.shareId, 'share_1');
+  });
+});
+
+describe('outcomeResponse', () => {
+  it('answers a refusal 502, carrying the reason', async () => {
+    // 200 here is what made a stop that never happened look like one that
+    // did, all the way up to the browser.
+    const response = outcomeResponse({
+      ok: false,
+      error: 'The sandbox is busy.',
+    });
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: 'The sandbox is busy.' });
+  });
+
+  it('answers a success 200', async () => {
+    const response = outcomeResponse({ ok: true });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
   });
 });
