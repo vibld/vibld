@@ -22,6 +22,15 @@ import { registerHooks } from 'node:module';
  * it never had. Worker code that reached for a browser global would then
  * pass here and fail in production, which is the opposite of what this is
  * for.
+ *
+ * That rests on one assumption about the runner, so here is what happens if
+ * it ever stops holding. Should node put two test files in one process, the
+ * entry is one of them and the other is mismatched: if the entry is the
+ * `.tsx`, a DOM appears where `harness-scope.test.ts` asserts there is
+ * none and that test fails; if the entry is the `.ts`, the component test
+ * loads untransformed and dies on its first tag. Both are loud. The
+ * assumption is load-bearing, but it cannot fail quietly, which is the
+ * property worth having.
  */
 const entry = process.argv[1] ?? '';
 if (entry.endsWith('.test.tsx')) {

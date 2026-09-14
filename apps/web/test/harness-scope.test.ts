@@ -18,6 +18,12 @@ import { sourceRoot, transformFor } from './harness/transform-target.ts';
  * in production. The same goes for the transform: outside a component test
  * the runner's own type stripping is what runs, so this suite is not
  * quietly being rebuilt on a different toolchain.
+ *
+ * This file is also the half of that guarantee that would notice. The
+ * harness reads `process.argv[1]`, which is exact only while the runner
+ * gives each test file its own process; if it ever shared one, this test
+ * would be running beside a component test and would find the DOM that
+ * component test installed.
  */
 describe('the component harness', () => {
   it('gives no DOM to a test that is not a component test', () => {
