@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import {
   fetchGitHubStatus,
@@ -42,21 +42,26 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   // repository is a sibling of it, so without the subscription a bind made
   // with the Code tab open leaves the button hidden and a disconnect leaves
   // it up, still naming the repository that is gone.
+  // Outside the effect because a refused push reads the connection again:
+  // the route is the one thing that can tell this browser its destination
+  // has moved, which is the case no notification from inside it covers.
+  const probe = useCallback(() => {
+    const gate = probes.current;
+    gate.supersede();
+    const current = gate.begin();
+    // Forgotten before it is read again, so a probe that fails leaves the
+    // button hidden rather than naming a repository somebody has just
+    // disconnected. An unknown connection and a connection that is gone
+    // are not the same thing, but they offer the same thing: nothing.
+    setStatus(null);
+    void (async () => {
+      const read = await fetchGitHubStatus();
+      if (current() && read) setStatus(read);
+    })();
+  }, []);
+
   useEffect(() => {
     const gate = probes.current;
-    function probe() {
-      gate.supersede();
-      const current = gate.begin();
-      // Forgotten before it is read again, so a probe that fails leaves the
-      // button hidden rather than naming a repository somebody has just
-      // disconnected. An unknown connection and a connection that is gone
-      // are not the same thing, but they offer the same thing: nothing.
-      setStatus(null);
-      void (async () => {
-        const read = await fetchGitHubStatus();
-        if (current() && read) setStatus(read);
-      })();
-    }
     probe();
     const stop = onConnectionChanged(() => {
       // A push already in the air was aimed at the connection that has just
@@ -74,7 +79,7 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       // component is a React warning and nothing a user sees.
       gate.supersede();
     };
-  }, []);
+  }, [probe]);
 
   // A different checkpoint is a different push. Without this, the branch
   // named by the last one stays on screen beside a project that has moved
@@ -98,6 +103,17 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     // work that is not the work in view.
     if (!current()) return;
     if (!pushed.ok) {
+      // The destination this was aimed at is not the one connected any
+      // more, which a tab that missed the change cannot find out any other
+      // way: the notification is per-document, so a rebind in another tab,
+      // on another device, or a binding that simply expired never reaches
+      // here. Reading the connection again is what turns a click that will
+      // be refused forever into one that works next time.
+      if (pushed.destinationMoved) {
+        setPhase({ at: 'moved', error: pushed.error });
+        probe();
+        return;
+      }
       setPhase({
         at: 'problem',
         to,

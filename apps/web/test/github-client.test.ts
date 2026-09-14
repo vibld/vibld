@@ -629,6 +629,45 @@ describe('pushing an accepted checkpoint', () => {
     }
   });
 
+  it('carries "your destination has moved" as its own answer', async () => {
+    // A third remedy beside reconnecting and retrying, and neither of those
+    // two. The connection is fine; this browser's idea of it is not, and
+    // the same request would be refused the same way.
+    const moved = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          {
+            error:
+              'Vibld is connected to acme/other, which is not where this push was for.',
+            destinationMoved: true,
+          },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(moved.ok, false);
+    if (!moved.ok) {
+      assert.equal(moved.destinationMoved, true);
+      // Not a lost grant. Offering a reconnection would be a loop.
+      assert.equal(moved.reconnect, undefined);
+    }
+
+    const other = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          { error: 'Too many pushes. Try again shortly.' },
+          429,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(other.ok, false);
+    if (!other.ok) assert.equal(other.destinationMoved, undefined);
+  });
+
   it('says a success it cannot parse is unreadable rather than hanging', async () => {
     // A rejection here is not an error anybody sees: the caller has already
     // gone busy and is awaiting this, so the button would stay disabled

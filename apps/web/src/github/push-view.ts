@@ -35,6 +35,19 @@ export interface Destination {
  */
 export type PushPhase =
   | { at: 'idle' }
+  /**
+   * The push was refused because this browser's idea of the destination had
+   * moved on, and nothing was written.
+   *
+   * Apart from `problem` precisely because it records no destination. Every
+   * other phase belongs to the place it was aimed at and is withheld once
+   * that is no longer the place on screen; this one is about the aim having
+   * been wrong, so it belongs to whatever the connection turns out to be.
+   * Folded into `problem` it would be hidden by the very refresh it causes,
+   * and somebody would have clicked Push, had nothing pushed, and been told
+   * nothing at all.
+   */
+  | { at: 'moved'; error: string }
   | { at: 'pushing'; to: Destination }
   | { at: 'done'; to: Destination; pushed: PushedSnapshot }
   | {
@@ -107,6 +120,7 @@ export function decidePush(
   // disabled on its account would withhold a push nothing is doing.
   const here =
     phase.at === 'idle' ||
+    phase.at === 'moved' ||
     (phase.to.owner === destination.owner &&
       phase.to.repo === destination.repo);
 
@@ -117,6 +131,10 @@ export function decidePush(
   };
 
   if (!here) return view;
+
+  // No `reconnect`: the connection is not the thing that is wrong.
+  if (phase.at === 'moved')
+    view.problem = { error: phase.error, reconnect: false };
 
   if (phase.at === 'problem') {
     view.problem = {

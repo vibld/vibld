@@ -188,13 +188,19 @@ function parseRevision(body: unknown): string | null {
 }
 
 /**
- * Where the caller believed it was pushing, if it said.
+ * Where the caller believes it is pushing. Required.
  *
- * Optional, and absent means an older bundle rather than a caller declining
- * to say: a browser holding the previous build through a deploy still
- * pushes, and the check below simply has nothing to compare. Both halves or
- * neither, because a request naming an owner and no repository has not said
- * where it meant to go.
+ * It was optional for one commit, so that a browser holding the previous
+ * bundle through a deploy could still push. That is the wrong trade: a tab
+ * old enough to be sending the previous bundle is the tab most likely to be
+ * holding a binding that has since moved, which is the whole of what this
+ * check exists to catch. An optional guard is skipped by exactly the
+ * requests that most need it, and a push nobody constrained is worse than a
+ * push that fails until the tab is reloaded.
+ *
+ * Both halves and both non-empty. An owner with no repository has not said
+ * where it meant to go, and choosing which half to believe would be
+ * inventing the other.
  */
 function parseExpectedRepository(
   body: unknown,
@@ -280,7 +286,15 @@ export async function handleGitHubPush(
   // and become one operation on one key, so the first click's destination
   // never receives its push and nothing reports that.
   const expected = parseExpectedRepository(body);
-  if (expected && !sameRepository(expected, binding)) {
+  if (!expected) {
+    return json(
+      {
+        error: '"owner" and "repo" must say which repository this push is for.',
+      },
+      400,
+    );
+  }
+  if (!sameRepository(expected, binding)) {
     return json(
       {
         // Only the binding is named. The other half of this sentence would
@@ -290,6 +304,13 @@ export async function handleGitHubPush(
         error:
           `Vibld is connected to ${binding.owner}/${binding.repo}, which is not where this push was for. ` +
           `Nothing was pushed. Check where Vibld is pointing, then push again.`,
+        // Said apart from the sentence, because it comes with something to
+        // do rather than something to read: whatever asked for this push is
+        // holding a destination that has moved, and the answer is to read
+        // the connection again. Without it a tab that missed the change
+        // repeats the same rejected push forever, since nothing in a 409
+        // tells it that what it believes is the thing that is wrong.
+        destinationMoved: true,
       },
       409,
     );

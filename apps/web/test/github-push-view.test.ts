@@ -202,6 +202,28 @@ describe('never describing a push as going where it did not', () => {
     assert.equal(view.show && view.busy, false);
   });
 
+  it('shows a refusal that was about the destination having moved', () => {
+    // The one phase that records no destination, because it is about the
+    // aim having been wrong. Withholding it the way a mismatched result is
+    // withheld would hide it behind the very refresh it causes, and
+    // somebody would have clicked Push, had nothing pushed, and been told
+    // nothing at all.
+    const view = decidePush(
+      {
+        at: 'moved',
+        error:
+          'Vibld is connected to acme/site, which is not where this push was for.',
+      },
+      CONNECTED,
+    );
+    assert.deepEqual(view.show && view.problem, {
+      error:
+        'Vibld is connected to acme/site, which is not where this push was for.',
+      // The connection is not the thing that is wrong.
+      reconnect: false,
+    });
+  });
+
   it('withholds one that differs only in the owner', () => {
     // `acme/site` and `other/site` are different repositories and a check
     // that reads the name alone calls them the same one. Forks make that

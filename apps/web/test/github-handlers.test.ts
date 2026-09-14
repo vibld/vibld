@@ -42,6 +42,12 @@ function pushRequest(body: unknown = undefined): Request {
       body ?? {
         files: [{ path: 'index.html', content: '<h1>hi</h1>' }],
         revision: 'r7',
+        // The destination is part of a well-formed push: the route reads
+        // the binding when the request arrives, so a request that does not
+        // say where it meant to go is asking for whatever is connected by
+        // then.
+        owner: 'acme',
+        repo: 'site',
       },
     ),
   });
@@ -451,13 +457,15 @@ describe('pushing where the click said, or not at all', () => {
     assert.equal(response.status, 200);
   });
 
-  it('still pushes for a caller that did not say', async () => {
-    // A browser holding the previous bundle through a deploy. Absence is an
-    // older caller rather than one declining to say, and refusing it would
-    // break pushing for the length of a cache.
+  it('refuses a caller that did not say where it was pushing', async () => {
+    // This was optional for one commit, so an older bundle could still
+    // push. It is the wrong trade: a tab old enough to be sending the
+    // previous bundle is the tab most likely to be holding a binding that
+    // has since moved, so the guard would be skipped by exactly the
+    // requests that most need it.
     const db = new SqliteD1Database(SCHEMA);
     await new GitHubStore(db as unknown as D1Database).bind(GRANT);
-    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+    const { doFetch, calls } = fakeGitHub({ base: 'base-commit' });
 
     const response = await handleGitHubPush(
       pushRequest({ files: FILES, revision: 'r7' }),
@@ -466,10 +474,11 @@ describe('pushing where the click said, or not at all', () => {
       doFetch,
       NOW,
     );
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 400);
+    assert.deepEqual(calls, []);
   });
 
-  it('treats half a destination as not having said', async () => {
+  it('refuses half a destination', async () => {
     // An owner with no name has not named a repository, and guessing which
     // half to trust would be inventing the other.
     const db = new SqliteD1Database(SCHEMA);
@@ -483,13 +492,13 @@ describe('pushing where the click said, or not at all', () => {
       doFetch,
       NOW,
     );
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 400);
   });
 
-  it('treats an empty destination as not having said', async () => {
-    // A blank is not a name. Refusing it would report that the destination
-    // moved, which is not what happened and not something anybody can act
-    // on.
+  it('refuses an empty destination', async () => {
+    // A blank is not a name, and it is a malformed request rather than a
+    // destination that moved: 400 says which, and reporting a move would
+    // send somebody looking for a change that did not happen.
     const db = new SqliteD1Database(SCHEMA);
     await new GitHubStore(db as unknown as D1Database).bind(GRANT);
     const { doFetch } = fakeGitHub({ base: 'base-commit' });
@@ -501,7 +510,42 @@ describe('pushing where the click said, or not at all', () => {
       doFetch,
       NOW,
     );
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { destinationMoved?: boolean };
+    assert.equal(body.destinationMoved, undefined);
+  });
+
+  it('says the destination moved, so the caller can read it again', async () => {
+    // A tab that missed the change cannot find out any other way: the
+    // notification inside the browser is per-document, so a rebind in
+    // another tab or on another device never reaches it. Without this it
+    // repeats the same refused push forever, because nothing in a 409 says
+    // that what it believes is the thing that is wrong.
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({
+        files: FILES,
+        revision: 'r7',
+        owner: 'acme',
+        repo: 'somewhere-else',
+      }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as {
+      destinationMoved?: boolean;
+      reconnect?: boolean;
+    };
+    assert.equal(body.destinationMoved, true);
+    // The connection is not the thing that is wrong, so reconnecting is not
+    // the remedy and offering it would be a loop.
+    assert.equal(body.reconnect, undefined);
   });
 });
 
@@ -692,11 +736,19 @@ describe('pushing the same checkpoint to a second repository', () => {
       NOW,
     );
 
-    // The user connects somewhere else and pushes the same checkpoint.
+    // The user connects somewhere else and pushes the same checkpoint. The
+    // second push names the second repository: a click made after the
+    // rebind is a click on a button showing the new destination, and one
+    // still naming the old one is refused rather than sent blind.
     await store.bind({ ...GRANT, owner: 'acme', repo: 'other-site' });
     const second = fakeGitHub({ base: 'base-in-other-site' });
     const response = await handleGitHubPush(
-      pushRequest(),
+      pushRequest({
+        files: [{ path: 'index.html', content: '<h1>hi</h1>' }],
+        revision: 'r7',
+        owner: 'acme',
+        repo: 'other-site',
+      }),
       env(db),
       PRINCIPAL,
       second.doFetch,

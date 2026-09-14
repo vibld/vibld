@@ -641,6 +641,17 @@ export type PushResult =
       error: string;
       reconnect?: boolean;
       conflict?: PushConflict;
+      /**
+       * What this caller believes about the destination is out of date.
+       *
+       * A third remedy beside the other two, and a third reason to keep it
+       * out of the sentence. Reconnecting is wrong here (the connection is
+       * fine, this tab's idea of it is not) and retrying is wrong too, since
+       * the same request would be refused the same way. Reading the
+       * connection again is the only thing that helps, and it is the one
+       * thing a message cannot do on its own.
+       */
+      destinationMoved?: boolean;
     };
 
 /**
@@ -692,15 +703,18 @@ export async function pushSnapshot(
     let error = 'Something went wrong talking to GitHub. Try again shortly.';
     let reconnect = false;
     let conflict: PushConflict | null = null;
+    let destinationMoved = false;
     try {
       const body = (await response.json()) as {
         error?: unknown;
         reconnect?: unknown;
         conflict?: unknown;
+        destinationMoved?: unknown;
       };
       if (typeof body.error === 'string' && body.error) error = body.error;
       reconnect = body.reconnect === true;
       conflict = conflictFrom(body.conflict);
+      destinationMoved = body.destinationMoved === true;
     } catch {
       // Keep the generic sentence.
     }
@@ -709,6 +723,7 @@ export async function pushSnapshot(
       error,
       ...(reconnect ? { reconnect: true } : {}),
       ...(conflict ? { conflict } : {}),
+      ...(destinationMoved ? { destinationMoved: true } : {}),
     };
   }
 
