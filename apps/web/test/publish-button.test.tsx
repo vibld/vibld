@@ -33,7 +33,7 @@ interface Call {
   body?: Record<string, unknown>;
 }
 
-function serving(answer: () => Response): Call[] {
+function serving(answer: () => Response | Promise<Response>): Call[] {
   const calls: Call[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({
@@ -45,6 +45,32 @@ function serving(answer: () => Response): Call[] {
     return answer();
   }) as typeof fetch;
   return calls;
+}
+
+/**
+ * A reply held back, so a publish can be caught mid-flight.
+ *
+ * `land` resolves it and then drains the microtasks behind it: the request
+ * settling is three awaits away from the state it sets, and `act` alone
+ * returns before the last of them.
+ */
+function held(response: () => Response) {
+  let open: (() => void) | undefined;
+  const waiting = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return {
+    answer: async () => {
+      await waiting;
+      return response();
+    },
+    async land() {
+      await act(async () => {
+        open?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    },
+  };
 }
 
 async function mount(element: React.ReactNode) {
@@ -85,6 +111,9 @@ async function mount(element: React.ReactNode) {
     },
     label(): string {
       return container.querySelector('button')?.textContent ?? '';
+    },
+    busy(): boolean {
+      return container.querySelector('button')?.disabled ?? false;
     },
     unmount() {
       act(() => root.unmount());
@@ -188,6 +217,78 @@ describe('publishing an accepted checkpoint', () => {
     await view.click();
     assert.equal(calls.length, 2);
     assert.equal(calls[1]?.body?.slug, 'my-site');
+    view.unmount();
+  });
+
+  it('discards a publish that lands after the checkpoint moved on', async () => {
+    // Clearing the result is only half of it. The request that was already
+    // in flight still answers, and an unguarded completion then puts the
+    // previous checkpoint's address back beside the new one, which is the
+    // sentence this component is being fixed for. The same latest-wins gate
+    // the push button uses on #123.
+    const reply1 = held(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    serving(reply1.answer);
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+    await reply1.land();
+
+    assert.doesNotMatch(
+      view.container.textContent ?? '',
+      /my-site\.example/,
+      'a superseded publish said the new checkpoint was live',
+    );
+    assert.equal(view.busy(), false, 'the button was left waiting on it');
+    view.unmount();
+  });
+
+  it('leaves an abandoned republish knowing the name it published under', async () => {
+    // Putting the wait back to idle must not throw away what was already
+    // known. It also must not invent it: the slug that comes back is the one
+    // an earlier publish went out under, not the one this abandoned request
+    // was carrying, whose fate nobody saw.
+    const first = held(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    const calls = serving(first.answer);
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    await first.land();
+
+    const second = held(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    serving(second.answer);
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+    await view.click();
+    await view.render(<PublishButton snapshot={snapshot('r3')} />);
+    await second.land();
+
+    assert.equal(view.slug(), null, 'it asked again for a slug it already had');
+    assert.match(view.label(), /Republish/);
+
+    await view.click();
+    assert.equal(calls.length, 1, 'the first fake kept being called');
     view.unmount();
   });
 

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import { publishProject } from '../generation/publish-client.ts';
+import { createStatusGate } from '../github/panel-view.ts';
 
 type PublishState =
   /**
@@ -9,7 +10,13 @@ type PublishState =
    * slug that is already chosen.
    */
   | { phase: 'idle'; publishedSlug?: string }
-  | { phase: 'publishing' }
+  /**
+   * `publishedSlug` here is the same fact carried through the wait: what a
+   * publish that already landed went out under, so a request abandoned
+   * mid-flight can be put back where it started rather than leaving behind a
+   * name we never saw go out.
+   */
+  | { phase: 'publishing'; publishedSlug?: string }
   | { phase: 'published'; slug: string; url: string; skipped: string[] }
   | { phase: 'failed'; error: string };
 
@@ -31,6 +38,7 @@ type PublishState =
 export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [state, setState] = useState<PublishState>({ phase: 'idle' });
   const [slugInput, setSlugInput] = useState('');
+  const publishes = useRef(createStatusGate());
 
   const knownSlug =
     state.phase === 'published'
@@ -49,12 +57,25 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   // site rather than a fact about this checkpoint, and asking for it again
   // after every accepted change would be asking somebody to retype what
   // they already told us.
+  //
+  // Clearing alone is not enough, for the reason the push button found on
+  // #123: a publish still in flight lands afterwards and draws the previous
+  // checkpoint's address beside the new one, which is the sentence this is
+  // here to stop. The gate is `createStatusGate`, the same latest-wins
+  // primitive rather than a second copy of the rule, and the abandoned wait
+  // is put back to idle so the button does not stay disabled on a result
+  // nobody is going to show.
   useEffect(() => {
-    setState((previous) =>
-      previous.phase === 'published'
-        ? { phase: 'idle', publishedSlug: previous.slug }
-        : previous,
-    );
+    publishes.current.supersede();
+    setState((previous) => {
+      if (previous.phase === 'published') {
+        return { phase: 'idle', publishedSlug: previous.slug };
+      }
+      if (previous.phase === 'publishing') {
+        return { phase: 'idle', publishedSlug: previous.publishedSlug };
+      }
+      return previous;
+    });
   }, [snapshot.revision]);
 
   async function publish() {
@@ -62,12 +83,14 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       setState({ phase: 'failed', error: 'Choose a slug to publish under.' });
       return;
     }
-    setState({ phase: 'publishing' });
+    const current = publishes.current.begin();
+    setState({ phase: 'publishing', publishedSlug: knownSlug });
     try {
       const result = await publishProject(
         snapshot.files,
         knownSlug ?? slugInput.trim(),
       );
+      if (!current()) return;
       setState(
         result.ok
           ? {
@@ -79,6 +102,7 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
           : { phase: 'failed', error: result.error },
       );
     } catch (error) {
+      if (!current()) return;
       setState({
         phase: 'failed',
         error:
