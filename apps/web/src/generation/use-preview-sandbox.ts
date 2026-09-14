@@ -9,9 +9,10 @@ import {
   stopSandboxPreview,
 } from './preview-client.ts';
 import type { PreviewShare, PreviewStatus } from './preview-client.ts';
+import { createStatusGate } from '../github/panel-view.ts';
 
 /** How often to re-check a preview that has not yet settled (matches `handlePlan`'s own poll interval, `worker/index.ts`'s `POLL_INTERVAL_MS`). */
-const POLL_INTERVAL_MS = 1500;
+export const POLL_INTERVAL_MS = 1500;
 
 const SETTLED = new Set(['ready', 'failed']);
 
@@ -74,6 +75,19 @@ export function usePreviewSandbox(): PreviewSandbox {
    * missed one serves an old checkpoint under a new checkpoint's name.
    */
   const mayExist = useRef(true);
+  /**
+   * Latest wins for the poll, the same `createStatusGate` the connect panel,
+   * the push button and the admin panel use.
+   *
+   * `stopPolling` clears the interval, which stops the next tick and does
+   * nothing about the request a tick already sent. That reply still arrives,
+   * and it is about the sandbox from before the restart: committed, it puts
+   * the old frame back while `ranRevision` names the new checkpoint, so the
+   * staleness warning stays hidden and the old sandbox is presented as the
+   * current one. It would also call `stopPolling` on the new interval, so
+   * the replacement stops being watched.
+   */
+  const polls = useRef(createStatusGate());
 
   const [shares, setShares] = useState<PreviewShare[]>([]);
   const [sharePending, setSharePending] = useState(false);
@@ -103,8 +117,13 @@ export function usePreviewSandbox(): PreviewSandbox {
 
   function pollUntilSettled() {
     stopPolling();
+    // Once for the interval rather than per tick: every tick of it belongs
+    // to the run that started it.
+    const current = polls.current.begin();
     pollRef.current = setInterval(() => {
       void fetchPreviewStatus().then((result) => {
+        // Sent before a run or a stop superseded this poll, answering after.
+        if (!current()) return;
         // A transient read failure (a dropped request, an expired session)
         // is not the sandbox failing -- the poll itself keeps going rather
         // than reporting a status the server never actually sent.
@@ -117,6 +136,7 @@ export function usePreviewSandbox(): PreviewSandbox {
 
   async function run(files: ProjectFile[], revision: string) {
     stopPolling();
+    polls.current.supersede();
     setPending(true);
     setStatus(null);
     setRanRevision(null);
@@ -166,6 +186,7 @@ export function usePreviewSandbox(): PreviewSandbox {
 
   async function stop() {
     stopPolling();
+    polls.current.supersede();
     setPending(true);
     try {
       await stopSandboxPreview();
