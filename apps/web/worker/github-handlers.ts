@@ -914,6 +914,26 @@ export async function handleGitHubDisconnect(
   if (!state.usable) return json({ connected: false });
 
   const { binding } = state;
+
+  // The read found the repository the request named, which the update did
+  // not. Something bound it in between, so the row that refused the update
+  // is gone and this one cannot explain it: saying this repository "is not
+  // what this would have disconnected" would name the one that was asked
+  // for as the reason for refusing to disconnect it. Say what actually
+  // happened instead, and leave the retry to a second click rather than
+  // opening another window inside this request.
+  if (sameRepository(expected, binding)) {
+    return json(
+      {
+        error:
+          'The connection changed while this was running. Nothing was ' +
+          'disconnected. Try again.',
+        movedTo: { owner: binding.owner, repo: binding.repo },
+      },
+      409,
+    );
+  }
+
   return json(
     {
       error:

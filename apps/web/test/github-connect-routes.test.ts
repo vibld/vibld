@@ -32,7 +32,7 @@ const CREDENTIALS = {
 const PRINCIPAL = { userId: 'user_1', policyIdentity: 'chris@example.com' };
 const NOW = new Date('2026-09-13T12:00:00.000Z');
 
-function env(db: SqliteD1Database) {
+function env(db: SqliteD1Database | D1Database) {
   return {
     DB: db as unknown as D1Database,
     VIBLD_GITHUB_CLIENT_ID: CREDENTIALS.clientId,
@@ -428,6 +428,43 @@ const GRANT_ROW = {
   expiresAt: '2026-12-13T00:00:00.000Z',
 };
 
+/**
+ * A database that lets something happen between one write and the next read.
+ *
+ * The handler revokes by name and then reads to decide what to report, and
+ * the interesting failures live in the gap between those two statements.
+ * Nothing else here can open that gap: the store talks to SQLite
+ * synchronously, so a test that wanted to bind between them would have to
+ * ask for it.
+ */
+function afterFirstUpdate(
+  db: SqliteD1Database,
+  between: () => Promise<void>,
+): D1Database {
+  let pending = true;
+  const real = db as unknown as D1Database;
+  return {
+    prepare(sql: string) {
+      const statement = real.prepare(sql);
+      if (!sql.trimStart().toUpperCase().startsWith('UPDATE')) return statement;
+      const wrap = (bound: D1PreparedStatement): D1PreparedStatement =>
+        ({
+          ...bound,
+          bind: (...values: unknown[]) => wrap(bound.bind(...values)),
+          run: async () => {
+            const result = await bound.run();
+            if (pending) {
+              pending = false;
+              await between();
+            }
+            return result;
+          },
+        }) as unknown as D1PreparedStatement;
+      return wrap(statement);
+    },
+  } as unknown as D1Database;
+}
+
 function disconnectRequest(body: unknown): Request {
   return new Request('https://app.vibld.com/api/github/disconnect', {
     method: 'POST',
@@ -551,6 +588,39 @@ describe('disconnecting', () => {
     };
     assert.deepEqual(body, { connected: false });
     assert.equal(body.movedTo, undefined);
+  });
+
+  it('does not blame the repository it was asked about', async () => {
+    // Doubly raced: the guarded update fails against what was bound, and a
+    // bind then makes the row the repository the request named. The read
+    // after the failed write cannot see what refused it, so naming this one
+    // would say the repository somebody asked to disconnect is the reason
+    // for refusing to disconnect it.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind({ ...GRANT_ROW, owner: 'acme', repo: 'other' });
+
+    // Rebind to the requested repository the moment the guarded update has
+    // run and failed, which is the window the read sits in.
+    const raced = afterFirstUpdate(db, async () => {
+      await store.revoke('user_1', NOW);
+      await store.bind(GRANT_ROW);
+    });
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
+      env(raced),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as { error: string };
+    assert.match(body.error, /changed while this was running/);
+    assert.doesNotMatch(
+      body.error,
+      /is not what this would have disconnected/,
+      'it named the repository the request asked about as the reason',
+    );
   });
 
   it('ends a connection named in the case GitHub would resolve', async () => {

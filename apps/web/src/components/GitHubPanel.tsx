@@ -9,6 +9,7 @@ import {
   disconnectRepository,
   holdHandoff,
   fetchGitHubStatus,
+  noteConnectionChanged,
   onConnectionChanged,
 } from '../github/github-client.ts';
 import type {
@@ -232,11 +233,14 @@ export function GitHubConnection() {
     const done = await disconnectRepository(to);
     if (!done.ok) {
       setPhase({ at: 'problem', error: done.error });
-      // The route is the only thing that can tell this panel its idea of the
-      // connection is out of date, so a refusal about the destination sends
-      // it back to read one. Without this the panel goes on naming the old
-      // repository and every further click is refused the same way.
-      if (done.movedTo) await refreshStatus();
+      // The route is the only thing that can tell this browser its idea of
+      // the connection is out of date, so a refusal about the destination
+      // sends it back to read one. Announced rather than refreshed here,
+      // because the push button keeps its own copy of the status and would
+      // otherwise go on offering a push to the repository this just found
+      // out about, until somebody clicked it and was refused in turn. Same
+      // discovery, same announcement, as the push route's own mismatch.
+      if (done.movedTo) noteConnectionChanged();
       return;
     }
     // Same rule as binding: the write landed, so say so without depending on
