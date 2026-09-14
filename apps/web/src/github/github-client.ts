@@ -654,9 +654,18 @@ export type PushResult =
  * `reconnect` is carried through rather than folded into the sentence,
  * because the two are different remedies and the route already separates
  * them: a lost grant wants a fresh connection, and everything else does not.
+ *
+ * `to` is where the caller believes it is pushing, sent so the route can
+ * refuse if that is no longer where the connection points. Required rather
+ * than optional: the route reads the binding when the request arrives, and
+ * a caller that does not say where it meant to go is asking for whatever is
+ * connected by then, which is how a button labelled one repository writes to
+ * another. Filtering the reply afterwards would only make the button quiet
+ * about it.
  */
 export async function pushSnapshot(
   snapshot: { revision: string; files: { path: string; content: string }[] },
+  to: { owner: string; repo: string },
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<PushResult> {
@@ -671,6 +680,8 @@ export async function pushSnapshot(
       body: JSON.stringify({
         revision: snapshot.revision,
         files: snapshot.files,
+        owner: to.owner,
+        repo: to.repo,
       }),
     });
   } catch {

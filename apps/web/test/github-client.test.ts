@@ -435,10 +435,14 @@ describe('pushing an accepted checkpoint', () => {
     files: [{ path: 'index.html', content: '<p>hi</p>' }],
   };
 
+  /** Where the button believed it was pushing when it was clicked. */
+  const TO = { owner: 'acme', repo: 'site' };
+
   it('sends the revision and the files the route keys on', async () => {
     const sent: unknown[] = [];
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async (_url: string, init?: RequestInit) => {
         sent.push(JSON.parse(String(init?.body)));
         return json({ branch: 'vibld/r7', commitSha: 'abc', created: true });
@@ -446,12 +450,17 @@ describe('pushing an accepted checkpoint', () => {
       TOKEN,
     );
     assert.equal(result.ok, true);
-    assert.deepEqual(sent[0], SNAPSHOT);
+    // The destination travels with it. The route reads the binding when the
+    // request arrives, so a push that does not say where it meant to go is
+    // asking for whatever is connected by then, which is how a button
+    // labelled one repository writes to another.
+    assert.deepEqual(sent[0], { ...SNAPSHOT, owner: 'acme', repo: 'site' });
   });
 
   it('reads back what was written', async () => {
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         json({
           branch: 'vibld/r7',
@@ -477,6 +486,7 @@ describe('pushing an accepted checkpoint', () => {
     // a fresh push sends somebody looking for a commit nothing just made.
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         json({
           branch: 'vibld/r7',
@@ -495,6 +505,7 @@ describe('pushing an accepted checkpoint', () => {
     // more misleading.
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         json({
           branch: 'vibld/r7',
@@ -512,6 +523,7 @@ describe('pushing an accepted checkpoint', () => {
     // feature has made more than any other.
     const lost = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         json(
           { error: 'Vibld’s access was withdrawn.', reconnect: true },
@@ -524,6 +536,7 @@ describe('pushing an accepted checkpoint', () => {
 
     const limited = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         json(
           { error: 'Too many pushes. Try again shortly.' },
@@ -538,6 +551,7 @@ describe('pushing an accepted checkpoint', () => {
   it('reports an unreadable success rather than inventing a branch', async () => {
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () => json({ ok: true })) as unknown as typeof fetch,
       TOKEN,
     );
@@ -547,6 +561,7 @@ describe('pushing an accepted checkpoint', () => {
   it('reports being unable to reach Vibld as that', async () => {
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () => {
         throw new Error('offline');
       }) as unknown as typeof fetch,
@@ -562,6 +577,7 @@ describe('pushing an accepted checkpoint', () => {
     // neither of them. This reply is the only place they exist.
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         json(
           {
@@ -593,6 +609,7 @@ describe('pushing an accepted checkpoint', () => {
     // at nothing.
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         json(
           {
@@ -618,6 +635,7 @@ describe('pushing an accepted checkpoint', () => {
     // until the page was reloaded.
     const result = await pushSnapshot(
       SNAPSHOT,
+      TO,
       (async () =>
         new Response('', {
           status: 200,

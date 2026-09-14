@@ -336,6 +336,175 @@ describe('pushing a checkpoint', () => {
   });
 });
 
+/**
+ * The binding is read when the request arrives, not when the button drew it.
+ *
+ * In between, another tab or the panel in the header can rebind. Without the
+ * destination on the request, the click lands on whatever is connected by
+ * then: a button labelled one repository writing to another, and two clicks
+ * either side of a rebind collapsing onto one
+ * `(user, owner, repo, revision)` key so the first one's destination never
+ * receives its push and nothing says so.
+ */
+describe('pushing where the click said, or not at all', () => {
+  const FILES = [{ path: 'index.html', content: '<h1>hi</h1>' }];
+
+  it('pushes when the destination is still the one connected', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({
+        files: FILES,
+        revision: 'r7',
+        owner: 'acme',
+        repo: 'site',
+      }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+  });
+
+  it('refuses one whose destination has moved, and writes nothing', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch, calls } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({
+        files: FILES,
+        revision: 'r7',
+        owner: 'acme',
+        repo: 'somewhere-else',
+      }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as {
+      error: string;
+      reconnect?: boolean;
+    };
+    // The connected repository is named, because that is the half somebody
+    // can act on. The requested one is not: it came out of the request body,
+    // and a message the browser draws is no place to repeat a caller's own
+    // input back at it.
+    assert.match(body.error, /acme\/site/);
+    assert.doesNotMatch(body.error, /somewhere-else/);
+    // Reconnecting is not the remedy, and offering it would send somebody
+    // round a loop that ends where it started.
+    assert.equal(body.reconnect, undefined);
+    // Nothing reached GitHub at all, not even a token.
+    assert.deepEqual(calls, []);
+  });
+
+  it('refuses one whose owner has moved, keeping the name', async () => {
+    // `acme/site` and `other/site` are different repositories. A check that
+    // reads the name alone calls them the same one, which forks make
+    // ordinary rather than contrived.
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch, calls } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({
+        files: FILES,
+        revision: 'r7',
+        owner: 'other',
+        repo: 'site',
+      }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    assert.deepEqual(calls, []);
+  });
+
+  it('accepts a destination that differs only in case', async () => {
+    // GitHub resolves an owner and a name without regard to case, so this
+    // destination has not moved. Refusing it would be a refusal with nothing
+    // the person could correct.
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({
+        files: FILES,
+        revision: 'r7',
+        owner: 'Acme',
+        repo: 'Site',
+      }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+  });
+
+  it('still pushes for a caller that did not say', async () => {
+    // A browser holding the previous bundle through a deploy. Absence is an
+    // older caller rather than one declining to say, and refusing it would
+    // break pushing for the length of a cache.
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({ files: FILES, revision: 'r7' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+  });
+
+  it('treats half a destination as not having said', async () => {
+    // An owner with no name has not named a repository, and guessing which
+    // half to trust would be inventing the other.
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({ files: FILES, revision: 'r7', owner: 'acme' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+  });
+
+  it('treats an empty destination as not having said', async () => {
+    // A blank is not a name. Refusing it would report that the destination
+    // moved, which is not what happened and not something anybody can act
+    // on.
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit' });
+
+    const response = await handleGitHubPush(
+      pushRequest({ files: FILES, revision: 'r7', owner: '', repo: '' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+  });
+});
+
 describe('what the request has to carry', () => {
   it('refuses a revision that could not be a branch', async () => {
     const db = new SqliteD1Database(SCHEMA);

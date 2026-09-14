@@ -91,7 +91,7 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   async function push(to: Destination) {
     const current = pushes.current.begin();
     setPhase({ at: 'pushing', to });
-    const pushed = await pushSnapshot(snapshot);
+    const pushed = await pushSnapshot(snapshot, to);
     // The checkpoint this was for is no longer the one on screen. The push
     // itself stands -- the route keys it on the revision and the branch is
     // there -- but saying so beside a different project would be describing
