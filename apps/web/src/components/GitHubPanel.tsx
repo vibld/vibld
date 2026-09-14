@@ -13,6 +13,8 @@ import type {
   GitHubStatus,
   RepositoryChoice,
 } from '../github/github-client.ts';
+import { decidePanel } from '../github/panel-view.ts';
+import type { PanelPhase } from '../github/panel-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
 /**
@@ -44,16 +46,9 @@ export function GitHubPanel() {
   );
 }
 
-type Phase =
-  | { at: 'loading' }
-  | { at: 'idle' }
-  | { at: 'working'; note: string }
-  | { at: 'choosing'; offer: ConnectOffer }
-  | { at: 'problem'; error: string; install?: boolean };
-
 function GitHubConnection() {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
-  const [phase, setPhase] = useState<Phase>({ at: 'loading' });
+  const [phase, setPhase] = useState<PanelPhase>({ at: 'loading' });
 
   // Finishing a return from GitHub, if that is what this page load is.
   useEffect(() => {
@@ -166,32 +161,31 @@ function GitHubConnection() {
     if (refreshed) setStatus(refreshed);
   }
 
-  if (phase.at === 'loading') return null;
-
-  // A connection in flight outranks the status probe. `/api/github/status`
-  // is only how the panel decides what to offer; it is not what makes the
-  // panel meaningful. If it failed transiently while the exchange succeeded,
-  // hiding everything strands somebody whose code and state are already
-  // spent, holding a ticket they cannot see and cannot use before it
-  // expires.
-  const busy =
-    phase.at === 'working' || phase.at === 'problem' || phase.at === 'choosing';
-
-  // Otherwise: nothing to offer on a deployment without GitHub configured,
-  // the same silence `BillingStatusWidget` keeps when billing is not.
-  if (!busy && !status?.configured) return null;
+  // Every decision about what appears lives in `decidePanel`, which is a
+  // plain function with tests. Four findings on this feature were decisions
+  // made in this file, where the test runner cannot reach them: it strips
+  // TypeScript types and errors on JSX, so a component is typechecked and
+  // never exercised. Below this line nothing reads `phase` or `status`, only
+  // the view, so there is nothing left here to get wrong that a test could
+  // not have caught.
+  const view = decidePanel(phase, status);
+  if (!view.show) return null;
+  // Held in a const so the callback below closes over a definite offer rather
+  // than reaching back into the view for a ticket TypeScript can no longer
+  // prove is there.
+  const picker = view.picker;
 
   return (
     <section className="github-panel">
       <h3>GitHub</h3>
 
-      {phase.at === 'working' && <p role="status">{phase.note}</p>}
+      {view.working && <p role="status">{view.working}</p>}
 
-      {phase.at === 'problem' && (
+      {view.problem && (
         <>
           <p role="alert" className="github-panel__problem">
-            {phase.error}
-            {phase.install && (
+            {view.problem.error}
+            {view.problem.install && (
               <>
                 {' '}
                 <a
@@ -204,15 +198,7 @@ function GitHubConnection() {
               </>
             )}
           </p>
-          {/*
-            Offered without waiting on a status. By the time a completion has
-            failed the code is spent, so "try again" means starting a fresh
-            authorization, and gating that button on a status request that may
-            itself have failed leaves the only route out being a page reload
-            somebody has to think of. Hidden only when the deployment has said
-            outright that it cannot connect.
-          */}
-          {status?.canConnect !== false && (
+          {view.problem.retry && (
             <p>
               <button type="button" onClick={() => void connect()}>
                 Try connecting again
@@ -222,52 +208,42 @@ function GitHubConnection() {
         </>
       )}
 
-      {phase.at === 'choosing' && (
+      {picker && (
         <RepositoryPicker
-          offer={phase.offer}
-          onChoose={(choice) => void choose(choice, phase.offer.ticket)}
+          offer={picker}
+          onChoose={(choice) => void choose(choice, picker.ticket)}
         />
       )}
 
-      {status?.configured &&
-        phase.at !== 'choosing' &&
-        phase.at !== 'working' && (
-          <>
-            {status.connected ? (
-              <p>
-                {/*
-                `canPush` rather than `connected` alone. A deployment with the
-                OAuth half and no App key lets a repository be connected and
-                answers every push with a 503, so saying "pushing to" it would
-                be describing something that cannot happen.
-              */}
-                {status.canPush ? 'Pushing to ' : 'Connected to '}
-                <strong>
-                  {status.owner}/{status.repo}
-                </strong>{' '}
-                on <code>{status.defaultBranch}</code>.
-                {!status.canPush &&
-                  ' Pushing is not configured on this deployment.'}{' '}
-                <button type="button" onClick={() => void disconnect()}>
-                  Disconnect
-                </button>
-              </p>
-            ) : (
-              <p>
-                No repository connected.{' '}
-                {status.canConnect ? (
-                  <button type="button" onClick={() => void connect()}>
-                    Connect a repository
-                  </button>
-                ) : (
-                  // Said rather than shown as a button that cannot work:
-                  // pushing and connecting are configured separately.
-                  <span>Connecting is not configured on this deployment.</span>
-                )}
-              </p>
-            )}
-          </>
-        )}
+      {view.summary?.connected === true && (
+        <p>
+          {view.summary.canPush ? 'Pushing to ' : 'Connected to '}
+          <strong>
+            {view.summary.owner}/{view.summary.repo}
+          </strong>{' '}
+          on <code>{view.summary.defaultBranch}</code>.
+          {!view.summary.canPush &&
+            ' Pushing is not configured on this deployment.'}{' '}
+          <button type="button" onClick={() => void disconnect()}>
+            Disconnect
+          </button>
+        </p>
+      )}
+
+      {view.summary?.connected === false && (
+        <p>
+          No repository connected.{' '}
+          {view.summary.canConnect ? (
+            <button type="button" onClick={() => void connect()}>
+              Connect a repository
+            </button>
+          ) : (
+            // Said rather than shown as a button that cannot work: pushing
+            // and connecting are configured separately.
+            <span>Connecting is not configured on this deployment.</span>
+          )}
+        </p>
+      )}
     </section>
   );
 }
