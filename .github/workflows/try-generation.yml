@@ -228,7 +228,7 @@ jobs:
       # generation steps and never to a path under them.
       - name: Upload the generated project
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: generated-project
           path: ${{ runner.temp }}/generated
@@ -237,7 +237,7 @@ jobs:
 
       - name: Upload the iterated project
         if: ${{ always() && inputs.follow_up != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iterated-project
           path: ${{ runner.temp }}/iterated
