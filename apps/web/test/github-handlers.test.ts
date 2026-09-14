@@ -511,11 +511,13 @@ describe('pushing where the click said, or not at all', () => {
       NOW,
     );
     assert.equal(response.status, 400);
-    const body = (await response.json()) as { destinationMoved?: boolean };
-    assert.equal(body.destinationMoved, undefined);
+    const body = (await response.json()) as {
+      movedTo?: { owner: string; repo: string };
+    };
+    assert.equal(body.movedTo, undefined);
   });
 
-  it('says the destination moved, so the caller can read it again', async () => {
+  it('names where the connection points, so the caller can tell later', async () => {
     // A tab that missed the change cannot find out any other way: the
     // notification inside the browser is per-document, so a rebind in
     // another tab or on another device never reaches it. Without this it
@@ -539,10 +541,14 @@ describe('pushing where the click said, or not at all', () => {
     );
     assert.equal(response.status, 409);
     const body = (await response.json()) as {
-      destinationMoved?: boolean;
+      movedTo?: { owner: string; repo: string };
       reconnect?: boolean;
     };
-    assert.equal(body.destinationMoved, true);
+    // The destination rather than a flag: the sentence beside it names this
+    // repository, and a caller that reads the connection again needs to be
+    // able to tell whether that sentence is still about the place it is
+    // showing.
+    assert.deepEqual(body.movedTo, { owner: 'acme', repo: 'site' });
     // The connection is not the thing that is wrong, so reconnecting is not
     // the remedy and offering it would be a loop.
     assert.equal(body.reconnect, undefined);

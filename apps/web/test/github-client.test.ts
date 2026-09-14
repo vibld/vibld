@@ -629,10 +629,13 @@ describe('pushing an accepted checkpoint', () => {
     }
   });
 
-  it('carries "your destination has moved" as its own answer', async () => {
+  it('carries where the connection actually points, not just that it moved', async () => {
     // A third remedy beside reconnecting and retrying, and neither of those
     // two. The connection is fine; this browser's idea of it is not, and
-    // the same request would be refused the same way.
+    // the same request would be refused the same way. The destination comes
+    // with it because the sentence names that repository, and a caller that
+    // cannot name it cannot tell whether the sentence still applies once it
+    // has read the connection again.
     const moved = await pushSnapshot(
       SNAPSHOT,
       TO,
@@ -641,7 +644,7 @@ describe('pushing an accepted checkpoint', () => {
           {
             error:
               'Vibld is connected to acme/other, which is not where this push was for.',
-            destinationMoved: true,
+            movedTo: { owner: 'acme', repo: 'other' },
           },
           409,
         )) as unknown as typeof fetch,
@@ -649,7 +652,7 @@ describe('pushing an accepted checkpoint', () => {
     );
     assert.equal(moved.ok, false);
     if (!moved.ok) {
-      assert.equal(moved.destinationMoved, true);
+      assert.deepEqual(moved.movedTo, { owner: 'acme', repo: 'other' });
       // Not a lost grant. Offering a reconnection would be a loop.
       assert.equal(moved.reconnect, undefined);
     }
@@ -665,7 +668,22 @@ describe('pushing an accepted checkpoint', () => {
       TOKEN,
     );
     assert.equal(other.ok, false);
-    if (!other.ok) assert.equal(other.destinationMoved, undefined);
+    if (!other.ok) assert.equal(other.movedTo, undefined);
+  });
+
+  it('drops half a moved destination rather than half naming one', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          { error: 'no', movedTo: { owner: 'acme' } },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.movedTo, undefined);
   });
 
   it('says a success it cannot parse is unreadable rather than hanging', async () => {

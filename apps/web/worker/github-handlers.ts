@@ -310,7 +310,13 @@ export async function handleGitHubPush(
         // the connection again. Without it a tab that missed the change
         // repeats the same rejected push forever, since nothing in a 409
         // tells it that what it believes is the thing that is wrong.
-        destinationMoved: true,
+        //
+        // The destination itself rather than a flag saying one moved. The
+        // sentence above is about this repository, and a caller that knows
+        // which one can tell whether that sentence is still worth drawing
+        // by the time it has read the connection again. A bare flag leaves
+        // it describing a repository it can no longer name.
+        movedTo: { owner: binding.owner, repo: binding.repo },
       },
       409,
     );

@@ -39,15 +39,19 @@ export type PushPhase =
    * The push was refused because this browser's idea of the destination had
    * moved on, and nothing was written.
    *
-   * Apart from `problem` precisely because it records no destination. Every
-   * other phase belongs to the place it was aimed at and is withheld once
-   * that is no longer the place on screen; this one is about the aim having
-   * been wrong, so it belongs to whatever the connection turns out to be.
-   * Folded into `problem` it would be hidden by the very refresh it causes,
-   * and somebody would have clicked Push, had nothing pushed, and been told
-   * nothing at all.
+   * Apart from `problem` because it survives the refresh it causes, where a
+   * result of a push does not: folded in, it would be cleared by the very
+   * connection change it is reporting, and somebody would have clicked
+   * Push, had nothing pushed, and been told nothing at all.
+   *
+   * Its `to` is not where the push was aimed. It is where the route said
+   * the connection points, which is what the sentence beside it names. So
+   * it is subject to the same rule as every other phase rather than exempt
+   * from it: if the connection has moved again since, this sentence is
+   * about neither the destination on screen nor the one that was aimed at,
+   * and drawing it would be the thing that rule exists to prevent.
    */
-  | { at: 'moved'; error: string }
+  | { at: 'moved'; to: Destination; error: string }
   | { at: 'pushing'; to: Destination }
   | { at: 'done'; to: Destination; pushed: PushedSnapshot }
   | {
@@ -95,6 +99,23 @@ export type PushView =
 
 const HIDDEN: PushView = { show: false };
 
+/**
+ * What is left of a phase once the connection has changed under it.
+ *
+ * A result belongs to the push that produced it, and the connection moving
+ * is exactly the case where showing one again would attribute it to
+ * somewhere it did not go. So results are dropped.
+ *
+ * A refusal that says the destination moved is not a result: it is the
+ * explanation for this very change. Dropping it would clear the only thing
+ * that tells somebody why the push they asked for did not happen, and it is
+ * `decidePush` that decides whether it is still worth drawing, by the same
+ * destination rule everything else goes through.
+ */
+export function afterConnectionChanged(phase: PushPhase): PushPhase {
+  return phase.at === 'moved' ? phase : { at: 'idle' };
+}
+
 export function decidePush(
   phase: PushPhase,
   status: GitHubStatus | null,
@@ -120,7 +141,6 @@ export function decidePush(
   // disabled on its account would withhold a push nothing is doing.
   const here =
     phase.at === 'idle' ||
-    phase.at === 'moved' ||
     (phase.to.owner === destination.owner &&
       phase.to.repo === destination.repo);
 

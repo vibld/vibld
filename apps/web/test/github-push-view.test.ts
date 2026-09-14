@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { decidePush } from '../src/github/push-view.ts';
+import { afterConnectionChanged, decidePush } from '../src/github/push-view.ts';
 import type { GitHubStatus } from '../src/github/github-client.ts';
 
 /**
@@ -211,6 +211,7 @@ describe('never describing a push as going where it did not', () => {
     const view = decidePush(
       {
         at: 'moved',
+        to: HERE,
         error:
           'Vibld is connected to acme/site, which is not where this push was for.',
       },
@@ -222,6 +223,23 @@ describe('never describing a push as going where it did not', () => {
       // The connection is not the thing that is wrong.
       reconnect: false,
     });
+  });
+
+  it('withholds a moved refusal once the connection has moved again', () => {
+    // A→B→C. The route refused a push aimed at A and named B, and by the
+    // time the connection was read again it was C. That sentence is about
+    // neither the destination on screen nor the one that was aimed at, and
+    // this phase carrying a destination is what lets the same rule catch
+    // it rather than exempting it.
+    const view = decidePush(
+      {
+        at: 'moved',
+        to: { owner: 'acme', repo: 'was-b' },
+        error: 'Vibld is connected to acme/was-b.',
+      },
+      CONNECTED,
+    );
+    assert.equal(view.show && view.problem, undefined);
   });
 
   it('withholds one that differs only in the owner', () => {
@@ -249,6 +267,39 @@ describe('never describing a push as going where it did not', () => {
       CONNECTED,
     );
     assert.equal(view.show && view.outcome?.branch, 'vibld/r7');
+  });
+});
+
+describe('what survives the connection changing under it', () => {
+  it('drops a result, which belonged to the push that produced it', () => {
+    assert.deepEqual(
+      afterConnectionChanged({
+        at: 'done',
+        to: HERE,
+        pushed: { branch: 'vibld/r7', commitSha: 'abc', created: true },
+      }),
+      { at: 'idle' },
+    );
+    assert.deepEqual(
+      afterConnectionChanged({ at: 'problem', to: HERE, error: 'nope' }),
+      { at: 'idle' },
+    );
+    assert.deepEqual(afterConnectionChanged({ at: 'pushing', to: HERE }), {
+      at: 'idle',
+    });
+  });
+
+  it('keeps a refusal that is the explanation for the change', () => {
+    // Dropping it would clear the only thing saying why the push somebody
+    // asked for did not happen, cleared by the very change it reports.
+    // Whether it is still worth drawing is `decidePush`'s to decide, by the
+    // same destination rule as everything else.
+    const moved = {
+      at: 'moved',
+      to: HERE,
+      error: 'Vibld is connected to acme/site.',
+    } as const;
+    assert.deepEqual(afterConnectionChanged(moved), moved);
   });
 });
 

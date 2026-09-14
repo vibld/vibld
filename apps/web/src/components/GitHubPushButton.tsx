@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import {
   fetchGitHubStatus,
+  noteConnectionChanged,
   onConnectionChanged,
   pushSnapshot,
 } from '../github/github-client.ts';
@@ -10,7 +11,7 @@ import type { GitHubStatus } from '../github/github-client.ts';
 // rather than written again: it is one generation counter with tests, and a
 // second copy of it here would be a second place for it to be wrong.
 import { createStatusGate } from '../github/panel-view.ts';
-import { decidePush } from '../github/push-view.ts';
+import { afterConnectionChanged, decidePush } from '../github/push-view.ts';
 import type { Destination, PushPhase } from '../github/push-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
@@ -70,7 +71,7 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       // rebind does not leave the button busy on account of a request whose
       // answer is about to be thrown away.
       pushes.current.supersede();
-      setPhase({ at: 'idle' });
+      setPhase(afterConnectionChanged);
       probe();
     });
     return () => {
@@ -103,15 +104,25 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     // work that is not the work in view.
     if (!current()) return;
     if (!pushed.ok) {
-      // The destination this was aimed at is not the one connected any
-      // more, which a tab that missed the change cannot find out any other
-      // way: the notification is per-document, so a rebind in another tab,
-      // on another device, or a binding that simply expired never reaches
-      // here. Reading the connection again is what turns a click that will
-      // be refused forever into one that works next time.
-      if (pushed.destinationMoved) {
-        setPhase({ at: 'moved', error: pushed.error });
-        probe();
+      // A push is the only thing here that finds out about a change made
+      // somewhere else: the notification is per-document, so a rebind in
+      // another tab, on another device, or a grant that simply expired
+      // never reaches this browser on its own. Saying so refreshes the
+      // panel in the header as well as this button, which is where somebody
+      // told to reconnect has to go and which would otherwise still be
+      // offering them Disconnect.
+      //
+      // After the phase rather than before it, so the listener has
+      // something to keep: `afterConnectionChanged` drops a result and
+      // keeps an explanation.
+      if (pushed.movedTo) {
+        setPhase({ at: 'moved', to: pushed.movedTo, error: pushed.error });
+        noteConnectionChanged();
+        return;
+      }
+      if (pushed.reconnect) {
+        setPhase({ at: 'problem', to, error: pushed.error, reconnect: true });
+        noteConnectionChanged();
         return;
       }
       setPhase({

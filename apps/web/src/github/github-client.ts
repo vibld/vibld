@@ -489,6 +489,20 @@ export function onConnectionChanged(listener: () => void): () => void {
   };
 }
 
+/**
+ * Say the connection changed, for a caller that found out rather than did it.
+ *
+ * A push is the only thing here that can discover a change made somewhere
+ * else: another tab, another device, or a grant that simply expired. The
+ * writes announce for themselves, but `pushSnapshot` deliberately does not,
+ * because announcing supersedes the very generations its own caller is
+ * holding while it waits, and a push would cancel itself. So the caller
+ * announces once it has finished reading the answer.
+ */
+export function noteConnectionChanged(): void {
+  announceConnectionChanged();
+}
+
 function announceConnectionChanged(): void {
   // Over a copy, so this dispatch reaches exactly the listeners that were
   // subscribed when the write landed: one that subscribes another while
@@ -634,6 +648,23 @@ function conflictFrom(value: unknown): PushConflict | null {
   return { branch, existingSha, attemptedTreeSha };
 }
 
+/**
+ * Both halves or neither, the same rule `conflictFrom` follows.
+ *
+ * Half a destination cannot be compared against the one on screen, so a
+ * caller holding it would have to guess whether its message still applies,
+ * and guessing is what carrying the destination exists to avoid.
+ */
+function destinationFrom(
+  value: unknown,
+): { owner: string; repo: string } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { owner, repo } = value as Record<string, unknown>;
+  if (typeof owner !== 'string' || !owner) return null;
+  if (typeof repo !== 'string' || !repo) return null;
+  return { owner, repo };
+}
+
 export type PushResult =
   | { ok: true; pushed: PushedSnapshot }
   | {
@@ -642,7 +673,7 @@ export type PushResult =
       reconnect?: boolean;
       conflict?: PushConflict;
       /**
-       * What this caller believes about the destination is out of date.
+       * Where the connection actually points, when this caller was wrong.
        *
        * A third remedy beside the other two, and a third reason to keep it
        * out of the sentence. Reconnecting is wrong here (the connection is
@@ -650,8 +681,14 @@ export type PushResult =
        * the same request would be refused the same way. Reading the
        * connection again is the only thing that helps, and it is the one
        * thing a message cannot do on its own.
+       *
+       * The destination rather than a flag, because the sentence beside it
+       * names that repository. A caller holding the name can tell whether
+       * the sentence is still about the place on screen once it has read
+       * the connection again; a bare flag would leave it repeating a
+       * sentence about a repository it can no longer identify.
        */
-      destinationMoved?: boolean;
+      movedTo?: { owner: string; repo: string };
     };
 
 /**
@@ -703,18 +740,18 @@ export async function pushSnapshot(
     let error = 'Something went wrong talking to GitHub. Try again shortly.';
     let reconnect = false;
     let conflict: PushConflict | null = null;
-    let destinationMoved = false;
+    let movedTo: { owner: string; repo: string } | null = null;
     try {
       const body = (await response.json()) as {
         error?: unknown;
         reconnect?: unknown;
         conflict?: unknown;
-        destinationMoved?: unknown;
+        movedTo?: unknown;
       };
       if (typeof body.error === 'string' && body.error) error = body.error;
       reconnect = body.reconnect === true;
       conflict = conflictFrom(body.conflict);
-      destinationMoved = body.destinationMoved === true;
+      movedTo = destinationFrom(body.movedTo);
     } catch {
       // Keep the generic sentence.
     }
@@ -723,7 +760,7 @@ export async function pushSnapshot(
       error,
       ...(reconnect ? { reconnect: true } : {}),
       ...(conflict ? { conflict } : {}),
-      ...(destinationMoved ? { destinationMoved: true } : {}),
+      ...(movedTo ? { movedTo } : {}),
     };
   }
 
