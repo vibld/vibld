@@ -190,6 +190,55 @@ describe('answers that arrive after the thing they were about moved on', () => {
     view.unmount();
   });
 
+  it('discards a push that finished after the connection changed', async () => {
+    // The connection moving under a push in flight is a different race from
+    // the checkpoint moving, and the handler supersedes the push for it.
+    // Sending the notification while nothing is pushing would leave that
+    // line free to delete: the suite stayed green without it until this
+    // test existed.
+    const slow = held<Response>();
+    serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/push': () => slow.promise,
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    await view.click('Push to');
+
+    await act(async () => {
+      noteConnectionChanged();
+    });
+    await act(async () => {
+      slow.give(reply({ branch: 'vibld/r7', commitSha: 'abc', created: true }));
+    });
+
+    // The push may well have landed. Saying so beside a connection that has
+    // moved since would be describing it against the wrong destination.
+    assert.doesNotMatch(view.container.textContent ?? '', /vibld\/r7/);
+    view.unmount();
+  });
+
+  it('clears a result the connection has moved on from', async () => {
+    // The rule `afterConnectionChanged` states, asserted through the
+    // component that has to call it. The destination is unchanged here on
+    // purpose: `decidePush` hides a result whose destination differs, so a
+    // test that also moved the repository would pass without the component
+    // clearing anything and pin nothing.
+    serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/push': () =>
+        reply({ branch: 'vibld/r7', commitSha: 'abc', created: true }),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    await view.click('Push to');
+    assert.match(view.container.textContent ?? '', /vibld\/r7/);
+
+    await act(async () => {
+      noteConnectionChanged();
+    });
+    assert.doesNotMatch(view.container.textContent ?? '', /vibld\/r7/);
+    view.unmount();
+  });
+
   it('reads the status again when the connection changes', async () => {
     // The panel that binds a repository is this component's sibling, so
     // without the subscription a bind made with the Code tab open leaves

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { join, sep } from 'node:path';
 import { describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { sourceRoot, transformFor } from './harness/transform-target.ts';
 
@@ -61,8 +63,22 @@ describe('which files the harness transforms', () => {
     // not, so on a checkout with a space in it the two never matched and
     // nothing under src was transformed. `clerkConfigured` then read false
     // and the component tests exercised an early return.
-    const root = sourceRoot('file:///home/a%20b/apps/web/test/harness/x.mjs');
-    assert.equal(root, '/home/a b/apps/web/src/');
-    assert.equal(transformFor(`${root}auth/clerk-token.ts`, root), 'ts');
+    //
+    // Built from a native path through `pathToFileURL` rather than written
+    // as a literal `file://` URL: a POSIX-shaped literal has no drive
+    // letter, so on Windows `fileURLToPath` throws before the assertion is
+    // reached and this test fails for a reason that has nothing to do with
+    // what it is checking.
+    const checkout = join(process.cwd(), 'a b');
+    const harness = join(checkout, 'apps', 'web', 'test', 'harness', 'x.mjs');
+
+    const root = sourceRoot(pathToFileURL(harness));
+    assert.equal(root, join(checkout, 'apps', 'web', 'src') + sep);
+    // The space survived, which is the whole point.
+    assert.ok(root.includes('a b'), root);
+    assert.equal(
+      transformFor(join(root, 'auth', 'clerk-token.ts'), root),
+      'ts',
+    );
   });
 });
