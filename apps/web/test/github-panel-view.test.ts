@@ -182,6 +182,62 @@ describe('describing a connected repository', () => {
   });
 });
 
+describe('a failure that named a repository', () => {
+  const ABOUT = { owner: 'acme', repo: 'other' };
+  const FAILED = {
+    at: 'problem',
+    error: 'Vibld is connected to acme/other.',
+    about: ABOUT,
+  } as const;
+
+  it('is drawn while the connection is not yet known again', () => {
+    // The window between forgetting a contradicted status and reading one.
+    // The sentence is the only thing saying why nothing happened.
+    const view = decidePanel(FAILED, null);
+    assert.equal(
+      view.show && view.problem?.error,
+      'Vibld is connected to acme/other.',
+    );
+  });
+
+  it('is drawn while the connection is still the one it names', () => {
+    const view = decidePanel(FAILED, { ...CONNECTED, repo: 'other' });
+    assert.equal(
+      view.show && view.problem?.error,
+      'Vibld is connected to acme/other.',
+    );
+  });
+
+  it('is withheld once the connection has moved on again', () => {
+    // The binding changed a second time while the panel was reading it, so
+    // this sentence now describes a state nothing on screen is in.
+    const view = decidePanel(FAILED, { ...CONNECTED, repo: 'third' });
+    assert.equal(view.show && view.problem, undefined);
+  });
+
+  it('is withheld once there is no connection to be wrong about', () => {
+    // The name still matches, so this is the disconnected-ness doing the
+    // work rather than the comparison: "Vibld is connected to acme/other"
+    // beside "No repository connected" is the contradiction.
+    const view = decidePanel(FAILED, {
+      ...CONNECTED,
+      connected: false,
+      repo: 'other',
+    });
+    assert.equal(view.show && view.problem, undefined);
+  });
+
+  it('leaves a failure that named nothing alone', () => {
+    // Everything that is not about one repository in particular: a rate
+    // limit, an unreachable GitHub, a refused exchange.
+    const view = decidePanel(
+      { at: 'problem', error: 'Try again shortly.' },
+      { ...CONNECTED, repo: 'third' },
+    );
+    assert.equal(view.show && view.problem?.error, 'Try again shortly.');
+  });
+});
+
 describe('what a Disconnect would end', () => {
   it('names the repository, so the route can refuse a stale one', () => {
     const view = decidePanel({ at: 'idle' }, CONNECTED);

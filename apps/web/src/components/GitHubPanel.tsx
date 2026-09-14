@@ -232,7 +232,13 @@ export function GitHubConnection() {
     setPhase({ at: 'working', note: 'Disconnecting…' });
     const done = await disconnectRepository(to);
     if (!done.ok) {
-      setPhase({ at: 'problem', error: done.error });
+      setPhase({
+        at: 'problem',
+        error: done.error,
+        // What the sentence is about, so it stops being drawn once the
+        // connection is known to be somewhere else again.
+        ...(done.movedTo ? { about: done.movedTo } : {}),
+      });
       // The route is the only thing that can tell this browser its idea of
       // the connection is out of date, so a refusal about the destination
       // sends it back to read one. Announced rather than refreshed here,

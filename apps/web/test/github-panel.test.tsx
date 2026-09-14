@@ -251,6 +251,31 @@ describe('a disconnect the route refuses', () => {
     panel.done();
   });
 
+  it('stops showing the refusal once the connection has moved again', async () => {
+    // The route's sentence is true of the connection as it stood when it
+    // answered. If the binding moves once more while the panel is reading
+    // it, that sentence describes a state nothing on screen is in.
+    let probes = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes('/api/github/status')) return REFUSAL();
+      probes += 1;
+      // The read after the refusal finds a third repository.
+      return reply(probes === 1 ? CONNECTED : { ...CONNECTED, repo: 'third' });
+    }) as typeof fetch;
+
+    const panel = await mountPanel();
+    await panel.clickDisconnect();
+
+    assert.match(panel.container.textContent ?? '', /acme\/third/);
+    assert.doesNotMatch(
+      panel.container.textContent ?? '',
+      /acme\/other/,
+      'it kept a sentence about a repository that is no longer the one on screen',
+    );
+    panel.done();
+  });
+
   it('tells the rest of the builder, not just itself', async () => {
     // The push button keeps its own copy of the status. A panel that only
     // refreshed itself would leave it offering a push to the repository
