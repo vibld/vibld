@@ -6,6 +6,7 @@ import {
   claimHandoff,
   completeClaimedConnect,
   disconnectRepository,
+  holdHandoff,
   fetchGitHubStatus,
 } from '../github/github-client.ts';
 import type {
@@ -74,6 +75,14 @@ function GitHubConnection() {
   useEffect(() => {
     let cancelled = false;
 
+    // Held for the life of this mount, and let go when it ends. The claim
+    // below is a module-level cache, so without this it outlives the panel:
+    // signing out unmounts, signing in mounts again with no page load
+    // between, and the next person is handed the previous one's handoff and
+    // their completed offer. Releasing is deferred inside `holdHandoff`, so
+    // the StrictMode replay below still finds it.
+    const release = holdHandoff();
+
     // Claimed rather than read: StrictMode runs this effect twice in
     // development, and a plain read would have the first pass clear the
     // fragment and the replay find nothing. The claim also takes it off the
@@ -122,6 +131,7 @@ function GitHubConnection() {
 
     return () => {
       cancelled = true;
+      release();
     };
   }, []);
 

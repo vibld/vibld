@@ -9,6 +9,7 @@ import {
   completeClaimedConnect,
   completeConnect,
   forgetHandoffClaim,
+  holdHandoff,
   fetchGitHubStatus,
   readHandoff,
   rememberState,
@@ -448,5 +449,139 @@ describe('surviving an effect that runs twice', () => {
     const again = await completeClaimedConnect(handoff, doFetch, TOKEN, store);
     assert.equal(again.ok, true);
     assert.equal(calls, 1);
+  });
+});
+
+/**
+ * How long that cache is allowed to live.
+ *
+ * Surviving the replay is the whole point of it, and surviving anything
+ * longer is a bug with teeth. The panel mounts inside `Show when="signed-in"`,
+ * so signing out unmounts it and signing in unmounts and mounts it again: a
+ * cache that outlives the mount replays the previous person's repository
+ * names to whoever signs in next on that browser, without a page load in
+ * between. It also replays a spent ticket to the same person, which can only
+ * fail by the time they click it.
+ *
+ * So it is held for as long as something is using it, and cleared when
+ * nothing is. The clearing is deferred, because StrictMode's unmount and
+ * remount happen with nothing in between, and a clear that ran there would
+ * take the replay's handoff away, which is the bug this cache exists to
+ * stop.
+ */
+describe('not outliving the mount that claimed it', () => {
+  /** Runs the deferred clear by hand, so a test never waits on a timer. */
+  function scheduler() {
+    const queue: (() => void)[] = [];
+    return {
+      defer: (run: () => void) => {
+        queue.push(run);
+        return () => {
+          const at = queue.indexOf(run);
+          if (at !== -1) queue.splice(at, 1);
+        };
+      },
+      settle() {
+        const due = queue.splice(0);
+        for (const run of due) run();
+      },
+      get pending() {
+        return queue.length;
+      },
+    };
+  }
+
+  it('forgets the handoff once the last holder lets go', () => {
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const release = holdHandoff(clock.defer);
+    claimHandoff('#github=the-code&state=the-state');
+
+    release();
+    clock.settle();
+
+    assert.equal(
+      claimHandoff(''),
+      null,
+      "a later mount was handed the previous mount's handoff",
+    );
+  });
+
+  it('keeps it across an unmount the remount follows immediately', () => {
+    // StrictMode: setup, cleanup, setup, with nothing in between. The
+    // deferred clear has not run by the time the replay takes hold again,
+    // and taking hold cancels it.
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const first = holdHandoff(clock.defer);
+    const claimed = claimHandoff('#github=the-code&state=the-state');
+
+    first();
+    const second = holdHandoff(clock.defer);
+    clock.settle();
+
+    assert.deepEqual(claimHandoff(''), claimed);
+    second();
+  });
+
+  it('keeps it while any other holder is still there', () => {
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const first = holdHandoff(clock.defer);
+    const second = holdHandoff(clock.defer);
+    claimHandoff('#github=the-code&state=the-state');
+
+    first();
+    assert.equal(clock.pending, 0, 'cleared while still in use');
+    clock.settle();
+    assert.ok(claimHandoff(''));
+
+    second();
+    clock.settle();
+    assert.equal(claimHandoff(''), null);
+  });
+
+  it('counts one release per hold however often it is called', () => {
+    // A cleanup that runs twice must not release somebody else's hold.
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const first = holdHandoff(clock.defer);
+    const second = holdHandoff(clock.defer);
+    claimHandoff('#github=the-code&state=the-state');
+
+    first();
+    first();
+    clock.settle();
+
+    assert.ok(claimHandoff(''), 'a repeated release freed a live hold');
+    second();
+  });
+
+  it('starts a new exchange for the next mount rather than replaying one', async () => {
+    forgetHandoffClaim();
+    const clock = scheduler();
+    const store = storage();
+    rememberState('the-state', store);
+    const handoff = { code: 'c', state: 'the-state' };
+    let calls = 0;
+    const doFetch = (async () => {
+      calls += 1;
+      return json({ repositories: [], ticket: `tkt-${calls}` });
+    }) as unknown as typeof fetch;
+
+    const release = holdHandoff(clock.defer);
+    const first = await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+    release();
+    clock.settle();
+
+    // Whoever is signed in now: a fresh hold, and the same code offered
+    // again. What must not happen is the previous answer coming back.
+    holdHandoff(clock.defer);
+    rememberState('the-state', store);
+    const next = await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+
+    assert.equal(calls, 2, "the previous mount's offer was replayed");
+    assert.equal(first.ok && first.offer.ticket, 'tkt-1');
+    assert.equal(next.ok && next.offer.ticket, 'tkt-2');
   });
 });

@@ -132,6 +132,60 @@ export function readHandoff(hash: string): CallbackHandoff | null {
  */
 let claimed: CallbackHandoff | null = null;
 
+/**
+ * How long that cache is allowed to live: as long as something is using it.
+ *
+ * Module-level and never cleared was a leak with teeth. The panel mounts
+ * inside `Show when="signed-in"`, so signing out unmounts it and signing in
+ * mounts it again, with no page load in between and nothing resetting a
+ * module variable. Whoever signed in next was handed the previous person's
+ * handoff, and `completeClaimedConnect` handed back their completed offer:
+ * one account's repository names shown to another. The milder version of the
+ * same thing replays a spent ticket to the person who earned it, which can
+ * only fail by the time they click it.
+ *
+ * Counted, because the two StrictMode passes overlap and either may be the
+ * last to let go. Cleared on a deferred task rather than immediately,
+ * because StrictMode's unmount and remount happen with nothing in between:
+ * a clear that ran there would take the replay's handoff away, which is the
+ * bug this cache exists to stop.
+ */
+let holders = 0;
+let cancelClear: (() => void) | null = null;
+
+/** Schedules the clear, and hands back a way to call it off. */
+export type Defer = (run: () => void) => () => void;
+
+const deferToTask: Defer = (run) => {
+  const timer = setTimeout(run, 0);
+  return () => clearTimeout(timer);
+};
+
+/**
+ * Hold the claimed handoff for the life of a mount. Release when it unmounts.
+ *
+ * The returned release is idempotent: a cleanup that somehow runs twice must
+ * not free a hold belonging to a mount that is still there.
+ */
+export function holdHandoff(defer: Defer = deferToTask): () => void {
+  holders += 1;
+  cancelClear?.();
+  cancelClear = null;
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    holders -= 1;
+    if (holders > 0) return;
+    cancelClear = defer(() => {
+      cancelClear = null;
+      claimed = null;
+      completion = null;
+    });
+  };
+}
+
 export function claimHandoff(hash: string): CallbackHandoff | null {
   const fresh = readHandoff(hash);
   if (fresh) {
@@ -165,6 +219,9 @@ export function completeClaimedConnect(
 
 /** Only for tests, which need each case to start from nothing. */
 export function forgetHandoffClaim(): void {
+  cancelClear?.();
+  cancelClear = null;
+  holders = 0;
   claimed = null;
   completion = null;
 }
