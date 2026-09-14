@@ -25,23 +25,23 @@ importers:
     dependencies:
       '@react-router/node':
         specifier: 8.3.1
-        version: 8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(typescript@5.9.3)
+        version: 8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(typescript@5.9.3)
       isbot:
         specifier: 5.1.36
         version: 5.1.36
       react:
-        specifier: 19.2.8
-        version: 19.2.8
+        specifier: 19.3.0
+        version: 19.3.0
       react-dom:
         specifier: 19.2.8
-        version: 19.2.8(react@19.2.8)
+        version: 19.2.8(react@19.3.0)
       react-router:
         specifier: 8.3.1
-        version: 8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
     devDependencies:
       '@react-router/dev':
         specifier: 8.3.1
-        version: 8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.2(@types/node@22.19.1)(esbuild@0.28.1)(jiti@2.7.0))(wrangler@4.129.1(@cloudflare/workers-types@5.20260907.1)(@types/node@22.19.1))
+        version: 8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.2(@types/node@22.19.1)(esbuild@0.28.1)(jiti@2.7.0))(wrangler@4.129.1(@cloudflare/workers-types@5.20260907.1)(@types/node@22.19.1))
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.2.2(@types/node@22.19.1)(esbuild@0.28.1)(jiti@2.7.0))
@@ -49,11 +49,11 @@ importers:
         specifier: 22.19.1
         version: 22.19.1
       '@types/react':
-        specifier: 19.2.2
-        version: 19.2.2
+        specifier: 19.3.0
+        version: 19.3.0
       '@types/react-dom':
         specifier: 19.2.2
-        version: 19.2.2(@types/react@19.2.2)
+        version: 19.2.2(@types/react@19.3.0)
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -103,7 +103,7 @@ importers:
     dependencies:
       '@clerk/react':
         specifier: 6.15.2
-        version: 6.15.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 6.15.2(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
       '@vibld/ai':
         specifier: workspace:*
         version: link:../../packages/ai
@@ -111,11 +111,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
       react:
-        specifier: 19.2.8
-        version: 19.2.8
+        specifier: 19.3.0
+        version: 19.3.0
       react-dom:
         specifier: 19.2.8
-        version: 19.2.8(react@19.2.8)
+        version: 19.2.8(react@19.3.0)
       stripe:
         specifier: 22.6.2
         version: 22.6.2(@types/node@26.4.1)
@@ -124,11 +124,11 @@ importers:
         specifier: 26.4.1
         version: 26.4.1
       '@types/react':
-        specifier: 19.2.18
-        version: 19.2.18
+        specifier: 19.3.0
+        version: 19.3.0
       '@types/react-dom':
         specifier: 19.2.7
-        version: 19.2.7(@types/react@19.2.18)
+        version: 19.2.7(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: 6.1.1
         version: 6.1.1(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.1)(jiti@2.7.0))
@@ -991,11 +991,8 @@ packages:
     peerDependencies:
       '@types/react': ^19.2.0
 
-  '@types/react@19.2.18':
-    resolution: {integrity: sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==}
-
-  '@types/react@19.2.2':
-    resolution: {integrity: sha512-6mDvHUFSjyT2B2yeNx2nUgMxh9LtOWvkhIU3uePn2I2oyNymUAX1NIsdgviM4CH+JSrp2D2hsMvJOkxY+0wNRA==}
+  '@types/react@19.3.0':
+    resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
 
   '@types/whatwg-mimetype@3.0.2':
     resolution: {integrity: sha512-c2AKvDT8ToxLIOUlN51gTiHXflsfIFisS4pO7pDPoKouJCESkhZnEy623gwP9laCy5lnLDAw1vAzu2vM2YLOrA==}
@@ -1538,8 +1535,8 @@ packages:
       react-dom:
         optional: true
 
-  react@19.2.8:
-    resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
+  react@19.3.0:
+    resolution: {integrity: sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==}
     engines: {node: '>=0.10.0'}
 
   readdirp@5.1.1:
@@ -1847,22 +1844,22 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@clerk/react@6.15.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@clerk/react@6.15.2(react-dom@19.2.8(react@19.3.0))(react@19.3.0)':
     dependencies:
-      '@clerk/shared': 4.31.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
+      '@clerk/shared': 4.31.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
+      react: 19.3.0
+      react-dom: 19.2.8(react@19.3.0)
       tslib: 2.8.1
 
-  '@clerk/shared@4.31.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@clerk/shared@4.31.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0)':
     dependencies:
       '@tanstack/query-core': 5.102.8
       dequal: 2.0.3
       glob-to-regexp: 0.4.1
       js-cookie: 3.0.8
     optionalDependencies:
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
+      react: 19.3.0
+      react-dom: 19.2.8(react@19.3.0)
 
   '@cloudflare/containers@0.3.7': {}
 
@@ -2137,14 +2134,14 @@ snapshots:
   '@poppinss/exception@1.2.3':
     optional: true
 
-  '@react-router/dev@8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.2(@types/node@22.19.1)(esbuild@0.28.1)(jiti@2.7.0))(wrangler@4.129.1(@cloudflare/workers-types@5.20260907.1)(@types/node@22.19.1))':
+  '@react-router/dev@8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.2(@types/node@22.19.1)(esbuild@0.28.1)(jiti@2.7.0))(wrangler@4.129.1(@cloudflare/workers-types@5.20260907.1)(@types/node@22.19.1))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@10.2.2)
       '@babel/generator': 7.29.8
       '@babel/parser': 7.29.8
       '@babel/traverse': 7.29.8(supports-color@10.2.2)
       '@babel/types': 7.29.8
-      '@react-router/node': 8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(typescript@5.9.3)
+      '@react-router/node': 8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(typescript@5.9.3)
       '@remix-run/node-fetch-server': 0.14.1
       babel-dead-code-elimination: 1.0.12(supports-color@10.2.2)
       chokidar: 5.0.0
@@ -2159,7 +2156,7 @@ snapshots:
       picocolors: 1.1.1
       pkg-types: 2.3.3
       react-refresh: 0.18.0
-      react-router: 8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react-router: 8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
       semver: 7.8.5
       tinyglobby: 0.2.17
       valibot: 1.4.2(typescript@5.9.3)
@@ -2171,10 +2168,10 @@ snapshots:
       - babel-plugin-macros
       - supports-color
 
-  '@react-router/node@8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(typescript@5.9.3)':
+  '@react-router/node@8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0))(typescript@5.9.3)':
     dependencies:
       '@remix-run/node-fetch-server': 0.14.1
-      react-router: 8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react-router: 8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0)
     optionalDependencies:
       typescript: 5.9.3
 
@@ -2331,19 +2328,15 @@ snapshots:
     dependencies:
       undici-types: 8.3.0
 
-  '@types/react-dom@19.2.2(@types/react@19.2.2)':
+  '@types/react-dom@19.2.2(@types/react@19.3.0)':
     dependencies:
-      '@types/react': 19.2.2
+      '@types/react': 19.3.0
 
-  '@types/react-dom@19.2.7(@types/react@19.2.18)':
+  '@types/react-dom@19.2.7(@types/react@19.3.0)':
     dependencies:
-      '@types/react': 19.2.18
+      '@types/react': 19.3.0
 
-  '@types/react@19.2.18':
-    dependencies:
-      csstype: 3.2.3
-
-  '@types/react@19.2.2':
+  '@types/react@19.3.0':
     dependencies:
       csstype: 3.2.3
 
@@ -2731,21 +2724,21 @@ snapshots:
 
   prettier@3.9.6: {}
 
-  react-dom@19.2.8(react@19.2.8):
+  react-dom@19.2.8(react@19.3.0):
     dependencies:
-      react: 19.2.8
+      react: 19.3.0
       scheduler: 0.27.0
 
   react-refresh@0.18.0: {}
 
-  react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  react-router@8.3.1(react-dom@19.2.8(react@19.3.0))(react@19.3.0):
     dependencies:
       cookie-es: 3.1.1
-      react: 19.2.8
+      react: 19.3.0
     optionalDependencies:
-      react-dom: 19.2.8(react@19.2.8)
+      react-dom: 19.2.8(react@19.3.0)
 
-  react@19.2.8: {}
+  react@19.3.0: {}
 
   readdirp@5.1.1: {}
 
