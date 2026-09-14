@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { decidePanel } from '../src/github/panel-view.ts';
+import { createStatusGate, decidePanel } from '../src/github/panel-view.ts';
 import type { GitHubStatus } from '../src/github/github-client.ts';
 
 /**
@@ -109,7 +109,7 @@ describe('describing a connected repository', () => {
     const view = decidePanel({ at: 'idle' }, CONNECTED);
     assert.equal(view.show && view.summary?.connected, true);
     if (view.show && view.summary?.connected) {
-      assert.equal(view.summary.canPush, true);
+      assert.equal(view.summary.pushing, 'yes');
       assert.equal(view.summary.owner, 'acme');
       assert.equal(view.summary.repo, 'site');
     }
@@ -121,7 +121,22 @@ describe('describing a connected repository', () => {
     const view = decidePanel({ at: 'idle' }, { ...CONNECTED, canPush: false });
     assert.equal(view.show && view.summary?.connected, true);
     if (view.show && view.summary?.connected) {
-      assert.equal(view.summary.canPush, false);
+      assert.equal(view.summary.pushing, 'no');
+    }
+  });
+
+  it('makes no claim either way when nothing said', () => {
+    // The finding: a bind whose status probe and post-bind refresh both
+    // failed is shown from the write's own reply, which says what was bound
+    // and nothing about the deployment. Reading that silence as "no" told
+    // somebody pushing was unconfigured on a deployment that pushes fine.
+    // Unknown has to stay unknown, because only one of the three says
+    // anything worth printing.
+    const { canPush: _unstated, ...unsaid } = CONNECTED;
+    const view = decidePanel({ at: 'idle' }, unsaid);
+    assert.equal(view.show && view.summary?.connected, true);
+    if (view.show && view.summary?.connected) {
+      assert.equal(view.summary.pushing, 'unknown');
     }
   });
 
@@ -141,6 +156,76 @@ describe('describing a connected repository', () => {
     if (view.show && view.summary && !view.summary.connected) {
       assert.equal(view.summary.canConnect, false);
     }
+  });
+
+  it('offers connecting rather than stranding somebody on a silence', () => {
+    // Unknown goes the other way here than it does for pushing, and for a
+    // reason: an offered button that turns out not to work answers with the
+    // reason, while a withheld one leaves no route anywhere. The same rule
+    // the retry uses.
+    const { canConnect: _unstated, ...unsaid } = CONFIGURED;
+    const view = decidePanel({ at: 'idle' }, unsaid);
+    if (view.show && view.summary && !view.summary.connected) {
+      assert.equal(view.summary.canConnect, true);
+    }
+  });
+});
+
+describe('which answer about the connection is allowed to win', () => {
+  // The finding: the status probe starts alongside the callback exchange, so
+  // it can still be in flight when a repository is bound and land afterwards
+  // carrying what it read before the write. The panel then replaced a
+  // confirmed repository with `connected: false`, making a write that landed
+  // look like one that never happened.
+
+  it('lets a read commit when nothing has been written since', () => {
+    const gate = createStatusGate();
+    const commit = gate.begin();
+    assert.equal(commit(), true);
+  });
+
+  it('discards a read that a write overtook', () => {
+    const gate = createStatusGate();
+    const commit = gate.begin();
+    gate.supersede();
+    assert.equal(commit(), false);
+  });
+
+  it('discards it however long the read sat there', () => {
+    const gate = createStatusGate();
+    const commit = gate.begin();
+    gate.supersede();
+    gate.supersede();
+    assert.equal(commit(), false);
+  });
+
+  it("lets the write's own refresh commit", () => {
+    // A mutation supersedes the reads before it and then reads again; that
+    // later read is the newest thing there is and must be allowed through,
+    // or the panel would never pick up anything the server corrected.
+    const gate = createStatusGate();
+    gate.supersede();
+    const refresh = gate.begin();
+    assert.equal(refresh(), true);
+  });
+
+  it("lets a second write overtake the first write's refresh", () => {
+    const gate = createStatusGate();
+    gate.supersede();
+    const refresh = gate.begin();
+    gate.supersede();
+    assert.equal(refresh(), false);
+  });
+
+  it('keeps two reads in flight independent of each other', () => {
+    const gate = createStatusGate();
+    const first = gate.begin();
+    const second = gate.begin();
+    assert.equal(first(), true);
+    assert.equal(second(), true);
+    gate.supersede();
+    assert.equal(first(), false);
+    assert.equal(second(), false);
   });
 });
 

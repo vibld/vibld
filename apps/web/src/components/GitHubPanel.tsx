@@ -1,5 +1,5 @@
 import { Show } from '@clerk/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   beginConnect,
   bindRepository,
@@ -13,7 +13,7 @@ import type {
   GitHubStatus,
   RepositoryChoice,
 } from '../github/github-client.ts';
-import { decidePanel } from '../github/panel-view.ts';
+import { createStatusGate, decidePanel } from '../github/panel-view.ts';
 import type { PanelPhase } from '../github/panel-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
@@ -50,6 +50,26 @@ function GitHubConnection() {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [phase, setPhase] = useState<PanelPhase>({ at: 'loading' });
 
+  // Which answer about the connection is allowed to win. The rule and its
+  // tests are in `panel-view.ts`; this is only where it is held, in a ref
+  // rather than state because changing it must never draw anything.
+  const gate = useRef(createStatusGate());
+
+  /**
+   * Read the status, and commit it only if no write has landed since.
+   *
+   * Without the gate the first probe races every write. It starts alongside
+   * the callback exchange, so it can still be in flight when a repository is
+   * bound, and it would then overwrite a confirmed binding with the
+   * `connected: false` it read beforehand: a write that landed, shown as one
+   * that never happened.
+   */
+  async function refreshStatus() {
+    const commit = gate.current.begin();
+    const current = await fetchGitHubStatus();
+    if (current && commit()) setStatus(current);
+  }
+
   // Finishing a return from GitHub, if that is what this page load is.
   useEffect(() => {
     let cancelled = false;
@@ -74,10 +94,12 @@ function GitHubConnection() {
     }
 
     // Alongside, never in front of it. The status only decides what the panel
-    // offers once there is nothing in flight.
+    // offers once there is nothing in flight, and it is gated so that landing
+    // late cannot undo a binding written while it was away.
     void (async () => {
+      const commit = gate.current.begin();
       const current = await fetchGitHubStatus();
-      if (!cancelled && current) setStatus(current);
+      if (!cancelled && current && commit()) setStatus(current);
     })();
 
     void (async () => {
@@ -127,6 +149,13 @@ function GitHubConnection() {
     // landed, so a status request that fails here must not leave somebody
     // staring at nothing, unable to tell whether their repository connected.
     // A refresh is still attempted, and only used if it answers.
+    //
+    // Superseding first, so a probe started before this write cannot land
+    // afterwards and put `connected: false` back over a repository that is
+    // connected. What the reply does not say, it does not say: `canPush`
+    // stays undefined here when nothing has reported it, and `decidePanel`
+    // keeps that as unknown rather than reading it as a no.
+    gate.current.supersede();
     setStatus((previous) => ({
       configured: true,
       canPush: previous?.canPush,
@@ -138,8 +167,7 @@ function GitHubConnection() {
       ...(bound.bound.expiresAt ? { expiresAt: bound.bound.expiresAt } : {}),
     }));
     setPhase({ at: 'idle' });
-    const refreshed = await fetchGitHubStatus();
-    if (refreshed) setStatus(refreshed);
+    await refreshStatus();
   }
 
   async function disconnect() {
@@ -150,15 +178,16 @@ function GitHubConnection() {
       return;
     }
     // Same rule as binding: the write landed, so say so without depending on
-    // a second request succeeding.
+    // a second request succeeding, and supersede any read still in flight so
+    // it cannot put the disconnected repository back.
+    gate.current.supersede();
     setStatus((previous) =>
       previous
         ? { ...previous, connected: false, reason: 'revoked' }
         : previous,
     );
     setPhase({ at: 'idle' });
-    const refreshed = await fetchGitHubStatus();
-    if (refreshed) setStatus(refreshed);
+    await refreshStatus();
   }
 
   // Every decision about what appears lives in `decidePanel`, which is a
@@ -217,12 +246,12 @@ function GitHubConnection() {
 
       {view.summary?.connected === true && (
         <p>
-          {view.summary.canPush ? 'Pushing to ' : 'Connected to '}
+          {view.summary.pushing === 'yes' ? 'Pushing to ' : 'Connected to '}
           <strong>
             {view.summary.owner}/{view.summary.repo}
           </strong>{' '}
           on <code>{view.summary.defaultBranch}</code>.
-          {!view.summary.canPush &&
+          {view.summary.pushing === 'no' &&
             ' Pushing is not configured on this deployment.'}{' '}
           <button type="button" onClick={() => void disconnect()}>
             Disconnect

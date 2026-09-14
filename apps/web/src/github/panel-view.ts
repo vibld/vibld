@@ -23,13 +23,25 @@ export interface PanelProblem {
   retry: boolean;
 }
 
+/**
+ * Whether pushing works, kept at three values rather than two.
+ *
+ * Two states is what the earlier bug was made of. A bind whose status probe
+ * and post-bind refresh both failed is shown from the write's own reply,
+ * which says what was bound and nothing about the deployment, and reading
+ * that silence as `false` printed "Pushing is not configured on this
+ * deployment" on a deployment that pushes fine. Only one of the three says
+ * anything worth printing, so all three have to survive to here.
+ */
+export type Pushing = 'yes' | 'no' | 'unknown';
+
 export type PanelSummary =
   | {
       connected: true;
       owner?: string;
       repo?: string;
       defaultBranch?: string;
-      canPush: boolean;
+      pushing: Pushing;
     }
   | { connected: false; canConnect: boolean };
 
@@ -92,16 +104,65 @@ export function decidePanel(
           // `canPush` rather than `connected` alone. A deployment with the
           // OAuth half and no App key lets a repository be connected and
           // answers every push with a 503, so saying "pushing to" it would be
-          // describing something that cannot happen.
-          canPush: status.canPush === true,
+          // describing something that cannot happen. Silence is its own
+          // answer and is kept as one.
+          pushing:
+            status.canPush === undefined
+              ? 'unknown'
+              : status.canPush
+                ? 'yes'
+                : 'no',
           ...(status.owner === undefined ? {} : { owner: status.owner }),
           ...(status.repo === undefined ? {} : { repo: status.repo }),
           ...(status.defaultBranch === undefined
             ? {}
             : { defaultBranch: status.defaultBranch }),
         }
-      : { connected: false, canConnect: status.canConnect === true };
+      : {
+          connected: false,
+          // Unknown goes the other way here than it does for pushing. An
+          // offered button that turns out not to work answers with the
+          // reason; a withheld one leaves no route anywhere. The same rule
+          // the retry above uses, for the same reason.
+          canConnect: status.canConnect !== false,
+        };
   }
 
   return view;
+}
+
+/**
+ * Which answer about the connection is allowed to win.
+ *
+ * The status probe starts alongside the callback exchange rather than in
+ * front of it, which is what stops a slow probe throwing away a good
+ * callback. The cost of that is a probe still in flight when a repository is
+ * bound: it lands afterwards carrying what it read before the write, and an
+ * unconditional update then replaces a confirmed repository with
+ * `connected: false`, making a write that landed look like one that never
+ * happened.
+
+ * So a write supersedes every read started before it, and a read may only
+ * commit if nothing has been written since it began. Counted rather than
+ * flagged, because the first write's own refresh has to be allowed through
+ * while a second write still overtakes it.
+ */
+export interface StatusGate {
+  /** A write landed: every read already in flight is now out of date. */
+  supersede(): void;
+  /** Begin a read, and get back whether its result may still be committed. */
+  begin(): () => boolean;
+}
+
+export function createStatusGate(): StatusGate {
+  let generation = 0;
+  return {
+    supersede() {
+      generation += 1;
+    },
+    begin() {
+      const at = generation;
+      return () => at === generation;
+    },
+  };
 }
