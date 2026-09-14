@@ -1,9 +1,10 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import {
   grantAdminCredit,
   lookupAdminUser,
 } from '../generation/admin-client.ts';
 import type { AdminGrant } from '../generation/admin-client.ts';
+import { createStatusGate } from '../github/panel-view.ts';
 
 type LookupState =
   | { phase: 'idle' }
@@ -19,6 +20,12 @@ type LookupState =
 type GrantState =
   | { phase: 'idle' }
   | { phase: 'granting' }
+  /**
+   * What the route said it did, which is the only thing that says a grant
+   * landed. Kept apart from the lookup so a refresh that fails afterwards
+   * cannot take the confirmation down with it.
+   */
+  | { phase: 'granted'; userId: string; creditUsdCents: number }
   | { phase: 'failed'; error: string };
 
 function formatUsd(micro: number): string {
@@ -45,15 +52,24 @@ export function AdminPanel() {
   const [note, setNote] = useState('');
   const [lookup, setLookup] = useState<LookupState>({ phase: 'idle' });
   const [grant, setGrant] = useState<GrantState>({ phase: 'idle' });
+  const lookups = useRef(createStatusGate());
   const emailId = useId();
   const amountId = useId();
   const noteId = useId();
 
+  // Latest wins, the same `createStatusGate` the connect panel and the push
+  // button use. A manual lookup can still be in flight when a grant finishes
+  // and refreshes: without this, the older answer can land last and show the
+  // balance from before the grant, which invites granting it again.
   async function runLookup() {
     const trimmed = email.trim();
     if (trimmed === '') return;
+    const gate = lookups.current;
+    gate.supersede();
+    const current = gate.begin();
     setLookup({ phase: 'loading' });
     const result = await lookupAdminUser(trimmed);
+    if (!current()) return;
     setLookup(
       result.ok
         ? {
@@ -63,6 +79,24 @@ export function AdminPanel() {
             grants: result.grants,
           }
         : { phase: 'failed', error: result.error },
+    );
+  }
+
+  /**
+   * A balance, a grant history and a result are all statements about one
+   * address. The moment the field names a different one they are about
+   * somebody else, and leaving them up puts one user's credit beside a form
+   * that will pay another. The in-flight lookup is superseded with them, so
+   * an answer for the address just abandoned cannot arrive and re-attach
+   * itself to this one.
+   */
+  function changeEmail(next: string) {
+    setEmail(next);
+    if (next.trim() === email.trim()) return;
+    lookups.current.supersede();
+    setLookup({ phase: 'idle' });
+    setGrant((previous) =>
+      previous.phase === 'granting' ? previous : { phase: 'idle' },
     );
   }
 
@@ -88,7 +122,16 @@ export function AdminPanel() {
         setGrant({ phase: 'failed', error: result.error });
         return;
       }
-      setGrant({ phase: 'idle' });
+      // The route says what it did and who it did it to. Saying it back is
+      // the only confirmation the grant landed: the refresh below is not
+      // one, because a refresh that fails would then read as a grant that
+      // failed, and the answer to a grant that looks like it failed is to
+      // make it again.
+      setGrant({
+        phase: 'granted',
+        userId: result.userId,
+        creditUsdCents: result.creditUsdCents,
+      });
       setAmount('');
       setNote('');
       // Refresh the balance shown so the grant that was just made is
@@ -126,7 +169,7 @@ export function AdminPanel() {
           className="prompt__input"
           placeholder="user@example.com"
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => changeEmail(event.target.value)}
         />
         <button
           type="button"
@@ -197,6 +240,11 @@ export function AdminPanel() {
           </button>
         </div>
       </form>
+      {grant.phase === 'granted' ? (
+        <p className="pane-note" role="status">
+          Granted {formatUsd(grant.creditUsdCents * 10_000)} to {grant.userId}.
+        </p>
+      ) : null}
       {grant.phase === 'failed' ? (
         <p className="pane-note pane-note--error" role="alert">
           {grant.error}
