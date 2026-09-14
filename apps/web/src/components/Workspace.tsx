@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import type { ProjectFile } from '@vibld/core';
 import type { BuilderState } from '../generation/session.ts';
 import {
   servingOlderThan,
@@ -21,6 +22,28 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 
+/**
+ * Whether the listed files are the accepted checkpoint's own.
+ *
+ * Compared rather than inferred from `status`. A submission refused before
+ * it starts (the budget reservation in `BuilderSession.submit`) leaves the
+ * status `failed` and never touches `stagedFiles`, so after an accepted
+ * checkpoint the list is still that checkpoint while the status says
+ * otherwise. Reading the status there marks the list "staged" and tells
+ * somebody the buttons act on something else, both about the very files
+ * they are looking at.
+ */
+function sameFiles(listed: ProjectFile[], accepted: ProjectFile[]): boolean {
+  return (
+    listed.length === accepted.length &&
+    listed.every(
+      (file, index) =>
+        file.path === accepted[index]?.path &&
+        file.content === accepted[index]?.content,
+    )
+  );
+}
+
 export function Workspace({ state }: { state: BuilderState }) {
   const [activeTab, setActiveTab] = useState<TabId>('preview');
   const [requestedPath, setRequestedPath] = useState<string | null>(null);
@@ -37,7 +60,10 @@ export function Workspace({ state }: { state: BuilderState }) {
   const selected =
     files.find((file) => file.path === requestedPath) ?? files[0] ?? null;
   /** The list is showing work that has not been accepted yet. */
-  const showingStaged = state.status !== 'accepted' && files.length > 0;
+  const showingStaged =
+    files.length > 0 &&
+    (state.acceptedSnapshot === null ||
+      !sameFiles(files, state.acceptedSnapshot.files));
 
   function onTabKeyDown(
     event: KeyboardEvent<HTMLButtonElement>,

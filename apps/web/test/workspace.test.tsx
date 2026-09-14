@@ -47,16 +47,17 @@ function serving(preview: () => Response): void {
   }) as typeof fetch;
 }
 
+const ACCEPTED = [{ path: 'index.html', content: '<h1>hi</h1>' }];
+const STAGED = [{ path: 'index.html', content: '<h1>newer</h1>' }];
+
+/** Accepted and listed are the same files, as they are after an acceptance. */
 function builder(overrides: Partial<BuilderState> = {}): BuilderState {
   return {
     status: 'accepted',
-    stagedFiles: [{ path: 'index.html', content: '<h1>hi</h1>' }],
+    stagedFiles: ACCEPTED.map((file) => ({ ...file })),
     problems: [],
     timeline: [],
-    acceptedSnapshot: {
-      revision: 'r1',
-      files: [{ path: 'index.html', content: '<h1>hi</h1>' }],
-    },
+    acceptedSnapshot: { revision: 'r1', files: ACCEPTED },
     acceptedBrief: null,
     ...overrides,
   } as BuilderState;
@@ -120,7 +121,9 @@ describe('the workspace, as it is actually wired', () => {
     // All three take the accepted snapshot on purpose. The list beside them
     // is showing the staged files, so without this they sit beneath one set
     // of files and act on another.
-    const view = await mount(builder({ status: 'staging' }));
+    const view = await mount(
+      builder({ status: 'staging', stagedFiles: STAGED }),
+    );
     await view.open(/Code/);
 
     assert.match(view.text(), /act on the last accepted checkpoint/);
@@ -136,8 +139,37 @@ describe('the workspace, as it is actually wired', () => {
     view.unmount();
   });
 
+  it('says nothing of the kind after a submit that never started', async () => {
+    // `BuilderSession.submit` sets `failed` when the budget reservation
+    // refuses a run, and never touches `stagedFiles`. After an accepted
+    // checkpoint the list is still that checkpoint, so reading the status
+    // here would mark those very files "staged" and tell somebody the
+    // buttons act on something else.
+    const view = await mount(
+      builder({ status: 'failed', problems: ['Run budget exceeded'] }),
+    );
+    await view.open(/Code/);
+
+    assert.doesNotMatch(view.text(), /act on the last accepted checkpoint/);
+    assert.doesNotMatch(view.text(), /staged/);
+    view.unmount();
+  });
+
+  it('says nothing about a list with nothing in it', async () => {
+    // A run in progress clears `stagedFiles` while the accepted snapshot
+    // still has files, so "not the staged files listed below" would point
+    // at an empty list.
+    const view = await mount(builder({ status: 'planning', stagedFiles: [] }));
+    await view.open(/Code/);
+
+    assert.doesNotMatch(view.text(), /act on the last accepted checkpoint/);
+    view.unmount();
+  });
+
   it('marks a list of staged files as staged', async () => {
-    const view = await mount(builder({ status: 'staging' }));
+    const view = await mount(
+      builder({ status: 'staging', stagedFiles: STAGED }),
+    );
     await view.open(/Code/);
 
     assert.match(view.text(), /staged/);
