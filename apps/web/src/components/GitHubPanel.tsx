@@ -254,6 +254,23 @@ function GitHubConnection() {
         />
       )}
 
+      {view.omitted && (
+        <p className="github-panel__omitted">
+          Vibld did not read {view.omitted.length}{' '}
+          {view.omitted.length === 1 ? 'account' : 'accounts'}:{' '}
+          <strong>{view.omitted.join(', ')}</strong>. To connect a repository on
+          one of those,{' '}
+          <a
+            href="https://github.com/apps/vibld/installations/new"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            install the Vibld app on that account
+          </a>{' '}
+          and connect again.
+        </p>
+      )}
+
       {view.summary?.connected === true && (
         <p>
           {view.summary.pushing === 'yes' ? 'Pushing to ' : 'Connected to '}

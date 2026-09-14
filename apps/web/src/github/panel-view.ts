@@ -53,6 +53,20 @@ export type PanelView =
       problem?: PanelProblem;
       picker?: ConnectOffer;
       summary?: PanelSummary;
+      /**
+       * Accounts the server could not read, named so the offer is not
+       * presented as the whole truth.
+       *
+       * Without a hint GitHub's callback carries no installation id, which
+       * is the ordinary case once the App is installed, so the server's read
+       * budget simply stops and everything past it goes unmentioned. The
+       * user token is discarded by then, so those repositories cannot be
+       * fetched afterwards and a silent short list is indistinguishable from
+       * a complete one. Installing again on the named account returns an id
+       * the server reads directly and outside the budget, so saying this is
+       * what keeps it a limit rather than a dead end.
+       */
+      omitted?: string[];
     };
 
 const HIDDEN: PanelView = { show: false };
@@ -123,6 +137,14 @@ export function decidePanel(
   }
 
   if (choosing && phase.at === 'choosing') view.picker = phase.offer;
+
+  // Reported whether or not anything was offered. An empty offer with
+  // unread accounts behind it is the case where saying so matters most:
+  // "none of these are pushable" is a different sentence from "and Vibld
+  // did not look at three of your accounts".
+  if (phase.at === 'choosing' && (phase.offer.omitted?.length ?? 0) > 0) {
+    view.omitted = phase.offer.omitted;
+  }
 
   // Beside a failure, so a failed disconnect still shows what is connected,
   // but not beside a choice or a step in progress, which are about to replace

@@ -842,6 +842,42 @@ describe('when the account reaches more installations than are read', () => {
     );
   });
 
+  it('names the accounts it did not read, rather than dropping them', async () => {
+    // The ordinary path has no hint at all: once the App is installed,
+    // GitHub's authorization callback carries `code` and `state` and no
+    // `installation_id`. So the two accounts past the cap are not merely
+    // unlisted, they are unreachable, because the user token is discarded
+    // when this ends. Naming them turns that back into a limit: installing
+    // again on one returns an id, and a named installation is read directly
+    // and outside the budget.
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state }),
+      env(db),
+      PRINCIPAL,
+      githubFor(MANY, REPOS),
+      NOW,
+    );
+    const body = (await response.json()) as { omitted?: string[] };
+    assert.deepEqual(body.omitted, ['account-10', 'account-11']);
+  });
+
+  it('says nothing about omissions when it read them all', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const few = MANY.slice(0, 3);
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state }),
+      env(db),
+      PRINCIPAL,
+      githubFor(few, REPOS),
+      NOW,
+    );
+    const body = (await response.json()) as { omitted?: string[] };
+    assert.equal(body.omitted, undefined);
+  });
+
   it('ignores a hint that names an installation the user cannot reach', async () => {
     // Still only a reordering of what GitHub said this account can reach.
     const body = await complete({ installation: '999999' });

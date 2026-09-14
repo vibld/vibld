@@ -39,6 +39,16 @@ export interface RepositoryChoice {
 export interface ConnectOffer {
   repositories: RepositoryChoice[];
   ticket: string;
+  /**
+   * Accounts the server's read budget did not reach, by login.
+   *
+   * Almost always empty. When it is not, this list is the difference between
+   * a short offer and a silently wrong one: the user token is gone by now,
+   * so an unread account's repositories cannot be fetched later, and the
+   * only route to them is installing again on that account, which returns an
+   * installation id the server reads directly and outside the budget.
+   */
+  omitted?: string[];
 }
 
 /** What came back on the URL after GitHub sent the browser here. */
@@ -369,15 +379,20 @@ export async function completeConnect(
   const body = (await response.json()) as {
     repositories?: unknown;
     ticket?: unknown;
+    omitted?: unknown;
   };
   if (!Array.isArray(body.repositories) || typeof body.ticket !== 'string') {
     return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
   }
+  const omitted = Array.isArray(body.omitted)
+    ? body.omitted.filter((entry): entry is string => typeof entry === 'string')
+    : [];
   return {
     ok: true,
     offer: {
       repositories: body.repositories as RepositoryChoice[],
       ticket: body.ticket,
+      ...(omitted.length > 0 ? { omitted } : {}),
     },
   };
 }

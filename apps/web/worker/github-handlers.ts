@@ -635,6 +635,12 @@ export async function handleGitHubComplete(
   return json({
     installations: installations.value,
     repositories: offered,
+    // The accounts the read budget did not reach, so the panel can say so
+    // rather than presenting a short list as the whole truth. Omitted from
+    // the body when there are none, which is almost always.
+    ...(repositories.value.omitted.length > 0
+      ? { omitted: repositories.value.omitted }
+      : {}),
     // What the bind call may choose from, signed. See `signChoice`.
     ticket: await signChoice(
       credentials,

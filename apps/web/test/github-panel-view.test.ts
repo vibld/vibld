@@ -282,6 +282,67 @@ describe('an exchange that found nothing to offer', () => {
   });
 });
 
+describe('accounts the read budget never reached', () => {
+  // The finding: without an installation hint, and GitHub's callback carries
+  // none once the App is already installed, the server's budget stops at ten
+  // and everything past it is dropped. The user token is discarded by then,
+  // so those repositories cannot be fetched afterwards: a short list that
+  // looks exactly like a complete one, permanently.
+  const OMITTED = {
+    at: 'choosing' as const,
+    offer: {
+      repositories: [CHOICE],
+      ticket: 'tkt',
+      omitted: ['globex', 'initech'],
+    },
+  };
+
+  it('names them beside the offer', () => {
+    const view = decidePanel(OMITTED, CONFIGURED);
+    assert.deepEqual(view.show && view.omitted, ['globex', 'initech']);
+    assert.ok(view.show && view.picker, 'the offer itself went missing');
+  });
+
+  it('says nothing when the budget reached everything', () => {
+    const view = decidePanel(
+      { at: 'choosing', offer: { repositories: [CHOICE], ticket: 'tkt' } },
+      CONFIGURED,
+    );
+    assert.equal(view.show && view.omitted, undefined);
+  });
+
+  it('treats an empty list as nothing to say, not as something to draw', () => {
+    // The first version of the test above passed whether or not the guard
+    // was there, because assigning `undefined` and assigning nothing are the
+    // same to it. An empty array is what the guard actually stops, and
+    // letting one through leaves the panel drawing a sentence about no
+    // accounts.
+    const view = decidePanel(
+      {
+        at: 'choosing',
+        offer: { repositories: [CHOICE], ticket: 'tkt', omitted: [] },
+      },
+      CONFIGURED,
+    );
+    assert.equal(view.show && view.omitted, undefined);
+  });
+
+  it('still names them when the offer itself is empty', () => {
+    // The case where saying so matters most: "none of these are pushable"
+    // and "Vibld did not look at two of your accounts" are different
+    // sentences, and only the second one has a route out of it.
+    const view = decidePanel(
+      {
+        at: 'choosing',
+        offer: { repositories: [], ticket: 'tkt', omitted: ['globex'] },
+      },
+      CONFIGURED,
+    );
+    assert.deepEqual(view.show && view.omitted, ['globex']);
+    assert.ok(view.show && view.problem, 'the empty offer lost its remedy');
+  });
+});
+
 describe('what is shown beside what', () => {
   it('leaves the summary out while a choice is being made', () => {
     const view = decidePanel(

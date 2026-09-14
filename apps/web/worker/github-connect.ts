@@ -615,6 +615,22 @@ export interface Connectable {
    * "read nothing", and the repository list alone cannot.
    */
   read: number;
+  /**
+   * The accounts the budget left unread, by login.
+   *
+   * Empty almost always, and the whole point when it is not. Without a hint
+   * GitHub's callback carries no `installation_id`, which is the ordinary
+   * case for an App that is already installed, so nothing is read outside
+   * the budget and everything past it is simply dropped. Dropped silently,
+   * the user token is gone and those repositories become unreachable rather
+   * than merely unlisted: the fourth time this shape has appeared here.
+   *
+   * Naming them is what turns it back into a limit. The install link returns
+   * an `installation_id`, and an installation named on the way back is read
+   * directly and outside the budget, so there is a route to every one of
+   * these and the panel can say what it is.
+   */
+  omitted: string[];
 }
 
 export async function connectableRepositories(
@@ -665,9 +681,16 @@ export async function connectableRepositories(
   // omits it, and the user token is gone before anyone could retry.
   const probeFailure = probe ? await gather(probe) : null;
 
+  const omitted: string[] = [];
   for (const installation of installations) {
     if (installation.id === probe?.id) continue;
-    if (read >= MAX_INSTALLATIONS_READ) break;
+    if (read >= MAX_INSTALLATIONS_READ) {
+      // Recorded rather than broken out of, so the caller can say which
+      // accounts were not looked at. Reading them is what the budget
+      // refuses; naming them costs nothing.
+      omitted.push(installation.account);
+      continue;
+    }
     read += 1;
     await gather(installation);
   }
@@ -692,7 +715,10 @@ export async function connectableRepositories(
   // installation answered perfectly well, which is the same "count as a
   // proxy for whether anything was read" mistake as the install prompt.
   if (succeeded === 0 && lastFailure) return lastFailure;
-  return { ok: true, value: { repositories: connectable, read: succeeded } };
+  return {
+    ok: true,
+    value: { repositories: connectable, read: succeeded, omitted },
+  };
 }
 
 /** Whether retrying could change this answer. */
