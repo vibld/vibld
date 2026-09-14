@@ -462,6 +462,65 @@ export async function completeConnect(
 }
 
 /** Write the binding for the repository the person picked. */
+const connectionListeners = new Set<() => void>();
+
+/**
+ * Hear that the connection changed, from wherever it was changed.
+ *
+ * Two places in the builder read `/api/github/status` and each keeps its own
+ * copy: the panel in the header and the push button in the Code tab. Until
+ * this, only the one that made the change learned of it. Binding a
+ * repository from the panel with the Code tab already open left the button
+ * hidden, because the status it read on mount said there was nothing to push
+ * to and nothing ever told it otherwise; disconnecting left the button up,
+ * naming a repository that is no longer connected.
+ *
+ * Published by the writes themselves rather than by the panel that calls
+ * them, because a bind changing the connection is a fact about the bind. A
+ * second caller elsewhere would otherwise have to remember to announce it,
+ * and the failure of remembering is silent.
+ *
+ * Returns the unsubscribe.
+ */
+export function onConnectionChanged(listener: () => void): () => void {
+  connectionListeners.add(listener);
+  return () => {
+    connectionListeners.delete(listener);
+  };
+}
+
+/**
+ * Say the connection changed, for a caller that found out rather than did it.
+ *
+ * A push is the only thing here that can discover a change made somewhere
+ * else: another tab, another device, or a grant that simply expired. The
+ * writes announce for themselves, but `pushSnapshot` deliberately does not,
+ * because announcing supersedes the very generations its own caller is
+ * holding while it waits, and a push would cancel itself. So the caller
+ * announces once it has finished reading the answer.
+ */
+export function noteConnectionChanged(): void {
+  announceConnectionChanged();
+}
+
+function announceConnectionChanged(): void {
+  // Over a copy, so this dispatch reaches exactly the listeners that were
+  // subscribed when the write landed: one that subscribes another while
+  // being called is reacting to this change, not asking to be told about it
+  // twice. (Removing during iteration needs no copy; a Set handles that.)
+  //
+  // Each one caught on its own. The write has already landed, and one
+  // subscriber throwing is neither a reason to report a successful bind as
+  // failed nor a reason for the rest not to hear about it.
+  for (const listener of [...connectionListeners]) {
+    try {
+      listener();
+    } catch {
+      // Not this write's problem, and not worth a provider's reply in a log.
+    }
+  }
+}
+
 export interface BoundRepository {
   owner: string;
   repo: string;
@@ -497,6 +556,11 @@ export async function bindRepository(
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
 
+  // Here rather than beside the return, so an unreadable reply still tells
+  // everyone else the connection moved. The write landed either way, and the
+  // fallback below is about what to show, not about whether it happened.
+  announceConnectionChanged();
+
   // The binding comes back in the reply, so the caller does not need a
   // second round trip to know what it just connected. That matters: a status
   // refresh that fails after a write has already succeeded would otherwise
@@ -527,6 +591,208 @@ export async function bindRepository(
   return { ok: true, bound };
 }
 
+/** What a push wrote, as `/api/github/push` reports it. */
+export interface PushedSnapshot {
+  branch: string;
+  commitSha: string;
+  /**
+   * False when the branch was already there carrying this exact tree.
+   *
+   * The route distinguishes these and so does this, because they are
+   * different things to tell somebody: one moved their work, the other found
+   * it already moved. Collapsing them would report a commit that this push
+   * did not make.
+   */
+  created: boolean;
+  pullRequestUrl?: string;
+}
+
+/**
+ * A branch that is already there and points somewhere else.
+ *
+ * Carried out of the reply rather than left inside its sentence, because
+ * `docs/push-and-deploy-plan.md` commits to surfacing a conflict with both
+ * shas, and the sentence names the branch and neither. The reply is the only
+ * place they exist: nothing here can ask again, so reading past them loses
+ * them for good.
+ *
+ * The two are different kinds of object and are labelled as such wherever
+ * they are shown. `existingSha` is the commit the branch points at;
+ * `attemptedTreeSha` is the tree this checkpoint builds. Presenting them as
+ * a pair to compare would invite a comparison that means nothing.
+ */
+export interface PushConflict {
+  branch: string;
+  /** The commit the branch points at now. */
+  existingSha: string;
+  /** The tree this push built and wanted the branch to carry. */
+  attemptedTreeSha: string;
+}
+
+/**
+ * All three fields or none of it.
+ *
+ * A half-read conflict is worse than no conflict: it draws the sentence that
+ * promises both shas and then prints a blank where one of them should be,
+ * which reads as though the branch points at nothing.
+ */
+function conflictFrom(value: unknown): PushConflict | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { branch, existingSha, attemptedTreeSha } = value as Record<
+    string,
+    unknown
+  >;
+  if (typeof branch !== 'string' || !branch) return null;
+  if (typeof existingSha !== 'string' || !existingSha) return null;
+  if (typeof attemptedTreeSha !== 'string' || !attemptedTreeSha) return null;
+  return { branch, existingSha, attemptedTreeSha };
+}
+
+/**
+ * Both halves or neither, the same rule `conflictFrom` follows.
+ *
+ * Half a destination cannot be compared against the one on screen, so a
+ * caller holding it would have to guess whether its message still applies,
+ * and guessing is what carrying the destination exists to avoid.
+ */
+function destinationFrom(
+  value: unknown,
+): { owner: string; repo: string } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { owner, repo } = value as Record<string, unknown>;
+  if (typeof owner !== 'string' || !owner) return null;
+  if (typeof repo !== 'string' || !repo) return null;
+  return { owner, repo };
+}
+
+export type PushResult =
+  | { ok: true; pushed: PushedSnapshot }
+  | {
+      ok: false;
+      error: string;
+      reconnect?: boolean;
+      conflict?: PushConflict;
+      /**
+       * Where the connection actually points, when this caller was wrong.
+       *
+       * A third remedy beside the other two, and a third reason to keep it
+       * out of the sentence. Reconnecting is wrong here (the connection is
+       * fine, this tab's idea of it is not) and retrying is wrong too, since
+       * the same request would be refused the same way. Reading the
+       * connection again is the only thing that helps, and it is the one
+       * thing a message cannot do on its own.
+       *
+       * The destination rather than a flag, because the sentence beside it
+       * names that repository. A caller holding the name can tell whether
+       * the sentence is still about the place on screen once it has read
+       * the connection again; a bare flag would leave it repeating a
+       * sentence about a repository it can no longer identify.
+       */
+      movedTo?: { owner: string; repo: string };
+    };
+
+/**
+ * Push an accepted checkpoint to the connected repository.
+ *
+ * `revision` and `files` are what the snapshot already holds, sent as they
+ * are: the route keys the operation on the revision so a retry of one
+ * checkpoint cannot become a second branch, which is the whole reason it is
+ * not a client-generated id.
+ *
+ * `reconnect` is carried through rather than folded into the sentence,
+ * because the two are different remedies and the route already separates
+ * them: a lost grant wants a fresh connection, and everything else does not.
+ *
+ * `to` is where the caller believes it is pushing, sent so the route can
+ * refuse if that is no longer where the connection points. Required rather
+ * than optional: the route reads the binding when the request arrives, and
+ * a caller that does not say where it meant to go is asking for whatever is
+ * connected by then, which is how a button labelled one repository writes to
+ * another. Filtering the reply afterwards would only make the button quiet
+ * about it.
+ */
+export async function pushSnapshot(
+  snapshot: { revision: string; files: { path: string; content: string }[] },
+  to: { owner: string; repo: string },
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<PushResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl('/api/github/push', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(await authHeaders(getToken)),
+      },
+      body: JSON.stringify({
+        revision: snapshot.revision,
+        files: snapshot.files,
+        owner: to.owner,
+        repo: to.repo,
+      }),
+    });
+  } catch {
+    return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
+  }
+
+  if (!response.ok) {
+    let error = 'Something went wrong talking to GitHub. Try again shortly.';
+    let reconnect = false;
+    let conflict: PushConflict | null = null;
+    let movedTo: { owner: string; repo: string } | null = null;
+    try {
+      const body = (await response.json()) as {
+        error?: unknown;
+        reconnect?: unknown;
+        conflict?: unknown;
+        movedTo?: unknown;
+      };
+      if (typeof body.error === 'string' && body.error) error = body.error;
+      reconnect = body.reconnect === true;
+      conflict = conflictFrom(body.conflict);
+      movedTo = destinationFrom(body.movedTo);
+    } catch {
+      // Keep the generic sentence.
+    }
+    return {
+      ok: false,
+      error,
+      ...(reconnect ? { reconnect: true } : {}),
+      ...(conflict ? { conflict } : {}),
+      ...(movedTo ? { movedTo } : {}),
+    };
+  }
+
+  // Guarded for the same reason the failure branch above is, and with more
+  // riding on it: this one is awaited by a button that has already gone
+  // busy, so a rejection here is not a thrown error anybody sees. It is a
+  // button that stays disabled until the page is reloaded.
+  let body: Partial<PushedSnapshot>;
+  try {
+    body = (await response.json()) as Partial<PushedSnapshot>;
+  } catch {
+    return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
+  }
+  if (typeof body.branch !== 'string' || typeof body.commitSha !== 'string') {
+    return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
+  }
+  return {
+    ok: true,
+    pushed: {
+      branch: body.branch,
+      commitSha: body.commitSha,
+      // Absent is read as "it made one" rather than as false. The route
+      // always sends it, so absence means an older deployment, and claiming
+      // a push found nothing to do is the more misleading of the two.
+      created: body.created !== false,
+      ...(typeof body.pullRequestUrl === 'string'
+        ? { pullRequestUrl: body.pullRequestUrl }
+        : {}),
+    },
+  };
+}
+
 /** Stop pushing to the connected repository. */
 export async function disconnectRepository(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
@@ -542,5 +808,6 @@ export async function disconnectRepository(
     return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
+  announceConnectionChanged();
   return { ok: true };
 }

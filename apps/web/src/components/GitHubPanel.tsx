@@ -9,6 +9,7 @@ import {
   disconnectRepository,
   holdHandoff,
   fetchGitHubStatus,
+  onConnectionChanged,
 } from '../github/github-client.ts';
 import type {
   ConnectOffer,
@@ -135,6 +136,22 @@ function GitHubConnection() {
       release();
     };
   }, []);
+
+  /**
+   * Hear about a connection this panel did not change itself.
+   *
+   * It publishes on this already, through `bindRepository` and
+   * `disconnectRepository`, and until now it never listened: a rebind found
+   * by a push in another tab or on another device refreshed the push button
+   * and left the header saying the old repository was still connected. That
+   * is worse than looking out of date, because Disconnect on a stale panel
+   * disconnects whatever is bound now rather than the thing it is naming.
+   *
+   * Its own writes come back through here too, harmlessly: the refresh they
+   * trigger begins before they supersede the gate, so the write's own reply
+   * is what wins and this only arrives late enough to be discarded.
+   */
+  useEffect(() => onConnectionChanged(() => void refreshStatus()), []);
 
   /**
    * Go and install the App, carrying a state that comes back.

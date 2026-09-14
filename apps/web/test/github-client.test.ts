@@ -5,6 +5,9 @@ import {
   beginConnect,
   beginInstall,
   bindRepository,
+  disconnectRepository,
+  onConnectionChanged,
+  pushSnapshot,
   claimHandoff,
   clearHandoff,
   completeClaimedConnect,
@@ -426,6 +429,385 @@ describe('taking the handoff off the URL', () => {
  * fail its own check, reporting that the connection did not come from this
  * browser when it did.
  */
+describe('pushing an accepted checkpoint', () => {
+  const SNAPSHOT = {
+    revision: 'r7',
+    files: [{ path: 'index.html', content: '<p>hi</p>' }],
+  };
+
+  /** Where the button believed it was pushing when it was clicked. */
+  const TO = { owner: 'acme', repo: 'site' };
+
+  it('sends the revision and the files the route keys on', async () => {
+    const sent: unknown[] = [];
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async (_url: string, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return json({ branch: 'vibld/r7', commitSha: 'abc', created: true });
+      }) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    // The destination travels with it. The route reads the binding when the
+    // request arrives, so a push that does not say where it meant to go is
+    // asking for whatever is connected by then, which is how a button
+    // labelled one repository writes to another.
+    assert.deepEqual(sent[0], { ...SNAPSHOT, owner: 'acme', repo: 'site' });
+  });
+
+  it('reads back what was written', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json({
+          branch: 'vibld/r7',
+          commitSha: 'abc',
+          created: true,
+          pullRequestUrl: 'https://github.com/acme/site/pull/1',
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.pushed, {
+        branch: 'vibld/r7',
+        commitSha: 'abc',
+        created: true,
+        pullRequestUrl: 'https://github.com/acme/site/pull/1',
+      });
+    }
+  });
+
+  it('keeps "the branch was already there" as its own answer', async () => {
+    // What a retry looks like when the first reply was lost. Reporting it as
+    // a fresh push sends somebody looking for a commit nothing just made.
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json({
+          branch: 'vibld/r7',
+          commitSha: 'abc',
+          created: false,
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.pushed.created, false);
+  });
+
+  it('reads an absent `created` as a push rather than as a no-op', async () => {
+    // The route always sends it, so absence means an older deployment. Of
+    // the two ways to be wrong, claiming a push found nothing to do is the
+    // more misleading.
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json({
+          branch: 'vibld/r7',
+          commitSha: 'abc',
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.pushed.created, true);
+  });
+
+  it('carries `reconnect` rather than folding it into the sentence', async () => {
+    // A lost grant and a rate limit want different remedies, and the route
+    // already separates them. Collapsing that here is the mistake this
+    // feature has made more than any other.
+    const lost = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          { error: 'Vibld’s access was withdrawn.', reconnect: true },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(lost.ok, false);
+    if (!lost.ok) assert.equal(lost.reconnect, true);
+
+    const limited = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          { error: 'Too many pushes. Try again shortly.' },
+          429,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(limited.ok, false);
+    if (!limited.ok) assert.equal(limited.reconnect, undefined);
+  });
+
+  it('reports an unreadable success rather than inventing a branch', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () => json({ ok: true })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+  });
+
+  it('reports being unable to reach Vibld as that', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () => {
+        throw new Error('offline');
+      }) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /Could not reach Vibld/);
+  });
+
+  it('carries a conflict with both shas rather than its sentence alone', async () => {
+    // `docs/push-and-deploy-plan.md` promises a conflict is surfaced with
+    // both shas, and the sentence the route writes names the branch and
+    // neither of them. This reply is the only place they exist.
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          {
+            error:
+              'The branch vibld/r7 already exists and points somewhere else.',
+            conflict: {
+              branch: 'vibld/r7',
+              existingSha: 'a'.repeat(40),
+              attemptedTreeSha: 'b'.repeat(40),
+            },
+          },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.conflict, {
+        branch: 'vibld/r7',
+        existingSha: 'a'.repeat(40),
+        attemptedTreeSha: 'b'.repeat(40),
+      });
+    }
+  });
+
+  it('drops a conflict missing a sha rather than showing a blank one', async () => {
+    // The sentence that carries a conflict promises both. Half of one draws
+    // that sentence around an empty space, which reads as a branch pointing
+    // at nothing.
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          {
+            error:
+              'The branch vibld/r7 already exists and points somewhere else.',
+            conflict: { branch: 'vibld/r7', existingSha: 'a'.repeat(40) },
+          },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.conflict, undefined);
+      // The sentence still gets through.
+      assert.match(result.error, /already exists/);
+    }
+  });
+
+  it('carries where the connection actually points, not just that it moved', async () => {
+    // A third remedy beside reconnecting and retrying, and neither of those
+    // two. The connection is fine; this browser's idea of it is not, and
+    // the same request would be refused the same way. The destination comes
+    // with it because the sentence names that repository, and a caller that
+    // cannot name it cannot tell whether the sentence still applies once it
+    // has read the connection again.
+    const moved = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          {
+            error:
+              'Vibld is connected to acme/other, which is not where this push was for.',
+            movedTo: { owner: 'acme', repo: 'other' },
+          },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(moved.ok, false);
+    if (!moved.ok) {
+      assert.deepEqual(moved.movedTo, { owner: 'acme', repo: 'other' });
+      // Not a lost grant. Offering a reconnection would be a loop.
+      assert.equal(moved.reconnect, undefined);
+    }
+
+    const other = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          { error: 'Too many pushes. Try again shortly.' },
+          429,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(other.ok, false);
+    if (!other.ok) assert.equal(other.movedTo, undefined);
+  });
+
+  it('drops half a moved destination rather than half naming one', async () => {
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        json(
+          { error: 'no', movedTo: { owner: 'acme' } },
+          409,
+        )) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.movedTo, undefined);
+  });
+
+  it('says a success it cannot parse is unreadable rather than hanging', async () => {
+    // A rejection here is not an error anybody sees: the caller has already
+    // gone busy and is awaiting this, so the button would stay disabled
+    // until the page was reloaded.
+    const result = await pushSnapshot(
+      SNAPSHOT,
+      TO,
+      (async () =>
+        new Response('', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.error, /could not read/);
+  });
+});
+
+/**
+ * Two components read the connection and each keeps its own copy.
+ *
+ * The panel in the header binds and disconnects; the push button in the Code
+ * tab reads the same status and is a sibling rather than a child, so nothing
+ * about a bind reaches it on its own. Published from the writes themselves,
+ * because a second caller would otherwise have to remember to announce it,
+ * and forgetting is silent.
+ */
+describe('telling the rest of the builder the connection moved', () => {
+  const CHOICE = { owner: 'acme', repo: 'site', defaultBranch: 'main' };
+  const bound = (async () =>
+    json({
+      owner: 'acme',
+      repo: 'site',
+      defaultBranch: 'main',
+    })) as unknown as typeof fetch;
+
+  it('tells a listener when a repository is bound', async () => {
+    let told = 0;
+    const stop = onConnectionChanged(() => {
+      told += 1;
+    });
+    await bindRepository('t', CHOICE, bound, TOKEN);
+    stop();
+    assert.equal(told, 1);
+  });
+
+  it('tells a listener when the repository is disconnected', async () => {
+    let told = 0;
+    const stop = onConnectionChanged(() => {
+      told += 1;
+    });
+    await disconnectRepository(
+      (async () => json({ ok: true })) as unknown as typeof fetch,
+      TOKEN,
+    );
+    stop();
+    assert.equal(told, 1);
+  });
+
+  it('says nothing when the write did not land', async () => {
+    // Nothing moved, so a refresh would read back exactly what is already on
+    // screen and the second request is the only thing that happened.
+    let told = 0;
+    const stop = onConnectionChanged(() => {
+      told += 1;
+    });
+    await bindRepository(
+      't',
+      CHOICE,
+      (async () => json({ error: 'no' }, 409)) as unknown as typeof fetch,
+      TOKEN,
+    );
+    stop();
+    assert.equal(told, 0);
+  });
+
+  it('stops telling a listener that unsubscribed', async () => {
+    let told = 0;
+    const stop = onConnectionChanged(() => {
+      told += 1;
+    });
+    stop();
+    await bindRepository('t', CHOICE, bound, TOKEN);
+    assert.equal(told, 0);
+  });
+
+  it('does not tell a listener subscribed while the news was going out', async () => {
+    // Somebody reacting to this change is not asking to be told about it,
+    // and calling them for the change they are already handling is a
+    // refresh of something they have in hand.
+    const heard: string[] = [];
+    const stops: (() => void)[] = [];
+    stops.push(
+      onConnectionChanged(() => {
+        heard.push('first');
+        stops.push(onConnectionChanged(() => void heard.push('late')));
+      }),
+    );
+    await bindRepository('t', CHOICE, bound, TOKEN);
+    for (const stop of stops) stop();
+    assert.deepEqual(heard, ['first']);
+  });
+
+  it('lets one listener throw without failing the write or silencing the next', async () => {
+    // The write has already landed by the time this runs. Reporting a bind
+    // that worked as a failure because something listening threw would be
+    // the worst of both.
+    const heard: string[] = [];
+    const first = onConnectionChanged(() => {
+      heard.push('first');
+      throw new Error('listener');
+    });
+    const second = onConnectionChanged(() => void heard.push('second'));
+    const result = await bindRepository('t', CHOICE, bound, TOKEN);
+    first();
+    second();
+    assert.equal(result.ok, true);
+    assert.deepEqual(heard, ['first', 'second']);
+  });
+});
+
 /**
  * Installing is a leg of the same flow, not a link out of it.
  *

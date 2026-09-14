@@ -39,7 +39,6 @@ import {
   verifyChoice,
   verifyState,
   type GitHubOAuthEnv,
-  type RepositoryChoice,
 } from './github-connect.ts';
 import type { Principal } from './principal.ts';
 
@@ -189,6 +188,30 @@ function parseRevision(body: unknown): string | null {
 }
 
 /**
+ * Where the caller believes it is pushing. Required.
+ *
+ * It was optional for one commit, so that a browser holding the previous
+ * bundle through a deploy could still push. That is the wrong trade: a tab
+ * old enough to be sending the previous bundle is the tab most likely to be
+ * holding a binding that has since moved, which is the whole of what this
+ * check exists to catch. An optional guard is skipped by exactly the
+ * requests that most need it, and a push nobody constrained is worse than a
+ * push that fails until the tab is reloaded.
+ *
+ * Both halves and both non-empty. An owner with no repository has not said
+ * where it meant to go, and choosing which half to believe would be
+ * inventing the other.
+ */
+function parseExpectedRepository(
+  body: unknown,
+): { owner: string; repo: string } | null {
+  const { owner, repo } = (body ?? {}) as { owner?: unknown; repo?: unknown };
+  if (typeof owner !== 'string' || typeof repo !== 'string') return null;
+  if (!owner.trim() || !repo.trim()) return null;
+  return { owner: owner.trim(), repo: repo.trim() };
+}
+
+/**
  * Push an accepted checkpoint to the connected repository.
  *
  * The caller has already been identified; this takes the principal rather
@@ -247,6 +270,55 @@ export async function handleGitHubPush(
     return json(
       { error: '"revision" must name a checkpoint that can become a branch.' },
       400,
+    );
+  }
+
+  // The binding is read here, and the button that offered this push read it
+  // whenever it last looked. In between, another tab or the panel in the
+  // header can rebind, and without this the click lands on whatever is
+  // connected now: a button labelled one repository writing to another.
+  // ADR-0007 is about not doing things to somebody's repository that they
+  // did not ask for, and a push to a repository they were not looking at is
+  // one of those, however briefly the two disagreed.
+  //
+  // It also keeps `(user, owner, repo, revision)` meaning what it says. Two
+  // clicks either side of a rebind both resolve to the repository bound last
+  // and become one operation on one key, so the first click's destination
+  // never receives its push and nothing reports that.
+  const expected = parseExpectedRepository(body);
+  if (!expected) {
+    return json(
+      {
+        error: '"owner" and "repo" must say which repository this push is for.',
+      },
+      400,
+    );
+  }
+  if (!sameRepository(expected, binding)) {
+    return json(
+      {
+        // Only the binding is named. The other half of this sentence would
+        // be a string out of the request body, reflected into a message the
+        // browser then draws, and nothing here has any reason to repeat a
+        // caller's own input back at it.
+        error:
+          `Vibld is connected to ${binding.owner}/${binding.repo}, which is not where this push was for. ` +
+          `Nothing was pushed. Check where Vibld is pointing, then push again.`,
+        // Said apart from the sentence, because it comes with something to
+        // do rather than something to read: whatever asked for this push is
+        // holding a destination that has moved, and the answer is to read
+        // the connection again. Without it a tab that missed the change
+        // repeats the same rejected push forever, since nothing in a 409
+        // tells it that what it believes is the thing that is wrong.
+        //
+        // The destination itself rather than a flag saying one moved. The
+        // sentence above is about this repository, and a caller that knows
+        // which one can tell whether that sentence is still worth drawing
+        // by the time it has read the connection again. A bare flag leaves
+        // it describing a repository it can no longer name.
+        movedTo: { owner: binding.owner, repo: binding.repo },
+      },
+      409,
     );
   }
 
@@ -659,8 +731,18 @@ export async function handleGitHubComplete(
   });
 }
 
+/**
+ * The same repository, by GitHub's reckoning rather than by string equality.
+ *
+ * GitHub resolves an owner and a name without regard to case, so `acme/Site`
+ * and `acme/site` are one repository. Used by the bind, to match a choice
+ * against the list the callback signed, and by the push, to refuse one whose
+ * destination has moved: there, comparing exactly would refuse a push whose
+ * destination had not moved at all, and that is a refusal with nothing the
+ * person can do about it.
+ */
 function sameRepository(
-  a: RepositoryChoice,
+  a: { owner: string; repo: string },
   b: { owner: string; repo: string },
 ) {
   return (
