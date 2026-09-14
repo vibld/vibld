@@ -60,7 +60,7 @@ Directories that have not reached their implementation milestone contain a short
 
 Prerequisites:
 
-- Node.js 22 or newer
+- Node.js 22.15 or newer
 - pnpm
 
 ```bash

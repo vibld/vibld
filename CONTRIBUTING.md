@@ -10,7 +10,7 @@ Thank you for helping build Vibld. The project is in an early architectural stag
 
 ## Development setup
 
-Install Node.js 22 or newer and pnpm, then run:
+Install Node.js 22.15 or newer and pnpm, then run:
 
 ```bash
 pnpm install --frozen-lockfile
