@@ -116,16 +116,71 @@ describe('what a running sandbox remembers', () => {
     view.unmount();
   });
 
-  it('moves to the checkpoint a restart was asked for', async () => {
-    serving({
+  it('stops the running sandbox before it claims to have restarted it', async () => {
+    // `startPreview` reports an existing preview rather than replacing it,
+    // so without the stop the second run hands back the sandbox still
+    // serving r1 while this records r2 against it. The staleness warning
+    // would then be hidden in exactly the case it exists for, and its
+    // absence is itself a claim that the frame is current.
+    const calls = serving({
       '/api/preview/share': () => reply({ shares: [] }),
       '/api/preview': () => reply(READY),
     });
     const view = await mount();
     await view.run('r1');
+    const before = calls.length;
     await view.run('r2');
 
+    const restart = calls
+      .slice(before)
+      .filter((call) => call.endsWith('/api/preview'));
+    assert.deepEqual(restart, ['DELETE /api/preview', 'POST /api/preview']);
     assert.equal(view.sandbox.ranRevision, 'r2');
+    view.unmount();
+  });
+
+  it('does not stop anything on a first run', async () => {
+    const calls = serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    assert.deepEqual(
+      calls.filter((call) => call.startsWith('DELETE')),
+      [],
+      'it stopped a sandbox that was not running',
+    );
+    view.unmount();
+  });
+
+  it('claims no checkpoint when the running sandbox will not stop', async () => {
+    // Without a stop there is no restart, so recording the new checkpoint
+    // would put the current revision on the older project.
+    let stops = 0;
+    const view = await mount();
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r1');
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => {
+        stops += 1;
+        return reply({ error: 'The sandbox is busy.' }, 503);
+      },
+    });
+    await view.run('r2');
+
+    assert.equal(stops, 1, 'it did not try to stop the running sandbox');
+    assert.equal(view.sandbox.status?.status, 'failed');
+    assert.match(
+      (view.sandbox.status as { error: string }).error,
+      /has not been restarted/,
+    );
+    assert.equal(view.sandbox.ranRevision, null);
     view.unmount();
   });
 });

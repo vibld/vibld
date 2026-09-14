@@ -114,10 +114,12 @@ async function errorMessage(response: Response): Promise<string> {
 }
 
 /**
- * Start (or restart -- the sandbox is one instance per user, L9) a preview of
- * these files. Unlike `fetchPreviewStatus`, this is the direct result of
- * something the caller just clicked, so it throws rather than swallowing the
- * problem.
+ * Start a preview of these files. One instance per user (L9), and this does
+ * not replace a running one: the worker reports the existing preview
+ * instead, unchanged, so a caller wanting a restart calls
+ * `stopSandboxPreview` first. Unlike `fetchPreviewStatus`, this is the
+ * direct result of something the caller just clicked, so it throws rather
+ * than swallowing the problem.
  */
 export async function startSandboxPreview(
   files: ProjectFile[],

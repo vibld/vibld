@@ -100,13 +100,38 @@ export function usePreviewSandbox(): PreviewSandbox {
   }
 
   async function run(files: ProjectFile[], revision: string) {
+    // Whether this is a restart, read before the status is cleared below.
+    const replacing = status !== null && status.status !== 'failed';
     stopPolling();
     setPending(true);
     setStatus(null);
-    setRanRevision(revision);
+    setRanRevision(null);
     try {
+      // `startPreview` reports an existing preview rather than replacing it
+      // ("call `stopPreview()` first for a clean restart against new
+      // files", `apps/preview/worker/preview-sandbox.ts`). So a restart
+      // that does not stop first is not one: it hands back the sandbox that
+      // is already running, still serving the checkpoint it was built from,
+      // and recording the new checkpoint against it would put the current
+      // revision on an older project. That is worse than saying nothing,
+      // because then the absence of the warning above is itself a claim.
+      if (replacing) {
+        try {
+          await stopSandboxPreview();
+        } catch {
+          setStatus({
+            status: 'failed',
+            error:
+              'The running sandbox could not be stopped, so it has not been restarted. Try again in a moment.',
+          });
+          return;
+        }
+      }
       const initial = await startSandboxPreview(files);
       setStatus(initial);
+      // Only now: this is the checkpoint the sandbox is actually being
+      // built from.
+      setRanRevision(revision);
       if (!SETTLED.has(initial.status)) pollUntilSettled();
     } catch (error) {
       setStatus({
