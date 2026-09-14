@@ -3,7 +3,10 @@ import {
   grantAdminCredit,
   lookupAdminUser,
 } from '../generation/admin-client.ts';
-import type { AdminGrant } from '../generation/admin-client.ts';
+import type {
+  AdminGrant,
+  AdminUserResult,
+} from '../generation/admin-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
 
 type LookupState =
@@ -30,6 +33,10 @@ type GrantState =
 
 function formatUsd(micro: number): string {
   return `$${(micro / 1_000_000).toFixed(2)}`;
+}
+
+function messageFor(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 /**
@@ -68,7 +75,21 @@ export function AdminPanel() {
     gate.supersede();
     const current = gate.begin();
     setLookup({ phase: 'loading' });
-    const result = await lookupAdminUser(trimmed);
+    let result: AdminUserResult;
+    try {
+      result = await lookupAdminUser(trimmed);
+    } catch (error) {
+      // `lookupAdminUser` returns a refusal but throws a transport failure,
+      // so without this the button sits on "Looking up..." for the rest of
+      // the page's life and the rejection goes unhandled.
+      if (current()) {
+        setLookup({
+          phase: 'failed',
+          error: messageFor(error, 'The lookup could not be made.'),
+        });
+      }
+      return;
+    }
     if (!current()) return;
     setLookup(
       result.ok
@@ -134,18 +155,20 @@ export function AdminPanel() {
       });
       setAmount('');
       setNote('');
-      // Refresh the balance shown so the grant that was just made is
-      // reflected immediately, not only on the next manual lookup.
-      await runLookup();
     } catch (error) {
       setGrant({
         phase: 'failed',
-        error:
-          error instanceof Error
-            ? error.message
-            : 'The credit could not be granted.',
+        error: messageFor(error, 'The credit could not be granted.'),
       });
+      return;
     }
+    // Outside the grant's own `try` on purpose. The refresh is a second
+    // request, and nothing that happens to it says anything about the grant
+    // that already landed: inside, a rejection reached the catch above and
+    // replaced the confirmation with a failure, which is the reading that
+    // gets a grant made twice. It is safe to await unguarded because
+    // `runLookup` now reports its own failure rather than throwing.
+    await runLookup();
   }
 
   return (

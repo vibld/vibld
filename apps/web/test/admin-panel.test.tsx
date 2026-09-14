@@ -211,6 +211,46 @@ describe('granting credit, as it is actually wired', () => {
     view.unmount();
   });
 
+  it('keeps it when the refresh cannot be made at all', async () => {
+    // The refusal above and this are different paths: `lookupAdminUser`
+    // returns a 503 but throws a dropped connection. The first was guarded
+    // and the second was not, and it landed in the grant's own catch, which
+    // replaced the confirmation with a failure for a request that worked.
+    serving({
+      '/api/admin/user': () => {
+        throw new Error('Connection dropped.');
+      },
+      '/api/admin/topup': () =>
+        reply({ userId: 'user_alice', creditUsdCents: 250 }),
+    });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.amount('2.50');
+    await view.grant();
+
+    assert.match(view.text(), /Granted \$2\.50 to user_alice/);
+    view.unmount();
+  });
+
+  it('says so when a lookup cannot be made at all, rather than waiting forever', async () => {
+    serving({
+      '/api/admin/user': () => {
+        throw new Error('Connection dropped.');
+      },
+    });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.lookUp();
+
+    assert.match(view.text(), /Connection dropped/);
+    assert.doesNotMatch(
+      view.text(),
+      /Looking up/,
+      'the button was left waiting on a request that will never answer',
+    );
+    view.unmount();
+  });
+
   it('refuses an amount that is not money, without asking the server', async () => {
     const calls = serving({ '/api/admin/user': () => reply(FOUND) });
     const view = await mount();
