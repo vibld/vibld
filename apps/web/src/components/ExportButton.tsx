@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import { ZipError, archiveName, createZip } from '../export/zip.ts';
 
@@ -16,6 +16,14 @@ import { ZipError, archiveName, createZip } from '../export/zip.ts';
  */
 export function ExportButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [problem, setProblem] = useState<string | null>(null);
+
+  // A refusal is about the checkpoint it was refused for. Once a later one
+  // is accepted it is a red message under a project it was never about,
+  // which reads as "this one cannot be exported either" and stops somebody
+  // trying. The same rule the publish result needed on #126.
+  useEffect(() => {
+    setProblem(null);
+  }, [snapshot.revision]);
 
   function download() {
     setProblem(null);
