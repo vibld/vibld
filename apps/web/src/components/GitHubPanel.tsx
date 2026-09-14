@@ -240,7 +240,18 @@ export function GitHubConnection() {
       // otherwise go on offering a push to the repository this just found
       // out about, until somebody clicked it and was refused in turn. Same
       // discovery, same announcement, as the push route's own mismatch.
-      if (done.movedTo) noteConnectionChanged();
+      if (done.movedTo) {
+        // Forgotten before it is read again, and not left to the refresh to
+        // replace. `refreshStatus` only commits a status it actually got,
+        // so a probe that fails would leave this panel showing "Connected
+        // to acme/site" beside an error the server has just written saying
+        // it is connected to somewhere else, and still offering to
+        // disconnect the wrong one. The push button was given this on #123
+        // for the same reason; the panel was not.
+        gate.current.supersede();
+        setStatus(null);
+        noteConnectionChanged();
+      }
       return;
     }
     // Same rule as binding: the write landed, so say so without depending on
