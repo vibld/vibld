@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { sourceRoot, transformFor } from './harness/transform-target.ts';
+
 /**
  * The component harness stays out of the way of everything else.
  *
@@ -29,5 +31,38 @@ describe('the component harness', () => {
         .IS_REACT_ACT_ENVIRONMENT,
       undefined,
     );
+  });
+});
+
+describe('which files the harness transforms', () => {
+  const ROOT = '/home/someone/vibld/apps/web/src/';
+
+  it('takes every .tsx, because the runner cannot load one at all', () => {
+    assert.equal(transformFor('/anywhere/Button.tsx', ROOT), 'tsx');
+    assert.equal(transformFor(`${ROOT}components/Button.tsx`, ROOT), 'tsx');
+  });
+
+  it('takes .ts under src, where the env define has to reach', () => {
+    assert.equal(transformFor(`${ROOT}auth/clerk-token.ts`, ROOT), 'ts');
+  });
+
+  it('leaves .ts elsewhere to the runner', () => {
+    // The worker and the tests keep node's own type stripping. Taking them
+    // would rebuild the whole suite on a different transform for no reason.
+    assert.equal(
+      transformFor('/home/someone/vibld/apps/web/worker/index.ts', ROOT),
+      null,
+    );
+    assert.equal(transformFor('/home/someone/vibld/x.json', ROOT), null);
+  });
+
+  it('finds the source root as a path, not as a URL', () => {
+    // `new URL(...).pathname` keeps the escapes and `fileURLToPath` does
+    // not, so on a checkout with a space in it the two never matched and
+    // nothing under src was transformed. `clerkConfigured` then read false
+    // and the component tests exercised an early return.
+    const root = sourceRoot('file:///home/a%20b/apps/web/test/harness/x.mjs');
+    assert.equal(root, '/home/a b/apps/web/src/');
+    assert.equal(transformFor(`${root}auth/clerk-token.ts`, root), 'ts');
   });
 });

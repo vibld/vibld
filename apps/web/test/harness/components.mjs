@@ -27,8 +27,9 @@ const entry = process.argv[1] ?? '';
 if (entry.endsWith('.test.tsx')) {
   const { transformSync } = await import('esbuild');
   const { Window } = await import('happy-dom');
+  const { sourceRoot, transformFor } = await import('./transform-target.ts');
 
-  const SOURCE = new URL('../../src/', import.meta.url).pathname;
+  const SOURCE = sourceRoot(import.meta.url);
 
   /**
    * What Vite would have replaced, replaced here.
@@ -50,15 +51,10 @@ if (entry.endsWith('.test.tsx')) {
     load(url, context, nextLoad) {
       if (!url.startsWith('file:')) return nextLoad(url, context);
       const path = fileURLToPath(url);
-      const isTsx = path.endsWith('.tsx');
-      // `.ts` under `src/` as well, and only there: the define above has to
-      // reach `clerk-token.ts`, which carries no JSX. Everything outside
-      // `src/` keeps the runner's own type stripping.
-      if (!isTsx && !(path.endsWith('.ts') && path.startsWith(SOURCE))) {
-        return nextLoad(url, context);
-      }
+      const loader = transformFor(path, SOURCE);
+      if (!loader) return nextLoad(url, context);
       const { code } = transformSync(readFileSync(path, 'utf8'), {
-        loader: isTsx ? 'tsx' : 'ts',
+        loader,
         format: 'esm',
         jsx: 'automatic',
         target: 'esnext',
