@@ -117,6 +117,58 @@ export function readHandoff(hash: string): CallbackHandoff | null {
   return { code, state, ...(installation ? { installation } : {}) };
 }
 
+/**
+ * The handoff for this page load, read once however often this is called.
+ *
+ * React runs effects twice in StrictMode, which development builds enable.
+ * The first pass would read the fragment and clear it, and the replay would
+ * find nothing, so the connection stalls with no error anywhere: a bug that
+ * only appears when running locally, which is exactly where it would be
+ * blamed on GitHub.
+ *
+ * Caching the first read rather than not clearing the URL, because the URL
+ * genuinely should be cleared: a single-use code sitting in the address bar
+ * invites a reload that can only fail.
+ */
+let claimed: CallbackHandoff | null = null;
+
+export function claimHandoff(hash: string): CallbackHandoff | null {
+  const fresh = readHandoff(hash);
+  if (fresh) {
+    claimed = fresh;
+    clearHandoff();
+  }
+  return claimed;
+}
+
+/**
+ * The completion for this handoff, started once however often this is
+ * called.
+ *
+ * The second half of the same StrictMode problem, and the one that would
+ * have survived fixing only the first. `completeConnect` spends the stored
+ * state, so two passes racing it would have the first succeed and the second
+ * fail its own check, reporting that the connection did not come from this
+ * browser when it did. Both passes share one promise instead.
+ */
+let completion: Promise<CompleteResult> | null = null;
+
+export function completeClaimedConnect(
+  handoff: CallbackHandoff,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+  storage: Storage | null = safeStorage(),
+): Promise<CompleteResult> {
+  completion ??= completeConnect(handoff, fetchImpl, getToken, storage);
+  return completion;
+}
+
+/** Only for tests, which need each case to start from nothing. */
+export function forgetHandoffClaim(): void {
+  claimed = null;
+  completion = null;
+}
+
 /** Take the handoff off the URL, so a reload cannot replay it. */
 export function clearHandoff(): void {
   try {

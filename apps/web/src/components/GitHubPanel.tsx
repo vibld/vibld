@@ -3,11 +3,10 @@ import { useEffect, useState } from 'react';
 import {
   beginConnect,
   bindRepository,
-  clearHandoff,
-  completeConnect,
+  claimHandoff,
+  completeClaimedConnect,
   disconnectRepository,
   fetchGitHubStatus,
-  readHandoff,
 } from '../github/github-client.ts';
 import type {
   ConnectOffer,
@@ -60,10 +59,12 @@ function GitHubConnection() {
   useEffect(() => {
     let cancelled = false;
 
-    const handoff = readHandoff(globalThis.location?.hash ?? '');
-    // Taken off the URL immediately: a code is single use, and leaving it in
-    // the address bar invites a reload that can only fail.
-    if (handoff) clearHandoff();
+    // Claimed rather than read: StrictMode runs this effect twice in
+    // development, and a plain read would have the first pass clear the
+    // fragment and the replay find nothing. The claim also takes it off the
+    // URL, because a single-use code in the address bar invites a reload
+    // that can only fail.
+    const handoff = claimHandoff(globalThis.location?.hash ?? '');
 
     void (async () => {
       const current = await fetchGitHubStatus();
@@ -75,7 +76,9 @@ function GitHubConnection() {
         return;
       }
       setPhase({ at: 'working', note: 'Finishing the GitHub connection…' });
-      const finished = await completeConnect(handoff);
+      // Shared between both StrictMode passes: completing twice would spend
+      // the stored state on the first and fail the second's own check.
+      const finished = await completeClaimedConnect(handoff);
       if (cancelled) return;
       if (!finished.ok) {
         setPhase({

@@ -1267,3 +1267,127 @@ describe('when the probe is refused rather than absent', () => {
     assert.equal(body.install, true);
   });
 });
+
+/**
+ * The chosen installation failing while another one works.
+ *
+ * A partial list is the right answer when some unrelated installation is
+ * unreadable. It is the wrong answer when the unreadable one is the
+ * installation somebody just picked: they get a cheerful picker that quietly
+ * omits what they came for, and the user token is discarded before anything
+ * could be retried.
+ *
+ * The distinction is whether retrying could change the answer. Transient,
+ * report it. Definitive, carry on, because failing the whole connection over
+ * a forged or stale id in a link would stop somebody binding a repository
+ * they can perfectly well reach.
+ */
+describe('when the installation just chosen cannot be read', () => {
+  const OTHER = [{ id: 1, account: { login: 'other' } }];
+  const OTHER_REPOS = {
+    1: [
+      {
+        name: 'unrelated',
+        default_branch: 'main',
+        owner: { login: 'acme' },
+        permissions: { push: true },
+      },
+    ],
+  };
+
+  async function complete(probeReply: () => Response) {
+    const db = new SqliteD1Database(SCHEMA);
+    const state = await signState(CREDENTIALS, 'user_1', NOW.getTime());
+    const doFetch = (async (url: string) => {
+      const target = new URL(url);
+      if (target.pathname === '/login/oauth/access_token') {
+        return new Response(JSON.stringify({ access_token: 'ghu_user' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.pathname === '/user/installations') {
+        return new Response(JSON.stringify({ installations: OTHER }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (target.pathname.includes('/user/installations/500/')) {
+        return probeReply();
+      }
+      return new Response(JSON.stringify({ repositories: OTHER_REPOS[1] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const response = await handleGitHubComplete(
+      callbackRequest({ code: 'the-code', state, installation: '500' }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as {
+        error?: string;
+        repositories?: { repo: string }[];
+      },
+    };
+  }
+
+  it('reports a rate limit rather than offering a list without it', async () => {
+    const { status, body } = await complete(
+      () =>
+        new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+          status: 403,
+          headers: {
+            'content-type': 'application/json',
+            'retry-after': '30',
+          },
+        }),
+    );
+    assert.equal(status, 429);
+    assert.equal(body.repositories, undefined);
+  });
+
+  it('reports an unreachable GitHub rather than a partial list', async () => {
+    const { status } = await complete(() => {
+      throw new Error('connection reset');
+    });
+    assert.equal(status, 502);
+  });
+
+  it('still offers the rest when the chosen one simply is not there', async () => {
+    // A forged or stale id in a link must not cost somebody the repositories
+    // they can actually reach.
+    const { status, body } = await complete(
+      () =>
+        new Response(JSON.stringify({ message: 'Not Found' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(
+      body.repositories?.map((choice) => choice.repo),
+      ['unrelated'],
+    );
+  });
+
+  it('still offers the rest when a policy refuses the chosen one', async () => {
+    const { status, body } = await complete(
+      () =>
+        new Response(
+          JSON.stringify({ message: 'Resource protected by organization' }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(
+      body.repositories?.map((choice) => choice.repo),
+      ['unrelated'],
+    );
+  });
+});

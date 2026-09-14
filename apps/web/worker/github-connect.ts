@@ -611,7 +611,10 @@ export async function connectableRepositories(
   let lastFailure: Extract<Reachable<never>, { ok: false }> | null = null;
   let read = 0;
 
-  const gather = async (installation: UserInstallation) => {
+  /** Reads one installation, and hands back its failure if it had one. */
+  const gather = async (
+    installation: UserInstallation,
+  ): Promise<Extract<Reachable<never>, { ok: false }> | null> => {
     const reply = await installationRepositories(
       token,
       installation.id,
@@ -619,14 +622,20 @@ export async function connectableRepositories(
     );
     if (!reply.ok) {
       lastFailure = reply;
-      return;
+      return reply;
     }
     for (const choice of reply.value) {
       connectable.push({ ...choice, installationId: installation.id });
     }
+    return null;
   };
 
-  if (probe) await gather(probe);
+  // The probe's own outcome is kept apart from the rest. It is the
+  // installation somebody just chose, so another one succeeding does not
+  // make its failure unimportant: without this, a transient error on exactly
+  // the repository they wanted returns a cheerful partial list that silently
+  // omits it, and the user token is gone before anyone could retry.
+  const probeFailure = probe ? await gather(probe) : null;
 
   for (const installation of installations) {
     if (installation.id === probe?.id) continue;
@@ -635,11 +644,26 @@ export async function connectableRepositories(
     await gather(installation);
   }
 
-  // Only a failure when it cost every installation. Reporting a partial read
-  // as success would quietly hide repositories somebody expected to see, and
-  // reporting it as failure would block a connection that can be made.
+  // A transient failure on the chosen installation is reported even when
+  // others succeeded, because retrying recovers it and nothing else will.
+  // A definitive one (it is not there, or a policy refuses it) is not: that
+  // answer will not change on a retry, and failing the whole connection
+  // would stop somebody binding a repository they can perfectly well reach,
+  // which is what a forged or stale id in the link would otherwise do to
+  // them.
+  if (probeFailure && !isDefinitive(probeFailure.reason)) return probeFailure;
+
+  // Otherwise only a failure when it cost every installation. Reporting a
+  // partial read as success would quietly hide repositories somebody
+  // expected to see, and reporting it as failure would block a connection
+  // that can be made.
   if (connectable.length === 0 && lastFailure) return lastFailure;
   return { ok: true, value: connectable };
+}
+
+/** Whether retrying could change this answer. */
+function isDefinitive(reason: GitHubFailure): boolean {
+  return reason === 'missing' || reason === 'forbidden';
 }
 
 /**

@@ -4,8 +4,11 @@ import { describe, it } from 'node:test';
 import {
   beginConnect,
   bindRepository,
+  claimHandoff,
   clearHandoff,
+  completeClaimedConnect,
   completeConnect,
+  forgetHandoffClaim,
   fetchGitHubStatus,
   readHandoff,
   rememberState,
@@ -335,5 +338,70 @@ describe('taking the handoff off the URL', () => {
     // Runs in the test runner, which has no document. The panel calls this
     // on mount, so throwing here would take the builder down with it.
     assert.doesNotThrow(() => clearHandoff());
+  });
+});
+
+/**
+ * React runs effects twice in StrictMode, which development builds enable.
+ *
+ * Two separate hazards, and fixing only the first leaves the second. A plain
+ * read would have the first pass clear the fragment and the replay find
+ * nothing, so the connection stalls with no error anywhere. And two passes
+ * both completing would have the first spend the stored state and the second
+ * fail its own check, reporting that the connection did not come from this
+ * browser when it did.
+ */
+describe('surviving an effect that runs twice', () => {
+  it('gives the same handoff to a second read of a cleared URL', () => {
+    forgetHandoffClaim();
+    const first = claimHandoff('#github=the-code&state=the-state');
+    // The replay sees an empty fragment, because the first pass cleared it.
+    const second = claimHandoff('');
+    assert.deepEqual(first, { code: 'the-code', state: 'the-state' });
+    assert.deepEqual(second, first);
+  });
+
+  it('is still nothing when there was never a handoff', () => {
+    forgetHandoffClaim();
+    assert.equal(claimHandoff(''), null);
+  });
+
+  it('spends the state once however many passes complete', async () => {
+    forgetHandoffClaim();
+    const store = storage();
+    rememberState('the-state', store);
+    const handoff = { code: 'c', state: 'the-state' };
+
+    let calls = 0;
+    const doFetch = (async () => {
+      calls += 1;
+      return json({ repositories: [], ticket: 'tkt' });
+    }) as unknown as typeof fetch;
+
+    const [a, b] = await Promise.all([
+      completeClaimedConnect(handoff, doFetch, TOKEN, store),
+      completeClaimedConnect(handoff, doFetch, TOKEN, store),
+    ]);
+
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, true, 'the second pass failed its own check');
+    assert.equal(calls, 1, 'the exchange ran twice');
+  });
+
+  it('does not start a second exchange after the first finished', async () => {
+    forgetHandoffClaim();
+    const store = storage();
+    rememberState('the-state', store);
+    const handoff = { code: 'c', state: 'the-state' };
+    let calls = 0;
+    const doFetch = (async () => {
+      calls += 1;
+      return json({ repositories: [], ticket: 'tkt' });
+    }) as unknown as typeof fetch;
+
+    await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+    const again = await completeClaimedConnect(handoff, doFetch, TOKEN, store);
+    assert.equal(again.ok, true);
+    assert.equal(calls, 1);
   });
 });
