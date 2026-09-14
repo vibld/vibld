@@ -118,6 +118,16 @@ Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-de
 | Build tier                     | $29/mo -- $10/mo model spend                             |
 | Ship tier                      | $99/mo -- $40/mo model spend                             |
 | Top-up                         | $20 -- $8 model spend, expires 12 months                 |
+| GA4 measurement ID             | `G-JCWXRRM8R9` (recorded 2026-09-14, not wired)          |
+
+The GA4 ID is recorded here and nothing loads it. `apps/marketing` counts page
+views with its own first-party, cookieless measurement
+(`apps/marketing/worker/analytics.ts`), and the shipped Cookie Notice and
+Privacy Policy say so in as many words: "our own first-party measurement rather
+than a third-party analytics service", "sets no cookie, assigns no visitor or
+device identifier, and stores no IP address". The Cookie Notice also states
+that it will be updated, with its "Last updated" date, before anything of that
+kind ships.
 
 ### Lists confirmed
 
