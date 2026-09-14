@@ -3,7 +3,10 @@ import { describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { usePreviewSandbox } from '../src/generation/use-preview-sandbox.ts';
+import {
+  POLL_INTERVAL_MS,
+  usePreviewSandbox,
+} from '../src/generation/use-preview-sandbox.ts';
 import type { PreviewSandbox } from '../src/generation/use-preview-sandbox.ts';
 
 /**
@@ -22,7 +25,9 @@ function reply(value: unknown, status = 200): Response {
   });
 }
 
-function serving(answers: Record<string, () => Response>): string[] {
+function serving(
+  answers: Record<string, (method: string) => Response | Promise<Response>>,
+): string[] {
   const calls: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -32,7 +37,7 @@ function serving(answers: Record<string, () => Response>): string[] {
     for (const path of Object.keys(answers).sort(
       (a, b) => b.length - a.length,
     )) {
-      if (url.includes(path)) return answers[path]!();
+      if (url.includes(path)) return answers[path]!(init?.method ?? 'GET');
     }
     throw new Error(`nothing is serving ${url}`);
   }) as typeof fetch;
@@ -278,6 +283,73 @@ describe('what a running sandbox remembers', () => {
       /has not been restarted/,
     );
     assert.equal(view.sandbox.ranRevision, null);
+    view.unmount();
+  });
+
+  it('does not let a poll from before a restart put the old sandbox back', async () => {
+    // `stopPolling` clears the interval, which stops the next tick and does
+    // nothing about the request a tick already sent. That reply is about
+    // the sandbox from before the restart: committed, it puts the old frame
+    // back while `ranRevision` names the new checkpoint, so the warning
+    // stays hidden and the old sandbox is shown as the current one.
+    const held = (() => {
+      let open: ((value: Response) => void) | undefined;
+      const waiting = new Promise<Response>((resolve) => {
+        open = resolve;
+      });
+      return { waiting, answer: (value: Response) => open?.(value) };
+    })();
+
+    let polled = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) => {
+        if (method === 'GET') {
+          polled = true;
+          return held.waiting;
+        }
+        return reply({ status: 'installing' });
+      },
+    });
+    const view = await mount();
+    await view.run('r1');
+    assert.equal(view.sandbox.status?.status, 'installing');
+
+    // One tick of the real interval, so a status request is in flight.
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 200),
+      );
+    });
+    assert.ok(polled, 'the poll never asked for a status');
+
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r2');
+    assert.equal(view.sandbox.status?.status, 'ready');
+
+    await act(async () => {
+      held.answer(
+        new Response(
+          JSON.stringify({
+            status: 'ready',
+            url: 'https://sandbox.example/old',
+            expiresAt: Date.UTC(2026, 0, 1),
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.equal(
+      (view.sandbox.status as { url: string }).url,
+      READY.url,
+      'a poll from before the restart put the old sandbox back',
+    );
+    assert.equal(view.sandbox.ranRevision, 'r2');
     view.unmount();
   });
 });
