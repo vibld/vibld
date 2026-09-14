@@ -856,6 +856,58 @@ export async function handleGitHubDisconnect(
       503,
     );
   }
-  await new GitHubStore(env.DB!).revoke(principal.userId, now);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  // The same guard the push has, for the same reason and with the same
+  // shape. This route used to act on whatever was bound when the request
+  // arrived, and the panel that offers it reads the connection whenever it
+  // last looked: somebody reading `acme/site` and pressing Disconnect
+  // disconnected `acme/other` if the binding had moved in another tab or on
+  // another device in between. Undoing a connection they meant to keep and
+  // keeping one they meant to end, in a single click, with nothing saying
+  // so.
+  //
+  // Required rather than optional, on the reasoning the push settled: a
+  // caller old enough to be sending no destination is the one most likely
+  // to be holding a binding that has moved.
+  const expected = parseExpectedRepository(body);
+  if (!expected) {
+    return json(
+      {
+        error: '"owner" and "repo" must say which repository this disconnects.',
+      },
+      400,
+    );
+  }
+
+  const store = new GitHubStore(env.DB!);
+  const binding = await store.binding(principal.userId);
+
+  // Nothing to disconnect, or nothing left of it. The end state asked for is
+  // the state already in place, so this is a success rather than a quarrel
+  // about a destination that is not there: refusing here would leave a
+  // second click on a slow first one reporting a failure for work that is
+  // done.
+  if (!binding || binding.revokedAt) return json({ connected: false });
+
+  if (!sameRepository(expected, binding)) {
+    return json(
+      {
+        error:
+          `Vibld is connected to ${binding.owner}/${binding.repo}, which is not what this would have disconnected. ` +
+          `Nothing was changed. Check where Vibld is pointing, then try again.`,
+        movedTo: { owner: binding.owner, repo: binding.repo },
+      },
+      409,
+    );
+  }
+
+  await store.revoke(principal.userId, now);
   return json({ connected: false });
 }

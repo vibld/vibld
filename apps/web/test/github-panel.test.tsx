@@ -71,3 +71,56 @@ describe('the connect panel, as it is actually wired', () => {
     container.remove();
   });
 });
+
+describe('ending a connection from the panel', () => {
+  it('sends the repository it is naming, not whatever is bound', async () => {
+    // The route acts on the binding as it stands when the request arrives.
+    // This is the half that makes its guard usable: a panel that sent
+    // nothing would be refused, and one that sent the wrong thing would
+    // end a connection somebody meant to keep.
+    const sent: { url: string; body?: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      sent.push({
+        url,
+        ...(init?.body
+          ? { body: JSON.parse(String(init.body)) as Record<string, unknown> }
+          : {}),
+      });
+      if (url.includes('/api/github/status')) {
+        return reply({
+          configured: true,
+          connected: true,
+          canPush: true,
+          owner: 'acme',
+          repo: 'site',
+          defaultBranch: 'main',
+        });
+      }
+      return reply({ connected: false });
+    }) as typeof fetch;
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<GitHubConnection />));
+
+    const button = [...container.querySelectorAll('button')].find((el) =>
+      el.textContent?.includes('Disconnect'),
+    );
+    assert.ok(button, `no Disconnect button: ${container.innerHTML}`);
+    await act(async () => {
+      button.click();
+    });
+
+    const ended = sent.find((call) => call.url.includes('/disconnect'));
+    assert.ok(ended, 'nothing was sent to the disconnect route');
+    assert.deepEqual(ended.body, { owner: 'acme', repo: 'site' });
+
+    act(() => root.unmount());
+    container.remove();
+  });
+});

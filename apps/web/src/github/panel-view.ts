@@ -42,6 +42,19 @@ export type PanelSummary =
       repo?: string;
       defaultBranch?: string;
       pushing: Pushing;
+      /**
+       * What a Disconnect here would end, present only when both halves of
+       * the name are known.
+       *
+       * The route refuses a disconnect that does not say which repository
+       * it is for, because it acts on whatever is bound when the request
+       * arrives and a panel naming one repository must not end another. So
+       * offering the button without a name to send would be offering
+       * something that cannot work. The status carries both whenever it
+       * says `connected`, so this is absent only for a reply that has
+       * already contradicted itself.
+       */
+      disconnect?: { owner: string; repo: string };
     }
   | { connected: false; canConnect: boolean };
 
@@ -179,6 +192,9 @@ export function decidePanel(
                 : 'no',
           ...(status.owner === undefined ? {} : { owner: status.owner }),
           ...(status.repo === undefined ? {} : { repo: status.repo }),
+          ...(status.owner && status.repo
+            ? { disconnect: { owner: status.owner, repo: status.repo } }
+            : {}),
           ...(status.defaultBranch === undefined
             ? {}
             : { defaultBranch: status.defaultBranch }),

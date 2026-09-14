@@ -227,11 +227,16 @@ export function GitHubConnection() {
     await refreshStatus();
   }
 
-  async function disconnect() {
+  async function disconnect(to: { owner: string; repo: string }) {
     setPhase({ at: 'working', note: 'Disconnecting…' });
-    const done = await disconnectRepository();
+    const done = await disconnectRepository(to);
     if (!done.ok) {
       setPhase({ at: 'problem', error: done.error });
+      // The route is the only thing that can tell this panel its idea of the
+      // connection is out of date, so a refusal about the destination sends
+      // it back to read one. Without this the panel goes on naming the old
+      // repository and every further click is refused the same way.
+      if (done.movedTo) await refreshStatus();
       return;
     }
     // Same rule as binding: the write landed, so say so without depending on
@@ -256,6 +261,11 @@ export function GitHubConnection() {
   // not have caught.
   const view = decidePanel(phase, status);
   if (!view.show) return null;
+  // Held in a const for the same reason `picker` is: the callback below has
+  // to close over a definite destination rather than a field TypeScript can
+  // no longer prove is there by the time it runs.
+  const summaryDisconnect =
+    view.summary?.connected === true ? view.summary.disconnect : undefined;
   // Held in a const so the callback below closes over a definite offer rather
   // than reaching back into the view for a ticket TypeScript can no longer
   // prove is there.
@@ -327,9 +337,14 @@ export function GitHubConnection() {
           on <code>{view.summary.defaultBranch}</code>.
           {view.summary.pushing === 'no' &&
             ' Pushing is not configured on this deployment.'}{' '}
-          <button type="button" onClick={() => void disconnect()}>
-            Disconnect
-          </button>
+          {summaryDisconnect && (
+            <button
+              type="button"
+              onClick={() => void disconnect(summaryDisconnect)}
+            >
+              Disconnect
+            </button>
+          )}
         </p>
       )}
 

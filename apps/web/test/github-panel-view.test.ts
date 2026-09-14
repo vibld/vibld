@@ -182,6 +182,32 @@ describe('describing a connected repository', () => {
   });
 });
 
+describe('what a Disconnect would end', () => {
+  it('names the repository, so the route can refuse a stale one', () => {
+    const view = decidePanel({ at: 'idle' }, CONNECTED);
+    assert.deepEqual(
+      view.show && view.summary?.connected === true
+        ? view.summary.disconnect
+        : null,
+      { owner: 'acme', repo: 'site' },
+    );
+  });
+
+  it('offers nothing to end when the name is only half there', () => {
+    // The route refuses a disconnect that does not say which repository it
+    // is for, so a button with no name to send would be offering something
+    // that cannot work. A status saying `connected` always carries both, so
+    // this is a reply that has already contradicted itself.
+    const half = decidePanel({ at: 'idle' }, { ...CONNECTED, repo: undefined });
+    assert.equal(
+      half.show && half.summary?.connected === true
+        ? half.summary.disconnect
+        : 'wrong shape',
+      undefined,
+    );
+  });
+});
+
 describe('which answer about the connection is allowed to win', () => {
   // The finding: the status probe starts alongside the callback exchange, so
   // it can still be in flight when a repository is bound and land afterwards

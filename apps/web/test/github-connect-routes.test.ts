@@ -416,6 +416,25 @@ describe('binding the repository the user chose', () => {
   });
 });
 
+/** A binding row for the tests that need one already in place. */
+const GRANT_ROW = {
+  userId: 'user_1',
+  installationId: 42,
+  owner: 'acme',
+  repo: 'site',
+  defaultBranch: 'main',
+  grantedAt: NOW.toISOString(),
+  grantedByEmail: 'chris@example.com',
+  expiresAt: '2026-12-13T00:00:00.000Z',
+};
+
+function disconnectRequest(body: unknown): Request {
+  return new Request('https://app.vibld.com/api/github/disconnect', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 describe('disconnecting', () => {
   it('stops a push without deleting the record of the grant', async () => {
     const db = new SqliteD1Database(SCHEMA);
@@ -432,9 +451,7 @@ describe('disconnecting', () => {
     });
 
     const response = await handleGitHubDisconnect(
-      new Request('https://app.vibld.com/api/github/disconnect', {
-        method: 'POST',
-      }),
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
       env(db),
       PRINCIPAL,
       NOW,
@@ -448,18 +465,86 @@ describe('disconnecting', () => {
   });
 
   it('answers the same way when there was nothing connected', async () => {
-    // So it cannot be used to ask whether somebody has connected something.
+    // A disconnect that got what it asked for and a disconnect with nothing
+    // to do are the same answer, so neither the work nor the absence of it
+    // is reported differently.
     const db = new SqliteD1Database(SCHEMA);
     const response = await handleGitHubDisconnect(
-      new Request('https://app.vibld.com/api/github/disconnect', {
-        method: 'POST',
-      }),
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
       env(db),
       PRINCIPAL,
       NOW,
     );
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { connected: false });
+  });
+
+  it('refuses to end a connection it was not asked to end', async () => {
+    // The panel offering this reads the connection whenever it last looked,
+    // and the route acts on whatever is bound when the request arrives.
+    // Without this, somebody reading `acme/site` and pressing Disconnect
+    // ended `acme/other` if the binding had moved in another tab or on
+    // another device: undoing a connection they meant to keep and keeping
+    // one they meant to end, in one click, with nothing saying so.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind({ ...GRANT_ROW, owner: 'acme', repo: 'other' });
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'acme', repo: 'site' }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+    const body = (await response.json()) as {
+      movedTo?: { owner: string; repo: string };
+    };
+    assert.deepEqual(body.movedTo, { owner: 'acme', repo: 'other' });
+
+    // And the connection it was not asked about is untouched.
+    const state = await store.usableBinding('user_1', NOW);
+    assert.equal(state.usable, true);
+  });
+
+  it('refuses one that does not say what it is ending', async () => {
+    // Required rather than optional, on the reasoning the push settled: a
+    // caller old enough to be sending no destination is the one most likely
+    // to be holding a binding that has moved.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind(GRANT_ROW);
+
+    const response = await handleGitHubDisconnect(
+      new Request('https://app.vibld.com/api/github/disconnect', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 400);
+    const state = await store.usableBinding('user_1', NOW);
+    assert.equal(state.usable, true);
+  });
+
+  it('ends a connection named in the case GitHub would resolve', async () => {
+    // `acme/Site` and `acme/site` are one repository, and refusing that
+    // would be a refusal with nothing for anybody to correct.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind(GRANT_ROW);
+
+    const response = await handleGitHubDisconnect(
+      disconnectRequest({ owner: 'Acme', repo: 'Site' }),
+      env(db),
+      PRINCIPAL,
+      NOW,
+    );
+    assert.equal(response.status, 200);
+    const state = await store.usableBinding('user_1', NOW);
+    assert.equal(state.usable, false);
   });
 });
 
