@@ -32,7 +32,8 @@ export function BillingStatusWidget() {
 
 const UPGRADE_TIERS: readonly Tier[] = ['build', 'ship'];
 
-function BillingStatusPanel() {
+/** The signed-in half, exported so it can be mounted on its own. */
+export function BillingStatusPanel() {
   const fieldId = useId();
   const [status, setStatus] = useState<BillingStatus | null | 'loading'>(
     'loading',
@@ -78,6 +79,18 @@ function BillingStatusPanel() {
       <p className="billing__usage">
         {TIER_LABELS[status.tier]} · {formatUsd(status.spentMicroUsd)} /{' '}
         {formatUsd(status.allowanceMicroUsd)} this month
+        {/*
+         * Credit is spendable money this readout used to drop on the floor.
+         * `reserveBudget` falls through to it automatically once the monthly
+         * allowance is exhausted, so a line that stops at the allowance says
+         * somebody is finished for the month when they are not, and it never
+         * shows back the balance they paid for or were granted (L4, and the
+         * dollar every new account starts with). The route has always sent
+         * it; only the screen was missing.
+         */}
+        {status.topupRemainingMicroUsd > 0
+          ? ` · ${formatUsd(status.topupRemainingMicroUsd)} credit`
+          : ''}
         {status.cancelAtPeriodEnd ? ' · cancels at period end' : ''}
       </p>
 
