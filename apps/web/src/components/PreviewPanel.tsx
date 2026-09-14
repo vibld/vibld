@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { BuilderState } from '../generation/session.ts';
 import { buildPreviewDocument } from '../generation/preview.ts';
+import { servingOlderThan } from '../generation/use-preview-sandbox.ts';
 import type { PreviewSandbox } from '../generation/use-preview-sandbox.ts';
 
 function describeStatus(status: PreviewSandbox['status']): string | null {
@@ -50,11 +51,10 @@ export function PreviewPanel({
   // buttons were fixed for: the address is still live, it is just live on
   // the previous checkpoint. The mock beside it is rebuilt from the
   // accepted snapshot every time, so only the sandbox can say this.
-  const servingOlder =
-    sandbox.status?.status === 'ready' &&
-    sandbox.ranRevision !== null &&
-    state.acceptedSnapshot !== null &&
-    state.acceptedSnapshot.revision !== sandbox.ranRevision;
+  const servingOlder = servingOlderThan(
+    sandbox,
+    state.acceptedSnapshot?.revision,
+  );
 
   return (
     <div className="preview">

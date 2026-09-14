@@ -1,7 +1,10 @@
 import { useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { BuilderState } from '../generation/session.ts';
-import { usePreviewSandbox } from '../generation/use-preview-sandbox.ts';
+import {
+  servingOlderThan,
+  usePreviewSandbox,
+} from '../generation/use-preview-sandbox.ts';
 import { CodeViewer } from './CodeViewer.tsx';
 import { ExportButton } from './ExportButton.tsx';
 import { FileList } from './FileList.tsx';
@@ -33,6 +36,8 @@ export function Workspace({ state }: { state: BuilderState }) {
   const files = state.stagedFiles;
   const selected =
     files.find((file) => file.path === requestedPath) ?? files[0] ?? null;
+  /** The list is showing work that has not been accepted yet. */
+  const showingStaged = state.status !== 'accepted' && files.length > 0;
 
   function onTabKeyDown(
     event: KeyboardEvent<HTMLButtonElement>,
@@ -63,13 +68,21 @@ export function Workspace({ state }: { state: BuilderState }) {
           // because it keeps running while another tab is in view -- unlike
           // the problems/console counts, this is not otherwise visible at
           // all once the user has looked away from Preview.
+          //
+          // Which is exactly why it cannot say "live" for a sandbox serving
+          // a checkpoint that has been moved on from. The panel says so on
+          // its own face, but the whole point of this badge is the person
+          // who is not looking at the panel, and to them "live" reads as
+          // "your project is running" rather than "an older one is".
           const badge =
             tab.id === 'problems'
               ? state.problems.length || null
               : tab.id === 'console'
                 ? state.timeline.length || null
                 : tab.id === 'preview' && sandbox.status?.status === 'ready'
-                  ? 'live'
+                  ? servingOlderThan(sandbox, state.acceptedSnapshot?.revision)
+                    ? 'older'
+                    : 'live'
                   : null;
           return (
             <button
@@ -112,12 +125,27 @@ export function Workspace({ state }: { state: BuilderState }) {
             <div className="codepane__files">
               <h2 className="pane-title">
                 Files
-                {state.status !== 'accepted' && files.length > 0 ? (
+                {showingStaged ? (
                   <span className="pill pill--staged">staged</span>
                 ) : null}
               </h2>
               {state.acceptedSnapshot ? (
                 <>
+                  {/*
+                   * All three take the accepted checkpoint, deliberately:
+                   * staged files have not been validated, and exporting or
+                   * publishing a project that is about to be rejected is
+                   * worse than offering nothing. But the list under them is
+                   * showing the staged files, so without this the buttons
+                   * sit beneath one set of files and act on another. The
+                   * pill on the heading marks the list, not them.
+                   */}
+                  {showingStaged ? (
+                    <p className="pane-note">
+                      These act on the last accepted checkpoint, not the staged
+                      files listed below.
+                    </p>
+                  ) : null}
                   <ExportButton snapshot={state.acceptedSnapshot} />
                   <PublishButton snapshot={state.acceptedSnapshot} />
                   <GitHubPushButton snapshot={state.acceptedSnapshot} />
