@@ -10,7 +10,7 @@
     "dev": "vite",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "test": "node --test --experimental-strip-types --import ./test/harness/components.mjs test/*.test.ts test/*.test.tsx",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -26,6 +26,8 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "@vitejs/plugin-react": "6.1.1",
+    "esbuild": "0.28.1",
+    "happy-dom": "20.14.5",
     "typescript": "7.0.2",
     "vite": "8.2.2"
   }

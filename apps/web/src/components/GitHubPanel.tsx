@@ -49,7 +49,15 @@ export function GitHubPanel() {
   );
 }
 
-function GitHubConnection() {
+/**
+ * The signed-in half, exported so it can be mounted on its own.
+ *
+ * `GitHubPanel` is a Clerk gate and nothing else. Reaching what is below it
+ * through `Show` would mean standing up a provider and a session to test a
+ * status fetch, so a test mounts this directly and the gate above stays
+ * what it looks like: two lines with nothing in them to get wrong.
+ */
+export function GitHubConnection() {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [phase, setPhase] = useState<PanelPhase>({ at: 'loading' });
 
