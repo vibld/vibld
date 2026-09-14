@@ -1,9 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import { publishProject } from '../generation/publish-client.ts';
 
 type PublishState =
-  | { phase: 'idle' }
+  /**
+   * `publishedSlug` is the name a previous checkpoint went out under, kept
+   * across a new one so the button stays "Republish" and stops asking for a
+   * slug that is already chosen.
+   */
+  | { phase: 'idle'; publishedSlug?: string }
   | { phase: 'publishing' }
   | { phase: 'published'; slug: string; url: string; skipped: string[] }
   | { phase: 'failed'; error: string };
@@ -27,7 +32,30 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [state, setState] = useState<PublishState>({ phase: 'idle' });
   const [slugInput, setSlugInput] = useState('');
 
-  const knownSlug = state.phase === 'published' ? state.slug : undefined;
+  const knownSlug =
+    state.phase === 'published'
+      ? state.slug
+      : state.phase === 'idle'
+        ? state.publishedSlug
+        : undefined;
+
+  // What is live is the checkpoint that was published, and a later one has
+  // not been. Leaving "Live at ..." up beside a project that has moved on
+  // reads as though the new work is already on the web, which is the same
+  // thing the push button was fixed for on #123: the address is still
+  // serving, but it is serving the previous checkpoint.
+  //
+  // The slug is deliberately not forgotten with it. It is the name of the
+  // site rather than a fact about this checkpoint, and asking for it again
+  // after every accepted change would be asking somebody to retype what
+  // they already told us.
+  useEffect(() => {
+    setState((previous) =>
+      previous.phase === 'published'
+        ? { phase: 'idle', publishedSlug: previous.slug }
+        : previous,
+    );
+  }, [snapshot.revision]);
 
   async function publish() {
     if (!knownSlug && slugInput.trim() === '') {

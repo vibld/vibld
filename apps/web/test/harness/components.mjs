@@ -83,21 +83,38 @@ if (entry.endsWith('.test.tsx')) {
    * like the component's fault.
    */
   const window = new Window({ url: 'https://app.vibld.test/' });
+  // Taken from this window even where node already has a global of the same
+  // name, which is the point rather than an oversight. Node defines `Event`,
+  // and happy-dom's DOM checks events against its own class: a test that
+  // built one from node's global got "parameter 1 is not of type 'Event'"
+  // from `dispatchEvent`, which reads like a broken component and is a
+  // broken harness. Only a `*.test.tsx` process reaches here, and in one the
+  // DOM's implementations are the ones that have to win.
   for (const name of [
     'window',
     'document',
     'navigator',
     'HTMLElement',
+    'HTMLInputElement',
     'Element',
     'Node',
     'Event',
+    'InputEvent',
     'MouseEvent',
+    'KeyboardEvent',
     'CustomEvent',
     'getComputedStyle',
     'requestAnimationFrame',
     'cancelAnimationFrame',
   ]) {
-    if (!(name in globalThis)) globalThis[name] = window[name];
+    if (window[name] === undefined) continue;
+    // Defined rather than assigned: some of these are getter-only on node's
+    // globalThis (`navigator` is), and a plain assignment throws there.
+    Object.defineProperty(globalThis, name, {
+      value: window[name],
+      writable: true,
+      configurable: true,
+    });
   }
 
   // React 19 refuses to run `act` without it, and `act` is how a test waits
