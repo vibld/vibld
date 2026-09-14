@@ -66,19 +66,31 @@ function GitHubConnection() {
     // that can only fail.
     const handoff = claimHandoff(globalThis.location?.hash ?? '');
 
+    // Started before anything is awaited, and deliberately not after the
+    // status probe. The fragment is claimed and cleared by now and the signed
+    // state expires in ten minutes, so letting a slow or hanging
+    // `/api/github/status` sit in front of the exchange means a perfectly
+    // good callback can be thrown away by a request that has nothing to do
+    // with it. Shared between both StrictMode passes: completing twice would
+    // spend the stored state on the first and fail the second's own check.
+    const completing = handoff ? completeClaimedConnect(handoff) : null;
+    if (handoff) {
+      setPhase({ at: 'working', note: 'Finishing the GitHub connection…' });
+    }
+
+    // Alongside, never in front of it. The status only decides what the panel
+    // offers once there is nothing in flight.
     void (async () => {
       const current = await fetchGitHubStatus();
-      if (cancelled) return;
-      setStatus(current);
+      if (!cancelled && current) setStatus(current);
+    })();
 
-      if (!handoff) {
-        setPhase({ at: 'idle' });
+    void (async () => {
+      if (!completing) {
+        if (!cancelled) setPhase({ at: 'idle' });
         return;
       }
-      setPhase({ at: 'working', note: 'Finishing the GitHub connection…' });
-      // Shared between both StrictMode passes: completing twice would spend
-      // the stored state on the first and fail the second's own check.
-      const finished = await completeClaimedConnect(handoff);
+      const finished = await completing;
       if (cancelled) return;
       if (!finished.ok) {
         setPhase({
@@ -176,21 +188,38 @@ function GitHubConnection() {
       {phase.at === 'working' && <p role="status">{phase.note}</p>}
 
       {phase.at === 'problem' && (
-        <p role="alert" className="github-panel__problem">
-          {phase.error}
-          {phase.install && (
-            <>
-              {' '}
-              <a
-                href="https://github.com/apps/vibld/installations/new"
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                Install the Vibld app
-              </a>
-            </>
+        <>
+          <p role="alert" className="github-panel__problem">
+            {phase.error}
+            {phase.install && (
+              <>
+                {' '}
+                <a
+                  href="https://github.com/apps/vibld/installations/new"
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Install the Vibld app
+                </a>
+              </>
+            )}
+          </p>
+          {/*
+            Offered without waiting on a status. By the time a completion has
+            failed the code is spent, so "try again" means starting a fresh
+            authorization, and gating that button on a status request that may
+            itself have failed leaves the only route out being a page reload
+            somebody has to think of. Hidden only when the deployment has said
+            outright that it cannot connect.
+          */}
+          {status?.canConnect !== false && (
+            <p>
+              <button type="button" onClick={() => void connect()}>
+                Try connecting again
+              </button>
+            </p>
           )}
-        </p>
+        </>
       )}
 
       {phase.at === 'choosing' && (
