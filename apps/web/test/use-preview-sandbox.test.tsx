@@ -139,7 +139,12 @@ describe('what a running sandbox remembers', () => {
     view.unmount();
   });
 
-  it('does not stop anything on a first run', async () => {
+  it("stops first even on the session's first run", async () => {
+    // A sandbox outlives a reload of the page and nothing here reads the
+    // status on mount, so "none is running" is not something a first run
+    // knows. Unknown has to behave as "there may be one": the worker
+    // answers a stop with nothing to stop `{ ok: true }`, while a missed
+    // stop hands back the old sandbox under the new checkpoint's name.
     const calls = serving({
       '/api/preview/share': () => reply({ shares: [] }),
       '/api/preview': () => reply(READY),
@@ -148,10 +153,102 @@ describe('what a running sandbox remembers', () => {
     await view.run('r1');
 
     assert.deepEqual(
-      calls.filter((call) => call.startsWith('DELETE')),
-      [],
-      'it stopped a sandbox that was not running',
+      calls.filter((call) => call.endsWith('/api/preview')),
+      ['DELETE /api/preview', 'POST /api/preview'],
     );
+    view.unmount();
+  });
+
+  it('does not stop again after a stop that succeeded', async () => {
+    // The one case where nothing needs stopping is known rather than
+    // assumed: a stop that actually answered.
+    const view = await mount();
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r1');
+    await view.stop();
+
+    const calls = serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r2');
+
+    assert.deepEqual(
+      calls.filter((call) => call.endsWith('/api/preview')),
+      ['POST /api/preview'],
+      'it stopped a sandbox it had already stopped',
+    );
+    view.unmount();
+  });
+
+  it('assumes a start whose reply was lost created one anyway', async () => {
+    // The sandbox may exist even though the answer never arrived, so the
+    // next run has to stop it first.
+    const view = await mount();
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r1');
+    await view.stop();
+
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => {
+        throw new Error('Connection dropped.');
+      },
+    });
+    await view.run('r2');
+    assert.equal(view.sandbox.status?.status, 'failed');
+
+    const calls = serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r2');
+
+    assert.deepEqual(
+      calls.filter((call) => call.endsWith('/api/preview')),
+      ['DELETE /api/preview', 'POST /api/preview'],
+      'it left a sandbox a lost start may have created',
+    );
+    view.unmount();
+  });
+
+  it('still stops first when the retry follows a stop that failed', async () => {
+    // The screen says failed, but the sandbox is still running: those are
+    // different facts. A retry that read the failure as "nothing is
+    // running" would skip the stop, be handed the old sandbox back, and
+    // record the new checkpoint against it.
+    const view = await mount();
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r1');
+
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply({ error: 'The sandbox is busy.' }, 503),
+    });
+    await view.run('r2');
+    assert.equal(view.sandbox.status?.status, 'failed');
+
+    const calls = serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': () => reply(READY),
+    });
+    await view.run('r2');
+
+    assert.deepEqual(
+      calls.filter((call) => call.endsWith('/api/preview')),
+      ['DELETE /api/preview', 'POST /api/preview'],
+      'the retry after a failed stop did not stop first',
+    );
+    assert.equal(view.sandbox.ranRevision, 'r2');
     view.unmount();
   });
 

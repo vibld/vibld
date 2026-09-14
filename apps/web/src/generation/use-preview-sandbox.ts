@@ -58,6 +58,22 @@ export function usePreviewSandbox(): PreviewSandbox {
   const [ranRevision, setRanRevision] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /**
+   * Whether the worker may still be holding a preview for this caller.
+   *
+   * Not the same fact as `status`, which is only what the screen is
+   * showing. A stop that fails leaves a sandbox running while the screen
+   * reports a failure, and a run that then skipped the stop would be handed
+   * that same sandbox back and record the new checkpoint against it.
+   *
+   * Unknown behaves as true, which is why it starts that way: a sandbox
+   * outlives a reload of this page and nothing here reads the status on
+   * mount, so the first run of a session cannot assume it has none. Only a
+   * stop that actually succeeded clears it. A needless `DELETE` costs one
+   * request the worker answers `{ ok: true }` to with nothing to stop; a
+   * missed one serves an old checkpoint under a new checkpoint's name.
+   */
+  const mayExist = useRef(true);
 
   const [shares, setShares] = useState<PreviewShare[]>([]);
   const [sharePending, setSharePending] = useState(false);
@@ -100,8 +116,6 @@ export function usePreviewSandbox(): PreviewSandbox {
   }
 
   async function run(files: ProjectFile[], revision: string) {
-    // Whether this is a restart, read before the status is cleared below.
-    const replacing = status !== null && status.status !== 'failed';
     stopPolling();
     setPending(true);
     setStatus(null);
@@ -115,9 +129,10 @@ export function usePreviewSandbox(): PreviewSandbox {
       // and recording the new checkpoint against it would put the current
       // revision on an older project. That is worse than saying nothing,
       // because then the absence of the warning above is itself a claim.
-      if (replacing) {
+      if (mayExist.current) {
         try {
           await stopSandboxPreview();
+          mayExist.current = false;
         } catch {
           setStatus({
             status: 'failed',
@@ -127,6 +142,9 @@ export function usePreviewSandbox(): PreviewSandbox {
           return;
         }
       }
+      // Before the request, not after: a start whose reply is lost may
+      // still have created the sandbox, and the next run has to stop it.
+      mayExist.current = true;
       const initial = await startSandboxPreview(files);
       setStatus(initial);
       // Only now: this is the checkpoint the sandbox is actually being
@@ -151,10 +169,12 @@ export function usePreviewSandbox(): PreviewSandbox {
     setPending(true);
     try {
       await stopSandboxPreview();
+      mayExist.current = false;
     } catch {
-      // Best-effort: the sandbox times out on its own either way (L9), so
-      // there is nothing more useful to do with a failed stop than let the
-      // UI forget about it.
+      // Best-effort for what the screen shows: the sandbox times out on its
+      // own either way (L9), so there is nothing more useful to do with a
+      // failed stop than let the UI forget about it. `mayExist` deliberately
+      // does not forget, because the next run still has to stop it first.
     } finally {
       setStatus(null);
       setRanRevision(null);
