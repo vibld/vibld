@@ -29,7 +29,7 @@ export const GATED_PATHS: readonly string[] = [
   '/api/github/push',
   // Takes money, which an uninvited account has no reason to be able to do.
   '/api/billing/checkout',
-  '/api/billing/portal',
+
   // Issues a referral code, which is a share link into a closed product.
   '/api/referral/status',
   // Records who referred this account. Gated for now, which has a cost worth
@@ -67,6 +67,16 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // the $1 is the one thing this gate exists to prevent. A route listed
   // here has to be read-only in fact, not in description.
   '/api/billing/status': 'a balance read, with its one write behind the gate',
+  // Revocation does not cancel a subscription in Stripe, and this is the
+  // only way to cancel one. Gating it would take a customer's access away
+  // while their card kept being charged and leave them no way to stop it,
+  // in the product or out of it. That is not a gate, it is a trap.
+  //
+  // Safe to leave open because it grants nothing: it needs an existing
+  // Stripe customer and errors without one, and the only route that creates
+  // a customer is `/api/billing/checkout`, which stays gated. So an
+  // uninvited account finds nothing here.
+  '/api/billing/portal': 'the only way to stop being charged',
   // Stripe's own POST, authenticated by signature rather than by session.
   // Gating it would mean dropping webhooks for uninvited accounts, which is
   // how a payment that succeeded ends up unmirrored.

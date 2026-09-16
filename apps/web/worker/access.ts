@@ -52,19 +52,35 @@ export type AccessDecision =
  *    check on the resolved identity, not on a header.
  * 4. Otherwise the list decides.
  */
-export function decideAccess(input: {
+export async function decideAccess(input: {
   mode: AccessMode;
   isAdmin: boolean;
   /** `Principal.policyIdentity`: a verified email, or 'unknown'. */
   identity: string;
-  invited: boolean;
-}): AccessDecision {
+  /**
+   * Take the invite for this account, and report whether it is now theirs.
+   *
+   * A function rather than a boolean, and the difference is the whole point.
+   * Asking "is this account invited" and then separately recording that it
+   * took the invite is a check followed by an act, and two accounts verified
+   * for the same address can both pass the check before either performs the
+   * act. Both were admitted, one binding was written, and the other update
+   * quietly changed nothing.
+   *
+   * So admission is the act. This claims the row and its result is the
+   * answer, which is what SQLite's single writer can actually settle.
+   *
+   * Called only when the decision reaches it, so an unverified identity
+   * never claims an invite and an admin never spends one.
+   */
+  claimInvite: () => Promise<boolean>;
+}): Promise<AccessDecision> {
   if (input.isAdmin) return { allowed: true, because: 'admin' };
   if (input.mode === 'open') return { allowed: true, because: 'open' };
   if (!isUsableIdentity(input.identity)) {
     return { allowed: false, because: 'unverified-identity' };
   }
-  if (input.invited) return { allowed: true, because: 'invited' };
+  if (await input.claimInvite()) return { allowed: true, because: 'invited' };
   return { allowed: false, because: 'not-invited' };
 }
 

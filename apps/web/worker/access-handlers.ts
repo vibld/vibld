@@ -31,11 +31,8 @@ function json(body: unknown, status = 200): Response {
  * Whether this principal may use the product, and the bookkeeping that goes
  * with finding out.
  *
- * A successful invited decision marks the invite redeemed. That write is
- * bookkeeping and must never fail a request somebody is allowed to make, so
- * it is swallowed: losing the "when did they first sign in" timestamp is a
- * worse-reporting problem, while failing the request is an outage for
- * somebody who was invited.
+ * An invited decision is the act of taking the invite, not a read followed
+ * by a note that it was taken. `AccessStore.claimInvite` says why.
  */
 export async function decideAccessFor(
   env: AccessEnv,
@@ -62,26 +59,22 @@ export async function decideAccessFor(
   // open one, which is the same fail-closed rule every other gate here
   // follows.
   const store = env.DB ? new AccessStore(env.DB) : undefined;
-  const invited = store
-    ? await store.isInvited(principal.policyIdentity, principal.userId)
-    : false;
 
-  const decision = decideAccess({
+  return decideAccess({
     mode,
     isAdmin,
     identity: principal.policyIdentity,
-    invited,
+    // Taking the invite is the admission, so a failure here refuses rather
+    // than being swallowed. It used to be bookkeeping recorded after the
+    // decision, on the reasoning that losing a timestamp must not fail a
+    // request somebody is allowed to make. That was the bug: if the write
+    // is not what admits them, two accounts can both be admitted and only
+    // one binding lands.
+    claimInvite: () =>
+      store
+        ? store.claimInvite(principal.policyIdentity, principal.userId)
+        : Promise.resolve(false),
   });
-
-  if (decision.allowed && decision.because === 'invited' && store) {
-    try {
-      await store.redeem(principal.policyIdentity, principal.userId);
-    } catch (error) {
-      console.error('could not record an invite redemption', error);
-    }
-  }
-
-  return decision;
 }
 
 /** The refusal a gated route returns. 403, and the same words either way. */

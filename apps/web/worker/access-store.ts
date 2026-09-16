@@ -22,36 +22,45 @@ export class AccessStore {
   }
 
   /**
-   * Whether this account may in. Revoked invites do not count.
+   * Take the invite for this account, and say whether it is now theirs.
    *
-   * An invite is for a person, and once redeemed it belongs to the account
-   * that redeemed it. Matching on the address alone let a second Clerk
-   * account that later verified the same address walk through a door
-   * somebody else had already opened, which matters because an address can
-   * be reassigned: a company mailbox handed to a new employee, a domain
-   * that changes hands. `redeem` binds the row to its first user, and an
-   * already-bound row now admits only that user.
+   * One statement, because two cannot settle this. Reading the row and then
+   * writing the binding is a check followed by an act: two Clerk accounts
+   * verified for the same address, arriving together, both read an
+   * unclaimed row and both were admitted, after which one binding landed
+   * and the other update changed nothing and was ignored. A single
+   * conditional UPDATE is what SQLite's one writer serialises, so exactly
+   * one of them comes back true.
    *
-   * An unredeemed row admits whoever arrives first, which is what makes an
-   * invite usable at all.
+   * The condition is the rule: not revoked, and either unclaimed or already
+   * this account's. An unclaimed invite goes to whoever arrives first, which
+   * is what makes an invite usable; once taken it admits only that account,
+   * because an address can be reassigned (a company mailbox handed on, a
+   * domain that changes hands) and the invite was for the person.
+   *
+   * `COALESCE` keeps the first redemption time rather than overwriting it on
+   * every later sign-in: the question it answers is when they first came in.
    *
    * The normalisation is not a convenience: an invite issued to
    * `Chris@Example.com` and a sign-in as `chris@example.com` are the same
    * person, and a lookup that misses turns a granted invite into a locked
    * door with no error anybody can act on.
    */
-  async isInvited(identity: string, userId: string): Promise<boolean> {
+  async claimInvite(identity: string, userId: string): Promise<boolean> {
     const email = normaliseEmail(identity);
     if (email === null) return false;
-    const row = await this.#db
+    const result = await this.#db
       .prepare(
-        `SELECT 1 FROM access_invites
-          WHERE email = ?1 AND revoked_at IS NULL
+        `UPDATE access_invites
+            SET redeemed_by_user_id = ?2,
+                redeemed_at = COALESCE(redeemed_at, ?3)
+          WHERE email = ?1
+            AND revoked_at IS NULL
             AND (redeemed_by_user_id IS NULL OR redeemed_by_user_id = ?2)`,
       )
-      .bind(email, userId)
-      .first();
-    return row !== null;
+      .bind(email, userId, new Date().toISOString())
+      .run();
+    return result.meta.changes > 0;
   }
 
   /**
@@ -103,27 +112,6 @@ export class AccessStore {
       .bind(email)
       .run();
     return result.meta.changes > 0;
-  }
-
-  /**
-   * Record that this invite has been used, the first time it is used.
-   *
-   * `WHERE redeemed_at IS NULL` keeps the first sign-in rather than the
-   * latest, which is the fact worth having: when somebody actually took the
-   * invite up. It is written on a normal request path, so it must never fail
-   * one; the caller treats it as bookkeeping.
-   */
-  async redeem(identity: string, userId: string): Promise<void> {
-    const email = normaliseEmail(identity);
-    if (email === null) return;
-    await this.#db
-      .prepare(
-        `UPDATE access_invites
-            SET redeemed_by_user_id = ?2, redeemed_at = ?3
-          WHERE email = ?1 AND redeemed_at IS NULL`,
-      )
-      .bind(email, userId, new Date().toISOString())
-      .run();
   }
 
   /** The list an operator reads: never-used invites first, oldest first. */
