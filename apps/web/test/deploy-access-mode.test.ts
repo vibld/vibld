@@ -134,6 +134,39 @@ describe('the access mode a deploy sets', () => {
     assert.equal(result.wrangler, '', 'set the mode before refusing');
   });
 
+  it('counts admins the way the Worker will', async () => {
+    // The check is "can anybody get in", not "is the string non-empty".
+    // `parsePlatformAdmins` splits on commas, trims and drops the rest, so
+    // " , " is a non-empty secret and an empty admin list, and an entry
+    // that cannot be an email can never match a verified one. Both deploy
+    // green and lock everybody out, which is the one outcome this step
+    // exists to prevent.
+    for (const admins of [' , ', ',,', '   ', 'chris', 'chris@', '@example']) {
+      const result = await run({
+        VIBLD_ACCESS_MODE: '',
+        VIBLD_PLATFORM_ADMINS: admins,
+      });
+      assert.equal(result.code, 1, `"${admins}" was accepted as an admin`);
+      assert.equal(result.wrangler, '', 'closed the door before refusing');
+    }
+
+    // And the ones that do work, including the untidy spellings a person
+    // actually pastes. Refusing these would be the same failure pointed the
+    // other way: a deploy blocked on a list that is fine.
+    for (const admins of [
+      'chris@example.com',
+      '  chris@example.com  ',
+      'bad, chris@example.com',
+      'chris@example.com,someone@else.io',
+    ]) {
+      const result = await run({
+        VIBLD_ACCESS_MODE: '',
+        VIBLD_PLATFORM_ADMINS: admins,
+      });
+      assert.equal(result.code, 0, `"${admins}" was refused`);
+    }
+  });
+
   it('is invite-only when nothing says otherwise', async () => {
     // Unset is the launch state, and it is written rather than left absent
     // so that going back to closed is possible from here.

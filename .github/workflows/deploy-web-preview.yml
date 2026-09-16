@@ -402,8 +402,18 @@ jobs:
             echo "::warning::VIBLD_ACCESS_MODE is '$VIBLD_ACCESS_MODE', which is not the exact string 'open'. This deployment stays invite-only."
           fi
 
-          if [ -z "${VIBLD_PLATFORM_ADMINS:-}" ]; then
-            echo "::error::This deployment is invite-only and VIBLD_PLATFORM_ADMINS is empty, so nobody can reach the admin panel and nobody can issue an invite. Every account, including yours, would be refused with no way to let anybody in. Set VIBLD_PLATFORM_ADMINS on the 'preview' environment (a comma-separated list of admin email addresses) at https://github.com/vibld/vibld/settings/environments and run this workflow again."
+          # Counted the way the Worker counts them, not by whether the
+          # string is empty. `parsePlatformAdmins` splits on commas, trims,
+          # lowercases and drops what is left over, so " , " is a non-empty
+          # secret and an empty admin list, and an entry that cannot be an
+          # email address can never match a Clerk-verified one. Either way
+          # the deployment has no admin, which is the thing being checked.
+          usable="$(printf '%s' "${VIBLD_PLATFORM_ADMINS:-}" \
+            | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | grep -cE '^[^@[:space:]]+@[^@[:space:]]+$' || true)"
+          if [ "$usable" -eq 0 ]; then
+            echo "::error::This deployment is invite-only and VIBLD_PLATFORM_ADMINS holds no usable admin address, so nobody can reach the admin panel and nobody can issue an invite. Every account, including yours, would be refused with no way to let anybody in. Set VIBLD_PLATFORM_ADMINS on the 'preview' environment (a comma-separated list of admin email addresses) at https://github.com/vibld/vibld/settings/environments and run this workflow again."
             exit 1
           fi
 
