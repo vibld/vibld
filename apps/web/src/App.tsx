@@ -3,6 +3,7 @@ import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
 import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
 import { describeMode } from './generation/labels.ts';
+import { footerNote } from './generation/pane-gaps.ts';
 import { saveStyleDna } from './generation/style-dna-store.ts';
 import { saveKnowledge } from './generation/knowledge-store.ts';
 import { LifecycleBar } from './components/LifecycleBar.tsx';
@@ -111,13 +112,12 @@ function Builder() {
           This used to say that sandbox execution, real providers, Git export
           and deployment were not implemented. All four shipped, and the line
           stayed, so the app spent weeks denying the features somebody was
-          using while reading it. What is left here is the part that is still
-          true, and nothing else.
+          using while reading it. Then it was corrected twice and still left
+          claiming Problems was wired. It is now assembled from the same list
+          the panes state their own gaps from (generation/pane-gaps.ts), so
+          there is nothing here to correct separately.
         */}
-        <span>
-          Preview shows a local mock until you run the project in the sandbox.
-          The console shows generation events, not sandbox output.
-        </span>
+        <span>{footerNote()}</span>
       </footer>
     </div>
   );

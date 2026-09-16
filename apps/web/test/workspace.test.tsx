@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import type { BuilderState } from '../src/generation/session.ts';
 import { Workspace } from '../src/components/Workspace.tsx';
+import { noteFor } from '../src/generation/pane-gaps.ts';
 
 /**
  * The workspace shell, as it is actually wired.
@@ -261,6 +262,21 @@ describe('the workspace, as it is actually wired', () => {
 
     assert.doesNotMatch(view.tab(/Preview/).textContent ?? '', /live/);
     assert.match(view.tab(/Preview/).textContent ?? '', /older/);
+    view.unmount();
+  });
+
+  it('takes both pane notes from the one list of gaps', async () => {
+    // Not a match on the wording: the whole point is that the pane renders
+    // the recorded note itself, so correcting the record corrects the pane.
+    // A hand-written sentence that happens to read the same passes a regex
+    // and is exactly what went wrong three times.
+    const view = await mount(builder());
+
+    await view.open(/Console/);
+    assert.ok(view.text().includes(noteFor('console')));
+
+    await view.open(/Problems/);
+    assert.ok(view.text().includes(noteFor('problems')));
     view.unmount();
   });
 });
