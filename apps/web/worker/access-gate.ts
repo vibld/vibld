@@ -32,6 +32,19 @@ export const GATED_PATHS: readonly string[] = [
   '/api/billing/portal',
   // Issues a referral code, which is a share link into a closed product.
   '/api/referral/status',
+  // Records who referred this account. Gated for now, which has a cost worth
+  // stating: somebody who arrives on a referral link, signs up and lands on
+  // the waiting list cannot record their referrer, and the code is gone from
+  // the URL by the time they are let in. Nothing is lost today, because the
+  // referral programme has no interface and its reward is a placeholder.
+  //
+  // Opening it would be defensible: a claim spends nothing and grants
+  // nothing, and no payout is possible until a purchase clears, which an
+  // uninvited account cannot make. The cost of opening it is that an
+  // uninvited account can write a row. That is a product decision about how
+  // an invite-only launch and a referral programme should interact, so it
+  // stays closed until somebody makes it rather than being decided by
+  // whichever default I typed first.
   '/api/referral/claim',
 ];
 
