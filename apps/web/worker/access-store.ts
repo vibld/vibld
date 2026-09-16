@@ -100,6 +100,31 @@ export class AccessStore {
     return result.meta.changes > 0;
   }
 
+  /**
+   * The account that took this invite, or null when nobody has.
+   *
+   * Needed because withdrawing access and stopping a charge are two
+   * different systems keyed differently: the invite list is keyed by address
+   * and Stripe is keyed by account. Without this link, revoking somebody's
+   * invite left their subscription billing them for a product they could no
+   * longer sign in to, and nothing connected the two.
+   *
+   * Deliberately not restricted to unrevoked rows: the caller revokes first
+   * and then asks, so by the time this runs the row it is asking about has
+   * just been withdrawn.
+   */
+  async redeemedUserId(rawEmail: string): Promise<string | null> {
+    const email = normaliseEmail(rawEmail);
+    if (email === null) return null;
+    const row = await this.#db
+      .prepare(
+        `SELECT redeemed_by_user_id FROM access_invites WHERE email = ?1`,
+      )
+      .bind(email)
+      .first<{ redeemed_by_user_id: string | null }>();
+    return row?.redeemed_by_user_id ?? null;
+  }
+
   /** Put a withdrawn invite back, which is a separate act from issuing one. */
   async reinstate(rawEmail: string): Promise<boolean> {
     const email = normaliseEmail(rawEmail);
