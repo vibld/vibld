@@ -7,7 +7,7 @@ import { AccessStore } from '../worker/access-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
 const SCHEMA = readFileSync(
-  join(import.meta.dirname, '..', 'migrations', '0007_access.sql'),
+  join(import.meta.dirname, '..', 'migrations', '0008_access.sql'),
   'utf8',
 );
 
