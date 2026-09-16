@@ -579,3 +579,51 @@ describe('what the poll does with an unconfirmed stop', () => {
     view.unmount();
   });
 });
+
+describe('an answer the poll cannot read', () => {
+  it('keeps the stop warning and keeps asking', async () => {
+    // A malformed 200 is not the service saying the sandbox stopped. Read
+    // as a failure it would take the warning down, stop the poll, and
+    // remove the Stop button, all on the strength of a body this client
+    // could not parse, while the sandbox may still be running.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to keep');
+
+    // Nonsense, then the truth. The poll has to survive the first to report
+    // the second.
+    phase = { status: 'ready' };
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    assert.equal(
+      view.sandbox.status?.status,
+      'installing',
+      'took the nonsense',
+    );
+    assert.ok(view.sandbox.stopError, 'dropped the warning on unreadable news');
+
+    phase = READY;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    assert.equal(view.sandbox.status?.status, 'ready', 'stopped asking');
+    view.unmount();
+  });
+});
