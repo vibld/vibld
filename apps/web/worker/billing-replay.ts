@@ -34,8 +34,67 @@ import type { EventReplayCursor } from './billing-store.ts';
 /** The cursor row this sweep uses. One today; named so a second is not a schema change. */
 export const STRIPE_EVENTS_CURSOR = 'stripe-events';
 
-/** Events per Stripe request. Stripe's own maximum, so the fewest requests per event. */
-const PAGE_SIZE = 100;
+/**
+ * The most events one Stripe request may return.
+ *
+ * Stripe's own maximum, and also D1's hundred bound parameters per query,
+ * which is what the page's one dedupe read is bounded by. The page actually
+ * asked for is smaller whenever the query budget below cannot afford this
+ * many.
+ */
+const PAGE_SIZE_CAP = 100;
+
+/**
+ * D1 queries one event can cost, at its worst.
+ *
+ * A settled top-up Checkout is the worst: `linkCustomer`, `recordTopup`,
+ * `recordPayment`, then `markEventProcessed`. An invoice or a subscription
+ * costs one fewer. Whether an event has already been applied is asked once
+ * for the whole page rather than once per event, which is why that is not in
+ * this number.
+ *
+ * Over-counting here is safe and under-counting is not, so a handler that
+ * grows a write has to grow this.
+ */
+const MAX_QUERIES_PER_EVENT = 4;
+
+/** The page's dedupe read, plus the cursor save after it. */
+const QUERIES_PER_PAGE = 2;
+
+/** The sweep header written before the first request. */
+const QUERIES_PER_RUN = 1;
+
+/**
+ * D1 queries one run may spend.
+ *
+ * D1 counts queries per Worker invocation and stops the invocation at the
+ * limit: 1000 on Workers Paid, 50 on Workers Free. Exceeding it is not a slow
+ * run, it is a throw partway through a page, and a throw leaves the cursor
+ * where it was, so every following night would die in the same place for
+ * ever. A budget that never decides what is reachable has to be a budget in
+ * the unit the platform actually meters.
+ *
+ * The default is the one that is safe wherever this is deployed, because
+ * which plan a deployment is on is not something this code can read. A
+ * deployment on Workers Paid should raise it: see `VIBLD_REPLAY_QUERY_BUDGET`
+ * in `worker/index.ts`.
+ */
+export const DEFAULT_QUERY_BUDGET = 40;
+
+/**
+ * How many events a page may hold, given what a run may spend.
+ *
+ * At least one, always. A page that cannot fit in the budget could never be
+ * completed, and a page that is never completed is a cursor that never
+ * advances, which is the stuck-for-ever failure in another costume.
+ */
+export function pageSizeFor(queryBudget: number): number {
+  const forEvents = queryBudget - QUERIES_PER_RUN - QUERIES_PER_PAGE;
+  return Math.max(
+    1,
+    Math.min(PAGE_SIZE_CAP, Math.floor(forEvents / MAX_QUERIES_PER_EVENT)),
+  );
+}
 
 /**
  * Stripe requests one run may spend.
@@ -118,7 +177,16 @@ export async function replayStripeEvents(
   store: BillingStore,
   budget: number = DEFAULT_REQUEST_BUDGET,
   now: () => number = () => Math.floor(Date.now() / 1000),
+  queryBudget: number = DEFAULT_QUERY_BUDGET,
 ): Promise<ReplayResult> {
+  const pageSize = pageSizeFor(queryBudget);
+  // What a page costs at its worst, which is what decides whether there is
+  // room for another one. Measured against the worst case rather than what
+  // the last page happened to cost: the budget exists to keep the run inside
+  // a limit the platform enforces by throwing, and a throw is the one
+  // outcome this must not reach.
+  const worstPageCost = QUERIES_PER_PAGE + pageSize * MAX_QUERIES_PER_EVENT;
+  let spent = QUERIES_PER_RUN;
   const saved = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
   // A deployment that has never run one asks for everything Stripe still
   // holds. Bounded by retention, not by this number.
@@ -180,9 +248,10 @@ export async function replayStripeEvents(
    */
   let after = cursor.sweepAfterId;
 
-  while (requests < budget) {
+  while (requests < budget && spent + worstPageCost <= queryBudget) {
+    spent += worstPageCost;
     const page = await stripe.events.list({
-      limit: PAGE_SIZE,
+      limit: pageSize,
       types: REPLAYED_EVENT_TYPES,
       created: { gte: cursor.doneBelow, lt: sweepTop },
       ...(after === null ? {} : { starting_after: after }),
@@ -202,10 +271,15 @@ export async function replayStripeEvents(
     const events = [...page.data]
       .reverse()
       .sort((a, b) => a.created - b.created);
+    // One query for the page rather than one per event, which is what makes
+    // a page of a hundred affordable at all.
+    const alreadyDone = await store.processedEventIds(
+      events.map((event) => event.id),
+    );
     for (const event of events) {
       read += 1;
       try {
-        if (await store.wasEventProcessed(event.id)) continue;
+        if (alreadyDone.has(event.id)) continue;
         // No purchase hook, deliberately. `announceIfPaid` lets a failed
         // referral payout fail the delivery, which is right for a webhook
         // because Stripe retries it, and wrong here because nothing retries
@@ -317,6 +391,22 @@ export async function replayStripeEvents(
   return { read, applied, failed, unresolved, requests, incomplete: true };
 }
 
+/**
+ * How many parked events one retry run may take on.
+ *
+ * The same D1 ceiling the replay is bounded by, and this pass runs in the
+ * same invocation, so the two budgets are spent from one allowance. A row
+ * costs its attempt stamp, the handler's own queries, and on success the
+ * mark and the delete.
+ *
+ * Taking fewer than the queue holds is not a limit on what is reachable: the
+ * queue rotates by `last_attempt_at`, so a batch that does not cover it
+ * leaves the rest at the front of the next one.
+ */
+export function retryBatchFor(queryBudget: number): number {
+  return Math.max(1, Math.floor(queryBudget / (MAX_QUERIES_PER_EVENT + 2)));
+}
+
 export interface RetryResult {
   /** Parked events this run looked at. */
   tried: number;
@@ -346,7 +436,7 @@ export interface RetryResult {
  */
 export async function retryUnattributedEvents(
   store: BillingStore,
-  limit = 200,
+  limit = retryBatchFor(DEFAULT_QUERY_BUDGET),
   now: () => string = () => new Date().toISOString(),
 ): Promise<RetryResult> {
   // Least recently tried first, so a row that can never be attributed costs

@@ -472,6 +472,30 @@ export class BillingStore {
     return row !== null;
   }
 
+  /**
+   * Which of these events have already been applied.
+   *
+   * One query for a whole page rather than one per event, because D1 counts
+   * queries per Worker invocation (1000 on Workers Paid, 50 on Free) and the
+   * replay's per-event cost is what decides how much of a backlog a nightly
+   * run can clear.
+   *
+   * The caller keeps the list at or under D1's hundred bound parameters per
+   * query, which is what bounds the page.
+   */
+  async processedEventIds(stripeEventIds: string[]): Promise<Set<string>> {
+    if (stripeEventIds.length === 0) return new Set();
+    const holes = stripeEventIds.map((_, n) => `?${n + 1}`).join(', ');
+    const result = await this.#db
+      .prepare(
+        `SELECT stripe_event_id FROM billing_webhook_events
+          WHERE stripe_event_id IN (${holes})`,
+      )
+      .bind(...stripeEventIds)
+      .all<{ stripe_event_id: string }>();
+    return new Set((result.results ?? []).map((row) => row.stripe_event_id));
+  }
+
   /** Has this Stripe event already been applied? Checked before, not after. */
   async wasEventProcessed(stripeEventId: string): Promise<boolean> {
     const row = await this.#db

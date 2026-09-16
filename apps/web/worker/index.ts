@@ -101,7 +101,9 @@ import {
   handleGitHubStatus,
 } from './github-handlers.ts';
 import {
+  DEFAULT_QUERY_BUDGET,
   replayStripeEvents,
+  retryBatchFor,
   retryUnattributedEvents,
 } from './billing-replay.ts';
 import { createStripeClient } from './stripe-client.ts';
@@ -305,6 +307,15 @@ export interface Env {
    * the same exception `VIBLD_MODEL_POLICY` is.
    */
   VIBLD_PLATFORM_ADMINS?: string;
+  /**
+   * D1 queries the nightly billing replay may spend in one invocation.
+   *
+   * Unset means the default that is safe on Workers Free. A Workers Paid
+   * deployment sets this to clear a backlog faster; see
+   * `billing-replay.ts`'s `DEFAULT_QUERY_BUDGET` for why setting it above
+   * the plan's real limit is worse than leaving it alone.
+   */
+  VIBLD_REPLAY_QUERY_BUDGET?: string;
   /**
    * Worker secret. Lets `/api/admin/*` resolve an email an admin typed into
    * the Clerk user id the ledger actually keys on -- see clerk-lookup.ts.
@@ -1517,6 +1528,22 @@ export default {
       const payout = { referrals, billing };
 
       const stripe = createStripeClient(env);
+      /*
+       * D1 stops a Worker invocation at its query limit by throwing, and the
+       * limit depends on the plan: 1000 on Workers Paid, 50 on Workers Free.
+       * Nothing in the runtime reports which one this deployment is on, so
+       * the default is the one that is safe on either and a Paid deployment
+       * says so here.
+       *
+       * Raising it past the real limit is worse than leaving it low. The
+       * replay would throw partway through a page, which leaves its cursor
+       * where it was, so every following night would die in the same place.
+       */
+      const queryBudget = Number(env.VIBLD_REPLAY_QUERY_BUDGET);
+      const budget =
+        Number.isFinite(queryBudget) && queryBudget > 0
+          ? queryBudget
+          : DEFAULT_QUERY_BUDGET;
       const cleared = (userId: string) =>
         payReferralIfEarned(payout, userId).then(() => undefined);
       ctx.waitUntil(
@@ -1529,7 +1556,7 @@ export default {
         // the replay left it in. The money the replay recovers does not
         // depend on order: a top-up and a payment are recorded against the
         // Stripe object's own id, once.
-        replayStripeEvents(stripe, billing)
+        replayStripeEvents(stripe, billing, undefined, undefined, budget)
           .then(
             (result) =>
               console.log(
@@ -1540,7 +1567,7 @@ export default {
           // Then the events parked because nobody could be attributed to
           // them. No Stripe requests: the payloads were kept, so this keeps
           // working long after Stripe has forgotten the events existed.
-          .then(() => retryUnattributedEvents(billing))
+          .then(() => retryUnattributedEvents(billing, retryBatchFor(budget)))
           .then(
             (result) =>
               console.log(

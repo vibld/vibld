@@ -7,6 +7,7 @@ import type Stripe from 'stripe';
 
 import {
   DEFAULT_REQUEST_BUDGET,
+  pageSizeFor,
   REPLAYED_EVENT_TYPES,
   STRIPE_EVENTS_CURSOR,
   replayStripeEvents,
@@ -352,11 +353,25 @@ describe('the budget', () => {
     ]);
     const { stripe } = stripeServing(pages);
 
+    // A query budget wide enough that the request budget is what this
+    // measures. The D1 ceiling has its own tests below.
     let runs = 0;
-    let result = await replayStripeEvents(stripe, store);
+    let result = await replayStripeEvents(
+      stripe,
+      store,
+      undefined,
+      undefined,
+      9000,
+    );
     runs += 1;
     while (result.incomplete && runs < 10) {
-      result = await replayStripeEvents(stripe, store);
+      result = await replayStripeEvents(
+        stripe,
+        store,
+        undefined,
+        undefined,
+        9000,
+      );
       runs += 1;
     }
 
@@ -383,10 +398,10 @@ describe('what the nightly pass hands the replay', () => {
     // recovered over a bug in an unrelated subsystem.
     const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
 
-    assert.match(source, /replayStripeEvents\(stripe, billing\)/);
+    assert.match(source, /replayStripeEvents\(\s*stripe,\s*billing,/);
     assert.doesNotMatch(
       source,
-      /replayStripeEvents\(stripe, billing, cleared\)/,
+      /replayStripeEvents\([^)]*\bcleared\b/,
       'a payout failure can stall the recovery again',
     );
   });
@@ -396,7 +411,7 @@ describe('what the nightly pass hands the replay', () => {
     // it does not need to be told. It does need to run after the thing that
     // records the payment.
     const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
-    const replay = source.indexOf('replayStripeEvents(stripe, billing)');
+    const replay = source.indexOf('replayStripeEvents(');
     const payouts = source.indexOf('resumeStrandedPayouts(payout)');
 
     assert.ok(replay > 0 && payouts > 0, 'the nightly pass lost a step');
@@ -534,7 +549,7 @@ describe('an event whose owner this deployment cannot work out yet', () => {
     } as unknown as Stripe.Event;
     const { stripe } = stripeServing([[foreign]]);
 
-    const result = await replayStripeEvents(stripe, store, 5, () => 9000);
+    const result = await replayStripeEvents(stripe, store, 5, () => 9000, 9000);
 
     assert.equal(result.unresolved, 1);
     assert.equal(result.incomplete, false, 'froze the sweep on it');
@@ -567,8 +582,8 @@ describe('an event whose owner this deployment cannot work out yet', () => {
     ]);
 
     // One run over the whole descent: the invoice is parked, and the
-    // Checkout below it links the customer.
-    await replayStripeEvents(stripe, store);
+    // Checkout below it links the customer. Given room for both pages.
+    await replayStripeEvents(stripe, store, undefined, undefined, 9000);
     assert.equal((await store.listUnattributedEvents()).length, 1);
 
     // The local retry comes back for it, and now there is an owner. No
@@ -605,7 +620,7 @@ describe('an event whose owner this deployment cannot work out yet', () => {
       },
     } as unknown as Stripe.Event;
     const { stripe } = stripeServing([[foreign]]);
-    await replayStripeEvents(stripe, store);
+    await replayStripeEvents(stripe, store, undefined, undefined, 9000);
 
     await retryUnattributedEvents(store);
     const second = await retryUnattributedEvents(store);
@@ -764,5 +779,86 @@ describe('a queue with rows in it that can never be attributed', () => {
 
     assert.equal(result.applied, 2, 'applied the invoice before its mapping');
     assert.equal((await store.listUnattributedEvents()).length, 0);
+  });
+});
+
+describe('the D1 query ceiling', () => {
+  it('always leaves room for a whole page', async () => {
+    // D1 stops a Worker invocation at its query limit by throwing: 1000 on
+    // Workers Paid, 50 on Free. A page that cannot fit in the budget could
+    // never be completed, so its cursor could never advance, so every night
+    // would die in the same place for ever. That is the stuck-for-ever
+    // failure again, reached through a resource limit rather than through
+    // logic, which is why the page is derived from the budget and not the
+    // other way round.
+    for (const budget of [1, 4, 8, 40, 50, 900, 1000]) {
+      const size = pageSizeFor(budget);
+      assert.ok(size >= 1, `budget ${budget} asked for a page of none`);
+      // One run's header, the page's dedupe read and cursor save, then the
+      // events at their worst.
+      const worst = 1 + 2 + size * 4;
+      if (budget >= 8) {
+        assert.ok(
+          worst <= budget,
+          `budget ${budget} allows a page costing ${worst}`,
+        );
+      }
+    }
+  });
+
+  it('never asks Stripe for more than the page it can afford', async () => {
+    // Asking for a hundred and then only being able to pay for nine would
+    // read eighty-one events it cannot mark, every night, for ever.
+    const store = newStore();
+    const { stripe, asked } = stripeServing([[]]);
+
+    await replayStripeEvents(stripe, store, 20, () => 5000, 40);
+
+    assert.equal(asked[0]?.limit, pageSizeFor(40));
+    assert.ok(
+      (asked[0]?.limit ?? 0) <= 100,
+      'asked for more than D1 can bind in one dedupe read',
+    );
+  });
+
+  it('stops a run before the budget rather than after it', async () => {
+    // Two pages are available and the budget affords one. Stopping after
+    // the second would be a throw partway through, and a throw leaves the
+    // cursor where it was.
+    const store = newStore();
+    const { stripe, asked } = stripeServing([
+      [topupEvent('evt_1', 3000)],
+      [topupEvent('evt_2', 1000, 'user_2')],
+    ]);
+
+    const result = await replayStripeEvents(stripe, store, 20, () => 5000, 40);
+
+    assert.equal(asked.length, 1, 'spent more of the budget than it had');
+    assert.equal(result.incomplete, true, 'called a budgeted stop complete');
+
+    // And the next run carries on, which is what makes the stop a pause.
+    await replayStripeEvents(stripe, store, 20, () => 5000, 40);
+    assert.equal(await store.hasClearedPayment('user_2'), true);
+  });
+
+  it('asks whether a page is done in one query, not one per event', async () => {
+    // Per event it is the single biggest cost in the run, and it is what
+    // decides how much of a backlog a night can clear.
+    const store = newStore();
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/billing-replay.ts', import.meta.url)),
+      'utf8',
+    );
+
+    assert.match(source, /store\.processedEventIds\(/);
+    assert.doesNotMatch(
+      source,
+      /await store\.wasEventProcessed\(/,
+      'back to one dedupe query per event',
+    );
+    // And the batched read really does say what has been done.
+    await store.markEventProcessed('evt_done', 'invoice.paid');
+    const done = await store.processedEventIds(['evt_done', 'evt_new']);
+    assert.deepEqual([...done], ['evt_done']);
   });
 });
