@@ -154,6 +154,130 @@ export const LEGAL_DOCS: LegalDoc[] = [
   },
 ];
 
+/**
+ * The two documentation tracks (docs/decisions.md, resolved 2026-09-16).
+ *
+ * Separate rather than one set of pages with "if you are self-hosting"
+ * asides, because the two readers are answering different questions. Somebody
+ * using app.vibld.com never has to know what a Durable Object is; somebody
+ * running their own copy needs to know exactly which bindings exist and which
+ * secrets have to be set, and is not helped by being told what their credit
+ * balance means.
+ */
+export type DocTrack = 'hosted' | 'self-hosted';
+
+export interface DocTrackInfo {
+  id: DocTrack;
+  label: string;
+  lead: string;
+}
+
+export const DOC_TRACKS: DocTrackInfo[] = [
+  {
+    id: 'hosted',
+    label: 'Using Vibld',
+    lead: 'The hosted builder at app.vibld.com: what each part of it does, what it costs, and where your project goes when you are finished with it.',
+  },
+  {
+    id: 'self-hosted',
+    label: 'Running Vibld yourself',
+    lead: 'The published source, run on your own Cloudflare account and your own model keys. What it needs, what you have to set, and what differs from the hosted service.',
+  },
+];
+
+export interface DocGuide {
+  slug: string;
+  track: DocTrack;
+  label: string;
+  title: string;
+  description: string;
+}
+
+export const DOC_GUIDES: DocGuide[] = [
+  {
+    slug: 'getting-started',
+    track: 'hosted',
+    label: 'Getting started',
+    title: `Getting started | ${SITE.name} docs`,
+    description:
+      'Sign in, describe what you want, and accept your first checkpoint.',
+  },
+  {
+    slug: 'the-builder',
+    track: 'hosted',
+    label: 'The builder, pane by pane',
+    title: `The builder, pane by pane | ${SITE.name} docs`,
+    description:
+      'What Preview, Code, Console and Problems each show, and what they do not.',
+  },
+  {
+    slug: 'running-your-project',
+    track: 'hosted',
+    label: 'Running and sharing your project',
+    title: `Running and sharing your project | ${SITE.name} docs`,
+    description:
+      'Run a real installed copy in a sandbox, share it with a link, and revoke it.',
+  },
+  {
+    slug: 'taking-your-code',
+    track: 'hosted',
+    label: 'Taking your code with you',
+    title: `Taking your code with you | ${SITE.name} docs`,
+    description:
+      'Download the project, push it to GitHub, or publish it, and what each one produces.',
+  },
+  {
+    slug: 'credits-and-plans',
+    track: 'hosted',
+    label: 'Credits and plans',
+    title: `Credits and plans | ${SITE.name} docs`,
+    description:
+      'What a run costs, what a plan includes, and the order the three layers of credit are spent in.',
+  },
+  {
+    slug: 'self-hosting',
+    track: 'self-hosted',
+    label: 'What self-hosting involves',
+    title: `What self-hosting involves | ${SITE.name} docs`,
+    description:
+      'The three Workers, the stored state behind them, and the accounts you need before starting.',
+  },
+  {
+    slug: 'configuration',
+    track: 'self-hosted',
+    label: 'Settings and secrets',
+    title: `Settings and secrets | ${SITE.name} docs`,
+    description:
+      'Every variable and secret the Worker reads, what happens without each one, and where it belongs.',
+  },
+  {
+    slug: 'deploying',
+    track: 'self-hosted',
+    label: 'Deploying your own copy',
+    title: `Deploying your own copy | ${SITE.name} docs`,
+    description:
+      'From a clone to a running builder on your own Cloudflare account.',
+  },
+  {
+    slug: 'hosted-vs-self-hosted',
+    track: 'self-hosted',
+    label: 'What differs from the hosted service',
+    title: `What differs from the hosted service | ${SITE.name} docs`,
+    description:
+      'The parts of app.vibld.com that are operations rather than code, and what you take on by running your own.',
+  },
+];
+
+export function guidesIn(track: DocTrack): DocGuide[] {
+  return DOC_GUIDES.filter((guide) => guide.track === track);
+}
+
+export function trackFor(guide: DocGuide): DocTrackInfo {
+  const track = DOC_TRACKS.find((candidate) => candidate.id === guide.track);
+  if (!track) throw new Error(`No track declared for ${guide.slug}`);
+  return track;
+}
+
 export const ROUTES: SiteRoute[] = [
   {
     path: '/',
@@ -170,6 +294,17 @@ export const ROUTES: SiteRoute[] = [
     path: `/legal/${doc.slug}`,
     title: doc.title,
     description: doc.description,
+  })),
+  {
+    path: '/docs',
+    title: `Docs | ${SITE.name}`,
+    description:
+      'Guides for the hosted builder and for running your own copy of Vibld.',
+  },
+  ...DOC_GUIDES.map((guide) => ({
+    path: `/docs/${guide.slug}`,
+    title: guide.title,
+    description: guide.description,
   })),
 ];
 

@@ -4,7 +4,15 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { before, describe, it } from 'node:test';
 
-import { LEGAL_DOCS, ROUTES, SITE } from '../app/site.ts';
+import {
+  DOC_GUIDES,
+  DOC_TRACKS,
+  LEGAL_DOCS,
+  ROUTES,
+  ROUTE_PATHS,
+  SITE,
+  guidesIn,
+} from '../app/site.ts';
 
 /**
  * These tests read the built site, not the source -- see
@@ -504,5 +512,89 @@ describe('social and structured metadata', () => {
       (node: { '@type': string }) => node['@type'] === 'Organization',
     );
     assert.ok(org.sameAs.includes(SITE.repoUrl));
+  });
+});
+
+describe('internal links', () => {
+  /** Every root-relative href in the built HTML, fragment and query stripped. */
+  function internalLinks(html: string): string[] {
+    return [...html.matchAll(/href="(\/[^"]*)"/g)]
+      .map((match) => match[1]!)
+      .map((href) => href.split('#')[0]!.split('?')[0]!)
+      .filter((href) => href !== '');
+  }
+
+  /**
+   * A link to a page that does not exist is the way documentation rots, and
+   * it is invisible in a diff: the page it points at was renamed somewhere
+   * else entirely. Asset paths are exempt because they are files rather than
+   * routes, and they are checked by existing on disk.
+   */
+  it('never points at a page that was not built', () => {
+    const declared = new Set(ROUTE_PATHS);
+    const broken: string[] = [];
+
+    for (const route of ROUTES) {
+      for (const href of internalLinks(read(route.path))) {
+        if (/\.[a-z0-9]+$/i.test(href)) {
+          if (!existsSync(join(CLIENT, href.replace(/^\//, '')))) {
+            broken.push(`${route.path} -> ${href} (no such file)`);
+          }
+          continue;
+        }
+        const normalised =
+          href.endsWith('/') && href !== '/' ? href.slice(0, -1) : href;
+        if (!declared.has(normalised)) {
+          broken.push(`${route.path} -> ${href} (no such route)`);
+        }
+      }
+    }
+
+    assert.deepEqual(
+      broken,
+      [],
+      `broken internal links:\n${broken.join('\n')}`,
+    );
+  });
+
+  it('checks enough pages to mean something', () => {
+    // The rule above passes trivially if the walk finds nothing, which is
+    // exactly what a wrong CLIENT path would produce.
+    const total = ROUTES.reduce(
+      (count, route) => count + internalLinks(read(route.path)).length,
+      0,
+    );
+    assert.ok(total > 50, `only ${total} internal links found`);
+  });
+});
+
+describe('the docs index', () => {
+  it('reaches every guide', () => {
+    // A guide in DOC_GUIDES whose track is not one of DOC_TRACKS builds its
+    // own page and is listed from nowhere, which is worse than not shipping
+    // it: it is reachable only by somebody who already knows the URL.
+    const html = read('/docs');
+    for (const guide of DOC_GUIDES) {
+      assert.ok(
+        html.includes(`/docs/${guide.slug}`),
+        `the docs index does not link ${guide.slug}`,
+      );
+    }
+  });
+
+  it('gives every track something to show', () => {
+    for (const track of DOC_TRACKS) {
+      assert.ok(
+        guidesIn(track.id).length > 0,
+        `the ${track.id} track has no guides, so its section is a heading over nothing`,
+      );
+    }
+  });
+
+  it('puts every guide in a declared track', () => {
+    const tracks = new Set(DOC_TRACKS.map((track) => track.id));
+    for (const guide of DOC_GUIDES) {
+      assert.ok(tracks.has(guide.track), `${guide.slug} is in no known track`);
+    }
   });
 });

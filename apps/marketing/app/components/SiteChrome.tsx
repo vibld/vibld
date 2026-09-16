@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { CONSENT_OPEN_EVENT } from '../consent.ts';
-import { LEGAL_DOCS, SITE } from '../site';
+import { DOC_TRACKS, LEGAL_DOCS, SITE } from '../site';
 
 /**
  * The skip link is the first thing in the tab order on every page. Without it
@@ -41,6 +41,17 @@ export function SiteHeader() {
               {SITE.tagline}
             </span>
             {/*
+              In the header rather than the footer only. The guides answer
+              "what does this actually do", which is a question somebody has
+              before they sign up, not after.
+            */}
+            <Link
+              to="/docs"
+              className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium hover:underline hover:underline-offset-4"
+            >
+              Docs
+            </Link>
+            {/*
               A plain anchor: app.vibld.com is a different Worker on a
               different host, so routing to it client-side would 404 in the
               router before the browser ever left this origin.
@@ -62,6 +73,24 @@ export function SiteFooter() {
   return (
     <footer className="mt-20 border-t border-black/10 dark:border-white/10">
       <div className="mx-auto max-w-5xl px-5 py-10 text-sm text-[var(--color-ink-muted)]">
+        {/*
+          The two tracks, not all nine guides. The index is the navigation;
+          a footer that lists every page is a second, worse copy of it.
+        */}
+        <nav aria-label="Guides" className="mb-6">
+          <ul className="flex flex-wrap gap-x-5 gap-y-2">
+            {DOC_TRACKS.map((track) => (
+              <li key={track.id}>
+                <Link
+                  to={`/docs#${track.id}`}
+                  className="hover:text-[var(--color-ink)] hover:underline hover:underline-offset-4"
+                >
+                  {track.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
         <nav aria-label="Legal">
           <ul className="flex flex-wrap gap-x-5 gap-y-2">
             {LEGAL_DOCS.map((doc) => (
@@ -161,6 +190,53 @@ export function LegalPage({
       </h1>
       <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
         Last updated <time dateTime={updated}>{formatDate(updated)}</time>
+      </p>
+      <div className="prose-legal mt-8 max-w-none">{children}</div>
+    </article>
+  );
+}
+
+/**
+ * Shared chrome for a guide: which track it belongs to, a way back to the
+ * index, and the date it was last checked against the product.
+ *
+ * `updated` is the date somebody last read the code this page describes, not
+ * the date the file changed. A guide that describes a feature the product
+ * does not have is the same defect as a UI note that does, and it reaches
+ * more people.
+ */
+export function DocPage({
+  guide,
+  updated,
+  children,
+}: {
+  guide: { label: string; track: string };
+  /** ISO date, e.g. "2026-09-16". */
+  updated: string;
+  children: React.ReactNode;
+}) {
+  const track = DOC_TRACKS.find((candidate) => candidate.id === guide.track);
+  return (
+    <article className="mx-auto max-w-3xl px-5 py-16">
+      <p className="text-sm">
+        <Link
+          to="/docs"
+          className="text-[var(--color-accent-ink)] hover:underline hover:underline-offset-4"
+        >
+          ← All guides
+        </Link>
+      </p>
+      {track ? (
+        <p className="mt-4 font-mono text-sm font-medium tracking-wide text-[var(--color-accent-ink)] uppercase">
+          {track.label}
+        </p>
+      ) : null}
+      <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-balance sm:text-4xl">
+        {guide.label}
+      </h1>
+      <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
+        Checked against the product on{' '}
+        <time dateTime={updated}>{formatDate(updated)}</time>
       </p>
       <div className="prose-legal mt-8 max-w-none">{children}</div>
     </article>
