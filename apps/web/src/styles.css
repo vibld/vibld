@@ -1259,3 +1259,30 @@ body {
   font-size: var(--text-xs);
   color: var(--text-faint);
 }
+
+/*
+ * The invite list in the admin panel. One row per address, each with its
+ * state and the single act available on it, so an operator reads the list
+ * and acts on it in the same place.
+ */
+.invites {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invites__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.invites__email {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

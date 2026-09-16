@@ -552,10 +552,37 @@ async function handleBillingStatus(
   }
 }
 
+/**
+ * What every `/api/admin/*` route needs before it can decide anything: a
+ * list of admins to check the caller against, and the database they all
+ * read or write.
+ *
+ * `CLERK_SECRET_KEY` is deliberately not here. It buys one thing, turning a
+ * typed email into a Clerk user id, and only the two credit routes do that.
+ * Requiring it for every admin route made the invite routes answer 503 on a
+ * deployment with no credit tool configured, so an operator with a
+ * perfectly good admin list could not invite anybody and was told the
+ * credit tool was missing, which is true and not the thing they were doing.
+ * The two routes that need it check for it themselves, below.
+ */
 function adminConfigured(env: Env): boolean {
-  return Boolean(
-    env.VIBLD_PLATFORM_ADMINS && clerkLookupConfigured(env) && env.DB,
-  );
+  return Boolean(env.VIBLD_PLATFORM_ADMINS && env.DB);
+}
+
+/**
+ * The extra requirement of the credit routes, asked after the caller has
+ * been established as an admin rather than before: what a deployment has
+ * configured is not something an anonymous caller needs told.
+ */
+function creditToolDenial(env: Env): Response | null {
+  return clerkLookupConfigured(env)
+    ? null
+    : json(
+        {
+          error: 'The admin credit tool is not configured for this deployment.',
+        },
+        503,
+      );
 }
 
 /**
@@ -573,9 +600,7 @@ async function requireAdmin(
   if (!adminConfigured(env)) {
     return {
       denied: json(
-        {
-          error: 'The admin credit tool is not configured for this deployment.',
-        },
+        { error: 'Admin access is not configured for this deployment.' },
         503,
       ),
     };
@@ -604,6 +629,8 @@ async function handleAdminUser(request: Request, env: Env): Promise<Response> {
 
   const admin = await requireAdmin(request, env);
   if (admin.denied) return admin.denied;
+  const unconfigured = creditToolDenial(env);
+  if (unconfigured) return unconfigured;
 
   const email = new URL(request.url).searchParams.get('email');
   if (!email)
@@ -635,6 +662,8 @@ async function handleAdminTopup(request: Request, env: Env): Promise<Response> {
 
   const admin = await requireAdmin(request, env);
   if (admin.denied) return admin.denied;
+  const unconfigured = creditToolDenial(env);
+  if (unconfigured) return unconfigured;
 
   let body: unknown;
   try {
@@ -1292,13 +1321,6 @@ export default {
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
-      if (!isConfigured(env)) {
-        return json(
-          { error: 'Model generation is not configured for this deployment.' },
-          403,
-        );
-      }
-
       // Identified before answered: the picker is per-person now, so this
       // cannot be served to an anonymous caller without telling them what
       // somebody else may use.
@@ -1306,20 +1328,29 @@ export default {
       if (resolved.denied) return resolved.denied;
       const { principal } = resolved;
 
+      // A deployment with no model generation is reported, not refused.
+      // This used to answer 403, and the shell reads any refusal as "nothing
+      // configured, and you are not an admin", which hid the invite panel on
+      // a deployment whose invite routes work perfectly: they need the admin
+      // list and D1, and neither is what generation is missing. This
+      // endpoint's job is to say what the deployment can do, and "it cannot
+      // generate" is an answer to that question rather than a reason to
+      // withhold one.
+      const configured = isConfigured(env);
+
       // Two filters, in order. What the deployment can serve at all --
       // offering a model whose provider has no key produces a run that fails
       // after the user has waited for it. Then what this person is granted
       // (by email, per L4 -- see the same note in handlePlan).
-      const models = grantedFor(env, principal.policyIdentity);
+      const models = configured
+        ? grantedFor(env, principal.policyIdentity)
+        : [];
       // The deployment default is only offered if this person may use it.
-      const decided = decideModel(
-        env,
-        principal.policyIdentity,
-        null,
-        resolveModel(env),
-      );
+      const decided = configured
+        ? decideModel(env, principal.policyIdentity, null, resolveModel(env))
+        : { ok: false as const, error: 'not configured' };
       return json({
-        generation: isConfigured(env) ? 'model' : 'fake',
+        generation: configured ? 'model' : 'fake',
         models: models.map(({ id, label, note, provider }) => ({
           id,
           label,

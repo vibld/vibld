@@ -46,7 +46,7 @@ describe('decideAccessFor', () => {
     const decision = await decideAccessFor(env, INVITED);
 
     assert.deepEqual(decision, { allowed: true, because: 'invited' });
-    const [row] = await new AccessStore(env.DB).list();
+    const [row] = (await new AccessStore(env.DB).list()).invites;
     assert.equal(row?.redeemedByUserId, 'user_1');
   });
 

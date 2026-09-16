@@ -179,8 +179,33 @@ has been invited.
 
 ### Running the list
 
+An admin gets an **Admin: invites** panel in the builder shell, which lists
+every invite with what it currently is (waiting, in, withdrawn) and carries
+the two acts that change it. That panel is the way in: without it, letting
+somebody in would mean constructing an authenticated POST by hand.
+
+**Two systems have to agree**, and the panel says so rather than implying
+otherwise. Clerk is in Waitlist mode (above), so it decides whether somebody
+can sign in at all; this list decides whether signing in gets them anywhere.
+A row here for an address Clerk has not approved is somebody who cannot
+create a session and so never reaches the gate, which is why the panel's
+confirmation names the Clerk step and links to
+<https://dashboard.clerk.com/~/users/waitlist> rather than reporting an
+invite as access.
+
+It is careful about what it claims, because this list is what decides who may
+use the product. Issuing has three outcomes and they are reported apart: a new
+invite, a withdrawn one put back, and an address already on the list where
+nothing changed. A withdrawal that moved no row says so rather than reporting
+success.
+
+Underneath:
+
 - `GET /api/access/status` -- what the shell asks to decide which screen to
-  render. The endpoints are the boundary either way (ADR-0006).
+  render. The endpoints are the boundary either way (ADR-0006). A failure to
+  answer is not a refusal: the shell keeps the builder shut and says the check
+  could not be made, with a way to try again, rather than telling an invited
+  account it is on a waiting list.
 - `GET /api/admin/invites` -- the list, never-used invites first.
 - `POST /api/admin/invite` `{ email }` -- issue one. Re-issuing an existing
   invite does nothing and says so; reinstating a revoked one is reported as
@@ -188,7 +213,54 @@ has been invited.
 - `POST /api/admin/invite/revoke` `{ email }` -- withdraw one. The row stays,
   so the record of what was authorised stays readable.
 
-All three are behind the platform-admin check, not the invite gate.
+All four are behind the platform-admin check, not the invite gate. That
+check needs an admin list and a D1 binding, and deliberately not
+`CLERK_SECRET_KEY`: that secret turns a typed email into a Clerk user id,
+which only the two credit routes do. Requiring it everywhere meant a
+deployment with a good admin list and no credit tool could not invite
+anybody, and said the credit tool was missing when asked why.
+
+### Deploying it
+
+The deploy workflow writes `VIBLD_ACCESS_MODE` explicitly rather than leaving
+it absent, so opening a deployment is a deliberate act the run records and
+closing it again is possible from the same place. It comes from the
+`VIBLD_ACCESS_MODE` secret on the workflow's environment; anything that is not
+exactly `open` deploys invite-only, and a value that looks like it meant to
+open the deployment (`OPEN`, `open `) is warned about in the run rather than
+silently treated as closed.
+
+**A closed deployment with no usable `VIBLD_PLATFORM_ADMINS` fails the
+deploy**, before any secret is written. That combination admits nobody and
+gives nobody the ability to issue an invite, since the only door is the admin
+panel and that secret is the only key to it. It is a product that is down
+while looking deployed, and it is cheaper to stop at the workflow than to
+discover it from the outside.
+
+A deployment with no `CLERK_PUBLISHABLE_KEY` fails the same check, open or
+closed. `wrangler.jsonc` gives every Worker this workflow deploys a Clerk
+issuer, so `resolvePrincipal` demands a bearer token on every `/api/*` route;
+with no browser key the build inlines nothing, the shell renders no session,
+and every request is refused for want of a token. A closed deployment also
+loses the admin panel that way, but an open one is no more usable. (A deploy
+with no Clerk at all is a supported shape for `pnpm dev` and for a
+static-only host, neither of which is what this workflow produces.)
+
+"Usable" is not decided by the workflow. `scripts/access-preflight.ts` makes
+the whole decision and imports the Worker's own `parseAccessMode`,
+`parsePlatformAdmins` and `normaliseEmail`, so the deploy and the running
+product answer "is the door open", "what does this list mean" and "could this
+be an address" with the same code. Written as shell it was a second
+implementation of those three rules, and every time the two disagreed the
+deploy was the more generous one, which is the direction that ships the
+outage.
+
+The check is its own step, before the first `wrangler secret put`, and writes
+nothing. That ordering is the point rather than tidiness: a secret put
+deploys a new Worker version immediately, and the admin list is among the
+first secrets this job syncs, so a check that ran alongside the writes would
+publish a broken list, lock out the admins who could have fixed it, and only
+then fail the run.
 
 ## Model generation (optional)
 

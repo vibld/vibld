@@ -99,7 +99,7 @@ describe('AccessStore', () => {
       false,
     );
 
-    const [row] = await store.list();
+    const [row] = (await store.list()).invites;
     assert.equal(row?.invitedByEmail, 'first@vibld.com');
   });
 
@@ -112,7 +112,7 @@ describe('AccessStore', () => {
     );
 
     assert.equal(await store.claimInvite('chris@example.com', 'user_1'), false);
-    assert.equal((await store.list()).length, 1);
+    assert.equal((await store.list()).invites.length, 1);
   });
 
   it('does not un-revoke an invite by re-issuing it', async () => {
@@ -135,13 +135,13 @@ describe('AccessStore', () => {
     const store = newStore();
     await store.invite('chris@example.com', 'admin@vibld.com');
     await store.claimInvite('chris@example.com', 'user_1');
-    const first = (await store.list())[0]?.redeemedAt;
+    const first = (await store.list()).invites[0]?.redeemedAt;
 
     // A second account cannot take a claimed invite, and a repeat claim by
     // the same account must not move the timestamp.
     assert.equal(await store.claimInvite('chris@example.com', 'user_2'), false);
     assert.equal(await store.claimInvite('chris@example.com', 'user_1'), true);
-    const [row] = await store.list();
+    const [row] = (await store.list()).invites;
 
     assert.equal(row?.redeemedAt, first);
     assert.equal(row?.redeemedByUserId, 'user_1');
@@ -150,7 +150,31 @@ describe('AccessStore', () => {
   it('ignores an address that could never be one', async () => {
     const store = newStore();
     assert.equal(await store.invite('nope', 'admin@vibld.com'), false);
-    assert.equal((await store.list()).length, 0);
+    assert.equal((await store.list()).invites.length, 0);
+  });
+
+  it('says when there are more invites than it returned', async () => {
+    // The panel's only per-invite control is the row, so an invite past the
+    // cap has none. A capped list that presents itself as the whole one is
+    // what makes that invisible.
+    const store = newStore();
+    for (const n of [1, 2, 3, 4, 5]) {
+      await store.invite(`u${n}@example.com`, 'admin@vibld.com');
+    }
+
+    const capped = await store.list(3);
+    assert.equal(capped.invites.length, 3, 'returned more than asked for');
+    assert.equal(capped.truncated, true);
+
+    // The boundary, which is the reason this is not a count comparison: a
+    // last page of exactly the limit is complete, and telling an operator
+    // otherwise sends them looking for rows that do not exist.
+    const exact = await store.list(5);
+    assert.equal(exact.invites.length, 5);
+    assert.equal(exact.truncated, false, 'called a whole list incomplete');
+
+    const roomy = await store.list(200);
+    assert.equal(roomy.truncated, false);
   });
 
   it('lists invites nobody has used first', async () => {
@@ -160,7 +184,7 @@ describe('AccessStore', () => {
     await store.claimInvite('used@example.com', 'user_1');
 
     assert.deepEqual(
-      (await store.list()).map((row) => row.email),
+      (await store.list()).invites.map((row) => row.email),
       ['unused@example.com', 'used@example.com'],
     );
   });

@@ -11,6 +11,8 @@
  * round.
  */
 
+import { usablePublishableKey } from './publishable-key.ts';
+
 /**
  * Present only once the deployment has been given a publishable key -- see
  * apps/web/README.md's Clerk setup section. Absent means "not configured
@@ -20,10 +22,17 @@
  * docs/decisions.md L5: Clerk is now the only thing that gates `/api/plan`
  * and `/api/config` -- Cloudflare Access is off.
  */
-export const PUBLISHABLE_KEY = import.meta.env?.VITE_CLERK_PUBLISHABLE_KEY as
-  string | undefined;
+export const PUBLISHABLE_KEY =
+  usablePublishableKey(import.meta.env?.VITE_CLERK_PUBLISHABLE_KEY) ??
+  undefined;
 
-export const clerkConfigured = Boolean(PUBLISHABLE_KEY);
+/*
+ * `Boolean(key)` before, which called a key of one space configured and
+ * handed that space to `ClerkProvider`: not the unconfigured fallback that
+ * renders without Clerk on purpose, but a provider that cannot mint a
+ * session, on a deployment whose Worker refuses every request without one.
+ */
+export const clerkConfigured = PUBLISHABLE_KEY !== undefined;
 
 /**
  * `ClerkProvider` (in clerk.tsx) sets `window.Clerk` -- the SDK's own

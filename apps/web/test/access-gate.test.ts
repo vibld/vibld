@@ -202,3 +202,81 @@ describe('what an ungated route is allowed to do', () => {
     assert.ok(call < write, 'the grant is written before access is decided');
   });
 });
+
+describe('what an admin route requires', () => {
+  /**
+   * The invite panel is the only way anybody is let in, and every one of its
+   * routes goes through `requireAdmin`. That check used to require
+   * `CLERK_SECRET_KEY`, which buys exactly one thing: turning a typed email
+   * into a Clerk user id, which only the two credit routes do. A deployment
+   * with a perfectly good admin list and no credit tool therefore answered
+   * 503 to every invite request and told the operator the credit tool was
+   * missing, which is true and not what they were doing.
+   *
+   * Read from the source, because `worker/index.ts` imports
+   * `cloudflare:workers` and cannot be loaded under `node --test` at all
+   * (see the router-ordering rule above for the same constraint).
+   */
+  it('does not make letting somebody in depend on the credit tool', async () => {
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const start = source.indexOf('function adminConfigured(');
+    assert.ok(start > 0, 'no adminConfigured to check');
+    const body = source.slice(start, source.indexOf('}', start));
+
+    assert.doesNotMatch(
+      body,
+      /clerkLookupConfigured/,
+      'an invite route needs the admin credit tool configured',
+    );
+    assert.match(body, /VIBLD_PLATFORM_ADMINS/);
+    assert.match(body, /env\.DB/);
+  });
+
+  it('tells an admin they are one even where nothing can be generated', async () => {
+    // `/api/config` is what the shell asks to decide whether to offer the
+    // admin panels, and it used to answer 403 when model generation was
+    // unconfigured. The client reads any refusal as "nothing configured,
+    // and you are not an admin", so a deployment whose invite routes work
+    // perfectly (they need the admin list and D1, neither of which is what
+    // generation is missing) showed its admin no way to invite anybody.
+    //
+    // The endpoint's job is to say what the deployment can do. "It cannot
+    // generate" is an answer to that, not a reason to withhold one.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const start = source.indexOf("if (pathname === '/api/config')");
+    assert.ok(start > 0, 'no config route');
+    const block = source.slice(
+      start,
+      source.indexOf("if (pathname === '/api/plan')", start),
+    );
+    // Comments stripped before looking for the refusal, or the sentence
+    // explaining why the 403 is gone counts as a 403.
+    const code = block
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n');
+
+    assert.doesNotMatch(code, /403/, 'the config route refuses again');
+    assert.match(code, /isAdmin:/, 'stopped reporting admin membership');
+
+    // Identity first, so the answer is still per-person rather than served
+    // to anybody who asks.
+    const identified = code.indexOf('resolvePrincipal');
+    const configured = code.indexOf('isConfigured(env)');
+    assert.ok(identified > 0 && configured > 0);
+    assert.ok(identified < configured, 'answers before knowing who asked');
+  });
+
+  it('still refuses the credit routes without it', async () => {
+    // The requirement did not go away, it moved to the two routes that
+    // actually have it. Dropping it entirely would let a credit request
+    // reach a Clerk lookup that cannot be made.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    for (const handler of ['handleAdminUser', 'handleAdminTopup']) {
+      const start = source.indexOf(`async function ${handler}(`);
+      assert.ok(start > 0, `no ${handler}`);
+      const body = source.slice(start, source.indexOf('\n}', start));
+      assert.match(body, /creditToolDenial\(env\)/, handler);
+    }
+  });
+});
