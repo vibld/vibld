@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   CONSENT_KEY,
+  analyticsAction,
   answerOutcome,
   bannerVisible,
   consentSignals,
@@ -195,5 +196,40 @@ describe('answerOutcome', () => {
       answerOutcome('granted', writeConsent(throwing, 'granted')).warn,
       true,
     );
+  });
+});
+
+describe('analyticsAction', () => {
+  it('loads on the first yes, and only then', () => {
+    assert.equal(analyticsAction('granted', false), 'load');
+  });
+
+  it('updates rather than reloading on a second yes', () => {
+    // The bug: returning early because the tag "is already loaded" left GA4
+    // denied for the rest of the visit, while the stored answer and the
+    // closed banner both said it was allowed.
+    assert.equal(analyticsAction('granted', true), 'grant');
+  });
+
+  it('denies a running tag when consent is withdrawn', () => {
+    // A script already in the document cannot be taken out of it, so the
+    // only honest response to "No thanks" mid-visit is an update.
+    assert.equal(analyticsAction('denied', true), 'deny');
+    assert.equal(analyticsAction(null, true), 'deny');
+  });
+
+  it('says nothing when there is no tag to say it to', () => {
+    // A queue for a tag that does not exist is not a no-op: it is a
+    // dataLayer waiting to be replayed the moment something loads.
+    assert.equal(analyticsAction('denied', false), 'nothing');
+    assert.equal(analyticsAction(null, false), 'nothing');
+  });
+
+  it('never loads for an answer that is not an explicit yes', () => {
+    for (const state of ['denied', null] as const) {
+      for (const running of [true, false]) {
+        assert.notEqual(analyticsAction(state, running), 'load');
+      }
+    }
   });
 });

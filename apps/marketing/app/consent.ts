@@ -161,3 +161,31 @@ export function answerOutcome(
 ): AnswerOutcome {
   return { apply: choice, warn: !stored && choice === 'granted' };
 }
+
+/** What the tag should be made to do, given an answer and what it is doing now. */
+export type AnalyticsAction = 'load' | 'grant' | 'deny' | 'nothing';
+
+/**
+ * The whole lifecycle of the tag in one rule.
+ *
+ * `shouldLoadAnalytics` answers only the first question, and answering only
+ * that is what produced two real bugs in review. A visitor can say yes, say
+ * no, and say yes again without ever reloading the page, and each of those
+ * three is a different instruction to gtag:
+ *
+ * - The first yes loads it, because nothing has been requested from Google.
+ * - A no cannot unload a script already in the document, so it has to be an
+ *   update to denied. Doing nothing left GA4 storing after "No thanks".
+ * - A second yes must be an update back to granted. Skipping it because the
+ *   tag "is already loaded" left GA4 denied for the rest of the visit while
+ *   the stored answer and the closed banner both said otherwise.
+ * - A no before anything loaded is the only case with nothing to say, and
+ *   saying anything would mean a queue existing for a tag that does not.
+ */
+export function analyticsAction(
+  state: ConsentState,
+  running: boolean,
+): AnalyticsAction {
+  if (shouldLoadAnalytics(state)) return running ? 'grant' : 'load';
+  return running ? 'deny' : 'nothing';
+}

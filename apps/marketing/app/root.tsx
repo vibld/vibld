@@ -16,11 +16,11 @@ import {
   CONSENT_CHANGED_EVENT,
   CONSENT_OPEN_EVENT,
   GA4_SRC,
+  analyticsAction,
   answerOutcome,
   bannerVisible,
   consentSignals,
   readConsent,
-  shouldLoadAnalytics,
   writeConsent,
   type ConsentChoice,
   type ConsentState,
@@ -110,27 +110,36 @@ function GoogleAnalytics() {
 
   useEffect(() => {
     const apply = (state: ConsentState) => {
-      if (shouldLoadAnalytics(state)) {
-        if (running.current) return;
-        running.current = true;
-        // Queued before the script exists, which is how gtag is meant to be
-        // used: `dataLayer` is a plain array until gtag.js replaces it, and
-        // everything pushed beforehand is replayed in order. Consent is
-        // therefore declared ahead of `config` even here, where the tag only
-        // ever exists in the granted state, because the advertising signals
-        // still have to be denied before anything is sent.
-        const queue = window as unknown as { dataLayer?: unknown[] };
-        queue.dataLayer = queue.dataLayer ?? [];
-        tell('consent', 'default', consentSignals('granted'));
-        tell('js', new Date());
-        tell('config', SITE.ga4MeasurementId);
-        setAllowed(true);
-        return;
+      // Every branch is `analyticsAction`'s, and it is tested. Deciding this
+      // inline is what produced two review findings: a withdrawal that never
+      // reached gtag, and a second grant skipped because the tag was already
+      // loaded.
+      switch (analyticsAction(state, running.current)) {
+        case 'load': {
+          running.current = true;
+          // Queued before the script exists, which is how gtag is meant to be
+          // used: `dataLayer` is a plain array until gtag.js replaces it, and
+          // everything pushed beforehand is replayed in order. Consent is
+          // declared ahead of `config` even here, where the tag only ever
+          // loads in the granted state, because the advertising signals still
+          // have to be denied before anything is sent.
+          const queue = window as unknown as { dataLayer?: unknown[] };
+          queue.dataLayer = queue.dataLayer ?? [];
+          tell('consent', 'default', consentSignals('granted'));
+          tell('js', new Date());
+          tell('config', SITE.ga4MeasurementId);
+          setAllowed(true);
+          return;
+        }
+        case 'grant':
+          tell('consent', 'update', consentSignals('granted'));
+          return;
+        case 'deny':
+          tell('consent', 'update', consentSignals('denied'));
+          return;
+        case 'nothing':
+          return;
       }
-      // Withdrawn mid-visit. The tag is already in this document and cannot
-      // be taken out of it, so it is told to stop storing straight away
-      // rather than left running until the next page load.
-      if (running.current) tell('consent', 'update', consentSignals('denied'));
     };
 
     apply(readConsent(storage()));
