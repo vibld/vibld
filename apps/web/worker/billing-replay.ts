@@ -129,6 +129,12 @@ export async function replayStripeEvents(
     sweepAfterId: cursor.sweepTop === null ? null : cursor.sweepAfterId,
   };
 
+  // Written before the first request, so the top of the descent is durable
+  // even if this run's first page is the one that fails and nothing else is
+  // ever persisted. Without it a new sweep would forget its own top and the
+  // next run would pin a later one.
+  await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, cursor);
+
   let read = 0;
   let applied = 0;
   let failed = 0;
@@ -173,11 +179,22 @@ export async function replayStripeEvents(
     }
 
     const oldest = page.data.at(-1);
-    if (oldest !== undefined) {
-      // Recorded after every page, not once at the end. A run cut off
-      // mid-descent then loses one page rather than the whole descent, and a
-      // descent that restarts at the top every night never reaches the
-      // bottom.
+    // Recorded after every page, not once at the end. A run cut off
+    // mid-descent then loses one page rather than the whole descent, and a
+    // descent that restarts at the top every night never reaches the bottom.
+    //
+    // And only while nothing has failed. The saved resume point must never
+    // go below a page something threw on, because the next run's `failed`
+    // starts at zero: it would resume under the failed event, reach the
+    // bottom clean, and move the floor over the payment. Every way out of
+    // this loop has to hold that, not just the one that reaches the bottom.
+    // The budget can run out below a failure, and the next `events.list` can
+    // reject, and both leave through a different door.
+    //
+    // Later pages are still applied, which is worth doing and costs nothing
+    // to redo. They are simply not credited to the cursor, so the next run
+    // resumes at the page that failed.
+    if (oldest !== undefined && failed === 0) {
       cursor = { ...cursor, sweepAfterId: oldest.id };
       await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, cursor);
     }
@@ -196,25 +213,16 @@ export async function replayStripeEvents(
       }
 
       // Something threw, so this descent did not cover its ground and the
-      // floor stays where it is. The resume point has to go back to the top
-      // with it: it points below the page the failure was on, so leaving it
-      // would send the next run past the failed event, let that run finish
-      // clean, and move the floor over the event anyway. Which is the silent
-      // loss this module exists to prevent, arrived at one run later.
+      // floor stays where it is. The resume point needs no rewind: nothing
+      // has been persisted since the failure, so it already sits at the page
+      // that failed and the next run reads it again.
       //
-      // So the whole sweep is walked again. Everything that did apply is
-      // skipped by `wasEventProcessed`, so the cost is requests rather than
-      // writes, and the deliberate consequence is that an event which fails
-      // for ever holds the floor for ever: nothing above this sweep is
-      // replayed until it is fixed. That is the trade taken on purpose. The
+      // The deliberate consequence is that an event which fails for ever
+      // holds the floor for ever, and nothing above this sweep is replayed
+      // until it is fixed. That is the trade taken on purpose. The
       // alternative is stepping over a payment somebody made, and a stall
-      // says so every night in `failed` while a step-over says nothing at
-      // all.
-      await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, {
-        doneBelow: cursor.doneBelow,
-        sweepTop,
-        sweepAfterId: null,
-      });
+      // says so every night in `failed` and `incomplete` while a step-over
+      // says nothing at all.
       return { read, applied, failed, requests, incomplete: true };
     }
   }

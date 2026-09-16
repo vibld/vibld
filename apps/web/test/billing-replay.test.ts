@@ -405,3 +405,64 @@ describe('what the nightly pass hands the replay', () => {
     );
   });
 });
+
+describe('a failure on a page with more below it', () => {
+  it('is still read again when the budget runs out under it', async () => {
+    // The door the first fix did not cover. Rewinding only where the descent
+    // reaches the bottom leaves the resume point below a failed page
+    // whenever the run leaves any other way, and the budget running out is
+    // the ordinary way. The next run's `failed` starts at zero, so it
+    // resumes under the failed event, finishes clean, and moves the floor
+    // over the payment.
+    const store = newStore();
+    const broken = {
+      id: 'evt_broken',
+      created: 3000,
+      type: 'invoice.paid',
+      data: { object: null },
+    } as unknown as Stripe.Event;
+    const { stripe, asked } = stripeServing([
+      [broken],
+      [topupEvent('evt_old', 1000, 'user_2')],
+    ]);
+
+    const stopped = await replayStripeEvents(stripe, store, 1);
+    assert.equal(stopped.failed, 1);
+    assert.equal(stopped.incomplete, true);
+
+    const cursor = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+    assert.equal(
+      cursor?.sweepAfterId,
+      null,
+      'left the resume point below the page that failed',
+    );
+
+    await replayStripeEvents(stripe, store, 1);
+    assert.equal(
+      asked[1]?.starting_after,
+      undefined,
+      'the next run skipped past the event that failed',
+    );
+    const after = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+    assert.equal(after?.doneBelow, 0, 'moved the floor over the failure');
+  });
+
+  it('keeps the top of the descent even when the first page fails', async () => {
+    // Nothing else is persisted on that run, so without a write before the
+    // first request the sweep would forget its own top and the next run
+    // would pin a later one, quietly narrowing what this descent covers.
+    const store = newStore();
+    const broken = {
+      id: 'evt_broken',
+      created: 3000,
+      type: 'invoice.paid',
+      data: { object: null },
+    } as unknown as Stripe.Event;
+    const { stripe } = stripeServing([[broken], [topupEvent('evt_old', 1000)]]);
+
+    await replayStripeEvents(stripe, store, 1, () => 5000);
+    const cursor = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+
+    assert.equal(cursor?.sweepTop, 5000, 'forgot the top of the descent');
+  });
+});
