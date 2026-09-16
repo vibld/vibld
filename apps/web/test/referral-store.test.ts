@@ -25,7 +25,7 @@ const SCHEMA = [
   '0002_billing.sql',
   '0004_admin_credits.sql',
   '0006_referrals.sql',
-  '0008_subscription_payments.sql',
+  '0007_subscription_payments.sql',
 ]
   .map((name) =>
     readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),

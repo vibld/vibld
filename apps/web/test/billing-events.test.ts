@@ -11,7 +11,7 @@ import {
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
-const SCHEMA = ['0002_billing.sql', '0008_subscription_payments.sql']
+const SCHEMA = ['0002_billing.sql', '0007_subscription_payments.sql']
   .map((name) =>
     readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
   )
