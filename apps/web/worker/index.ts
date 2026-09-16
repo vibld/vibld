@@ -1574,8 +1574,14 @@ export default {
       // charge, so the replay needs the same lookup the webhook path has.
       const readCharge = (chargeId: string) =>
         stripe.charges.retrieve(chargeId);
-      const reversed = (userId: string, reason: string) =>
-        clawBackReferral(payout, userId, reason).then(() => undefined);
+      const reversed = (
+        userId: string,
+        reason: string,
+        refundedIds: string[],
+      ) =>
+        clawBackReferral(payout, userId, reason, refundedIds).then(
+          () => undefined,
+        );
       ctx.waitUntil(
         // The replay first, and the reconcile after it rather than beside
         // it. The replay applies events in the order Stripe created them

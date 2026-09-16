@@ -22,8 +22,13 @@ CREATE TABLE billing_scheduled_cancellations (
 CREATE INDEX billing_scheduled_cancellations_user
   ON billing_scheduled_cancellations (user_id);
 
--- The Stripe object whose money earned this referral: a charge id, or the
--- invoice or checkout session that recorded the payment. Null for rows paid
--- before this existed, which the reversal path treats as "cannot prove this
--- refund is the one that funded it" and therefore does not reverse on.
+-- Every Stripe id the payment that earned this referral can be recognised
+-- by, space separated. Several because a charge names itself differently
+-- depending on how it was made: a subscription charge carries its invoice, a
+-- Checkout carries its payment intent, and the refund event names the charge.
+-- Matching on any one of them is what ties a refund back to the reward.
+--
+-- Null for rows paid before this existed, which the reversal path treats as
+-- "cannot prove this refund is the one that funded it" and therefore does
+-- not reverse on.
 ALTER TABLE referral_attributions ADD COLUMN funded_by TEXT;

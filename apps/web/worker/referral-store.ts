@@ -19,6 +19,12 @@ export interface AttributionRecord {
    * its grant and its markPaid.
    */
   reversedAt?: string | null;
+  /**
+   * Every Stripe id the payment that funded this reward can be recognised
+   * by. Empty when it is not known, which the reversal path treats as
+   * unprovable rather than as permission to reverse.
+   */
+  fundedBy?: string[];
   referredUserId: string;
   referrerUserId: string;
   code: string;
@@ -102,7 +108,7 @@ export class ReferralStore {
     const row = await this.#db
       .prepare(
         `SELECT referred_user_id, referrer_user_id, code, created_at,
-                claimed_at, paid_at, last_attempt_at, reversed_at
+                claimed_at, paid_at, last_attempt_at, reversed_at, funded_by
          FROM referral_attributions WHERE referred_user_id = ?1`,
       )
       .bind(referredUserId)
@@ -115,6 +121,7 @@ export class ReferralStore {
         paid_at: string | null;
         last_attempt_at: string | null;
         reversed_at: string | null;
+        funded_by: string | null;
       }>();
     if (!row) return undefined;
     return {
@@ -126,6 +133,7 @@ export class ReferralStore {
       paidAt: row.paid_at,
       lastAttemptAt: row.last_attempt_at,
       reversedAt: row.reversed_at,
+      fundedBy: row.funded_by ? row.funded_by.split(' ') : [],
     };
   }
 
@@ -272,14 +280,27 @@ export class ReferralStore {
    * redelivered webhook that loses this race is told it lost and grants
    * nothing, rather than reading a stale NULL and paying a second time.
    */
-  async markPaid(referredUserId: string, at: string): Promise<boolean> {
+  async markPaid(
+    referredUserId: string,
+    at: string,
+    /**
+     * Every Stripe id the payment that funded this reward can be recognised
+     * by, space separated. Written in the same statement that settles the
+     * payout, so a row can never be paid without recording what paid for it.
+     *
+     * Empty for a payout whose funding payment is not known, which the
+     * reversal path treats as unprovable and leaves alone.
+     */
+    fundedBy: string[] = [],
+  ): Promise<boolean> {
     const result = await this.#db
       .prepare(
-        `UPDATE referral_attributions SET paid_at = ?2
+        `UPDATE referral_attributions
+            SET paid_at = ?2, funded_by = NULLIF(?3, '')
          WHERE referred_user_id = ?1 AND paid_at IS NULL
            AND reversed_at IS NULL`,
       )
-      .bind(referredUserId, at)
+      .bind(referredUserId, at, fundedBy.join(' '))
       .run();
     return result.meta.changes > 0;
   }

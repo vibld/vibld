@@ -63,6 +63,8 @@ export interface PayoutDeps {
 export async function payReferralIfEarned(
   deps: PayoutDeps,
   referredUserId: string,
+  /** Stripe ids the funding payment can be recognised by; see `markPaid`. */
+  fundedBy: string[] = [],
 ): Promise<PayoutOutcome> {
   const attribution = await deps.referrals.attributionFor(referredUserId);
   const referrerUserId = attribution?.referrerUserId;
@@ -102,13 +104,25 @@ export async function payReferralIfEarned(
     note,
   );
 
+  // The paths that pay without an event in hand still have to record what
+  // funded the reward, or the reversal path can never prove a match for
+  // them and the reward becomes permanently unreversible. The nightly
+  // reconcile and the stranded-payout sweep are both such paths: they know
+  // an account has a cleared payment, not which webhook said so. Reading
+  // the recorded payments back costs one query, and only on a payout that
+  // is about to settle.
+  const funding =
+    fundedBy.length > 0
+      ? fundedBy
+      : await deps.billing.clearedPaymentIds(referredUserId);
+
   // The write that settles it, and the only place that can. `decidePayout`
   // read `reversed_at` several statements ago, so a refund arriving in
   // between passes that check: the reversal saw a null `paid_at`, took
   // nothing back, and this would otherwise mark the row paid with both
   // grants standing. `markPaid` now carries `AND reversed_at IS NULL`, so
   // D1's single writer decides which of the two happened second.
-  const marked = await deps.referrals.markPaid(referredUserId, now);
+  const marked = await deps.referrals.markPaid(referredUserId, now, funding);
   if (!marked) {
     // Either a redelivery of a payout that already landed, which is a no-op
     // and fine, or the reversal won. Only the second has grants to undo, and
@@ -222,6 +236,18 @@ export async function clawBackReferral(
   deps: PayoutDeps,
   referredUserId: string,
   note: string,
+  /**
+   * Stripe ids the refunded charge can be recognised by.
+   *
+   * The reward is taken back only when one of these is an id the funding
+   * payment was recorded under. Without that check every refund on the
+   * account reversed its one referral, so refunding an unrelated later
+   * top-up took back a reward the original purchase still funds.
+   *
+   * Empty means the caller could not name the charge, which is treated the
+   * same way an unmatched one is: nothing is reversed.
+   */
+  refundedIds: string[] = [],
 ): Promise<ClawbackResult> {
   const attribution = await deps.referrals.attributionFor(referredUserId);
   // No referral at all. Most refunds are of a purchase nothing was attached
@@ -230,23 +256,59 @@ export async function clawBackReferral(
     return { found: false, referrerCents: 0, referredCents: 0 };
   }
 
-  // Written before anything is deducted, and written whether or not a payout
-  // has happened. An unpaid attribution is not proof that no payout can
-  // still happen: the replay descends newest pages first, so a refund can be
-  // applied before the older purchase that earns the reward is recovered,
-  // and a payout can fail between its first grant and its `markPaid`. In
-  // both cases the reward was still coming, and returning early here is what
-  // let it arrive after its funding payment had gone back out.
+  // Nothing paid yet, and the mark is written anyway. An unpaid attribution
+  // is not proof that no payout can still happen: the replay descends newest
+  // pages first, so a refund can be applied before the older purchase that
+  // earns the reward is recovered, and a payout can fail between its first
+  // grant and its `markPaid`. In both cases the reward was still coming, and
+  // returning early without the mark is what let it arrive after its funding
+  // payment had gone back out.
+  //
+  // This branch cannot ask the question the paid branch below asks, because
+  // nothing has recorded what funds this reward yet. So it is deliberately
+  // the conservative half of the same decision: unproven here withholds a
+  // reward, unproven there leaves one standing. Both err away from moving
+  // credit on a guess, and the cost of this one is a $5 reward not paid
+  // where the cost of the other is credit taken from somebody who kept
+  // their purchase.
+  if (attribution.paidAt == null) {
+    await deps.referrals.markReversed(
+      referredUserId,
+      (deps.now ?? new Date()).toISOString(),
+    );
+    return { found: false, referrerCents: 0, referredCents: 0 };
+  }
+
+  // Only the payment that earned the reward can take it back.
+  //
+  // Decided 2026-09-16: when the match cannot be proven, the reward stays.
+  // That errs toward never taking credit from somebody wrongly, and it costs
+  // the abuse case whenever the funding payment is unknown, which is every
+  // reward paid before this was recorded.
+  //
+  // Nothing is written on this path, the mark included. A row marked
+  // reversed with both grants still standing would assert something untrue
+  // about this reward: the payment that went back out was not the one that
+  // earned it. The log line is the record, because a reward that arguably
+  // should have been reversed and was not is worth somebody seeing.
+  const funded = attribution.fundedBy ?? [];
+  const matched = refundedIds.some((id) => funded.includes(id));
+  if (!matched) {
+    console.log(
+      JSON.stringify({
+        event: 'referral.reversal_unmatched',
+        referredUserId,
+        refundedIds,
+        knownFunding: funded,
+      }),
+    );
+    return { found: false, referrerCents: 0, referredCents: 0 };
+  }
+
   await deps.referrals.markReversed(
     referredUserId,
     (deps.now ?? new Date()).toISOString(),
   );
-
-  // Nothing paid yet, so there is nothing to take back. The mark above is
-  // what makes this safe to return from: the payout path refuses this row now.
-  if (attribution.paidAt == null) {
-    return { found: false, referrerCents: 0, referredCents: 0 };
-  }
 
   const taken = await reverseGrants(
     deps,

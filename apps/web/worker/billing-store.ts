@@ -589,6 +589,26 @@ export class BillingStore {
    * predicates side by side and says which is which, because using the wrong
    * one either pays out on an abandoned checkout or refuses a real customer.
    */
+  /**
+   * The Stripe ids of payments that actually took money from this account.
+   *
+   * Used to tie a referral reward to the purchase that funded it, so a later
+   * refund of something unrelated does not take the reward back. The sweep
+   * that pays on a recorded payment has no event in hand, so it reads the
+   * ids from here instead.
+   */
+  async clearedPaymentIds(userId: string): Promise<string[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT stripe_object_id FROM billing_payments
+          WHERE user_id = ?1 AND amount_usd_cents > 0
+          ORDER BY cleared_at LIMIT 20`,
+      )
+      .bind(userId)
+      .all<{ stripe_object_id: string }>();
+    return (result.results ?? []).map((row) => row.stripe_object_id);
+  }
+
   async hasClearedPayment(userId: string): Promise<boolean> {
     const row = await this.#db
       .prepare(`SELECT 1 AS found WHERE ${CLEARED_PAYMENT_SQL}`)

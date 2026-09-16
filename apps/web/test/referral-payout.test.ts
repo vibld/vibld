@@ -19,10 +19,19 @@ interface Grant {
 }
 
 /** A billing store that records grants the way the real one does: id wins. */
-function billingFake() {
+function billingFake(
+  /**
+   * The Stripe ids of this account's recorded payments, which is what the
+   * payout reads when it is paying without an event in hand. Empty is the
+   * ordinary case: the webhook names the funding payment itself.
+   */
+  clearedIds: string[] = [],
+) {
   const grants = new Map<string, Grant>();
+  const asked: string[] = [];
   return {
     grants,
+    asked,
     store: {
       async grantAdminCredit(
         id: string,
@@ -33,6 +42,10 @@ function billingFake() {
       ) {
         // ON CONFLICT(id) DO NOTHING, which is the real idempotency guard.
         if (!grants.has(id)) grants.set(id, { id, userId, cents, actor, note });
+      },
+      async clearedPaymentIds(userId: string) {
+        asked.push(userId);
+        return clearedIds;
       },
     } as unknown as BillingStore,
   };
@@ -60,6 +73,8 @@ function referralFake(options: {
     claimedAt: options.attribution?.claimedAt ?? null,
     markCalls: 0,
     reserveCalls: 0,
+    /** What the settling write recorded as having funded the reward. */
+    fundedBy: null as string[] | null,
   };
   let slotsLeft = options.slotsLeft ?? 1;
   return {
@@ -84,10 +99,11 @@ function referralFake(options: {
         state.claimedAt = at;
         return true;
       },
-      async markPaid(_id: string, at: string) {
+      async markPaid(_id: string, at: string, fundedBy: string[] = []) {
         state.markCalls += 1;
         if (state.paidAt !== null) return false;
         state.paidAt = at;
+        state.fundedBy = fundedBy;
         return true;
       },
     } as unknown as ReferralStore,
@@ -140,6 +156,56 @@ describe('payReferralIfEarned', () => {
       assert.equal(grant.actor, REFERRAL_GRANT_ACTOR);
       assert.match(grant.note ?? '', /ABCD2345/);
     }
+  });
+
+  it('records what funded the reward, in the write that settles it', async () => {
+    // Without this the reversal path knows only the account, and refunding
+    // an unrelated later top-up takes back a reward the original purchase
+    // still funds. Asserted on `markPaid`'s own arguments rather than on a
+    // row read back afterwards, because a separate write is exactly the
+    // thing that can fail and leave a reward paid with nothing recorded
+    // against it.
+    const billing = billingFake();
+    const referrals = referralFake({
+      attribution: {
+        referrerUserId: 'user_owner',
+        code: 'ABCD2345',
+        paidAt: null,
+      },
+    });
+    await payReferralIfEarned(
+      { referrals: referrals.store, billing: billing.store },
+      'user_new',
+      ['in_123', 'pi_123'],
+    );
+    assert.deepEqual(referrals.state.fundedBy, ['in_123', 'pi_123']);
+    assert.deepEqual(
+      billing.asked,
+      [],
+      'asked the database for something the caller had already handed it',
+    );
+  });
+
+  it('reads the recorded payments when it is paying without an event', async () => {
+    // The nightly reconcile and the stranded-payout sweep both pay on a
+    // payment that has already been recorded, so neither has a webhook to
+    // name it. Leaving them to record nothing would make every reward they
+    // pay permanently unreversible, which is the abuse case with the
+    // clawback switched off for exactly the payouts no delivery covered.
+    const billing = billingFake(['in_from_the_mirror']);
+    const referrals = referralFake({
+      attribution: {
+        referrerUserId: 'user_owner',
+        code: 'ABCD2345',
+        paidAt: null,
+      },
+    });
+    await payReferralIfEarned(
+      { referrals: referrals.store, billing: billing.store },
+      'user_new',
+    );
+    assert.deepEqual(referrals.state.fundedBy, ['in_from_the_mirror']);
+    assert.deepEqual(billing.asked, ['user_new']);
   });
 
   it('leaves the attribution unpaid when the credit could not be written', async () => {
@@ -217,6 +283,9 @@ describe('payReferralIfEarned', () => {
     const watching = {
       async grantAdminCredit() {
         reservedFirst = referrals.state.claimedAt !== null;
+      },
+      async clearedPaymentIds() {
+        return [];
       },
     } as unknown as BillingStore;
 

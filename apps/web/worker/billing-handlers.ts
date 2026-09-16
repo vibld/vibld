@@ -214,15 +214,18 @@ export async function handleStripeWebhook(
     const outcome = await applyStripeEvent(
       store,
       event,
-      (userId) => payReferralIfEarned(deps, userId).then(() => undefined),
+      (userId, fundedBy) =>
+        payReferralIfEarned(deps, userId, fundedBy).then(() => undefined),
       // A reversal rides its own delivery on the same terms, and fails it
       // the same way. The reward was funded by a payment that has gone
       // back out, so a clawback that is swallowed here leaves credit this
       // deployment is paying for with an event marked done and nothing to
       // come back to it. `clawBackReferral` is idempotent, so the retry
       // Stripe makes writes the same rows once.
-      (userId, reason) =>
-        clawBackReferral(deps, userId, reason).then(() => undefined),
+      (userId, reason, refundedIds) =>
+        clawBackReferral(deps, userId, reason, refundedIds).then(
+          () => undefined,
+        ),
       // A dispute names its charge by id, and the customer is only on the
       // charge. One request, on the rarest event type this deployment
       // handles.

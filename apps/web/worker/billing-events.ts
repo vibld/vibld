@@ -46,7 +46,20 @@ function metadataUserId(metadata: Stripe.Metadata | null): string | undefined {
  * the kind of thing that must never be able to fail a webhook delivery: see
  * where it is invoked below.
  */
-export type OnPurchaseCleared = (userId: string) => Promise<void>;
+export type OnPurchaseCleared = (
+  userId: string,
+  /**
+   * Every Stripe id this payment can be recognised by later.
+   *
+   * Carried so a referral reward can be tied to the purchase that funded it.
+   * Without it the reversal path knew only the account, so refunding an
+   * unrelated later top-up took back a reward the original purchase still
+   * funds. More than one because a charge names itself differently
+   * depending on how it was made: a subscription charge carries its invoice,
+   * a Checkout carries its payment intent, and neither carries the other.
+   */
+  fundedBy: string[],
+) => Promise<void>;
 
 /**
  * Called when money that had already arrived goes back out: a refund, or a
@@ -64,6 +77,11 @@ export type OnPurchaseCleared = (userId: string) => Promise<void>;
 export type OnPurchaseReversed = (
   userId: string,
   reason: string,
+  /**
+   * Every Stripe id the refunded charge can be recognised by, so the reward
+   * taken back is the one this payment earned. See `clawBackReferral`.
+   */
+  refundedIds: string[],
 ) => Promise<void>;
 
 /**
@@ -184,7 +202,12 @@ async function applyCheckoutSessionCompleted(
     new Date().toISOString(),
   );
 
-  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
+  await announceIfPaid(
+    onPurchaseCleared,
+    userId,
+    amountUsdCents,
+    idsOf(session.id, session.payment_intent),
+  );
   return 'applied';
 }
 
@@ -209,6 +232,7 @@ async function announceIfPaid(
   hook: OnPurchaseCleared | undefined,
   userId: string,
   amountUsdCents: number,
+  fundedBy: string[] = [],
 ): Promise<void> {
   // The gate, in the one place every announce goes through. A settlement
   // that took nothing is not a purchase, however settled Stripe considers
@@ -217,7 +241,7 @@ async function announceIfPaid(
   // to disagree about who has paid.
   if (amountUsdCents <= 0) return;
   if (!hook) return;
-  await hook(userId);
+  await hook(userId, fundedBy);
 }
 
 /**
@@ -392,8 +416,40 @@ async function applyInvoicePaid(
     new Date().toISOString(),
   );
 
-  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
+  await announceIfPaid(
+    onPurchaseCleared,
+    userId,
+    amountUsdCents,
+    idsOf(
+      invoice.id,
+      (invoice as unknown as { payment_intent?: unknown }).payment_intent,
+      (invoice as unknown as { charge?: unknown }).charge,
+    ),
+  );
   return 'applied';
+}
+
+/**
+ * The ids among these that are usable, as strings.
+ *
+ * Stripe hands an expandable field back as an id, as the expanded object, or
+ * as null, and which one depends on the caller and the API version. Reading
+ * `.id` off a string or a null is how a plain read here becomes a throw in a
+ * handler that has already written a payment row.
+ */
+export function idsOf(...values: unknown[]): string[] {
+  const ids: string[] = [];
+  for (const value of values) {
+    if (typeof value === 'string' && value !== '') ids.push(value);
+    else if (
+      typeof value === 'object' &&
+      value !== null &&
+      typeof (value as { id?: unknown }).id === 'string'
+    ) {
+      ids.push((value as { id: string }).id);
+    }
+  }
+  return ids;
 }
 
 export async function applyStripeEvent(
@@ -526,7 +582,15 @@ async function applyChargeReversed(
 
   if (onPurchaseReversed) {
     try {
-      await onPurchaseReversed(userId, reason);
+      await onPurchaseReversed(
+        userId,
+        reason,
+        idsOf(
+          resolved.id,
+          (resolved as unknown as { invoice?: unknown }).invoice,
+          (resolved as unknown as { payment_intent?: unknown }).payment_intent,
+        ),
+      );
     } catch (error) {
       // Not `applied`. The clawback is the entire work of this event, so an
       // event marked done on a failed one is credit this deployment paid for

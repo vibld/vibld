@@ -677,6 +677,26 @@ Dashboard needs no code change, only the amount to change.
   `charge.dispute.closed` is acted on only when the dispute was lost: a won
   dispute means the money stayed.
 
+  **A refund takes a reward back only when it is demonstrably the payment
+  that earned it.** The ids a payment can be recognised by are recorded on
+  the attribution when the payout settles (`funded_by`), and the refunded
+  charge has to name one of them. A refund that names none of them, which
+  includes every reward paid before this was recorded, leaves the reward
+  standing and writes one line:
+
+  ```
+  {"event":"referral.reversal_unmatched","referredUserId":...,
+   "refundedIds":[...],"knownFunding":[...]}
+  ```
+
+  Visible in `wrangler tail` and in this Worker's logs at
+  <https://dash.cloudflare.com/?to=/:account/workers/services/view/vibld-web-preview/production/logs>
+  (`vibld-web-preview` is the deployed service name, from `wrangler.jsonc`).
+  The direction is deliberate: refunding an unrelated later top-up must not
+  take back a reward the original purchase still funds, so an unprovable
+  match costs the abuse case rather than taking credit from somebody
+  wrongly.
+
   `invoice.paid` **is** acted on now: it carries `amount_paid`, so it is the
   event that says how much money moved, and it is the only one that
   announces a purchase. `customer.subscription.*` deliberately does not. A

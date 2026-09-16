@@ -14,6 +14,16 @@ import { schemaSql } from './fakes/schema.ts';
 
 const SCHEMA = schemaSql();
 
+/**
+ * The Stripe id the fixture's reward was funded by.
+ *
+ * Named rather than inlined because almost every test below has to hand it
+ * to the clawback: a refund that cannot be tied to the payment that earned
+ * the reward does not reverse anything, so a test passing nothing here would
+ * be asserting the unmatched path while claiming to assert the reversal.
+ */
+const FUNDING_ID = 'in_funded_the_reward';
+
 /** A referrer and a referred account, attributed and paid. */
 async function paidReferral() {
   const db = new SqliteD1Database(SCHEMA);
@@ -24,7 +34,13 @@ async function paidReferral() {
   const code = await referrals.codeFor('user_referrer');
   await referrals.attribute('user_referred', 'user_referrer', code);
   await billing.linkCustomer('user_referred', 'cus_referred');
-  const paid = await payReferralIfEarned(deps, 'user_referred');
+  await billing.recordPayment(
+    FUNDING_ID,
+    'user_referred',
+    2000,
+    '2026-01-01T00:00:00.000Z',
+  );
+  const paid = await payReferralIfEarned(deps, 'user_referred', [FUNDING_ID]);
   assert.equal(paid.paid, true, 'the fixture did not actually pay');
 
   return { db, referrals, billing, deps };
@@ -52,7 +68,9 @@ describe('taking a referral back when its payment goes away', () => {
     assert.equal(await cents(billing, 'user_referrer'), 500);
     assert.equal(await cents(billing, 'user_referred'), 500);
 
-    const result = await clawBackReferral(deps, 'user_referred', 'refunded');
+    const result = await clawBackReferral(deps, 'user_referred', 'refunded', [
+      FUNDING_ID,
+    ]);
 
     assert.deepEqual(result, {
       found: true,
@@ -83,7 +101,9 @@ describe('taking a referral back when its payment goes away', () => {
     );
     const before = await billing.totalSpendableCreditMicroUsd('user_referrer');
 
-    const result = await clawBackReferral(deps, 'user_referred', 'refunded');
+    const result = await clawBackReferral(deps, 'user_referred', 'refunded', [
+      FUNDING_ID,
+    ]);
 
     assert.equal(result.referrerCents, 0, 'took money the referrer had paid');
     assert.equal(
@@ -107,11 +127,13 @@ describe('taking a referral back when its payment goes away', () => {
       'a grant that has nothing to do with the referral',
     );
 
-    await clawBackReferral(deps, 'user_referred', 'refunded');
+    await clawBackReferral(deps, 'user_referred', 'refunded', [FUNDING_ID]);
     const after = await cents(billing, 'user_referrer');
     assert.equal(after, 1000, 'the first clawback took the wrong amount');
 
-    const again = await clawBackReferral(deps, 'user_referred', 'refunded');
+    const again = await clawBackReferral(deps, 'user_referred', 'refunded', [
+      FUNDING_ID,
+    ]);
 
     assert.equal(again.referrerCents, 0, 'deducted a second time');
     assert.equal(
@@ -130,7 +152,7 @@ describe('taking a referral back when its payment goes away', () => {
     // `AND paid_at IS NULL` and no method on the store can clear it, so the
     // assertion could not fail whatever the code did.
     const { billing, deps } = await paidReferral();
-    await clawBackReferral(deps, 'user_referred', 'refunded');
+    await clawBackReferral(deps, 'user_referred', 'refunded', [FUNDING_ID]);
     assert.equal(await cents(billing, 'user_referrer'), 0);
 
     await payReferralIfEarned(deps, 'user_referred');
@@ -476,5 +498,187 @@ describe('a reversal that lands while the payout is running', () => {
       await referrals.markPaid('user_referred', new Date().toISOString()),
       false,
     );
+  });
+});
+
+/**
+ * Capture what was logged while `run` ran, as parsed objects.
+ *
+ * The log line is the deliverable on the unmatched path: nothing is written
+ * and nothing is returned that distinguishes it from "no referral here", so
+ * asserting the return value alone would pass for code that silently did
+ * nothing at all.
+ */
+async function logged(run: () => Promise<unknown>): Promise<unknown[]> {
+  const lines: unknown[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    for (const arg of args) {
+      try {
+        lines.push(JSON.parse(String(arg)));
+      } catch {
+        lines.push(arg);
+      }
+    }
+  };
+  try {
+    await run();
+  } finally {
+    console.log = original;
+  }
+  return lines;
+}
+
+describe('tying a reversal to the payment that earned the reward', () => {
+  it('leaves the reward alone when the refund is of something else', async () => {
+    // The case this exists for. One account, two payments: the purchase that
+    // earned the referral, and a later top-up that had nothing to do with
+    // it. Refunding the top-up used to take the reward back, because the
+    // reversal knew the account and not the payment.
+    const { billing, deps } = await paidReferral();
+    await billing.recordPayment(
+      'ch_unrelated_topup',
+      'user_referred',
+      1000,
+      '2026-02-01T00:00:00.000Z',
+    );
+
+    const result = await clawBackReferral(deps, 'user_referred', 'refunded', [
+      'ch_unrelated_topup',
+    ]);
+
+    assert.deepEqual(result, {
+      found: false,
+      referrerCents: 0,
+      referredCents: 0,
+    });
+    assert.equal(
+      await cents(billing, 'user_referrer'),
+      500,
+      'took a reward back on a refund of a different payment',
+    );
+    assert.equal(await cents(billing, 'user_referred'), 500);
+  });
+
+  it('says so, rather than leaving it standing silently', async () => {
+    const { deps } = await paidReferral();
+
+    const lines = await logged(() =>
+      clawBackReferral(deps, 'user_referred', 'refunded', ['ch_unrelated']),
+    );
+
+    assert.deepEqual(lines, [
+      {
+        event: 'referral.reversal_unmatched',
+        referredUserId: 'user_referred',
+        refundedIds: ['ch_unrelated'],
+        knownFunding: [FUNDING_ID],
+      },
+    ]);
+  });
+
+  it('does not mark the row reversed when it took nothing back', async () => {
+    // A row marked reversed with both grants standing asserts something
+    // untrue: the payment that went back out was not the one that earned
+    // this reward. The log line is the record of an unmatched refund.
+    const { referrals, deps } = await paidReferral();
+
+    await logged(() =>
+      clawBackReferral(deps, 'user_referred', 'refunded', ['ch_unrelated']),
+    );
+
+    const attribution = await referrals.attributionFor('user_referred');
+    assert.equal(attribution?.reversedAt ?? null, null);
+  });
+
+  it('matches on any id the funding payment was recorded under', async () => {
+    // A charge names itself differently depending on how it was made, and
+    // the refund event names only some of them: a subscription charge
+    // carries its invoice, a Checkout carries its payment intent, and
+    // neither carries the other. Recording one id and matching on one id
+    // would reverse nothing for whichever kind is not the one recorded.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const deps = { referrals, billing };
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    const paid = await payReferralIfEarned(deps, 'user_referred', [
+      'cs_checkout',
+      'pi_checkout',
+    ]);
+    assert.equal(paid.paid, true);
+
+    // The refund names the payment intent and the charge. It never names
+    // the Checkout Session the payment was recorded under.
+    const result = await clawBackReferral(deps, 'user_referred', 'refunded', [
+      'ch_the_refund',
+      'pi_checkout',
+    ]);
+
+    assert.equal(result.found, true, 'the payment intent did not match');
+    assert.equal(await cents(billing, 'user_referrer'), 0);
+  });
+
+  it('leaves a reward paid before any of this was recorded alone', async () => {
+    // Every reward paid before `funded_by` existed reads as null, which
+    // cannot be matched against anything. Decided: unprovable means the
+    // reward stays, so these become unreversible rather than reversible on
+    // any refund at all. That is the direction that never takes credit from
+    // somebody wrongly, and it is why the log line above exists.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const deps = { referrals, billing };
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    const paid = await payReferralIfEarned(deps, 'user_referred');
+    assert.equal(paid.paid, true);
+    assert.equal(
+      (await referrals.attributionFor('user_referred'))?.fundedBy?.length ?? 0,
+      0,
+      'the fixture recorded funding, so this proves nothing',
+    );
+
+    const result = await logged(() =>
+      clawBackReferral(deps, 'user_referred', 'refunded', ['ch_anything']),
+    );
+
+    assert.equal(result.length, 1, 'an unreversible reward went unreported');
+    assert.equal(await cents(billing, 'user_referrer'), 500);
+  });
+
+  it('hands the refunded charge its invoice and payment intent', async () => {
+    // Read off the Stripe event rather than assumed, because which of these
+    // fields is populated is what decides whether a match is possible at
+    // all. Stripe sends each of them as a bare id or as an expanded object,
+    // and reading `.id` off a string is how this becomes a throw in a
+    // handler that has already written a payment row.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new BillingStore(db);
+    await store.linkCustomer('user_referred', 'cus_referred');
+    const seen: string[][] = [];
+
+    const outcome = await applyStripeEvent(
+      store,
+      {
+        type: 'charge.refunded',
+        data: {
+          object: {
+            id: 'ch_1',
+            customer: 'cus_referred',
+            invoice: 'in_1',
+            payment_intent: { id: 'pi_1' },
+          },
+        },
+      } as never,
+      undefined,
+      async (_userId, _reason, refundedIds) => {
+        seen.push(refundedIds);
+      },
+    );
+
+    assert.equal(outcome, 'applied');
+    assert.deepEqual(seen, [['ch_1', 'in_1', 'pi_1']]);
   });
 });
