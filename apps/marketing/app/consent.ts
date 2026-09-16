@@ -209,3 +209,20 @@ export function analyticsAction(
 export function mustReload(action: AnalyticsAction): boolean {
   return action === 'deny';
 }
+
+/**
+ * Whether a `storage` event is about the consent answer.
+ *
+ * A `storage` event fires in every *other* document on this origin, never in
+ * the one that wrote, which is exactly the case this exists for: two tabs
+ * open, "No thanks" clicked in one, and the other still running the tag it
+ * loaded earlier. The stored answer is already shared; nothing was listening
+ * for it to change.
+ *
+ * `key` is null when the whole store was cleared rather than one key written,
+ * which clears the answer too. Checking only for an exact key match would
+ * miss it, and clearing site data is a fairly direct way of saying no.
+ */
+export function isConsentStorageEvent(key: string | null): boolean {
+  return key === null || key === CONSENT_KEY;
+}

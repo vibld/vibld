@@ -20,6 +20,7 @@ import {
   answerOutcome,
   bannerVisible,
   consentSignals,
+  isConsentStorageEvent,
   mustReload,
   readConsent,
   writeConsent,
@@ -159,11 +160,25 @@ function GoogleAnalytics() {
     };
 
     apply(readConsent(storage()));
+
     const onChange = (event: Event) => {
       apply((event as CustomEvent<ConsentState>).detail ?? null);
     };
+    // The same answer arriving from another tab. A `storage` event fires in
+    // every other document on this origin and never in the one that wrote,
+    // so this and the custom event above are two halves of one thing rather
+    // than a duplicate: without it, a second tab keeps running the tag it
+    // loaded earlier and goes on sending hits after the visitor has said no.
+    const onStored = (event: StorageEvent) => {
+      if (!isConsentStorageEvent(event.key)) return;
+      apply(readConsent(storage()));
+    };
     window.addEventListener(CONSENT_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(CONSENT_CHANGED_EVENT, onChange);
+    window.addEventListener('storage', onStored);
+    return () => {
+      window.removeEventListener(CONSENT_CHANGED_EVENT, onChange);
+      window.removeEventListener('storage', onStored);
+    };
   }, []);
 
   if (!allowed) return null;
@@ -293,8 +308,21 @@ function ConsentBanner() {
   useEffect(() => {
     setDecided(readConsent(storage()));
     const open = () => setReopened(true);
+    // Answered in another tab. Without this the banner here goes on asking a
+    // question that has been answered, and a second answer would overwrite
+    // the first for no reason the visitor could see.
+    const onStored = (event: StorageEvent) => {
+      if (!isConsentStorageEvent(event.key)) return;
+      setDecided(readConsent(storage()));
+      setReopened(false);
+      setUnsaved(false);
+    };
     window.addEventListener(CONSENT_OPEN_EVENT, open);
-    return () => window.removeEventListener(CONSENT_OPEN_EVENT, open);
+    window.addEventListener('storage', onStored);
+    return () => {
+      window.removeEventListener(CONSENT_OPEN_EVENT, open);
+      window.removeEventListener('storage', onStored);
+    };
   }, []);
 
   if (decided === undefined) return null;

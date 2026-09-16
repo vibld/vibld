@@ -7,6 +7,7 @@ import {
   answerOutcome,
   bannerVisible,
   consentSignals,
+  isConsentStorageEvent,
   mustReload,
   readConsent,
   shouldLoadAnalytics,
@@ -267,5 +268,39 @@ describe('mustReload', () => {
     const afterReload = analyticsAction('denied', false);
     assert.equal(afterReload, 'nothing');
     assert.equal(mustReload(afterReload), false);
+  });
+});
+
+describe('isConsentStorageEvent', () => {
+  it('reacts to the consent key changing in another tab', () => {
+    // The case this exists for: two tabs, "No thanks" clicked in one, and
+    // the other still running the tag it loaded earlier. A storage event
+    // fires in every other document and never in the one that wrote.
+    assert.equal(isConsentStorageEvent(CONSENT_KEY), true);
+  });
+
+  it('treats a cleared store as a change, because it clears the answer', () => {
+    // key is null when the whole store was cleared rather than one key
+    // written. Matching only the exact key misses it, and clearing site data
+    // is a fairly direct way of saying no.
+    assert.equal(isConsentStorageEvent(null), true);
+  });
+
+  it('ignores every other key', () => {
+    // Something else on this origin writing its own value is not an answer,
+    // and reacting would re-read and re-apply consent for no reason.
+    assert.equal(isConsentStorageEvent('theme'), false);
+    assert.equal(isConsentStorageEvent(`${CONSENT_KEY}.other`), false);
+    assert.equal(isConsentStorageEvent(''), false);
+  });
+
+  it('composes into a withdrawal that stops a tag in another tab', () => {
+    // End to end as the other tab sees it: the event is ours, the stored
+    // answer now reads denied, the tag here is running, so it is denied and
+    // the document replaced.
+    assert.equal(isConsentStorageEvent(CONSENT_KEY), true);
+    const state = readConsent(working('denied'));
+    assert.equal(analyticsAction(state, true), 'deny');
+    assert.equal(mustReload(analyticsAction(state, true)), true);
   });
 });
