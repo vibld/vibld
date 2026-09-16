@@ -270,6 +270,25 @@ describe('Google Analytics', () => {
     }
   });
 
+  it('sends no page_view of its own, which would double-count', () => {
+    // GA4's Enhanced Measurement counts page changes made through the History
+    // API, which is how React Router's Link navigates. An explicit page_view
+    // beside it records every internal navigation twice, and the site is nine
+    // legal pages reachable only by internal link, so the inflation would be
+    // most of the traffic. gtag.js is loaded from Google rather than bundled,
+    // so a `page_view` literal anywhere in our own client build is ours.
+    const assets = join(CLIENT, 'assets');
+    const scripts = readdirSync(assets).filter((name) => name.endsWith('.js'));
+    assert.ok(scripts.length > 0, 'no client bundle to check');
+    for (const name of scripts) {
+      const code = readFileSync(join(assets, name), 'utf8');
+      assert.ok(
+        !code.includes('page_view'),
+        `${name} sends a page_view, which GA4 Enhanced Measurement already sends`,
+      );
+    }
+  });
+
   // These two are here rather than with the legal pages on purpose. The Cookie
   // Notice promised to be updated before anything that sets a cookie shipped,
   // and GA4 sets cookies, so the disclosure is part of shipping the tag, not a

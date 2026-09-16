@@ -128,6 +128,15 @@ cookies, assigns a client identifier, sends the IP address to Google), because
 the Cookie Notice had promised to be updated before anything of that kind
 shipped.
 
+GA4 counts client-side navigation through its own Enhanced Measurement ("page
+changes based on browser history events", on by default for a web stream), not
+through anything in our code. `RouteChangeBeacon` in `app/root.tsx` is for the
+first-party counter only: an explicit GA4 `page_view` beside Enhanced
+Measurement would record every internal link twice. If that stream setting is
+ever turned off, GA4 silently counts only the first view of a visit. Check it
+at https://analytics.google.com/analytics/web/#/a/p/admin/streams, under the
+web stream's Enhanced measurement.
+
 **Open, for Chris:** GA4 loads for every visitor, with no consent banner. In
 the EU and UK, setting analytics cookies normally requires consent first. The
 options are a consent banner gating the GA4 snippet, Google Consent Mode v2

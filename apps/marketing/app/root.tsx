@@ -61,9 +61,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
  * never blocks rendering.
  *
  * `send_page_view` is left on, so the `config` call counts the first view.
- * Every view after it comes from `RouteChangeBeacon` below, for the same
- * reason the first-party beacon needs one: React Router replaces the page
- * without reloading the document, so nothing in this script runs again.
+ * Every view after it is counted by GA4's own Enhanced Measurement, which
+ * tracks page changes made through the History API and so already sees every
+ * React Router navigation. Nothing here sends a second `page_view`: doing so
+ * would double-count every internal link on the site. See `RouteChangeBeacon`
+ * below, which is for our own counter only.
  *
  * Unlike worker/analytics.ts, this does set cookies and does assign a client
  * identifier. The Cookie Notice, the Privacy Policy and the Subprocessors
@@ -133,6 +135,15 @@ function PageviewBeacon() {
  * Sends a pageview when the path changes, and never for the path the inline
  * script already sent.
  *
+ * This counts for `/api/hit` only. GA4 needs no help here and must not be
+ * given any: its Enhanced Measurement counts "page changes based on browser
+ * history events" by default, React Router's `Link` navigates by
+ * `history.pushState`, and an explicit `page_view` beside that would record
+ * every internal navigation twice. The dependency runs the other way too, and
+ * it is worth knowing: turning that setting off in the GA4 stream would leave
+ * GA4 counting only the first view of a visit, which is the exact bug this
+ * component exists to fix for our own counter.
+ *
  * Keyed on the path rather than fired on every run, so the first effect after
  * hydration is a no-op and the view is counted once rather than twice. The
  * same comparison makes a repeated effect harmless, which matters because
@@ -160,21 +171,6 @@ function RouteChangeBeacon() {
       navigator.sendBeacon('/api/hit', data);
     } catch {
       // Same contract as the inline script: a lost datapoint never surfaces.
-    }
-    // GA4 needs the same nudge, and the decision above is the same decision:
-    // the gtag `config` call counted the first view, so this fires for every
-    // view after it and never for that one. Guarded because gtag is only
-    // there once the loader has run, and a blocked script must not throw.
-    try {
-      const send = (
-        window as unknown as { gtag?: (...args: unknown[]) => void }
-      ).gtag;
-      send?.('event', 'page_view', {
-        page_location: window.location.href,
-        page_referrer: decision.referrer,
-      });
-    } catch {
-      // Same contract: a lost datapoint never surfaces.
     }
   }, [location.pathname, location.search]);
 
