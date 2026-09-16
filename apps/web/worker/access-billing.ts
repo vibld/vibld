@@ -120,6 +120,13 @@ export async function windDownSubscription(
     // and the webhook or the nightly reconcile will correct this row.
     const endsAt = periodEndOf(updated) ?? subscription.currentPeriodEnd;
     try {
+      // Provenance, written alongside the mirror. Without it, restoring
+      // access cannot tell this cancellation from one the subscriber made
+      // for themselves, and clears theirs.
+      await billing.recordScheduledCancellation(
+        subscription.stripeSubscriptionId,
+        subscription.userId,
+      );
       await billing.upsertSubscription({
         ...subscription,
         cancelAtPeriodEnd: true,
@@ -173,6 +180,8 @@ export type SubscriptionRestore =
   | { restored: false; reason: 'no-invite' }
   | { restored: false; reason: 'never-signed-in' }
   | { restored: false; reason: 'nothing-to-restore' }
+  /** Somebody else scheduled this cancellation, so it is not ours to undo. */
+  | { restored: false; reason: 'not-ours' }
   | { restored: false; reason: 'error'; error: string };
 
 /**
@@ -186,13 +195,16 @@ export type SubscriptionRestore =
  * ended a subscription belonging to somebody whose access had been restored
  * and every sentence written about it said otherwise.
  *
- * Only ever clears a flag this deployment could have set. A subscriber who
- * cancelled their own subscription and is then re-invited keeps their
- * cancellation: it was their decision, and silently reversing it would be
- * charging somebody who asked not to be charged. That is why the local
- * mirror is read first and a subscription not marked `cancelAtPeriodEnd` is
- * left alone, rather than sending `cancel_at_period_end: false`
- * unconditionally.
+ * Only ever clears a cancellation this deployment recorded scheduling. A
+ * subscriber who cancelled in the Billing Portal and is then re-invited
+ * keeps their cancellation: it was their decision, and silently reversing it
+ * would be charging somebody who asked not to be charged.
+ *
+ * That is established from `billing_scheduled_cancellations`, not from the
+ * mirror. An earlier version read `cancelAtPeriodEnd` and claimed in this
+ * comment that doing so identified its own work. It does not:
+ * `cancel_at_period_end` is the same boolean whoever set it, so that version
+ * cleared subscribers' own cancellations and Stripe charged them again.
  *
  * Best-effort on the same terms as the wind-down: the invite has already been
  * written, so a throw here would answer 500 for a request that half happened.
@@ -225,11 +237,32 @@ export async function restoreSubscription(
     };
   }
 
-  // Nothing live, or nothing scheduled to end. Both mean there is no
-  // cancellation of this deployment's making to undo.
+  // Nothing live, or nothing scheduled to end.
   if (!subscription || !subscription.cancelAtPeriodEnd) {
     return { restored: false, reason: 'nothing-to-restore' };
   }
+
+  // Whether this deployment is the one that scheduled it. The mirror cannot
+  // answer that: `cancel_at_period_end` is the same boolean whoever set it,
+  // so an earlier version of this read the flag, believed its own comment
+  // about only undoing its own work, and cleared cancellations subscribers
+  // had made in the Billing Portal. Stripe then charged them again.
+  //
+  // No row means somebody else scheduled it, and it is left alone.
+  let ours: boolean;
+  try {
+    ours = await billing.scheduledCancellation(
+      subscription.stripeSubscriptionId,
+    );
+  } catch (error) {
+    console.error('restore: could not read the cancellation record', error);
+    return {
+      restored: false,
+      reason: 'error',
+      error: 'Could not establish who scheduled the cancellation.',
+    };
+  }
+  if (!ours) return { restored: false, reason: 'not-ours' };
 
   try {
     const updated = await makeStripe(env).subscriptions.update(
@@ -243,6 +276,12 @@ export async function restoreSubscription(
         cancelAtPeriodEnd: false,
         currentPeriodEnd: renewsOn,
       });
+      // Cleared, not left behind. A stale row would let a later restore undo
+      // a cancellation the subscriber makes after this one, which is the
+      // same harm one step removed.
+      await billing.clearScheduledCancellation(
+        subscription.stripeSubscriptionId,
+      );
     } catch (error) {
       console.error('restore: Stripe accepted it, local mirror did not', error);
     }

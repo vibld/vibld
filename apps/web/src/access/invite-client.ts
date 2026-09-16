@@ -103,6 +103,7 @@ export type RestoreOutcome =
         | 'no-invite'
         | 'never-signed-in'
         | 'nothing-to-restore'
+        | 'not-ours'
         | 'error';
       error?: string;
     };
@@ -112,6 +113,7 @@ const NOT_RESTORED = new Set([
   'no-invite',
   'never-signed-in',
   'nothing-to-restore',
+  'not-ours',
   'error',
 ]);
 

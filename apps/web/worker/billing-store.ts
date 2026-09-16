@@ -308,6 +308,64 @@ export class BillingStore {
   }
 
   /**
+   * Record that this deployment scheduled a subscription to end.
+   *
+   * Provenance, and it cannot be inferred. `cancel_at_period_end` is the same
+   * boolean whether a revoke here set it or the subscriber set it in the
+   * Billing Portal, so reading the mirror could not establish who did it, and
+   * restoring access therefore cleared a paying customer's own cancellation
+   * and let Stripe charge them again.
+   *
+   * A row means this deployment scheduled it and may undo it. No row means
+   * hands off, whatever the mirror says.
+   */
+  async recordScheduledCancellation(
+    stripeSubscriptionId: string,
+    userId: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_scheduled_cancellations
+           (stripe_subscription_id, user_id, scheduled_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(stripe_subscription_id) DO NOTHING`,
+      )
+      .bind(stripeSubscriptionId, userId, new Date().toISOString())
+      .run();
+  }
+
+  /** Whether this deployment is the one that scheduled this cancellation. */
+  async scheduledCancellation(stripeSubscriptionId: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(
+        `SELECT 1 AS present FROM billing_scheduled_cancellations
+          WHERE stripe_subscription_id = ?1`,
+      )
+      .bind(stripeSubscriptionId)
+      .first<{ present: number }>();
+    return row !== null && row !== undefined;
+  }
+
+  /**
+   * Forget a scheduled cancellation, because it has been undone.
+   *
+   * Cleared on restore rather than left behind: a stale row would let a
+   * later restore undo a cancellation the subscriber made afterwards, which
+   * is the same harm one step removed.
+   */
+  async clearScheduledCancellation(
+    stripeSubscriptionId: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `DELETE FROM billing_scheduled_cancellations
+          WHERE stripe_subscription_id = ?1`,
+      )
+      .bind(stripeSubscriptionId)
+      .run();
+  }
+
+  /**
    * Deduct up to `maxCents` of granted credit, and say how much was taken.
    *
    * One statement, because two cannot settle this. Reading the balance here

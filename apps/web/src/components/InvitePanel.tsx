@@ -62,6 +62,12 @@ export function restoreSentence(billing: RestoreOutcome | null): string {
       ? ` Their subscription was ending and now renews on ${onDay(billing.renewsOn)}.`
       : ' Their subscription was ending and now renews as before.';
   }
+  if (billing.reason === 'not-ours') {
+    // They cancelled for themselves. Saying nothing would be wrong here in a
+    // way the other silent outcomes are not: an operator who restores access
+    // and hears nothing will assume the subscription is running again.
+    return ' They had already cancelled their own subscription, which is left as they set it.';
+  }
   if (billing.reason === 'error') {
     return ` Stripe could not be asked whether their subscription was ending (${billing.error ?? 'no reason given'}), so check there.`;
   }

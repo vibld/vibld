@@ -273,7 +273,11 @@ describe('putting a subscription back when access is restored', () => {
     // immediately was false. Revoking schedules the end, re-inviting cleared
     // revoked_at and asked Clerk, and Stripe ended a subscription belonging
     // to somebody whose access had been restored.
+    //
+    // The provenance row is what makes this ours to undo. Setting the flag
+    // alone is a subscriber's own cancellation, which the suite below covers.
     const { access, billing } = await deployment({ cancelAtPeriodEnd: true });
+    await billing.recordScheduledCancellation('sub_sam', 'user_sam');
     const stripe = stripeAccepting();
 
     const result = await restoreSubscription(
@@ -316,6 +320,7 @@ describe('putting a subscription back when access is restored', () => {
 
   it('asks nothing when Stripe is not configured', async () => {
     const { access, billing } = await deployment({ cancelAtPeriodEnd: true });
+    await billing.recordScheduledCancellation('sub_sam', 'user_sam');
     let asked = false;
     const result = await restoreSubscription(
       {},
@@ -333,6 +338,7 @@ describe('putting a subscription back when access is restored', () => {
 
   it('reports a Stripe refusal rather than throwing into the route', async () => {
     const { access, billing } = await deployment({ cancelAtPeriodEnd: true });
+    await billing.recordScheduledCancellation('sub_sam', 'user_sam');
     const result = await restoreSubscription(
       ENV,
       access,
@@ -382,5 +388,98 @@ describe('an address the invite list has never heard of', () => {
       scheduled: false,
       reason: 'never-signed-in',
     });
+  });
+});
+
+describe('whose cancellation it is', () => {
+  it('does not clear a cancellation the subscriber made themselves', async () => {
+    // The harm this exists to stop, and the previous version caused it. A
+    // subscriber cancels in the Billing Portal; an admin later re-invites
+    // them for an unrelated reason; the restore clears the cancellation and
+    // Stripe charges them again for a subscription they had ended.
+    //
+    // The mirror cannot tell the two apart: `cancel_at_period_end` is the
+    // same boolean whoever set it. Only a record of having scheduled it can.
+    const { access, billing } = await deployment({ cancelAtPeriodEnd: true });
+    const stripe = stripeAccepting();
+
+    const result = await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+
+    assert.deepEqual(
+      stripe.calls,
+      [],
+      'told Stripe to un-cancel their own cancellation',
+    );
+    assert.deepEqual(result, { restored: false, reason: 'not-ours' });
+  });
+
+  it('clears one this deployment scheduled', async () => {
+    const { access, billing } = await deployment();
+    // Revoke first, which is what records the provenance.
+    await windDownSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripeAccepting().client,
+    );
+
+    const stripe = stripeAccepting();
+    const result = await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+
+    assert.deepEqual(stripe.calls, [
+      { id: 'sub_sam', params: { cancel_at_period_end: false } },
+    ]);
+    assert.equal(result.restored, true);
+  });
+
+  it('forgets the record once it is undone', async () => {
+    // A stale row would let a later restore undo a cancellation the
+    // subscriber makes after this one, which is the same harm one step
+    // removed.
+    const { access, billing } = await deployment();
+    await windDownSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripeAccepting().client,
+    );
+    await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripeAccepting().client,
+    );
+
+    assert.equal(await billing.scheduledCancellation('sub_sam'), false);
+
+    // Now the subscriber cancels for themselves.
+    const row = await billing.getSubscription('sub_sam');
+    await billing.upsertSubscription({ ...row!, cancelAtPeriodEnd: true });
+    const stripe = stripeAccepting();
+    const again = await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+
+    assert.deepEqual(stripe.calls, []);
+    assert.deepEqual(again, { restored: false, reason: 'not-ours' });
   });
 });
