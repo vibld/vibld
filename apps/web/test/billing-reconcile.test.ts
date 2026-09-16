@@ -2,10 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
-import {
-  backfillTopupPayments,
-  reconcileSubscriptions,
-} from '../worker/billing-handlers.ts';
+import { reconcileSubscriptions } from '../worker/billing-handlers.ts';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
@@ -106,19 +103,30 @@ async function storeWith(statuses: string[]): Promise<BillingStore> {
 }
 
 describe('reconcileSubscriptions', () => {
-  it('offers whoever Stripe has taken money from, whatever their status now', async () => {
+  it('offers whoever has a recorded payment, whatever their status now', async () => {
     // Status was the wrong question in both directions. A subscriber who
     // paid once and cancelled reads `canceled` for ever, and skipping them
     // is the bug this sweep exists for; a trialing subscriber has been
     // charged nothing, and paying on one makes the trial the thing farmed.
+    // What separates them is a recorded payment, not a status.
     const statuses = ['active', 'trialing', 'canceled'];
     const store = await storeWith(statuses);
+    await store.recordPayment(
+      'in_a',
+      'user_active',
+      2000,
+      '2026-09-01T00:00:00.000Z',
+    );
+    await store.recordPayment(
+      'in_c',
+      'user_canceled',
+      2000,
+      '2026-09-01T00:00:00.000Z',
+    );
     const offered: string[] = [];
 
     const result = await reconcileSubscriptions(
-      stripeServing(statuses, statuses, (id) =>
-        id === 'sub_trialing' ? [] : [2000],
-      ),
+      stripeServing(statuses),
       store,
       async (userId) => {
         offered.push(userId);
@@ -130,58 +138,21 @@ describe('reconcileSubscriptions', () => {
     assert.equal(result.failed, 0);
   });
 
-  it('does not re-read the invoice history of a subscriber already known to have paid', async () => {
-    // What bounds this. A subscriber's invoice history grows every year and
-    // is read once per night; past the request budget the subscriptions
-    // after it are never reached, which is the non-converging failure the
-    // top-up rotation was reshaped to avoid. Once a payment is recorded,
-    // re-reading cannot change any decision here.
+  it('does not offer a subscriber whose only payment took nothing', async () => {
+    // A zero-amount invoice is `paid` in Stripe's sense and took no money.
+    // Recorded truthfully, and it earns nothing.
     const statuses = ['active'];
     const store = await storeWith(statuses);
     await store.recordPayment(
-      'in_known',
+      'in_free',
       'user_active',
-      2000,
+      0,
       '2026-09-01T00:00:00.000Z',
     );
-
-    let invoiceListCalls = 0;
-    const stripe = {
-      subscriptions: {
-        async list() {
-          return { data: statuses.map(subscriptionObject), has_more: false };
-        },
-        async retrieve() {
-          return subscriptionObject('active');
-        },
-      },
-      invoices: {
-        async list() {
-          invoiceListCalls += 1;
-          return { data: [], has_more: false };
-        },
-      },
-    } as unknown as Stripe;
-
-    const offered: string[] = [];
-    await reconcileSubscriptions(stripe, store, async (userId) => {
-      offered.push(userId);
-    });
-
-    assert.equal(invoiceListCalls, 0, 'read invoices it did not need');
-    assert.deepEqual(offered, ['user_active'], 'stopped offering the payout');
-  });
-
-  it('does not offer a subscriber whose paid invoices took nothing', async () => {
-    // `paid` is Stripe's word for settled, not for charged. A zero-amount
-    // invoice is paid and took no money, and treating it as a purchase is a
-    // way to earn referral credit for free.
-    const statuses = ['active'];
-    const store = await storeWith(statuses);
     const offered: string[] = [];
 
     await reconcileSubscriptions(
-      stripeServing(statuses, statuses, () => [0]),
+      stripeServing(statuses),
       store,
       async (userId) => {
         offered.push(userId);
@@ -189,38 +160,6 @@ describe('reconcileSubscriptions', () => {
     );
 
     assert.deepEqual(offered, []);
-    assert.equal(await store.hasClearedPayment('user_active'), false);
-  });
-
-  it('does not offer a subscriber whose invoices were settled outside Stripe', async () => {
-    // Marked paid by hand rather than collected. `amount_paid` is populated
-    // and no money moved through Stripe, so the same rule the webhook uses
-    // has to apply here too.
-    const statuses = ['active'];
-    const store = await storeWith(statuses);
-    const offered: string[] = [];
-
-    await reconcileSubscriptions(
-      stripeServing(statuses, statuses, () => [-2000]),
-      store,
-      async (userId) => {
-        offered.push(userId);
-      },
-    );
-
-    assert.deepEqual(offered, []);
-    assert.equal(await store.hasClearedPayment('user_active'), false);
-  });
-
-  it('records the invoices it read, so the payout sweep can see them', async () => {
-    // The delivery-independent half. If `invoice.paid` never arrived,
-    // nothing local says the money cleared, and this is what repairs that.
-    const statuses = ['canceled'];
-    const store = await storeWith(statuses);
-
-    await reconcileSubscriptions(stripeServing(statuses), store);
-
-    assert.equal(await store.hasClearedPayment('user_canceled'), true);
   });
 
   it('keeps reconciling when one payout throws', async () => {
@@ -228,6 +167,12 @@ describe('reconcileSubscriptions', () => {
     // tonight must not stop the remaining subscriptions being corrected.
     const statuses = ['active'];
     const store = await storeWith(statuses);
+    await store.recordPayment(
+      'in_a',
+      'user_active',
+      2000,
+      '2026-09-01T00:00:00.000Z',
+    );
 
     const result = await reconcileSubscriptions(
       stripeServing(statuses),
@@ -259,6 +204,12 @@ describe('reconcileSubscriptions: discovery', () => {
     // a subscription-mode checkout only links the customer, so iterating the
     // mirror alone never reaches them and their referral is never paid.
     const store = new BillingStore(new SqliteD1Database(SCHEMA));
+    await store.recordPayment(
+      'in_a',
+      'user_active',
+      2000,
+      '2026-09-01T00:00:00.000Z',
+    );
     const offered: string[] = [];
 
     const result = await reconcileSubscriptions(
@@ -353,33 +304,12 @@ describe('Stripe pagination that does not advance', () => {
     },
   };
 
-  it('stops listing invoices for one subscription', async () => {
-    const store = new BillingStore(new SqliteD1Database(SCHEMA));
-    const stripe = {
-      subscriptions: {
-        async list() {
-          return { data: [subscription], has_more: false };
-        },
-        async retrieve() {
-          return subscription;
-        },
-      },
-      invoices: {
-        list: stuck({
-          id: 'in_same',
-          amount_paid: 100,
-          status_transitions: { paid_at: 1_800_000_000 },
-        }),
-      },
-    } as unknown as Stripe;
-
-    const result = await reconcileSubscriptions(stripe, store);
-
-    assert.equal(result.checked, 1);
-    assert.equal(result.failed, 0);
-  });
-
-  it('stops discovering subscriptions', async () => {
+  it('reports a stuck discovery cursor as a failure, not a clean short run', async () => {
+    // Breaking out of the loop stops the spin. Reporting it is what stops
+    // the stall being invisible: otherwise every night reads the same
+    // first pages, stops at the same place, logs success, and every
+    // subscription behind that page goes unreconciled with nothing saying
+    // so.
     const store = new BillingStore(new SqliteD1Database(SCHEMA));
     const stripe = {
       subscriptions: {
@@ -388,315 +318,10 @@ describe('Stripe pagination that does not advance', () => {
           return subscription;
         },
       },
-      invoices: {
-        async list() {
-          return { data: [], has_more: false };
-        },
-      },
     } as unknown as Stripe;
 
     const result = await reconcileSubscriptions(stripe, store);
 
-    assert.equal(result.checked, 1);
-  });
-
-  it('stops listing Checkout Sessions for one customer', async () => {
-    const store = new BillingStore(new SqliteD1Database(SCHEMA));
-    await store.linkCustomer('user_1', 'cus_1');
-    const stripe = {
-      checkout: {
-        sessions: {
-          list: stuck({
-            id: 'cs_same',
-            mode: 'payment',
-            payment_status: 'paid',
-            amount_total: 500,
-            created: 1_800_000_000,
-          }),
-        },
-      },
-    } as unknown as Stripe;
-
-    const result = await backfillTopupPayments(stripe, store);
-
-    assert.equal(result.checked, 1);
-    assert.equal(result.failed, 0);
-  });
-});
-
-describe('backfillTopupPayments', () => {
-  /**
-   * A Stripe that reports the given Checkout Sessions for one customer.
-   *
-   * `sessions` are `[mode, payment_status, amount_total]` triples, which is
-   * exactly the three things the backfill decides on.
-   */
-  let listCalls = 0;
-
-  function stripeWithSessions(
-    sessions: Array<[string, string, number]>,
-  ): Stripe {
-    return {
-      checkout: {
-        sessions: {
-          async list({ customer }: { customer: string }) {
-            listCalls += 1;
-            return {
-              // The id carries the customer. A Checkout Session id is
-              // unique across the account, and it is the primary key of
-              // `billing_payments`: a fake that reuses one across customers
-              // makes the second customer's write a silent no-op on
-              // conflict and the test green for the wrong reason.
-              data: sessions.map(([mode, payment_status, amount], index) => ({
-                id: `cs_${customer}_${index}`,
-                mode,
-                payment_status,
-                amount_total: amount,
-                created: 1_800_000_000,
-              })),
-              has_more: false,
-            };
-          },
-        },
-      },
-    } as unknown as Stripe;
-  }
-
-  async function storeWithCustomer(): Promise<BillingStore> {
-    const store = new BillingStore(new SqliteD1Database(SCHEMA));
-    await store.linkCustomer('user_1', 'cus_1');
-    return store;
-  }
-
-  it('records a settled top-up nothing else could reconstruct', async () => {
-    // The hole this closes. A top-up taken before `billing_payments` existed
-    // leaves only a `billing_topups` row, which records credit granted and
-    // not money taken, so the account reads as never having paid and the
-    // attribution behind it is stranded for ever.
-    const store = await storeWithCustomer();
-    const paid: string[] = [];
-
-    const result = await backfillTopupPayments(
-      stripeWithSessions([['payment', 'paid', 500]]),
-      store,
-      async (userId) => {
-        paid.push(userId);
-      },
-    );
-
-    assert.equal(await store.hasClearedPayment('user_1'), true);
-    assert.deepEqual(paid, ['user_1']);
-    assert.equal(result.cleared, 1);
-    assert.equal(result.failed, 0);
-  });
-
-  it('does not count a Checkout that owed nothing', async () => {
-    const store = await storeWithCustomer();
-    const paid: string[] = [];
-
-    await backfillTopupPayments(
-      stripeWithSessions([['payment', 'no_payment_required', 0]]),
-      store,
-      async (userId) => {
-        paid.push(userId);
-      },
-    );
-
-    assert.equal(await store.hasClearedPayment('user_1'), false);
-    assert.deepEqual(paid, []);
-  });
-
-  it('ignores a session that never settled', async () => {
-    const store = await storeWithCustomer();
-
-    await backfillTopupPayments(
-      stripeWithSessions([['payment', 'unpaid', 500]]),
-      store,
-    );
-
-    assert.equal(await store.hasClearedPayment('user_1'), false);
-  });
-
-  it('leaves subscription checkouts to the invoice path, to avoid counting twice', async () => {
-    // A subscription Checkout's money arrives as an invoice and is recorded
-    // there. Recording the session as well would put the same charge in the
-    // table under two keys.
-    const store = await storeWithCustomer();
-
-    await backfillTopupPayments(
-      stripeWithSessions([['subscription', 'paid', 2000]]),
-      store,
-    );
-
-    assert.equal(await store.hasClearedPayment('user_1'), false);
-  });
-
-  it('drops a customer from the rotation once their payment is recorded', async () => {
-    // What bounds the work. An account with a recorded payment cannot learn
-    // anything from another Stripe call, so it leaves the rotation and the
-    // set shrinks as customers pay. Without that the scan re-read every
-    // customer's whole Checkout history every night and offered every
-    // already-paid account to the payout again.
-    const store = await storeWithCustomer();
-    const stripe = stripeWithSessions([['payment', 'paid', 500]]);
-    const paid: string[] = [];
-    const pay = async (userId: string) => {
-      paid.push(userId);
-    };
-
-    listCalls = 0;
-    await backfillTopupPayments(stripe, store, pay);
-    const afterFirst = listCalls;
-
-    const again = await backfillTopupPayments(stripe, store, pay);
-
-    assert.equal(again.checked, 0);
-    assert.equal(listCalls, afterFirst, 'Stripe read again');
-    assert.deepEqual(paid, ['user_1'], 'payout offered twice');
-    assert.equal(await store.hasClearedPayment('user_1'), true);
-  });
-
-  it('keeps looking at a customer whose session has not settled yet', async () => {
-    // A customer is mapped when Checkout begins, so the first pass can see
-    // a session that has not settled. A one-time backfill marked them done
-    // and nothing looked again when it settled; the payment was lost if the
-    // webhook was also missed.
-    const store = await storeWithCustomer();
-
-    const first = await backfillTopupPayments(
-      stripeWithSessions([['payment', 'unpaid', 500]]),
-      store,
-    );
-    assert.equal(first.checked, 1);
-    assert.equal(await store.hasClearedPayment('user_1'), false);
-
-    // It settles, and nobody delivered the webhook.
-    const second = await backfillTopupPayments(
-      stripeWithSessions([['payment', 'paid', 500]]),
-      store,
-    );
-
-    assert.equal(second.checked, 1, 'stopped looking after an unsettled pass');
-    assert.equal(await store.hasClearedPayment('user_1'), true);
-  });
-
-  it('takes at most the limit it is given, and the rest next time', async () => {
-    const store = new BillingStore(new SqliteD1Database(SCHEMA));
-    for (const n of [1, 2, 3])
-      await store.linkCustomer(`user_${n}`, `cus_${n}`);
-    const stripe = stripeWithSessions([['payment', 'paid', 500]]);
-
-    const first = await backfillTopupPayments(stripe, store, undefined, 2);
-    const second = await backfillTopupPayments(stripe, store, undefined, 2);
-    const third = await backfillTopupPayments(stripe, store, undefined, 2);
-
-    assert.equal(first.checked, 2);
-    assert.equal(second.checked, 1);
-    // All three now have a recorded payment, so the rotation is empty.
-    assert.equal(third.checked, 0, 'did not converge');
-  });
-
-  it('reaches later customers even though an earlier one always fails', async () => {
-    // A Stripe customer deleted out from under the mapping fails every
-    // night for ever. Ordered by age alone it leads every run, and with a
-    // limit enough such rows hold every slot: the set stops converging and
-    // nothing reports that it has.
-    const store = new BillingStore(new SqliteD1Database(SCHEMA));
-    await store.linkCustomer('user_bad', 'cus_bad');
-    await store.linkCustomer('user_good', 'cus_good');
-    // Explicit stamps rather than whatever `linkCustomer` wrote a
-    // microsecond apart. Both rows can land in the same millisecond, and
-    // then the queue order is a tie that the ordering resolves arbitrarily:
-    // this test failed about one run in three on exactly that.
-    await store.markTopupsChecked('user_bad', '2020-01-01T00:00:00.000Z');
-    await store.markTopupsChecked('user_good', '2021-01-01T00:00:00.000Z');
-
-    const stripe = {
-      checkout: {
-        sessions: {
-          async list({ customer }: { customer: string }) {
-            if (customer === 'cus_bad') throw new Error('no such customer');
-            return {
-              data: [
-                {
-                  id: 'cs_1',
-                  mode: 'payment',
-                  payment_status: 'paid',
-                  amount_total: 500,
-                  created: 1_800_000_000,
-                },
-              ],
-              has_more: false,
-            };
-          },
-        },
-      },
-    } as unknown as Stripe;
-
-    // One slot a night, and the failing customer is the older row.
-    for (let night = 0; night < 3; night += 1) {
-      await backfillTopupPayments(stripe, store, undefined, 1);
-    }
-
-    assert.equal(
-      await store.hasClearedPayment('user_good'),
-      true,
-      'starved by the failing customer',
-    );
-  });
-
-  it('revisits an older account even while new ones keep joining', async () => {
-    // What makes this a rotation rather than a queue with a permanent
-    // front. Ordering every never-checked account first looks equivalent
-    // and is not: signups keep arriving at the front, and an account
-    // checked once is never looked at again, so a missed webhook for an
-    // existing customer is never recovered. A new arrival has to queue
-    // behind somebody who has been waiting longer.
-    const store = new BillingStore(new SqliteD1Database(SCHEMA));
-    await store.linkCustomer('user_old', 'cus_old');
-    await store.markTopupsChecked('user_old', '2020-01-01T00:00:00.000Z');
-    for (let n = 0; n < 10; n += 1) {
-      await store.linkCustomer(`user_new_${n}`, `cus_new_${n}`);
-    }
-
-    const seen = new Set<string>();
-    for (let night = 0; night < 5; night += 1) {
-      const batch = await store.customersToCheckForTopups(2);
-      for (const customer of batch) {
-        seen.add(customer.userId);
-        await store.markTopupsChecked(
-          customer.userId,
-          new Date().toISOString(),
-        );
-      }
-    }
-
-    assert.ok(seen.has('user_old'), 'never looked at the older account again');
-  });
-
-  it('comes back to a customer whose history could not be read', async () => {
-    // A failed read leaves nothing recorded, so the customer is still in
-    // the rotation next time rather than silently dropped.
-    const store = await storeWithCustomer();
-    const failing = {
-      checkout: {
-        sessions: {
-          async list() {
-            throw new Error('stripe unavailable');
-          },
-        },
-      },
-    } as unknown as Stripe;
-
-    const first = await backfillTopupPayments(failing, store);
-    assert.equal(first.failed, 1);
-
-    const retry = await backfillTopupPayments(
-      stripeWithSessions([['payment', 'paid', 500]]),
-      store,
-    );
-
-    assert.equal(retry.checked, 1, 'gave up on a customer it never read');
-    assert.equal(await store.hasClearedPayment('user_1'), true);
+    assert.ok(result.failed > 0, 'a truncated discovery reported success');
   });
 });

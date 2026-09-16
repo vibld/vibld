@@ -4,7 +4,6 @@ import { BillingStore } from './billing-store.ts';
 import {
   applyStripeEvent,
   ownerOfSubscription,
-  stripeCollectedUsdCents,
   subscriptionRecordFrom,
 } from './billing-events.ts';
 import { payReferralIfEarned } from './referral-payout.ts';
@@ -257,6 +256,15 @@ export async function reconcileSubscriptions(
   let corrected = 0;
   let failed = 0;
 
+  // A discovery that stopped early is a reconcile that cannot have covered
+  // everything, so it is counted as a failure rather than reported as a
+  // clean run over a short list. The subscriptions it did find are still
+  // worth checking, which is why this does not throw.
+  if (ids.truncated) {
+    console.error('reconcile: subscription discovery stopped early');
+    failed += 1;
+  }
+
   for (const id of ids.ids) {
     try {
       const subscription = await stripe.subscriptions.retrieve(id);
@@ -286,23 +294,19 @@ export async function reconcileSubscriptions(
         corrected += 1;
       }
       // Deliberately not gated on `record.status`. The bug this recovers
-      // from is a subscriber who paid and then cancelled: their status reads
-      // `canceled` for ever, and reading status was exactly how the sweep
-      // came to skip them. Their paid invoices are still there in Stripe.
+      // from is a subscriber who paid and then cancelled: their status
+      // reads `canceled` for ever, and reading status was exactly how the
+      // sweep came to skip them. What they have is a recorded payment.
       //
-      // Gated on the local answer first, though, and that is what keeps
-      // this from growing without bound. Reading a subscriber's whole
-      // invoice history every night costs more every year, and once the
-      // run exceeds its budget the subscriptions after it are never
-      // reached -- the same non-converging failure the top-up rotation was
-      // shaped to avoid. Once a payment is recorded, re-reading the
-      // invoices cannot change any decision here, so a paid subscriber
-      // costs one D1 query instead. The Stripe scan is only for accounts
-      // where nothing local says they paid, which is the set it exists for
-      // and which empties as they are found.
-      const cleared =
-        (await store.hasClearedPayment(record.userId)) ||
-        (await recordPaidInvoices(stripe, store, id, record.userId)) > 0;
+      // A local read, not a Stripe one. Reading each subscriber's invoice
+      // history from Stripe here was an attempt to recover a payment no
+      // webhook ever delivered, and it could not be made to work inside a
+      // scheduled run: the history grows without bound, the run has a
+      // fixed budget, and every bound put on it turned "never finishes"
+      // into "stops early and reports success". That is a design problem,
+      // not a patch, and it is tracked separately rather than half-built
+      // here.
+      const cleared = await store.hasClearedPayment(record.userId);
       if (cleared && onClearedPayment) {
         // Counted as a failure of this subscription's reconcile, not thrown:
         // a reward that cannot be paid tonight must not stop the remaining
@@ -329,183 +333,6 @@ export async function reconcileSubscriptions(
 }
 
 /**
- * Mirror every account's settled top-up Checkouts, and pay what they earned.
- *
- * The other half of the delivery-independent payment record, and the half a
- * migration cannot supply. `recordPaidInvoices` repairs subscribers by
- * reading Stripe; a top-up leaves no equivalent trail locally. Its only row
- * is in `billing_topups`, which records the credit granted rather than the
- * money taken -- a coupon-covered Checkout writes one having been charged
- * nothing -- so the old rows cannot say which of them were real purchases.
- *
- * Without this, an account that topped up before `billing_payments` existed
- * reads as never having paid, and an unpaid attribution behind it is
- * stranded for ever: the webhook that would have recorded it is long gone.
- *
- * Only `mode: 'payment'` sessions. A subscription Checkout's money arrives
- * as an invoice and is recorded there, and counting the session too would
- * record the same charge twice.
- *
- * A bounded rotation, not a queue that empties. This was a one-time
- * backfill with a "done" stamp, and that shape was wrong twice over. A
- * customer is mapped when Checkout *begins*, so a pass can see a session
- * that has not settled yet and mark the account permanently finished;
- * nothing looks again when it settles. And a top-up taken after the stamp
- * had no recovery at all, which is the gap this exists to close, reopened
- * one night later.
- *
- * So there is no finished state. Least recently checked first, at most
- * `limit` a night, for ever. Accounts with a recorded payment are excluded
- * by the query rather than skipped here, so the rotation only covers
- * accounts a Stripe call could still say something about, and it shrinks as
- * customers pay.
- *
- * Returns what it looked at and how many accounts it found cleared money
- * for. Idempotent: the session id keys the write.
- */
-export async function backfillTopupPayments(
-  stripe: Stripe,
-  store: BillingStore,
-  onClearedPayment?: (userId: string) => Promise<void>,
-  limit = 50,
-): Promise<{ checked: number; cleared: number; failed: number }> {
-  const customers = await store.customersToCheckForTopups(limit);
-  let cleared = 0;
-  let failed = 0;
-
-  for (const { userId, stripeCustomerId } of customers) {
-    try {
-      // Before the read, not after. A customer whose read throws is exactly
-      // the one that must move to the back of the queue; stamping
-      // afterwards leaves it at the front for ever, holding a slot under
-      // the limit so later customers are never reached.
-      await store.markTopupsChecked(userId, new Date().toISOString());
-      let collected = 0;
-      let startingAfter: string | undefined;
-
-      for (;;) {
-        const page = await stripe.checkout.sessions.list({
-          customer: stripeCustomerId,
-          limit: 100,
-          ...(startingAfter ? { starting_after: startingAfter } : {}),
-        });
-
-        for (const session of page.data) {
-          if (session.mode !== 'payment') continue;
-          if (
-            session.payment_status !== 'paid' &&
-            session.payment_status !== 'no_payment_required'
-          ) {
-            continue;
-          }
-          const amount = session.amount_total ?? 0;
-          collected += amount;
-          await store.recordPayment(
-            session.id,
-            userId,
-            amount,
-            new Date((session.created ?? 0) * 1000).toISOString(),
-          );
-        }
-
-        const last = page.data.at(-1);
-        if (!page.has_more || !last?.id) break;
-        // A cursor that does not move means the next request returns this
-        // same page for ever. Stripe should never do it, and the cost of
-        // trusting that it will not is a scheduled run that spins inside
-        // one customer until the Worker is killed, every night, never
-        // reaching anybody else. Cheaper to stop.
-        if (last.id === startingAfter) break;
-        startingAfter = last.id;
-      }
-
-      if (collected > 0) {
-        cleared += 1;
-        // Same shape as the subscription path: a reward that cannot be paid
-        // tonight must not stop the remaining accounts being backfilled.
-        if (onClearedPayment) {
-          try {
-            await onClearedPayment(userId);
-          } catch (error) {
-            console.error('backfill: referral payout failed', userId, error);
-            failed += 1;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('backfill: failed to read checkouts', userId, error);
-      failed += 1;
-    }
-  }
-
-  return { checked: customers.length, cleared, failed };
-}
-
-/**
- * Mirror this subscription's paid invoices, and report what they took.
- *
- * The delivery-independent half of the payment record. `invoice.paid` is the
- * fast path; if that delivery never arrived, or the endpoint was not
- * subscribed to it, nothing local says the money cleared. Stripe still
- * knows, so this asks Stripe.
- *
- * Returns the total actually taken, in USD cents, across every paid invoice
- * on the subscription. Zero is a real answer and not an error: a trial
- * invoice and a fully coupon-covered one are both `paid` and both took
- * nothing, and the caller must not pay a referral on either.
- *
- * Writes are keyed on the invoice id, so re-running this every night
- * re-records the same invoices as no-ops.
- */
-async function recordPaidInvoices(
-  stripe: Stripe,
-  store: BillingStore,
-  subscriptionId: string,
-  userId: string,
-): Promise<number> {
-  let total = 0;
-  let startingAfter: string | undefined;
-
-  // Paginated explicitly, for the same reason discoverSubscriptionIds is: a
-  // long-lived subscriber has more than one page of invoices, and the first
-  // one is not the interesting one.
-  for (;;) {
-    const page = await stripe.invoices.list({
-      subscription: subscriptionId,
-      status: 'paid',
-      limit: 100,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
-
-    for (const invoice of page.data) {
-      // The same rule the webhook path uses, from the same function: an
-      // invoice settled outside Stripe must not read as a charge here and
-      // not there.
-      const collected = stripeCollectedUsdCents(invoice);
-      total += collected;
-      if (!invoice.id) continue;
-      await store.recordPayment(
-        invoice.id,
-        userId,
-        collected,
-        invoice.status_transitions?.paid_at
-          ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
-          : new Date().toISOString(),
-      );
-    }
-
-    const last = page.data.at(-1);
-    if (!page.has_more || !last?.id) break;
-    // See the note in backfillTopupPayments: a cursor that does not
-    // advance turns this into an endless loop rather than a long one.
-    if (last.id === startingAfter) break;
-    startingAfter = last.id;
-  }
-
-  return total;
-}
-
-/**
  * Every subscription this reconcile should look at.
  *
  * The local mirror is not enough, and assuming it was is what this fixes. A
@@ -524,7 +351,7 @@ async function recordPaidInvoices(
 async function discoverSubscriptionIds(
   stripe: Stripe,
   store: BillingStore,
-): Promise<{ ids: string[]; discovered: number }> {
+): Promise<{ ids: string[]; discovered: number; truncated: boolean }> {
   const mirrored = await store.listSubscriptionIds();
   const ids = new Set(mirrored);
   let discovered = 0;
@@ -544,12 +371,18 @@ async function discoverSubscriptionIds(
     }
     const last = page.data[page.data.length - 1];
     if (!page.has_more || !last) break;
-    // Same guard as the two loops above. This one predates them and had
-    // the same hole: discovery is what feeds the whole reconcile, so a
-    // cursor stuck here stalls every subscription behind it.
-    if (last.id === startingAfter) break;
+    // A cursor that does not move means the next request returns this same
+    // page for ever. Breaking out of the loop stops the spin; reporting it
+    // is what stops the stall being invisible. Without `truncated` this
+    // returns a short list as though it were the whole one, so every night
+    // reads the same first pages, stops at the same place, logs success,
+    // and every subscription behind that page goes unreconciled with
+    // nothing anywhere saying so.
+    if (last.id === startingAfter) {
+      return { ids: [...ids], discovered, truncated: true };
+    }
     startingAfter = last.id;
   }
 
-  return { ids: [...ids], discovered };
+  return { ids: [...ids], discovered, truncated: false };
 }
