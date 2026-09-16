@@ -8,6 +8,7 @@ import {
   bannerVisible,
   consentChangeFor,
   consentSignals,
+  gaDisableFlag,
   isConsentStorageEvent,
   mustReload,
   readConsent,
@@ -412,5 +413,27 @@ describe('consentChangeFor', () => {
     const action = analyticsAction(change.state, true);
     assert.equal(action, 'deny');
     assert.equal(mustReload(action) && change.allowReload, false);
+  });
+});
+
+describe('gaDisableFlag', () => {
+  it('names the property, which is how Google scopes the switch', () => {
+    // Not a generic "off" global: gtag.js reads one per measurement id, so a
+    // wrong or generic name is a switch that silently does nothing.
+    assert.equal(gaDisableFlag('G-ABC123'), 'ga-disable-G-ABC123');
+  });
+
+  it('is the piece a consent update cannot supply', () => {
+    // Worth pinning as a rule rather than a comment: denying
+    // analytics_storage stops cookies, not measurement. The tag keeps
+    // sending cookieless hits, which is why a withdrawal that cannot reload
+    // needs this to make "analytics is off" true.
+    assert.equal(consentSignals('denied').analytics_storage, 'denied');
+    assert.notEqual(gaDisableFlag('G-ABC123'), '');
+  });
+
+  it('is stable for one id, so on and off address the same switch', () => {
+    assert.equal(gaDisableFlag('G-ABC123'), gaDisableFlag('G-ABC123'));
+    assert.notEqual(gaDisableFlag('G-ABC123'), gaDisableFlag('G-XYZ789'));
   });
 });

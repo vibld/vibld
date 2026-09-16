@@ -19,6 +19,7 @@ import {
   GA4_SRC,
   analyticsAction,
   consentChangeFor,
+  gaDisableFlag,
   recordAnswer,
   bannerVisible,
   consentSignals,
@@ -130,6 +131,7 @@ function GoogleAnalytics() {
           // have to be denied before anything is sent.
           const queue = window as unknown as { dataLayer?: unknown[] };
           queue.dataLayer = queue.dataLayer ?? [];
+          measurement(true);
           tell('consent', 'default', consentSignals('granted'));
           tell('js', new Date());
           tell('config', SITE.ga4MeasurementId);
@@ -137,6 +139,10 @@ function GoogleAnalytics() {
           break;
         }
         case 'grant':
+          // Clears a disable set by an earlier withdrawal in this same
+          // document. Without it, saying yes again would store consent and
+          // still measure nothing.
+          measurement(true);
           tell('consent', 'update', consentSignals('granted'));
           break;
         case 'deny':
@@ -156,6 +162,11 @@ function GoogleAnalytics() {
           // when the store no longer says granted, so the next document
           // loads nothing and never reaches this branch.
           tell('consent', 'update', consentSignals('denied'));
+          // The consent update denies storage; this stops the tag sending.
+          // Without it a withdrawal that cannot reload leaves GA4 running on
+          // cookieless hits while the banner says analytics is off, which is
+          // the same overclaim this change has already made four times.
+          measurement(false);
           break;
         case 'nothing':
           break;
@@ -344,11 +355,27 @@ function ConsentBanner() {
       setReopened(false);
       setUnsaved(null);
     };
+    // And over the channel, which is the only one that arrives when the
+    // store refused the write. Without it another tab's banner keeps showing
+    // a question that has been answered, or claims a grant that has just
+    // been withdrawn, while the tag beside it does the opposite.
+    const channel = openChannel();
+    if (channel) {
+      channel.onmessage = (event: MessageEvent<ConsentChange>) => {
+        setDecided(event.data?.state ?? null);
+        setReopened(false);
+        // Whatever went wrong went wrong in the other tab. Nothing here
+        // failed, so there is nothing here to warn about.
+        setUnsaved(null);
+      };
+    }
+
     window.addEventListener(CONSENT_OPEN_EVENT, open);
     window.addEventListener('storage', onStored);
     return () => {
       window.removeEventListener(CONSENT_OPEN_EVENT, open);
       window.removeEventListener('storage', onStored);
+      channel?.close();
     };
   }, []);
 
@@ -448,6 +475,23 @@ function ConsentBanner() {
       </div>
     </div>
   );
+}
+
+/**
+ * Turn gtag.js on or off for this document.
+ *
+ * Guarded like every other global touched here: a sandboxed frame can make
+ * the assignment throw, and a tag that cannot be disabled is not a reason to
+ * break the page.
+ */
+function measurement(on: boolean) {
+  try {
+    (window as unknown as Record<string, boolean>)[
+      gaDisableFlag(SITE.ga4MeasurementId)
+    ] = !on;
+  } catch {
+    // Nothing to fall back to; the consent update above still applies.
+  }
 }
 
 /**

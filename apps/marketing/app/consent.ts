@@ -316,3 +316,22 @@ export function mustReload(action: AnalyticsAction): boolean {
 export function isConsentStorageEvent(key: string | null): boolean {
   return key === null || key === CONSENT_KEY;
 }
+
+/**
+ * The global that stops gtag.js sending anything at all.
+ *
+ * Google's own opt-out switch, named after the property: setting
+ * `window['ga-disable-G-XXXXXXX']` to true makes the loaded tag send nothing.
+ * It is the piece that was missing from a withdrawal that cannot reload.
+ *
+ * A consent update denies storage. It does not stop measurement: the tag
+ * carries on sending cookieless hits, which is fine for a visitor who only
+ * objects to cookies and is not fine for one who clicked "No thanks" and was
+ * told analytics was off. Replacing the document usually settles it, but the
+ * one case where the document must not be replaced, a denial the store
+ * refused to record over a surviving grant, is exactly the case where the
+ * tag would otherwise keep running with the banner claiming it had stopped.
+ */
+export function gaDisableFlag(measurementId: string): string {
+  return `ga-disable-${measurementId}`;
+}
