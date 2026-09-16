@@ -30,8 +30,72 @@ export interface InviteRecord {
  * and reporting that as success is how somebody concludes they have let
  * a person in when the list has said so since last week.
  */
+/**
+ * What Clerk said when this deployment tried to approve them there too.
+ *
+ * Null means the response carried no answer this could read, which is a gap
+ * rather than a silence, and the panel says so rather than staying quiet.
+ *
+ * Read strictly, and unreadable means null rather than a guess. "Approved in
+ * Clerk" is the strongest claim this panel makes and the one that decides
+ * whether somebody can actually sign in, so it is made only when Clerk's own
+ * answer says so.
+ */
+export type ClerkOutcome =
+  | { admitted: true }
+  | { admitted: false; reason: 'unconfigured' }
+  | {
+      admitted: false;
+      reason: 'still-waiting';
+      status: string;
+      invited: boolean;
+    }
+  | { admitted: false; reason: 'error'; error: string };
+
+export function readClerkOutcome(value: unknown): ClerkOutcome | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as {
+    admitted?: unknown;
+    reason?: unknown;
+    status?: unknown;
+    invited?: unknown;
+    error?: unknown;
+  };
+  if (row.admitted === true) return { admitted: true };
+  if (row.admitted !== false) return null;
+  if (row.reason === 'unconfigured')
+    return { admitted: false, reason: 'unconfigured' };
+  if (row.reason === 'still-waiting') {
+    return {
+      admitted: false,
+      reason: 'still-waiting',
+      status: typeof row.status === 'string' ? row.status : 'waiting',
+      // Whether Clerk took the invitation, which decides whether this is
+      // "they cannot sign in" or "nobody here can tell".
+      invited: row.invited === true,
+    };
+  }
+  if (row.reason === 'error') {
+    return {
+      admitted: false,
+      reason: 'error',
+      error:
+        typeof row.error === 'string' && row.error.trim() !== ''
+          ? row.error
+          : 'Clerk could not be reached.',
+    };
+  }
+  return null;
+}
+
 export type IssueResult =
-  | { ok: true; email: string; created: boolean; reinstated: boolean }
+  | {
+      ok: true;
+      email: string;
+      created: boolean;
+      reinstated: boolean;
+      clerk: ClerkOutcome | null;
+    }
   | { ok: false; error: string };
 
 /**
@@ -166,6 +230,7 @@ export async function issueInvite(
     return {
       ok: true,
       email: body.email,
+      clerk: readClerkOutcome(body.clerk),
       created: body.created === true,
       reinstated: body.reinstated === true,
     };

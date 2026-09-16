@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { InvitePanel } from '../src/components/InvitePanel.tsx';
+import { InvitePanel, clerkSentence } from '../src/components/InvitePanel.tsx';
 
 /**
  * The panel an operator uses to let somebody in.
@@ -149,7 +149,14 @@ describe('the invite panel', () => {
     harness({
       '/api/admin/invites': [{ invites: [] }],
       '/api/admin/invite': [
-        { email: 'new@example.com', created: true, reinstated: false },
+        {
+          email: 'new@example.com',
+          created: true,
+          reinstated: false,
+          // What a deployment with no Clerk key answers. The invite is
+          // real and the other half of letting them in has not happened.
+          clerk: { admitted: false, reason: 'unconfigured' },
+        },
       ],
     });
     const view = await open();
@@ -334,5 +341,117 @@ describe('the invite panel', () => {
     assert.match(rows[0]?.textContent ?? '', /waiting@example\.com/);
     assert.doesNotMatch(view.text(), /Nobody has been invited yet/);
     assert.match(view.text(), /D1 is unavailable/);
+  });
+});
+
+describe('what the panel says about Clerk', () => {
+  it('claims they can sign in only when Clerk said so', async () => {
+    // The strongest claim this panel makes, and the one that decides whether
+    // somebody is actually let in. It is made on Clerk's own answer read
+    // back, never on a request having been sent.
+    assert.match(clerkSentence({ admitted: true }), /can sign in/);
+  });
+
+  it('says they cannot sign in yet when Clerk took nothing', async () => {
+    // An answer rather than a failure, and the difference matters: this one
+    // is not worth trying again, it is worth going to Clerk.
+    const said = clerkSentence({
+      admitted: false,
+      reason: 'still-waiting',
+      status: 'pending',
+      invited: false,
+    });
+
+    assert.match(said, /cannot sign in yet/);
+    assert.match(said, /pending/);
+    assert.doesNotMatch(said, /could not be asked/);
+  });
+
+  it('sends somebody to look when Clerk contradicts itself', async () => {
+    // Clerk took the invitation and still lists the person as waiting. Which
+    // of those governs is the one thing this deployment cannot establish, so
+    // it must not claim either. What is true under both readings is that
+    // somebody should go and look.
+    const said = clerkSentence({
+      admitted: false,
+      reason: 'still-waiting',
+      status: 'pending',
+      invited: true,
+    });
+
+    // It must not claim either way. "whether they can sign in" is the
+    // question being handed over, not an answer to it, so the assertion is
+    // on the claim rather than on the words.
+    assert.match(said, /check in Clerk/);
+    assert.doesNotMatch(said, /Approved in Clerk/);
+    assert.doesNotMatch(said, /they cannot sign in/);
+  });
+
+  it('says Clerk was not asked when this deployment cannot ask it', async () => {
+    const said = clerkSentence({ admitted: false, reason: 'unconfigured' });
+
+    assert.match(said, /not set up/);
+    assert.doesNotMatch(said, /can sign in\./);
+  });
+
+  it('says it could not tell, rather than either answer', async () => {
+    const said = clerkSentence({
+      admitted: false,
+      reason: 'error',
+      error: 'Could not reach Clerk to invite them.',
+    });
+
+    assert.match(said, /could not be asked/);
+    assert.doesNotMatch(said, /can sign in\./);
+    assert.doesNotMatch(said, /still has them/);
+  });
+
+  it('warns when the answer could not be read at all', async () => {
+    // A gap rather than a silence, and the difference is the whole reason
+    // the two are separate values. An operator told nothing concludes the
+    // invite was the whole job, which is how somebody is left unable to
+    // sign in with everybody believing they were let in.
+    const said = clerkSentence(null);
+
+    assert.match(said, /not known/);
+    assert.doesNotMatch(said, /can sign in\./);
+  });
+});
+
+describe('the standing Clerk line, once inviting approves there too', () => {
+  it('does not tell an operator to redo what the invite just did', async () => {
+    // It used to end "approve people in Clerk as well", which was true until
+    // inviting started doing that. Left alone, a successful approval sits
+    // directly above a standing instruction to go and do the thing that has
+    // just been done, and the way somebody follows that instruction is by
+    // revoking and reissuing an invitation that was already working.
+    harness({
+      '/api/admin/invites': [{ invites: [] }],
+      '/api/admin/invite': [
+        {
+          email: 'new@example.com',
+          created: true,
+          reinstated: false,
+          clerk: { admitted: true },
+        },
+      ],
+    });
+    const view = await open();
+    await view.type('new@example.com');
+    await view.press(/^Invite$/);
+
+    assert.match(view.text(), /Approved in Clerk/i);
+    assert.doesNotMatch(
+      view.text(),
+      /approve people at/i,
+      'still standing instruction to do it by hand',
+    );
+    // The link stays, for the outcomes where somebody does have to look.
+    assert.ok(
+      view.container.querySelector(
+        'a[href="https://dashboard.clerk.com/~/users/waitlist"]',
+      ),
+      'no way to reach Clerk when the automatic attempt did not work',
+    );
   });
 });

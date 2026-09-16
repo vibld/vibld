@@ -215,10 +215,18 @@ Underneath:
 
 All four are behind the platform-admin check, not the invite gate. That
 check needs an admin list and a D1 binding, and deliberately not
-`CLERK_SECRET_KEY`: that secret turns a typed email into a Clerk user id,
-which only the two credit routes do. Requiring it everywhere meant a
-deployment with a good admin list and no credit tool could not invite
-anybody, and said the credit tool was missing when asked why.
+`CLERK_SECRET_KEY`. Requiring it everywhere meant a deployment with a good
+admin list and no credit tool could not invite anybody, and said the credit
+tool was missing when asked why.
+
+`CLERK_SECRET_KEY` is optional and each route that wants it asks for itself:
+the two credit routes refuse without it, and `POST /api/admin/invite` records
+the invite either way and reports that Clerk was not asked. Setting it is
+worth it, though, because sign-in is waitlisted in Clerk (L6) and without the
+key an invite here is half the action: the row authorises somebody who still
+cannot create a session, and an operator has to approve them by hand at
+https://dashboard.clerk.com/~/users/waitlist. With the key set, inviting asks
+Clerk to approve the address too and the panel says what Clerk answered.
 
 ### Deploying it
 
@@ -382,10 +390,13 @@ Two things this costs, both accepted rather than solved here:
 3. Add the provider key as a Worker secret -- it must never be committed:
    `wrangler secret put ANTHROPIC_API_KEY`
 4. Add `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` to the `preview`
-   environment (the deploy workflow's Build step inlines the publishable key
-   as `VITE_CLERK_PUBLISHABLE_KEY`; `CLERK_SECRET_KEY` is currently unused by
-   any Worker code -- JWKS verification needs no secret -- and is kept only
-   because Clerk issues both together).
+   environment. The deploy workflow's Build step inlines the publishable key
+   as `VITE_CLERK_PUBLISHABLE_KEY`. `CLERK_SECRET_KEY` is not needed to verify
+   a session (JWKS verification needs no secret), but Worker code does read it
+   now: the two admin credit routes turn a typed email into a Clerk user id
+   with it, and `POST /api/admin/invite` uses it to ask Clerk to approve the
+   invited address. Leaving it unset is a supported shape and costs those
+   three things, each of which says so rather than failing quietly.
 
 Until all of that is in place the deployed shell keeps running the fake, which
 is the intended safe default.

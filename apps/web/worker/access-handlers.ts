@@ -3,6 +3,8 @@
  * invite list.
  */
 import { AccessStore } from './access-store.ts';
+import { admitToClerk } from './clerk-waitlist.ts';
+import type { ClerkAdmission } from './clerk-waitlist.ts';
 import {
   REFUSED_MESSAGE,
   decideAccess,
@@ -18,6 +20,12 @@ export interface AccessEnv {
   /** "open" opens the deployment. Anything else, including unset, is invite-only. */
   VIBLD_ACCESS_MODE?: string;
   VIBLD_PLATFORM_ADMINS?: string;
+  /**
+   * Clerk's Backend API key, for approving an invited person in Clerk as
+   * well as here. Optional on purpose: a deployment without it still issues
+   * invites, and says that Clerk was not asked.
+   */
+  CLERK_SECRET_KEY?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -148,7 +156,27 @@ export async function handleInvite(
   // one, so it is reported as its own outcome instead of looking like a
   // fresh invite that did nothing.
   const reinstated = created ? false : await store.reinstate(email);
-  return json({ email, created, reinstated });
+
+  // Then Clerk, which is the other half of letting somebody in: a row here
+  // gets them past the access gate, and Clerk in Waitlist mode is what
+  // decides whether they can create a session at all.
+  //
+  // After the row and never before it, and its outcome is carried rather
+  // than thrown. The invite is this deployment's own record and must not
+  // depend on Clerk answering: a deployment with no CLERK_SECRET_KEY is a
+  // supported shape, and an operator with a good admin list has to be able
+  // to invite somebody whatever Clerk is doing. So the response says what
+  // happened on each side and the panel reports both.
+  // Asked every time the address is submitted, not only when the row
+  // changed. Gating it on `created || reinstated` left no way to approve
+  // anybody whose row already existed: every invite issued before this
+  // deployment, and every one whose first Clerk attempt failed or ran with
+  // no key configured, could only be approved by withdrawing the invite and
+  // putting it back. `admitToClerk` handles a duplicate invitation, so the
+  // repeat is cheap and it is the retry path.
+  const clerk: ClerkAdmission = await admitToClerk(env, email);
+
+  return json({ email, created, reinstated, clerk });
 }
 
 /** Withdraw an invite. Assumes the admin check already ran. */

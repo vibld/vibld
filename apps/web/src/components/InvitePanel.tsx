@@ -5,7 +5,7 @@ import {
   listInvites,
   revokeInvite,
 } from '../access/invite-client.ts';
-import type { InviteRecord } from '../access/invite-client.ts';
+import type { ClerkOutcome, InviteRecord } from '../access/invite-client.ts';
 
 /**
  * The invite list, and the two acts that change it.
@@ -20,6 +20,41 @@ import type { InviteRecord } from '../access/invite-client.ts';
  * membership on every call (ADR-0006), so this component never trusts its
  * own visibility as an access control.
  */
+/**
+ * What to add about Clerk, given what Clerk said.
+ *
+ * Four answers rather than two, because "not approved" covers three quite
+ * different situations and only one of them is worth trying again. Clerk
+ * saying the person is still waiting is an answer, not a failure.
+ *
+ * Empty only when Clerk was deliberately not asked, which is the case when
+ * the invite row did not change. An answer that could not be read is not
+ * that, and gets a sentence of its own.
+ */
+export function clerkSentence(clerk: ClerkOutcome | null): string {
+  // No readable answer is a gap, not a silence. A response that does not
+  // mention Clerk is one this deployment cannot vouch for, and an operator
+  // who is told nothing concludes the invite was the whole job.
+  if (clerk === null) {
+    return ' Whether Clerk approved them is not known, so check there or they may not be able to sign in.';
+  }
+  if (clerk.admitted) return ' Approved in Clerk, so they can sign in.';
+  if (clerk.reason === 'unconfigured') {
+    return ' Clerk approval is not set up on this deployment, so approve them in Clerk or they cannot sign in.';
+  }
+  if (clerk.reason === 'still-waiting') {
+    // Two different situations, and only one of them is a claim this
+    // deployment can make. When Clerk took the invitation and still lists
+    // the person as waiting, the two answers disagree and which one governs
+    // is undocumented, so the honest thing is to send somebody to look
+    // rather than to pick. When Clerk took nothing, they are plainly not in.
+    return clerk.invited
+      ? ` Clerk took the invitation and still lists them as ${clerk.status}, so check in Clerk whether they can sign in.`
+      : ` Clerk still has them ${clerk.status}, so they cannot sign in yet. Approve them in Clerk.`;
+  }
+  return ` Clerk could not be asked (${clerk.error}), so check whether they are approved there.`;
+}
+
 export function InvitePanel() {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState('');
@@ -75,22 +110,22 @@ export function InvitePanel() {
       setFailure(result.error);
       return;
     }
-    // Three outcomes, said apart. "Already invited" reported as success is
-    // how somebody concludes they have just let a person in when the list
+    // Three outcomes here, said apart. "Already invited" reported as success
+    // is how somebody concludes they have just let a person in when the list
     // has said so since last week.
     //
-    // And none of the three is the whole job. Clerk is in Waitlist mode, so
-    // a row here lets somebody past the gate and does not let them create a
-    // session: unapproved in Clerk they cannot sign in at all, and never
-    // reach the gate to be admitted by it. "Invited" on its own is a claim
-    // this panel cannot make.
-    setNote(
-      result.created
-        ? `${result.email} is on the invite list. Approve them in Clerk too, or they cannot sign in.`
-        : result.reinstated
-          ? `Put ${result.email}'s withdrawn invite back. Approve them in Clerk too, or they cannot sign in.`
-          : `${result.email} was already invited. Nothing changed.`,
-    );
+    // And letting somebody in takes both halves. Clerk is in Waitlist mode,
+    // so a row here gets them past the access gate and Clerk decides whether
+    // they can create a session at all. The deployment now asks Clerk as
+    // well, and what it reports is Clerk's own answer read back afterwards
+    // rather than the fact that a request was sent: "they can sign in" is
+    // the claim that matters and the one worth being sure of.
+    const here = result.created
+      ? `${result.email} is on the invite list.`
+      : result.reinstated
+        ? `Put ${result.email}'s withdrawn invite back.`
+        : `${result.email} was already invited. Nothing changed.`;
+    setNote(`${here}${clerkSentence(result.clerk)}`);
     if (result.created || result.reinstated) {
       setVersion((n) => n + 1);
       // Compared against the value now, not the one this closure was born
@@ -172,18 +207,28 @@ export function InvitePanel() {
         of the last thing pressed. Two systems have to agree before somebody
         can use the product: Clerk decides whether they can sign in at all,
         this list decides whether signing in gets them anywhere.
+
+        It used to end "approve people in Clerk as well", which was true
+        until inviting started doing that. Left as it was, every successful
+        approval sat directly above a standing instruction to go and do the
+        thing that had just been done, which is how somebody revokes and
+        reissues an invitation that was already working. It describes what
+        inviting attempts now, and the link stays for the outcomes where
+        somebody does have to go and look, which the sentence under each
+        invite names.
       */}
       <p className="pane-note">
-        Sign-in is waitlisted in Clerk, so this list is half of it. Approve
-        people at{' '}
+        Sign-in is waitlisted in Clerk, so this list is half of it. Inviting
+        somebody here asks Clerk to approve them too, and says what Clerk
+        answered. When it could not, approve them at{' '}
         <a
           href="https://dashboard.clerk.com/~/users/waitlist"
           rel="noopener noreferrer"
           target="_blank"
         >
           the Clerk waitlist
-        </a>{' '}
-        as well.
+        </a>
+        .
       </p>
 
       {note ? (
