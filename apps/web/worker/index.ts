@@ -102,6 +102,7 @@ import {
 } from './github-handlers.ts';
 import {
   DEFAULT_QUERY_BUDGET,
+  replayBudgetFor,
   replayStripeEvents,
   retryBatchFor,
   retryUnattributedEvents,
@@ -1556,7 +1557,13 @@ export default {
         // the replay left it in. The money the replay recovers does not
         // depend on order: a top-up and a payment are recorded against the
         // Stripe object's own id, once.
-        replayStripeEvents(stripe, billing, undefined, undefined, budget)
+        replayStripeEvents(
+          stripe,
+          billing,
+          undefined,
+          undefined,
+          replayBudgetFor(budget),
+        )
           .then(
             (result) => {
               console.log(
@@ -1567,10 +1574,11 @@ export default {
             (error: unknown) => {
               console.error('billing replay failed', error);
               // What it reserved before throwing is unknown, so assume it
-              // reserved the lot. A throw here is already a sign the
-              // allowance was misjudged, and guessing low is how the next
-              // phase finishes the job.
-              return budget;
+              // reserved everything it was entitled to. Not the whole
+              // allowance: the parked queue's share was never the replay's
+              // to spend, and a throw here must not be what stops parked
+              // payments being retried.
+              return replayBudgetFor(budget);
             },
           )
           // Then the events parked because nobody could be attributed to

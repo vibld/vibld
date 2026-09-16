@@ -438,6 +438,33 @@ export function retryBatchFor(queryBudget: number): number {
 }
 
 /**
+ * The share of an invocation's allowance held back for parked events, before
+ * the replay is allowed to reserve any of it.
+ *
+ * Leftovers do not work, and the arithmetic says so rather than the
+ * intention: the replay reserves a page's worst case up front whether or not
+ * the page had anything in it, so on the smallest supported budget (40, the
+ * Workers Free default) it took 39 of 40 every night and the retry was
+ * handed 1, which buys no rows. Every night, for ever, while the cursor
+ * moved on past the very events that were parked. Money already taken and
+ * never credited to anybody.
+ *
+ * A quarter, and never fewer than one row's worth. The order of precedence
+ * is deliberate: a parked event is a payment this deployment has already
+ * seen and cannot attribute, which is worse than a payment it has not read
+ * yet, so it is served first and the replay takes what is left rather than
+ * the other way round.
+ */
+export function parkedReserveFor(queryBudget: number): number {
+  return Math.max(MAX_QUERIES_PER_PARKED_ROW, Math.floor(queryBudget / 4));
+}
+
+/** What the replay may reserve, once the parked queue has had its share. */
+export function replayBudgetFor(queryBudget: number): number {
+  return Math.max(0, queryBudget - parkedReserveFor(queryBudget));
+}
+
+/**
  * D1 queries one parked row costs at its worst: the attempt stamp, the
  * handler's own writes, then the mark and the delete once it resolves.
  */

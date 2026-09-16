@@ -6,8 +6,11 @@ import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
 import {
+  DEFAULT_QUERY_BUDGET,
   DEFAULT_REQUEST_BUDGET,
   pageSizeFor,
+  parkedReserveFor,
+  replayBudgetFor,
   retryBatchFor,
   REPLAYED_EVENT_TYPES,
   STRIPE_EVENTS_CURSOR,
@@ -883,10 +886,10 @@ describe('two phases in one invocation', () => {
         store,
         20,
         () => 5000,
-        budget,
+        replayBudgetFor(budget),
       );
       assert.ok(
-        result.queriesReserved <= budget,
+        result.queriesReserved <= replayBudgetFor(budget),
         `the replay alone reserved ${result.queriesReserved} of ${budget}`,
       );
 
@@ -898,6 +901,38 @@ describe('two phases in one invocation', () => {
         `both phases together reserve more than ${budget}`,
       );
     }
+  });
+
+  it('always leaves the parked queue enough for a row', async () => {
+    // Leftovers do not work. The replay reserves a page's worst case up
+    // front whether the page held anything or not, so on the Workers Free
+    // default it took 39 of 40 and the retry was handed 1, which buys no
+    // rows. Every night, for ever, while the cursor moved on past the very
+    // events that were parked: money already taken and never credited.
+    const store = newStore();
+    const { stripe } = stripeServing([[topupEvent('evt_1', 3000)]]);
+
+    for (const budget of [DEFAULT_QUERY_BUDGET, 40, 120, 500, 900]) {
+      const result = await replayStripeEvents(
+        stripe,
+        store,
+        20,
+        () => 5000,
+        replayBudgetFor(budget),
+      );
+      const batch = retryBatchFor(budget - result.queriesReserved);
+      assert.ok(batch >= 1, `budget ${budget} retries no parked events, ever`);
+    }
+  });
+
+  it('serves the parked queue before the replay, not after it', async () => {
+    // A parked event is a payment already seen and not attributed, which is
+    // worse than one not read yet. So the share is taken off the top rather
+    // than left over, and the replay is handed the remainder.
+    assert.ok(parkedReserveFor(500) >= 6);
+    assert.equal(replayBudgetFor(500), 500 - parkedReserveFor(500));
+    // Never fewer than one row's worth, however small the allowance.
+    assert.ok(parkedReserveFor(4) >= 6);
   });
 
   it('takes no parked work at all when nothing is left', async () => {
@@ -918,6 +953,21 @@ describe('two phases in one invocation', () => {
     );
 
     assert.match(source, /retryBatchFor\(budget - reserved\)/);
+
+    // And the replay is *called* with the remainder. Matching the file
+    // anywhere passed while the call itself took the whole allowance,
+    // because `replayBudgetFor(budget)` also appears in the error handler
+    // beneath it. The argument list is the thing under test, so that is what
+    // is read.
+    const call = source.slice(
+      source.indexOf('replayStripeEvents('),
+      source.indexOf('.then(', source.indexOf('replayStripeEvents(')),
+    );
+    assert.match(
+      call,
+      /replayBudgetFor\(budget\)/,
+      'the replay is handed the whole allowance again',
+    );
     assert.doesNotMatch(
       source,
       /retryBatchFor\(budget\)/,
