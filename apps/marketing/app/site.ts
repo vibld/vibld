@@ -37,6 +37,15 @@ export const SITE = {
    * the Privacy Policy and the Subprocessors page all say so.
    */
   ga4MeasurementId: 'G-JCWXRRM8R9',
+  /**
+   * The only hostnames that report to that property.
+   *
+   * Everything else, the workers.dev preview and `pnpm dev` included, loads
+   * no analytics at all and is not asked for consent, because a question
+   * whose answer cannot change anything is noise. Without this the preview
+   * and a laptop both fed the production numbers.
+   */
+  analyticsHosts: ['vibld.com', 'www.vibld.com'] as readonly string[],
   /** Issue #7 -- link the repository and the open-source, portable-code promise. */
   repoUrl: 'https://github.com/vibld/vibld',
   /**

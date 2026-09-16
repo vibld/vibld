@@ -162,13 +162,29 @@ only way a page can remove a script already in it: this is a single-page app,
 internal links never create a new document, so a tag left in place would
 otherwise outlive the answer.
 
-**Consent is per origin; the cookie is not.** This Worker serves both
-`vibld.com` and `www.vibld.com`, `localStorage` is scoped to one origin, and
-GA writes `_ga` on `.vibld.com`, which both share. So a grant on one origin
-leaves an identifier the other origin can see while having no record of any
-answer. Every "no" therefore expires the cookies whether or not that document
-ever loaded the tag; tying the cleanup to "the tag is running here" left the
-shared identifier in place for a later grant to resume.
+**Consent is per origin, so the cookie is made per origin too.** This Worker
+serves both `vibld.com` and `www.vibld.com`, and `localStorage` is scoped to
+one origin. GA's default is to write `_ga` on `.vibld.com`, which both share,
+so the two origins could hold opposite answers over one identifier: denying on
+one deleted a cookie the other recreated on its next page view, and deletion
+at the moment of denial could not hold. `config` therefore passes
+`cookie_domain: 'none'`, which makes the cookie host-only and puts its scope
+and the answer's scope in step. Every "no" also expires the cookies whether or
+not that document ever loaded the tag, since an identifier can predate the
+change and tying cleanup to "the tag is running here" leaves it for a later
+grant to resume.
+
+Two origins serving the same pages is the root of that, and the site already
+names `vibld.com` as canonical in its metadata while answering on both. A
+redirect would remove the class of problem rather than managing it, and is
+Chris's call rather than a change to make inside an analytics PR.
+
+**Only production is measured.** `SITE.analyticsHosts` lists the two hostnames
+that report to the property. The measurement id is a constant, so before this
+the workers.dev preview and `pnpm dev` both fed the production numbers the
+moment anyone clicked Allow, which breaks nothing visibly and would have gone
+on quietly making the data wrong. Anywhere else loads no analytics and shows
+no banner, because a question whose answer cannot change anything is noise.
 
 **The reload is conditional, and the condition matters.** When the store
 refuses both the write and the removal of the denial, an older grant survives

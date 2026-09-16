@@ -27,6 +27,7 @@ import {
   bannerVisible,
   consentSignals,
   isConsentStorageEvent,
+  measuresHost,
   mustReload,
   readConsent,
   type ConsentChange,
@@ -118,6 +119,7 @@ function GoogleAnalytics() {
 
   useEffect(() => {
     const apply = (state: ConsentState, allowReload = true) => {
+      if (!measured()) return;
       // Every branch is `analyticsAction`'s, and it is tested. Deciding this
       // inline is what produced two review findings: a withdrawal that never
       // reached gtag, and a second grant skipped because the tag was already
@@ -137,7 +139,14 @@ function GoogleAnalytics() {
           measurement(true);
           tell('consent', 'default', consentSignals('granted'));
           tell('js', new Date());
-          tell('config', SITE.ga4MeasurementId);
+          // Host-only cookies, so the cookie is scoped the way the answer
+          // is. `localStorage` is per origin and this Worker serves both
+          // vibld.com and www.vibld.com, so GA's default `.vibld.com` cookie
+          // is shared by two origins that can hold opposite answers: denying
+          // on one deletes a cookie the other recreates on its next page
+          // view, and the identifier comes back. Matching the scopes is what
+          // makes a denial stay denied.
+          tell('config', SITE.ga4MeasurementId, { cookie_domain: 'none' });
           setAllowed(true);
           break;
         }
@@ -388,6 +397,9 @@ function ConsentBanner() {
   }, []);
 
   if (decided === undefined) return null;
+  // Nothing loads here, so there is nothing to consent to. Asking anyway
+  // would train people to dismiss a banner that never meant anything.
+  if (!measured()) return null;
   if (unsaved === null && !bannerVisible(decided, reopened)) return null;
 
   const answer = (choice: ConsentChoice) => {
@@ -492,6 +504,15 @@ function ConsentBanner() {
       </div>
     </div>
   );
+}
+
+/** Whether analytics runs here at all. See `SITE.analyticsHosts`. */
+function measured(): boolean {
+  try {
+    return measuresHost(window.location.hostname, SITE.analyticsHosts);
+  } catch {
+    return false;
+  }
 }
 
 /**

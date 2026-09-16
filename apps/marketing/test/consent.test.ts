@@ -13,6 +13,7 @@ import {
   consentSignals,
   gaDisableFlag,
   isConsentStorageEvent,
+  measuresHost,
   mustReload,
   readConsent,
   shouldLoadAnalytics,
@@ -513,5 +514,49 @@ describe('expiredCookie', () => {
     for (const domain of [null, '.vibld.com']) {
       assert.match(expiredCookie('_ga_ABC', domain), /path=\//);
     }
+  });
+});
+
+describe('measuresHost', () => {
+  const HOSTS = ['vibld.com', 'www.vibld.com'];
+
+  it('measures the production hosts', () => {
+    assert.equal(measuresHost('vibld.com', HOSTS), true);
+    assert.equal(measuresHost('www.vibld.com', HOSTS), true);
+  });
+
+  it('keeps the preview deploy out of the production property', () => {
+    // The whole reason this exists: the measurement id is a constant, so
+    // without a host check a reviewer clicking Allow on the workers.dev
+    // preview fed the real numbers, silently and for as long as nobody
+    // looked.
+    assert.equal(
+      measuresHost('vibld-marketing-preview.workers.dev', HOSTS),
+      false,
+    );
+  });
+
+  it('keeps a laptop out of it too', () => {
+    assert.equal(measuresHost('localhost', HOSTS), false);
+    assert.equal(measuresHost('127.0.0.1', HOSTS), false);
+  });
+
+  it('is not fooled by a hostname that merely contains ours', () => {
+    // An allow list compared whole, not a substring check. This is the same
+    // mistake CodeQL flagged in the tests earlier in this change.
+    assert.equal(measuresHost('vibld.com.evil.example', HOSTS), false);
+    assert.equal(measuresHost('notvibld.com', HOSTS), false);
+    assert.equal(measuresHost('evil.example/vibld.com', HOSTS), false);
+  });
+
+  it('compares case-insensitively, since hostnames are', () => {
+    assert.equal(measuresHost('VIBLD.COM', HOSTS), true);
+    assert.equal(measuresHost('Www.Vibld.Com', HOSTS), true);
+  });
+
+  it('measures nothing when nothing is allowed', () => {
+    // A misconfigured list denies rather than opening up, the same direction
+    // every other rule in this file falls.
+    assert.equal(measuresHost('vibld.com', []), false);
   });
 });

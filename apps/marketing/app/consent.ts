@@ -392,3 +392,24 @@ export function expiredCookie(name: string, domain: string | null): string {
   const base = `${name}=; Max-Age=0; path=/`;
   return domain === null ? base : `${base}; domain=${domain}`;
 }
+
+/**
+ * Whether this hostname is one we measure.
+ *
+ * The measurement id is a constant in `site.ts` and was therefore live in
+ * every environment: the workers.dev preview and `pnpm dev` both sent page
+ * views into the production property the moment anyone clicked Allow. That
+ * does not break anything visibly, which is why it would have run for months
+ * quietly making the numbers wrong.
+ *
+ * An allow list rather than a "not localhost" check, because the failure to
+ * avoid is measuring somewhere nobody thought about, and a deny list is
+ * always missing the environment invented last week.
+ */
+export function measuresHost(
+  hostname: string,
+  allowed: readonly string[],
+): boolean {
+  const host = hostname.trim().toLowerCase();
+  return allowed.some((candidate) => candidate.trim().toLowerCase() === host);
+}
