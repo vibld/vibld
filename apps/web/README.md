@@ -526,9 +526,12 @@ Dashboard needs no code change, only the amount to change.
   mirrored -- `customer.subscription.updated` already carries the status
   change it implies).
 
-  `invoice.paid` **is** acted on now: it is the durable record that a
-  subscription took money, and it announces the purchase itself, which is a
-  second recovery path for a missed `customer.subscription.*` delivery.
+  `invoice.paid` **is** acted on now: it carries `amount_paid`, so it is the
+  event that says how much money moved, and it is the only one that
+  announces a purchase. `customer.subscription.*` deliberately does not. A
+  status is not a charge: a subscription covered in full by a coupon, or one
+  whose first invoice is zero, reads `active` having taken nothing, and
+  announcing on that paid a referral for free.
 
   The two `async_payment_*` events matter for delayed payment methods, where
   `checkout.session.completed` arrives with `payment_status: unpaid` and the
@@ -548,10 +551,26 @@ Dashboard needs no code change, only the amount to change.
   What counts as owed is "this account has a cleared payment and no payout",
   not "this attribution holds a cap reservation". The reservation reading
   excluded the rows the sweep exists for: a payout that failed before taking
-  its slot leaves nothing to find. `invoice.paid` is now mirrored onto the
-  subscription as `ever_paid_at`, because a subscription's _current_ status
-  cannot answer "did they ever pay" (somebody who paid once and cancelled
-  reads `canceled` for ever), and it is the only event that says money moved.
+  its slot leaves nothing to find.
+
+  A cleared payment is a row in `billing_payments`, keyed on the Stripe
+  object that settled and carrying what it took, with a positive amount.
+  Both halves matter. It is not hung off the subscription row, because
+  `invoice.paid` can arrive before `customer.subscription.created` and an
+  UPDATE against a row that does not exist yet changes nothing and reports
+  nothing. And it requires an amount, because `no_payment_required`
+  Checkouts, zero-amount invoices and trialing subscriptions are all settled
+  states that took no money, and each one was a way to earn referral credit
+  without ever being charged. `CLEARED_PAYMENT_SQL` (`worker/purchase-barrier.ts`)
+  is the one place that decides, and it sits beside the barrier predicate it
+  must not be confused with.
+
+  The nightly reconcile reads each subscription's paid invoices back from
+  Stripe and records them, for every subscription rather than only the
+  active ones: a subscriber who paid once and then cancelled reads
+  `canceled` for ever, and reading status was how the sweep came to skip
+  them. That is also what makes the payment record independent of any
+  webhook delivery having happened.
 
   The reconcile asks Stripe which subscriptions exist rather than only
   re-reading the ones already mirrored. A subscriber whose very first
