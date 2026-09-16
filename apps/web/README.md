@@ -236,9 +236,14 @@ deployment is not held to this, because a deploy with no Clerk at all is a
 supported shape and it is being closed that makes an identity provider
 load-bearing.
 
-"Usable" is counted the way the Worker counts it: the list is split on commas
-and trimmed, so `" , "` is a non-empty secret and an empty admin list, and an
-entry that cannot be an email address can never match a Clerk-verified one.
+"Usable" is not decided by the workflow. `scripts/access-preflight.ts` makes
+the whole decision and imports the Worker's own `parseAccessMode`,
+`parsePlatformAdmins` and `normaliseEmail`, so the deploy and the running
+product answer "is the door open", "what does this list mean" and "could this
+be an address" with the same code. Written as shell it was a second
+implementation of those three rules, and every time the two disagreed the
+deploy was the more generous one, which is the direction that ships the
+outage.
 
 The check is its own step, before the first `wrangler secret put`, and writes
 nothing. That ordering is the point rather than tidiness: a secret put

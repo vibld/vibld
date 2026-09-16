@@ -46,6 +46,15 @@ jobs:
             exit 1
           fi
 
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
       # The invite gate (apps/web/worker/access-gate.ts). Unset means
       # invite-only, which is the launch state and the safe default, and the
       # Worker opens only on the exact string `open`.
@@ -58,85 +67,25 @@ jobs:
       # have fixed it, and only then fail the run: a refusal that arrives
       # after the damage is not a refusal.
       #
-      # So it runs before anything is written, needs no Cloudflare
-      # credentials, and touches nothing.
+      # The decision lives in apps/web/scripts/access-preflight.ts rather
+      # than here, and imports the Worker's own `parseAccessMode`,
+      # `parsePlatformAdmins` and `normaliseEmail`. Written as shell it was a
+      # second implementation of those three rules in a language with
+      # different semantics, and every time the two disagreed the deploy was
+      # the more generous one, which is the direction that ships the outage.
+      #
+      # Placed after Setup Node because it needs the pinned Node 22 to strip
+      # types, and before Install dependencies because both modules it reaches
+      # are dependency-free. It needs no Cloudflare credentials and writes
+      # nothing.
       - name: Check who can get in, before any secret is written
         shell: bash
+        working-directory: apps/web
         env:
           VIBLD_ACCESS_MODE: ${{ secrets.VIBLD_ACCESS_MODE }}
           VIBLD_PLATFORM_ADMINS: ${{ secrets.VIBLD_PLATFORM_ADMINS }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-        run: |
-          set -euo pipefail
-          if [ "${VIBLD_ACCESS_MODE:-}" = "open" ]; then
-            echo "Access will be OPEN." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          # Anything else is invite-only, including a typo. Said out loud
-          # rather than silently coerced, because a value that was meant to
-          # open the deployment and did not is worth seeing in the run.
-          if [ -n "${VIBLD_ACCESS_MODE:-}" ] && [ "$VIBLD_ACCESS_MODE" != "invite" ]; then
-            echo "::warning::VIBLD_ACCESS_MODE is '$VIBLD_ACCESS_MODE', which is not the exact string 'open'. This deployment stays invite-only."
-          fi
-
-          # Counted the way the Worker counts them, not by whether the
-          # string is empty. `parsePlatformAdmins` splits on commas, trims,
-          # lowercases and drops what is left over, so " , " is a non-empty
-          # secret and an empty admin list, and an entry that cannot be an
-          # email address can never match a Clerk-verified one. Either way
-          # the deployment has no admin, which is the thing being checked.
-          #
-          # awk with RS="," rather than a `tr` into lines, because the comma
-          # is the only separator the Worker knows. Splitting on newlines too
-          # would count "a@x.com\nb@y.com" as two admins where the Worker
-          # keeps one member with a newline inside it that can never match a
-          # verified email: a check more generous than the thing it checks
-          # passes exactly the deployments it exists to stop.
-          #
-          # The shape is `normaliseEmail`'s, which is this codebase's own
-          # answer to "could this be an address": at most 254 characters, no
-          # spaces, and a dotted domain. One `@` is not enough -- `a@b` and
-          # `.@.` both have one and no Clerk-verified email can ever equal
-          # them, so an admin list holding only those admits nobody.
-          usable="$(printf '%s' "${VIBLD_PLATFORM_ADMINS:-}" | awk '
-            BEGIN { RS = ","; n = 0 }
-            {
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-              if (length($0) <= 254 &&
-                  $0 ~ /^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$/) n++
-            }
-            END { print n + 0 }
-          ')"
-          if [ "$usable" -eq 0 ]; then
-            echo "::error::This deployment is invite-only and VIBLD_PLATFORM_ADMINS holds no usable admin address, so nobody can reach the admin panel and nobody can issue an invite. Every account, including yours, would be refused with no way to let anybody in. Set VIBLD_PLATFORM_ADMINS on the 'preview' environment (a comma-separated list of admin email addresses) at https://github.com/vibld/vibld/settings/environments and run this workflow again."
-            exit 1
-          fi
-          # The browser half of Clerk. Unset means the Build step inlines no
-          # key, `ClerkRoot` renders no session, and nothing the browser
-          # sends carries a token: `/api/config` cannot say who is asking, so
-          # even the admin named above never sees the panel that issues
-          # invites. An invite-only deployment that admits nobody is the same
-          # outage as an empty admin list, reached from the other side.
-          #
-          # Only checked here, not for an open deployment: a deploy with no
-          # Clerk at all is a supported shape (the Build step says so), and
-          # it is being closed that makes an identity provider load-bearing.
-          if [ -z "${CLERK_PUBLISHABLE_KEY:-}" ]; then
-            echo "::error::This deployment is invite-only and CLERK_PUBLISHABLE_KEY is empty, so the browser has no way to sign anybody in. Nobody can be identified, so nobody can be admitted and no admin can reach the invite panel. Set CLERK_PUBLISHABLE_KEY on the 'preview' environment (the pk_live_... key from https://dashboard.clerk.com) at https://github.com/vibld/vibld/settings/environments and run this workflow again."
-            exit 1
-          fi
-
-          echo "Access will be INVITE ONLY, with $usable admin address(es)." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
+        run: node --experimental-strip-types scripts/access-preflight.ts
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
