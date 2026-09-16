@@ -27,13 +27,34 @@ const BASE = {
 describe('parseAccessMode', () => {
   it('opens only on the exact word', () => {
     assert.equal(parseAccessMode('open'), 'open');
-    assert.equal(parseAccessMode(' OPEN '), 'open');
   });
 
   it('treats anything else as invite-only, including unset', () => {
     // A typo in a deployment variable must not open the door. This is the
     // opposite of the usual default and it is the point.
-    for (const raw of [undefined, '', 'opne', 'true', 'yes', 'invite', 'off']) {
+    //
+    // The near misses are the reason this is a list and not one case. This
+    // test used to assert that ` OPEN ` opened the deployment, under this
+    // very heading: the name said exact and the assertion said lenient, so
+    // the leniency was pinned as though it were the requirement. Every
+    // spelling accepted here is another way a mistyped deployment variable
+    // opens the door.
+    for (const raw of [
+      undefined,
+      '',
+      ' ',
+      'OPEN',
+      'Open',
+      ' open',
+      'open ',
+      ' OPEN ',
+      'open\n',
+      'opne',
+      'true',
+      'yes',
+      'invite',
+      'off',
+    ]) {
       assert.equal(parseAccessMode(raw), 'invite', `${String(raw)} opened it`);
     }
   });

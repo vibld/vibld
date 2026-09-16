@@ -26,6 +26,9 @@
 import { fetchClerkUserCreatedAt } from './clerk-lookup.ts';
 import type { ClerkLookupEnv } from './clerk-lookup.ts';
 import type { BillingStore } from './billing-store.ts';
+import { decideAccessFor } from './access-handlers.ts';
+import type { AccessEnv } from './access-handlers.ts';
+import type { Principal } from './principal.ts';
 
 /** $1.00, as `grantAdminCredit` counts it. */
 export const DEFAULT_SIGNUP_CREDIT_USD_CENTS = 100;
@@ -58,7 +61,7 @@ export const SIGNUP_GRANT_NOTE = 'Welcome credit on account creation';
  */
 export const SIGNUP_DECLINED_NOTE = 'Not in the welcome-credit cohort';
 
-export interface SignupCreditEnv extends ClerkLookupEnv {
+export interface SignupCreditEnv extends ClerkLookupEnv, AccessEnv {
   /**
    * Cents. Defaults to 100. "0" stops the grant, which is the switch to reach
    * for if accounts ever start being created faster than people are creating
@@ -84,6 +87,7 @@ export interface SignupCreditEnv extends ClerkLookupEnv {
  */
 export type SignupGrantOutcome =
   | 'granted'
+  | 'no-access'
   | 'already-granted'
   | 'disabled'
   | 'no-cohort-configured'
@@ -177,13 +181,24 @@ export function signupGrantId(userId: string): string {
  * Never throws: a failed grant must not fail the request it rode in on. A
  * user who misses it on one request gets it on the next, because the id makes
  * retrying free.
+ *
+ * **The access check lives here rather than at each call site.** This takes
+ * the whole principal for that reason. The grant is the thing the invite
+ * gate exists to protect, and one of its two callers is an ungated route:
+ * `/api/billing/status` is deliberately readable by somebody whose access
+ * was revoked, so they can still see what happened to their money, and it
+ * was handing out the dollar to anybody signed in. A rule that each caller
+ * must remember to check is a rule that gets forgotten by the third caller;
+ * asking here means there is no way to call this without the question being
+ * asked.
  */
 export async function grantSignupCreditOnce(
   billing: Pick<BillingStore, 'grantAdminCredit' | 'findAdminCredit'>,
-  userId: string,
+  principal: Principal,
   env: SignupCreditEnv,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SignupGrantOutcome> {
+  const userId = principal.userId;
   const cents = signupCreditCents(env);
   if (cents <= 0) return 'disabled';
 
@@ -191,6 +206,10 @@ export async function grantSignupCreditOnce(
   if (cohortStart === null) return 'no-cohort-configured';
 
   try {
+    // Before anything is written, and before Clerk is asked. An account that
+    // may not use the product may not draw its welcome credit either.
+    if (!(await decideAccessFor(env, principal)).allowed) return 'no-access';
+
     // Cheapest question first. Once a user has their grant this is the only
     // work any later request does, so the Clerk lookup below happens at most
     // once per account rather than on every request forever.

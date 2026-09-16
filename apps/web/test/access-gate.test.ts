@@ -125,3 +125,35 @@ describe('the invite gate', () => {
     assert.match(gate, /decideAccessFor/);
   });
 });
+
+describe('what an ungated route is allowed to do', () => {
+  /**
+   * The gate exists to stop an uninvited account drawing the sign-up
+   * credit. `/api/billing/status` was listed as ungated and described as a
+   * read-only balance view, and it called `grantSignupCreditOnce`, so an
+   * uninvited account could draw its dollar with one direct request
+   * whatever the UI chose to render. The route table was wrong about the
+   * route, so a rule that reads the route table would not have caught it.
+   *
+   * The grant now asks the access question itself, which is what makes the
+   * property hold for callers nobody has written yet. This rule guards that
+   * arrangement rather than any individual call site: move the check back
+   * out to the callers and it fails.
+   */
+  it('leaves the signup grant to decide access for itself', async () => {
+    const source = await readFile(
+      join(import.meta.dirname, '..', 'worker', 'signup-credit.ts'),
+      'utf8',
+    );
+
+    assert.ok(
+      source.includes('decideAccessFor'),
+      'the signup grant no longer asks whether the account has access',
+    );
+
+    const call = source.indexOf('decideAccessFor(');
+    const write = source.indexOf('grantAdminCredit(');
+    assert.ok(call > 0 && write > 0, 'expected both calls in this module');
+    assert.ok(call < write, 'the grant is written before access is decided');
+  });
+});

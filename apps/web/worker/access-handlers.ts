@@ -47,13 +47,23 @@ export async function decideAccessFor(
     parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
   );
 
+  // Answered before the invite list is touched, because neither answer
+  // depends on it. `decideAccess` puts admin and open ahead of invited, and
+  // that order was only true of the decision, not of the work: the lookup
+  // ran first regardless, so a missing table or an unavailable D1 threw and
+  // even a platform admin got an error instead of the admission the order
+  // promises. The admin path is the one that makes a broken deployment
+  // recoverable, so it must not depend on the database being well.
+  if (isAdmin) return { allowed: true, because: 'admin' };
+  if (mode === 'open') return { allowed: true, because: 'open' };
+
   // Without D1 there is no list to be on. In invite mode that has to refuse
   // rather than open: a deployment missing its database must not become an
   // open one, which is the same fail-closed rule every other gate here
-  // follows. An admin still gets in, which is what makes it recoverable.
+  // follows.
   const store = env.DB ? new AccessStore(env.DB) : undefined;
   const invited = store
-    ? await store.isInvited(principal.policyIdentity)
+    ? await store.isInvited(principal.policyIdentity, principal.userId)
     : false;
 
   const decision = decideAccess({

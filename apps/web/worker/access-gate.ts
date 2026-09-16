@@ -57,10 +57,16 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // that tells somebody they are not on the list.
   '/api/config': 'the shell cannot render the refusal without it',
   '/api/access/status': 'this is the endpoint that reports the refusal',
-  // A readout of the caller's own balance. It spends nothing, and hiding it
-  // would leave somebody who was invited, spent, and then had access revoked
-  // with no way to see what happened to their money.
-  '/api/billing/status': "a read-only view of the caller's own balance",
+  // A readout of the caller's own balance. Hiding it would leave somebody
+  // who was invited, spent, and then had access revoked with no way to see
+  // what happened to their money.
+  //
+  // It is not quite read-only, and saying so here was wrong: it grants the
+  // sign-up credit on first read. That grant is now behind the access
+  // decision inside the handler, because an ungated route that hands out
+  // the $1 is the one thing this gate exists to prevent. A route listed
+  // here has to be read-only in fact, not in description.
+  '/api/billing/status': 'a balance read, with its one write behind the gate',
   // Stripe's own POST, authenticated by signature rather than by session.
   // Gating it would mean dropping webhooks for uninvited accounts, which is
   // how a payment that succeeded ends up unmirrored.

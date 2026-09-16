@@ -45,7 +45,21 @@ const clerkSaying = (createdAt: number | null, ok = true) =>
 const ENV = {
   CLERK_SECRET_KEY: 'sk_test',
   VIBLD_SIGNUP_CREDIT_FROM: OFFER_START,
+  // These tests are about the cohort, not the gate, so they run against an
+  // open deployment. The gate has its own test below, and `access.test.ts`
+  // owns the question of what opens one.
+  VIBLD_ACCESS_MODE: 'open',
 };
+
+/** A signed-in account, which is all `grantSignupCreditOnce` needs of one. */
+function who(userId: string) {
+  return {
+    userId,
+    email: `${userId}@example.com`,
+    emailVerified: true,
+    policyIdentity: `${userId}@example.com`,
+  };
+}
 
 describe('signupCreditCents', () => {
   it('defaults to a dollar', () => {
@@ -156,11 +170,34 @@ describe('signupCohortStart', () => {
 });
 
 describe('grantSignupCreditOnce', () => {
+  it('gives nothing to an account the access gate refuses', async () => {
+    // The whole reason the invite gate exists. `/api/billing/status` is
+    // deliberately ungated, so that somebody whose access was revoked can
+    // still see what happened to their money, and it calls this. Without
+    // the check here, one direct request drew the dollar for any signed-in
+    // account whatever the UI rendered.
+    const store = newStore();
+
+    const outcome = await grantSignupCreditOnce(
+      store,
+      who('user_uninvited'),
+      { ...ENV, VIBLD_ACCESS_MODE: undefined },
+      clerkSaying(AFTER),
+    );
+
+    assert.equal(outcome, 'no-access');
+    assert.equal(
+      await store.findAdminCredit(signupGrantId('user_uninvited')),
+      undefined,
+      'wrote a grant for an account with no access',
+    );
+  });
+
   it('grants a dollar to an account created after the offer started', async () => {
     const store = newStore();
     const outcome = await grantSignupCreditOnce(
       store,
-      'user_new',
+      who('user_new'),
       ENV,
       clerkSaying(AFTER),
     );
@@ -189,12 +226,12 @@ describe('grantSignupCreditOnce', () => {
     }) as unknown as typeof fetch;
 
     assert.equal(
-      await grantSignupCreditOnce(store, 'user_repeat', ENV, counting),
+      await grantSignupCreditOnce(store, who('user_repeat'), ENV, counting),
       'not-in-cohort',
     );
     for (let i = 0; i < 4; i += 1) {
       assert.equal(
-        await grantSignupCreditOnce(store, 'user_repeat', ENV, counting),
+        await grantSignupCreditOnce(store, who('user_repeat'), ENV, counting),
         'already-granted',
       );
     }
@@ -216,7 +253,7 @@ describe('grantSignupCreditOnce', () => {
     const store = newStore();
     const outcome = await grantSignupCreditOnce(
       store,
-      'user_old',
+      who('user_old'),
       ENV,
       clerkSaying(BEFORE),
     );
@@ -228,7 +265,7 @@ describe('grantSignupCreditOnce', () => {
     const store = newStore();
     const outcome = await grantSignupCreditOnce(
       store,
-      'user_edge',
+      who('user_edge'),
       ENV,
       clerkSaying(Date.parse(OFFER_START)),
     );
@@ -241,7 +278,7 @@ describe('grantSignupCreditOnce', () => {
     const store = newStore();
     const outcome = await grantSignupCreditOnce(
       store,
-      'user_x',
+      who('user_x'),
       { CLERK_SECRET_KEY: 'sk_test' },
       clerkSaying(AFTER),
     );
@@ -257,7 +294,7 @@ describe('grantSignupCreditOnce', () => {
     for (const unreachable of [clerkSaying(null), clerkSaying(AFTER, false)]) {
       const outcome = await grantSignupCreditOnce(
         store,
-        'user_unknown',
+        who('user_unknown'),
         ENV,
         unreachable,
       );
@@ -270,8 +307,11 @@ describe('grantSignupCreditOnce', () => {
     const store = newStore();
     const outcome = await grantSignupCreditOnce(
       store,
-      'user_nokey',
-      { VIBLD_SIGNUP_CREDIT_FROM: OFFER_START },
+      who('user_nokey'),
+      // Open, so this test is about the missing Clerk key and not about the
+      // gate. Access is checked before Clerk is asked, deliberately: an
+      // account that may not use the product is not worth an external call.
+      { VIBLD_SIGNUP_CREDIT_FROM: OFFER_START, VIBLD_ACCESS_MODE: 'open' },
       clerkSaying(AFTER),
     );
     assert.equal(outcome, 'age-unknown');
@@ -283,7 +323,12 @@ describe('grantSignupCreditOnce', () => {
     const outcomes: string[] = [];
     for (let i = 0; i < 5; i += 1) {
       outcomes.push(
-        await grantSignupCreditOnce(store, 'user_b', ENV, clerkSaying(AFTER)),
+        await grantSignupCreditOnce(
+          store,
+          who('user_b'),
+          ENV,
+          clerkSaying(AFTER),
+        ),
       );
     }
     assert.equal(outcomes[0], 'granted');
@@ -302,7 +347,7 @@ describe('grantSignupCreditOnce', () => {
     const store = newStore();
     await Promise.all(
       Array.from({ length: 8 }, () =>
-        grantSignupCreditOnce(store, 'user_c', ENV, clerkSaying(AFTER)),
+        grantSignupCreditOnce(store, who('user_c'), ENV, clerkSaying(AFTER)),
       ),
     );
     assert.equal(await store.totalSpendableCreditMicroUsd('user_c'), 1_000_000);
@@ -314,7 +359,7 @@ describe('grantSignupCreditOnce', () => {
     let asked = false;
     const outcome = await grantSignupCreditOnce(
       store,
-      'user_d',
+      who('user_d'),
       { ...ENV, VIBLD_SIGNUP_CREDIT_USD_CENTS: '0' },
       (async () => {
         asked = true;
@@ -334,7 +379,12 @@ describe('grantSignupCreditOnce', () => {
       findAdminCredit: async () => undefined,
     };
     assert.equal(
-      await grantSignupCreditOnce(broken, 'user_g', ENV, clerkSaying(AFTER)),
+      await grantSignupCreditOnce(
+        broken,
+        who('user_g'),
+        ENV,
+        clerkSaying(AFTER),
+      ),
       'error',
     );
   });

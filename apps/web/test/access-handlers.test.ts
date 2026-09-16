@@ -50,6 +50,47 @@ describe('decideAccessFor', () => {
     assert.equal(row?.redeemedByUserId, 'user_1');
   });
 
+  it('admits an admin when the database is unusable', async () => {
+    // The order admin, open, invited was true of the decision and not of the
+    // work: the invite lookup ran first regardless, so a missing table or an
+    // unavailable D1 threw and even a platform admin got an error. The admin
+    // path is what makes a broken deployment recoverable, so it must not
+    // depend on the database being well.
+    const broken = {
+      DB: {
+        prepare() {
+          throw new Error('no such table: access_invites');
+        },
+      },
+      VIBLD_PLATFORM_ADMINS: 'admin@vibld.com',
+    } as unknown as Parameters<typeof decideAccessFor>[0];
+
+    const decision = await decideAccessFor(broken, {
+      userId: 'user_admin',
+      email: 'admin@vibld.com',
+      emailVerified: true,
+      policyIdentity: 'admin@vibld.com',
+    });
+
+    assert.deepEqual(decision, { allowed: true, because: 'admin' });
+  });
+
+  it('admits everybody on an open deployment without reading the list', async () => {
+    const broken = {
+      DB: {
+        prepare() {
+          throw new Error('no such table: access_invites');
+        },
+      },
+      VIBLD_ACCESS_MODE: 'open',
+      VIBLD_PLATFORM_ADMINS: 'admin@vibld.com',
+    } as unknown as Parameters<typeof decideAccessFor>[0];
+
+    const decision = await decideAccessFor(broken, STRANGER);
+
+    assert.deepEqual(decision, { allowed: true, because: 'open' });
+  });
+
   it('refuses an account nobody invited', async () => {
     const decision = await decideAccessFor(newEnv(), STRANGER);
     assert.equal(decision.allowed, false);

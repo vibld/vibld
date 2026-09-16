@@ -21,7 +21,13 @@ export type AccessMode = 'invite' | 'open';
  * deliberate act by somebody who can set a variable.
  */
 export function parseAccessMode(raw: string | undefined): AccessMode {
-  return raw?.trim().toLowerCase() === 'open' ? 'open' : 'invite';
+  // Compared raw. This trimmed and lowercased, so `OPEN`, ` open ` and
+  // `Open` all opened the deployment while the comment above promised that
+  // only the exact string could. Leniency here is the one place it cannot
+  // be afforded: every accepted spelling is another way a mistyped
+  // deployment variable opens the door, which is the failure this whole
+  // module exists to make impossible.
+  return raw === 'open' ? 'open' : 'invite';
 }
 
 export type AccessRefusal = 'not-invited' | 'unverified-identity';

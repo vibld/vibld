@@ -22,22 +22,34 @@ export class AccessStore {
   }
 
   /**
-   * Whether this identity may in. Revoked invites do not count.
+   * Whether this account may in. Revoked invites do not count.
+   *
+   * An invite is for a person, and once redeemed it belongs to the account
+   * that redeemed it. Matching on the address alone let a second Clerk
+   * account that later verified the same address walk through a door
+   * somebody else had already opened, which matters because an address can
+   * be reassigned: a company mailbox handed to a new employee, a domain
+   * that changes hands. `redeem` binds the row to its first user, and an
+   * already-bound row now admits only that user.
+   *
+   * An unredeemed row admits whoever arrives first, which is what makes an
+   * invite usable at all.
    *
    * The normalisation is not a convenience: an invite issued to
    * `Chris@Example.com` and a sign-in as `chris@example.com` are the same
    * person, and a lookup that misses turns a granted invite into a locked
    * door with no error anybody can act on.
    */
-  async isInvited(identity: string): Promise<boolean> {
+  async isInvited(identity: string, userId: string): Promise<boolean> {
     const email = normaliseEmail(identity);
     if (email === null) return false;
     const row = await this.#db
       .prepare(
         `SELECT 1 FROM access_invites
-          WHERE email = ?1 AND revoked_at IS NULL`,
+          WHERE email = ?1 AND revoked_at IS NULL
+            AND (redeemed_by_user_id IS NULL OR redeemed_by_user_id = ?2)`,
       )
-      .bind(email)
+      .bind(email, userId)
       .first();
     return row !== null;
   }

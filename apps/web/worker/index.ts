@@ -492,7 +492,19 @@ async function handleBillingStatus(
     // Before the balance is read, so a brand new account sees its welcome
     // credit on the very first load rather than after a refresh. Idempotent
     // on a deterministic id, so calling it on every status request is free.
-    await grantSignupCreditOnce(billing, principal.userId, env);
+    //
+    // Gated, even though the route is not. This route is ungated so that
+    // somebody invited, who spent, and whose access was then revoked can
+    // still see what happened to their money: refusing a balance read
+    // tells them nothing and looks like theft. But the route was described
+    // as read-only and it is not, and the grant is the exact thing the
+    // invite gate exists to protect: an uninvited account could call this
+    // directly and draw its $1 whatever the UI chose to render.
+    //
+    // So the read stays open to anyone signed in, and the money does not.
+    // The check is inside `grantSignupCreditOnce` rather than here, so that
+    // no caller can be the one that forgets it.
+    await grantSignupCreditOnce(billing, principal, env);
     const subscription = await billing.findActiveSubscription(principal.userId);
     const tier = tierFor(subscription);
     const freeAllowance = positiveInt(
@@ -837,7 +849,7 @@ async function handlePlan(
     // calls the status endpoint must not be refused its first generation for
     // want of a credit it was promised. The deterministic id means whichever
     // path arrives first wins and the other is a no-op.
-    await grantSignupCreditOnce(billing, principal.userId, env);
+    await grantSignupCreditOnce(billing, principal, env);
     const subscription = await billing.findActiveSubscription(principal.userId);
     const tier = tierFor(subscription);
     const freeAllowance = positiveInt(
