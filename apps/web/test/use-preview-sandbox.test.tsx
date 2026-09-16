@@ -672,3 +672,73 @@ describe('a ready sandbox whose stop was carried out but not confirmed', () => {
     view.unmount();
   });
 });
+
+describe('a status request slower than the poll interval', () => {
+  it('never has two of them in flight, and takes the answers in order', async () => {
+    // What an interval does that a chain does not. It fires on the clock
+    // whatever the last request is doing, so a slow status read leaves
+    // several requests outstanding at once, all carrying the same gate
+    // token because the gate is taken once for the whole poll. They land in
+    // whatever order the network gives them and the gate cannot tell them
+    // apart.
+    //
+    // The sequence below is the one that reads worst. The first read is
+    // slow and reports `installing`; the second is prompt and reports the
+    // sandbox gone, which is the answer to the question the warning was
+    // asking. Overlapped, the second lands first and ends the poll, and
+    // then the first overwrites it with news from before the stop: the
+    // panel says a sandbox is installing, with no warning and nothing still
+    // asking, about something that does not exist.
+    let failStop = false;
+    let slowNext = true;
+    let inFlight = 0;
+    let most = 0;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': async (method) => {
+        if (method === 'DELETE') {
+          return failStop
+            ? reply({ error: 'The preview service is unavailable.' }, 502)
+            : reply({ ok: true });
+        }
+        if (method !== 'GET') return reply(phase);
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        // Only the first read is slow, so a second one issued while it is
+        // outstanding would answer before it.
+        const answer = phase;
+        if (slowNext) {
+          slowNext = false;
+          await new Promise((resolve) =>
+            setTimeout(resolve, POLL_INTERVAL_MS + 400),
+          );
+        }
+        inFlight -= 1;
+        return reply(answer);
+      },
+    });
+
+    const view = await mount();
+    await view.run('r1');
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to reconcile');
+
+    phase = { status: 'failed', error: 'No preview has been started.' };
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS * 3 + 600),
+      );
+    });
+
+    assert.equal(most, 1, 'asked again while the last answer was outstanding');
+    assert.equal(
+      view.sandbox.status?.status,
+      'failed',
+      'an answer from before the stop overwrote the one that settled it',
+    );
+    assert.equal(view.sandbox.stopError, null, 'still warning about a ghost');
+    view.unmount();
+  });
+});

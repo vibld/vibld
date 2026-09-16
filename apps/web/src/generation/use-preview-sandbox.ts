@@ -97,7 +97,7 @@ export function usePreviewSandbox(): PreviewSandbox {
   const [ranRevision, setRanRevision] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * Whether the worker may still be holding a preview for this caller.
    *
@@ -118,8 +118,8 @@ export function usePreviewSandbox(): PreviewSandbox {
    * Latest wins for the poll, the same `createStatusGate` the connect panel,
    * the push button and the admin panel use.
    *
-   * `stopPolling` clears the interval, which stops the next tick and does
-   * nothing about the request a tick already sent. That reply still arrives,
+   * `stopPolling` clears the pending tick and does nothing about the
+   * request an earlier tick already sent. That reply still arrives,
    * and it is about the sandbox from before the restart: committed, it puts
    * the old frame back while `ranRevision` names the new checkpoint, so the
    * staleness warning stays hidden and the old sandbox is presented as the
@@ -134,12 +134,12 @@ export function usePreviewSandbox(): PreviewSandbox {
 
   function stopPolling() {
     if (pollRef.current !== null) {
-      clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
       pollRef.current = null;
     }
   }
 
-  // The interval must not outlive the shell even though this hook otherwise
+  // The poll must not outlive the shell even though this hook otherwise
   // does not track component lifetime.
   useEffect(() => stopPolling, []);
 
@@ -154,19 +154,42 @@ export function usePreviewSandbox(): PreviewSandbox {
     void fetchPreviewShares().then(setShares);
   }, [status?.status]);
 
+  /**
+   * Ask again every `POLL_INTERVAL_MS` until the sandbox settles, one
+   * request at a time.
+   *
+   * A chain rather than an interval, and the difference is not tidiness.
+   * An interval fires on the clock whatever the last request is doing, so a
+   * status read slower than 1.5 seconds leaves several in flight at once,
+   * all holding the same `current()` token because the gate is taken once
+   * for the whole poll. They then land in whatever order the network gives
+   * them, and the gate cannot tell them apart. That is a real wrong screen,
+   * not a race in the abstract: after an unconfirmed stop, a later request
+   * can come back `failed`, clear the warning and end the poll, and then an
+   * earlier one lands with the stale `installing` it was sent for. The
+   * panel is left saying a sandbox is installing, with no warning and
+   * nothing still asking, about something that no longer exists.
+   *
+   * The next tick is scheduled only once the previous answer has been
+   * handled, so there is never a second request to be out of order with.
+   * The first tick is still one interval out: the caller has just read the
+   * status itself.
+   */
   function pollUntilSettled() {
     stopPolling();
-    // Once for the interval rather than per tick: every tick of it belongs
-    // to the run that started it.
+    // Once for the chain rather than per tick: every tick of it belongs to
+    // the run that started it, and a run or a stop supersedes the lot.
     const current = polls.current.begin();
-    pollRef.current = setInterval(() => {
-      void fetchPreviewStatus().then((result) => {
-        // Sent before a run or a stop superseded this poll, answering after.
-        if (!current()) return;
-        // A transient read failure (a dropped request, an expired session)
-        // is not the sandbox failing -- the poll itself keeps going rather
-        // than reporting a status the server never actually sent.
-        if (result === null) return;
+    const tick = async () => {
+      // This one has fired, so there is no pending timer to cancel until
+      // the next is scheduled. `stopPolling` mid-request is still the right
+      // call: it is the gate that discards the reply, not the timer.
+      pollRef.current = null;
+      const result = await fetchPreviewStatus();
+      // Sent before a run or a stop superseded this poll, answering after.
+      // Nothing is rescheduled either: this chain is no longer the poll.
+      if (!current()) return;
+      if (result !== null) {
         setStatus(result);
         // The poll is what settles an unconfirmed stop, so it also has to
         // put the warning down. A sandbox the service reports as failed is
@@ -175,9 +198,14 @@ export function usePreviewSandbox(): PreviewSandbox {
         // started" is the panel contradicting itself. Worse, a failed
         // status takes the Stop button away, so nobody could clear it.
         if (result.status === 'failed') setStopError(null);
-        if (SETTLED.has(result.status)) stopPolling();
-      });
-    }, POLL_INTERVAL_MS);
+        if (SETTLED.has(result.status)) return;
+      }
+      // A transient read failure (a dropped request, an expired session) is
+      // not the sandbox failing -- `result === null` falls through to here
+      // rather than reporting a status the server never actually sent.
+      pollRef.current = setTimeout(() => void tick(), POLL_INTERVAL_MS);
+    };
+    pollRef.current = setTimeout(() => void tick(), POLL_INTERVAL_MS);
   }
 
   async function run(files: ProjectFile[], revision: string) {
