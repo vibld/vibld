@@ -118,16 +118,43 @@ Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-de
 | Build tier                     | $29/mo -- $10/mo model spend                             |
 | Ship tier                      | $99/mo -- $40/mo model spend                             |
 | Top-up                         | $20 -- $8 model spend, expires 12 months                 |
-| GA4 measurement ID             | `G-JCWXRRM8R9` (recorded 2026-09-14, not wired)          |
+| GA4 measurement ID             | `G-JCWXRRM8R9` (wired into apps/marketing 2026-09-16)    |
 
-The GA4 ID is recorded here and nothing loads it. `apps/marketing` counts page
-views with its own first-party, cookieless measurement
-(`apps/marketing/worker/analytics.ts`), and the shipped Cookie Notice and
-Privacy Policy say so in as many words: "our own first-party measurement rather
-than a third-party analytics service", "sets no cookie, assigns no visitor or
-device identifier, and stores no IP address". The Cookie Notice also states
-that it will be updated, with its "Last updated" date, before anything of that
-kind ships.
+`apps/marketing` now measures page views twice: with its own first-party,
+cookieless counter (`apps/marketing/worker/analytics.ts`) and with GA4, loaded
+site-wide from `app/root.tsx`. The Cookie Notice, the Privacy Policy and the
+Subprocessors page were rewritten in the same change to say what GA4 does (sets
+cookies, assigns a client identifier, sends the IP address to Google), because
+the Cookie Notice had promised to be updated before anything of that kind
+shipped.
+
+GA4 counts client-side navigation through its own Enhanced Measurement ("page
+changes based on browser history events", on by default for a web stream), not
+through anything in our code. `RouteChangeBeacon` in `app/root.tsx` is for the
+first-party counter only: an explicit GA4 `page_view` beside Enhanced
+Measurement would record every internal link twice. If that stream setting is
+ever turned off, GA4 silently counts only the first view of a visit. Check it
+at https://analytics.google.com/analytics/web/#/a/p/admin/streams, under the
+web stream's Enhanced measurement.
+
+**Decided 2026-09-16 (Chris):** a consent banner. GA4 is not loaded at all
+until the visitor agrees: no script is requested from Google, so nothing about
+a visit reaches them. Consent Mode v2 alone was the first attempt and was
+wrong for this site, because under denied consent gtag.js is still fetched and
+still sends cookieless pings, which would have made the Cookie Notice's "runs
+only if you say yes" untrue. The banner asks on the first visit, and the footer's
+"Cookie preferences" link on every page reopens it afterwards. The answer is
+kept in `localStorage` (`vibld.consent.analytics`), not in a cookie, so it
+never leaves the browser. The first-party counter in `worker/analytics.ts` is
+deliberately outside all of it: no cookie, no identifier, no IP address, so
+there is nothing to consent to and no reason to make anyone click before a
+page works. Rules live in `app/consent.ts`; `app/root.tsx` renders the tag on a grant, and
+a withdrawal mid-visit both denies storage and reloads the document. The
+reload is not belt-and-braces: this is a single-page app, internal links never
+create a new document, and a running tag keeps sending cookieless hits to
+Google for the rest of the visit otherwise. Consent is still declared
+before `config`, because gtag applies the state in force when a command runs
+and the advertising signals are denied in every state.
 
 ### Lists confirmed
 

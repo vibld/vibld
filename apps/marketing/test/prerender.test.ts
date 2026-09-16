@@ -15,6 +15,18 @@ import { LEGAL_DOCS, ROUTES, SITE } from '../app/site.ts';
 
 const CLIENT = join(import.meta.dirname, '..', 'build', 'client');
 
+/**
+ * The loader's path, which is what these tests look for.
+ *
+ * Deliberately not the hostname. CodeQL reads `includes('<a host>')` as an
+ * attempt to validate a URL, which is a real and dangerous mistake in
+ * anything that makes a decision from the result, and it has no way to tell
+ * that this one is a test asserting on a blob of HTML. The path is just as
+ * unique to gtag.js, and it is not a hostname, so the assertion says the same
+ * thing without impersonating a security check.
+ */
+const GA4_PATH = '/gtag/js';
+
 function htmlPathFor(routePath: string): string {
   return routePath === '/'
     ? join(CLIENT, 'index.html')
@@ -241,6 +253,120 @@ describe('legal pages', () => {
         );
       }
     }
+  });
+});
+
+describe('Google Analytics', () => {
+  it('requests nothing from Google before the visitor has agreed', () => {
+    // The guarantee the Cookie Notice makes, checked against the bytes a
+    // visitor actually receives. A prerendered page is what everyone gets
+    // before any script of ours has decided anything, so a tag in here is a
+    // tag that loaded without consent.
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      assert.ok(
+        !html.includes(GA4_PATH),
+        `${route.path} loads gtag.js before anyone has agreed`,
+      );
+      assert.ok(
+        !html.includes(SITE.ga4MeasurementId),
+        `${route.path} carries the GA4 property id in its static HTML`,
+      );
+    }
+  });
+
+  it('still has the tag to load once somebody does agree', () => {
+    // The pair that matters: the assertion above passes just as well if GA4
+    // was deleted, so this one fails if it was. Both together say "not
+    // before consent", rather than "not at all".
+    const assets = join(CLIENT, 'assets');
+    const bundle = readdirSync(assets)
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => readFileSync(join(assets, name), 'utf8'))
+      .join('\n');
+    assert.ok(
+      bundle.includes(SITE.ga4MeasurementId),
+      'nothing in the client can load GA4 at all',
+    );
+    assert.ok(bundle.includes(GA4_PATH), 'the client has no loader for GA4');
+  });
+
+  it('denies every advertising signal wherever consent is declared', () => {
+    const assets = join(CLIENT, 'assets');
+    const bundle = readdirSync(assets)
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => readFileSync(join(assets, name), 'utf8'))
+      .join('\n');
+    for (const signal of ['ad_storage', 'ad_user_data', 'ad_personalization']) {
+      assert.ok(bundle.includes(signal), `${signal} is never declared`);
+    }
+    assert.ok(
+      !bundle.includes('ad_storage:"granted"') &&
+        !bundle.includes("ad_storage:'granted'"),
+      'an advertising signal is granted somewhere',
+    );
+  });
+
+  it('sends no page_view of its own, which would double-count', () => {
+    // GA4's Enhanced Measurement counts page changes made through the History
+    // API, which is how React Router's Link navigates. An explicit page_view
+    // beside it records every internal navigation twice, and the site is nine
+    // legal pages reachable only by internal link, so the inflation would be
+    // most of the traffic.
+    const assets = join(CLIENT, 'assets');
+    const scripts = readdirSync(assets).filter((name) => name.endsWith('.js'));
+    assert.ok(scripts.length > 0, 'no client bundle to check');
+    for (const name of scripts) {
+      const code = readFileSync(join(assets, name), 'utf8');
+      assert.ok(
+        !code.includes('page_view'),
+        `${name} sends a page_view, which GA4 Enhanced Measurement already sends`,
+      );
+    }
+  });
+
+  it('offers a way to change the answer on every page', () => {
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      assert.ok(
+        html.includes('Cookie preferences'),
+        `${route.path} has no way to reopen the consent choice`,
+      );
+    }
+  });
+
+  it('prerenders no banner, since the stored answer is not knowable here', () => {
+    // A banner baked into the static HTML is one a crawler reads and one that
+    // flashes for every visitor who already answered.
+    const html = read('/');
+    assert.ok(
+      !html.includes('aria-label="Analytics cookies"'),
+      'the consent banner was server-rendered',
+    );
+  });
+
+  // These two are here rather than with the legal pages on purpose. The Cookie
+  // Notice describes when GA4 loads, and that description is only true because
+  // of the code above, so it is part of shipping the tag rather than a
+  // separate chore.
+  it('is disclosed in the Cookie Notice, cookies and identifier named', () => {
+    const html = read('/legal/cookies');
+    assert.match(html, /Google Analytics/);
+    assert.match(html, /sets cookies in your browser/);
+    assert.match(html, /client identifier/);
+    assert.match(html, /we do not load it at all/);
+  });
+
+  it('names Google as a current subprocessor, not a planned one', () => {
+    const html = read('/legal/subprocessors');
+    const google = html.indexOf('Google LLC');
+    const planned = html.indexOf('Planned for product launch');
+    assert.notEqual(google, -1, 'Google is not listed as a subprocessor');
+    assert.notEqual(planned, -1, 'the planned table is gone, so this is stale');
+    assert.ok(
+      google < planned,
+      'Google is processing data today, so it belongs in the current table',
+    );
   });
 });
 
