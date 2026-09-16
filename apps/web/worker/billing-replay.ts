@@ -70,8 +70,18 @@ export interface ReplayResult {
   read: number;
   /** Events this run applied, which is the number no delivery had. */
   applied: number;
-  /** Events that threw. The cursor does not advance past a failure. */
+  /** Events that threw. The cursor does not advance past one. */
   failed: number;
+  /**
+   * Events whose owner this deployment could not work out yet, so nothing
+   * was written and nothing was marked done.
+   *
+   * Ordinary during a catch-up rather than an error. A descent reads newest
+   * first, so a missed `invoice.paid` can be read before the older
+   * `checkout.session.completed` that creates the customer mapping. The next
+   * run retries it, by which time the older event has been applied.
+   */
+  unresolved: number;
   /** Stripe requests spent, out of the budget. */
   requests: number;
   /**
@@ -138,23 +148,54 @@ export async function replayStripeEvents(
   let read = 0;
   let applied = 0;
   let failed = 0;
+  let unresolved = 0;
   let requests = 0;
+  /**
+   * Whether anything this run read was left undone.
+   *
+   * One flag rather than a condition per exit, because getting this wrong
+   * once per exit is exactly how this function was wrong twice. It means the
+   * same thing everywhere: the cursor may not move past a page that still
+   * holds work, and the floor may not move at all. A throw and an event
+   * nobody could be attributed to are the same answer to that question, so
+   * they set the same flag.
+   */
+  let blocked = false;
+  /**
+   * Where the next request in *this* run picks up.
+   *
+   * Held apart from the persisted `sweepAfterId`, and they are two different
+   * questions. This one has to advance on every page or the descent never
+   * moves: a blocked run that kept asking from the same place would spend
+   * its whole budget re-reading one page, and the older events below it are
+   * exactly what an unresolved event is waiting for. The persisted one must
+   * not advance past a blocked page, because it is where the next run
+   * starts.
+   */
+  let after = cursor.sweepAfterId;
 
   while (requests < budget) {
     const page = await stripe.events.list({
       limit: PAGE_SIZE,
       types: REPLAYED_EVENT_TYPES,
       created: { gte: cursor.doneBelow, lt: sweepTop },
-      ...(cursor.sweepAfterId === null
-        ? {}
-        : { starting_after: cursor.sweepAfterId }),
+      ...(after === null ? {} : { starting_after: after }),
     } as Stripe.EventListParams);
     requests += 1;
 
-    // Oldest first within the page. Stripe lists newest first, and applying
-    // a subscription update before the update that superseded it would leave
-    // the mirror holding the older one.
-    const events = [...page.data].sort((a, b) => a.created - b.created);
+    // Oldest first within the page, because applying a subscription update
+    // before the update that superseded it leaves the mirror holding the
+    // older one.
+    //
+    // Reversed before the sort, not sorted alone. Stripe lists newest first
+    // and `created` has one-second resolution, so two updates in the same
+    // second compare equal and a stable sort leaves them in the order they
+    // arrived in, which is the newest-first order this is trying to undo.
+    // Reversing first makes the page oldest-first, and the sort then only
+    // has to fix the pairs whose seconds actually differ.
+    const events = [...page.data]
+      .reverse()
+      .sort((a, b) => a.created - b.created);
     for (const event of events) {
       read += 1;
       try {
@@ -169,12 +210,25 @@ export async function replayStripeEvents(
         // happened by then, and `resumeStrandedPayouts` pays on the recorded
         // payment rather than on being told. It runs straight after this in
         // the same nightly pass.
-        await applyStripeEvent(store, event);
+        const outcome = await applyStripeEvent(store, event);
+        if (outcome === 'unresolved') {
+          // Nothing was written, so it is not done. Marking it processed on
+          // a normal return is how a real payment is lost for ever: a
+          // missed `invoice.paid` read before the older Checkout that
+          // creates its customer mapping has nobody to attribute to yet,
+          // and does once that older event is applied further down this
+          // same descent. `blocked` holds the floor so the next run comes
+          // back for it.
+          unresolved += 1;
+          blocked = true;
+          continue;
+        }
         await store.markEventProcessed(event.id, event.type);
         applied += 1;
       } catch (error) {
         console.error('replay: failed to apply stripe event', event.id, error);
         failed += 1;
+        blocked = true;
       }
     }
 
@@ -194,25 +248,36 @@ export async function replayStripeEvents(
     // Later pages are still applied, which is worth doing and costs nothing
     // to redo. They are simply not credited to the cursor, so the next run
     // resumes at the page that failed.
-    if (oldest !== undefined && failed === 0) {
-      cursor = { ...cursor, sweepAfterId: oldest.id };
-      await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, cursor);
+    if (oldest !== undefined) {
+      after = oldest.id;
+      if (!blocked) {
+        cursor = { ...cursor, sweepAfterId: oldest.id };
+        await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, cursor);
+      }
     }
 
     if (!page.has_more) {
       // The descent reached the floor, so everything below the top of this
       // sweep has now been replayed. Only here does the floor move, and it
       // moves to where the descent started rather than to where it stopped.
-      if (failed === 0) {
+      if (!blocked) {
         await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, {
           doneBelow: sweepTop,
           sweepTop: null,
           sweepAfterId: null,
         });
-        return { read, applied, failed, requests, incomplete: false };
+        return {
+          read,
+          applied,
+          failed,
+          unresolved,
+          requests,
+          incomplete: false,
+        };
       }
 
-      // Something threw, so this descent did not cover its ground and the
+      // Something was left undone, so this descent did not cover its ground
+      // and the
       // floor stays where it is. The resume point needs no rewind: nothing
       // has been persisted since the failure, so it already sits at the page
       // that failed and the next run reads it again.
@@ -223,9 +288,9 @@ export async function replayStripeEvents(
       // alternative is stepping over a payment somebody made, and a stall
       // says so every night in `failed` and `incomplete` while a step-over
       // says nothing at all.
-      return { read, applied, failed, requests, incomplete: true };
+      return { read, applied, failed, unresolved, requests, incomplete: true };
     }
   }
 
-  return { read, applied, failed, requests, incomplete: true };
+  return { read, applied, failed, unresolved, requests, incomplete: true };
 }

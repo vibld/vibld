@@ -466,3 +466,101 @@ describe('a failure on a page with more below it', () => {
     assert.equal(cursor?.sweepTop, 5000, 'forgot the top of the descent');
   });
 });
+
+describe('an event whose owner this deployment cannot work out yet', () => {
+  it('is not marked done, and is read again', async () => {
+    // A descent reads newest first, so a missed `invoice.paid` can be read
+    // before the older Checkout that creates its customer mapping. The
+    // invoice has nobody to attribute to yet and writes nothing. Recording
+    // it as handled on that normal return loses a real payment for ever:
+    // the mapping arrives later, and nothing ever looks at the invoice
+    // again.
+    const store = newStore();
+    const invoice = {
+      id: 'evt_invoice',
+      created: 3000,
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_1',
+          customer: 'cus_user_1',
+          amount_paid: 2000,
+          amount_paid_off_stripe: 0,
+          metadata: {},
+        },
+      },
+    } as unknown as Stripe.Event;
+    const { stripe } = stripeServing([
+      [invoice],
+      [topupEvent('evt_checkout', 1000)],
+    ]);
+
+    const first = await replayStripeEvents(stripe, store, 1);
+    assert.equal(first.unresolved, 1, 'attributed an invoice it could not');
+    assert.equal(first.applied, 0);
+    assert.equal(first.incomplete, true, 'called the run complete');
+    assert.equal(
+      await store.wasEventProcessed('evt_invoice'),
+      false,
+      'marked an event done that wrote nothing',
+    );
+    const held = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+    assert.equal(held?.sweepAfterId, null, 'moved the cursor past it');
+  });
+
+  it('resolves once the older event that maps the customer is applied', async () => {
+    // The whole reason the retry is worth having. The Checkout further down
+    // the same descent links the customer, and the next run finds it.
+    const store = newStore();
+    const invoice = {
+      id: 'evt_invoice',
+      created: 3000,
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_1',
+          customer: 'cus_user_1',
+          amount_paid: 2000,
+          amount_paid_off_stripe: 0,
+          metadata: {},
+        },
+      },
+    } as unknown as Stripe.Event;
+    const { stripe } = stripeServing([
+      [invoice],
+      [topupEvent('evt_checkout', 1000)],
+    ]);
+
+    // One run over the whole descent: the invoice is unresolved, and the
+    // Checkout below it links the customer.
+    await replayStripeEvents(stripe, store);
+    // The next run comes back for the invoice, and now there is an owner.
+    const again = await replayStripeEvents(stripe, store);
+
+    assert.equal(again.unresolved, 0, 'still could not attribute it');
+    assert.equal(await store.wasEventProcessed('evt_invoice'), true);
+    const cursor = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+    assert.ok(cursor && cursor.doneBelow > 0, 'the floor never caught up');
+  });
+});
+
+describe('two events in the same second', () => {
+  it('still applies the older one first', async () => {
+    // `created` has one-second resolution, so a sort alone compares them
+    // equal and a stable sort leaves Stripe's newest-first order untouched.
+    // The mirror is then left holding the update that was already
+    // superseded, until a reconcile happens to fix it.
+    const store = newStore();
+    const { stripe } = stripeServing([
+      [
+        subscriptionEvent('evt_new', 2000, 'active'),
+        subscriptionEvent('evt_old', 2000, 'incomplete'),
+      ],
+    ]);
+
+    await replayStripeEvents(stripe, store);
+
+    const row = await store.getSubscription('sub_1');
+    assert.equal(row?.status, 'active', 'kept the superseded status');
+  });
+});

@@ -49,6 +49,25 @@ function metadataUserId(metadata: Stripe.Metadata | null): string | undefined {
 export type OnPurchaseCleared = (userId: string) => Promise<void>;
 
 /**
+ * Whether applying an event actually wrote what the event was about.
+ *
+ * `unresolved` means the handler could not work out whose money this is, so
+ * it wrote nothing. Reported rather than logged and dropped, because the
+ * answer can change: a missed `invoice.paid` read before the older
+ * `checkout.session.completed` that creates the customer mapping has nobody
+ * to attribute to yet, and does once that older event has been applied. A
+ * caller that records the event as handled on the strength of a normal
+ * return loses the payment permanently. `billing-replay.ts` is the caller
+ * that has to care.
+ *
+ * The webhook path ignores this and still marks the delivery processed, as
+ * it did before. Failing a delivery Stripe will retry for days over an event
+ * that may never resolve is a different trade, and not one this change is
+ * making.
+ */
+export type EventOutcome = 'applied' | 'unresolved';
+
+/**
  * Whether Stripe has actually taken the money for this session.
  *
  * `no_payment_required` is a real settled state, not an edge case to ignore:
@@ -66,7 +85,7 @@ async function applyCheckoutSessionCompleted(
   store: BillingStore,
   session: Stripe.Checkout.Session,
   onPurchaseCleared?: OnPurchaseCleared,
-): Promise<void> {
+): Promise<EventOutcome> {
   const userId =
     metadataUserId(session.metadata) ??
     session.client_reference_id ??
@@ -77,7 +96,7 @@ async function applyCheckoutSessionCompleted(
       'stripe checkout.session.completed with no resolvable user id',
       session.id,
     );
-    return;
+    return 'unresolved';
   }
 
   // Redundant with billing-checkout.ts's own write at Checkout creation, on
@@ -86,7 +105,8 @@ async function applyCheckoutSessionCompleted(
   // creation time still gets corrected once the webhook lands.
   await store.linkCustomer(userId, stripeCustomerId);
 
-  if (session.mode !== 'payment') return; // A subscription checkout is mirrored by the subscription events below.
+  // A subscription checkout is mirrored by the subscription events below.
+  if (session.mode !== 'payment') return 'applied';
 
   // A completed Checkout is not a paid one. With a delayed payment method
   // (bank debits and the like) the session completes `unpaid` and settles
@@ -104,7 +124,7 @@ async function applyCheckoutSessionCompleted(
         paymentStatus: session.payment_status,
       }),
     );
-    return;
+    return 'applied';
   }
 
   const raw = session.metadata?.[CREDIT_USD_CENTS_METADATA_KEY];
@@ -131,6 +151,7 @@ async function applyCheckoutSessionCompleted(
   );
 
   await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
+  return 'applied';
 }
 
 /**
@@ -239,7 +260,7 @@ export async function ownerOfSubscription(
 async function applySubscriptionEvent(
   store: BillingStore,
   subscription: Stripe.Subscription,
-): Promise<void> {
+): Promise<EventOutcome> {
   const userId = await ownerOfSubscription(store, subscription);
 
   const record = subscriptionRecordFrom(subscription, userId);
@@ -249,10 +270,11 @@ async function applySubscriptionEvent(
       subscription.id,
       subscription.items.data[0]?.price?.id,
     );
-    return;
+    return 'unresolved';
   }
 
   await store.upsertSubscription(record);
+  return 'applied';
 }
 
 /**
@@ -306,7 +328,7 @@ async function applyInvoicePaid(
   store: BillingStore,
   invoice: Stripe.Invoice,
   onPurchaseCleared?: OnPurchaseCleared,
-): Promise<void> {
+): Promise<EventOutcome> {
   const stripeCustomerId = customerId(invoice.customer);
   const userId =
     metadataUserId(invoice.metadata ?? null) ??
@@ -319,7 +341,7 @@ async function applyInvoicePaid(
   // attribute is a mirror that has drifted from Stripe, not a normal event.
   if (!userId) {
     console.error('stripe invoice.paid with no resolvable user id', invoice.id);
-    return;
+    return 'unresolved';
   }
 
   // Recorded against the user and keyed on the invoice, not hung off the
@@ -337,40 +359,42 @@ async function applyInvoicePaid(
   );
 
   await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
+  return 'applied';
 }
 
 export async function applyStripeEvent(
   store: BillingStore,
   event: Stripe.Event,
   onPurchaseCleared?: OnPurchaseCleared,
-): Promise<void> {
+): Promise<EventOutcome> {
   switch (event.type) {
     case 'checkout.session.completed':
     // The delayed-payment settlement of a session that completed unpaid. Same
     // handler, because it checks `payment_status` itself: the delivery that
     // arrived unpaid did nothing, and this one does the work.
     case 'checkout.session.async_payment_succeeded':
-      await applyCheckoutSessionCompleted(
+      return await applyCheckoutSessionCompleted(
         store,
         event.data.object,
         onPurchaseCleared,
       );
-      return;
     case 'checkout.session.async_payment_failed':
       // Nothing to undo, which is the whole reason the grant is gated on
       // `payment_status` rather than on the session having completed.
-      return;
+      return 'applied';
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted':
-      await applySubscriptionEvent(store, event.data.object);
-      return;
+      return await applySubscriptionEvent(store, event.data.object);
     case 'invoice.paid':
-      await applyInvoicePaid(store, event.data.object, onPurchaseCleared);
-      return;
+      return await applyInvoicePaid(
+        store,
+        event.data.object,
+        onPurchaseCleared,
+      );
     case 'invoice.payment_failed':
       // See the module comment: no separate mirror yet, only acknowledged.
-      return;
+      return 'applied';
     default:
       // Every type here is one this deployment asked Stripe for
       // (billing-handlers.ts registers the webhook's `enabled_events`), so
@@ -378,5 +402,9 @@ export async function applyStripeEvent(
       // drifted from this switch -- worth knowing about, not worth failing
       // the delivery over.
       console.error('unhandled stripe webhook event type', event.type);
+      // Applied in the sense that matters to a caller deciding whether to
+      // come back: nothing here can write it, and reading it again would
+      // reach this same branch.
+      return 'applied';
   }
 }
