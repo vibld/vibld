@@ -220,6 +220,36 @@ describe('admitting somebody in Clerk', () => {
     assert.equal(result.admitted === false && result.reason, 'error');
   });
 
+  it('asks for more rows than the default page holds', async () => {
+    // Both lists filter by address server-side, so one address's rows are
+    // all that can come back. The limit is asked for anyway: Clerk's default
+    // is ten, and an address invited, revoked and invited again over a year
+    // accumulates rows. A silent truncation reads as "Clerk holds nothing
+    // for them", which is the one wrong answer that costs somebody access.
+    const { fetchImpl, calls } = clerkServing({
+      invitationOk: false,
+      entries: [],
+      invitations: [{ email_address: 'sam@example.com', status: 'pending' }],
+    });
+
+    await admitToClerk(ENV, 'sam@example.com', fetchImpl);
+
+    const reads = calls.filter((call) => call.startsWith('GET'));
+    assert.ok(reads.length >= 2, 'did not read both lists');
+    for (const read of reads) {
+      assert.match(
+        read,
+        /limit=\d+/,
+        `left the page size to the default: ${read}`,
+      );
+      assert.match(
+        read,
+        /query=/,
+        `read the whole list instead of this address`,
+      );
+    }
+  });
+
   it('asks nothing at all when no Clerk key is configured', async () => {
     // A deployment with no key still issues invites. It must not pretend to
     // have approved anybody, and must not make a request with no credential.

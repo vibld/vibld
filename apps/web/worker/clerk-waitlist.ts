@@ -54,6 +54,19 @@ export type ClerkAdmission =
 const CLERK_API = 'https://api.clerk.com/v1';
 const TIMEOUT_MS = 8_000;
 
+/**
+ * Rows to ask for per list read.
+ *
+ * Both lists are filtered server-side by `query`, which Clerk documents on
+ * each of them as matching the email address, so one address's rows are all
+ * that can come back. This is asked for anyway rather than left to the
+ * default, which is ten: an address that has been invited, revoked and
+ * invited again over a year accumulates rows, and a silent truncation here
+ * reads as "Clerk holds nothing for them", which is the one wrong answer
+ * that costs somebody their access.
+ */
+const PAGE_LIMIT = 100;
+
 /** Statuses that mean Clerk will let this person create a session. */
 const ADMITTED = new Set(['invited', 'completed']);
 
@@ -101,7 +114,7 @@ async function listRows(
   let response: Response;
   try {
     response = await fetchImpl(
-      `${CLERK_API}/${path}?query=${encodeURIComponent(email)}`,
+      `${CLERK_API}/${path}?query=${encodeURIComponent(email)}&limit=${PAGE_LIMIT}`,
       {
         headers: { authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
         signal: AbortSignal.timeout(TIMEOUT_MS),
