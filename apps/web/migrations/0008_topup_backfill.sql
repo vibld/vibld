@@ -1,40 +1,31 @@
--- A completion marker for the one-time top-up backfill.
+-- When the top-up recovery last looked at this customer.
 --
--- `backfillTopupPayments` repairs what a migration cannot: a top-up taken
--- before `billing_payments` existed leaves no local record of money taken,
--- so the amount has to be read back from Stripe per customer.
+-- `backfillTopupPayments` repairs what a migration cannot: a top-up leaves
+-- no local record of money taken (`billing_topups` records the credit
+-- granted, and a coupon-covered Checkout writes one having been charged
+-- nothing), so the amount has to be read back from Stripe per customer.
 --
--- Without a marker that is a repair with no end. Every night it re-read
--- every customer's entire Checkout history, which grows without bound, and
--- offered every already-paid customer to the referral payout again. The
--- D1 writes were no-ops on conflict, but the Stripe calls and the payout
--- calls were not, and past some number of customers a single scheduled run
--- cannot finish the set at all -- so the accounts at the end of it would
--- stay unreconciled for ever, which is the failure the backfill exists to
--- prevent.
+-- This started as a one-time backfill with a "done" stamp, and that was the
+-- wrong shape twice over. A customer is mapped when Checkout *begins*, so
+-- the first pass can see a session that has not settled yet and mark the
+-- customer permanently finished; when it settles, nothing looks again. And
+-- a top-up taken after the stamp has no recovery at all, which is the
+-- gap the mechanism exists to close, reopened one night later.
 --
--- Stamped only after a customer's history has been read through to the end,
--- so a customer whose read failed is retried rather than silently skipped.
--- The nightly cost falls to nothing once the set is covered: a new top-up
--- after that arrives by webhook and needs no backfill.
-ALTER TABLE billing_customers ADD COLUMN topups_backfilled_at TEXT;
+-- So there is no finished state. The pass rotates: least recently looked at
+-- first, a bounded number per night, for ever. Nobody is permanently
+-- excluded, the nightly cost is capped rather than growing, and a customer
+-- who already has a recorded payment is skipped without a Stripe call at
+-- all, so the rotation covers only accounts that could still need one.
+--
+-- Stamped before the read rather than after, deliberately: a customer whose
+-- read throws is exactly the one that must go to the back of the queue, and
+-- stamping afterwards would keep it at the front for ever, holding a slot
+-- under the limit so later customers are never reached. The same reason
+-- `referral_attributions` stamps `last_attempt_at` before it tries.
+ALTER TABLE billing_customers ADD COLUMN topups_checked_at TEXT;
 
--- When the backfill last tried this customer, whether or not it succeeded.
---
--- Two stamps rather than one, for the same reason `referral_attributions`
--- carries both `paid_at` and `last_attempt_at`. Completion alone is not
--- enough to order the queue by: a customer whose read fails every night --
--- a Stripe customer deleted out from under the mapping, say -- stays
--- incomplete for ever, and ordering only by age puts it at the front of
--- every run. With a limit, enough such rows hold every slot and no later
--- customer is ever reached. The set stops converging and nothing says so.
---
--- Stamped before the attempt rather than after, deliberately: the read that
--- throws is exactly the one that must go to the back of the queue, and
--- stamping afterwards would skip precisely those.
-ALTER TABLE billing_customers ADD COLUMN topups_backfill_attempted_at TEXT;
-
--- The backfill asks for "customers not yet done, least recently tried
--- first", under a limit. This is the pair of columns that answers it.
-CREATE INDEX idx_billing_customers_backfill
-  ON billing_customers (topups_backfilled_at, topups_backfill_attempted_at);
+-- The rotation asks for "least recently checked first". This is the column
+-- that answers it.
+CREATE INDEX idx_billing_customers_topup_check
+  ON billing_customers (topups_checked_at);

@@ -182,36 +182,36 @@ export class BillingStore {
   }
 
   /**
-   * Mapped accounts whose top-up history has not been read back yet, oldest
-   * first, at most `limit` of them.
+   * The next accounts the top-up recovery should look at, least recently
+   * checked first, at most `limit` of them.
    *
-   * What the nightly top-up backfill walks. A top-up leaves no row anywhere
-   * but `billing_topups`, which records the credit granted rather than the
-   * money taken, so the only way to learn what Stripe actually collected is
-   * to ask Stripe per customer.
+   * A top-up leaves no row anywhere but `billing_topups`, which records the
+   * credit granted rather than the money taken, so the only way to learn
+   * what Stripe actually collected is to ask Stripe per customer.
    *
-   * Ordered least-recently-tried first, not simply oldest. A customer whose
-   * read fails every night stays incomplete for ever, and by age alone it
-   * would lead every run; with a limit, enough of those hold every slot and
-   * no later customer is ever reached. Ordering by the attempt stamp moves
-   * a failing row to the back and lets the rest of the set through.
+   * A rotation rather than a queue that empties. There is no finished
+   * state, on purpose: a customer is mapped when Checkout *begins*, so a
+   * pass can see a session that has not settled yet, and a "done" mark
+   * would stop anyone looking again when it does. Rotating also keeps a
+   * top-up taken tomorrow recoverable, which a one-time backfill does not.
    *
-   * Bounded and self-terminating, which an unfiltered list was neither.
-   * Reading every customer every night means a growing number of Stripe
-   * calls for work already done, and past some size one scheduled run
-   * cannot reach the end of the set at all, so the accounts at the far end
-   * would never be reconciled. The stamp makes each customer cost one pass,
-   * once.
+   * Already-paid accounts are excluded here rather than skipped later, so
+   * the rotation covers only accounts a Stripe call could still tell us
+   * something about, and the set shrinks as customers pay.
+   *
+   * Least recently checked first, and the caller stamps before it reads:
+   * an account whose read throws must go to the back, or enough of them
+   * hold every slot under the limit and later accounts are never reached.
    */
-  async customersNeedingTopupBackfill(
+  async customersToCheckForTopups(
     limit: number,
   ): Promise<Array<{ userId: string; stripeCustomerId: string }>> {
     const result = await this.#db
       .prepare(
-        `SELECT user_id, stripe_customer_id FROM billing_customers
-          WHERE topups_backfilled_at IS NULL
-          ORDER BY topups_backfill_attempted_at IS NOT NULL,
-                   topups_backfill_attempted_at,
+        `SELECT user_id, stripe_customer_id FROM billing_customers AS c
+          WHERE NOT ${CLEARED_PAYMENT_SQL.replace(/\?1/g, 'c.user_id')}
+          ORDER BY topups_checked_at IS NOT NULL,
+                   topups_checked_at,
                    created_at
           LIMIT ?1`,
       )
@@ -224,36 +224,19 @@ export class BillingStore {
   }
 
   /**
-   * Record that this account's Checkout history has been read to the end.
+   * Record that the top-up recovery is about to look at this customer.
    *
-   * Written only after a complete read, never after a partial or failed
-   * one: a customer whose pages could not be fetched must come back
-   * tomorrow rather than be marked done having been half read.
+   * Before the read, not after. The read that throws is exactly the one
+   * that must move to the back of the queue; stamping afterwards leaves it
+   * at the front for ever, holding a slot under the limit so later
+   * customers are never reached. The same reason `ReferralStore` stamps
+   * `last_attempt_at` before the attempt rather than after it.
    */
-  /**
-   * Record that the backfill is about to try this customer.
-   *
-   * Before the attempt, not after, and the ordering above depends on it: a
-   * read that throws is exactly the one that must move to the back of the
-   * queue, and stamping afterwards would skip precisely those. Unlike the
-   * completion stamp this is overwritten every time, because the question
-   * it answers is "how long since anyone tried".
-   */
-  async markTopupsBackfillAttempted(userId: string, at: string): Promise<void> {
+  async markTopupsChecked(userId: string, at: string): Promise<void> {
     await this.#db
       .prepare(
-        `UPDATE billing_customers SET topups_backfill_attempted_at = ?2
+        `UPDATE billing_customers SET topups_checked_at = ?2
           WHERE user_id = ?1`,
-      )
-      .bind(userId, at)
-      .run();
-  }
-
-  async markTopupsBackfilled(userId: string, at: string): Promise<void> {
-    await this.#db
-      .prepare(
-        `UPDATE billing_customers SET topups_backfilled_at = ?2
-          WHERE user_id = ?1 AND topups_backfilled_at IS NULL`,
       )
       .bind(userId, at)
       .run();

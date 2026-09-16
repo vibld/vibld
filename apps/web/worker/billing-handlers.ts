@@ -289,13 +289,21 @@ export async function reconcileSubscriptions(
       // from is a subscriber who paid and then cancelled: their status reads
       // `canceled` for ever, and reading status was exactly how the sweep
       // came to skip them. Their paid invoices are still there in Stripe.
-      const clearedUsdCents = await recordPaidInvoices(
-        stripe,
-        store,
-        id,
-        record.userId,
-      );
-      if (clearedUsdCents > 0 && onClearedPayment) {
+      //
+      // Gated on the local answer first, though, and that is what keeps
+      // this from growing without bound. Reading a subscriber's whole
+      // invoice history every night costs more every year, and once the
+      // run exceeds its budget the subscriptions after it are never
+      // reached -- the same non-converging failure the top-up rotation was
+      // shaped to avoid. Once a payment is recorded, re-reading the
+      // invoices cannot change any decision here, so a paid subscriber
+      // costs one D1 query instead. The Stripe scan is only for accounts
+      // where nothing local says they paid, which is the set it exists for
+      // and which empties as they are found.
+      const cleared =
+        (await store.hasClearedPayment(record.userId)) ||
+        (await recordPaidInvoices(stripe, store, id, record.userId)) > 0;
+      if (cleared && onClearedPayment) {
         // Counted as a failure of this subscription's reconcile, not thrown:
         // a reward that cannot be paid tonight must not stop the remaining
         // subscriptions being corrected.
@@ -338,20 +346,22 @@ export async function reconcileSubscriptions(
  * as an invoice and is recorded there, and counting the session too would
  * record the same charge twice.
  *
- * Bounded and self-terminating, which matters more than it sounds. An
- * unbounded nightly scan re-reads every customer's whole Checkout history
- * for ever and offers every already-paid account to the payout again; the
- * D1 writes are no-ops on conflict but the Stripe calls and the payout
- * calls are not, and past some number of customers one scheduled run
- * cannot reach the end of the set, leaving the accounts at the far end
- * permanently unreconciled. So each customer is stamped once its history
- * has been read through, at most `limit` are taken per run, and the work
- * falls to nothing once the set is covered. A top-up after that arrives by
- * webhook and needs no backfill.
+ * A bounded rotation, not a queue that empties. This was a one-time
+ * backfill with a "done" stamp, and that shape was wrong twice over. A
+ * customer is mapped when Checkout *begins*, so a pass can see a session
+ * that has not settled yet and mark the account permanently finished;
+ * nothing looks again when it settles. And a top-up taken after the stamp
+ * had no recovery at all, which is the gap this exists to close, reopened
+ * one night later.
+ *
+ * So there is no finished state. Least recently checked first, at most
+ * `limit` a night, for ever. Accounts with a recorded payment are excluded
+ * by the query rather than skipped here, so the rotation only covers
+ * accounts a Stripe call could still say something about, and it shrinks as
+ * customers pay.
  *
  * Returns what it looked at and how many accounts it found cleared money
- * for. Idempotent twice over: the session id keys the write, and the stamp
- * keeps a covered customer out of the next run entirely.
+ * for. Idempotent: the session id keys the write.
  */
 export async function backfillTopupPayments(
   stripe: Stripe,
@@ -359,7 +369,7 @@ export async function backfillTopupPayments(
   onClearedPayment?: (userId: string) => Promise<void>,
   limit = 50,
 ): Promise<{ checked: number; cleared: number; failed: number }> {
-  const customers = await store.customersNeedingTopupBackfill(limit);
+  const customers = await store.customersToCheckForTopups(limit);
   let cleared = 0;
   let failed = 0;
 
@@ -367,10 +377,9 @@ export async function backfillTopupPayments(
     try {
       // Before the read, not after. A customer whose read throws is exactly
       // the one that must move to the back of the queue; stamping
-      // afterwards would skip precisely those, and enough of them at the
-      // front hold every slot under the limit so the rest of the set is
-      // never reached.
-      await store.markTopupsBackfillAttempted(userId, new Date().toISOString());
+      // afterwards leaves it at the front for ever, holding a slot under
+      // the limit so later customers are never reached.
+      await store.markTopupsChecked(userId, new Date().toISOString());
       let collected = 0;
       let startingAfter: string | undefined;
 
@@ -401,13 +410,14 @@ export async function backfillTopupPayments(
 
         const last = page.data.at(-1);
         if (!page.has_more || !last?.id) break;
+        // A cursor that does not move means the next request returns this
+        // same page for ever. Stripe should never do it, and the cost of
+        // trusting that it will not is a scheduled run that spins inside
+        // one customer until the Worker is killed, every night, never
+        // reaching anybody else. Cheaper to stop.
+        if (last.id === startingAfter) break;
         startingAfter = last.id;
       }
-
-      // Only now, with every page read. A throw above leaves this customer
-      // unstamped and therefore first in tomorrow's run, which is what a
-      // half-read history deserves.
-      await store.markTopupsBackfilled(userId, new Date().toISOString());
 
       if (collected > 0) {
         cleared += 1;
@@ -486,6 +496,9 @@ async function recordPaidInvoices(
 
     const last = page.data.at(-1);
     if (!page.has_more || !last?.id) break;
+    // See the note in backfillTopupPayments: a cursor that does not
+    // advance turns this into an endless loop rather than a long one.
+    if (last.id === startingAfter) break;
     startingAfter = last.id;
   }
 
@@ -531,6 +544,10 @@ async function discoverSubscriptionIds(
     }
     const last = page.data[page.data.length - 1];
     if (!page.has_more || !last) break;
+    // Same guard as the two loops above. This one predates them and had
+    // the same hole: discovery is what feeds the whole reconcile, so a
+    // cursor stuck here stalls every subscription behind it.
+    if (last.id === startingAfter) break;
     startingAfter = last.id;
   }
 
