@@ -53,6 +53,30 @@
     // CLERK_PUBLISHABLE_KEY are Worker/build secrets set out of band.
     "CLERK_FRONTEND_API_URL": "https://clerk.vibld.com",
 
+    // D1 queries the payment recovery may spend in one invocation: the
+    // replay and the parked-event retry between them, not each.
+    //
+    // D1 meters queries per Worker invocation and stops the invocation at
+    // the limit by throwing: 1000 on Workers Paid, 50 on Workers Free
+    // (developers.cloudflare.com/d1/platform/limits). This deployment is on
+    // Workers Paid, which is a fact about the account that nothing in the
+    // runtime reports, so it is written down here rather than guessed at.
+    //
+    // 500 rather than anything near 1000, and the reason is a limit of this
+    // number rather than a margin of safety. Three of the four phases in the
+    // nightly pass are bounded by it, and it is split between them off the
+    // top rather than left over: a quarter for parked events, a quarter for
+    // stranded referral payouts, the rest for the replay. Both of the first
+    // two hand over money already established as owed, so they are served
+    // before the one that goes looking for more.
+    //
+    // The fourth, `reconcileSubscriptions`, is not bounded by anything. It
+    // reads every subscription Stripe knows about, so its cost grows with
+    // the customer base and no number here constrains it. The 500 this
+    // leaves is room for it by estimate, not by construction, and that is
+    // the whole of what is not yet guaranteed about this invocation.
+    "VIBLD_REPLAY_QUERY_BUDGET": "500",
+
     // A run reserves its worst case up front -- with a 64000-token output
     // ceiling that is about $1.61 -- and is reconciled to what it actually
     // cost once it finishes.

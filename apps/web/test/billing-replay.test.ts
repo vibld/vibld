@@ -6,8 +6,14 @@ import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
 import {
+  DEFAULT_QUERY_BUDGET,
   DEFAULT_REQUEST_BUDGET,
   pageSizeFor,
+  parkedReserveFor,
+  payoutBatchFor,
+  payoutReserveFor,
+  replayBudgetFor,
+  retryBatchFor,
   REPLAYED_EVENT_TYPES,
   STRIPE_EVENTS_CURSOR,
   replayStripeEvents,
@@ -412,7 +418,7 @@ describe('what the nightly pass hands the replay', () => {
     // records the payment.
     const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
     const replay = source.indexOf('replayStripeEvents(');
-    const payouts = source.indexOf('resumeStrandedPayouts(payout)');
+    const payouts = source.indexOf('resumeStrandedPayouts(');
 
     assert.ok(replay > 0 && payouts > 0, 'the nightly pass lost a step');
     assert.ok(
@@ -860,5 +866,187 @@ describe('the D1 query ceiling', () => {
     await store.markEventProcessed('evt_done', 'invoice.paid');
     const done = await store.processedEventIds(['evt_done', 'evt_new']);
     assert.deepEqual([...done], ['evt_done']);
+  });
+});
+
+describe('two phases in one invocation', () => {
+  it('cannot spend the allowance twice between them', async () => {
+    // D1 counts the invocation, not the phase. Sizing the parked-event retry
+    // from the whole budget rather than from what the replay left is how an
+    // invocation goes over the limit while each phase believes it stayed
+    // inside one: the replay can reserve most of it, and a full-size batch
+    // then spends it again.
+    const store = newStore();
+    const pages = Array.from({ length: 6 }, (_, n) => [
+      topupEvent(`evt_${n}`, 100_000 - n, `user_${n}`),
+    ]);
+    const { stripe } = stripeServing(pages);
+
+    for (const budget of [40, 120, 500, 900]) {
+      const result = await replayStripeEvents(
+        stripe,
+        store,
+        20,
+        () => 5000,
+        replayBudgetFor(budget),
+      );
+      assert.ok(
+        result.queriesReserved <= replayBudgetFor(budget),
+        `the replay alone reserved ${result.queriesReserved} of ${budget}`,
+      );
+
+      // What the caller must hand the retry, and the worst that batch costs.
+      const left = budget - result.queriesReserved;
+      const worstRetry = retryBatchFor(left) * 6;
+      assert.ok(
+        result.queriesReserved + worstRetry <= budget,
+        `both phases together reserve more than ${budget}`,
+      );
+    }
+  });
+
+  it('always leaves the parked queue enough for a row', async () => {
+    // Leftovers do not work. The replay reserves a page's worst case up
+    // front whether the page held anything or not, so on the Workers Free
+    // default it took 39 of 40 and the retry was handed 1, which buys no
+    // rows. Every night, for ever, while the cursor moved on past the very
+    // events that were parked: money already taken and never credited.
+    const store = newStore();
+    const { stripe } = stripeServing([[topupEvent('evt_1', 3000)]]);
+
+    for (const budget of [DEFAULT_QUERY_BUDGET, 40, 120, 500, 900]) {
+      const result = await replayStripeEvents(
+        stripe,
+        store,
+        20,
+        () => 5000,
+        replayBudgetFor(budget),
+      );
+      const batch = retryBatchFor(budget - result.queriesReserved);
+      assert.ok(batch >= 1, `budget ${budget} retries no parked events, ever`);
+    }
+  });
+
+  it('serves the parked queue before the replay, not after it', async () => {
+    // A parked event is a payment already seen and not attributed, which is
+    // worse than one not read yet. So the share is taken off the top rather
+    // than left over, and the replay is handed the remainder.
+    assert.ok(parkedReserveFor(500) >= 6);
+    assert.equal(
+      replayBudgetFor(500),
+      500 - parkedReserveFor(500) - payoutReserveFor(500),
+    );
+    // Never fewer than one row's worth, however small the allowance.
+    assert.ok(parkedReserveFor(4) >= 6);
+  });
+
+  it('takes no parked work at all when nothing is left', async () => {
+    // Zero is the right answer rather than one row anyway. A run with no
+    // allowance left does no parked work tonight, and the queue rotates by
+    // last attempt, so nothing is skipped over.
+    assert.equal(retryBatchFor(0), 0);
+    assert.equal(retryBatchFor(5), 0);
+  });
+
+  it('is what the nightly pass actually hands it', async () => {
+    // The property above is only worth having if the caller uses it. This is
+    // the line that was wrong: `retryBatchFor(budget)` sized the retry from
+    // the whole allowance while the replay had already reserved most of it.
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/index.ts', import.meta.url)),
+      'utf8',
+    );
+
+    assert.match(
+      source,
+      /retryBatchFor\(\s*budget - payoutReserveFor\(budget\) - reserved,?\s*\)/,
+      'the retry is sized from something other than what is left for it',
+    );
+
+    // And the replay is *called* with the remainder. Matching the file
+    // anywhere passed while the call itself took the whole allowance,
+    // because `replayBudgetFor(budget)` also appears in the error handler
+    // beneath it. The argument list is the thing under test, so that is what
+    // is read.
+    // Whitespace-collapsed rather than sliced between two landmarks. The
+    // first version of this matched the file anywhere and passed against its
+    // own mutation, and the second sliced to the next `.then(`, which the
+    // call's own argument list can contain. The argument list is what is
+    // under test, so it is read as one string.
+    const flat = source.replace(/\s+/g, ' ');
+    assert.match(
+      flat,
+      /replayStripeEvents\( stripe, billing, undefined, undefined, replayBudgetFor\(budget\), \)/,
+      'the replay is handed the whole allowance again',
+    );
+    assert.doesNotMatch(
+      source,
+      /retryBatchFor\(budget\)/,
+      'the retry is sized from the whole allowance again',
+    );
+  });
+});
+
+describe('the phases that hand over money already owed', () => {
+  it('reserve their shares before the replay takes any', async () => {
+    // A payout that is owed and a parked payment are both money already
+    // established. The replay goes looking for more. Leftovers were tried
+    // and do not work: a phase that reserves a worst case up front takes
+    // everything and the ones after it get nothing, every night.
+    for (const budget of [40, 120, 500, 900]) {
+      const parked = parkedReserveFor(budget);
+      const payouts = payoutReserveFor(budget);
+      assert.equal(
+        replayBudgetFor(budget),
+        Math.max(0, budget - parked - payouts),
+      );
+      assert.ok(parked >= 6, `budget ${budget} parks nothing`);
+      assert.ok(payoutBatchFor(payouts) >= 1, `budget ${budget} pays nobody`);
+    }
+  });
+
+  it('cannot together exceed the allowance', async () => {
+    // The property the whole split exists for. Three phases, one invocation,
+    // and D1 counts the invocation.
+    const store = newStore();
+    const pages = Array.from({ length: 6 }, (_, n) => [
+      topupEvent(`evt_${n}`, 100_000 - n, `user_${n}`),
+    ]);
+    const { stripe } = stripeServing(pages);
+
+    for (const budget of [40, 120, 500, 900]) {
+      const result = await replayStripeEvents(
+        stripe,
+        store,
+        20,
+        () => 5000,
+        replayBudgetFor(budget),
+      );
+      const payouts = payoutReserveFor(budget);
+      const worstRetry =
+        retryBatchFor(budget - payouts - result.queriesReserved) * 6;
+      const worstPayouts = 1 + payoutBatchFor(payouts) * 6;
+
+      assert.ok(
+        result.queriesReserved + worstRetry + worstPayouts <= budget,
+        `budget ${budget} is exceeded by the three phases that share it`,
+      );
+    }
+  });
+
+  it('is what the nightly pass actually hands the payout resume', async () => {
+    // It defaults to 100 rows at six queries each, 601 in total, which is
+    // most of a Workers Paid invocation and was bounded by nothing.
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/index.ts', import.meta.url)),
+      'utf8',
+    );
+
+    assert.match(source, /payoutBatchFor\(payoutReserveFor\(budget\)\)/);
+    assert.doesNotMatch(
+      source,
+      /resumeStrandedPayouts\(payout\)/,
+      'the payout resume takes its unbounded default again',
+    );
   });
 });

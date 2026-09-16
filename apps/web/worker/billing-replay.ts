@@ -144,6 +144,17 @@ export interface ReplayResult {
   /** Stripe requests spent, out of the budget. */
   requests: number;
   /**
+   * D1 queries this run reserved against the invocation's allowance.
+   *
+   * The worst case it charged itself, not what it happened to use, because
+   * what the phases after it may safely spend depends on what this one could
+   * have spent rather than on what it did. Reported so the caller can hand
+   * the rest of the pass what is actually left: a later phase sizing itself
+   * from the whole allowance is how an invocation goes over the limit while
+   * every phase believes it stayed inside one.
+   */
+  queriesReserved: number;
+  /**
    * Whether ground remains below where this run stopped.
    *
    * True is not a failure and false is not an assurance that nothing was
@@ -368,6 +379,7 @@ export async function replayStripeEvents(
           failed,
           unresolved,
           requests,
+          queriesReserved: spent,
           incomplete: false,
         };
       }
@@ -384,28 +396,123 @@ export async function replayStripeEvents(
       // alternative is stepping over a payment somebody made, and a stall
       // says so every night in `failed` and `incomplete` while a step-over
       // says nothing at all.
-      return { read, applied, failed, unresolved, requests, incomplete: true };
+      return {
+        read,
+        applied,
+        failed,
+        unresolved,
+        requests,
+        queriesReserved: spent,
+        incomplete: true,
+      };
     }
   }
 
-  return { read, applied, failed, unresolved, requests, incomplete: true };
+  return {
+    read,
+    applied,
+    failed,
+    unresolved,
+    requests,
+    queriesReserved: spent,
+    incomplete: true,
+  };
 }
 
 /**
  * How many parked events one retry run may take on.
  *
- * The same D1 ceiling the replay is bounded by, and this pass runs in the
- * same invocation, so the two budgets are spent from one allowance. A row
- * costs its attempt stamp, the handler's own queries, and on success the
- * mark and the delete.
+ * This runs in the same Worker invocation as the replay, so the argument is
+ * what the replay *left*, never the whole allowance. Sizing both phases from
+ * the same number is how an invocation goes over D1's limit while each phase
+ * believes it stayed inside one: the replay can reserve most of it, and a
+ * batch scaled to the full budget then spends it a second time.
  *
- * Taking fewer than the queue holds is not a limit on what is reachable: the
- * queue rotates by `last_attempt_at`, so a batch that does not cover it
- * leaves the rest at the front of the next one.
+ * Zero is a legitimate answer. A run with nothing left does no parked work
+ * tonight rather than throwing partway through some, and the queue rotates
+ * by `last_attempt_at`, so nothing is skipped over: what it did not reach is
+ * at the front of the next one.
  */
 export function retryBatchFor(queryBudget: number): number {
-  return Math.max(1, Math.floor(queryBudget / (MAX_QUERIES_PER_EVENT + 2)));
+  return Math.max(0, Math.floor(queryBudget / MAX_QUERIES_PER_PARKED_ROW));
 }
+
+/**
+ * The share of an invocation's allowance held back for parked events, before
+ * the replay is allowed to reserve any of it.
+ *
+ * Leftovers do not work, and the arithmetic says so rather than the
+ * intention: the replay reserves a page's worst case up front whether or not
+ * the page had anything in it, so on the smallest supported budget (40, the
+ * Workers Free default) it took 39 of 40 every night and the retry was
+ * handed 1, which buys no rows. Every night, for ever, while the cursor
+ * moved on past the very events that were parked. Money already taken and
+ * never credited to anybody.
+ *
+ * A quarter, and never fewer than one row's worth. The order of precedence
+ * is deliberate: a parked event is a payment this deployment has already
+ * seen and cannot attribute, which is worse than a payment it has not read
+ * yet, so it is served first and the replay takes what is left rather than
+ * the other way round.
+ */
+export function parkedReserveFor(queryBudget: number): number {
+  return Math.max(MAX_QUERIES_PER_PARKED_ROW, Math.floor(queryBudget / 4));
+}
+
+/**
+ * D1 queries one stranded referral payout costs at its worst: the attempt
+ * stamp, the attribution read, the slot claim, a credit grant for each side,
+ * then the paid mark. Read off `resumeStrandedPayouts` and
+ * `payReferralIfEarned`.
+ */
+const MAX_QUERIES_PER_PAYOUT_ROW = 6;
+
+/**
+ * How many stranded payouts one run may take on, given an allowance.
+ *
+ * The minus one is the query that selects the batch, which is paid once
+ * rather than per row.
+ */
+export function payoutBatchFor(queryBudget: number): number {
+  return Math.max(
+    0,
+    Math.floor((queryBudget - 1) / MAX_QUERIES_PER_PAYOUT_ROW),
+  );
+}
+
+/**
+ * The share held back for stranded referral payouts.
+ *
+ * Reserved off the top for the same reason the parked queue is: a payout
+ * that is owed is money somebody has already earned, so it does not wait on
+ * whatever discovery happens to leave behind. Its default batch of 100 rows
+ * costs 601 queries on its own, which is most of a Workers Paid invocation,
+ * and nothing used to bound it at all.
+ */
+export function payoutReserveFor(queryBudget: number): number {
+  return Math.max(1 + MAX_QUERIES_PER_PAYOUT_ROW, Math.floor(queryBudget / 4));
+}
+
+/**
+ * What the replay may reserve, once the two phases that pay out what is
+ * already owed have had their shares.
+ *
+ * The replay is last on purpose. It looks for money that may have been
+ * missed; the other two hand over money already established as owed, and a
+ * night that does those and reads less history is the better night.
+ */
+export function replayBudgetFor(queryBudget: number): number {
+  return Math.max(
+    0,
+    queryBudget - parkedReserveFor(queryBudget) - payoutReserveFor(queryBudget),
+  );
+}
+
+/**
+ * D1 queries one parked row costs at its worst: the attempt stamp, the
+ * handler's own writes, then the mark and the delete once it resolves.
+ */
+const MAX_QUERIES_PER_PARKED_ROW = MAX_QUERIES_PER_EVENT + 2;
 
 export interface RetryResult {
   /** Parked events this run looked at. */

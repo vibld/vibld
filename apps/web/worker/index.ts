@@ -102,6 +102,9 @@ import {
 } from './github-handlers.ts';
 import {
   DEFAULT_QUERY_BUDGET,
+  payoutBatchFor,
+  payoutReserveFor,
+  replayBudgetFor,
   replayStripeEvents,
   retryBatchFor,
   retryUnattributedEvents,
@@ -1556,18 +1559,46 @@ export default {
         // the replay left it in. The money the replay recovers does not
         // depend on order: a top-up and a payment are recorded against the
         // Stripe object's own id, once.
-        replayStripeEvents(stripe, billing, undefined, undefined, budget)
+        replayStripeEvents(
+          stripe,
+          billing,
+          undefined,
+          undefined,
+          replayBudgetFor(budget),
+        )
           .then(
-            (result) =>
+            (result) => {
               console.log(
                 JSON.stringify({ event: 'billing.replayed', ...result }),
-              ),
-            (error: unknown) => console.error('billing replay failed', error),
+              );
+              return result.queriesReserved;
+            },
+            (error: unknown) => {
+              console.error('billing replay failed', error);
+              // What it reserved before throwing is unknown, so assume it
+              // reserved everything it was entitled to. Not the whole
+              // allowance: the parked queue's share was never the replay's
+              // to spend, and a throw here must not be what stops parked
+              // payments being retried.
+              return replayBudgetFor(budget);
+            },
           )
           // Then the events parked because nobody could be attributed to
           // them. No Stripe requests: the payloads were kept, so this keeps
           // working long after Stripe has forgotten the events existed.
-          .then(() => retryUnattributedEvents(billing, retryBatchFor(budget)))
+          //
+          // Sized from what the replay left rather than from `budget`. Both
+          // phases run in this one invocation and D1 counts the invocation,
+          // so scaling each from the whole allowance spends it twice: the
+          // replay can reserve most of it and a full-size batch then pushes
+          // the invocation past the limit, with every phase believing it
+          // stayed inside one.
+          .then((reserved) =>
+            retryUnattributedEvents(
+              billing,
+              retryBatchFor(budget - payoutReserveFor(budget) - reserved),
+            ),
+          )
           .then(
             (result) =>
               console.log(
@@ -1582,7 +1613,12 @@ export default {
           // stays owed and nothing revisits it. After the replay rather than
           // beside it, so a payment the replay has just recovered is paid out
           // tonight instead of tomorrow.
-          .then(() => resumeStrandedPayouts(payout))
+          .then(() =>
+            resumeStrandedPayouts(
+              payout,
+              payoutBatchFor(payoutReserveFor(budget)),
+            ),
+          )
           .then(
             (result) =>
               console.log(

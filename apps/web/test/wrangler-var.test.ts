@@ -69,3 +69,39 @@ describe('the rate limit bindings', () => {
     }
   });
 });
+
+describe('the billing replay query budget', () => {
+  const vars = readVars(
+    readFileSync(join(import.meta.dirname, '..', 'wrangler.jsonc'), 'utf8'),
+  );
+
+  it('is declared, and is a number the Worker will take', () => {
+    // Unset falls back to the value that is safe on Workers Free, which on a
+    // Workers Paid deployment quietly clears about nine events a night
+    // instead of a few hundred. Not wrong, and not what this account is
+    // paying for.
+    const budget = Number(vars.VIBLD_REPLAY_QUERY_BUDGET);
+    assert.ok(
+      Number.isFinite(budget) && budget > 0,
+      'the replay would fall back to the Free-plan default',
+    );
+  });
+
+  it('leaves the rest of the nightly pass some of the allowance', () => {
+    // D1 stops the invocation at 1000 queries on Workers Paid by throwing,
+    // and a throw freezes the replay's cursor, so every following night dies
+    // in the same place. The parked-event retry, the payout resume and the
+    // subscription reconcile all draw on the same allowance, so the replay
+    // must not be entitled to the lot.
+    // Two of the nightly pass's four phases are bounded by this number and
+    // two are not. The payout resume and the subscription reconcile predate
+    // it and are bounded by nothing, so what is left over is the only room
+    // they have. Half the Paid-plan limit is the estimate; taking it all
+    // would make the throw reachable through them instead.
+    const budget = Number(vars.VIBLD_REPLAY_QUERY_BUDGET);
+    assert.ok(
+      budget <= 500,
+      'nothing is left for the phases this budget does not bound',
+    );
+  });
+});
