@@ -228,6 +228,14 @@ panel and that secret is the only key to it. It is a product that is down
 while looking deployed, and it is cheaper to stop at the workflow than to
 discover it from the outside.
 
+A closed deployment with no `CLERK_PUBLISHABLE_KEY` fails the same check, for
+the same reason from the other side: with no browser key the build inlines
+nothing, no request carries a token, and nobody can be identified, so the
+admin in the list never reaches the panel that issues invites. An open
+deployment is not held to this, because a deploy with no Clerk at all is a
+supported shape and it is being closed that makes an identity provider
+load-bearing.
+
 "Usable" is counted the way the Worker counts it: the list is split on commas
 and trimmed, so `" , "` is a non-empty secret and an empty admin list, and an
 entry that cannot be an email address can never match a Clerk-verified one.

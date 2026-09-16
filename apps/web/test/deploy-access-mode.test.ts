@@ -77,6 +77,10 @@ interface Run {
  * its stdin, so "did it set the mode to open" is answerable.
  */
 async function run(step: string, env: Record<string, string>): Promise<Run> {
+  // Defaulted so the cases about admin lists stay about admin lists. A test
+  // that had to spell out every prerequisite would start passing for the
+  // wrong reason the moment another one was added.
+  const withDefaults = { CLERK_PUBLISHABLE_KEY: 'pk_test_x', ...env };
   const dir = await mkdtemp(join(tmpdir(), 'vibld-deploy-'));
   const summary = join(dir, 'summary.md');
   const wrangler = join(dir, 'wrangler.log');
@@ -102,7 +106,7 @@ async function run(step: string, env: Record<string, string>): Promise<Run> {
         env: {
           PATH: `${dir}:${process.env.PATH ?? ''}`,
           GITHUB_STEP_SUMMARY: summary,
-          ...env,
+          ...withDefaults,
         },
       },
       (error, stdout, stderr) => {
@@ -183,6 +187,32 @@ describe('the access mode a deploy sets', () => {
         assert.match(result.stdout + result.stderr, /VIBLD_PLATFORM_ADMINS/);
       }
     }
+  });
+
+  it('refuses a closed deployment nobody can sign in to', async () => {
+    // The other side of the same outage. With no browser Clerk key the
+    // Build step inlines nothing, no request carries a token, and
+    // `/api/config` cannot say who is asking: the admin named in the list
+    // never sees the panel that issues invites, so an invite-only
+    // deployment admits nobody.
+    const result = await run(CHECK, {
+      VIBLD_ACCESS_MODE: '',
+      VIBLD_PLATFORM_ADMINS: 'chris@example.com',
+      CLERK_PUBLISHABLE_KEY: '',
+    });
+
+    assert.equal(result.code, 1, 'shipped a product nobody can sign in to');
+    assert.match(result.stdout + result.stderr, /CLERK_PUBLISHABLE_KEY/);
+
+    // An open deployment is a different question. A deploy with no Clerk at
+    // all is a supported shape, and it is being closed that makes an
+    // identity provider load-bearing.
+    const opened = await run(CHECK, {
+      VIBLD_ACCESS_MODE: 'open',
+      VIBLD_PLATFORM_ADMINS: '',
+      CLERK_PUBLISHABLE_KEY: '',
+    });
+    assert.equal(opened.code, 0, 'refused an open deployment over Clerk');
   });
 
   it('is invite-only when nothing says otherwise', async () => {
