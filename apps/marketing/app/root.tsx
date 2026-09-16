@@ -392,6 +392,15 @@ function ConsentBanner() {
 
   const answer = (choice: ConsentChoice) => {
     const outcome = recordAnswer(storage(), choice);
+    // On any "no", whether or not this document ever loaded the tag. The
+    // answer is kept per origin and the cookie is not: this Worker serves
+    // both vibld.com and www.vibld.com (wrangler.jsonc), so a grant on one
+    // leaves `_ga` on `.vibld.com` while the other origin's storage is
+    // empty. Saying no there used to take the "nothing was running" path and
+    // leave the shared identifier sitting there for a later grant to pick
+    // back up. Clearing site data without clearing cookies gets to the same
+    // place.
+    if (outcome.apply === 'denied') forgetAnalyticsCookies();
     setDecided(outcome.apply);
     setReopened(false);
     setUnsaved(outcome.warn ? outcome.apply : null);

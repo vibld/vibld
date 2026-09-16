@@ -162,6 +162,14 @@ only way a page can remove a script already in it: this is a single-page app,
 internal links never create a new document, so a tag left in place would
 otherwise outlive the answer.
 
+**Consent is per origin; the cookie is not.** This Worker serves both
+`vibld.com` and `www.vibld.com`, `localStorage` is scoped to one origin, and
+GA writes `_ga` on `.vibld.com`, which both share. So a grant on one origin
+leaves an identifier the other origin can see while having no record of any
+answer. Every "no" therefore expires the cookies whether or not that document
+ever loaded the tag; tying the cleanup to "the tag is running here" left the
+shared identifier in place for a later grant to resume.
+
 **The reload is conditional, and the condition matters.** When the store
 refuses both the write and the removal of the denial, an older grant survives
 in it, and reloading would read that grant and load analytics again: the
