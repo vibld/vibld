@@ -2,6 +2,8 @@ import type Stripe from 'stripe';
 import { resolvePrincipal } from './principal.ts';
 import { BillingStore } from './billing-store.ts';
 import { applyStripeEvent, subscriptionRecordFrom } from './billing-events.ts';
+import { payReferralIfEarned } from './referral-payout.ts';
+import { ReferralStore } from './referral-store.ts';
 import {
   createCheckoutSession,
   createPortalSession,
@@ -195,7 +197,18 @@ export async function handleStripeWebhook(
   }
 
   try {
-    await applyStripeEvent(store, event);
+    // The referral payout rides the same delivery that records the money,
+    // because "their first purchase cleared" is exactly what this event
+    // means and there is no second moment that knows it. It cannot fail the
+    // delivery: `applyStripeEvent` swallows and logs a hook failure, since a
+    // reward bug must not look like a billing outage, and the payout is
+    // idempotent so a later delivery recovers it.
+    const referrals = new ReferralStore(env.DB!);
+    await applyStripeEvent(store, event, (userId) =>
+      payReferralIfEarned({ referrals, billing: store }, userId).then(
+        () => undefined,
+      ),
+    );
   } catch (error) {
     // A 5xx here makes Stripe retry, which is what an unexpected D1/R2
     // failure should do -- succeeding despite a write that never happened

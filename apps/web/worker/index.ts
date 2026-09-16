@@ -38,6 +38,10 @@ import {
 import { decideModel, grantedFor } from './model-access.ts';
 import { grantSignupCreditOnce } from './signup-credit.ts';
 import {
+  handleReferralClaim,
+  handleReferralStatus,
+} from './referral-handlers.ts';
+import {
   ACCOUNT_BUDGET_KEY,
   dayKey,
   parsePrices,
@@ -1351,6 +1355,18 @@ export default {
       return handleGitHub(request, env, (principal) =>
         handleGitHubPush(request, env, principal),
       );
+    }
+
+    if (pathname === '/api/referral/status') {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      return handleReferralStatus(request, env, resolved.principal);
+    }
+
+    if (pathname === '/api/referral/claim') {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      return handleReferralClaim(request, env, resolved.principal);
     }
 
     if (pathname === '/api/admin/user') {

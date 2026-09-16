@@ -38,9 +38,20 @@ function metadataUserId(metadata: Stripe.Metadata | null): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+/**
+ * What to do when an account's money has actually arrived.
+ *
+ * A callback rather than a store, so this module keeps knowing only about
+ * Stripe and billing. The referral payout is the only caller today, and it is
+ * the kind of thing that must never be able to fail a webhook delivery: see
+ * where it is invoked below.
+ */
+export type OnPurchaseCleared = (userId: string) => Promise<void>;
+
 async function applyCheckoutSessionCompleted(
   store: BillingStore,
   session: Stripe.Checkout.Session,
+  onPurchaseCleared?: OnPurchaseCleared,
 ): Promise<void> {
   const userId =
     metadataUserId(session.metadata) ??
@@ -71,6 +82,30 @@ async function applyCheckoutSessionCompleted(
     stripeCustomerId,
     Number.isFinite(creditUsdCents) ? creditUsdCents : TOPUP_CREDIT_USD_CENTS,
   );
+
+  await announcePurchase(onPurchaseCleared, userId);
+}
+
+/**
+ * Run the purchase hook without letting it fail the delivery.
+ *
+ * The top-up above is the part Stripe is telling us about, and it has already
+ * been written. If the referral payout throws, Stripe sees a failed webhook,
+ * retries, and the top-up write runs again -- which is safe, but it means a
+ * bug in a reward can look like a billing outage. The hook is idempotent by
+ * construction, so the retry that a later delivery brings is a better place
+ * to recover than this one.
+ */
+async function announcePurchase(
+  hook: OnPurchaseCleared | undefined,
+  userId: string,
+): Promise<void> {
+  if (!hook) return;
+  try {
+    await hook(userId);
+  } catch (error) {
+    console.error('purchase hook failed', userId, error);
+  }
 }
 
 /**
@@ -110,6 +145,7 @@ export function subscriptionRecordFrom(
 async function applySubscriptionEvent(
   store: BillingStore,
   subscription: Stripe.Subscription,
+  onPurchaseCleared?: OnPurchaseCleared,
 ): Promise<void> {
   const stripeCustomerId = customerId(subscription.customer);
   const userId =
@@ -129,20 +165,33 @@ async function applySubscriptionEvent(
   }
 
   await store.upsertSubscription(record);
+
+  // A subscription is the other way an account's first money arrives, and the
+  // offer says "first purchase", not "first top-up". Only `active`: a trial
+  // has not paid for anything, and paying a referral on one turns the trial
+  // into the product being farmed.
+  if (record.status === 'active') {
+    await announcePurchase(onPurchaseCleared, record.userId);
+  }
 }
 
 export async function applyStripeEvent(
   store: BillingStore,
   event: Stripe.Event,
+  onPurchaseCleared?: OnPurchaseCleared,
 ): Promise<void> {
   switch (event.type) {
     case 'checkout.session.completed':
-      await applyCheckoutSessionCompleted(store, event.data.object);
+      await applyCheckoutSessionCompleted(
+        store,
+        event.data.object,
+        onPurchaseCleared,
+      );
       return;
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted':
-      await applySubscriptionEvent(store, event.data.object);
+      await applySubscriptionEvent(store, event.data.object, onPurchaseCleared);
       return;
     case 'invoice.paid':
     case 'invoice.payment_failed':
