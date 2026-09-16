@@ -565,12 +565,23 @@ Dashboard needs no code change, only the amount to change.
   is the one place that decides, and it sits beside the barrier predicate it
   must not be confused with.
 
-  The nightly reconcile reads each subscription's paid invoices back from
-  Stripe and records them, for every subscription rather than only the
-  active ones: a subscriber who paid once and then cancelled reads
+  The nightly reconcile offers the payout on that recorded answer rather
+  than on a subscription's status, for every subscription rather than only
+  the active ones: a subscriber who paid once and then cancelled reads
   `canceled` for ever, and reading status was how the sweep came to skip
-  them. That is also what makes the payment record independent of any
-  webhook delivery having happened.
+  them.
+
+  **A payment whose webhook was never delivered is not recovered.** The
+  reconcile reads state from Stripe, not history, so it corrects a
+  subscription that drifted but cannot find a charge nothing ever told this
+  deployment about. An earlier version of this change read each account's
+  Checkout and invoice history back from Stripe to close that gap, and it
+  could not be made to work inside a scheduled run: the history grows
+  without bound, the run has a fixed budget, and each bound placed on it
+  turned "never finishes" into "stops early and reports success". Doing it
+  properly needs a resumable cursor, a request budget and an explicit
+  incomplete result, which is its own piece of work rather than a few lines
+  here.
 
   The reconcile asks Stripe which subscriptions exist rather than only
   re-reading the ones already mirrored. A subscriber whose very first
