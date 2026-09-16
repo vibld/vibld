@@ -12,7 +12,7 @@ Vibld is early, and the honest summary is narrower than the ambition above.
 
 **What runs today.** `apps/web` is a builder shell that takes a prompt through planning, staged files, validation and an accepted checkpoint. From there a checkpoint can be run in a real sandbox, previewed at a shareable URL, published to Cloudflare, exported, or pushed to a connected GitHub repository as a branch and pull request. Accounts are Clerk; projects, budgets and audit records live in D1, R2 and a per-user Durable Object; billing is Stripe, with a spend ceiling enforced before each run rather than after it. `packages/core` owns the generation contracts, the state machine and the run budget; `packages/ai` puts a model provider behind them. It is deployed and live at [app.vibld.com](https://app.vibld.com).
 
-**What does not exist yet.** Repository search (issue #12), and the measured model bakeoff that would let us recommend one model over another with evidence rather than by reputation. Sandbox process output is not piped into the console, which still shows generation events only.
+**What does not exist yet.** Repository search (issue #12), and the measured model bakeoff that would let us recommend one model over another with evidence rather than by reputation. Sandbox output is not wired into the builder's own panes: the console shows generation events only, and install, build and type errors from a sandbox run are not reported under Problems.
 
 **What to be careful of.** Live for invited testing, not for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
 
