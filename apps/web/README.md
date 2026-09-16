@@ -522,9 +522,16 @@ Dashboard needs no code change, only the amount to change.
   authentication. Subscribed events: `checkout.session.completed`,
   `checkout.session.async_payment_succeeded` / `.async_payment_failed`,
   `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
-  `invoice.payment_failed` (the last two are acknowledged but not yet
-  separately mirrored -- `customer.subscription.updated` already carries
-  the status change either one implies).
+  `invoice.payment_failed` (the last is acknowledged but not separately
+  mirrored -- `customer.subscription.updated` already carries the status
+  change it implies).
+
+  `invoice.paid` **is** acted on now: it carries `amount_paid`, so it is the
+  event that says how much money moved, and it is the only one that
+  announces a purchase. `customer.subscription.*` deliberately does not. A
+  status is not a charge: a subscription covered in full by a coupon, or one
+  whose first invoice is zero, reads `active` having taken nothing, and
+  announcing on that paid a referral for free.
 
   The two `async_payment_*` events matter for delayed payment methods, where
   `checkout.session.completed` arrives with `payment_status: unpaid` and the
@@ -540,6 +547,50 @@ Dashboard needs no code change, only the amount to change.
   slot and was never paid is retried, and every active subscriber is offered
   the (idempotent) payout, so a delivery that was missed outright or whose
   retries ran out is still recovered.
+
+  What counts as owed is "this account has a cleared payment and no payout",
+  not "this attribution holds a cap reservation". The reservation reading
+  excluded the rows the sweep exists for: a payout that failed before taking
+  its slot leaves nothing to find.
+
+  A cleared payment is a row in `billing_payments`, keyed on the Stripe
+  object that settled and carrying what it took, with a positive amount.
+  Both halves matter. It is not hung off the subscription row, because
+  `invoice.paid` can arrive before `customer.subscription.created` and an
+  UPDATE against a row that does not exist yet changes nothing and reports
+  nothing. And it requires an amount, because `no_payment_required`
+  Checkouts, zero-amount invoices and trialing subscriptions are all settled
+  states that took no money, and each one was a way to earn referral credit
+  without ever being charged. `CLEARED_PAYMENT_SQL` (`worker/purchase-barrier.ts`)
+  is the one place that decides, and it sits beside the barrier predicate it
+  must not be confused with.
+
+  The nightly reconcile offers the payout on that recorded answer rather
+  than on a subscription's status, for every subscription rather than only
+  the active ones: a subscriber who paid once and then cancelled reads
+  `canceled` for ever, and reading status was how the sweep came to skip
+  them.
+
+  For a subscriber with no recorded payment, the reconcile asks Stripe once
+  for their most recent paid invoice and records what it collected. That is
+  the case reading subscription status used to get right and requiring a
+  local row would otherwise lose: somebody who really is paying whose
+  `invoice.paid` was never delivered. One request, no pagination, nothing
+  persisted between runs.
+
+  **It is deliberately not a full audit, and two gaps follow from that.** A
+  subscriber whose most recent paid invoice collected nothing (a fully
+  discounted month) but who paid before it is not recovered. Neither is a
+  top-up whose `checkout.session.completed` was never delivered, since a
+  Checkout leaves no local trace to start from.
+
+  Closing those means reading each account's history back from Stripe, and
+  that could not be made to work inside a scheduled run: the history grows
+  without bound, the run has a fixed budget, and each bound placed on it
+  turned "never finishes" into "stops early and reports success". Doing it
+  properly needs a resumable cursor, a request budget and an explicit
+  incomplete result, which is its own piece of work rather than a few lines
+  here.
 
   The reconcile asks Stripe which subscriptions exist rather than only
   re-reading the ones already mirrored. A subscriber whose very first

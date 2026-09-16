@@ -9,12 +9,12 @@ import { TOPUP_CREDIT_USD_CENTS, tierForLookupKey } from './stripe-client.ts';
  * `BillingStore`, the same way `generation-workflow.ts`'s `runGeneration` is
  * tested against a fake `GenerationStore`.
  *
- * Dispatches on `event.type`; an event this deployment does not act on
- * (`invoice.paid`, `invoice.payment_failed`) is acknowledged, not ignored --
- * `customer.subscription.updated` already carries the status change either
- * one implies (`past_due`, `unpaid`), so there is nothing further to mirror
- * yet. Kept in the switch, rather than left unsubscribed at the Stripe
- * endpoint, so adding real handling later is a case, not a re-subscription.
+ * Dispatches on `event.type`. `invoice.payment_failed` is acknowledged and
+ * not acted on: `customer.subscription.updated` already carries the status
+ * change it implies (`past_due`, `unpaid`), so there is nothing further to
+ * mirror. `invoice.paid` used to be treated the same way and is not any more,
+ * because it is the only event that records that money actually moved, and a
+ * subscription's current status cannot answer that afterwards.
  */
 
 /**
@@ -116,7 +116,21 @@ async function applyCheckoutSessionCompleted(
     Number.isFinite(creditUsdCents) ? creditUsdCents : TOPUP_CREDIT_USD_CENTS,
   );
 
-  await announcePurchase(onPurchaseCleared, userId);
+  // The credit granted above and the money taken here are different numbers
+  // and must not be conflated. `no_payment_required` is a settled state that
+  // took nothing (a Checkout fully covered by a coupon or a credit balance),
+  // and it still grants the credit the customer was promised. What it must
+  // not do is earn a referral, which is why the amount is recorded and
+  // `announceIfPaid` reads it rather than the fact that a top-up row exists.
+  const amountUsdCents = session.amount_total ?? 0;
+  await store.recordPayment(
+    session.id,
+    userId,
+    amountUsdCents,
+    new Date().toISOString(),
+  );
+
+  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
 }
 
 /**
@@ -136,10 +150,17 @@ async function applyCheckoutSessionCompleted(
  * stake; what is red is a webhook delivery, which is a thing somebody should
  * be told about. A reward silently not paid is not.
  */
-async function announcePurchase(
+async function announceIfPaid(
   hook: OnPurchaseCleared | undefined,
   userId: string,
+  amountUsdCents: number,
 ): Promise<void> {
+  // The gate, in the one place every announce goes through. A settlement
+  // that took nothing is not a purchase, however settled Stripe considers
+  // it, and this is the same question `CLEARED_PAYMENT_SQL` asks of the
+  // recorded row: the immediate path and the recovery sweep must not be able
+  // to disagree about who has paid.
+  if (amountUsdCents <= 0) return;
   if (!hook) return;
   await hook(userId);
 }
@@ -199,10 +220,25 @@ export async function ownerOfSubscription(
   );
 }
 
+/**
+ * Mirror a subscription's state. It does not announce a purchase.
+ *
+ * It used to, on `status === 'active'`, and that was the wrong question. A
+ * status is not a charge: a subscription covered in full by a coupon, or one
+ * whose first invoice is zero, reads `active` having taken nothing, and the
+ * announce paid a referral for it. `invoice.paid` is the event that says
+ * money moved and it carries the amount, so the announce belongs there and
+ * nowhere else.
+ *
+ * If that delivery never arrives, the nightly reconcile reads the paid
+ * invoices back from Stripe itself and records them, so the payout is late
+ * rather than lost. That is the trade, taken deliberately: a referral credit
+ * a day late costs nothing, and one paid on a charge that never happened is
+ * a way to farm the offer for free.
+ */
 async function applySubscriptionEvent(
   store: BillingStore,
   subscription: Stripe.Subscription,
-  onPurchaseCleared?: OnPurchaseCleared,
 ): Promise<void> {
   const userId = await ownerOfSubscription(store, subscription);
 
@@ -217,14 +253,90 @@ async function applySubscriptionEvent(
   }
 
   await store.upsertSubscription(record);
+}
 
-  // A subscription is the other way an account's first money arrives, and the
-  // offer says "first purchase", not "first top-up". Only `active`: a trial
-  // has not paid for anything, and paying a referral on one turns the trial
-  // into the product being farmed.
-  if (record.status === 'active') {
-    await announcePurchase(onPurchaseCleared, record.userId);
+/**
+ * What this invoice charged through Stripe, in USD cents.
+ *
+ * Deliberately not "what Stripe collected", which is a larger claim than
+ * this makes. A refund or a lost dispute returns money afterwards without
+ * moving `amount_paid`, and nothing here reads either, so this is what was
+ * charged at the time and not a current balance. Netting reversals is
+ * tracked separately; treating this number as one would be wrong.
+ *
+ * Not `amount_paid` either, which is the wrong number twice over. It counts money
+ * that never moved through Stripe: an invoice marked paid out of band (a
+ * bank transfer, a cheque, a cash payment recorded by hand) reports the full
+ * `amount_paid` with `amount_paid_off_stripe` carrying the part Stripe never
+ * saw. And a zero-amount invoice is `paid` in Stripe's sense having taken
+ * nothing at all, which a trial and a full coupon both produce.
+ *
+ * Subtracting leaves only what Stripe itself put through a card, which is
+ * the conservative direction on a rule that hands out credit and the same
+ * one the purchase barrier takes.
+ *
+ * **This is a product decision, not just a safety one, and it is reversible
+ * in one line.** Vibld has no out-of-band invoicing today, so today this
+ * changes nothing. If it ever bills an enterprise customer by bank transfer,
+ * that customer really has bought something, and whether their referrer gets
+ * paid is a question about the offer rather than about Stripe. Drop the
+ * subtraction to say yes.
+ */
+export function stripeCollectedUsdCents(invoice: Stripe.Invoice): number {
+  return invoice.amount_paid - (invoice.amount_paid_off_stripe ?? 0);
+}
+
+/**
+ * An invoice that was actually paid.
+ *
+ * This event was acknowledged and discarded, on the reasoning that
+ * `customer.subscription.updated` already carries whatever status change an
+ * invoice implies. That is true about the status and false about the history,
+ * and the difference cost a payout: a subscriber whose first subscription
+ * event was missed and who then cancelled reads as `canceled` for ever, so
+ * nothing downstream could tell they had ever paid.
+ *
+ * It is the only event that says money moved, so it is now the durable record
+ * that it did, and it announces the purchase itself. Announcing on every
+ * paid invoice rather than only the first is safe and deliberate: the payout
+ * is idempotent per referred account, so the second invoice is a no-op and
+ * the first one nobody delivered is recovered by the next.
+ */
+async function applyInvoicePaid(
+  store: BillingStore,
+  invoice: Stripe.Invoice,
+  onPurchaseCleared?: OnPurchaseCleared,
+): Promise<void> {
+  const stripeCustomerId = customerId(invoice.customer);
+  const userId =
+    metadataUserId(invoice.metadata ?? null) ??
+    (stripeCustomerId
+      ? await store.findUserIdForCustomer(stripeCustomerId)
+      : undefined);
+
+  // No resolvable owner means there is nobody to record the payment against.
+  // Logged rather than swallowed: an invoice this deployment cannot
+  // attribute is a mirror that has drifted from Stripe, not a normal event.
+  if (!userId) {
+    console.error('stripe invoice.paid with no resolvable user id', invoice.id);
+    return;
   }
+
+  // Recorded against the user and keyed on the invoice, not hung off the
+  // subscription row. `invoice.paid` can arrive before
+  // `customer.subscription.created`, and an UPDATE against a row that does
+  // not exist yet changes nothing and reports nothing, which is how a real
+  // payment could go unrecorded for ever.
+  //
+  const amountUsdCents = stripeCollectedUsdCents(invoice);
+  await store.recordPayment(
+    invoice.id ?? `invoice-unknown-${userId}`,
+    userId,
+    amountUsdCents,
+    new Date().toISOString(),
+  );
+
+  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
 }
 
 export async function applyStripeEvent(
@@ -251,9 +363,11 @@ export async function applyStripeEvent(
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted':
-      await applySubscriptionEvent(store, event.data.object, onPurchaseCleared);
+      await applySubscriptionEvent(store, event.data.object);
       return;
     case 'invoice.paid':
+      await applyInvoicePaid(store, event.data.object, onPurchaseCleared);
+      return;
     case 'invoice.payment_failed':
       // See the module comment: no separate mirror yet, only acknowledged.
       return;

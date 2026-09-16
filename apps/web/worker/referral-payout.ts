@@ -116,14 +116,19 @@ export interface ResumeResult {
 }
 
 /**
- * Finish the payouts that claimed a slot and never got paid.
+ * Finish the payouts that are owed and have not happened.
  *
  * Stripe's redelivery is the first line and it recovers most of them, but it
  * gives up after a few days, and a delivery that was never made at all is
  * retried by nobody. Without this, "a failure anywhere in claim, grant, mark
  * leaves a state that resumes" is a claim about the shape of the data rather
- * than something that actually happens: the slot stays taken and the referral
- * stays owed, permanently and quietly.
+ * than something that actually happens: the referral stays owed, permanently
+ * and quietly.
+ *
+ * What counts as owed is `ReferralStore.payoutsToRetry`, and the definition
+ * matters more than this loop does. An earlier cut asked for rows holding a
+ * cap reservation, which excluded every payout that failed before taking
+ * one.
  *
  * One failure does not stop the sweep. This is a nightly pass over rows, not
  * a webhook delivery: abandoning the rest because the first one threw would
@@ -133,11 +138,11 @@ export async function resumeStrandedPayouts(
   deps: PayoutDeps,
   limit = 100,
 ): Promise<ResumeResult> {
-  const stranded = await deps.referrals.strandedPayouts(limit);
+  const owed = await deps.referrals.payoutsToRetry(limit, MAX_PAID_REFERRALS);
   let paid = 0;
   let failed = 0;
 
-  for (const referredUserId of stranded) {
+  for (const referredUserId of owed) {
     try {
       // Stamped before the attempt, so a row that throws moves to the back of
       // the queue instead of holding the front of it for ever.
@@ -153,5 +158,5 @@ export async function resumeStrandedPayouts(
     }
   }
 
-  return { found: stranded.length, paid, failed };
+  return { found: owed.length, paid, failed };
 }

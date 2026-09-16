@@ -4,6 +4,7 @@ import { BillingStore } from './billing-store.ts';
 import {
   applyStripeEvent,
   ownerOfSubscription,
+  stripeCollectedUsdCents,
   subscriptionRecordFrom,
 } from './billing-events.ts';
 import { payReferralIfEarned } from './referral-payout.ts';
@@ -237,13 +238,15 @@ export async function reconcileSubscriptions(
   stripe: Stripe,
   store: BillingStore,
   /**
-   * Called for every subscription Stripe reports as active, so a payout whose
-   * webhook never arrived at all is still made. The webhook is the fast path;
-   * this is the one that does not depend on a delivery having happened. It is
-   * idempotent, so calling it nightly for every active subscriber costs one
-   * read each and changes nothing for the ones already paid.
+   * Called for every subscription Stripe has actually taken money for, so a
+   * payout whose webhook never arrived at all is still made. The webhook is
+   * the fast path; this is the one that does not depend on a delivery having
+   * happened, which is why it reads the invoices back from Stripe rather
+   * than trusting anything mirrored locally. It is idempotent, so calling it
+   * nightly costs one read each and changes nothing for the ones already
+   * paid.
    */
-  onActiveSubscription?: (userId: string) => Promise<void>,
+  onClearedPayment?: (userId: string) => Promise<void>,
 ): Promise<{
   checked: number;
   corrected: number;
@@ -253,6 +256,15 @@ export async function reconcileSubscriptions(
   const ids = await discoverSubscriptionIds(stripe, store);
   let corrected = 0;
   let failed = 0;
+
+  // A discovery that stopped early is a reconcile that cannot have covered
+  // everything, so it is counted as a failure rather than reported as a
+  // clean run over a short list. The subscriptions it did find are still
+  // worth checking, which is why this does not throw.
+  if (ids.truncated) {
+    console.error('reconcile: subscription discovery stopped early');
+    failed += 1;
+  }
 
   for (const id of ids.ids) {
     try {
@@ -282,12 +294,38 @@ export async function reconcileSubscriptions(
         await store.upsertSubscription(record);
         corrected += 1;
       }
-      if (record.status === 'active' && onActiveSubscription) {
+      // Deliberately not gated on `record.status`. The bug this recovers
+      // from is a subscriber who paid and then cancelled: their status
+      // reads `canceled` for ever, and reading status was exactly how the
+      // sweep came to skip them. What they have is a recorded payment.
+      //
+      // The local answer first, and one Stripe question when it is no.
+      //
+      // Before this change the payout fired on `record.status === 'active'`,
+      // which needed no webhook at all. Requiring a recorded payment is
+      // right (an active subscription can be a trial or a full coupon and
+      // have taken nothing) but on its own it would lose the case that
+      // reading status got correct: a subscriber who really is paying and
+      // whose `invoice.paid` was never delivered. That is a payout silently
+      // never made, so it is not something to fix later.
+      //
+      // Walking their invoice history is what could not be made to work
+      // inside a scheduled run, so this does not walk it. One request, the
+      // most recent paid invoice, no pagination and no cursor, which is why
+      // it has none of the stop-early-and-report-success behaviour that
+      // shape kept producing. Its limit is honest: a subscriber whose
+      // latest paid invoice is zero but who paid earlier is not recovered
+      // here, and recovering them needs the history read this deliberately
+      // does not do.
+      const cleared =
+        (await store.hasClearedPayment(record.userId)) ||
+        (await recordLatestPaidInvoice(stripe, store, id, record.userId));
+      if (cleared && onClearedPayment) {
         // Counted as a failure of this subscription's reconcile, not thrown:
         // a reward that cannot be paid tonight must not stop the remaining
         // subscriptions being corrected.
         try {
-          await onActiveSubscription(record.userId);
+          await onClearedPayment(record.userId);
         } catch (error) {
           console.error('reconcile: referral payout failed', id, error);
           failed += 1;
@@ -305,6 +343,51 @@ export async function reconcileSubscriptions(
     failed,
     discovered: ids.discovered,
   };
+}
+
+/**
+ * Record this subscription's most recent paid invoice, and say whether it
+ * was a real charge.
+ *
+ * One Stripe request, `limit: 1`. No loop, no cursor, no page budget and
+ * nothing persisted between runs, because every previous attempt to make
+ * this delivery-independent walked history and every bound placed on that
+ * walk turned "never finishes" into "stops early while reporting success".
+ * A single request cannot do either.
+ *
+ * What it buys is the case that reading subscription status used to get
+ * right: a subscriber who is genuinely paying and whose `invoice.paid`
+ * never arrived. What it does not buy is a full audit. A subscriber whose
+ * most recent paid invoice took nothing, a coupon month say, but who paid
+ * before it, is not recovered here. That needs the history walk, and the
+ * history walk needs a design rather than a few lines.
+ */
+async function recordLatestPaidInvoice(
+  stripe: Stripe,
+  store: BillingStore,
+  subscriptionId: string,
+  userId: string,
+): Promise<boolean> {
+  const page = await stripe.invoices.list({
+    subscription: subscriptionId,
+    status: 'paid',
+    limit: 1,
+  });
+
+  const invoice = page.data[0];
+  if (!invoice?.id) return false;
+
+  const collected = stripeCollectedUsdCents(invoice);
+  await store.recordPayment(
+    invoice.id,
+    userId,
+    collected,
+    invoice.status_transitions?.paid_at
+      ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+      : new Date().toISOString(),
+  );
+
+  return collected > 0;
 }
 
 /**
@@ -326,7 +409,7 @@ export async function reconcileSubscriptions(
 async function discoverSubscriptionIds(
   stripe: Stripe,
   store: BillingStore,
-): Promise<{ ids: string[]; discovered: number }> {
+): Promise<{ ids: string[]; discovered: number; truncated: boolean }> {
   const mirrored = await store.listSubscriptionIds();
   const ids = new Set(mirrored);
   let discovered = 0;
@@ -344,10 +427,25 @@ async function discoverSubscriptionIds(
         discovered += 1;
       }
     }
+    // Stripe saying there is no more is the only clean end.
+    if (!page.has_more) break;
+
+    // Everything else is "there is more and I cannot reach it", which is
+    // one condition with two shapes: a page with nothing to take a cursor
+    // from, and a cursor identical to the one just used, which would
+    // return this same page for ever.
+    //
+    // Both have to report it. Breaking out stops the spin; `truncated` is
+    // what stops the stall being invisible. Returning a short list as
+    // though it were the whole one means every night reads the same first
+    // pages, stops at the same place, logs success, and every subscription
+    // behind that page goes unreconciled with nothing anywhere saying so.
     const last = page.data[page.data.length - 1];
-    if (!page.has_more || !last) break;
+    if (!last || last.id === startingAfter) {
+      return { ids: [...ids], discovered, truncated: true };
+    }
     startingAfter = last.id;
   }
 
-  return { ids: [...ids], discovered };
+  return { ids: [...ids], discovered, truncated: false };
 }

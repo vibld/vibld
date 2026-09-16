@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { BillingStore } from '../worker/billing-store.ts';
 import { ReferralStore } from '../worker/referral-store.ts';
+import { MAX_PAID_REFERRALS } from '../worker/referral.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
 /**
  * The referral rules that are statements rather than comparisons.
@@ -21,15 +21,7 @@ import { SqliteD1Database } from './fakes/sqlite-d1.ts';
  * coupling is the fix rather than an accident, so the test schema reflects
  * it rather than working around it.
  */
-const SCHEMA = [
-  '0002_billing.sql',
-  '0004_admin_credits.sql',
-  '0006_referrals.sql',
-]
-  .map((name) =>
-    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
-  )
-  .join('\n');
+const SCHEMA = schemaSql();
 
 const AT = '2026-09-16T00:00:00.000Z';
 
@@ -40,6 +32,26 @@ function newStore(): ReferralStore {
 function newStoreWithDb(): { store: ReferralStore; db: SqliteD1Database } {
   const db = new SqliteD1Database(SCHEMA);
   return { store: new ReferralStore(db), db };
+}
+
+/**
+ * A settled top-up for this account, which is what makes a payout owed.
+ *
+ * The sweep asks who has money cleared, not who holds a cap reservation, so
+ * every test about what it returns has to say which accounts have paid.
+ */
+async function hasPaid(db: SqliteD1Database, userId: string): Promise<void> {
+  const billing = new BillingStore(db);
+  // Both halves of what a settled top-up writes: the credit granted, and the
+  // money taken. Only the second is evidence of a charge -- a coupon-covered
+  // session writes the first and takes nothing.
+  await billing.recordTopup(`cs_${userId}`, userId, 'cus_1', 500);
+  await billing.recordPayment(
+    `cs_${userId}`,
+    userId,
+    500,
+    '2026-09-01T00:00:00.000Z',
+  );
 }
 
 /** `n` accounts referred by one referrer, none of them claimed yet. */
@@ -214,68 +226,200 @@ describe('ReferralStore.attribute', () => {
   });
 });
 
-describe('ReferralStore.strandedPayouts', () => {
-  it('finds the claims that were never paid, and nothing else', async () => {
-    const store = newStore();
-    const referred = await referAll(store, 'user_owner', 3);
-    await store.reserveSlot(referred[0]!, AT, 5);
-    await store.markPaid(referred[0]!, AT);
-    await store.reserveSlot(referred[1]!, AT, 5);
-    // referred[2] was never claimed: not stranded, just not earned yet.
+describe('ReferralStore.payoutsToRetry', () => {
+  it('finds an unpaid attribution for somebody who has paid', async () => {
+    const { store, db } = newStoreWithDb();
+    const referred = await referAll(store, 'user_owner', 2);
+    await hasPaid(db, referred[0]!);
 
-    assert.deepEqual(await store.strandedPayouts(10), [referred[1]]);
-  });
-
-  it('honours its limit, oldest first', async () => {
-    const store = newStore();
-    const referred = await referAll(store, 'user_owner', 3);
-    await store.reserveSlot(referred[0]!, '2026-09-01T00:00:00.000Z', 5);
-    await store.reserveSlot(referred[1]!, '2026-09-02T00:00:00.000Z', 5);
-    await store.reserveSlot(referred[2]!, '2026-09-03T00:00:00.000Z', 5);
-
-    assert.deepEqual(await store.strandedPayouts(2), [
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
       referred[0],
-      referred[1],
     ]);
   });
 
-  it('finds nothing when every claim was paid', async () => {
-    const store = newStore();
+  it('leaves alone a top-up that granted credit and took no money', async () => {
+    // A Checkout fully covered by a coupon settles as `no_payment_required`:
+    // the credit is granted and the card is never charged. Reading the
+    // top-up row as proof of payment made a free coupon a way to earn a
+    // referral.
+    const { store, db } = newStoreWithDb();
     const [referred] = await referAll(store, 'user_owner', 1);
+    const billing = new BillingStore(db);
+    await billing.recordTopup('cs_free', referred!, 'cus_1', 500);
+    await billing.recordPayment(
+      'cs_free',
+      referred!,
+      0,
+      '2026-09-01T00:00:00.000Z',
+    );
+
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
+  });
+
+  it('finds one whose payout failed before it ever claimed a slot', async () => {
+    // The row the old predicate excluded, and the reason it was wrong: a
+    // payout that died in the attribution read or the reservation leaves
+    // claimed_at NULL, so asking for reservations skipped exactly the rows
+    // this sweep exists to recover.
+    const { store, db } = newStoreWithDb();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    await hasPaid(db, referred!);
+
+    assert.equal((await store.attributionFor(referred!))?.claimedAt, null);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
+      referred,
+    ]);
+  });
+
+  it('finds one for a subscriber who paid once and then cancelled', async () => {
+    // Current status cannot answer "did they ever pay". A subscriber whose
+    // first subscription event was missed and who then cancelled reads
+    // `canceled` for ever, which is how they were skipped.
+    const { store, db } = newStoreWithDb();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    const billing = new BillingStore(db);
+    await billing.upsertSubscription({
+      stripeSubscriptionId: 'sub_1',
+      userId: referred!,
+      stripeCustomerId: 'cus_1',
+      tier: 'build',
+      status: 'canceled',
+      priceId: 'price_build_monthly',
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+    });
+    await billing.recordPayment(
+      'in_1',
+      referred!,
+      2000,
+      '2026-09-01T00:00:00.000Z',
+    );
+
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
+      referred,
+    ]);
+  });
+
+  it('leaves alone a paid referral whose referrer is already at the cap', async () => {
+    // `reserveSlot` refuses this row every time it is offered, so selecting
+    // it means a row that can never be paid comes back every night, takes a
+    // place in the bounded batch from one that could be paid, and leaves
+    // the run reporting rows found, none paid and nothing failed.
+    const { store, db } = newStoreWithDb();
+    const referred = await referAll(
+      store,
+      'user_owner',
+      MAX_PAID_REFERRALS + 1,
+    );
+    for (const id of referred) await hasPaid(db, id);
+
+    // The referrer takes every slot there is.
+    for (let i = 0; i < MAX_PAID_REFERRALS; i += 1) {
+      assert.equal(
+        await store.reserveSlot(
+          referred[i]!,
+          '2026-09-01T00:00:00.000Z',
+          MAX_PAID_REFERRALS,
+        ),
+        true,
+      );
+    }
+
+    const owed = await store.payoutsToRetry(50, MAX_PAID_REFERRALS);
+
+    assert.ok(
+      !owed.includes(referred[MAX_PAID_REFERRALS]!),
+      'offered a row the cap will refuse for ever',
+    );
+  });
+
+  it('still retries a row that already holds a slot, cap or not', async () => {
+    // Not asking for a new slot: a payout that failed after reserving one,
+    // which is exactly what this sweep exists to recover.
+    const { store, db } = newStoreWithDb();
+    const referred = await referAll(store, 'user_owner', MAX_PAID_REFERRALS);
+    for (const id of referred) await hasPaid(db, id);
+    for (const id of referred) {
+      await store.reserveSlot(
+        id,
+        '2026-09-01T00:00:00.000Z',
+        MAX_PAID_REFERRALS,
+      );
+    }
+
+    const owed = await store.payoutsToRetry(50, MAX_PAID_REFERRALS);
+
+    assert.equal(owed.length, MAX_PAID_REFERRALS, 'dropped reserved rows');
+  });
+
+  it('leaves alone an attribution for somebody who has not paid', async () => {
+    // An attribution on its own earns nothing, and a sweep that paid on one
+    // would be a faucet rather than a recovery.
+    const store = newStore();
+    await referAll(store, 'user_owner', 2);
+
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
+  });
+
+  it('never pays on a checkout somebody merely started', async () => {
+    // The barrier that refuses a *claim* counts a customer row, which exists
+    // from Checkout creation and before any charge. Reusing it here would pay
+    // out on an abandoned checkout.
+    const { store, db } = newStoreWithDb();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    await new BillingStore(db).linkCustomer(referred!, 'cus_1');
+
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
+  });
+
+  it('leaves alone one that has already been paid', async () => {
+    const { store, db } = newStoreWithDb();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    await hasPaid(db, referred!);
     await store.reserveSlot(referred!, AT, 5);
     await store.markPaid(referred!, AT);
 
-    assert.deepEqual(await store.strandedPayouts(10), []);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
+  });
+
+  it('honours its limit', async () => {
+    const { store, db } = newStoreWithDb();
+    const referred = await referAll(store, 'user_owner', 3);
+    for (const id of referred) await hasPaid(db, id);
+
+    assert.equal((await store.payoutsToRetry(2, MAX_PAID_REFERRALS)).length, 2);
   });
 });
 
-describe('ReferralStore.strandedPayouts: ordering', () => {
+describe('ReferralStore.payoutsToRetry: ordering', () => {
   it('puts a row that has been tried behind one that has not', async () => {
     // The starvation this fixes: ordering by claimed_at alone keeps a row
     // that fails every night at the front for ever, and once `limit` of them
     // accumulate no newer stranded payout is ever attempted again.
-    const store = newStore();
+    const { store, db } = newStoreWithDb();
     const referred = await referAll(store, 'user_owner', 2);
+    for (const id of referred) await hasPaid(db, id);
     await store.reserveSlot(referred[0]!, '2026-09-01T00:00:00.000Z', 5);
     await store.reserveSlot(referred[1]!, '2026-09-02T00:00:00.000Z', 5);
 
     // The older one is tried and fails, so it goes to the back.
     await store.markAttempted(referred[0]!, '2026-09-16T00:00:00.000Z');
 
-    assert.deepEqual(await store.strandedPayouts(10), [
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
       referred[1],
       referred[0],
     ]);
   });
 
   it('orders two attempted rows by which was tried longest ago', async () => {
-    const store = newStore();
+    const { store, db } = newStoreWithDb();
     const referred = await referAll(store, 'user_owner', 2);
+    for (const id of referred) await hasPaid(db, id);
     for (const id of referred) await store.reserveSlot(id, AT, 5);
     await store.markAttempted(referred[0]!, '2026-09-16T02:00:00.000Z');
     await store.markAttempted(referred[1]!, '2026-09-16T01:00:00.000Z');
 
-    assert.deepEqual(await store.strandedPayouts(10), [
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
       referred[1],
       referred[0],
     ]);
@@ -284,14 +428,19 @@ describe('ReferralStore.strandedPayouts: ordering', () => {
   it('lets a newer row through once the failing one has been tried', async () => {
     // With a limit of one, the whole question is which single row the sweep
     // picks tonight. Before the stamp it was the same one every night.
-    const store = newStore();
+    const { store, db } = newStoreWithDb();
     const referred = await referAll(store, 'user_owner', 2);
+    for (const id of referred) await hasPaid(db, id);
     await store.reserveSlot(referred[0]!, '2026-09-01T00:00:00.000Z', 5);
     await store.reserveSlot(referred[1]!, '2026-09-02T00:00:00.000Z', 5);
 
-    assert.deepEqual(await store.strandedPayouts(1), [referred[0]]);
+    assert.deepEqual(await store.payoutsToRetry(1, MAX_PAID_REFERRALS), [
+      referred[0],
+    ]);
     await store.markAttempted(referred[0]!, '2026-09-16T00:00:00.000Z');
-    assert.deepEqual(await store.strandedPayouts(1), [referred[1]]);
+    assert.deepEqual(await store.payoutsToRetry(1, MAX_PAID_REFERRALS), [
+      referred[1],
+    ]);
   });
 
   it('records the attempt on the row itself', async () => {

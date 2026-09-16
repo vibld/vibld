@@ -61,20 +61,72 @@ describe('the gaps between the builder panes and the sandbox', () => {
     assert.notEqual(noteFor('console'), noteFor('problems'));
   });
 
-  it('leaves no second copy of the claim in the browser sources', async () => {
+  it('leaves no second copy of any recorded wording in the browser sources', async () => {
+    // The first cut of this matched one exact phrase, `Sandbox execution
+    // exists`, and claimed to enforce that pane-gaps.ts is the only source of
+    // these limitations. It did not: restating a gap in the footer's own
+    // words, or any paraphrase, walked straight past it. Codex found that
+    // after the PR had merged.
+    //
+    // The phrases now come from the record itself, so every sentence this
+    // module publishes is one no other file may contain. A copy is the drift
+    // that has happened three times; someone writing a fresh paraphrase from
+    // scratch is not something a string search can see, and the heuristic
+    // below is the nearest thing to a catch for it.
     const sources = await browserSources(SRC);
     assert.ok(sources.length > 5, 'the walk must actually find the sources');
 
+    const recorded = [
+      ...Object.values(PANE_GAPS).flatMap((gap) => [
+        gap.note,
+        gap.footerSentence,
+      ]),
+      PREVIEW_SENTENCE,
+    ];
+    assert.ok(recorded.length >= 5, 'nothing recorded to check against');
+
     const owner = join(SRC, 'generation', 'pane-gaps.ts');
+    const offenders: string[] = [];
     for (const path of sources) {
       if (path === owner) continue;
       const text = await readFile(path, 'utf8');
-      assert.equal(
-        text.includes('Sandbox execution exists'),
-        false,
-        `${path} writes out a sandbox limitation of its own. Add it to generation/pane-gaps.ts and render it from there, or the next correction will fix one copy and leave the other.`,
-      );
+      for (const phrase of recorded) {
+        if (text.includes(phrase)) offenders.push(`${path}: "${phrase}"`);
+      }
     }
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'a file other than pane-gaps.ts writes out a sandbox limitation of its own. Render it from the record instead, or the next correction will fix one copy and leave the other.',
+    );
+  });
+
+  it("catches a limitation written in somebody else's own words", async () => {
+    // Weaker than the rule above and deliberately kept separate: it cannot
+    // know what a paraphrase looks like, so it looks for the shape these
+    // sentences have taken every time. A line that says the sandbox does not
+    // reach something is the thing being centralised, whatever its wording.
+    const sources = await browserSources(SRC);
+    const owner = join(SRC, 'generation', 'pane-gaps.ts');
+    const offenders: string[] = [];
+
+    for (const path of sources) {
+      if (path === owner) continue;
+      const text = await readFile(path, 'utf8');
+      for (const [index, line] of text.split('\n').entries()) {
+        const lower = line.toLowerCase();
+        if (!lower.includes('sandbox')) continue;
+        // "not ... yet", "not piped", "not reported", "does not" -- the way a
+        // gap gets written when somebody is describing one.
+        if (!/\b(not|no)\b/.test(lower)) continue;
+        if (/\byet\b|piped|reported|shows|output/.test(lower)) {
+          offenders.push(`${path}:${index + 1}: ${line.trim()}`);
+        }
+      }
+    }
+
+    assert.deepEqual(offenders, []);
   });
 
   it('builds the footer from the list rather than restating it', async () => {

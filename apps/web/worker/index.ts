@@ -1402,10 +1402,10 @@ export default {
       const referrals = new ReferralStore(env.DB!);
       const payout = { referrals, billing };
       ctx.waitUntil(
-        // Every referral payout that claimed a slot and never finished, first.
+        // Every referral payout that is owed and has not happened, first.
         // Stripe's redelivery gives up after a few days and a delivery that
-        // was never made is retried by nobody, so without this the slot stays
-        // taken and the reward stays owed.
+        // was never made is retried by nobody, so without this the reward
+        // stays owed and nothing ever revisits it.
         resumeStrandedPayouts(payout).then(
           (result) =>
             console.log(

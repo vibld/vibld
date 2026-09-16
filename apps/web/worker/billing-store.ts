@@ -8,7 +8,10 @@
  * testable the same way `generation-store.ts` is: a real D1-backed schema
  * (`SqliteD1Database`), no network, no Stripe SDK.
  */
-import { PURCHASE_BARRIER_SQL } from './purchase-barrier.ts';
+import {
+  CLEARED_PAYMENT_SQL,
+  PURCHASE_BARRIER_SQL,
+} from './purchase-barrier.ts';
 
 export interface SubscriptionRecord {
   stripeSubscriptionId: string;
@@ -137,7 +140,8 @@ export class BillingStore {
       .prepare(
         `INSERT INTO billing_subscriptions
            (stripe_subscription_id, user_id, stripe_customer_id, tier, status,
-            price_id, current_period_end, cancel_at_period_end, created_at, updated_at)
+            price_id, current_period_end, cancel_at_period_end, created_at,
+            updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
          ON CONFLICT(stripe_subscription_id) DO UPDATE SET
            user_id = excluded.user_id,
@@ -354,6 +358,40 @@ export class BillingStore {
   }
 
   /**
+   * Record a Stripe object that settled, and what it took.
+   *
+   * `stripeObjectId` is the Checkout Session id for a top-up or the Invoice
+   * id for a subscription charge. It is the primary key, so this is a no-op
+   * on Stripe's at-least-once redelivery and on the nightly reconcile
+   * re-reading the same invoices.
+   *
+   * `amountUsdCents` is what Stripe actually took, which is not the credit
+   * granted and is legitimately zero: a coupon-covered Checkout settles as
+   * `no_payment_required` and a trial invoice is paid for nothing. Zero is
+   * recorded rather than dropped, because it happened; whether it counts as
+   * payment is `CLEARED_PAYMENT_SQL`'s decision, in one place.
+   *
+   * `ON CONFLICT DO NOTHING` keeps the first settlement rather than the
+   * latest, which is the answer the question wants.
+   */
+  async recordPayment(
+    stripeObjectId: string,
+    userId: string,
+    amountUsdCents: number,
+    at: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_payments
+           (stripe_object_id, user_id, amount_usd_cents, cleared_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(stripe_object_id) DO NOTHING`,
+      )
+      .bind(stripeObjectId, userId, amountUsdCents, at)
+      .run();
+  }
+
+  /**
    * Has this account begun paying for anything?
    *
    * Asked by the referral claim path, which has to refuse an account that is
@@ -376,6 +414,27 @@ export class BillingStore {
   async hasBegunAPurchase(userId: string): Promise<boolean> {
     const row = await this.#db
       .prepare(`SELECT 1 AS found WHERE ${PURCHASE_BARRIER_SQL}`)
+      .bind(userId)
+      .first();
+    return row !== null;
+  }
+
+  /**
+   * Has a positive charge been recorded for this account?
+   *
+   * Recorded, not still held: a refund or a lost dispute returns the money
+   * and nothing here reads either, so this stays true for a purchase that
+   * was later reversed. See `CLEARED_PAYMENT_SQL`.
+   *
+   * The late signal, and a different question from `hasBegunAPurchase`: that
+   * one refuses a claim from somebody whose purchase is under way, this one
+   * decides whether a payout is owed. purchase-barrier.ts holds both
+   * predicates side by side and says which is which, because using the wrong
+   * one either pays out on an abandoned checkout or refuses a real customer.
+   */
+  async hasClearedPayment(userId: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(`SELECT 1 AS found WHERE ${CLEARED_PAYMENT_SQL}`)
       .bind(userId)
       .first();
     return row !== null;
