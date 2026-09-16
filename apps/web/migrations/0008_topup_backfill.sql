@@ -25,7 +25,11 @@
 -- `referral_attributions` stamps `last_attempt_at` before it tries.
 ALTER TABLE billing_customers ADD COLUMN topups_checked_at TEXT;
 
--- The rotation asks for "least recently checked first". This is the column
--- that answers it.
+-- The rotation asks for "least recently attended to first", counting the
+-- day an account joined as its last attention if nobody has looked yet.
+-- Ordering all the never-checked accounts first instead looks equivalent
+-- and is not: a steady stream of signups keeps arriving at the front and an
+-- account checked once is never revisited. This is the expression that
+-- answers it, so it is the expression the index is on.
 CREATE INDEX idx_billing_customers_topup_check
-  ON billing_customers (topups_checked_at);
+  ON billing_customers (COALESCE(topups_checked_at, created_at));

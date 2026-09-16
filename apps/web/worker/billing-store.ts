@@ -199,9 +199,17 @@ export class BillingStore {
    * the rotation covers only accounts a Stripe call could still tell us
    * something about, and the set shrinks as customers pay.
    *
-   * Least recently checked first, and the caller stamps before it reads:
-   * an account whose read throws must go to the back, or enough of them
-   * hold every slot under the limit and later accounts are never reached.
+   * Ordered by when each account was last attended to, counting the day it
+   * joined as its last attention if nobody has looked yet. Putting all the
+   * never-checked accounts first instead looks like the same thing and is
+   * not: a steady stream of signups keeps arriving at the front, and an
+   * account checked once is never revisited, so a missed webhook for an
+   * existing customer is never recovered. Coalescing makes a new arrival
+   * queue behind somebody who has been waiting longer.
+   *
+   * The caller stamps before it reads: an account whose read throws must go
+   * to the back, or enough of them hold every slot under the limit and
+   * later accounts are never reached.
    */
   async customersToCheckForTopups(
     limit: number,
@@ -210,9 +218,7 @@ export class BillingStore {
       .prepare(
         `SELECT user_id, stripe_customer_id FROM billing_customers AS c
           WHERE NOT ${CLEARED_PAYMENT_SQL.replace(/\?1/g, 'c.user_id')}
-          ORDER BY topups_checked_at IS NOT NULL,
-                   topups_checked_at,
-                   created_at
+          ORDER BY COALESCE(topups_checked_at, created_at)
           LIMIT ?1`,
       )
       .bind(limit)

@@ -639,6 +639,35 @@ describe('backfillTopupPayments', () => {
     );
   });
 
+  it('revisits an older account even while new ones keep joining', async () => {
+    // What makes this a rotation rather than a queue with a permanent
+    // front. Ordering every never-checked account first looks equivalent
+    // and is not: signups keep arriving at the front, and an account
+    // checked once is never looked at again, so a missed webhook for an
+    // existing customer is never recovered. A new arrival has to queue
+    // behind somebody who has been waiting longer.
+    const store = new BillingStore(new SqliteD1Database(SCHEMA));
+    await store.linkCustomer('user_old', 'cus_old');
+    await store.markTopupsChecked('user_old', '2020-01-01T00:00:00.000Z');
+    for (let n = 0; n < 10; n += 1) {
+      await store.linkCustomer(`user_new_${n}`, `cus_new_${n}`);
+    }
+
+    const seen = new Set<string>();
+    for (let night = 0; night < 5; night += 1) {
+      const batch = await store.customersToCheckForTopups(2);
+      for (const customer of batch) {
+        seen.add(customer.userId);
+        await store.markTopupsChecked(
+          customer.userId,
+          new Date().toISOString(),
+        );
+      }
+    }
+
+    assert.ok(seen.has('user_old'), 'never looked at the older account again');
+  });
+
   it('comes back to a customer whose history could not be read', async () => {
     // A failed read leaves nothing recorded, so the customer is still in
     // the rotation next time rather than silently dropped.
