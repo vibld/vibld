@@ -208,7 +208,7 @@ async function call(
     return {
       ok: false,
       status: response.status,
-      error: 'Vibld no longer has access to that repository on GitHub.',
+      error: 'vibld no longer has access to that repository on GitHub.',
       reason: 'access',
     };
   }
@@ -273,7 +273,7 @@ async function refCommit(
   return sha
     ? { found: true, sha }
     : {
-        error: 'GitHub returned a ref Vibld could not read.',
+        error: 'GitHub returned a ref vibld could not read.',
         reason: 'unreadable',
       };
 }
@@ -303,7 +303,7 @@ async function commitTree(
   return sha
     ? { sha }
     : {
-        error: 'GitHub returned a commit Vibld could not read.',
+        error: 'GitHub returned a commit vibld could not read.',
         reason: 'unreadable',
       };
 }
@@ -381,7 +381,7 @@ export async function resolveBase(
     reason: 'invalid',
     error: branches
       ? `The branch ${target.baseBranch} no longer exists in ${repo.owner}/${repo.repo}.`
-      : `${repo.owner}/${repo.repo} has no commits yet. Add a first commit there, then push from Vibld.`,
+      : `${repo.owner}/${repo.repo} has no commits yet. Add a first commit there, then push from vibld.`,
   };
 }
 
@@ -436,7 +436,7 @@ export async function pushCheckpoint(
   if (!treeSha) {
     return {
       ok: false,
-      error: 'GitHub returned a tree Vibld could not read.',
+      error: 'GitHub returned a tree vibld could not read.',
       reason: 'unreadable',
     };
   }
@@ -502,7 +502,7 @@ export async function pushCheckpoint(
   if (!commitSha) {
     return {
       ok: false,
-      error: 'GitHub returned a commit Vibld could not read.',
+      error: 'GitHub returned a commit vibld could not read.',
       reason: 'unreadable',
     };
   }

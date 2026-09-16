@@ -1,6 +1,7 @@
 import { ClerkProvider, Show, SignIn, UserButton } from '@clerk/react';
 import type { ReactNode } from 'react';
 import { PUBLISHABLE_KEY, clerkConfigured } from './clerk-token.ts';
+import { Mark, WORDMARK } from '../components/Mark.tsx';
 
 export {
   clerkConfigured,
@@ -46,11 +47,11 @@ function SignInLanding() {
   return (
     <div className="auth-gate">
       <div className="auth-gate__brand">
-        <span className="shell__logo" aria-hidden="true">
-          ~
+        <span className="shell__logo">
+          <Mark size={22} />
         </span>
         <div>
-          <p className="shell__name">Vibld</p>
+          <p className="shell__name">{WORDMARK}</p>
           <p className="shell__tagline">Vibe. Build. Ship.</p>
         </div>
       </div>

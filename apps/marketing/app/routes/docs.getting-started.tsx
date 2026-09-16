@@ -12,7 +12,7 @@ export default function GettingStarted() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
-        Vibld turns a description of an application into a real project: a
+        vibld turns a description of an application into a real project: a
         conventional codebase in files you can read, running on a stack you
         already recognise. This page is the first twenty minutes.
       </p>
@@ -55,7 +55,7 @@ export default function GettingStarted() {
         </li>
         <li>
           <strong>Reference URL</strong> points at a page to copy from or
-          emulate. Vibld fetches it and reads its structure.
+          emulate. vibld fetches it and reads its structure.
         </li>
       </ul>
       <p>

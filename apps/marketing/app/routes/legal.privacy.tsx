@@ -14,7 +14,7 @@ export default function Privacy() {
       <p>
         This policy describes what {SITE.legalEntity} (&ldquo;{SITE.name}
         &rdquo;, &ldquo;we&rdquo;) collects through this website today, while
-        Vibld is in its pre-launch waitlist phase. It will be expanded before
+        vibld is in its pre-launch waitlist phase. It will be expanded before
         the product itself launches, since account, project, and billing data do
         not exist yet.
       </p>
@@ -67,7 +67,7 @@ export default function Privacy() {
 
       <h2>Why we collect it</h2>
       <p>
-        We use your email address to notify you when Vibld becomes available and
+        We use your email address to notify you when vibld becomes available and
         to send occasional updates about the product before then. We do not use
         it for any other purpose, and we do not sell it.
       </p>
@@ -85,7 +85,7 @@ export default function Privacy() {
       <h2>How long we keep it</h2>
       <p>
         We keep your email address until you unsubscribe, ask us to delete it,
-        or Vibld launches and the waitlist is retired, whichever comes first.
+        or vibld launches and the waitlist is retired, whichever comes first.
       </p>
 
       <h2>Your choices</h2>
@@ -114,7 +114,7 @@ export default function Privacy() {
 
       <h2>Changes to this policy</h2>
       <p>
-        As Vibld moves from a waitlist to a live product, this policy will be
+        As vibld moves from a waitlist to a live product, this policy will be
         replaced with a version covering accounts, projects, and payment data.
         We will update the &ldquo;Last updated&rdquo; date whenever we do, and
         for material changes we will notify waitlist members by email.

@@ -85,7 +85,7 @@ const SECTION_CONTENT: Record<
     body: 'Answers you can edit directly in the generated source.',
     items: [
       'Can I export this project? Yes -- it is a conventional npm project.',
-      'Do I need Vibld to build it? No. npm install and npm run build are enough.',
+      'Do I need vibld to build it? No. npm install and npm run build are enough.',
     ],
   },
   contact: {
@@ -141,7 +141,7 @@ export function deriveTitle(prompt: string): string {
     .filter((word) => word.length > 1 && !STOP_WORDS.has(word.toLowerCase()));
 
   const chosen = words.slice(0, 3).map(titleCase);
-  return chosen.length > 0 ? chosen.join(' ') : 'Vibld Project';
+  return chosen.length > 0 ? chosen.join(' ') : 'vibld project';
 }
 
 export function slugify(title: string): string {

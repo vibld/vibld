@@ -20,7 +20,7 @@ describe('brief derivation', () => {
   });
 
   it('falls back to a default title when the prompt carries no signal', () => {
-    assert.equal(deriveTitle('build a site'), 'Vibld Project');
+    assert.equal(deriveTitle('build a site'), 'vibld project');
     assert.equal(slugify(''), 'vibld-project');
   });
 

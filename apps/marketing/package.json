@@ -5,6 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
+    "brand:assets": "node --experimental-strip-types scripts/brand-assets.ts",
     "build": "react-router build && node --experimental-strip-types scripts/postbuild.ts",
     "deploy": "pnpm dlx wrangler@4.129.1 deploy",
     "dev": "react-router dev",
@@ -15,6 +16,7 @@
   },
   "dependencies": {
     "@react-router/node": "8.3.1",
+    "@vibld/brand": "workspace:*",
     "isbot": "5.1.36",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -26,6 +28,7 @@
     "@types/node": "22.19.1",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "sharp": ">=0.35.4",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vite": "8.2.2"

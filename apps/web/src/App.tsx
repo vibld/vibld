@@ -1,4 +1,5 @@
 import { AdminPanel } from './components/AdminPanel.tsx';
+import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
 import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
@@ -37,11 +38,11 @@ function Builder() {
     <div className="shell">
       <header className="shell__header">
         <div className="shell__brand">
-          <span className="shell__logo" aria-hidden="true">
-            ~
+          <span className="shell__logo">
+            <Mark size={22} />
           </span>
           <div>
-            <p className="shell__name">Vibld</p>
+            <p className="shell__name">{WORDMARK}</p>
             <p className="shell__tagline">Vibe. Build. Ship.</p>
           </div>
         </div>

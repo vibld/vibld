@@ -14,7 +14,19 @@ export interface SiteRoute {
 }
 
 export const SITE = {
-  name: 'Vibld',
+  /**
+   * Lowercase, everywhere, with no exceptions (Chris, 2026-09-16). It is the
+   * wordmark, so it is set the way the wordmark is set: in titles, in the
+   * header, in body copy, mid-sentence.
+   *
+   * `legalName` below is the capitalised form, which exists for one job:
+   * schema.org needs an `alternateName` a search engine can match against the
+   * way people actually type it. BRAND-01 is about consistency, and giving a
+   * crawler both spellings of one entity serves that better than pretending
+   * only one exists.
+   */
+  name: 'vibld',
+  legalName: 'Vibld',
   tagline: 'Vibe. Build. Ship.',
   /**
    * Absolute URLs are required in social card metadata, so the origin has to
@@ -73,10 +85,10 @@ export const SITE = {
   /** The social card built by the brand system (issue #7). Absolute URL is filled in against SITE.url; see `metaFor`. */
   ogImage: '/og-image.png',
   ogImageAlt:
-    'Vibld: an AI application builder that generates conventional, portable projects.',
+    'vibld: an AI application builder that generates conventional, portable projects.',
   /** One sentence, reused verbatim in schema, llms.txt and the OG card. */
   summary:
-    'Vibld is an AI application builder that turns a conversation into a working project and generates a conventional, portable codebase you can read, own and take with you.',
+    'vibld is an AI application builder that turns a conversation into a working project and generates a conventional, portable codebase you can read, own and take with you.',
   mailingAddress: '285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342',
   governingLaw: 'the State of Georgia, USA, with venue in Gwinnett County',
   emails: {
@@ -104,20 +116,20 @@ export const LEGAL_DOCS: LegalDoc[] = [
     label: 'Terms of Service',
     title: `Terms of Service | ${SITE.name}`,
     description:
-      'The agreement between you and Chris Brock LLC for using Vibld and its waitlist.',
+      'The agreement between you and Chris Brock LLC for using vibld and its waitlist.',
   },
   {
     slug: 'privacy',
     label: 'Privacy Policy',
     title: `Privacy Policy | ${SITE.name}`,
     description:
-      'What Vibld collects, why, how long it is kept, and how to request access or deletion.',
+      'What vibld collects, why, how long it is kept, and how to request access or deletion.',
   },
   {
     slug: 'acceptable-use',
     label: 'Acceptable Use Policy',
     title: `Acceptable Use Policy | ${SITE.name}`,
-    description: 'What may and may not be built, sent or hosted through Vibld.',
+    description: 'What may and may not be built, sent or hosted through vibld.',
   },
   {
     slug: 'security',
@@ -131,7 +143,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
     label: 'Subprocessors',
     title: `Subprocessors | ${SITE.name}`,
     description:
-      'The services Vibld uses to operate, and what each one is used for.',
+      'The services vibld uses to operate, and what each one is used for.',
   },
   {
     slug: 'cookies',
@@ -143,14 +155,14 @@ export const LEGAL_DOCS: LegalDoc[] = [
     slug: 'refunds',
     label: 'Refund Policy',
     title: `Refund Policy | ${SITE.name}`,
-    description: 'How refunds work for paid Vibld plans.',
+    description: 'How refunds work for paid vibld plans.',
   },
   {
     slug: 'licenses',
     label: 'Open-Source Notices',
     title: `Open-Source Notices | ${SITE.name}`,
     description:
-      'The license terms covering Vibld’s core and its starter templates.',
+      'The license terms covering vibld’s core and its starter templates.',
   },
 ];
 
@@ -175,12 +187,12 @@ export interface DocTrackInfo {
 export const DOC_TRACKS: DocTrackInfo[] = [
   {
     id: 'hosted',
-    label: 'Using Vibld',
+    label: 'Using vibld',
     lead: 'The hosted builder at app.vibld.com: what each part of it does, what it costs, and where your project goes when you are finished with it.',
   },
   {
     id: 'self-hosted',
-    label: 'Running Vibld yourself',
+    label: 'Running vibld yourself',
     lead: 'The published source, run on your own Cloudflare account and your own model keys. What it needs, what you have to set, and what differs from the hosted service.',
   },
 ];
@@ -283,12 +295,12 @@ export const ROUTES: SiteRoute[] = [
     path: '/',
     title: `${SITE.name} | ${SITE.tagline}`,
     description:
-      'Vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
+      'vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
   },
   {
     path: '/legal',
     title: `Legal | ${SITE.name}`,
-    description: 'Every policy governing Vibld and this site, in one place.',
+    description: 'Every policy governing vibld and this site, in one place.',
   },
   ...LEGAL_DOCS.map((doc) => ({
     path: `/legal/${doc.slug}`,
@@ -299,7 +311,7 @@ export const ROUTES: SiteRoute[] = [
     path: '/docs',
     title: `Docs | ${SITE.name}`,
     description:
-      'Guides for the hosted builder and for running your own copy of Vibld.',
+      'Guides for the hosted builder and for running your own copy of vibld.',
   },
   ...DOC_GUIDES.map((guide) => ({
     path: `/docs/${guide.slug}`,
@@ -360,7 +372,7 @@ export function organizationSchema() {
           '@type': 'Organization',
           '@id': `${SITE.url}/#organization`,
           name: SITE.name,
-          alternateName: 'Vibld by Chris Brock LLC',
+          alternateName: ['Vibld', 'Vibld by Chris Brock LLC'],
           url: SITE.url,
           logo: new URL('/favicon.svg', SITE.url).toString(),
           description: SITE.summary,

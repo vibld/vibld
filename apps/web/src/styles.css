@@ -15,7 +15,7 @@
   --muted: var(--text-muted);
   --line: var(--edge);
   --accent: var(--brand);
-  --accent-fg: hsl(250 40% 8%);
+  --accent-fg: var(--vibld-on-accent);
   --success: var(--signal);
   --success-bg: var(--signal-dim);
   --error: var(--danger);
@@ -51,8 +51,16 @@ body {
   border: 0;
 }
 
+/*
+ * The focus ring is an accent-coloured thing that has to be *seen*, which is
+ * the one job coral cannot do: against newsprint it measures 2.60, under the
+ * 3:1 bar for a non-text indicator. It takes the accent ink instead, which is
+ * ultramarine on light and a lightened coral on dark, and clears the bar in
+ * both. Pointing this at `--accent` when the brand landed quietly halved the
+ * contrast of every keyboard focus indicator in the product.
+ */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--vibld-accent-ink);
   outline-offset: 2px;
 }
 
@@ -427,8 +435,14 @@ body {
   width: 100%;
   min-height: 24rem;
   flex: 1;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius);
+  /*
+   * White, and deliberately not a theme token: what this frame contains is
+   * somebody else's project, rendering on its own page. Backing it with the
+   * builder's paper colour would tint their work and make a light project
+   * look broken in dark mode. The border is ours; the canvas is theirs.
+   */
   background: #ffffff;
 }
 
@@ -650,9 +664,14 @@ body {
  * Vibld surface treatment.
  *
  * The rules above define the shell's structure and are left alone. These
- * retune how it reads: a layered dark workspace where the project being built
+ * retune how it reads: a layered workspace where the project being built
  * holds the eye and the chrome recedes. Structure unchanged, so every
  * behavioural test still describes the same markup.
+ *
+ * It said "a layered dark workspace" until the brand landed. The workspace
+ * follows `prefers-color-scheme` now, like the rest of the product, and a
+ * comment describing one of the two themes as the only one is the same
+ * defect as a pane note describing a feature that shipped.
  * ------------------------------------------------------------------------ */
 
 body {
@@ -678,14 +697,27 @@ body {
   width: 2.15rem;
   height: 2.15rem;
   border-radius: var(--radius);
-  background: linear-gradient(
-    140deg,
-    hsl(var(--vibld-brand) 92% 72%),
-    hsl(212 92% 60%)
-  );
-  color: hsl(250 40% 8%);
-  font-weight: 800;
-  font-size: 1.1rem;
+  background: var(--vibld-ultramarine);
+  color: var(--vibld-newsprint);
+  /*
+   * A tile, not a bare mark. The header bar is a surface colour and the
+   * mark's two inks are picked for paper, so an untiled mark loses one of
+   * them here. On this ground the newsprint impression carries the shape and
+   * coral stays the ghost, which is the dark-theme arrangement.
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  --vibld-mark-ink: var(--vibld-newsprint);
+  --vibld-mark-offset: var(--vibld-coral);
+  /*
+   * And the blend, not only the inks. This tile is a dark ground whatever the
+   * page theme is, so in light mode it would otherwise inherit `multiply` and
+   * multiply a near-white stroke into ultramarine, giving the ground back and
+   * erasing the mark. That is the same failure `screen` was introduced for,
+   * one scope further in.
+   */
+  --vibld-mark-blend: screen;
   box-shadow:
     0 0 0 1px var(--brand-24),
     0 6px 18px -6px var(--brand-40);
@@ -743,10 +775,19 @@ body {
     box-shadow var(--fast) var(--ease);
 }
 
+/*
+ * This replaces the global focus ring, so it has to clear the same bar on its
+ * own. It was drawn in the accent at 64% and 16% alpha, which on the paper
+ * ground composite to roughly 1.87:1 and 1.16:1: a focus indicator nobody can
+ * see, on the one control the whole product is used through. The accent ink
+ * carries the edge; the halo stays soft because it is decoration sitting on
+ * top of a border that already reads.
+ */
 .prompt__input:focus-visible {
   outline: none;
-  border-color: var(--brand-64);
-  box-shadow: 0 0 0 3px var(--brand-16);
+  border-color: var(--vibld-accent-ink);
+  box-shadow: 0 0 0 3px
+    color-mix(in oklch, var(--vibld-accent-ink) 24%, transparent);
 }
 
 .button {
@@ -772,23 +813,15 @@ body {
 
 .button--primary {
   border-color: transparent;
-  background: linear-gradient(
-    140deg,
-    hsl(var(--vibld-brand) 92% 68%),
-    hsl(212 92% 56%)
-  );
-  color: hsl(250 40% 8%);
+  background: var(--vibld-accent);
+  color: var(--vibld-on-accent);
   font-weight: 640;
   box-shadow: 0 6px 18px -8px var(--brand-64);
 }
 
 .button--primary:hover:not(:disabled) {
   filter: brightness(1.08);
-  background: linear-gradient(
-    140deg,
-    hsl(var(--vibld-brand) 92% 68%),
-    hsl(212 92% 56%)
-  );
+  background: var(--vibld-accent);
 }
 
 .chip {
@@ -836,12 +869,6 @@ body {
 .code__body {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-}
-
-.preview__frame {
-  border-radius: var(--radius);
-  border: 1px solid var(--edge);
-  background: hsl(0 0% 100%);
 }
 
 .shell__footer {

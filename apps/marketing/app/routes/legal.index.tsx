@@ -11,7 +11,7 @@ export default function LegalIndex() {
     <Page
       eyebrow="Legal"
       title="Legal documents"
-      lead="Every policy governing Vibld and this site, in one place."
+      lead="Every policy governing vibld and this site, in one place."
     >
       <ul className="mt-10 divide-y divide-black/10 border-t border-b border-black/10 dark:divide-white/10 dark:border-white/10">
         {LEGAL_DOCS.map((doc) => (

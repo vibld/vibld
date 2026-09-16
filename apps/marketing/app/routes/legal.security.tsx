@@ -75,7 +75,7 @@ export default function Security() {
 
       <h2>Scope</h2>
       <p>
-        Today, this policy covers this website ({SITE.url}). Once the Vibld
+        Today, this policy covers this website ({SITE.url}). Once the vibld
         application and hosted previews launch, this page will be updated to
         describe their scope specifically, including how untrusted, AI-generated
         code is isolated.

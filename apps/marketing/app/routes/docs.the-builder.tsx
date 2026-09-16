@@ -63,7 +63,7 @@ export default function TheBuilder() {
 
       <h2>Problems</h2>
       <p>
-        Validation findings for the staged project: what Vibld’s own checks
+        Validation findings for the staged project: what vibld’s own checks
         found in the files before you accepted them.
       </p>
       <p>

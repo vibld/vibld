@@ -60,19 +60,19 @@ export default function TakingYourCode() {
 
       <h2>Publish</h2>
       <p>
-        Builds the accepted checkpoint and serves it at a Vibld URL. Unlike a
+        Builds the accepted checkpoint and serves it at a vibld URL. Unlike a
         sandbox, it is not a dev server on a timer: it is the built output,
         which is what you want when somebody needs to look at it tomorrow.
       </p>
       <p>
-        Publishing is still Vibld hosting your project. If you want it on your
+        Publishing is still vibld hosting your project. If you want it on your
         own domain and your own account, export it or push it and deploy from
         there.
       </p>
 
       <h2>What you own</h2>
       <p>
-        What Vibld generates for you is yours. The terms covering the Vibld core
+        What vibld generates for you is yours. The terms covering the vibld core
         itself, the starter templates, and what you build with it are set out on
         the <a href="/legal/licenses">Open-Source Notices</a> page, which is the
         authoritative statement rather than this summary.

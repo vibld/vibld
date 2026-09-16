@@ -183,7 +183,7 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
               That branch is at commit{' '}
               <code>{view.problem.conflict.existingSha}</code>, and this
               checkpoint builds tree{' '}
-              <code>{view.problem.conflict.attemptedTreeSha}</code>. Vibld never
+              <code>{view.problem.conflict.attemptedTreeSha}</code>. vibld never
               overwrites a branch.
             </>
           )}

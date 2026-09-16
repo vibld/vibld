@@ -386,7 +386,7 @@ export async function exchangeCode(
   if (typeof token !== 'string' || token.length === 0) {
     return {
       ok: false,
-      error: 'GitHub returned a reply Vibld could not read.',
+      error: 'GitHub returned a reply vibld could not read.',
       reason: 'unreadable',
     };
   }
@@ -570,7 +570,7 @@ export async function userInstallations(
     if (!Array.isArray(raw)) {
       return {
         ok: false,
-        error: 'GitHub returned a reply Vibld could not read.',
+        error: 'GitHub returned a reply vibld could not read.',
         reason: 'unreadable',
       };
     }
@@ -802,7 +802,7 @@ export async function installationRepositories(
     if (!Array.isArray(raw)) {
       return {
         ok: false,
-        error: 'GitHub returned a reply Vibld could not read.',
+        error: 'GitHub returned a reply vibld could not read.',
         reason: 'unreadable',
       };
     }

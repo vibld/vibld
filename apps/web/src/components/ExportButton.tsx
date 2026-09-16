@@ -6,7 +6,7 @@ import { ZipError, archiveName, createZip } from '../export/zip.ts';
  * Take the project away.
  *
  * ADR-0002's promise -- a conventional project that builds with ordinary npm
- * commands and needs no Vibld package, account or service -- is only worth
+ * commands and needs no vibld package, account or service -- is only worth
  * something if the files can actually leave. Until this, the only way to read
  * them was one at a time in the Code tab.
  *

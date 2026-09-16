@@ -488,7 +488,7 @@ function ConsentBanner() {
               <button
                 type="button"
                 onClick={() => answer('granted')}
-                className="rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-[var(--color-accent-contrast)]"
+                className="rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-[var(--color-on-accent)]"
               >
                 Allow
               </button>
@@ -605,7 +605,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       <p className="mt-6">
         <a
           href="/"
-          className="font-medium text-[var(--color-accent)] underline underline-offset-4"
+          className="font-medium text-[var(--color-accent-ink)] underline underline-offset-4"
         >
           Go to the home page
         </a>
