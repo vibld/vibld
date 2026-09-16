@@ -81,6 +81,7 @@ import {
   handleBillingCheckout,
   handleBillingPortal,
   handleStripeWebhook,
+  backfillTopupPayments,
   reconcileSubscriptions,
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
@@ -1413,6 +1414,17 @@ export default {
             ),
           (error: unknown) =>
             console.error('referral payout resume failed', error),
+        ),
+      );
+      ctx.waitUntil(
+        backfillTopupPayments(createStripeClient(env), billing, (userId) =>
+          payReferralIfEarned(payout, userId).then(() => undefined),
+        ).then(
+          (result) =>
+            console.log(
+              JSON.stringify({ event: 'billing.topups.backfilled', ...result }),
+            ),
+          (error: unknown) => console.error('topup backfill failed', error),
         ),
       );
       ctx.waitUntil(

@@ -321,6 +321,94 @@ export async function reconcileSubscriptions(
 }
 
 /**
+ * Mirror every account's settled top-up Checkouts, and pay what they earned.
+ *
+ * The other half of the delivery-independent payment record, and the half a
+ * migration cannot supply. `recordPaidInvoices` repairs subscribers by
+ * reading Stripe; a top-up leaves no equivalent trail locally. Its only row
+ * is in `billing_topups`, which records the credit granted rather than the
+ * money taken -- a coupon-covered Checkout writes one having been charged
+ * nothing -- so the old rows cannot say which of them were real purchases.
+ *
+ * Without this, an account that topped up before `billing_payments` existed
+ * reads as never having paid, and an unpaid attribution behind it is
+ * stranded for ever: the webhook that would have recorded it is long gone.
+ *
+ * Only `mode: 'payment'` sessions. A subscription Checkout's money arrives
+ * as an invoice and is recorded there, and counting the session too would
+ * record the same charge twice.
+ *
+ * Returns what it looked at and how many accounts it found cleared money
+ * for. Idempotent: the session id is the key, so every night after the
+ * first is a no-op.
+ */
+export async function backfillTopupPayments(
+  stripe: Stripe,
+  store: BillingStore,
+  onClearedPayment?: (userId: string) => Promise<void>,
+): Promise<{ checked: number; cleared: number; failed: number }> {
+  const customers = await store.listCustomers();
+  let cleared = 0;
+  let failed = 0;
+
+  for (const { userId, stripeCustomerId } of customers) {
+    try {
+      let collected = 0;
+      let startingAfter: string | undefined;
+
+      for (;;) {
+        const page = await stripe.checkout.sessions.list({
+          customer: stripeCustomerId,
+          limit: 100,
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+        });
+
+        for (const session of page.data) {
+          if (session.mode !== 'payment') continue;
+          if (
+            session.payment_status !== 'paid' &&
+            session.payment_status !== 'no_payment_required'
+          ) {
+            continue;
+          }
+          const amount = session.amount_total ?? 0;
+          collected += amount;
+          await store.recordPayment(
+            session.id,
+            userId,
+            amount,
+            new Date((session.created ?? 0) * 1000).toISOString(),
+          );
+        }
+
+        const last = page.data.at(-1);
+        if (!page.has_more || !last?.id) break;
+        startingAfter = last.id;
+      }
+
+      if (collected > 0) {
+        cleared += 1;
+        // Same shape as the subscription path: a reward that cannot be paid
+        // tonight must not stop the remaining accounts being backfilled.
+        if (onClearedPayment) {
+          try {
+            await onClearedPayment(userId);
+          } catch (error) {
+            console.error('backfill: referral payout failed', userId, error);
+            failed += 1;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('backfill: failed to read checkouts', userId, error);
+      failed += 1;
+    }
+  }
+
+  return { checked: customers.length, cleared, failed };
+}
+
+/**
  * Mirror this subscription's paid invoices, and report what they took.
  *
  * The delivery-independent half of the payment record. `invoice.paid` is the

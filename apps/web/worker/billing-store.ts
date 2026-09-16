@@ -181,6 +181,26 @@ export class BillingStore {
     return row ? toSubscriptionRecord(row) : undefined;
   }
 
+  /**
+   * Every mapped account, as (user, Stripe customer) pairs.
+   *
+   * What the nightly top-up backfill walks. A top-up leaves no row anywhere
+   * but `billing_topups`, which records the credit granted rather than the
+   * money taken, so the only way to learn what Stripe actually collected is
+   * to ask Stripe per customer.
+   */
+  async listCustomers(): Promise<
+    Array<{ userId: string; stripeCustomerId: string }>
+  > {
+    const result = await this.#db
+      .prepare(`SELECT user_id, stripe_customer_id FROM billing_customers`)
+      .all<CustomerRow>();
+    return result.results.map((row) => ({
+      userId: row.user_id,
+      stripeCustomerId: row.stripe_customer_id,
+    }));
+  }
+
   /** Every mirrored subscription id -- what the nightly reconcile re-checks against Stripe. */
   async listSubscriptionIds(): Promise<string[]> {
     const result = await this.#db

@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
-import { reconcileSubscriptions } from '../worker/billing-handlers.ts';
+import {
+  backfillTopupPayments,
+  reconcileSubscriptions,
+} from '../worker/billing-handlers.ts';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
@@ -270,5 +273,116 @@ describe('reconcileSubscriptions: discovery', () => {
 
     assert.equal(result.checked, 1);
     assert.equal(result.failed, 0);
+  });
+});
+
+describe('backfillTopupPayments', () => {
+  /**
+   * A Stripe that reports the given Checkout Sessions for one customer.
+   *
+   * `sessions` are `[mode, payment_status, amount_total]` triples, which is
+   * exactly the three things the backfill decides on.
+   */
+  function stripeWithSessions(
+    sessions: Array<[string, string, number]>,
+  ): Stripe {
+    return {
+      checkout: {
+        sessions: {
+          async list() {
+            return {
+              data: sessions.map(([mode, payment_status, amount], index) => ({
+                id: `cs_${index}`,
+                mode,
+                payment_status,
+                amount_total: amount,
+                created: 1_800_000_000,
+              })),
+              has_more: false,
+            };
+          },
+        },
+      },
+    } as unknown as Stripe;
+  }
+
+  async function storeWithCustomer(): Promise<BillingStore> {
+    const store = new BillingStore(new SqliteD1Database(SCHEMA));
+    await store.linkCustomer('user_1', 'cus_1');
+    return store;
+  }
+
+  it('records a settled top-up nothing else could reconstruct', async () => {
+    // The hole this closes. A top-up taken before `billing_payments` existed
+    // leaves only a `billing_topups` row, which records credit granted and
+    // not money taken, so the account reads as never having paid and the
+    // attribution behind it is stranded for ever.
+    const store = await storeWithCustomer();
+    const paid: string[] = [];
+
+    const result = await backfillTopupPayments(
+      stripeWithSessions([['payment', 'paid', 500]]),
+      store,
+      async (userId) => {
+        paid.push(userId);
+      },
+    );
+
+    assert.equal(await store.hasClearedPayment('user_1'), true);
+    assert.deepEqual(paid, ['user_1']);
+    assert.equal(result.cleared, 1);
+    assert.equal(result.failed, 0);
+  });
+
+  it('does not count a Checkout that owed nothing', async () => {
+    const store = await storeWithCustomer();
+    const paid: string[] = [];
+
+    await backfillTopupPayments(
+      stripeWithSessions([['payment', 'no_payment_required', 0]]),
+      store,
+      async (userId) => {
+        paid.push(userId);
+      },
+    );
+
+    assert.equal(await store.hasClearedPayment('user_1'), false);
+    assert.deepEqual(paid, []);
+  });
+
+  it('ignores a session that never settled', async () => {
+    const store = await storeWithCustomer();
+
+    await backfillTopupPayments(
+      stripeWithSessions([['payment', 'unpaid', 500]]),
+      store,
+    );
+
+    assert.equal(await store.hasClearedPayment('user_1'), false);
+  });
+
+  it('leaves subscription checkouts to the invoice path, to avoid counting twice', async () => {
+    // A subscription Checkout's money arrives as an invoice and is recorded
+    // there. Recording the session as well would put the same charge in the
+    // table under two keys.
+    const store = await storeWithCustomer();
+
+    await backfillTopupPayments(
+      stripeWithSessions([['subscription', 'paid', 2000]]),
+      store,
+    );
+
+    assert.equal(await store.hasClearedPayment('user_1'), false);
+  });
+
+  it('is a no-op the second night', async () => {
+    const store = await storeWithCustomer();
+    const stripe = stripeWithSessions([['payment', 'paid', 500]]);
+
+    await backfillTopupPayments(stripe, store);
+    const again = await backfillTopupPayments(stripe, store);
+
+    assert.equal(again.failed, 0);
+    assert.equal(await store.hasClearedPayment('user_1'), true);
   });
 });
