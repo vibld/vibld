@@ -57,6 +57,9 @@ export function AccessGate({
   signOut?: ReactNode;
 }) {
   const [status, setStatus] = useState<AccessStatusValue | null>(null);
+  // Bumped by the retry control below. An unknown answer is the one outcome
+  // somebody can do something about, and asking again is the something.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!configured) return;
@@ -67,7 +70,7 @@ export function AccessGate({
     return () => {
       live = false;
     };
-  }, [configured]);
+  }, [configured, attempt]);
 
   /*
    * An unconfigured deployment renders the builder, the same as `AuthGate`
@@ -86,7 +89,68 @@ export function AccessGate({
   // refusal reads as a product that broke, rather than one that is closed.
   if (status === null) return null;
   if (status.allowed) return children;
+  /*
+   * Two different screens, because they are two different facts. The gate
+   * stays shut either way: an unknown answer is not a yes, and showing a
+   * builder that refuses every action is the worse of the two failures.
+   * What must not happen is telling an invited customer they are on a
+   * waiting list because D1 was unavailable for a moment.
+   */
+  if (!status.decided) {
+    return (
+      <UnknownNotice retry={() => setAttempt((n) => n + 1)} signOut={signOut} />
+    );
+  }
   return <ClosedNotice status={status} signOut={signOut} />;
+}
+
+/** The brand header both refusal screens carry. */
+function GateBrand() {
+  return (
+    <div className="auth-gate__brand">
+      <span className="shell__logo">
+        <Mark size={22} />
+      </span>
+      <div>
+        <p className="shell__name">{WORDMARK}</p>
+        <p className="shell__tagline">Vibe. Build. Ship.</p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What the shell says when it could not find out.
+ *
+ * Not a refusal, and it must not read as one. The account may be perfectly
+ * fine; what failed is the check. So it says that, offers the one action
+ * that can change the answer, and leaves the builder shut in the meantime.
+ */
+function UnknownNotice({
+  retry,
+  signOut,
+}: {
+  retry: () => void;
+  signOut: ReactNode;
+}) {
+  return (
+    <div className="auth-gate">
+      <GateBrand />
+      <div className="banner" role="status">
+        <p className="banner__title">We could not check your account</p>
+        <p className="banner__detail">
+          Something went wrong on our side, so we have not been able to confirm
+          whether your account has access. This is not a decision about you.
+        </p>
+        <p className="banner__detail">
+          <button type="button" onClick={retry}>
+            Try again
+          </button>
+        </p>
+      </div>
+      {signOut}
+    </div>
+  );
 }
 
 function ClosedNotice({
@@ -98,15 +162,7 @@ function ClosedNotice({
 }) {
   return (
     <div className="auth-gate">
-      <div className="auth-gate__brand">
-        <span className="shell__logo">
-          <Mark size={22} />
-        </span>
-        <div>
-          <p className="shell__name">{WORDMARK}</p>
-          <p className="shell__tagline">Vibe. Build. Ship.</p>
-        </div>
-      </div>
+      <GateBrand />
       <div className="banner" role="status">
         <p className="banner__title">You are on the waiting list</p>
         <p className="banner__detail">

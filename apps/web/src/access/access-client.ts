@@ -12,6 +12,21 @@ export interface AccessStatus {
   allowed: boolean;
   mode: 'invite' | 'open';
   message: string | null;
+  /**
+   * Whether this is an answer at all.
+   *
+   * "You are not on the list" and "we could not find out" both keep the
+   * builder shut, and for that purpose they are the same. They are not the
+   * same thing to say to a person. Collapsing them told an invited customer,
+   * during a blip that lasted seconds, that their account was on a waiting
+   * list -- a statement about them that was false, on a screen with no way
+   * to try again.
+   *
+   * So the unknown keeps its own flag rather than borrowing the refusal.
+   * False means the endpoint did not answer, or answered something that was
+   * not a status.
+   */
+  decided: boolean;
 }
 
 /** What the shell assumes when it cannot find out. Closed, deliberately. */
@@ -19,6 +34,7 @@ export const UNKNOWN_ACCESS: AccessStatus = {
   allowed: false,
   mode: 'invite',
   message: null,
+  decided: false,
 };
 
 /**
@@ -43,11 +59,20 @@ export async function fetchAccess(): Promise<AccessStatus> {
 
 /** Parsed rather than trusted: this is model-adjacent JSON over the wire. */
 export function readAccess(body: unknown): AccessStatus {
-  if (typeof body !== 'object' || body === null) return UNKNOWN_ACCESS;
+  // An array is an object and is not a status. Without that clause a `[]`
+  // body came back as a decided refusal, which is the same mistake in
+  // miniature: something that answered nothing counted as an answer.
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return UNKNOWN_ACCESS;
+  }
   const value = body as Partial<AccessStatus>;
   return {
     allowed: value.allowed === true,
     mode: value.mode === 'open' ? 'open' : 'invite',
     message: typeof value.message === 'string' ? value.message : null,
+    // The endpoint answered, and this is what it said. A body that is not an
+    // object never reaches here: it returned above, undecided, because
+    // something that is not a status is not a refusal either.
+    decided: true,
   };
 }

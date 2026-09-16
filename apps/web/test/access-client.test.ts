@@ -7,7 +7,7 @@ describe('readAccess', () => {
   it('takes a well-formed answer at face value', () => {
     assert.deepEqual(
       readAccess({ allowed: true, mode: 'open', message: null }),
-      { allowed: true, mode: 'open', message: null },
+      { allowed: true, mode: 'open', message: null, decided: true },
     );
   });
 
@@ -28,5 +28,24 @@ describe('readAccess', () => {
       assert.equal(readAccess(body).allowed, false);
     }
     assert.deepEqual(readAccess(null), UNKNOWN_ACCESS);
+  });
+
+  it('separates a refusal from an answer it could not read', () => {
+    // Both keep the builder shut and only one of them is a fact about the
+    // account. Told apart here so the screen can say which it is: an
+    // invited customer must not be shown a waiting-list notice because
+    // something failed for a moment.
+    assert.equal(
+      readAccess({ allowed: false, mode: 'invite', message: null }).decided,
+      true,
+      'a refusal the endpoint gave is an answer',
+    );
+    for (const body of [null, undefined, 'yes', 42, []]) {
+      assert.equal(
+        readAccess(body).decided,
+        false,
+        'something that is not a status was treated as a refusal',
+      );
+    }
   });
 });

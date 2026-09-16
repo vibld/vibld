@@ -340,6 +340,67 @@ describe('the access gate', () => {
     assert.equal(view.mounted(), false);
   });
 
+  it('does not call an unknown answer a refusal', async () => {
+    // A 5xx from `/api/access/status` used to render the ordinary
+    // waiting-list notice, so an invited customer was told their account
+    // was not on the list because D1 was unavailable for a moment. Shut is
+    // right; saying that about them is not.
+    serving({}, false);
+    const view = await mount();
+
+    assert.doesNotMatch(
+      view.text,
+      /waiting list/i,
+      'told an account it was refused when nothing had decided that',
+    );
+    assert.match(view.text, /could not check your account/i);
+  });
+
+  it('asks again when told to, and opens on the answer', async () => {
+    // The screen offering nothing to do was half the finding: the first
+    // answer stood until somebody thought to reload the page.
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      return attempts === 1
+        ? new Response('{}', { status: 503 })
+        : new Response(
+            JSON.stringify({ allowed: true, mode: 'open', message: null }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+    }) as typeof fetch;
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    let mounted = false;
+    function Builder() {
+      mounted = true;
+      return <p>the builder</p>;
+    }
+    await act(async () => {
+      createRoot(container).render(
+        <AccessGate signOut={<button type="button">Sign out</button>}>
+          <Builder />
+        </AccessGate>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(mounted, false, 'opened before anything said yes');
+
+    const button = [...container.querySelectorAll('button')].find((node) =>
+      /try again/i.test(node.textContent ?? ''),
+    );
+    assert.ok(button, 'nothing to press');
+
+    await act(async () => {
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.equal(mounted, true, 'the retry never reached the endpoint');
+    assert.equal(attempts, 2);
+  });
+
   it('stays closed when the answer is not an explicit yes', async () => {
     serving({ allowed: 'true', mode: 'open' });
     const view = await mount();
