@@ -8,6 +8,7 @@ import type Stripe from 'stripe';
 import {
   DEFAULT_REQUEST_BUDGET,
   pageSizeFor,
+  retryBatchFor,
   REPLAYED_EVENT_TYPES,
   STRIPE_EVENTS_CURSOR,
   replayStripeEvents,
@@ -860,5 +861,67 @@ describe('the D1 query ceiling', () => {
     await store.markEventProcessed('evt_done', 'invoice.paid');
     const done = await store.processedEventIds(['evt_done', 'evt_new']);
     assert.deepEqual([...done], ['evt_done']);
+  });
+});
+
+describe('two phases in one invocation', () => {
+  it('cannot spend the allowance twice between them', async () => {
+    // D1 counts the invocation, not the phase. Sizing the parked-event retry
+    // from the whole budget rather than from what the replay left is how an
+    // invocation goes over the limit while each phase believes it stayed
+    // inside one: the replay can reserve most of it, and a full-size batch
+    // then spends it again.
+    const store = newStore();
+    const pages = Array.from({ length: 6 }, (_, n) => [
+      topupEvent(`evt_${n}`, 100_000 - n, `user_${n}`),
+    ]);
+    const { stripe } = stripeServing(pages);
+
+    for (const budget of [40, 120, 500, 900]) {
+      const result = await replayStripeEvents(
+        stripe,
+        store,
+        20,
+        () => 5000,
+        budget,
+      );
+      assert.ok(
+        result.queriesReserved <= budget,
+        `the replay alone reserved ${result.queriesReserved} of ${budget}`,
+      );
+
+      // What the caller must hand the retry, and the worst that batch costs.
+      const left = budget - result.queriesReserved;
+      const worstRetry = retryBatchFor(left) * 6;
+      assert.ok(
+        result.queriesReserved + worstRetry <= budget,
+        `both phases together reserve more than ${budget}`,
+      );
+    }
+  });
+
+  it('takes no parked work at all when nothing is left', async () => {
+    // Zero is the right answer rather than one row anyway. A run with no
+    // allowance left does no parked work tonight, and the queue rotates by
+    // last attempt, so nothing is skipped over.
+    assert.equal(retryBatchFor(0), 0);
+    assert.equal(retryBatchFor(5), 0);
+  });
+
+  it('is what the nightly pass actually hands it', async () => {
+    // The property above is only worth having if the caller uses it. This is
+    // the line that was wrong: `retryBatchFor(budget)` sized the retry from
+    // the whole allowance while the replay had already reserved most of it.
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/index.ts', import.meta.url)),
+      'utf8',
+    );
+
+    assert.match(source, /retryBatchFor\(budget - reserved\)/);
+    assert.doesNotMatch(
+      source,
+      /retryBatchFor\(budget\)/,
+      'the retry is sized from the whole allowance again',
+    );
   });
 });

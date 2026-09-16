@@ -93,7 +93,15 @@ describe('the billing replay query budget', () => {
     // in the same place. The parked-event retry, the payout resume and the
     // subscription reconcile all draw on the same allowance, so the replay
     // must not be entitled to the lot.
+    // Two of the nightly pass's four phases are bounded by this number and
+    // two are not. The payout resume and the subscription reconcile predate
+    // it and are bounded by nothing, so what is left over is the only room
+    // they have. Half the Paid-plan limit is the estimate; taking it all
+    // would make the throw reachable through them instead.
     const budget = Number(vars.VIBLD_REPLAY_QUERY_BUDGET);
-    assert.ok(budget < 1000, 'the replay may spend the whole invocation');
+    assert.ok(
+      budget <= 500,
+      'nothing is left for the phases this budget does not bound',
+    );
   });
 });

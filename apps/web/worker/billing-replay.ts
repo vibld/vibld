@@ -144,6 +144,17 @@ export interface ReplayResult {
   /** Stripe requests spent, out of the budget. */
   requests: number;
   /**
+   * D1 queries this run reserved against the invocation's allowance.
+   *
+   * The worst case it charged itself, not what it happened to use, because
+   * what the phases after it may safely spend depends on what this one could
+   * have spent rather than on what it did. Reported so the caller can hand
+   * the rest of the pass what is actually left: a later phase sizing itself
+   * from the whole allowance is how an invocation goes over the limit while
+   * every phase believes it stayed inside one.
+   */
+  queriesReserved: number;
+  /**
    * Whether ground remains below where this run stopped.
    *
    * True is not a failure and false is not an assurance that nothing was
@@ -368,6 +379,7 @@ export async function replayStripeEvents(
           failed,
           unresolved,
           requests,
+          queriesReserved: spent,
           incomplete: false,
         };
       }
@@ -384,28 +396,52 @@ export async function replayStripeEvents(
       // alternative is stepping over a payment somebody made, and a stall
       // says so every night in `failed` and `incomplete` while a step-over
       // says nothing at all.
-      return { read, applied, failed, unresolved, requests, incomplete: true };
+      return {
+        read,
+        applied,
+        failed,
+        unresolved,
+        requests,
+        queriesReserved: spent,
+        incomplete: true,
+      };
     }
   }
 
-  return { read, applied, failed, unresolved, requests, incomplete: true };
+  return {
+    read,
+    applied,
+    failed,
+    unresolved,
+    requests,
+    queriesReserved: spent,
+    incomplete: true,
+  };
 }
 
 /**
  * How many parked events one retry run may take on.
  *
- * The same D1 ceiling the replay is bounded by, and this pass runs in the
- * same invocation, so the two budgets are spent from one allowance. A row
- * costs its attempt stamp, the handler's own queries, and on success the
- * mark and the delete.
+ * This runs in the same Worker invocation as the replay, so the argument is
+ * what the replay *left*, never the whole allowance. Sizing both phases from
+ * the same number is how an invocation goes over D1's limit while each phase
+ * believes it stayed inside one: the replay can reserve most of it, and a
+ * batch scaled to the full budget then spends it a second time.
  *
- * Taking fewer than the queue holds is not a limit on what is reachable: the
- * queue rotates by `last_attempt_at`, so a batch that does not cover it
- * leaves the rest at the front of the next one.
+ * Zero is a legitimate answer. A run with nothing left does no parked work
+ * tonight rather than throwing partway through some, and the queue rotates
+ * by `last_attempt_at`, so nothing is skipped over: what it did not reach is
+ * at the front of the next one.
  */
 export function retryBatchFor(queryBudget: number): number {
-  return Math.max(1, Math.floor(queryBudget / (MAX_QUERIES_PER_EVENT + 2)));
+  return Math.max(0, Math.floor(queryBudget / MAX_QUERIES_PER_PARKED_ROW));
 }
+
+/**
+ * D1 queries one parked row costs at its worst: the attempt stamp, the
+ * handler's own writes, then the mark and the delete once it resolves.
+ */
+const MAX_QUERIES_PER_PARKED_ROW = MAX_QUERIES_PER_EVENT + 2;
 
 export interface RetryResult {
   /** Parked events this run looked at. */

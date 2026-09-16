@@ -53,7 +53,8 @@
     // CLERK_PUBLISHABLE_KEY are Worker/build secrets set out of band.
     "CLERK_FRONTEND_API_URL": "https://clerk.vibld.com",
 
-    // D1 queries the nightly billing replay may spend in one invocation.
+    // D1 queries the payment recovery may spend in one invocation: the
+    // replay and the parked-event retry between them, not each.
     //
     // D1 meters queries per Worker invocation and stops the invocation at
     // the limit by throwing: 1000 on Workers Paid, 50 on Workers Free
@@ -61,12 +62,16 @@
     // Workers Paid, which is a fact about the account that nothing in the
     // runtime reports, so it is written down here rather than guessed at.
     //
-    // 900 and not 1000: the replay charges itself the worst case a page
-    // could cost before it spends it, and the rest of the scheduled pass
-    // (the parked-event retry, the payout resume, the subscription
-    // reconcile) draws on the same allowance. Leaving headroom is what keeps
-    // the throw, which would freeze the replay's cursor, out of reach.
-    "VIBLD_REPLAY_QUERY_BUDGET": "900",
+    // 500 rather than anything near 1000, and the reason is a limit of this
+    // number rather than a margin of safety. Two of the four phases in the
+    // nightly pass are bounded by it: the replay reserves a page's worst
+    // case before spending it and reports what it reserved, and the retry is
+    // sized from what is left, so those two together cannot exceed this.
+    // The other two, the referral payout resume and the subscription
+    // reconcile, are older than this budget and are not bounded by anything.
+    // What is left over is for them, and it is an estimate, not a
+    // guarantee. Raising this takes that room away from them.
+    "VIBLD_REPLAY_QUERY_BUDGET": "500",
 
     // A run reserves its worst case up front -- with a 64000-token output
     // ceiling that is about $1.61 -- and is reconciled to what it actually
