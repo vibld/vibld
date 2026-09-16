@@ -571,12 +571,21 @@ Dashboard needs no code change, only the amount to change.
   `canceled` for ever, and reading status was how the sweep came to skip
   them.
 
-  **A payment whose webhook was never delivered is not recovered.** The
-  reconcile reads state from Stripe, not history, so it corrects a
-  subscription that drifted but cannot find a charge nothing ever told this
-  deployment about. An earlier version of this change read each account's
-  Checkout and invoice history back from Stripe to close that gap, and it
-  could not be made to work inside a scheduled run: the history grows
+  For a subscriber with no recorded payment, the reconcile asks Stripe once
+  for their most recent paid invoice and records what it collected. That is
+  the case reading subscription status used to get right and requiring a
+  local row would otherwise lose: somebody who really is paying whose
+  `invoice.paid` was never delivered. One request, no pagination, nothing
+  persisted between runs.
+
+  **It is deliberately not a full audit, and two gaps follow from that.** A
+  subscriber whose most recent paid invoice collected nothing (a fully
+  discounted month) but who paid before it is not recovered. Neither is a
+  top-up whose `checkout.session.completed` was never delivered, since a
+  Checkout leaves no local trace to start from.
+
+  Closing those means reading each account's history back from Stripe, and
+  that could not be made to work inside a scheduled run: the history grows
   without bound, the run has a fixed budget, and each bound placed on it
   turned "never finishes" into "stops early and reports success". Doing it
   properly needs a resumable cursor, a request budget and an explicit

@@ -58,15 +58,17 @@ function subscriptionObject(status: string) {
  * smaller set is how the discovery tests describe "Stripe knows about this
  * one and the mirror does not".
  *
- * `paidCents` says what each subscription's paid invoices took, defaulting
- * to one real charge. It is what the payout now follows: an empty list is a
- * subscription that has never been charged, and `[0]` is one whose invoice
- * is paid in Stripe's sense and took nothing (a trial, or a full coupon).
+ * `paidCents` says what each subscription's paid invoices took. It defaults
+ * to none, so a test that wants the single-invoice recovery to find
+ * something has to say so: the recovery reads only the first entry, which
+ * is Stripe's most recent paid invoice. `[0]` is an invoice that is paid in
+ * Stripe's sense and took nothing (a trial, or a full coupon), and a
+ * negative value is one settled outside Stripe.
  */
 function stripeServing(
   statuses: string[],
   listed = statuses,
-  paidCents: (subscriptionId: string) => number[] = () => [2000],
+  paidCents: (subscriptionId: string) => number[] = () => [],
 ): Stripe {
   return {
     subscriptions: {
@@ -136,6 +138,106 @@ describe('reconcileSubscriptions', () => {
     assert.deepEqual(offered.sort(), ['user_active', 'user_canceled']);
     assert.equal(result.checked, 3);
     assert.equal(result.failed, 0);
+  });
+
+  it('recovers a paying subscriber whose invoice.paid was never delivered', async () => {
+    // The case reading `status === 'active'` used to get right, and the one
+    // requiring a recorded payment would otherwise lose: a subscriber who
+    // really is paying, with nothing local to show for it because the
+    // webhook never arrived. A payout silently never made is not something
+    // to leave for later.
+    const statuses = ['active'];
+    const store = await storeWith(statuses);
+    const offered: string[] = [];
+
+    await reconcileSubscriptions(
+      stripeServing(statuses, statuses, () => [2000]),
+      store,
+      async (userId) => {
+        offered.push(userId);
+      },
+    );
+
+    assert.deepEqual(offered, ['user_active']);
+    assert.equal(await store.hasClearedPayment('user_active'), true);
+  });
+
+  it('does not recover a subscriber whose latest invoice took nothing', async () => {
+    // A trial or a fully discounted month is `paid` and collected no money.
+    // Recorded truthfully, and it earns nothing.
+    const statuses = ['active'];
+    const store = await storeWith(statuses);
+    const offered: string[] = [];
+
+    await reconcileSubscriptions(
+      stripeServing(statuses, statuses, () => [0]),
+      store,
+      async (userId) => {
+        offered.push(userId);
+      },
+    );
+
+    assert.deepEqual(offered, []);
+    assert.equal(await store.hasClearedPayment('user_active'), false);
+  });
+
+  it('does not recover a subscriber whose invoice settled outside Stripe', async () => {
+    const statuses = ['active'];
+    const store = await storeWith(statuses);
+    const offered: string[] = [];
+
+    await reconcileSubscriptions(
+      stripeServing(statuses, statuses, () => [-2000]),
+      store,
+      async (userId) => {
+        offered.push(userId);
+      },
+    );
+
+    assert.deepEqual(offered, []);
+    assert.equal(await store.hasClearedPayment('user_active'), false);
+  });
+
+  it('asks Stripe once per subscription, and not at all once payment is recorded', async () => {
+    // The whole reason this shape is safe. One request, no pagination, so
+    // it cannot stop early while reporting success the way walking the
+    // history did. And a subscriber already known to have paid costs no
+    // request at all.
+    const statuses = ['active'];
+    const store = await storeWith(statuses);
+    let invoiceCalls = 0;
+    const counting = {
+      subscriptions: {
+        async list() {
+          return { data: [subscriptionObject('active')], has_more: false };
+        },
+        async retrieve() {
+          return subscriptionObject('active');
+        },
+      },
+      invoices: {
+        async list() {
+          invoiceCalls += 1;
+          return {
+            data: [
+              {
+                id: 'in_latest',
+                amount_paid: 2000,
+                amount_paid_off_stripe: 0,
+                status_transitions: { paid_at: 1_800_000_000 },
+              },
+            ],
+            has_more: false,
+          };
+        },
+      },
+    } as unknown as Stripe;
+
+    await reconcileSubscriptions(counting, store);
+    assert.equal(invoiceCalls, 1, 'asked Stripe more than once');
+
+    await reconcileSubscriptions(counting, store);
+    assert.equal(invoiceCalls, 1, 'asked again after the payment was known');
   });
 
   it('does not offer a subscriber whose only payment took nothing', async () => {
