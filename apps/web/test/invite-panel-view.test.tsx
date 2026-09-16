@@ -71,6 +71,19 @@ async function open() {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
     },
+    // Scoped to a row, because the same words label the control beside the
+    // field. A search over the whole panel finds that one first and, when
+    // the field is empty, presses a disabled button and asserts nothing.
+    pressRow: async (label: RegExp) => {
+      const button = [
+        ...container.querySelectorAll('.invites__row button'),
+      ].find((node) => label.test(node.textContent ?? ''));
+      assert.ok(button, `no row control matching ${label}`);
+      await act(async () => {
+        (button as HTMLButtonElement).click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    },
     type: async (value: string) => {
       const input = container.querySelector('input');
       assert.ok(input, 'no field');
@@ -137,7 +150,7 @@ describe('the invite panel', () => {
       ],
     });
     const view = await open();
-    await view.press(/Withdraw/);
+    await view.pressRow(/Withdraw/);
 
     assert.match(view.text(), /had no invite to withdraw/i);
     assert.doesNotMatch(view.text(), /Withdrew/);
@@ -157,7 +170,7 @@ describe('the invite panel', () => {
       ],
     });
     const view = await open();
-    await view.press(/Withdraw/);
+    await view.pressRow(/Withdraw/);
 
     assert.match(view.text(), /withdrawn/i);
     assert.match(view.text(), /Invite again/);
@@ -165,6 +178,91 @@ describe('the invite panel', () => {
       seen.filter((call) => call.url === '/api/admin/invites').length,
       2,
       'never asked the list what it looks like now',
+    );
+  });
+
+  it('says when the list is not all of it', async () => {
+    // The rows are capped. Presenting 200 of them as the list is a claim
+    // nothing established, and it is the claim that makes the next failure
+    // invisible.
+    harness({
+      '/api/admin/invites': [{ invites: [WAITING], truncated: true }],
+    });
+    const view = await open();
+    assert.match(view.text(), /more invites than are shown/i);
+  });
+
+  it('can withdraw an address the list does not show', async () => {
+    // The consequence of the cap, and the reason the note above is not
+    // enough on its own: the per-row control is the only one a row has, so
+    // an invite past the cap would have no way to be withdrawn at all.
+    const seen = harness({
+      '/api/admin/invites': [{ invites: [WAITING], truncated: true }],
+      '/api/admin/invite/revoke': [{ email: 'far@example.com', revoked: true }],
+    });
+    const view = await open();
+    await view.type('far@example.com');
+    await view.press(/Withdraw/);
+
+    const revokes = seen.filter(
+      (call) => call.url === '/api/admin/invite/revoke',
+    );
+    assert.equal(revokes.length, 1, 'never reached the route');
+    assert.deepEqual(JSON.parse(revokes[0]?.body ?? '{}'), {
+      email: 'far@example.com',
+    });
+    assert.match(view.text(), /Withdrew far@example\.com/);
+  });
+
+  it('does not take away an address typed while the invite was in flight', async () => {
+    // The field stays editable during the request, and the operator's next
+    // address is usually typed into it. Clearing on the answer throws that
+    // away, and the comparison that was supposed to prevent it read the
+    // value from the render that started the request, which is by
+    // definition the one just submitted.
+    let release: (() => void) | null = null;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/admin/invite') {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return new Response(
+          JSON.stringify({
+            email: 'first@example.com',
+            created: true,
+            reinstated: false,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ invites: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const view = await open();
+    await view.type('first@example.com');
+    await act(async () => {
+      const button = [...view.container.querySelectorAll('button')].find(
+        (node) => /^Invite$/.test(node.textContent ?? ''),
+      );
+      button?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await view.type('second@example.com');
+    await act(async () => {
+      release?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const field = view.container.querySelector('input');
+    assert.equal(
+      field?.value,
+      'second@example.com',
+      'threw away what was being typed',
     );
   });
 
@@ -193,7 +291,7 @@ describe('the invite panel', () => {
     }) as typeof fetch;
 
     const view = await open();
-    await view.press(/Withdraw/);
+    await view.pressRow(/Withdraw/);
 
     // Asserted on the rows, not on the page text. The confirmation sentence
     // names the same address, so matching the text passed with the rows

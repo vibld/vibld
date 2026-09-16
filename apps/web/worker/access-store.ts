@@ -114,8 +114,23 @@ export class AccessStore {
     return result.meta.changes > 0;
   }
 
-  /** The list an operator reads: never-used invites first, oldest first. */
-  async list(limit = 200): Promise<InviteRecord[]> {
+  /**
+   * The list an operator reads: never-used invites first, oldest first.
+   *
+   * `truncated` rather than a silently short answer. A capped list that
+   * presents itself as the whole one is a claim nothing established, and the
+   * cost here is specific: the panel's only control for withdrawing an
+   * invite is the row, so an invite past the cap would have no way to be
+   * withdrawn and nothing would say why.
+   *
+   * One row more than asked for is fetched and dropped. Comparing the count
+   * to the limit cannot tell a full page from a last page of exactly that
+   * size, and an operator told the list is incomplete when it is not goes
+   * looking for rows that do not exist.
+   */
+  async list(
+    limit = 200,
+  ): Promise<{ invites: InviteRecord[]; truncated: boolean }> {
     const result = await this.#db
       .prepare(
         `SELECT email, invited_by_email, invited_at, redeemed_by_user_id,
@@ -124,7 +139,7 @@ export class AccessStore {
           ORDER BY redeemed_at IS NOT NULL, invited_at
           LIMIT ?1`,
       )
-      .bind(limit)
+      .bind(limit + 1)
       .all<{
         email: string;
         invited_by_email: string;
@@ -133,13 +148,17 @@ export class AccessStore {
         redeemed_at: string | null;
         revoked_at: string | null;
       }>();
-    return (result.results ?? []).map((row) => ({
-      email: row.email,
-      invitedByEmail: row.invited_by_email,
-      invitedAt: row.invited_at,
-      redeemedByUserId: row.redeemed_by_user_id,
-      redeemedAt: row.redeemed_at,
-      revokedAt: row.revoked_at,
-    }));
+    const rows = result.results ?? [];
+    return {
+      truncated: rows.length > limit,
+      invites: rows.slice(0, limit).map((row) => ({
+        email: row.email,
+        invitedByEmail: row.invited_by_email,
+        invitedAt: row.invited_at,
+        redeemedByUserId: row.redeemed_by_user_id,
+        redeemedAt: row.redeemed_at,
+        revokedAt: row.revoked_at,
+      })),
+    };
   }
 }

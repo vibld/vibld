@@ -43,8 +43,16 @@ export type IssueResult =
 export type RevokeResult =
   { ok: true; email: string; revoked: boolean } | { ok: false; error: string };
 
+/**
+ * `truncated` is the route saying there are more rows than it returned.
+ *
+ * Carried rather than dropped: the panel's per-row controls are the only way
+ * to act on a row, so an invite past the cap has none, and a capped list
+ * that presents itself as the whole one is what makes that invisible.
+ */
 export type ListResult =
-  { ok: true; invites: InviteRecord[] } | { ok: false; error: string };
+  | { ok: true; invites: InviteRecord[]; truncated: boolean }
+  | { ok: false; error: string };
 
 async function authHeaders(
   getToken: () => Promise<string | null>,
@@ -107,11 +115,17 @@ export async function listInvites(
     // A row that cannot be read is dropped rather than faked into shape: a
     // list of invites with an invented address in it is worse than a
     // shorter list.
+    //
+    // `truncated` only when the route says so. A route that does not say is
+    // not evidence of a complete list, but it is not evidence of a capped
+    // one either, and warning on every answer sends an operator looking for
+    // rows that are not there.
     return {
       ok: true,
       invites: rows
         .map(readRecord)
         .filter((row): row is InviteRecord => row !== null),
+      truncated: (body as { truncated?: unknown }).truncated === true,
     };
   } catch {
     return {

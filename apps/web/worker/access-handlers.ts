@@ -111,7 +111,7 @@ export async function handleInviteList(
 ): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
   if (!env.DB) return json({ error: 'Invites are not configured here.' }, 503);
-  return json({ invites: await new AccessStore(env.DB).list() });
+  return json(await new AccessStore(env.DB).list());
 }
 
 async function emailFromBody(request: Request): Promise<string | null> {

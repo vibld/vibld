@@ -24,6 +24,7 @@ export function InvitePanel() {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [invites, setInvites] = useState<InviteRecord[] | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export function InvitePanel() {
       if (!live) return;
       if (result.ok) {
         setInvites(result.invites);
+        setTruncated(result.truncated);
         setLoadError(null);
       } else {
         // The rows already shown are left alone. Clearing them on a failed
@@ -85,7 +87,12 @@ export function InvitePanel() {
     );
     if (result.created || result.reinstated) {
       setVersion((n) => n + 1);
-      if (trimmed === email.trim()) setEmail('');
+      // Compared against the value now, not the one this closure was born
+      // with. Those are the same on the render that started the request and
+      // different by the time it answers if the operator has typed the next
+      // address, and clearing then takes away what they are in the middle
+      // of writing.
+      setEmail((current) => (current.trim() === trimmed ? '' : current));
     }
   }
 
@@ -137,6 +144,21 @@ export function InvitePanel() {
         >
           {busy ? 'Working…' : 'Invite'}
         </button>
+        {/*
+          Withdrawing from the field as well as from a row, because the rows
+          are capped and an invite past the cap would otherwise have no
+          control at all. It acts on the address typed, which is the same
+          thing the route takes, so a list too long to show is not a list too
+          long to administer.
+        */}
+        <button
+          type="button"
+          className="button"
+          onClick={() => void withdraw(email)}
+          disabled={busy || email.trim() === ''}
+        >
+          Withdraw
+        </button>
       </div>
 
       {note ? (
@@ -152,6 +174,13 @@ export function InvitePanel() {
       {loadError ? (
         <p className="pane-note pane-note--error" role="alert">
           {loadError}
+        </p>
+      ) : null}
+
+      {truncated ? (
+        <p className="pane-note" role="status">
+          There are more invites than are shown. Type an address above to invite
+          or withdraw it, whether or not it appears below.
         </p>
       ) : null}
 
