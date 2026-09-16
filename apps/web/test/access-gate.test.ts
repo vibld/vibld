@@ -84,4 +84,44 @@ describe('the invite gate', () => {
     assert.equal(isGated('/api/config'), false);
     assert.equal(isGated('/api/access/status'), false);
   });
+
+  it('runs the gate before the router dispatches anything', async () => {
+    // The half the route table cannot prove. A complete table is a fact about
+    // two lists; whether the router consults it before dispatching is what
+    // decides if an uninvited account can spend money.
+    //
+    // This reads the source rather than driving the Worker, because
+    // `worker/index.ts` imports `cloudflare:workers` and cannot be loaded
+    // under `node --test` at all. The repository's own answer to that is to
+    // split the pure half out (see `generation-run.ts` beside
+    // `generation-workflow.ts`), which the router has not had done to it yet.
+    // Until it does, this is a structural check and not a behavioural one,
+    // and it is worth having precisely because it is the ordering that
+    // matters: a gate after the first dispatch is not a gate.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+
+    const gate = source.indexOf('if (isGated(pathname))');
+    assert.ok(gate > 0, 'the router does not call the gate at all');
+
+    const firstDispatch = source.indexOf("if (pathname === '/api/");
+    assert.ok(firstDispatch > 0, 'no route dispatch found to compare against');
+
+    assert.ok(
+      gate < firstDispatch,
+      'a route is dispatched before the invite gate runs',
+    );
+  });
+
+  it('resolves a principal inside the gate, so an uninvited and an unauthenticated caller differ', async () => {
+    // Two different problems, and only one of them is the caller's to fix.
+    // A gate that refused before identity would answer 403 to somebody who
+    // simply has not signed in.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const gate = source.slice(
+      source.indexOf('if (isGated(pathname))'),
+      source.indexOf("if (pathname === '/api/"),
+    );
+    assert.match(gate, /resolvePrincipal/);
+    assert.match(gate, /decideAccessFor/);
+  });
 });
