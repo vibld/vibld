@@ -20,7 +20,40 @@ describe('readAccess', () => {
   });
 
   it('falls back to invite for any mode it does not recognise', () => {
-    assert.equal(readAccess({ allowed: true, mode: 'opne' }).mode, 'invite');
+    // On a yes only. The mode picks copy for screens a yes never renders,
+    // so an unfamiliar one must not cost an admitted account its access.
+    const yes = readAccess({ allowed: true, mode: 'opne' });
+    assert.equal(yes.mode, 'invite');
+    assert.equal(yes.allowed, true);
+    assert.equal(yes.decided, true);
+  });
+
+  it('will not describe a refusal it cannot read', () => {
+    // The refusal screen is written from `mode`. Coercing an unrecognised
+    // one to `invite` announces a waiting list that may not be what
+    // happened, which is the same false claim in a different place.
+    const no = readAccess({ allowed: false, mode: 'maintenance' });
+    assert.equal(no.decided, false);
+    assert.equal(no.allowed, false);
+  });
+
+  it('does not treat any 200 body as an answer', () => {
+    // A JSON object that parses is not a status. An empty body, an error
+    // envelope, a gateway's own reply: all of these used to come back as a
+    // decided refusal, so an invited customer saw the waiting-list notice
+    // with no way to retry.
+    for (const body of [
+      {},
+      { error: 'temporary' },
+      { mode: 'invite', message: null },
+      { allowed: 'false', mode: 'invite' },
+    ]) {
+      assert.equal(
+        readAccess(body).decided,
+        false,
+        `${JSON.stringify(body)} was taken for an answer`,
+      );
+    }
   });
 
   it('returns the closed answer for a body that is not an object', () => {

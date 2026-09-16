@@ -66,13 +66,29 @@ export function readAccess(body: unknown): AccessStatus {
     return UNKNOWN_ACCESS;
   }
   const value = body as Partial<AccessStatus>;
-  return {
-    allowed: value.allowed === true,
-    mode: value.mode === 'open' ? 'open' : 'invite',
-    message: typeof value.message === 'string' ? value.message : null,
-    // The endpoint answered, and this is what it said. A body that is not an
-    // object never reaches here: it returned above, undecided, because
-    // something that is not a status is not a refusal either.
-    decided: true,
-  };
+  const message = typeof value.message === 'string' ? value.message : null;
+
+  // `allowed` is the answer. A JSON object arriving with 200 is not one by
+  // itself: `{}`, an error envelope, a proxy's own reply, all parse fine and
+  // say nothing about this account. Anything but a boolean here means the
+  // question went unanswered, whatever came back.
+  if (typeof value.allowed !== 'boolean') return UNKNOWN_ACCESS;
+
+  // A yes is a yes. `mode` only picks copy on screens a yes never renders,
+  // so an unfamiliar value must not lock out an account the endpoint just
+  // admitted.
+  if (value.allowed) {
+    return {
+      allowed: true,
+      mode: value.mode === 'open' ? 'open' : 'invite',
+      message,
+      decided: true,
+    };
+  }
+
+  // A no is only sayable when we know which no it is: the refusal screen is
+  // written from `mode`, and quietly coercing an unrecognised one to
+  // `invite` announces a waiting list that may not be what happened.
+  if (value.mode !== 'invite' && value.mode !== 'open') return UNKNOWN_ACCESS;
+  return { allowed: false, mode: value.mode, message, decided: true };
 }

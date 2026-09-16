@@ -125,6 +125,14 @@ function GateBrand() {
  * Not a refusal, and it must not read as one. The account may be perfectly
  * fine; what failed is the check. So it says that, offers the one action
  * that can change the answer, and leaves the builder shut in the meantime.
+ *
+ * It carries the same wind-down controls as the refusal, because the builder
+ * is unmounted here too. A fault that does not clear (the access query
+ * broken while everything else is fine) otherwise puts a subscriber on a
+ * screen with a retry button that keeps failing and no way to stop being
+ * charged, stop a sandbox, pull a public link or hand back a repository. The
+ * routes behind those controls do not depend on the answer this screen is
+ * missing.
  */
 function UnknownNotice({
   retry,
@@ -148,6 +156,7 @@ function UnknownNotice({
           </button>
         </p>
       </div>
+      <WindDown />
       {signOut}
     </div>
   );

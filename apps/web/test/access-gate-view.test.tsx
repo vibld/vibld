@@ -356,11 +356,80 @@ describe('the access gate', () => {
     assert.match(view.text, /could not check your account/i);
   });
 
+  it('keeps the wind-down controls when the check itself failed', async () => {
+    // Retrying does not help a fault that does not clear, and the builder is
+    // unmounted here exactly as it is on the refusal. Without these controls
+    // a subscriber sits on a screen with a button that keeps failing and no
+    // way to stop being charged or take their code down. None of the routes
+    // behind them depend on the answer this screen is missing.
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      const path = url.split('?')[0] ?? url;
+      if (path === '/api/access/status') {
+        return new Response('{}', { status: 503 });
+      }
+      const byUrl: Record<string, unknown> = {
+        '/api/billing/status': {
+          tier: 'free',
+          allowanceMicroUsd: 0,
+          spentMicroUsd: 0,
+          topupRemainingMicroUsd: 2_500_000,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          hasStripeCustomer: true,
+          billingConfigured: true,
+        },
+        '/api/preview': { status: 'ready', url: 'https://x', expiresAt: 1 },
+        '/api/preview/share': {
+          shares: [
+            {
+              shareId: 's1',
+              createdAt: 1,
+              expiresAt: Date.now() + 60_000,
+              revoked: false,
+            },
+          ],
+        },
+        '/api/github/status': {
+          configured: true,
+          connected: true,
+          owner: 'chris',
+          repo: 'thing',
+        },
+      };
+      return new Response(JSON.stringify(byUrl[path] ?? {}), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const view = await mount();
+
+    assert.match(view.text, /could not check your account/i);
+    assert.equal(view.mounted(), false, 'opened on an answer nobody gave');
+    assert.match(view.text, /manage or cancel a subscription/i);
+    assert.match(view.text, /stop the running sandbox/i, 'sandbox unreachable');
+    assert.match(view.text, /public link/i, 'public code unreachable');
+    assert.match(view.text, /disconnect chris\/thing/i, 'grant unreachable');
+    assert.match(view.text, /unspent credit/i, 'no sight of their money');
+  });
+
   it('asks again when told to, and opens on the answer', async () => {
     // The screen offering nothing to do was half the finding: the first
     // answer stood until somebody thought to reload the page.
+    // Counted per URL, because the unknown screen loads what the account
+    // owns as well. A counter over every request would be counting the
+    // wind-down probes and would answer the retry with somebody else's turn.
     let attempts = 0;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      const path = url.split('?')[0] ?? url;
+      if (path !== '/api/access/status') {
+        return new Response('{}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       attempts += 1;
       return attempts === 1
         ? new Response('{}', { status: 503 })
