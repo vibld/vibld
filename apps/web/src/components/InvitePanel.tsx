@@ -207,18 +207,28 @@ export function InvitePanel() {
         of the last thing pressed. Two systems have to agree before somebody
         can use the product: Clerk decides whether they can sign in at all,
         this list decides whether signing in gets them anywhere.
+
+        It used to end "approve people in Clerk as well", which was true
+        until inviting started doing that. Left as it was, every successful
+        approval sat directly above a standing instruction to go and do the
+        thing that had just been done, which is how somebody revokes and
+        reissues an invitation that was already working. It describes what
+        inviting attempts now, and the link stays for the outcomes where
+        somebody does have to go and look, which the sentence under each
+        invite names.
       */}
       <p className="pane-note">
-        Sign-in is waitlisted in Clerk, so this list is half of it. Approve
-        people at{' '}
+        Sign-in is waitlisted in Clerk, so this list is half of it. Inviting
+        somebody here asks Clerk to approve them too, and says what Clerk
+        answered. When it could not, approve them at{' '}
         <a
           href="https://dashboard.clerk.com/~/users/waitlist"
           rel="noopener noreferrer"
           target="_blank"
         >
           the Clerk waitlist
-        </a>{' '}
-        as well.
+        </a>
+        .
       </p>
 
       {note ? (

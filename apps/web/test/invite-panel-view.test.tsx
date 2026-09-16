@@ -417,3 +417,41 @@ describe('what the panel says about Clerk', () => {
     assert.doesNotMatch(said, /can sign in\./);
   });
 });
+
+describe('the standing Clerk line, once inviting approves there too', () => {
+  it('does not tell an operator to redo what the invite just did', async () => {
+    // It used to end "approve people in Clerk as well", which was true until
+    // inviting started doing that. Left alone, a successful approval sits
+    // directly above a standing instruction to go and do the thing that has
+    // just been done, and the way somebody follows that instruction is by
+    // revoking and reissuing an invitation that was already working.
+    harness({
+      '/api/admin/invites': [{ invites: [] }],
+      '/api/admin/invite': [
+        {
+          email: 'new@example.com',
+          created: true,
+          reinstated: false,
+          clerk: { admitted: true },
+        },
+      ],
+    });
+    const view = await open();
+    await view.type('new@example.com');
+    await view.press(/^Invite$/);
+
+    assert.match(view.text(), /Approved in Clerk/i);
+    assert.doesNotMatch(
+      view.text(),
+      /approve people at/i,
+      'still standing instruction to do it by hand',
+    );
+    // The link stays, for the outcomes where somebody does have to look.
+    assert.ok(
+      view.container.querySelector(
+        'a[href="https://dashboard.clerk.com/~/users/waitlist"]',
+      ),
+      'no way to reach Clerk when the automatic attempt did not work',
+    );
+  });
+});
