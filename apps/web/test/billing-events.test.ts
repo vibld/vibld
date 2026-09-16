@@ -117,10 +117,15 @@ describe('applyStripeEvent: checkout.session.completed', () => {
 });
 
 describe('applyStripeEvent: the purchase hook', () => {
-  function topup(): Stripe.Event {
+  function topup(overrides: Record<string, unknown> = {}): Stripe.Event {
     return stripeEvent(
       'checkout.session.completed',
-      checkoutSession({ id: 'cs_topup', mode: 'payment' }),
+      checkoutSession({
+        id: 'cs_topup',
+        mode: 'payment',
+        payment_status: 'paid',
+        ...overrides,
+      }),
     );
   }
 
@@ -162,6 +167,69 @@ describe('applyStripeEvent: the purchase hook', () => {
       /payout failed/,
     );
     assert.equal(hadCustomer, true);
+  });
+
+  it('announces nothing for a session that completed unpaid', async () => {
+    // A delayed payment method completes the session and settles later, or
+    // never. Announcing on completion alone pays a referral on money that may
+    // not arrive, and records a top-up for it too.
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      topup({ payment_status: 'unpaid' }),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, []);
+  });
+
+  it('announces the delayed payment when it finally settles', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent(
+        'checkout.session.async_payment_succeeded',
+        checkoutSession({
+          id: 'cs_topup',
+          mode: 'payment',
+          payment_status: 'paid',
+        }),
+      ),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('announces a session that owed nothing to begin with', async () => {
+    // Fully covered by a coupon or a credit balance. Settled, not an edge
+    // case to skip.
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      topup({ payment_status: 'no_payment_required' }),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('does nothing at all for a delayed payment that failed', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent(
+        'checkout.session.async_payment_failed',
+        checkoutSession({ id: 'cs_topup', mode: 'payment' }),
+      ),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, []);
   });
 
   it('announces an active subscription, and not a trialing one', async () => {

@@ -111,15 +111,23 @@ export async function handleReferralClaim(
       typeof rawCode === 'string' ? rawCode : null,
     ),
     existing: existing !== undefined,
-    alreadyPurchased: await billing.hasEverPurchased(principal.userId),
+    purchaseStarted: await billing.hasBegunAPurchase(principal.userId),
   });
 
   if (decision.ok) {
-    await store.attribute(
+    // The write can still decline, and silently: it carries the purchase
+    // barrier itself, so a Checkout that completed between the check above
+    // and this line loses the race here. Logged as its own outcome rather
+    // than assumed to have succeeded, because "the rule said yes and nothing
+    // was written" is exactly the kind of thing that goes unnoticed.
+    const written = await store.attribute(
       principal.userId,
       decision.referrerUserId,
       decision.code,
     );
+    if (!written) {
+      console.log('referral claim not recorded', principal.userId);
+    }
   } else {
     // Logged, never returned. A support question about a link that did not
     // work needs an answer, and the person asking is not the attacker.

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { BillingStore } from '../worker/billing-store.ts';
 import { ReferralStore } from '../worker/referral-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
@@ -14,15 +15,31 @@ import { SqliteD1Database } from './fakes/sqlite-d1.ts';
  * `changes` count that statement reports when two writers go for the same
  * slot. A hand-written fake would only prove the method was called.
  */
-const SCHEMA = readFileSync(
-  join(import.meta.dirname, '..', 'migrations', '0006_referrals.sql'),
-  'utf8',
-);
+/**
+ * The billing tables come along because `attribute` carries the purchase
+ * barrier in its own INSERT (purchase-barrier.ts), which reads them. That
+ * coupling is the fix rather than an accident, so the test schema reflects
+ * it rather than working around it.
+ */
+const SCHEMA = [
+  '0002_billing.sql',
+  '0004_admin_credits.sql',
+  '0006_referrals.sql',
+]
+  .map((name) =>
+    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
+  )
+  .join('\n');
 
 const AT = '2026-09-16T00:00:00.000Z';
 
 function newStore(): ReferralStore {
   return new ReferralStore(new SqliteD1Database(SCHEMA));
+}
+
+function newStoreWithDb(): { store: ReferralStore; db: SqliteD1Database } {
+  const db = new SqliteD1Database(SCHEMA);
+  return { store: new ReferralStore(db), db };
 }
 
 /** `n` accounts referred by one referrer, none of them claimed yet. */
@@ -133,5 +150,101 @@ describe('ReferralStore.summaryFor', () => {
       referred: 3,
       paid: 1,
     });
+  });
+});
+
+describe('ReferralStore.attribute', () => {
+  it('records an attribution for an account with no purchase', async () => {
+    const store = newStore();
+    assert.equal(
+      await store.attribute('user_new', 'user_owner', 'ABCD2345'),
+      true,
+    );
+    assert.equal(
+      (await store.attributionFor('user_new'))?.referrerUserId,
+      'user_owner',
+    );
+  });
+
+  it('never replaces one that already exists', async () => {
+    const store = newStore();
+    await store.attribute('user_new', 'user_first', 'ABCD2345');
+    assert.equal(
+      await store.attribute('user_new', 'user_second', 'EFGH6789'),
+      false,
+    );
+    assert.equal(
+      (await store.attributionFor('user_new'))?.referrerUserId,
+      'user_first',
+    );
+  });
+
+  it('refuses once a Checkout exists for the account', async () => {
+    // The race the readable rule cannot close on its own: a claim arriving
+    // after Checkout completes but before its webhook is mirrored sees no
+    // purchase. The barrier is in this statement, so it loses here instead.
+    const { store, db } = newStoreWithDb();
+    await new BillingStore(db).linkCustomer('user_new', 'cus_1');
+
+    assert.equal(
+      await store.attribute('user_new', 'user_owner', 'ABCD2345'),
+      false,
+    );
+    assert.equal(await store.attributionFor('user_new'), undefined);
+  });
+
+  it('refuses once a top-up has been recorded', async () => {
+    const { store, db } = newStoreWithDb();
+    await new BillingStore(db).recordTopup('cs_1', 'user_new', 'cus_1', 500);
+
+    assert.equal(
+      await store.attribute('user_new', 'user_owner', 'ABCD2345'),
+      false,
+    );
+  });
+
+  it('is not blocked by somebody else having purchased', async () => {
+    const { store, db } = newStoreWithDb();
+    await new BillingStore(db).linkCustomer('user_other', 'cus_1');
+
+    assert.equal(
+      await store.attribute('user_new', 'user_owner', 'ABCD2345'),
+      true,
+    );
+  });
+});
+
+describe('ReferralStore.strandedPayouts', () => {
+  it('finds the claims that were never paid, and nothing else', async () => {
+    const store = newStore();
+    const referred = await referAll(store, 'user_owner', 3);
+    await store.reserveSlot(referred[0]!, AT, 5);
+    await store.markPaid(referred[0]!, AT);
+    await store.reserveSlot(referred[1]!, AT, 5);
+    // referred[2] was never claimed: not stranded, just not earned yet.
+
+    assert.deepEqual(await store.strandedPayouts(10), [referred[1]]);
+  });
+
+  it('honours its limit, oldest first', async () => {
+    const store = newStore();
+    const referred = await referAll(store, 'user_owner', 3);
+    await store.reserveSlot(referred[0]!, '2026-09-01T00:00:00.000Z', 5);
+    await store.reserveSlot(referred[1]!, '2026-09-02T00:00:00.000Z', 5);
+    await store.reserveSlot(referred[2]!, '2026-09-03T00:00:00.000Z', 5);
+
+    assert.deepEqual(await store.strandedPayouts(2), [
+      referred[0],
+      referred[1],
+    ]);
+  });
+
+  it('finds nothing when every claim was paid', async () => {
+    const store = newStore();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    await store.reserveSlot(referred!, AT, 5);
+    await store.markPaid(referred!, AT);
+
+    assert.deepEqual(await store.strandedPayouts(10), []);
   });
 });

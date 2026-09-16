@@ -99,7 +99,7 @@ describe('decideAttribution', () => {
     referredUserId: 'user_new',
     ownerOfCode: 'user_owner',
     existing: false,
-    alreadyPurchased: false,
+    purchaseStarted: false,
   };
 
   it('attributes a readable code owned by somebody else', () => {
@@ -139,12 +139,12 @@ describe('decideAttribution', () => {
     assert.deepEqual(decision, { ok: false, reason: 'already-attributed' });
   });
 
-  it('refuses an account that has already bought something', () => {
+  it('refuses an account that has already begun buying something', () => {
     // The offer is for somebody who arrived through a link and then bought.
     // Without this, a customer of two years pastes a code today and their
     // next top-up pays out both sides.
-    const decision = decideAttribution({ ...base, alreadyPurchased: true });
-    assert.deepEqual(decision, { ok: false, reason: 'already-purchased' });
+    const decision = decideAttribution({ ...base, purchaseStarted: true });
+    assert.deepEqual(decision, { ok: false, reason: 'purchase-started' });
   });
 
   it('asks whether they have purchased before it looks the code up', () => {
@@ -153,10 +153,10 @@ describe('decideAttribution', () => {
     // out which codes do.
     const decision = decideAttribution({
       ...base,
-      alreadyPurchased: true,
+      purchaseStarted: true,
       ownerOfCode: undefined,
     });
-    assert.deepEqual(decision, { ok: false, reason: 'already-purchased' });
+    assert.deepEqual(decision, { ok: false, reason: 'purchase-started' });
   });
 
   it('refuses an unknown code', () => {

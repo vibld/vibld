@@ -107,3 +107,45 @@ export async function payReferralIfEarned(
     reward: decision.reward,
   };
 }
+
+/** What one sweep of the stranded payouts did. */
+export interface ResumeResult {
+  found: number;
+  paid: number;
+  failed: number;
+}
+
+/**
+ * Finish the payouts that claimed a slot and never got paid.
+ *
+ * Stripe's redelivery is the first line and it recovers most of them, but it
+ * gives up after a few days, and a delivery that was never made at all is
+ * retried by nobody. Without this, "a failure anywhere in claim, grant, mark
+ * leaves a state that resumes" is a claim about the shape of the data rather
+ * than something that actually happens: the slot stays taken and the referral
+ * stays owed, permanently and quietly.
+ *
+ * One failure does not stop the sweep. This is a nightly pass over rows, not
+ * a webhook delivery: abandoning the rest because the first one threw would
+ * strand exactly the ones this exists to recover.
+ */
+export async function resumeStrandedPayouts(
+  deps: PayoutDeps,
+  limit = 100,
+): Promise<ResumeResult> {
+  const stranded = await deps.referrals.strandedPayouts(limit);
+  let paid = 0;
+  let failed = 0;
+
+  for (const referredUserId of stranded) {
+    try {
+      const outcome = await payReferralIfEarned(deps, referredUserId);
+      if (outcome.paid) paid += 1;
+    } catch (error) {
+      failed += 1;
+      console.error('referral payout resume failed', referredUserId, error);
+    }
+  }
+
+  return { found: stranded.length, paid, failed };
+}

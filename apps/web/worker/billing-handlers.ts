@@ -232,6 +232,14 @@ export async function handleStripeWebhook(
 export async function reconcileSubscriptions(
   stripe: Stripe,
   store: BillingStore,
+  /**
+   * Called for every subscription Stripe reports as active, so a payout whose
+   * webhook never arrived at all is still made. The webhook is the fast path;
+   * this is the one that does not depend on a delivery having happened. It is
+   * idempotent, so calling it nightly for every active subscriber costs one
+   * read each and changes nothing for the ones already paid.
+   */
+  onActiveSubscription?: (userId: string) => Promise<void>,
 ): Promise<{ checked: number; corrected: number; failed: number }> {
   const ids = await store.listSubscriptionIds();
   let corrected = 0;
@@ -257,6 +265,17 @@ export async function reconcileSubscriptions(
       ) {
         await store.upsertSubscription(record);
         corrected += 1;
+      }
+      if (record.status === 'active' && onActiveSubscription) {
+        // Counted as a failure of this subscription's reconcile, not thrown:
+        // a reward that cannot be paid tonight must not stop the remaining
+        // subscriptions being corrected.
+        try {
+          await onActiveSubscription(record.userId);
+        } catch (error) {
+          console.error('reconcile: referral payout failed', id, error);
+          failed += 1;
+        }
       }
     } catch (error) {
       console.error('reconcile: failed to check subscription', id, error);

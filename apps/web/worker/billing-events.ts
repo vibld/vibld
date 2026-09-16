@@ -48,6 +48,20 @@ function metadataUserId(metadata: Stripe.Metadata | null): string | undefined {
  */
 export type OnPurchaseCleared = (userId: string) => Promise<void>;
 
+/**
+ * Whether Stripe has actually taken the money for this session.
+ *
+ * `no_payment_required` is a real settled state, not an edge case to ignore:
+ * a Checkout fully covered by a coupon or a credit balance completes that way
+ * and owes nothing further.
+ */
+function isSettled(session: Stripe.Checkout.Session): boolean {
+  return (
+    session.payment_status === 'paid' ||
+    session.payment_status === 'no_payment_required'
+  );
+}
+
 async function applyCheckoutSessionCompleted(
   store: BillingStore,
   session: Stripe.Checkout.Session,
@@ -73,6 +87,25 @@ async function applyCheckoutSessionCompleted(
   await store.linkCustomer(userId, stripeCustomerId);
 
   if (session.mode !== 'payment') return; // A subscription checkout is mirrored by the subscription events below.
+
+  // A completed Checkout is not a paid one. With a delayed payment method
+  // (bank debits and the like) the session completes `unpaid` and settles
+  // later, through `checkout.session.async_payment_succeeded`, or fails and
+  // never settles at all. Recording the top-up on completion alone therefore
+  // grants credit for money that may never arrive, and pays a referral on it.
+  //
+  // The settled events route back into this same function, so the top-up and
+  // the payout both happen exactly once, when the money is actually there.
+  if (!isSettled(session)) {
+    console.log(
+      JSON.stringify({
+        event: 'billing.checkout.unsettled',
+        session: session.id,
+        paymentStatus: session.payment_status,
+      }),
+    );
+    return;
+  }
 
   const raw = session.metadata?.[CREDIT_USD_CENTS_METADATA_KEY];
   const creditUsdCents = raw ? Number(raw) : TOPUP_CREDIT_USD_CENTS;
@@ -185,11 +218,19 @@ export async function applyStripeEvent(
 ): Promise<void> {
   switch (event.type) {
     case 'checkout.session.completed':
+    // The delayed-payment settlement of a session that completed unpaid. Same
+    // handler, because it checks `payment_status` itself: the delivery that
+    // arrived unpaid did nothing, and this one does the work.
+    case 'checkout.session.async_payment_succeeded':
       await applyCheckoutSessionCompleted(
         store,
         event.data.object,
         onPurchaseCleared,
       );
+      return;
+    case 'checkout.session.async_payment_failed':
+      // Nothing to undo, which is the whole reason the grant is gated on
+      // `payment_status` rather than on the session having completed.
       return;
     case 'customer.subscription.created':
     case 'customer.subscription.updated':

@@ -26,7 +26,7 @@ function newStoreWithDb(): { store: BillingStore; db: SqliteD1Database } {
   return { store: new BillingStore(db), db };
 }
 
-describe('BillingStore.hasEverPurchased', () => {
+describe('BillingStore.hasBegunAPurchase', () => {
   /** A mirrored subscription, at whatever status the case needs. */
   function subscriptionAt(status: string) {
     return {
@@ -43,19 +43,29 @@ describe('BillingStore.hasEverPurchased', () => {
 
   it('says no for an account that has never paid for anything', async () => {
     const store = newStore();
-    assert.equal(await store.hasEverPurchased('user_1'), false);
+    assert.equal(await store.hasBegunAPurchase('user_1'), false);
   });
 
   it('says yes once a top-up has been recorded', async () => {
     const store = newStore();
     await store.recordTopup('cs_1', 'user_1', 'cus_1', 500);
-    assert.equal(await store.hasEverPurchased('user_1'), true);
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+
+  it('says yes from the moment a Checkout exists, before it is paid', async () => {
+    // The barrier has to precede the charge or it is not a barrier: a claim
+    // submitted while a Checkout is in flight would otherwise see no
+    // purchase. The customer row is written at Checkout creation, which is
+    // the earliest point there is.
+    const store = newStore();
+    await store.linkCustomer('user_1', 'cus_1');
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
   });
 
   it('asks about this account only', async () => {
     const store = newStore();
     await store.recordTopup('cs_1', 'user_1', 'cus_1', 500);
-    assert.equal(await store.hasEverPurchased('user_2'), false);
+    assert.equal(await store.hasBegunAPurchase('user_2'), false);
   });
 
   it('counts a live subscription, and a trial, but not one Stripe never charged', async () => {
@@ -67,7 +77,7 @@ describe('BillingStore.hasEverPurchased', () => {
       const store = newStore();
       await store.upsertSubscription(subscriptionAt(status));
       assert.equal(
-        await store.hasEverPurchased('user_1'),
+        await store.hasBegunAPurchase('user_1'),
         true,
         `${status} should count as having purchased`,
       );
@@ -77,7 +87,7 @@ describe('BillingStore.hasEverPurchased', () => {
       const store = newStore();
       await store.upsertSubscription(subscriptionAt(status));
       assert.equal(
-        await store.hasEverPurchased('user_1'),
+        await store.hasBegunAPurchase('user_1'),
         false,
         `${status} should not count as having purchased`,
       );
@@ -98,7 +108,7 @@ describe('BillingStore.hasEverPurchased', () => {
       .run();
 
     assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 0);
-    assert.equal(await store.hasEverPurchased('user_1'), true);
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
   });
 });
 

@@ -3,6 +3,7 @@
  * and `GitHubStore` present: SQL lives here, decisions live in
  * `referral.ts`, and nothing outside this file writes these rows.
  */
+import { PURCHASE_BARRIER_SQL } from './purchase-barrier.ts';
 import { makeCode, normaliseCode } from './referral.ts';
 
 export interface AttributionRecord {
@@ -111,12 +112,26 @@ export class ReferralStore {
   }
 
   /**
-   * Record who referred this account, if nothing has been recorded before.
+   * Record who referred this account, if nothing has been recorded before and
+   * this account is not already a customer.
    *
-   * `ON CONFLICT DO NOTHING` rather than a read followed by a write: the
-   * "first one wins" rule has to hold under two simultaneous signups with two
-   * different codes, and check-then-act does not survive that. Returns whether
-   * this call is the one that wrote.
+   * Two rules, both in the statement rather than in a read before it, because
+   * both have to hold against a second request arriving at the same instant.
+   *
+   * `ON CONFLICT DO NOTHING` is "first one wins": two simultaneous claims with
+   * two different codes must not both write, and check-then-act does not
+   * survive that.
+   *
+   * The `WHERE NOT ...` is the purchase barrier (purchase-barrier.ts). The
+   * caller has already asked the readable version of the same question and
+   * refused on it, which is what produces a reason worth logging; this is the
+   * half that closes the window between that read and this write. A claim
+   * submitted while a Checkout is in flight loses that race here instead of
+   * recording an attribution behind a purchase.
+   *
+   * It reads billing's tables, which nothing else in this file does. That is
+   * the point: the only way the two facts can be checked together is in one
+   * statement, and they are in the same database.
    */
   async attribute(
     referredUserId: string,
@@ -128,12 +143,35 @@ export class ReferralStore {
         `INSERT INTO referral_attributions
            (referred_user_id, referrer_user_id, code, created_at,
             claimed_at, paid_at)
-         VALUES (?1, ?2, ?3, ?4, NULL, NULL)
+         SELECT ?1, ?2, ?3, ?4, NULL, NULL
+          WHERE NOT ${PURCHASE_BARRIER_SQL}
          ON CONFLICT(referred_user_id) DO NOTHING`,
       )
       .bind(referredUserId, referrerUserId, code, new Date().toISOString())
       .run();
     return result.meta.changes > 0;
+  }
+
+  /**
+   * Attributions that claimed a slot and were never paid, oldest first.
+   *
+   * The state a payout that died between claiming and granting leaves behind.
+   * Stripe's own redelivery recovers most of them, but its retries run out
+   * after a few days, and a delivery that was never made at all is not
+   * retried by anybody. Without a sweep over these, the slot stays taken and
+   * the referral stays owed, permanently and silently.
+   */
+  async strandedPayouts(limit: number): Promise<string[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT referred_user_id FROM referral_attributions
+          WHERE claimed_at IS NOT NULL AND paid_at IS NULL
+          ORDER BY claimed_at
+          LIMIT ?1`,
+      )
+      .bind(limit)
+      .all<{ referred_user_id: string }>();
+    return (result.results ?? []).map((row) => row.referred_user_id);
   }
 
   /**

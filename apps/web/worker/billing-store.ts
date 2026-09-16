@@ -8,6 +8,7 @@
  * testable the same way `generation-store.ts` is: a real D1-backed schema
  * (`SqliteD1Database`), no network, no Stripe SDK.
  */
+import { PURCHASE_BARRIER_SQL } from './purchase-barrier.ts';
 
 export interface SubscriptionRecord {
   stripeSubscriptionId: string;
@@ -353,30 +354,28 @@ export class BillingStore {
   }
 
   /**
-   * Has this account ever been a paying customer?
+   * Has this account begun paying for anything?
    *
-   * Asked by the referral claim path, which has to refuse an account that
-   * already bought something: the offer is for somebody who arrived through a
-   * link and then purchased, so if a code could be attached afterwards, every
+   * Asked by the referral claim path, which has to refuse an account that is
+   * already a customer: the offer is for somebody who arrived through a link
+   * and then purchased, so if a code could be attached afterwards, every
    * established account would be a voucher waiting to be spent.
    *
-   * A subscription row counts unless Stripe never took the first payment for
-   * it (`incomplete`, `incomplete_expired`). A trial counts, because the
-   * payout fires the moment that subscription turns active and arranging a
-   * referral in between is precisely the move being refused. Neither the
-   * 12-month credit window nor the current tier comes into it: the question
-   * is whether this account has ever paid, not what it has left.
+   * "Begun" rather than "completed", and the predicate lives in
+   * purchase-barrier.ts, which explains both why and what it costs. A
+   * subscription row counts unless Stripe never took the first payment for
+   * it. A trial counts, because the payout fires the moment that subscription
+   * turns active. Neither the 12-month credit window nor the current tier
+   * comes into it: the question is whether this account is a customer, not
+   * what it has left.
+   *
+   * This is the readable half of the rule and it produces the refusal reason.
+   * The half that survives two requests arriving at once is the same
+   * predicate inside `ReferralStore.attribute`'s own INSERT.
    */
-  async hasEverPurchased(userId: string): Promise<boolean> {
+  async hasBegunAPurchase(userId: string): Promise<boolean> {
     const row = await this.#db
-      .prepare(
-        `SELECT 1 AS found
-           WHERE EXISTS (SELECT 1 FROM billing_topups WHERE user_id = ?1)
-              OR EXISTS (SELECT 1 FROM billing_subscriptions
-                          WHERE user_id = ?1
-                            AND status NOT IN ('incomplete',
-                                               'incomplete_expired'))`,
-      )
+      .prepare(`SELECT 1 AS found WHERE ${PURCHASE_BARRIER_SQL}`)
       .bind(userId)
       .first();
     return row !== null;

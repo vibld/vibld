@@ -85,7 +85,7 @@ export type AttributionRefusal =
   | 'unknown-code'
   | 'self-referral'
   | 'already-attributed'
-  | 'already-purchased';
+  | 'purchase-started';
 
 export type AttributionDecision =
   | { ok: true; referrerUserId: string; code: string }
@@ -102,18 +102,22 @@ export type AttributionDecision =
  * wins and is never replaced, because an account that can be re-attributed
  * can be sold to whichever referrer asks last.
  *
- * `alreadyPurchased` closes the other end of the same hole. The offer is for
+ * `purchaseStarted` closes the other end of the same hole. The offer is for
  * somebody who arrived through a link and then bought, so the attribution has
  * to be fixed before the purchase, not after it. Without this, any
  * long-standing customer could paste a code today and have their next top-up
  * pay out both sides, which turns every existing account into a voucher.
+ *
+ * It is "started", not "completed", and it is deliberately the conservative
+ * reading: see purchase-barrier.ts, which also carries the same rule as SQL
+ * for the window this one cannot cover on its own.
  */
 export function decideAttribution(input: {
   rawCode: string | null | undefined;
   referredUserId: string;
   ownerOfCode: string | undefined;
   existing: boolean;
-  alreadyPurchased: boolean;
+  purchaseStarted: boolean;
 }): AttributionDecision {
   const code = normaliseCode(input.rawCode);
   if (code === null) return { ok: false, reason: 'unreadable-code' };
@@ -121,8 +125,8 @@ export function decideAttribution(input: {
   // Before the code is looked at, deliberately: whether this account has ever
   // paid is nothing to do with which code was pasted, and answering it first
   // means the refusal cannot be used to probe which codes exist.
-  if (input.alreadyPurchased) {
-    return { ok: false, reason: 'already-purchased' };
+  if (input.purchaseStarted) {
+    return { ok: false, reason: 'purchase-started' };
   }
   if (input.ownerOfCode === undefined) {
     return { ok: false, reason: 'unknown-code' };

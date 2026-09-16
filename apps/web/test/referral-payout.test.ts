@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   REFERRAL_GRANT_ACTOR,
   payReferralIfEarned,
+  resumeStrandedPayouts,
 } from '../worker/referral-payout.ts';
 import { payoutGrantId } from '../worker/referral.ts';
 import type { BillingStore } from '../worker/billing-store.ts';
@@ -298,6 +299,83 @@ describe('payReferralIfEarned', () => {
     assert.equal(
       billing.grants.get(payoutGrantId('referred', 'user_new'))?.cents,
       1000,
+    );
+  });
+});
+
+describe('resumeStrandedPayouts', () => {
+  /** A store holding a fixed list of stranded rows, each payable once. */
+  function strandedFake(ids: string[], failing: string[] = []) {
+    const paid = new Set<string>();
+    return {
+      paid,
+      store: {
+        async strandedPayouts() {
+          return ids;
+        },
+        async attributionFor(referredUserId: string) {
+          if (failing.includes(referredUserId)) {
+            throw new Error(`D1 unavailable for ${referredUserId}`);
+          }
+          return {
+            referredUserId,
+            referrerUserId: 'user_owner',
+            code: 'ABCD2345',
+            createdAt: '2026-09-16T00:00:00.000Z',
+            claimedAt: '2026-09-16T00:00:00.000Z',
+            paidAt: paid.has(referredUserId)
+              ? '2026-09-16T01:00:00.000Z'
+              : null,
+          };
+        },
+        async reserveSlot() {
+          return false; // already holding one, which is why it is stranded
+        },
+        async markPaid(referredUserId: string) {
+          paid.add(referredUserId);
+          return true;
+        },
+      } as unknown as ReferralStore,
+    };
+  }
+
+  it('finishes every payout that claimed a slot and never got paid', async () => {
+    const billing = billingFake();
+    const referrals = strandedFake(['user_a', 'user_b']);
+
+    const result = await resumeStrandedPayouts({
+      referrals: referrals.store,
+      billing: billing.store,
+    });
+
+    assert.deepEqual(result, { found: 2, paid: 2, failed: 0 });
+    assert.equal(billing.grants.size, 4); // two sides, two accounts
+  });
+
+  it('keeps going when one of them fails', async () => {
+    // A nightly pass over rows, not a webhook delivery. Abandoning the rest
+    // because the first one threw would strand exactly what this recovers.
+    const billing = billingFake();
+    const referrals = strandedFake(['user_a', 'user_b', 'user_c'], ['user_a']);
+
+    const result = await resumeStrandedPayouts({
+      referrals: referrals.store,
+      billing: billing.store,
+    });
+
+    assert.deepEqual(result, { found: 3, paid: 2, failed: 1 });
+  });
+
+  it('reports nothing to do as nothing done', async () => {
+    const billing = billingFake();
+    const referrals = strandedFake([]);
+
+    assert.deepEqual(
+      await resumeStrandedPayouts({
+        referrals: referrals.store,
+        billing: billing.store,
+      }),
+      { found: 0, paid: 0, failed: 0 },
     );
   });
 });
