@@ -3,6 +3,8 @@
  * invite list.
  */
 import { AccessStore } from './access-store.ts';
+import { admitToClerk } from './clerk-waitlist.ts';
+import type { ClerkAdmission } from './clerk-waitlist.ts';
 import {
   REFUSED_MESSAGE,
   decideAccess,
@@ -18,6 +20,12 @@ export interface AccessEnv {
   /** "open" opens the deployment. Anything else, including unset, is invite-only. */
   VIBLD_ACCESS_MODE?: string;
   VIBLD_PLATFORM_ADMINS?: string;
+  /**
+   * Clerk's Backend API key, for approving an invited person in Clerk as
+   * well as here. Optional on purpose: a deployment without it still issues
+   * invites, and says that Clerk was not asked.
+   */
+  CLERK_SECRET_KEY?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -148,7 +156,32 @@ export async function handleInvite(
   // one, so it is reported as its own outcome instead of looking like a
   // fresh invite that did nothing.
   const reinstated = created ? false : await store.reinstate(email);
-  return json({ email, created, reinstated });
+
+  // Then Clerk, which is the other half of letting somebody in: a row here
+  // gets them past the access gate, and Clerk in Waitlist mode is what
+  // decides whether they can create a session at all.
+  //
+  // After the row and never before it, and its outcome is carried rather
+  // than thrown. The invite is this deployment's own record and must not
+  // depend on Clerk answering: a deployment with no CLERK_SECRET_KEY is a
+  // supported shape, and an operator with a good admin list has to be able
+  // to invite somebody whatever Clerk is doing. So the response says what
+  // happened on each side and the panel reports both.
+  const clerk: ClerkAdmission =
+    created || reinstated
+      ? await admitToClerk(env, email)
+      : // Nothing changed here, so nothing is claimed about Clerk either.
+        // Saying "already invited, and approved" would be a second read
+        // nobody asked for and a second thing that could be wrong.
+        //
+        // Said rather than omitted. A missing field and a deliberate silence
+        // are different answers, and the browser has to be able to tell
+        // them apart: a response that does not mention Clerk at all is one
+        // this deployment cannot vouch for, and the panel warns about that
+        // rather than saying nothing.
+        { admitted: false, reason: 'not-asked' };
+
+  return json({ email, created, reinstated, clerk });
 }
 
 /** Withdraw an invite. Assumes the admin check already ran. */

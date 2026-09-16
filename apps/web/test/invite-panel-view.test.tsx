@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { InvitePanel } from '../src/components/InvitePanel.tsx';
+import { InvitePanel, clerkSentence } from '../src/components/InvitePanel.tsx';
 
 /**
  * The panel an operator uses to let somebody in.
@@ -149,7 +149,14 @@ describe('the invite panel', () => {
     harness({
       '/api/admin/invites': [{ invites: [] }],
       '/api/admin/invite': [
-        { email: 'new@example.com', created: true, reinstated: false },
+        {
+          email: 'new@example.com',
+          created: true,
+          reinstated: false,
+          // What a deployment with no Clerk key answers. The invite is
+          // real and the other half of letting them in has not happened.
+          clerk: { admitted: false, reason: 'unconfigured' },
+        },
       ],
     });
     const view = await open();
@@ -334,5 +341,64 @@ describe('the invite panel', () => {
     assert.match(rows[0]?.textContent ?? '', /waiting@example\.com/);
     assert.doesNotMatch(view.text(), /Nobody has been invited yet/);
     assert.match(view.text(), /D1 is unavailable/);
+  });
+});
+
+describe('what the panel says about Clerk', () => {
+  it('claims they can sign in only when Clerk said so', async () => {
+    // The strongest claim this panel makes, and the one that decides whether
+    // somebody is actually let in. It is made on Clerk's own answer read
+    // back, never on a request having been sent.
+    assert.match(clerkSentence({ admitted: true }), /can sign in/);
+  });
+
+  it('says they cannot sign in yet when Clerk still has them waiting', async () => {
+    // An answer rather than a failure, and the difference matters: this one
+    // is not worth trying again, it is worth going to Clerk.
+    const said = clerkSentence({
+      admitted: false,
+      reason: 'still-waiting',
+      status: 'pending',
+    });
+
+    assert.match(said, /cannot sign in yet/);
+    assert.match(said, /pending/);
+    assert.doesNotMatch(said, /could not be asked/);
+  });
+
+  it('says Clerk was not asked when this deployment cannot ask it', async () => {
+    const said = clerkSentence({ admitted: false, reason: 'unconfigured' });
+
+    assert.match(said, /not set up/);
+    assert.doesNotMatch(said, /can sign in\./);
+  });
+
+  it('says it could not tell, rather than either answer', async () => {
+    const said = clerkSentence({
+      admitted: false,
+      reason: 'error',
+      error: 'Could not reach Clerk to invite them.',
+    });
+
+    assert.match(said, /could not be asked/);
+    assert.doesNotMatch(said, /can sign in\./);
+    assert.doesNotMatch(said, /still has them/);
+  });
+
+  it('says nothing when Clerk was deliberately not asked', async () => {
+    // The invite row did not change, so nothing happened here and nothing is
+    // claimed there either. The sentence before it already says so.
+    assert.equal(clerkSentence({ admitted: false, reason: 'not-asked' }), '');
+  });
+
+  it('warns when the answer could not be read at all', async () => {
+    // A gap rather than a silence, and the difference is the whole reason
+    // the two are separate values. An operator told nothing concludes the
+    // invite was the whole job, which is how somebody is left unable to
+    // sign in with everybody believing they were let in.
+    const said = clerkSentence(null);
+
+    assert.match(said, /not known/);
+    assert.doesNotMatch(said, /can sign in\./);
   });
 });

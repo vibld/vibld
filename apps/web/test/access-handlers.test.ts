@@ -184,6 +184,11 @@ describe('the invite endpoints', () => {
       email: 'new@example.com',
       created: true,
       reinstated: false,
+      // This env has no Clerk key, and the route says so rather than
+      // omitting the field. A response that does not mention Clerk is one
+      // the panel cannot tell apart from a deployment that did approve
+      // somebody, so the silence has to be deliberate and named.
+      clerk: { admitted: false, reason: 'unconfigured' },
     });
 
     const again = (await (
@@ -195,6 +200,10 @@ describe('the invite endpoints', () => {
     ).json()) as Record<string, unknown>;
     assert.equal(again.created, false);
     assert.equal(again.reinstated, false);
+    // Nothing changed, so Clerk was not asked. Distinct from "not
+    // configured": one is a deployment that cannot ask, the other is a
+    // deployment that had no reason to.
+    assert.deepEqual(again.clerk, { admitted: false, reason: 'not-asked' });
   });
 
   it('reports reinstating a revoked invite as its own outcome', async () => {
