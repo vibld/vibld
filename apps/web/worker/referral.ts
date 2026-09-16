@@ -147,11 +147,23 @@ export interface RewardCents {
 }
 
 /**
- * The default reward.
+ * The reward, both sides, on first purchase.
  *
- * Chris chose "both sides, on first purchase" but not an amount, so this is a
- * placeholder rather than a decision: it is deliberately modest and it is
- * overridable per deployment. Whatever replaces it is his number, not mine.
+ * $5 and $5 is Chris's decision rather than the placeholder it started as.
+ * Still overridable per deployment.
+ *
+ * One thing that was put to him with it and is worth keeping written down,
+ * because the numbers move independently and this stops being true the
+ * moment either does: a top-up is $8 (`TOPUP_CREDIT_USD_CENTS`), so a
+ * referred account whose first purchase is a top-up earns $10 of credit
+ * between the two of them on an $8 sale. That is underwater per top-up and
+ * deliberate, on the reasoning that the referred account is being bought
+ * rather than the single sale being profited from, and subscription revenue
+ * is where it comes back.
+ *
+ * What bounds the exposure is not this number. It is `MAX_PAID_REFERRALS`
+ * below, which caps how many referrals one account is ever paid for, and the
+ * requirement of a cleared payment rather than a signup.
  */
 export const DEFAULT_REWARD_CENTS: RewardCents = {
   referrer: 500,
