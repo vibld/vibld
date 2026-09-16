@@ -23,12 +23,24 @@ function clerkServing(options: {
   wrap?: boolean;
   /** The literal body the waitlist read answers with, before any wrapping. */
   rawBody?: string;
+  /** Rows the invitations list answers with, read only after a refusal. */
+  invitations?: unknown[];
+  invitationListStatus?: number;
 }) {
   const calls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push(`${init?.method ?? 'GET'} ${url}`);
     if (url.includes('/invitations')) {
+      // The list read, which is only reached when creating one was refused.
+      if ((init?.method ?? 'GET') === 'GET') {
+        return new Response(
+          JSON.stringify({ data: options.invitations ?? [] }),
+          {
+            status: options.invitationListStatus ?? 200,
+          },
+        );
+      }
       return new Response('{}', {
         status: options.invitationOk === false ? 400 : 200,
       });
@@ -109,6 +121,38 @@ describe('admitting somebody in Clerk', () => {
     const result = await admitToClerk(ENV, 'sam@example.com', fetchImpl);
 
     assert.deepEqual(result, { admitted: true, via: 'waitlist' });
+  });
+
+  it('takes a standing invitation as admission when a second one is refused', async () => {
+    // What re-submitting an address does once the first invitation
+    // succeeded: Clerk refuses the duplicate, there is no waitlist row to
+    // fall back on, and the invitation still standing is the thing that
+    // admits them. Reading the refusal as failure turns a correct "they can
+    // sign in" into an error the second time somebody presses the button.
+    const { fetchImpl } = clerkServing({
+      invitationOk: false,
+      entries: [],
+      invitations: [{ email_address: 'sam@example.com', status: 'pending' }],
+    });
+
+    const result = await admitToClerk(ENV, 'sam@example.com', fetchImpl);
+
+    assert.deepEqual(result, { admitted: true, via: 'invitation' });
+  });
+
+  it('does not take a revoked invitation as admission', async () => {
+    // The other half, and the reason this reads the status rather than the
+    // existence of a row. A revoked or expired invitation admits nobody.
+    const { fetchImpl } = clerkServing({
+      invitationOk: false,
+      entries: [],
+      invitations: [{ email_address: 'sam@example.com', status: 'revoked' }],
+    });
+
+    const result = await admitToClerk(ENV, 'sam@example.com', fetchImpl);
+
+    assert.equal(result.admitted, false);
+    assert.equal(result.admitted === false && result.reason, 'error');
   });
 
   it('does not take a near-miss address for this person', async () => {

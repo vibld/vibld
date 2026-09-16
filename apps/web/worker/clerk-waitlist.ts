@@ -57,39 +57,63 @@ const TIMEOUT_MS = 8_000;
 /** Statuses that mean Clerk will let this person create a session. */
 const ADMITTED = new Set(['invited', 'completed']);
 
-interface WaitlistEntry {
+/** Invitation statuses that mean a live invitation is standing. */
+const LIVE_INVITATION = new Set(['pending', 'accepted']);
+
+interface ClerkRow {
   email_address?: unknown;
   status?: unknown;
 }
 
 /**
- * The waitlist entry for this address, or null when there is none.
+ * The status of this exact address's row in a Clerk list, or null when the
+ * list holds none.
  *
- * `query` is a search rather than an exact match, so the address is compared
- * again here: a search for `sam@example.com` that returns
- * `sam@example.com.au` must not be read as this person's row.
+ * `query` is a search rather than an exact match on both of the lists this
+ * reads, so the address is compared again: a search for `sam@example.com`
+ * that returns `sam@example.com.au` is somebody else, and reading it as this
+ * person is how an operator is told the wrong thing about who can sign in.
  */
-async function entryFor(
+function statusOf(rows: unknown[], email: string): string | null {
+  const wanted = email.trim().toLowerCase();
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null) continue;
+    const entry = row as ClerkRow;
+    if (
+      typeof entry.email_address !== 'string' ||
+      entry.email_address.trim().toLowerCase() !== wanted
+    ) {
+      continue;
+    }
+    return typeof entry.status === 'string' ? entry.status : '';
+  }
+  return null;
+}
+
+/** Read a Clerk list endpoint, bare or wrapped in `data`. */
+async function listRows(
   env: ClerkWaitlistEnv,
+  path: string,
   email: string,
   fetchImpl: typeof fetch,
-): Promise<{ ok: true; status: string | null } | { ok: false; error: string }> {
+  what: string,
+): Promise<{ ok: true; rows: unknown[] } | { ok: false; error: string }> {
   let response: Response;
   try {
     response = await fetchImpl(
-      `${CLERK_API}/waitlist_entries?query=${encodeURIComponent(email)}`,
+      `${CLERK_API}/${path}?query=${encodeURIComponent(email)}`,
       {
         headers: { authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
         signal: AbortSignal.timeout(TIMEOUT_MS),
       },
     );
   } catch {
-    return { ok: false, error: 'Could not reach Clerk to check the waitlist.' };
+    return { ok: false, error: `Could not reach Clerk to check the ${what}.` };
   }
   if (!response.ok) {
     return {
       ok: false,
-      error: `Clerk refused the waitlist read (${response.status}).`,
+      error: `Clerk refused the ${what} read (${response.status}).`,
     };
   }
 
@@ -97,17 +121,17 @@ async function entryFor(
   try {
     body = await response.json();
   } catch {
-    return { ok: false, error: 'Clerk returned an unreadable waitlist.' };
+    return { ok: false, error: `Clerk returned an unreadable ${what}.` };
   }
 
-  // Clerk has served this list both bare and wrapped in `data` across
+  // Clerk has served these lists both bare and wrapped in `data` across
   // versions, so both are read rather than one being assumed.
   //
   // The object check is not decoration: `JSON.parse('null')` is a successful
   // parse of a 200, and reading `.data` off it throws. That throw would
   // escape to the route, which has already written the invite row, so the
   // operator would get a 500 for a request that half happened rather than
-  // the unreadable-answer outcome two lines below.
+  // the unreadable-answer outcome this returns.
   const rows = Array.isArray(body)
     ? body
     : typeof body === 'object' &&
@@ -116,25 +140,51 @@ async function entryFor(
       ? (body as { data: unknown[] }).data
       : null;
   if (rows === null) {
-    return { ok: false, error: 'Clerk returned an unreadable waitlist.' };
+    return { ok: false, error: `Clerk returned an unreadable ${what}.` };
   }
+  return { ok: true, rows };
+}
 
-  const wanted = email.trim().toLowerCase();
-  for (const row of rows) {
-    if (typeof row !== 'object' || row === null) continue;
-    const entry = row as WaitlistEntry;
-    if (
-      typeof entry.email_address !== 'string' ||
-      entry.email_address.trim().toLowerCase() !== wanted
-    ) {
-      continue;
-    }
-    return {
-      ok: true,
-      status: typeof entry.status === 'string' ? entry.status : '',
-    };
-  }
-  return { ok: true, status: null };
+/** This address's waitlist status, or null when Clerk has no entry for it. */
+async function waitlistStatus(
+  env: ClerkWaitlistEnv,
+  email: string,
+  fetchImpl: typeof fetch,
+): Promise<{ ok: true; status: string | null } | { ok: false; error: string }> {
+  const list = await listRows(
+    env,
+    'waitlist_entries',
+    email,
+    fetchImpl,
+    'waitlist',
+  );
+  return list.ok ? { ok: true, status: statusOf(list.rows, email) } : list;
+}
+
+/**
+ * Whether Clerk is already holding a live invitation for this address.
+ *
+ * Asked only when creating one was refused, which is what Clerk does for a
+ * duplicate. Without this, re-submitting an address whose first invitation
+ * succeeded reports an error: the creation is refused, there is no waitlist
+ * row to fall back on, and the still-standing invitation that admits them is
+ * never looked at.
+ */
+async function hasLiveInvitation(
+  env: ClerkWaitlistEnv,
+  email: string,
+  fetchImpl: typeof fetch,
+): Promise<{ ok: true; live: boolean } | { ok: false; error: string }> {
+  const list = await listRows(
+    env,
+    'invitations',
+    email,
+    fetchImpl,
+    'invitations',
+  );
+  if (!list.ok) return list;
+  const status = statusOf(list.rows, email);
+  return { ok: true, live: status !== null && LIVE_INVITATION.has(status) };
 }
 
 /**
@@ -179,21 +229,31 @@ export async function admitToClerk(
     };
   }
 
-  const entry = await entryFor(env, email, fetchImpl);
+  const entry = await waitlistStatus(env, email, fetchImpl);
   if (!entry.ok)
     return { admitted: false, reason: 'error', error: entry.error };
 
   if (entry.status === null) {
-    // Nobody by that address is on the waitlist. An invitation still lets
-    // them sign up, so a created one admits them; without one there is
-    // nothing to show for this at all.
-    return created
+    // Nobody by that address is on the waitlist, so an invitation is the
+    // only thing that can admit them.
+    if (created) return { admitted: true, via: 'invitation' };
+
+    // Creating one was refused, which is what Clerk does for a duplicate. A
+    // refusal is therefore not an answer: the invitation this deployment
+    // made a moment ago, or last week, may be standing and admitting them
+    // right now. Reading the refusal as failure is how re-submitting an
+    // address turns a correct "they can sign in" into an error.
+    const invitation = await hasLiveInvitation(env, email, fetchImpl);
+    if (!invitation.ok) {
+      return { admitted: false, reason: 'error', error: invitation.error };
+    }
+    return invitation.live
       ? { admitted: true, via: 'invitation' }
       : {
           admitted: false,
           reason: 'error',
           error:
-            'Clerk would not create an invitation and has no waitlist entry for them.',
+            'Clerk would not create an invitation, holds no live one, and has no waitlist entry for them.',
         };
   }
 
