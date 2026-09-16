@@ -31,6 +31,9 @@ const THEIRS = fileURLToPath(
 const TOUCH = fileURLToPath(
   new URL('../public/apple-touch-icon.png', import.meta.url),
 );
+const THEIR_TOUCH = fileURLToPath(
+  new URL('../../marketing/public/apple-touch-icon.png', import.meta.url),
+);
 
 describe("the builder's shell", () => {
   it('sets the wordmark in lowercase, like everywhere else', async () => {
@@ -68,9 +71,7 @@ describe("the builder's shell", () => {
 
   it('has the touch icon its own shell links to', async () => {
     // The shell names this file, so a generator that stopped writing it would
-    // ship a link to a 404 and nothing else here would notice. The shape is
-    // read rather than the bytes compared: a rasteriser version bump changes
-    // the pixels and changes nothing that matters.
+    // ship a link to a 404 and nothing else here would notice.
     const png = await readFile(TOUCH);
     assert.equal(png.subarray(1, 4).toString('ascii'), 'PNG', 'not a PNG');
     assert.deepEqual(
@@ -78,5 +79,24 @@ describe("the builder's shell", () => {
       { width: 180, height: 180 },
       'iOS asks for 180x180',
     );
+  });
+
+  it('ships the same touch icon the marketing site ships', async () => {
+    // Checking the signature and the dimensions is not enough on its own, and
+    // stopping there would have been this test file contradicting itself: the
+    // favicon above must be byte-equal across the two hosts, while any other
+    // 180x180 PNG could sit here, so the home-screen icon could drift back to
+    // a different logo with everything green.
+    //
+    // Comparing bytes is safe here in a way that comparing them against a
+    // stored expectation would not be. A rasteriser version bump does change
+    // the pixels, but both files come out of the same call in the same run,
+    // so it changes both of them the same way. What this catches is one of
+    // them being replaced, which is the thing that actually happens.
+    const [ours, theirs] = await Promise.all([
+      readFile(TOUCH),
+      readFile(THEIR_TOUCH),
+    ]);
+    assert.ok(ours.equals(theirs), 'the two hosts ship different touch icons');
   });
 });
