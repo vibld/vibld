@@ -131,6 +131,34 @@ export interface ConsentChange {
 }
 
 /**
+ * The channel an answer travels on between open tabs.
+ *
+ * `storage` events were the first attempt and they are not enough, because
+ * they only fire when something was actually written. The case they miss is
+ * the one that matters most: writing and removing both fail, a stale grant
+ * survives, nothing in the store changes, and every other tab goes on
+ * measuring after the visitor has said no. Nothing had happened for them to
+ * hear about.
+ *
+ * Both are kept. This one carries an answer the store never recorded; the
+ * storage listener catches changes this never sees, such as site data cleared
+ * from browser settings, or a tab opened before this channel existed.
+ */
+export const CONSENT_CHANNEL = 'vibld.consent';
+
+/**
+ * The payload for other tabs.
+ *
+ * `allowReload` is carried rather than recomputed for the same reason it is
+ * on the local event: a receiving tab would work it out from its own copy of
+ * the store, which in the failure case still says granted, and it would
+ * reload straight into the grant that was just withdrawn.
+ */
+export function consentChangeFor(outcome: AnswerOutcome): ConsentChange {
+  return { state: outcome.apply, allowReload: outcome.safeToReload };
+}
+
+/**
  * Whether Google Analytics may be loaded at all.
  *
  * The first version of this shipped the tag to everyone and used Consent

@@ -14,9 +14,11 @@ import type { Route } from './+types/root';
 import { beaconFor } from './pageview.ts';
 import {
   CONSENT_CHANGED_EVENT,
+  CONSENT_CHANNEL,
   CONSENT_OPEN_EVENT,
   GA4_SRC,
   analyticsAction,
+  consentChangeFor,
   recordAnswer,
   bannerVisible,
   consentSignals,
@@ -182,11 +184,23 @@ function GoogleAnalytics() {
       if (!isConsentStorageEvent(event.key)) return;
       apply(readConsent(storage()));
     };
+    // The third way in, and the only one that works when the store refused
+    // both the write and the removal: nothing changed for a `storage` event
+    // to report, so without this every other tab keeps measuring after the
+    // visitor has said no.
+    const channel = openChannel();
+    if (channel) {
+      channel.onmessage = (event: MessageEvent<ConsentChange>) => {
+        apply(event.data?.state ?? null, event.data?.allowReload ?? true);
+      };
+    }
+
     window.addEventListener(CONSENT_CHANGED_EVENT, onChange);
     window.addEventListener('storage', onStored);
     return () => {
       window.removeEventListener(CONSENT_CHANGED_EVENT, onChange);
       window.removeEventListener('storage', onStored);
+      channel?.close();
     };
   }, []);
 
@@ -349,11 +363,19 @@ function ConsentBanner() {
     // `GoogleAnalytics` is what acts on this: it loads the tag on a grant and
     // stops storage on a withdrawal. The banner decides, and says so; it does
     // not reach into gtag itself.
+    const change = consentChangeFor(outcome);
     window.dispatchEvent(
-      new CustomEvent<ConsentChange>(CONSENT_CHANGED_EVENT, {
-        detail: { state: outcome.apply, allowReload: outcome.safeToReload },
-      }),
+      new CustomEvent<ConsentChange>(CONSENT_CHANGED_EVENT, { detail: change }),
     );
+    // And to every other tab. Posting even when the answer was stored, since
+    // a storage event and this one are not the same thing arriving twice:
+    // whichever gets there first hands the same payload to the same `apply`,
+    // and a second copy of an answer already applied changes nothing.
+    const channel = openChannel();
+    if (channel) {
+      channel.postMessage(change);
+      channel.close();
+    }
   };
 
   return (
@@ -426,6 +448,24 @@ function ConsentBanner() {
       </div>
     </div>
   );
+}
+
+/**
+ * A `BroadcastChannel`, or nothing.
+ *
+ * Not everywhere, and not in every context: the constructor is absent in
+ * older browsers and throws in some sandboxed frames. Every caller treats
+ * null as "this tab will hear about it some other way", which is what the
+ * storage listener is for.
+ */
+function openChannel(): BroadcastChannel | null {
+  try {
+    return 'BroadcastChannel' in window
+      ? new BroadcastChannel(CONSENT_CHANNEL)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   analyticsAction,
   recordAnswer,
   bannerVisible,
+  consentChangeFor,
   consentSignals,
   isConsentStorageEvent,
   mustReload,
@@ -374,5 +375,42 @@ describe('isConsentStorageEvent', () => {
     const state = readConsent(working('denied'));
     assert.equal(analyticsAction(state, true), 'deny');
     assert.equal(mustReload(analyticsAction(state, true)), true);
+  });
+});
+
+describe('consentChangeFor', () => {
+  it('carries the reload verdict rather than leaving it to be recomputed', () => {
+    // The point of sending it. A receiving tab would work `allowReload` out
+    // from its own copy of the store, which in this case still says granted,
+    // and would reload straight into the grant that was just withdrawn.
+    const outcome = recordAnswer(frozen('granted'), 'denied');
+    assert.deepEqual(consentChangeFor(outcome), {
+      state: 'denied',
+      allowReload: false,
+    });
+  });
+
+  it('allows the reload for a denial that actually stuck', () => {
+    const outcome = recordAnswer(working('granted'), 'denied');
+    assert.deepEqual(consentChangeFor(outcome), {
+      state: 'denied',
+      allowReload: true,
+    });
+  });
+
+  it('sends the answer that was applied, not the one that was asked for', () => {
+    // They are the same today, and the payload is built from `apply` rather
+    // than from the click so that stays true if they ever diverge.
+    const outcome = recordAnswer(throwing, 'granted');
+    assert.equal(consentChangeFor(outcome).state, outcome.apply);
+  });
+
+  it('composes into the same denial on the receiving side', () => {
+    // What the other tab does with it: a running tag, denied, and no reload,
+    // which is the whole reason this message exists.
+    const change = consentChangeFor(recordAnswer(frozen('granted'), 'denied'));
+    const action = analyticsAction(change.state, true);
+    assert.equal(action, 'deny');
+    assert.equal(mustReload(action) && change.allowReload, false);
   });
 });
