@@ -182,23 +182,54 @@ export class BillingStore {
   }
 
   /**
-   * Every mapped account, as (user, Stripe customer) pairs.
+   * Mapped accounts whose top-up history has not been read back yet, oldest
+   * first, at most `limit` of them.
    *
    * What the nightly top-up backfill walks. A top-up leaves no row anywhere
    * but `billing_topups`, which records the credit granted rather than the
    * money taken, so the only way to learn what Stripe actually collected is
    * to ask Stripe per customer.
+   *
+   * Bounded and self-terminating, which an unfiltered list was neither.
+   * Reading every customer every night means a growing number of Stripe
+   * calls for work already done, and past some size one scheduled run
+   * cannot reach the end of the set at all, so the accounts at the far end
+   * would never be reconciled. The stamp makes each customer cost one pass,
+   * once.
    */
-  async listCustomers(): Promise<
-    Array<{ userId: string; stripeCustomerId: string }>
-  > {
+  async customersNeedingTopupBackfill(
+    limit: number,
+  ): Promise<Array<{ userId: string; stripeCustomerId: string }>> {
     const result = await this.#db
-      .prepare(`SELECT user_id, stripe_customer_id FROM billing_customers`)
+      .prepare(
+        `SELECT user_id, stripe_customer_id FROM billing_customers
+          WHERE topups_backfilled_at IS NULL
+          ORDER BY created_at
+          LIMIT ?1`,
+      )
+      .bind(limit)
       .all<CustomerRow>();
-    return result.results.map((row) => ({
+    return (result.results ?? []).map((row) => ({
       userId: row.user_id,
       stripeCustomerId: row.stripe_customer_id,
     }));
+  }
+
+  /**
+   * Record that this account's Checkout history has been read to the end.
+   *
+   * Written only after a complete read, never after a partial or failed
+   * one: a customer whose pages could not be fetched must come back
+   * tomorrow rather than be marked done having been half read.
+   */
+  async markTopupsBackfilled(userId: string, at: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE billing_customers SET topups_backfilled_at = ?2
+          WHERE user_id = ?1 AND topups_backfilled_at IS NULL`,
+      )
+      .bind(userId, at)
+      .run();
   }
 
   /** Every mirrored subscription id -- what the nightly reconcile re-checks against Stripe. */

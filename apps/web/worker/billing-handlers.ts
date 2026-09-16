@@ -338,16 +338,28 @@ export async function reconcileSubscriptions(
  * as an invoice and is recorded there, and counting the session too would
  * record the same charge twice.
  *
+ * Bounded and self-terminating, which matters more than it sounds. An
+ * unbounded nightly scan re-reads every customer's whole Checkout history
+ * for ever and offers every already-paid account to the payout again; the
+ * D1 writes are no-ops on conflict but the Stripe calls and the payout
+ * calls are not, and past some number of customers one scheduled run
+ * cannot reach the end of the set, leaving the accounts at the far end
+ * permanently unreconciled. So each customer is stamped once its history
+ * has been read through, at most `limit` are taken per run, and the work
+ * falls to nothing once the set is covered. A top-up after that arrives by
+ * webhook and needs no backfill.
+ *
  * Returns what it looked at and how many accounts it found cleared money
- * for. Idempotent: the session id is the key, so every night after the
- * first is a no-op.
+ * for. Idempotent twice over: the session id keys the write, and the stamp
+ * keeps a covered customer out of the next run entirely.
  */
 export async function backfillTopupPayments(
   stripe: Stripe,
   store: BillingStore,
   onClearedPayment?: (userId: string) => Promise<void>,
+  limit = 50,
 ): Promise<{ checked: number; cleared: number; failed: number }> {
-  const customers = await store.listCustomers();
+  const customers = await store.customersNeedingTopupBackfill(limit);
   let cleared = 0;
   let failed = 0;
 
@@ -385,6 +397,11 @@ export async function backfillTopupPayments(
         if (!page.has_more || !last?.id) break;
         startingAfter = last.id;
       }
+
+      // Only now, with every page read. A throw above leaves this customer
+      // unstamped and therefore first in tomorrow's run, which is what a
+      // half-read history deserves.
+      await store.markTopupsBackfilled(userId, new Date().toISOString());
 
       if (collected > 0) {
         cleared += 1;

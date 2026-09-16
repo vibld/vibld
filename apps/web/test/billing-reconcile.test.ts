@@ -283,6 +283,8 @@ describe('backfillTopupPayments', () => {
    * `sessions` are `[mode, payment_status, amount_total]` triples, which is
    * exactly the three things the backfill decides on.
    */
+  let listCalls = 0;
+
   function stripeWithSessions(
     sessions: Array<[string, string, number]>,
   ): Stripe {
@@ -290,6 +292,7 @@ describe('backfillTopupPayments', () => {
       checkout: {
         sessions: {
           async list() {
+            listCalls += 1;
             return {
               data: sessions.map(([mode, payment_status, amount], index) => ({
                 id: `cs_${index}`,
@@ -375,14 +378,68 @@ describe('backfillTopupPayments', () => {
     assert.equal(await store.hasClearedPayment('user_1'), false);
   });
 
-  it('is a no-op the second night', async () => {
+  it('does not read or pay a covered customer again the next night', async () => {
+    // An unbounded nightly scan re-read every customer's whole Checkout
+    // history for ever and offered every paid account to the payout again.
+    // The stamp is what stops both, so both are asserted.
     const store = await storeWithCustomer();
     const stripe = stripeWithSessions([['payment', 'paid', 500]]);
+    const paid: string[] = [];
+    const pay = async (userId: string) => {
+      paid.push(userId);
+    };
 
-    await backfillTopupPayments(stripe, store);
-    const again = await backfillTopupPayments(stripe, store);
+    listCalls = 0;
+    await backfillTopupPayments(stripe, store, pay);
+    const afterFirst = listCalls;
 
-    assert.equal(again.failed, 0);
+    const again = await backfillTopupPayments(stripe, store, pay);
+
+    assert.equal(again.checked, 0);
+    assert.equal(listCalls, afterFirst, 'Stripe read again');
+    assert.deepEqual(paid, ['user_1'], 'payout offered twice');
+    assert.equal(await store.hasClearedPayment('user_1'), true);
+  });
+
+  it('takes at most the limit it is given, and the rest next time', async () => {
+    const store = new BillingStore(new SqliteD1Database(SCHEMA));
+    for (const n of [1, 2, 3])
+      await store.linkCustomer(`user_${n}`, `cus_${n}`);
+    const stripe = stripeWithSessions([['payment', 'paid', 500]]);
+
+    const first = await backfillTopupPayments(stripe, store, undefined, 2);
+    const second = await backfillTopupPayments(stripe, store, undefined, 2);
+    const third = await backfillTopupPayments(stripe, store, undefined, 2);
+
+    assert.equal(first.checked, 2);
+    assert.equal(second.checked, 1);
+    assert.equal(third.checked, 0, 'did not terminate');
+  });
+
+  it('comes back to a customer whose history could not be read', async () => {
+    // Stamped only after a complete read. A customer marked done on a
+    // failed read would never be reconciled, which is the failure the
+    // backfill exists to prevent.
+    const store = await storeWithCustomer();
+    const failing = {
+      checkout: {
+        sessions: {
+          async list() {
+            throw new Error('stripe unavailable');
+          },
+        },
+      },
+    } as unknown as Stripe;
+
+    const first = await backfillTopupPayments(failing, store);
+    assert.equal(first.failed, 1);
+
+    const retry = await backfillTopupPayments(
+      stripeWithSessions([['payment', 'paid', 500]]),
+      store,
+    );
+
+    assert.equal(retry.checked, 1, 'gave up on a customer it never read');
     assert.equal(await store.hasClearedPayment('user_1'), true);
   });
 });
