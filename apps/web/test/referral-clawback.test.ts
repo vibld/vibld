@@ -8,7 +8,7 @@ import {
   clawBackReferral,
   payReferralIfEarned,
 } from '../worker/referral-payout.ts';
-import { clawbackCents } from '../worker/referral.ts';
+import { clawbackCents, payoutGrantId } from '../worker/referral.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
 
@@ -648,6 +648,117 @@ describe('tying a reversal to the payment that earned the reward', () => {
     assert.equal(await cents(billing, 'user_referrer'), 500);
   });
 
+  it('reverses the grants an interrupted payout left behind', async () => {
+    // Unpaid does not mean nothing was granted. A payout that wrote the
+    // referrer's grant and then failed leaves `paid_at` null, so the refund
+    // took the early return, marked the row reversed, and removed neither
+    // grant. Every later retry then stopped at that mark, and the half
+    // reward stayed spendable for good.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const deps = { referrals, billing };
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+
+    // The state a payout that died after its first grant leaves behind.
+    await billing.grantAdminCredit(
+      payoutGrantId('referrer', 'user_referred'),
+      'user_referrer',
+      500,
+      'system@vibld.com',
+      'Referral: half written',
+    );
+    assert.equal(await cents(billing, 'user_referrer'), 500);
+    assert.equal(
+      (await referrals.attributionFor('user_referred'))?.paidAt ?? null,
+      null,
+      'the fixture marked it paid, so this proves nothing',
+    );
+
+    const result = await clawBackReferral(deps, 'user_referred', 'refunded');
+
+    assert.equal(
+      await cents(billing, 'user_referrer'),
+      0,
+      'left a half-paid reward standing after its payment was returned',
+    );
+    assert.equal(result.referrerCents, 500);
+  });
+
+  it('takes nothing from an account whose payout never granted anything', async () => {
+    // The other half of the same change, and the reason the reversal reads
+    // the grant rather than the reward constant. Reversing unconditionally
+    // against the balance would take this signup credit, which no referral
+    // ever paid for.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const deps = { referrals, billing };
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    await billing.grantAdminCredit(
+      'signup',
+      'user_referred',
+      100,
+      'system@vibld.com',
+      'a dollar to get started',
+    );
+
+    await clawBackReferral(deps, 'user_referred', 'refunded');
+
+    assert.equal(
+      await cents(billing, 'user_referred'),
+      100,
+      'took credit out of a grant this referral never paid',
+    );
+  });
+
+  it('reverses what was granted, not what the reward is worth today', async () => {
+    // The reward is a constant, and a deployment can change it between a
+    // payout and its reversal. Taking back today's figure for yesterday's
+    // grant is a gift or a theft depending on which way it moved.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    // Other granted credit, and it is the whole fixture. Without it the
+    // referrer's balance is the $5 reward, the floor caps any deduction at
+    // $5 whatever figure the code reaches for, and this passes against code
+    // that takes back today's constant. The assertion has to be able to see
+    // the difference between 500 and 1000.
+    await billing.grantAdminCredit(
+      'welcome',
+      'user_referrer',
+      5000,
+      'admin@vibld.com',
+      'a grant that has nothing to do with the referral',
+    );
+    const paid = await payReferralIfEarned(
+      { referrals, billing, reward: { referrer: 500, referred: 500 } },
+      'user_referred',
+      ['in_funding'],
+    );
+    assert.equal(paid.paid, true);
+    assert.equal(await cents(billing, 'user_referrer'), 5500);
+
+    // The reward is doubled, and then the old payment is refunded.
+    const result = await clawBackReferral(
+      { referrals, billing, reward: { referrer: 1000, referred: 1000 } },
+      'user_referred',
+      'refunded',
+      ['in_funding'],
+    );
+
+    assert.equal(result.referrerCents, 500, 'took back more than was granted');
+    assert.equal(
+      await cents(billing, 'user_referrer'),
+      5000,
+      'the extra came out of a grant the referral never paid for',
+    );
+  });
+
   it('does not treat a later renewal as what funded a recovered payout', async () => {
     // The recovery paths read the funding payment from the mirror, and an
     // earlier cut read every cleared payment on the account. A payout still
@@ -699,6 +810,46 @@ describe('tying a reversal to the payment that earned the reward', () => {
       'in_first',
     ]);
     assert.equal(result.found, true);
+    assert.equal(await cents(billing, 'user_referrer'), 0);
+  });
+
+  it('reverses a recovered top-up, which its session id could never match', async () => {
+    // A Checkout top-up is recorded under `cs_...`, and a refund names the
+    // charge and the payment intent and never the session. So a reward
+    // recovered from the mirror rather than from the event that paid it
+    // recorded an id nothing would ever match, the top-up was refunded, and
+    // the reward stayed. The aliases stored beside the ledger key are what
+    // close it.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const deps = { referrals, billing };
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    await billing.recordPayment(
+      'cs_topup',
+      'user_referred',
+      2000,
+      '2026-01-01T00:00:00.000Z',
+      ['cs_topup', 'pi_topup'],
+    );
+
+    // Paid without an event, which is the reconcile and the sweep.
+    const paid = await payReferralIfEarned(deps, 'user_referred');
+    assert.equal(paid.paid, true);
+    assert.deepEqual(
+      (await referrals.attributionFor('user_referred'))?.fundedBy,
+      ['cs_topup', 'pi_topup'],
+      'the payment intent was not recorded, so no refund can match',
+    );
+
+    // The refund names the charge and the payment intent. Never the session.
+    const result = await clawBackReferral(deps, 'user_referred', 'refunded', [
+      'ch_topup',
+      'pi_topup',
+    ]);
+
+    assert.equal(result.found, true, 'a refunded top-up kept its reward');
     assert.equal(await cents(billing, 'user_referrer'), 0);
   });
 

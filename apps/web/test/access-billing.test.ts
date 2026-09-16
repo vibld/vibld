@@ -266,7 +266,7 @@ describe('winding down a revoked subscriber', () => {
     // cancel something that is already cancelling.
     const { access } = await deployment();
     const brokenMirror = {
-      findActiveSubscription: async () => ({
+      findCancellableSubscription: async () => ({
         stripeSubscriptionId: 'sub_sam',
         userId: 'user_sam',
         stripeCustomerId: 'cus_sam',
@@ -309,7 +309,7 @@ describe('winding down a revoked subscriber', () => {
     // finding out weeks later.
     const { access } = await deployment();
     const brokenProvenance = {
-      findActiveSubscription: async () => ({
+      findCancellableSubscription: async () => ({
         stripeSubscriptionId: 'sub_sam',
         userId: 'user_sam',
         stripeCustomerId: 'cus_sam',
@@ -564,8 +564,8 @@ describe('whose cancellation it is', () => {
     // `BillingStore` holds its database in a private field and a stand-in
     // that only inherits its methods cannot reach it.
     const leavesTheRow = {
-      findActiveSubscription: (userId: string) =>
-        billing.findActiveSubscription(userId),
+      findCancellableSubscription: (userId: string) =>
+        billing.findCancellableSubscription(userId),
       scheduledCancellation: (id: string) => billing.scheduledCancellation(id),
       upsertSubscription: (record: SubscriptionRecord) =>
         billing.upsertSubscription(record),
@@ -608,6 +608,41 @@ describe('whose cancellation it is', () => {
       'cleared a cancellation the subscriber made for themselves',
     );
     assert.deepEqual(again, { restored: false, reason: 'not-ours' });
+  });
+
+  it('restores one whose subscription is past due', async () => {
+    // The wind-down finds every status that can still take money, so the
+    // reinstatement has to look the same ones up. Reading only the
+    // entitlement statuses meant a revoke that scheduled a cancellation on a
+    // `past_due` subscription could not be undone: the restore said there
+    // was nothing to restore, the payment recovered, and Stripe ended the
+    // subscription at period close anyway.
+    const { access, billing } = await deployment();
+    const row = await billing.getSubscription('sub_sam');
+    await billing.upsertSubscription({ ...row!, status: 'past_due' });
+
+    const stripe = stripeAccepting();
+    await windDownSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+    stripe.calls.length = 0;
+
+    const result = await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+
+    assert.equal(result.restored, true, 'could not undo its own cancellation');
+    assert.deepEqual(stripe.calls, [
+      { id: 'sub_sam', params: { cancel_at_period_end: false } },
+    ]);
   });
 
   it('forgets the record once it is undone', async () => {

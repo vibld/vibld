@@ -61,6 +61,31 @@ interface EventReplayRow {
   sweep_after_id: string | null;
 }
 
+/**
+ * The Stripe subscription statuses that can still take money.
+ *
+ * Expressed as what is billable rather than as what is terminal, because the
+ * question being asked is "can this still charge them", and `canceled` and
+ * `incomplete_expired` are the only two where the answer is no for good.
+ * `trialing` is the one that made this matter: a trial charges when it ends.
+ *
+ * One list, used by the mirror lookup (`findCancellableSubscription`) and by
+ * the Stripe fallback in `access-billing.ts`. Two lists would drift, and the
+ * drift would be a subscription the revoke finds and the reinstatement
+ * cannot.
+ */
+export const BILLABLE_STATUSES: readonly string[] = [
+  'active',
+  'trialing',
+  'past_due',
+  'unpaid',
+  'incomplete',
+  'paused',
+];
+
+/** The same list as a SQL literal, for embedding in an `IN (...)`. */
+const BILLABLE_STATUS_SQL = BILLABLE_STATUSES.map((s) => `'${s}'`).join(', ');
+
 export interface AdminCreditRecord {
   id: string;
   userId: string;
@@ -228,6 +253,33 @@ export class BillingStore {
    * still orders by `updated_at` and takes the most recent, defensively,
    * rather than assume the invariant holds.
    */
+  /**
+   * The subscription that could still be cancelled or un-cancelled, which is
+   * a wider question than the entitlement lookup below.
+   *
+   * A `past_due` or `paused` subscriber is not entitled to anything right
+   * now and is very much still billable, so the wind-down has to find them.
+   * Reinstating has to find the same ones, or a revoke that scheduled a
+   * cancellation on a `past_due` subscription cannot be undone: the restore
+   * reported nothing to restore, and the subscription ended at period close
+   * after the payment recovered.
+   */
+  async findCancellableSubscription(
+    userId: string,
+  ): Promise<SubscriptionRecord | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT stripe_subscription_id, user_id, stripe_customer_id, tier, status,
+                price_id, current_period_end, cancel_at_period_end
+         FROM billing_subscriptions
+         WHERE user_id = ?1 AND status IN (${BILLABLE_STATUS_SQL})
+         ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .bind(userId)
+      .first<SubscriptionRow>();
+    return row ? toSubscriptionRecord(row) : undefined;
+  }
+
   async findActiveSubscription(
     userId: string,
   ): Promise<SubscriptionRecord | undefined> {
@@ -564,15 +616,24 @@ export class BillingStore {
     userId: string,
     amountUsdCents: number,
     at: string,
+    /**
+     * Every other id this payment can be recognised by, from the event that
+     * settled it. The key above is the ledger key and is not what a refund
+     * names: a refund carries the charge, its payment intent and, for a
+     * subscription, its invoice, and never the Checkout Session a top-up was
+     * recorded under. Stored so a reward recovered from this table rather
+     * than from an event can still be tied to the payment that funded it.
+     */
+    aliases: string[] = [],
   ): Promise<void> {
     await this.#db
       .prepare(
         `INSERT INTO billing_payments
-           (stripe_object_id, user_id, amount_usd_cents, cleared_at)
-         VALUES (?1, ?2, ?3, ?4)
+           (stripe_object_id, user_id, amount_usd_cents, cleared_at, aliases)
+         VALUES (?1, ?2, ?3, ?4, NULLIF(?5, ''))
          ON CONFLICT(stripe_object_id) DO NOTHING`,
       )
-      .bind(stripeObjectId, userId, amountUsdCents, at)
+      .bind(stripeObjectId, userId, amountUsdCents, at, aliases.join(' '))
       .run();
   }
 
@@ -618,7 +679,8 @@ export class BillingStore {
    * one either pays out on an abandoned checkout or refuses a real customer.
    */
   /**
-   * The Stripe id of the earliest payment that took money from this account.
+   * Every id the earliest payment that took money from this account can be
+   * recognised by.
    *
    * Used to tie a referral reward to the purchase that funded it, so a later
    * refund of something unrelated does not take the reward back. The paths
@@ -633,16 +695,30 @@ export class BillingStore {
    * and then refunding the renewal would claw back a reward the original
    * purchase still funds, which is the bug this whole linkage exists to fix.
    */
-  async firstClearedPaymentId(userId: string): Promise<string | undefined> {
+  async firstClearedPaymentIds(userId: string): Promise<string[]> {
     const row = await this.#db
       .prepare(
-        `SELECT stripe_object_id FROM billing_payments
+        `SELECT stripe_object_id, aliases FROM billing_payments
           WHERE user_id = ?1 AND amount_usd_cents > 0
           ORDER BY cleared_at, stripe_object_id LIMIT 1`,
       )
       .bind(userId)
-      .first<{ stripe_object_id: string }>();
-    return row?.stripe_object_id;
+      .first<{ stripe_object_id: string; aliases: string | null }>();
+    if (!row) return [];
+    // The ledger key and every alias recorded with it. All of them name the
+    // same payment, which is what separates this from the earlier version
+    // that returned several different payments.
+    //
+    // Deduplicated because the callers compute the aliases from the event
+    // and the ledger key is one of them, so the key arrives twice by
+    // construction rather than by mistake.
+    return [
+      ...new Set(
+        [row.stripe_object_id, ...(row.aliases?.split(' ') ?? [])].filter(
+          (id) => id !== '',
+        ),
+      ),
+    ];
   }
 
   async hasClearedPayment(userId: string): Promise<boolean> {

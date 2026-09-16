@@ -3,6 +3,7 @@ import { resolvePrincipal } from './principal.ts';
 import { BillingStore } from './billing-store.ts';
 import {
   applyStripeEvent,
+  idsOf,
   ownerOfSubscription,
   stripeCollectedUsdCents,
   subscriptionRecordFrom,
@@ -414,6 +415,13 @@ async function recordLatestPaidInvoice(
     invoice.status_transitions?.paid_at
       ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
       : new Date().toISOString(),
+    // The same aliases the webhook path records, so a payment recovered by
+    // the reconcile is as reversible as one that arrived by delivery.
+    idsOf(
+      invoice.id,
+      (invoice as unknown as { payment_intent?: unknown }).payment_intent,
+      (invoice as unknown as { charge?: unknown }).charge,
+    ),
   );
 
   return collected > 0;

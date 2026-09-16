@@ -1,0 +1,15 @@
+-- The other ids a settled payment can be recognised by.
+--
+-- `stripe_object_id` is the ledger key: a Checkout Session id for a top-up,
+-- an Invoice id for a subscription charge. It is the right primary key and
+-- the wrong thing to match a refund against, because a refund event names
+-- the charge, its payment intent and, for a subscription, its invoice. It
+-- never names the Checkout Session.
+--
+-- So a referral reward recovered by the nightly reconcile or the stranded
+-- payout sweep, which read the funding payment from this table rather than
+-- from an event, could record only `cs_...` and then match nothing: the
+-- top-up was refunded and the reward stayed. Space separated, and null for
+-- rows written before this column existed, which the reversal path treats
+-- as unprovable rather than as permission to reverse.
+ALTER TABLE billing_payments ADD COLUMN aliases TEXT;

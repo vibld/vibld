@@ -22,6 +22,7 @@
 import type Stripe from 'stripe';
 
 import type { AccessStore } from './access-store.ts';
+import { BILLABLE_STATUSES } from './billing-store.ts';
 import type { BillingStore, SubscriptionRecord } from './billing-store.ts';
 import { subscriptionRecordFrom } from './billing-events.ts';
 import { createStripeClient, stripeConfigured } from './stripe-client.ts';
@@ -82,23 +83,6 @@ interface Winding {
 }
 
 /**
- * The Stripe subscription statuses that can still take money.
- *
- * Expressed as what is billable rather than as what is terminal, because the
- * question being asked is "can this still charge them", and the two statuses
- * left out are the only ones where the answer is no for good. `trialing` is
- * the one that made this matter: a trial charges when it ends.
- */
-const BILLABLE_STATUSES: ReadonlySet<string> = new Set([
-  'active',
-  'trialing',
-  'past_due',
-  'unpaid',
-  'incomplete',
-  'paused',
-]);
-
-/**
  * Stripe's `canceled_at` for a subscription, as an ISO string.
  *
  * Seconds since the epoch on the wire, absent when nothing is cancelled.
@@ -146,7 +130,7 @@ export async function windDownSubscription(
       return { scheduled: false, reason: 'never-signed-in' };
     }
     userId = invite.userId;
-    subscription = await billing.findActiveSubscription(userId);
+    subscription = await billing.findCancellableSubscription(userId);
   } catch (error) {
     console.error('wind-down: could not read the local records', error);
     return {
@@ -341,7 +325,7 @@ export async function restoreSubscription(
     if (invite.userId === null) {
       return { restored: false, reason: 'never-signed-in' };
     }
-    subscription = await billing.findActiveSubscription(invite.userId);
+    subscription = await billing.findCancellableSubscription(invite.userId);
   } catch (error) {
     console.error('restore: could not read the local records', error);
     return {
@@ -474,7 +458,7 @@ async function liveSubscription(
       status: 'all',
       limit: 10,
     });
-    const live = page.data.find((s) => BILLABLE_STATUSES.has(s.status));
+    const live = page.data.find((s) => BILLABLE_STATUSES.includes(s.status));
     if (!live) return { ok: true, winding: undefined };
     return {
       ok: true,

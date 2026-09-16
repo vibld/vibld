@@ -195,19 +195,20 @@ async function applyCheckoutSessionCompleted(
   // not do is earn a referral, which is why the amount is recorded and
   // `announceIfPaid` reads it rather than the fact that a top-up row exists.
   const amountUsdCents = session.amount_total ?? 0;
+  // The ids computed once and used twice: recorded against the payment, and
+  // handed to the payout hook. A Checkout is recorded under its session id,
+  // which a refund never names, so without the aliases stored here a reward
+  // this session funds can only ever be reversed by the event that paid it.
+  const settledBy = idsOf(session.id, session.payment_intent);
   await store.recordPayment(
     session.id,
     userId,
     amountUsdCents,
     new Date().toISOString(),
+    settledBy,
   );
 
-  await announceIfPaid(
-    onPurchaseCleared,
-    userId,
-    amountUsdCents,
-    idsOf(session.id, session.payment_intent),
-  );
+  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
   return 'applied';
 }
 
@@ -409,23 +410,20 @@ async function applyInvoicePaid(
   // payment could go unrecorded for ever.
   //
   const amountUsdCents = stripeCollectedUsdCents(invoice);
+  const settledBy = idsOf(
+    invoice.id,
+    (invoice as unknown as { payment_intent?: unknown }).payment_intent,
+    (invoice as unknown as { charge?: unknown }).charge,
+  );
   await store.recordPayment(
     invoice.id ?? `invoice-unknown-${userId}`,
     userId,
     amountUsdCents,
     new Date().toISOString(),
+    settledBy,
   );
 
-  await announceIfPaid(
-    onPurchaseCleared,
-    userId,
-    amountUsdCents,
-    idsOf(
-      invoice.id,
-      (invoice as unknown as { payment_intent?: unknown }).payment_intent,
-      (invoice as unknown as { charge?: unknown }).charge,
-    ),
-  );
+  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
   return 'applied';
 }
 

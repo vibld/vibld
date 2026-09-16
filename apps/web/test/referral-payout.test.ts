@@ -21,11 +21,12 @@ interface Grant {
 /** A billing store that records grants the way the real one does: id wins. */
 function billingFake(
   /**
-   * The Stripe id of this account's earliest recorded payment, which is what
-   * the payout reads when it is paying without an event in hand. Absent is
-   * the ordinary case: the webhook names the funding payment itself.
+   * Every id this account's earliest recorded payment can be recognised by,
+   * which is what the payout reads when it is paying without an event in
+   * hand. Empty is the ordinary case: the webhook names the funding payment
+   * itself.
    */
-  firstCleared?: string,
+  firstCleared: string[] = [],
 ) {
   const grants = new Map<string, Grant>();
   const asked: string[] = [];
@@ -43,9 +44,22 @@ function billingFake(
         // ON CONFLICT(id) DO NOTHING, which is the real idempotency guard.
         if (!grants.has(id)) grants.set(id, { id, userId, cents, actor, note });
       },
-      async firstClearedPaymentId(userId: string) {
+      async firstClearedPaymentIds(userId: string) {
         asked.push(userId);
         return firstCleared;
+      },
+      // The reversal reads what a payout actually granted rather than what
+      // the reward is worth today, so a store standing in for the grants has
+      // to answer for them.
+      async findAdminCredit(id: string) {
+        const grant = grants.get(id);
+        return grant
+          ? {
+              ...grant,
+              grantedByEmail: grant.actor,
+              creditUsdCents: grant.cents,
+            }
+          : undefined;
       },
     } as unknown as BillingStore,
   };
@@ -192,7 +206,7 @@ describe('payReferralIfEarned', () => {
     // name it. Leaving them to record nothing would make every reward they
     // pay permanently unreversible, which is the abuse case with the
     // clawback switched off for exactly the payouts no delivery covered.
-    const billing = billingFake('in_from_the_mirror');
+    const billing = billingFake(['in_from_the_mirror']);
     const referrals = referralFake({
       attribution: {
         referrerUserId: 'user_owner',
@@ -284,8 +298,8 @@ describe('payReferralIfEarned', () => {
       async grantAdminCredit() {
         reservedFirst = referrals.state.claimedAt !== null;
       },
-      async firstClearedPaymentId() {
-        return undefined;
+      async firstClearedPaymentIds() {
+        return [];
       },
     } as unknown as BillingStore;
 

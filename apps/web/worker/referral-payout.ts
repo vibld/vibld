@@ -7,7 +7,6 @@
 import type { BillingStore } from './billing-store.ts';
 import type { ReferralStore } from './referral-store.ts';
 import {
-  DEFAULT_REWARD_CENTS,
   MAX_PAID_REFERRALS,
   clawbackGrantId,
   decidePayout,
@@ -111,16 +110,15 @@ export async function payReferralIfEarned(
   // an account has a cleared payment, not which webhook said so. Reading it
   // back costs one query, and only on a payout that is about to settle.
   //
-  // One id, the earliest, rather than every payment on the account. The
-  // caller that has an event names several ids because they are aliases of
-  // one payment; a list read from the mirror would be several different
-  // payments, and recording those as funding would make refunding any later
-  // renewal take the reward back. That is the bug being fixed, reintroduced
-  // through the recovery path.
+  // One payment, the earliest, rather than every payment on the account,
+  // and every id that one payment can be recognised by. Several ids because
+  // they are aliases of a single settlement; a list of several different
+  // payments would make refunding any later renewal take the reward back,
+  // which is the bug being fixed reintroduced through the recovery path.
   const funding =
     fundedBy.length > 0
       ? fundedBy
-      : idOrNothing(await deps.billing.firstClearedPaymentId(referredUserId));
+      : await deps.billing.firstClearedPaymentIds(referredUserId);
 
   // The write that settles it, and the only place that can. `decidePayout`
   // read `reversed_at` several statements ago, so a refund arriving in
@@ -139,7 +137,6 @@ export async function payReferralIfEarned(
       await reverseGrants(
         deps,
         referredUserId,
-        decision.reward,
         'Referral reversed: the payment was returned while the reward was being paid.',
       );
       return { paid: false, reason: 'reversed' };
@@ -151,11 +148,6 @@ export async function payReferralIfEarned(
     referrerUserId: decision.referrerUserId,
     reward: decision.reward,
   };
-}
-
-/** A single optional id as the list the payout records. */
-function idOrNothing(id: string | undefined): string[] {
-  return id ? [id] : [];
 }
 
 /** What one sweep of the stranded payouts did. */
@@ -287,7 +279,16 @@ export async function clawBackReferral(
       referredUserId,
       (deps.now ?? new Date()).toISOString(),
     );
-    return { found: false, referrerCents: 0, referredCents: 0 };
+    // Unpaid does not mean nothing was granted. A payout that failed between
+    // its first grant and its second, or before `markPaid`, left credit
+    // standing under a row that still reads unpaid, and the mark above is
+    // what stops any retry ever finishing it. Returning here without this
+    // left that half-reward spendable for good.
+    //
+    // Safe to run unconditionally because it reverses the payout grants
+    // themselves: no grant, no deduction.
+    const taken = await reverseGrants(deps, referredUserId, note);
+    return { found: false, ...taken };
   }
 
   // Only the payment that earned the reward can take it back.
@@ -324,7 +325,6 @@ export async function clawBackReferral(
   const taken = await reverseGrants(
     deps,
     referredUserId,
-    deps.reward ?? DEFAULT_REWARD_CENTS,
     note,
     attribution.referrerUserId,
   );
@@ -343,7 +343,6 @@ export async function clawBackReferral(
 async function reverseGrants(
   deps: PayoutDeps,
   referredUserId: string,
-  reward: RewardCents,
   note: string,
   referrerUserId?: string,
 ): Promise<{ referrerCents: number; referredCents: number }> {
@@ -351,19 +350,13 @@ async function reverseGrants(
     referrerUserId ??
     (await deps.referrals.attributionFor(referredUserId))?.referrerUserId;
   const referrerCents = referrer
-    ? await takeBack(
-        deps,
-        clawbackGrantId('referrer', referredUserId),
-        referrer,
-        reward.referrer,
-        note,
-      )
+    ? await takeBack(deps, 'referrer', referredUserId, referrer, note)
     : 0;
   const referredCents = await takeBack(
     deps,
-    clawbackGrantId('referred', referredUserId),
+    'referred',
     referredUserId,
-    reward.referred,
+    referredUserId,
     note,
   );
   return { referrerCents, referredCents };
@@ -372,19 +365,36 @@ async function reverseGrants(
 /**
  * Deduct one side's reward, and say how much was actually taken.
  *
- * The balance is read first and the deduction capped by it, which is the
- * floor. Reading it as micro-USD and converting back is not a flourish:
- * `totalAdminCreditMicroUsd` is what every other caller uses, and doing the
- * arithmetic in cents here against a different total is how two places come
- * to disagree about what somebody has.
+ * **What that payout granted, read from the grant it wrote**, rather than
+ * what the reward is worth today. Two reasons, and the second is a bug this
+ * had:
+ *
+ * The reward amount is a constant that can be changed between a payout and
+ * its reversal, and taking back today's figure for yesterday's grant is
+ * either a gift or a theft depending on which way it moved.
+ *
+ * And a payout that failed partway through wrote one grant and not the
+ * other. Reading the row is what lets the reversal take back exactly what
+ * exists: the side that was written is reversed, the side that was not is a
+ * no-op rather than a deduction against whatever other granted credit the
+ * account happens to hold. Without that, reversing an interrupted payout
+ * would take the missing half out of somebody's signup credit.
  */
 async function takeBack(
   deps: PayoutDeps,
-  id: string,
+  side: 'referrer' | 'referred',
+  referredUserId: string,
   userId: string,
-  rewardCents: number,
   note: string,
 ): Promise<number> {
+  const granted = await deps.billing.findAdminCredit(
+    payoutGrantId(side, referredUserId),
+  );
+  const rewardCents = granted?.creditUsdCents ?? 0;
+  // Nothing was granted on this side, so there is nothing to take back. A
+  // deduction here would come out of credit this referral never paid.
+  if (rewardCents <= 0) return 0;
+  const id = clawbackGrantId(side, referredUserId);
   // The floor lives in the statement, not here. Reading the balance and then
   // writing a deduction bounded by it is a check followed by an act, and two
   // refunds of two different referrals sharing one referrer can both pass it
