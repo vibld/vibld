@@ -100,6 +100,15 @@ import {
   handleGitHubStatus,
 } from './github-handlers.ts';
 import { createStripeClient } from './stripe-client.ts';
+import { isGated } from './access-gate.ts';
+import {
+  decideAccessFor,
+  handleAccessStatus,
+  handleInvite,
+  handleInviteList,
+  handleInviteRevoke,
+  refusal,
+} from './access-handlers.ts';
 
 export interface Env {
   /** Worker secret. Never reaches the browser. */
@@ -167,6 +176,13 @@ export interface Env {
   VIBLD_SIGNUP_CREDIT_FROM?: string;
   /** Runs one user may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
+  /**
+   * "open" opens this deployment to anybody who can sign in. Anything else,
+   * including unset, is invite-only (access.ts). Unset is closed on purpose:
+   * a deployment that has never considered the question should not be the
+   * one handing out model spend to the internet.
+   */
+  VIBLD_ACCESS_MODE?: string;
   /**
    * Micro-USD the whole deployment may spend per UTC day, across every user
    * -- docs/decisions.md L29. Layered above the per-user tier allowances so
@@ -1236,6 +1252,31 @@ export default {
   ): Promise<Response> {
     const { pathname } = new URL(request.url);
 
+    /*
+     * The invite gate, before dispatch rather than inside each handler.
+     *
+     * Scattered checks fail silently: a new endpoint that spends money and
+     * forgets the call is open, and nothing says so. Here the route table
+     * (access-gate.ts) has to classify every path, and a test reads this
+     * file's own route literals and fails on any it does not cover.
+     *
+     * It runs after identity, never instead of it: an uninvited caller and an
+     * unauthenticated one get different answers, because they are different
+     * problems and only one of them is the caller's to fix.
+     */
+    if (isGated(pathname)) {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      const decision = await decideAccessFor(env, resolved.principal);
+      if (!decision.allowed) return refusal();
+    }
+
+    if (pathname === '/api/access/status') {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      return handleAccessStatus(request, env, resolved.principal);
+    }
+
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
@@ -1376,6 +1417,24 @@ export default {
 
     if (pathname === '/api/admin/user') {
       return handleAdminUser(request, env);
+    }
+
+    if (pathname === '/api/admin/invites') {
+      const guard = await requireAdmin(request, env);
+      if (guard.denied) return guard.denied;
+      return handleInviteList(request, env);
+    }
+
+    if (pathname === '/api/admin/invite') {
+      const guard = await requireAdmin(request, env);
+      if (guard.denied) return guard.denied;
+      return handleInvite(request, env, guard.adminEmail);
+    }
+
+    if (pathname === '/api/admin/invite/revoke') {
+      const guard = await requireAdmin(request, env);
+      if (guard.denied) return guard.denied;
+      return handleInviteRevoke(request, env);
     }
 
     if (pathname === '/api/admin/topup') {

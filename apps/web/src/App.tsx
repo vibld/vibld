@@ -1,4 +1,5 @@
 import { AdminPanel } from './components/AdminPanel.tsx';
+import { AccessGate } from './components/AccessGate.tsx';
 import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
@@ -21,11 +22,18 @@ import { GitHubPanel } from './components/GitHubPanel.tsx';
  * out, not just render behind a gate. Splitting it out of `App` is what
  * makes that mount conditional instead of the gate wrapping an
  * already-running session.
+ *
+ * `AccessGate` sits inside it for the same reason and answers the next
+ * question: signed in, but is this account on the invite list. Two gates
+ * rather than one, because "not signed in" is something the reader can fix
+ * in ten seconds and "not on the list" is not.
  */
 export function App() {
   return (
     <AuthGate>
-      <Builder />
+      <AccessGate>
+        <Builder />
+      </AccessGate>
     </AuthGate>
   );
 }

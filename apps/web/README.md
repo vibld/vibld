@@ -131,6 +131,56 @@ all on a deployment reachable only at some other domain (a fork's own
 `workers.dev` URL, for instance) -- put the whole route behind Cloudflare
 Access instead if a deployment like that needs to stay gated.
 
+## Invite-only access (the launch gate)
+
+The product grants model spend on sign-up, so "anyone who can reach the URL
+can have an account" is a faucet pointed at the provider bill. An account is
+still created freely (Clerk owns that) and can do nothing until its identity
+is on the invite list.
+
+`VIBLD_ACCESS_MODE` decides. **Anything other than the exact string `open` is
+invite-only, including unset.** That is the opposite of the usual default and
+it is deliberate: a typo cannot open the door, and a deployment that has never
+considered the question is closed rather than open.
+
+The gate runs in the router before dispatch, against a route table
+(`worker/access-gate.ts`) that has to classify every path. `test/access-gate.test.ts`
+reads `worker/index.ts`'s own route literals and fails on any path in neither
+list, so a new endpoint that spends money cannot be added without a decision
+about who may reach it. Ungated never means unauthenticated: everything still
+resolves a principal first.
+
+Four rules, in order, all failing closed:
+
+1. A **platform admin** is always in, before the mode is read. The tool that
+   issues invites is behind this same gate, so an operator who locked
+   themselves out would have no way back.
+2. An **open** deployment admits everyone.
+3. An **unverified identity** is refused. An invite list keyed on email means
+   nothing if the email was never verified.
+4. Otherwise the list decides.
+
+A deployment with no D1 binding refuses everybody except admins, for the same
+reason: missing configuration must not become an open door.
+
+Both refusals produce the same words. "Your email is not verified" and "you
+are not on the list" are different facts about an account, and telling the
+caller which applies turns the endpoint into a way to test whether an address
+has been invited.
+
+### Running the list
+
+- `GET /api/access/status` -- what the shell asks to decide which screen to
+  render. The endpoints are the boundary either way (ADR-0006).
+- `GET /api/admin/invites` -- the list, never-used invites first.
+- `POST /api/admin/invite` `{ email }` -- issue one. Re-issuing an existing
+  invite does nothing and says so; reinstating a revoked one is reported as
+  its own outcome rather than looking like a fresh invite.
+- `POST /api/admin/invite/revoke` `{ email }` -- withdraw one. The row stays,
+  so the record of what was authorised stays readable.
+
+All three are behind the platform-admin check, not the invite gate.
+
 ## Model generation (optional)
 
 The shell asks `/api/config` on load and uses whichever provider the
