@@ -322,36 +322,64 @@ export class BillingStore {
   async recordScheduledCancellation(
     stripeSubscriptionId: string,
     userId: string,
+    /**
+     * Stripe's own `canceled_at` for the cancellation being recorded, as it
+     * came back from the update. This is what makes the row a claim about
+     * one specific cancellation rather than a standing permission to clear
+     * whatever this subscription happens to be carrying later.
+     *
+     * `ON CONFLICT DO UPDATE` rather than `DO NOTHING`: a subscription can
+     * be cancelled, restored and cancelled again, and keeping the first
+     * row would leave the record pointing at a cancellation that no longer
+     * exists, which is the stale marker this column is here to stop.
+     */
+    canceledAt: string | null,
   ): Promise<void> {
     await this.#db
       .prepare(
         `INSERT INTO billing_scheduled_cancellations
-           (stripe_subscription_id, user_id, scheduled_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(stripe_subscription_id) DO NOTHING`,
+           (stripe_subscription_id, user_id, scheduled_at, canceled_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(stripe_subscription_id) DO UPDATE
+           SET user_id = ?2, scheduled_at = ?3, canceled_at = ?4`,
       )
-      .bind(stripeSubscriptionId, userId, new Date().toISOString())
+      .bind(stripeSubscriptionId, userId, new Date().toISOString(), canceledAt)
       .run();
   }
 
-  /** Whether this deployment is the one that scheduled this cancellation. */
-  async scheduledCancellation(stripeSubscriptionId: string): Promise<boolean> {
+  /**
+   * The cancellation this deployment recorded for this subscription, if any.
+   *
+   * `null` means no record, so nothing here scheduled it. A record answers
+   * with the `canceled_at` it was scheduled under, and the caller compares
+   * that against the cancellation Stripe is holding now. A bare "yes we
+   * scheduled something once" is not enough: a row left behind by a failed
+   * clean-up would otherwise authorise clearing a cancellation the
+   * subscriber made afterwards, which is the harm this table exists to
+   * prevent, one step removed.
+   */
+  async scheduledCancellation(
+    stripeSubscriptionId: string,
+  ): Promise<{ canceledAt: string | null } | null> {
     const row = await this.#db
       .prepare(
-        `SELECT 1 AS present FROM billing_scheduled_cancellations
+        `SELECT canceled_at FROM billing_scheduled_cancellations
           WHERE stripe_subscription_id = ?1`,
       )
       .bind(stripeSubscriptionId)
-      .first<{ present: number }>();
-    return row !== null && row !== undefined;
+      .first<{ canceled_at: string | null }>();
+    if (!row) return null;
+    return { canceledAt: row.canceled_at };
   }
 
   /**
    * Forget a scheduled cancellation, because it has been undone.
    *
-   * Cleared on restore rather than left behind: a stale row would let a
-   * later restore undo a cancellation the subscriber made afterwards, which
-   * is the same harm one step removed.
+   * Tidiness rather than safety. The `canceled_at` on the row is what stops
+   * a leftover authorising anything, so a delete that fails costs a stale
+   * row and no harm; without that column this delete would be the only
+   * thing standing between a failed clean-up and clearing somebody's own
+   * cancellation later.
    */
   async clearScheduledCancellation(
     stripeSubscriptionId: string,
@@ -590,23 +618,31 @@ export class BillingStore {
    * one either pays out on an abandoned checkout or refuses a real customer.
    */
   /**
-   * The Stripe ids of payments that actually took money from this account.
+   * The Stripe id of the earliest payment that took money from this account.
    *
    * Used to tie a referral reward to the purchase that funded it, so a later
-   * refund of something unrelated does not take the reward back. The sweep
-   * that pays on a recorded payment has no event in hand, so it reads the
-   * ids from here instead.
+   * refund of something unrelated does not take the reward back. The paths
+   * that pay on a recorded payment have no event in hand, so they read the
+   * id from here instead.
+   *
+   * **The earliest, and only the earliest.** A referral pays on a first
+   * purchase, and an attribution cannot be claimed once a purchase has begun
+   * (`PURCHASE_BARRIER_SQL`), so the account's first settled payment is the
+   * one that earned the reward. Returning every cleared payment would record
+   * a renewal or a later top-up as though it were an alias of that purchase,
+   * and then refunding the renewal would claw back a reward the original
+   * purchase still funds, which is the bug this whole linkage exists to fix.
    */
-  async clearedPaymentIds(userId: string): Promise<string[]> {
-    const result = await this.#db
+  async firstClearedPaymentId(userId: string): Promise<string | undefined> {
+    const row = await this.#db
       .prepare(
         `SELECT stripe_object_id FROM billing_payments
           WHERE user_id = ?1 AND amount_usd_cents > 0
-          ORDER BY cleared_at LIMIT 20`,
+          ORDER BY cleared_at, stripe_object_id LIMIT 1`,
       )
       .bind(userId)
-      .all<{ stripe_object_id: string }>();
-    return (result.results ?? []).map((row) => row.stripe_object_id);
+      .first<{ stripe_object_id: string }>();
+    return row?.stripe_object_id;
   }
 
   async hasClearedPayment(userId: string): Promise<boolean> {

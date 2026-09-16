@@ -16,7 +16,19 @@
 CREATE TABLE billing_scheduled_cancellations (
   stripe_subscription_id TEXT PRIMARY KEY,
   user_id                TEXT NOT NULL,
-  scheduled_at           TEXT NOT NULL
+  scheduled_at           TEXT NOT NULL,
+  -- Stripe's own `canceled_at` for the cancellation this row records.
+  --
+  -- The row has to identify one cancellation, not merely assert that this
+  -- deployment scheduled something once. A row left behind by a clean-up
+  -- that failed would otherwise authorise clearing whatever cancellation
+  -- the subscription carries later, including one the subscriber made for
+  -- themselves, which is exactly the harm the table exists to prevent.
+  --
+  -- Null for a row written before this column existed, and for a Stripe
+  -- response that carried no timestamp. Restoring refuses on a null rather
+  -- than treating it as a match: unidentifiable is not proof of ownership.
+  canceled_at            TEXT
 );
 
 CREATE INDEX billing_scheduled_cancellations_user

@@ -108,13 +108,19 @@ export async function payReferralIfEarned(
   // funded the reward, or the reversal path can never prove a match for
   // them and the reward becomes permanently unreversible. The nightly
   // reconcile and the stranded-payout sweep are both such paths: they know
-  // an account has a cleared payment, not which webhook said so. Reading
-  // the recorded payments back costs one query, and only on a payout that
-  // is about to settle.
+  // an account has a cleared payment, not which webhook said so. Reading it
+  // back costs one query, and only on a payout that is about to settle.
+  //
+  // One id, the earliest, rather than every payment on the account. The
+  // caller that has an event names several ids because they are aliases of
+  // one payment; a list read from the mirror would be several different
+  // payments, and recording those as funding would make refunding any later
+  // renewal take the reward back. That is the bug being fixed, reintroduced
+  // through the recovery path.
   const funding =
     fundedBy.length > 0
       ? fundedBy
-      : await deps.billing.clearedPaymentIds(referredUserId);
+      : idOrNothing(await deps.billing.firstClearedPaymentId(referredUserId));
 
   // The write that settles it, and the only place that can. `decidePayout`
   // read `reversed_at` several statements ago, so a refund arriving in
@@ -145,6 +151,11 @@ export async function payReferralIfEarned(
     referrerUserId: decision.referrerUserId,
     reward: decision.reward,
   };
+}
+
+/** A single optional id as the list the payout records. */
+function idOrNothing(id: string | undefined): string[] {
+  return id ? [id] : [];
 }
 
 /** What one sweep of the stranded payouts did. */

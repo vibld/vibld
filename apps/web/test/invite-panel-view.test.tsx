@@ -468,6 +468,7 @@ describe('what the panel says about a withdrawn subscriber', () => {
     const said = billingSentence({
       scheduled: true,
       endsAt: '2026-10-01T00:00:00.000Z',
+      restorable: true,
     });
     assert.match(said, /set to end/i);
     assert.match(said, /2026/);
@@ -478,8 +479,28 @@ describe('what the panel says about a withdrawn subscriber', () => {
     // Nothing has stopped yet. "Cancelled" would tell an operator the
     // charging is over when the next invoice may be weeks away, and that is
     // the sentence they would repeat to the person.
-    const said = billingSentence({ scheduled: true, endsAt: null });
+    const said = billingSentence({
+      scheduled: true,
+      endsAt: null,
+      restorable: true,
+    });
     assert.doesNotMatch(said, /cancell?ed/i);
+  });
+
+  it('says when reinstating them will not undo the cancellation', async () => {
+    // Stripe accepted the cancellation and the record of having scheduled it
+    // did not get written, so the restore path will refuse: it cannot tell
+    // this cancellation from one the subscriber made for themselves. An
+    // operator who is not told finds out by pressing Reinstate and watching
+    // nothing happen.
+    const said = billingSentence({
+      scheduled: true,
+      endsAt: '2026-10-01T00:00:00.000Z',
+      restorable: false,
+    });
+    assert.match(said, /set to end/i, 'dropped the part that is still true');
+    assert.match(said, /Reinstating will not undo it/i);
+    assert.match(said, /Stripe/);
   });
 
   it('warns rather than reassures when the answer could not be read', async () => {

@@ -84,9 +84,16 @@ export function billingSentence(billing: BillingOutcome | null): string {
     return ' What happened to any subscription is not known, so check Stripe before assuming the charges stopped.';
   }
   if (billing.scheduled) {
-    return billing.endsAt
+    const ending = billing.endsAt
       ? ` Their subscription is set to end on ${onDay(billing.endsAt)}, and they are not charged again.`
       : ' Their subscription is set to end when the period they paid for does, and they are not charged again.';
+    // The cancellation landed at Stripe and the record of having made it did
+    // not, so reinstating them here will refuse rather than undo it. Said now
+    // rather than discovered by an operator whose Reinstate button does
+    // nothing weeks later.
+    return billing.restorable
+      ? ending
+      : `${ending} Reinstating will not undo it, because the record of scheduling it could not be written; clear it in Stripe if they come back.`;
   }
   if (billing.reason === 'already-ending') {
     return billing.endsAt

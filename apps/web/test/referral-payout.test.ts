@@ -21,11 +21,11 @@ interface Grant {
 /** A billing store that records grants the way the real one does: id wins. */
 function billingFake(
   /**
-   * The Stripe ids of this account's recorded payments, which is what the
-   * payout reads when it is paying without an event in hand. Empty is the
-   * ordinary case: the webhook names the funding payment itself.
+   * The Stripe id of this account's earliest recorded payment, which is what
+   * the payout reads when it is paying without an event in hand. Absent is
+   * the ordinary case: the webhook names the funding payment itself.
    */
-  clearedIds: string[] = [],
+  firstCleared?: string,
 ) {
   const grants = new Map<string, Grant>();
   const asked: string[] = [];
@@ -43,9 +43,9 @@ function billingFake(
         // ON CONFLICT(id) DO NOTHING, which is the real idempotency guard.
         if (!grants.has(id)) grants.set(id, { id, userId, cents, actor, note });
       },
-      async clearedPaymentIds(userId: string) {
+      async firstClearedPaymentId(userId: string) {
         asked.push(userId);
-        return clearedIds;
+        return firstCleared;
       },
     } as unknown as BillingStore,
   };
@@ -192,7 +192,7 @@ describe('payReferralIfEarned', () => {
     // name it. Leaving them to record nothing would make every reward they
     // pay permanently unreversible, which is the abuse case with the
     // clawback switched off for exactly the payouts no delivery covered.
-    const billing = billingFake(['in_from_the_mirror']);
+    const billing = billingFake('in_from_the_mirror');
     const referrals = referralFake({
       attribution: {
         referrerUserId: 'user_owner',
@@ -284,8 +284,8 @@ describe('payReferralIfEarned', () => {
       async grantAdminCredit() {
         reservedFirst = referrals.state.claimedAt !== null;
       },
-      async clearedPaymentIds() {
-        return [];
+      async firstClearedPaymentId() {
+        return undefined;
       },
     } as unknown as BillingStore;
 

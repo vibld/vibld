@@ -164,7 +164,7 @@ export type IssueResult =
  * has stopped when the next invoice may still be weeks away.
  */
 export type BillingOutcome =
-  | { scheduled: true; endsAt: string | null }
+  | { scheduled: true; endsAt: string | null; restorable: boolean }
   | {
       scheduled: false;
       reason:
@@ -199,9 +199,15 @@ export function readBillingOutcome(value: unknown): BillingOutcome | null {
     reason?: unknown;
     endsAt?: unknown;
     error?: unknown;
+    restorable?: unknown;
   };
   const endsAt = typeof row.endsAt === 'string' ? row.endsAt : null;
-  if (row.scheduled === true) return { scheduled: true, endsAt };
+  if (row.scheduled === true) {
+    // Absent reads as restorable, which is what every route before this
+    // field existed meant. The flag says a cancellation cannot be undone,
+    // and a missing field is not evidence of that.
+    return { scheduled: true, endsAt, restorable: row.restorable !== false };
+  }
   if (row.scheduled !== false) return null;
   if (typeof row.reason !== 'string' || !NOT_SCHEDULED.has(row.reason)) {
     return null;

@@ -648,6 +648,60 @@ describe('tying a reversal to the payment that earned the reward', () => {
     assert.equal(await cents(billing, 'user_referrer'), 500);
   });
 
+  it('does not treat a later renewal as what funded a recovered payout', async () => {
+    // The recovery paths read the funding payment from the mirror, and an
+    // earlier cut read every cleared payment on the account. A payout still
+    // stranded after a renewal or a top-up then recorded all of them as
+    // aliases of the one purchase, and refunding any of them clawed the
+    // reward back: the finding this whole linkage exists to fix, rebuilt
+    // inside the fix for it.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const deps = { referrals, billing };
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+
+    // The purchase that earns the reward, then a renewal months later, with
+    // the payout still owed the whole time.
+    await billing.recordPayment(
+      'in_first',
+      'user_referred',
+      2000,
+      '2026-01-01T00:00:00.000Z',
+    );
+    await billing.recordPayment(
+      'in_renewal',
+      'user_referred',
+      2000,
+      '2026-04-01T00:00:00.000Z',
+    );
+    const paid = await payReferralIfEarned(deps, 'user_referred');
+    assert.equal(paid.paid, true);
+    assert.deepEqual(
+      (await referrals.attributionFor('user_referred'))?.fundedBy,
+      ['in_first'],
+      'recorded a payment that did not earn the reward',
+    );
+
+    const renewalRefund = await logged(() =>
+      clawBackReferral(deps, 'user_referred', 'refunded', ['in_renewal']),
+    );
+    assert.equal(renewalRefund.length, 1, 'the renewal refund was not logged');
+    assert.equal(
+      await cents(billing, 'user_referrer'),
+      500,
+      'refunding a renewal took back the first purchase’s reward',
+    );
+
+    // And the purchase that did earn it still reverses.
+    const result = await clawBackReferral(deps, 'user_referred', 'refunded', [
+      'in_first',
+    ]);
+    assert.equal(result.found, true);
+    assert.equal(await cents(billing, 'user_referrer'), 0);
+  });
+
   it('hands the refunded charge its invoice and payment intent', async () => {
     // Read off the Stripe event rather than assumed, because which of these
     // fields is populated is what decides whether a match is possible at

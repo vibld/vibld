@@ -23,6 +23,7 @@ import type Stripe from 'stripe';
 
 import type { AccessStore } from './access-store.ts';
 import type { BillingStore, SubscriptionRecord } from './billing-store.ts';
+import { subscriptionRecordFrom } from './billing-events.ts';
 import { createStripeClient, stripeConfigured } from './stripe-client.ts';
 import type { StripeEnv } from './stripe-client.ts';
 
@@ -35,7 +36,22 @@ import type { StripeEnv } from './stripe-client.ts';
  * still be weeks away, and that is the sentence they would act on.
  */
 export type SubscriptionWindDown =
-  | { scheduled: true; endsAt: string | null }
+  | {
+      scheduled: true;
+      endsAt: string | null;
+      /**
+       * Whether the panel can undo this later.
+       *
+       * False when Stripe accepted the cancellation and the record of
+       * having scheduled it could not be written. The money stops either
+       * way, which is why this is still `scheduled: true`, but restoring
+       * reads that record to establish the cancellation is this
+       * deployment's to clear, so without it a later reinstatement will
+       * refuse. Said out loud rather than discovered weeks later by an
+       * operator whose Reinstate button does nothing.
+       */
+      restorable: boolean;
+    }
   | { scheduled: false; reason: 'unconfigured' }
   | { scheduled: false; reason: 'no-invite' }
   | { scheduled: false; reason: 'never-signed-in' }
@@ -45,6 +61,53 @@ export type SubscriptionWindDown =
 
 export interface AccessBillingEnv extends StripeEnv {
   STRIPE_SECRET_KEY?: string;
+}
+
+/**
+ * What winding a subscription down needs to know about it.
+ *
+ * Deliberately less than a `SubscriptionRecord`. The wind-down needs an id
+ * to cancel, a period end to report and whether it is already ending; a
+ * mirror row is a separate thing that may or may not exist, which is why it
+ * sits in `record` and may be absent. Conflating the two is how a
+ * subscription read from Stripe ended up being written to the mirror as a
+ * placeholder.
+ */
+interface Winding {
+  stripeSubscriptionId: string;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  /** The mirror row this maps to, when this deployment recognises the price. */
+  record: SubscriptionRecord | undefined;
+}
+
+/**
+ * The Stripe subscription statuses that can still take money.
+ *
+ * Expressed as what is billable rather than as what is terminal, because the
+ * question being asked is "can this still charge them", and the two statuses
+ * left out are the only ones where the answer is no for good. `trialing` is
+ * the one that made this matter: a trial charges when it ends.
+ */
+const BILLABLE_STATUSES: ReadonlySet<string> = new Set([
+  'active',
+  'trialing',
+  'past_due',
+  'unpaid',
+  'incomplete',
+  'paused',
+]);
+
+/**
+ * Stripe's `canceled_at` for a subscription, as an ISO string.
+ *
+ * Seconds since the epoch on the wire, absent when nothing is cancelled.
+ * Read defensively for the same reason `periodEndOf` is: a field that is
+ * sometimes absent becomes a throw the moment it is passed to `Date`.
+ */
+function canceledAtOf(subscription: Stripe.Subscription): string | null {
+  const at = (subscription as unknown as { canceled_at?: unknown }).canceled_at;
+  return typeof at === 'number' ? new Date(at * 1000).toISOString() : null;
 }
 
 /**
@@ -93,70 +156,104 @@ export async function windDownSubscription(
     };
   }
 
+  // What the wind-down actually needs, which is less than a mirror row: an
+  // id to cancel, a period end to report, and whether it is already ending.
+  let winding: Winding | undefined = subscription
+    ? {
+        stripeSubscriptionId: subscription.stripeSubscriptionId,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+        record: subscription,
+      }
+    : undefined;
+
   // The mirror being empty is not the same as Stripe having nothing. A
   // `customer.subscription.created` that was missed, delayed, or is racing
   // this revoke leaves no local row while Stripe bills on schedule, and
   // nothing revisits a revoked invite afterwards: the nightly reconcile
   // creates the mirror row and never asks whether that person's access was
   // withdrawn. So the customer mapping is used to ask Stripe directly.
-  if (!subscription) {
+  if (!winding) {
     const fromStripe = await liveSubscription(env, billing, userId, makeStripe);
     if (!fromStripe.ok) {
       return { scheduled: false, reason: 'error', error: fromStripe.error };
     }
-    if (!fromStripe.subscription) {
+    if (!fromStripe.winding) {
       return { scheduled: false, reason: 'nothing-to-stop' };
     }
-    subscription = fromStripe.subscription;
+    winding = fromStripe.winding;
   }
 
   // Already winding down. Saying so is not the same as saying nothing
   // happened: an operator revoking somebody who had already cancelled needs
   // to see that the end date is real and when it is, not a blank.
-  if (subscription.cancelAtPeriodEnd) {
+  if (winding.cancelAtPeriodEnd) {
     return {
       scheduled: false,
       reason: 'already-ending',
-      endsAt: subscription.currentPeriodEnd,
+      endsAt: winding.currentPeriodEnd,
     };
   }
 
   try {
     const updated = await makeStripe(env).subscriptions.update(
-      subscription.stripeSubscriptionId,
+      winding.stripeSubscriptionId,
       { cancel_at_period_end: true },
     );
+
+    const endsAt = periodEndOf(updated) ?? winding.currentPeriodEnd;
+
+    // Provenance first, and its failure is reported. Without this row a
+    // later reinstatement cannot establish that the cancellation is this
+    // deployment's to clear, and refuses; nothing reconstructs it, because
+    // the webhooks and the nightly reconcile own `billing_subscriptions`
+    // and have never heard of this table. An earlier version swallowed the
+    // failure under a comment claiming the reconcile would fix it, which
+    // was true of the mirror row beneath it and false of this one.
+    //
+    // Recorded against Stripe's own `canceled_at` for this cancellation, so
+    // the row identifies one cancellation rather than standing as open
+    // permission to clear whatever the subscription carries later.
+    let restorable = true;
+    try {
+      await billing.recordScheduledCancellation(
+        winding.stripeSubscriptionId,
+        userId,
+        canceledAtOf(updated),
+      );
+    } catch (error) {
+      console.error('wind-down: could not record the provenance', error);
+      restorable = false;
+    }
 
     // Mirrored straight away rather than waiting for the webhook Stripe will
     // also send. The operator is looking at the panel now, and a list that
     // still says this subscription renews is the same false claim the
     // revoke was meant to end, just moved.
     //
-    // A failure here is not reported as a failed wind-down: Stripe has
-    // already accepted the change, which is the part that stops the money,
-    // and the webhook or the nightly reconcile will correct this row.
-    const endsAt = periodEndOf(updated) ?? subscription.currentPeriodEnd;
-    try {
-      // Provenance, written alongside the mirror. Without it, restoring
-      // access cannot tell this cancellation from one the subscriber made
-      // for themselves, and clears theirs.
-      await billing.recordScheduledCancellation(
-        subscription.stripeSubscriptionId,
-        subscription.userId,
-      );
-      await billing.upsertSubscription({
-        ...subscription,
-        cancelAtPeriodEnd: true,
-        currentPeriodEnd: endsAt,
-      });
-    } catch (error) {
-      console.error(
-        'wind-down: Stripe accepted it, local mirror did not',
-        error,
-      );
+    // A failure here really is not a failed wind-down: Stripe has accepted
+    // the change, which is the part that stops the money, and the webhook
+    // or the nightly reconcile will correct this row.
+    //
+    // Only written when there is a real row to write. A subscription read
+    // from Stripe whose price this deployment does not recognise has no
+    // mirror row to derive, and inventing one would put a wrong tier where
+    // the reconcile is about to put a right one: the previous cut of this
+    // hard-coded `build` with an empty price id, so a revoked Ship
+    // subscriber came back on Build entitlement until the nightly sweep.
+    if (winding.record) {
+      try {
+        await billing.upsertSubscription({
+          ...winding.record,
+          cancelAtPeriodEnd: true,
+          currentPeriodEnd: endsAt,
+        });
+      } catch (error) {
+        console.error('wind-down: Stripe accepted it, mirror did not', error);
+      }
     }
 
-    return { scheduled: true, endsAt };
+    return { scheduled: true, endsAt, restorable };
   } catch (error) {
     console.error('wind-down: Stripe refused the cancellation', error);
     return {
@@ -266,9 +363,9 @@ export async function restoreSubscription(
   // had made in the Billing Portal. Stripe then charged them again.
   //
   // No row means somebody else scheduled it, and it is left alone.
-  let ours: boolean;
+  let recorded: { canceledAt: string | null } | null;
   try {
-    ours = await billing.scheduledCancellation(
+    recorded = await billing.scheduledCancellation(
       subscription.stripeSubscriptionId,
     );
   } catch (error) {
@@ -279,10 +376,33 @@ export async function restoreSubscription(
       error: 'Could not establish who scheduled the cancellation.',
     };
   }
-  if (!ours) return { restored: false, reason: 'not-ours' };
+  if (!recorded) return { restored: false, reason: 'not-ours' };
 
   try {
-    const updated = await makeStripe(env).subscriptions.update(
+    // Which cancellation, not merely whether there was one. The record could
+    // have been left behind by a clean-up that failed after a previous
+    // restore, and a subscriber who then cancels for themselves would be
+    // holding a different cancellation that a bare record would authorise
+    // clearing. Stripe's own `canceled_at` is what tells them apart, so it
+    // is read back from Stripe rather than from the mirror, which does not
+    // carry it.
+    const stripe = makeStripe(env);
+    const live = await stripe.subscriptions.retrieve(
+      subscription.stripeSubscriptionId,
+    );
+    const now = canceledAtOf(live);
+    // A null on either side is not a match. The record predates this column,
+    // or Stripe reports no cancellation at all; neither is proof that what
+    // is scheduled now is what this deployment scheduled then.
+    if (
+      now === null ||
+      recorded.canceledAt === null ||
+      now !== recorded.canceledAt
+    ) {
+      return { restored: false, reason: 'not-ours' };
+    }
+
+    const updated = await stripe.subscriptions.update(
       subscription.stripeSubscriptionId,
       { cancel_at_period_end: false },
     );
@@ -293,9 +413,10 @@ export async function restoreSubscription(
         cancelAtPeriodEnd: false,
         currentPeriodEnd: renewsOn,
       });
-      // Cleared, not left behind. A stale row would let a later restore undo
-      // a cancellation the subscriber makes after this one, which is the
-      // same harm one step removed.
+      // Cleared rather than left behind, though a failure here is no longer
+      // dangerous: the `canceled_at` on the row means a leftover can only
+      // ever match the cancellation it was written for, which this restore
+      // has just undone.
       await billing.clearScheduledCancellation(
         subscription.stripeSubscriptionId,
       );
@@ -330,8 +451,7 @@ async function liveSubscription(
   userId: string,
   makeStripe: (env: StripeEnv) => Stripe,
 ): Promise<
-  | { ok: true; subscription: SubscriptionRecord | undefined }
-  | { ok: false; error: string }
+  { ok: true; winding: Winding | undefined } | { ok: false; error: string }
 > {
   let customerId: string | undefined;
   try {
@@ -340,31 +460,33 @@ async function liveSubscription(
     console.error('wind-down: could not read the customer mapping', error);
     return { ok: false, error: 'Could not read the customer mapping.' };
   }
-  if (!customerId) return { ok: true, subscription: undefined };
+  if (!customerId) return { ok: true, winding: undefined };
 
   try {
+    // Every status, filtered here rather than by Stripe. Asking for `active`
+    // alone missed a `trialing` subscription whose creation webhook never
+    // arrived: the revoke reported nothing to stop, the trial ended, and
+    // Stripe charged somebody whose access had been withdrawn. Anything that
+    // can still take money has to be found, and only Stripe's two terminal
+    // statuses cannot.
     const page = await makeStripe(env).subscriptions.list({
       customer: customerId,
-      status: 'active',
-      limit: 1,
+      status: 'all',
+      limit: 10,
     });
-    const live = page.data[0];
-    if (!live) return { ok: true, subscription: undefined };
+    const live = page.data.find((s) => BILLABLE_STATUSES.has(s.status));
+    if (!live) return { ok: true, winding: undefined };
     return {
       ok: true,
-      subscription: {
+      winding: {
         stripeSubscriptionId: live.id,
-        userId,
-        stripeCustomerId: customerId,
-        // Only the fields the wind-down reads are meaningful here. This is
-        // not written to the mirror as a subscription record: the reconcile
-        // owns that, and guessing a tier or a price id from a list response
-        // would put a wrong row where a right one is coming.
-        tier: 'build',
-        status: live.status,
-        priceId: '',
         currentPeriodEnd: periodEndOf(live),
         cancelAtPeriodEnd: live.cancel_at_period_end === true,
+        // The real row when the price is one this deployment sells, and
+        // nothing when it is not. `subscriptionRecordFrom` is the same
+        // function the reconcile and the webhook path use, so a tier read
+        // here can never disagree with the tier read there.
+        record: subscriptionRecordFrom(live, userId),
       },
     };
   } catch (error) {
