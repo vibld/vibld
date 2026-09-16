@@ -347,25 +347,30 @@ export interface RetryResult {
 export async function retryUnattributedEvents(
   store: BillingStore,
   limit = 200,
+  now: () => string = () => new Date().toISOString(),
 ): Promise<RetryResult> {
-  const parked = await store.listUnattributedEvents(limit);
+  // Least recently tried first, so a row that can never be attributed costs
+  // one attempt a night rather than holding the front of the queue for ever.
+  // Then oldest-first within the batch, because the ordering that gets a row
+  // *into* the batch and the ordering it has to be applied in are different
+  // questions: a Checkout that maps a customer has to run before the invoice
+  // that needs the mapping.
+  const parked = [...(await store.listUnattributedEvents(limit))].sort(
+    (a, b) => a.created - b.created,
+  );
   let applied = 0;
   let waiting = 0;
   let failed = 0;
 
   for (const row of parked) {
+    // Stamped before the attempt, never after. A row that throws is exactly
+    // the one that has to move to the back, and stamping afterwards skips
+    // precisely those.
+    await store.markUnattributedAttempted(row.stripeEventId, now());
     try {
       const event = JSON.parse(row.payload) as Stripe.Event;
       const outcome = await applyStripeEvent(store, event);
       if (outcome === 'unresolved') {
-        // Bumps `attempts` and `last_attempt_at` through the same upsert
-        // that parked it, so how long this has been waiting is on the row.
-        await store.parkUnattributedEvent(
-          row.stripeEventId,
-          row.type,
-          row.created,
-          row.payload,
-        );
         waiting += 1;
         continue;
       }

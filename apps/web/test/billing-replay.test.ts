@@ -637,3 +637,132 @@ describe('two events in the same second', () => {
     assert.equal(row?.status, 'active', 'kept the superseded status');
   });
 });
+
+describe('a queue with rows in it that can never be attributed', () => {
+  function foreignEvent(id: string, created: number): Stripe.Event {
+    return {
+      id,
+      created,
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: `in_${id}`,
+          customer: 'cus_nobody',
+          amount_paid: 500,
+          amount_paid_off_stripe: 0,
+          metadata: {},
+        },
+      },
+    } as unknown as Stripe.Event;
+  }
+
+  it('does not let them starve a payment parked behind them', async () => {
+    // A batch of the oldest rows is the whole queue for ever once the oldest
+    // rows are ones nobody can attribute. The invoice behind them becomes
+    // attributable the moment its customer mapping arrives, and is never
+    // tried again to find out. Its payment stays uncredited indefinitely.
+    const store = newStore();
+    const stuck = [foreignEvent('evt_a', 1000), foreignEvent('evt_b', 2000)];
+    for (const event of stuck) {
+      await store.parkUnattributedEvent(
+        event.id,
+        event.type,
+        event.created,
+        JSON.stringify(event),
+        '2026-09-01T00:00:00.000Z',
+      );
+    }
+    // Parked later, and attributable: the customer is mapped.
+    await store.linkCustomer('user_1', 'cus_user_1');
+    const payable = {
+      id: 'evt_payable',
+      created: 3000,
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_payable',
+          customer: 'cus_user_1',
+          amount_paid: 2500,
+          amount_paid_off_stripe: 0,
+          metadata: {},
+        },
+      },
+    } as unknown as Stripe.Event;
+    await store.parkUnattributedEvent(
+      payable.id,
+      payable.type,
+      payable.created,
+      JSON.stringify(payable),
+      '2026-09-02T00:00:00.000Z',
+    );
+
+    // A batch smaller than the queue, which is the whole point: the two
+    // stuck rows are older and would fill it every time.
+    const first = await retryUnattributedEvents(
+      store,
+      2,
+      () => '2026-09-03T00:00:00.000Z',
+    );
+    assert.equal(first.tried, 2);
+
+    const second = await retryUnattributedEvents(
+      store,
+      2,
+      () => '2026-09-04T00:00:00.000Z',
+    );
+
+    assert.equal(second.applied, 1, 'never got to the one it could pay');
+    assert.equal(
+      await store.hasClearedPayment('user_1'),
+      true,
+      'the payment behind the stuck rows stayed uncredited',
+    );
+  });
+
+  it('still applies a batch oldest first', async () => {
+    // Fairness decides which rows are in the batch. It must not decide the
+    // order they are applied in: a Checkout that maps a customer has to run
+    // before the invoice that needs the mapping, whatever their attempt
+    // history looks like.
+    const store = newStore();
+    const checkout = topupEvent('evt_checkout', 1000);
+    const invoice = {
+      id: 'evt_invoice',
+      created: 2000,
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_1',
+          customer: 'cus_user_1',
+          amount_paid: 2000,
+          amount_paid_off_stripe: 0,
+          metadata: {},
+        },
+      },
+    } as unknown as Stripe.Event;
+    // The invoice was tried longer ago, so fairness puts it first.
+    await store.parkUnattributedEvent(
+      invoice.id,
+      invoice.type,
+      invoice.created,
+      JSON.stringify(invoice),
+      '2026-09-01T00:00:00.000Z',
+    );
+    await store.parkUnattributedEvent(
+      checkout.id,
+      checkout.type,
+      checkout.created,
+      JSON.stringify(checkout),
+      '2026-09-02T00:00:00.000Z',
+    );
+
+    const result = await retryUnattributedEvents(
+      store,
+      10,
+      () => '2026-09-03T00:00:00.000Z',
+    );
+
+    assert.equal(result.applied, 2, 'applied the invoice before its mapping');
+    assert.equal((await store.listUnattributedEvents()).length, 0);
+  });
+});

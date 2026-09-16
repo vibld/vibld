@@ -552,8 +552,8 @@ export class BillingStore {
     type: string,
     created: number,
     payload: string,
+    at: string = new Date().toISOString(),
   ): Promise<void> {
-    const now = new Date().toISOString();
     await this.#db
       .prepare(
         `INSERT INTO billing_unattributed_events
@@ -564,17 +564,55 @@ export class BillingStore {
            last_attempt_at = excluded.last_attempt_at,
            attempts = billing_unattributed_events.attempts + 1`,
       )
-      .bind(stripeEventId, type, created, payload, now)
+      .bind(stripeEventId, type, created, payload, at)
       .run();
   }
 
-  /** Parked events, oldest first, which is the order they have to be applied in. */
+  /**
+   * Record that the retry is about to try this one.
+   *
+   * Stamped before the attempt rather than after it, and the ordering above
+   * reads the same column, so a row that cannot be attributed moves to the
+   * back of the queue instead of holding the front of it. Exactly what
+   * `ReferralStore.markAttempted` does and for the same reason: without it a
+   * fixed batch of the oldest rows is the whole queue for ever, and a
+   * payment parked later is never looked at again.
+   */
+  async markUnattributedAttempted(
+    stripeEventId: string,
+    at: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE billing_unattributed_events
+            SET last_attempt_at = ?2, attempts = attempts + 1
+          WHERE stripe_event_id = ?1`,
+      )
+      .bind(stripeEventId, at)
+      .run();
+  }
+
+  /**
+   * A batch of parked events, least recently tried first.
+   *
+   * By attempt and not by age, which is the difference between a queue and a
+   * dead end. Ordering by `created` meant a fixed batch always returned the
+   * same oldest rows, so once the batch filled with events that can never be
+   * attributed, every payment parked after them was starved: an invoice that
+   * became attributable the moment its customer mapping arrived would never
+   * be tried again.
+   *
+   * The caller applies the batch oldest-first regardless. Fairness decides
+   * which rows are in it; `created` decides the order they go in, because a
+   * Checkout that maps a customer has to be applied before the invoice that
+   * needs the mapping.
+   */
   async listUnattributedEvents(limit = 200): Promise<UnattributedEvent[]> {
     const result = await this.#db
       .prepare(
         `SELECT stripe_event_id, type, created, payload, first_seen_at, attempts
            FROM billing_unattributed_events
-          ORDER BY created, stripe_event_id
+          ORDER BY last_attempt_at, created, stripe_event_id
           LIMIT ?1`,
       )
       .bind(limit)
