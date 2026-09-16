@@ -113,9 +113,19 @@ export async function lookupAdminUser(
     // Every field is checked, the same discipline the rest of this file
     // follows. The cast this replaces let a row with no amount and no actor
     // through untouched.
-    const rows = (Array.isArray(record.grants) ? record.grants : []).map(
-      readGrant,
-    );
+    //
+    // A `grants` that is not an array is a failed lookup, not an empty
+    // history. Defaulting to `[]` was the row-level fault one level up:
+    // the panel would show "no past grants" for an answer it could not
+    // read, which is the silently shortened history this whole change
+    // exists to prevent, at its worst.
+    if (!Array.isArray(record.grants)) {
+      return {
+        ok: false,
+        error: 'The admin service returned an unexpected response.',
+      };
+    }
+    const rows = record.grants.map(readGrant);
     return {
       ok: true,
       userId: record.userId,

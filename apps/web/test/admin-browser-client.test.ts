@@ -176,6 +176,34 @@ describe('a grant row the page cannot read', () => {
     assert.equal(result.unreadable, 1);
   });
 
+  it('refuses a lookup whose history it could not read at all', async () => {
+    // Not an empty history. Defaulting to [] here would show "no past
+    // grants" for an answer nobody could read, which is the silently
+    // shortened list this change exists to prevent, at its worst: every row
+    // missing and nothing said.
+    for (const grants of [undefined, null, 'none', 42, { 0: 'a' }]) {
+      const result = await lookupAdminUser(
+        'a@example.com',
+        serving(grants),
+        async () => null,
+      );
+      assert.equal(result.ok, false, JSON.stringify(grants ?? null));
+    }
+  });
+
+  it('is content with a history that is genuinely empty', async () => {
+    // The other direction: a user with no grants is ordinary, and refusing
+    // that lookup would break the common case.
+    const result = await lookupAdminUser(
+      'a@example.com',
+      serving([]),
+      async () => null,
+    );
+    assert.ok(result.ok);
+    assert.deepEqual(result.grants, []);
+    assert.equal(result.unreadable, 0);
+  });
+
   it('keeps a readable grant that simply has no note', async () => {
     // The other direction: a note is genuinely optional, and refusing a row
     // for want of one would hide grants that are perfectly fine.
