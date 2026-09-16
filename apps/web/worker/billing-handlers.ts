@@ -211,7 +211,7 @@ export async function handleStripeWebhook(
     // retry Stripe then makes re-runs an idempotent path.
     const referrals = new ReferralStore(env.DB!);
     const deps = { referrals, billing: store };
-    await applyStripeEvent(
+    const outcome = await applyStripeEvent(
       store,
       event,
       (userId) => payReferralIfEarned(deps, userId).then(() => undefined),
@@ -228,6 +228,19 @@ export async function handleStripeWebhook(
       // handles.
       (chargeId) => stripe.charges.retrieve(chargeId),
     );
+
+    // `unresolved` means the handler wrote nothing, so the event is not
+    // done. Marking it processed on a normal return is how it is lost for
+    // good: the replay skips a processed event, so nothing ever revisits it.
+    //
+    // A 5xx is what makes Stripe try again, which is the only retry a
+    // webhook has. Thrown rather than returned so the one handler below
+    // covers both this and an unexpected D1 failure, and so
+    // `markEventProcessed` stays unreachable for anything that did not
+    // finish.
+    if (outcome === 'unresolved') {
+      throw new Error(`stripe event ${event.id} could not be applied yet`);
+    }
   } catch (error) {
     // A 5xx here makes Stripe retry, which is what an unexpected D1/R2
     // failure should do -- succeeding despite a write that never happened

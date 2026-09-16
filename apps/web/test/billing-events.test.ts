@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
@@ -501,6 +503,47 @@ describe('subscriptionRecordFrom', () => {
         'user_1',
       ),
       undefined,
+    );
+  });
+});
+
+describe('what the webhook does with an outcome it cannot apply', () => {
+  /**
+   * Read from the source rather than exercised, because reaching
+   * `handleStripeWebhook` means producing a body Stripe's own signature
+   * verification accepts, and the property under test is one line of control
+   * flow rather than anything that needs a signed request.
+   *
+   * The property: an `unresolved` outcome must not reach
+   * `markEventProcessed`. It used to. The outcome was discarded, every
+   * delivery answered 200, and a processed event is one the nightly replay
+   * skips, so an event the handler could not apply was lost by both paths at
+   * once.
+   */
+  it('does not mark an unresolved event processed', async () => {
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/billing-handlers.ts', import.meta.url)),
+      'utf8',
+    );
+    const flat = source.replace(/\s+/g, ' ');
+
+    assert.match(
+      flat,
+      /const outcome = await applyStripeEvent\(/,
+      'the outcome is discarded again, so nothing can act on it',
+    );
+    assert.match(
+      flat,
+      /if \(outcome === 'unresolved'\) \{ throw new Error\(/,
+      'an unresolved event no longer fails the delivery',
+    );
+
+    // And the order: the throw has to be above the mark, or the mark runs
+    // first and the retry it asks Stripe for is skipped at the dedupe check.
+    assert.ok(
+      flat.indexOf("outcome === 'unresolved'") <
+        flat.indexOf('markEventProcessed(event.id'),
+      'the event is marked processed before the unresolved check',
     );
   });
 });

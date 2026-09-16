@@ -406,3 +406,30 @@ describe('a dispute that names its charge by id', () => {
     assert.equal(outcome, 'unresolved');
   });
 });
+
+describe('a clawback that cannot be applied yet', () => {
+  it('is not reported as applied', async () => {
+    // The event is the clawback. Reporting `applied` on a failed one means
+    // the replay marks it processed and skips it next run, so a transient D1
+    // failure leaves the credit in place for ever. An earlier version caught
+    // the failure and resolved, and its comment claimed a retry that could
+    // not happen.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new BillingStore(db);
+    await store.linkCustomer('user_referred', 'cus_referred');
+
+    const outcome = await applyStripeEvent(
+      store,
+      {
+        type: 'charge.refunded',
+        data: { object: { id: 'ch_1', customer: 'cus_referred' } },
+      } as never,
+      undefined,
+      async () => {
+        throw new Error('no such table: referral_attributions');
+      },
+    );
+
+    assert.equal(outcome, 'unresolved');
+  });
+});

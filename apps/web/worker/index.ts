@@ -1557,28 +1557,25 @@ export default {
       const cleared = (userId: string) =>
         payReferralIfEarned(payout, userId).then(() => undefined);
       /**
-       * Swallowed on purpose, and this is the one place in this file where
-       * that is right.
+       * Deliberately not swallowed, which is the opposite of what an earlier
+       * version did and said.
        *
-       * Inside the replay a throw is not a retry: it counts as a failure,
-       * holds the floor, and stops every future payment being recovered
-       * over a bug in an unrelated subsystem. Stripe retries a webhook;
-       * nothing retries this. So a clawback that fails here is logged and
-       * the replay carries on, and the same reversal is reached again on
-       * the next run because `clawBackReferral` is idempotent and the
-       * credit it takes back is still there to take.
+       * That version caught the failure and resolved, so `applyStripeEvent`
+       * returned `applied`, the replay marked the event processed, and the
+       * next run skipped it: the comment claiming it would be retried
+       * described something that could not happen. A transient D1 failure
+       * left the credit in place for ever.
+       *
+       * Letting it reject is safe here because `applyChargeReversed` catches
+       * it and answers `unresolved`, which parks the event for the retry
+       * sweep rather than throwing into the replay and holding the floor.
        */
       // A dispute names its charge by id and the customer is only on the
       // charge, so the replay needs the same lookup the webhook path has.
       const readCharge = (chargeId: string) =>
         stripe.charges.retrieve(chargeId);
       const reversed = (userId: string, reason: string) =>
-        clawBackReferral(payout, userId, reason).then(
-          () => undefined,
-          (error: unknown) => {
-            console.error('referral clawback failed', userId, error);
-          },
-        );
+        clawBackReferral(payout, userId, reason).then(() => undefined);
       ctx.waitUntil(
         // The replay first, and the reconcile after it rather than beside
         // it. The replay applies events in the order Stripe created them

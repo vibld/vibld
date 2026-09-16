@@ -524,6 +524,18 @@ async function applyChargeReversed(
     return 'unresolved';
   }
 
-  if (onPurchaseReversed) await onPurchaseReversed(userId, reason);
+  if (onPurchaseReversed) {
+    try {
+      await onPurchaseReversed(userId, reason);
+    } catch (error) {
+      // Not `applied`. The clawback is the entire work of this event, so an
+      // event marked done on a failed one is credit this deployment paid for
+      // with nothing left to come back to it. `unresolved` is what the
+      // callers already have machinery for: the replay parks it and retries,
+      // and the webhook answers retryably rather than 200.
+      console.error('stripe reversal could not be applied', userId, error);
+      return 'unresolved';
+    }
+  }
   return 'applied';
 }
