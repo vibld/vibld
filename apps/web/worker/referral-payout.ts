@@ -9,7 +9,6 @@ import type { ReferralStore } from './referral-store.ts';
 import {
   DEFAULT_REWARD_CENTS,
   MAX_PAID_REFERRALS,
-  clawbackCents,
   clawbackGrantId,
   decidePayout,
   payoutGrantId,
@@ -71,6 +70,7 @@ export async function payReferralIfEarned(
   const decision = decidePayout({
     referrerUserId,
     paidAlready: attribution?.paidAt != null,
+    reversed: attribution?.reversedAt != null,
     ...(deps.reward ? { reward: deps.reward } : {}),
   });
   if (!decision.pay) return { paid: false, reason: decision.reason };
@@ -202,9 +202,27 @@ export async function clawBackReferral(
   note: string,
 ): Promise<ClawbackResult> {
   const attribution = await deps.referrals.attributionFor(referredUserId);
-  // Nothing was ever paid for this account, so there is nothing to reverse.
-  // Not an error: most refunds are of a purchase no referral was attached to.
-  if (!attribution?.referrerUserId || attribution.paidAt == null) {
+  // No referral at all. Most refunds are of a purchase nothing was attached
+  // to, and there is nothing here to record.
+  if (!attribution?.referrerUserId) {
+    return { found: false, referrerCents: 0, referredCents: 0 };
+  }
+
+  // Written before anything is deducted, and written whether or not a payout
+  // has happened. An unpaid attribution is not proof that no payout can
+  // still happen: the replay descends newest pages first, so a refund can be
+  // applied before the older purchase that earns the reward is recovered,
+  // and a payout can fail between its first grant and its `markPaid`. In
+  // both cases the reward was still coming, and returning early here is what
+  // let it arrive after its funding payment had gone back out.
+  await deps.referrals.markReversed(
+    referredUserId,
+    (deps.now ?? new Date()).toISOString(),
+  );
+
+  // Nothing paid yet, so there is nothing to take back. The mark above is
+  // what makes this safe to return from: the payout path refuses this row now.
+  if (attribution.paidAt == null) {
     return { found: false, referrerCents: 0, referredCents: 0 };
   }
 
@@ -243,24 +261,21 @@ async function takeBack(
   rewardCents: number,
   note: string,
 ): Promise<number> {
-  const grantedMicroUsd = await deps.billing.totalAdminCreditMicroUsd(userId);
-  const cents = clawbackCents(
-    rewardCents,
-    Math.floor(grantedMicroUsd / 10_000),
-  );
-  if (cents <= 0) return 0;
-
-  // What this returns is what this call took, not what the reward was worth.
-  // The row is written once for a given id, so a redelivered refund and a
-  // replayed event both reach here and neither writes: reporting the reward
-  // regardless would log the same five dollars recovered every time one
-  // arrived, while the balance moved once.
-  const written = await deps.billing.grantAdminCredit(
+  // The floor lives in the statement, not here. Reading the balance and then
+  // writing a deduction bounded by it is a check followed by an act, and two
+  // refunds of two different referrals sharing one referrer can both pass it
+  // and leave the granted total negative, which takes the difference out of
+  // credit somebody paid for.
+  //
+  // What comes back is what this call took, which is zero for a redelivered
+  // refund: the row is written once for a given id, and reporting the reward
+  // regardless would log the same money recovered every time one arrived
+  // while the balance moved once.
+  return await deps.billing.deductAdminCredit(
     id,
     userId,
-    -cents,
+    rewardCents,
     REFERRAL_GRANT_ACTOR,
     note,
   );
-  return written ? cents : 0;
 }

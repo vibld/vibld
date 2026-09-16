@@ -1568,6 +1568,10 @@ export default {
        * the next run because `clawBackReferral` is idempotent and the
        * credit it takes back is still there to take.
        */
+      // A dispute names its charge by id and the customer is only on the
+      // charge, so the replay needs the same lookup the webhook path has.
+      const readCharge = (chargeId: string) =>
+        stripe.charges.retrieve(chargeId);
       const reversed = (userId: string, reason: string) =>
         clawBackReferral(payout, userId, reason).then(
           () => undefined,
@@ -1592,6 +1596,7 @@ export default {
           undefined,
           replayBudgetFor(budget),
           reversed,
+          readCharge,
         )
           .then(
             (result) => {
@@ -1626,6 +1631,7 @@ export default {
               retryBatchFor(budget - payoutReserveFor(budget) - reserved),
               undefined,
               reversed,
+              readCharge,
             ),
           )
           .then(

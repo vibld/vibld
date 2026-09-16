@@ -10,6 +10,15 @@ import {
 import { makeCode, normaliseCode } from './referral.ts';
 
 export interface AttributionRecord {
+  /**
+   * When the payment that funded this referral went back out, or null.
+   *
+   * Set whether or not a payout had happened yet, because "no payout yet" is
+   * not proof that none can still happen: the replay can apply a refund
+   * before the older purchase it belongs to, and a payout can fail between
+   * its grant and its markPaid.
+   */
+  reversedAt?: string | null;
   referredUserId: string;
   referrerUserId: string;
   code: string;
@@ -93,7 +102,7 @@ export class ReferralStore {
     const row = await this.#db
       .prepare(
         `SELECT referred_user_id, referrer_user_id, code, created_at,
-                claimed_at, paid_at, last_attempt_at
+                claimed_at, paid_at, last_attempt_at, reversed_at
          FROM referral_attributions WHERE referred_user_id = ?1`,
       )
       .bind(referredUserId)
@@ -105,6 +114,7 @@ export class ReferralStore {
         claimed_at: string | null;
         paid_at: string | null;
         last_attempt_at: string | null;
+        reversed_at: string | null;
       }>();
     if (!row) return undefined;
     return {
@@ -115,7 +125,32 @@ export class ReferralStore {
       claimedAt: row.claimed_at,
       paidAt: row.paid_at,
       lastAttemptAt: row.last_attempt_at,
+      reversedAt: row.reversed_at,
     };
+  }
+
+  /**
+   * Record that the payment behind this referral went back out.
+   *
+   * Written whether or not a payout had already happened, which is the whole
+   * point: the replay descends newest pages first, so a refund can arrive
+   * before the purchase that earned the reward, and a payout can fail between
+   * its grant and its `markPaid`. In both cases `paid_at` is NULL while a
+   * payout is still coming, and treating that as "nothing to reverse" let the
+   * reward be paid after its payment had been returned.
+   *
+   * `COALESCE` keeps the first reversal's time rather than moving it on every
+   * redelivery, matching how `claimInvite` treats its own timestamp.
+   */
+  async markReversed(referredUserId: string, at: string): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE referral_attributions SET reversed_at = COALESCE(reversed_at, ?2)
+         WHERE referred_user_id = ?1`,
+      )
+      .bind(referredUserId, at)
+      .run();
+    return result.meta.changes > 0;
   }
 
   /**

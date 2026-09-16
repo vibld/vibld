@@ -666,7 +666,16 @@ Dashboard needs no code change, only the amount to change.
   `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
   `invoice.payment_failed` (the last is acknowledged but not separately
   mirrored -- `customer.subscription.updated` already carries the status
-  change it implies).
+  change it implies), `charge.refunded` and `charge.dispute.closed`.
+
+  **The last two have to be ticked on the endpoint, or refunds only ever
+  reach this deployment through the nightly replay.** They are what takes a
+  referral reward back when the payment that funded it goes out again, and
+  an endpoint configured from an older copy of this list will never deliver
+  either. Add them at
+  <https://dashboard.stripe.com/webhooks> on the existing endpoint.
+  `charge.dispute.closed` is acted on only when the dispute was lost: a won
+  dispute means the money stayed.
 
   `invoice.paid` **is** acted on now: it carries `amount_paid`, so it is the
   event that says how much money moved, and it is the only one that

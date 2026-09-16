@@ -308,6 +308,62 @@ export class BillingStore {
   }
 
   /**
+   * Deduct up to `maxCents` of granted credit, and say how much was taken.
+   *
+   * One statement, because two cannot settle this. Reading the balance here
+   * and inserting the bounded deduction there is a check followed by an act:
+   * two refunds of two different referrals sharing one referrer, arriving
+   * together, both read the same remaining five dollars, both pass the
+   * floor, and both write, leaving the granted total at minus five. The
+   * no-debt rule this exists to keep is exactly what that breaks, and it
+   * takes the difference out of credit somebody paid for.
+   *
+   * So the floor is computed inside the INSERT's own SELECT. D1 admits one
+   * writer at a time, so the second statement runs against the first one's
+   * committed row and sees the smaller balance.
+   *
+   * The `WHERE` keeps a zero-value row out of the ledger: there is no such
+   * thing as deducting nothing, and a row saying so would have to be
+   * explained to anybody reading a credit history.
+   *
+   * The amount is read back rather than computed here for the same reason it
+   * is written there: what was taken is whatever the database decided, and
+   * this must not be a second opinion about it.
+   */
+  async deductAdminCredit(
+    id: string,
+    userId: string,
+    maxCents: number,
+    grantedByEmail: string,
+    note: string | null,
+  ): Promise<number> {
+    if (maxCents <= 0) return 0;
+    const now = new Date().toISOString();
+    const available = `MAX(0, COALESCE((SELECT SUM(credit_usd_cents)
+        FROM billing_admin_credits
+       WHERE user_id = ?2 AND created_at > datetime('now', '-12 months')), 0))`;
+    const result = await this.#db
+      .prepare(
+        `INSERT INTO billing_admin_credits
+           (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
+         SELECT ?1, ?2, -MIN(?3, ${available}), ?4, ?5, ?6
+          WHERE MIN(?3, ${available}) > 0
+         ON CONFLICT(id) DO NOTHING`,
+      )
+      .bind(id, userId, maxCents, grantedByEmail, note, now)
+      .run();
+    if (result.meta.changes === 0) return 0;
+
+    const row = await this.#db
+      .prepare(
+        `SELECT credit_usd_cents FROM billing_admin_credits WHERE id = ?1`,
+      )
+      .bind(id)
+      .first<{ credit_usd_cents: number }>();
+    return row ? Math.abs(row.credit_usd_cents) : 0;
+  }
+
+  /**
    * This user's admin-granted credit (L4), summed the same way
    * `totalTopupCreditMicroUsd` sums Stripe top-ups -- including the same
    * 12-month window, since both feed the same spendable-credit bucket

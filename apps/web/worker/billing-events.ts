@@ -67,6 +67,22 @@ export type OnPurchaseReversed = (
 ) => Promise<void>;
 
 /**
+ * Fetch a charge Stripe referred to by id alone.
+ *
+ * `charge.dispute.closed` carries `charge` as a bare id in the ordinary
+ * case, and a dispute is the one reversal whose customer cannot be read off
+ * the event. Without this the whole dispute path was dead: the handler
+ * answered `unresolved`, the webhook marked the event processed anyway, and
+ * a replayed one parked for ever because nothing would ever expand it. Lost
+ * disputes never clawed anything back.
+ *
+ * Injected rather than reached for, because this module reads Stripe's
+ * envelopes and does not call Stripe. The caller has a client; this is the
+ * one question it has to ask on this module's behalf.
+ */
+export type ResolveCharge = (chargeId: string) => Promise<Stripe.Charge>;
+
+/**
  * Whether applying an event actually wrote what the event was about.
  *
  * `unresolved` means the handler could not work out whose money this is, so
@@ -385,6 +401,7 @@ export async function applyStripeEvent(
   event: Stripe.Event,
   onPurchaseCleared?: OnPurchaseCleared,
   onPurchaseReversed?: OnPurchaseReversed,
+  resolveCharge?: ResolveCharge,
 ): Promise<EventOutcome> {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -420,6 +437,7 @@ export async function applyStripeEvent(
         event.data.object,
         'Referral reversed: the payment was refunded.',
         onPurchaseReversed,
+        resolveCharge,
       );
     case 'charge.dispute.closed':
       // Only a dispute that was lost took the money back. A won dispute
@@ -431,6 +449,7 @@ export async function applyStripeEvent(
         event.data.object.charge,
         'Referral reversed: the dispute was lost.',
         onPurchaseReversed,
+        resolveCharge,
       );
     default:
       // Every type here is one this deployment asked Stripe for
@@ -468,23 +487,40 @@ async function applyChargeReversed(
   charge: Stripe.Charge | string,
   reason: string,
   onPurchaseReversed?: OnPurchaseReversed,
+  resolveCharge?: ResolveCharge,
 ): Promise<EventOutcome> {
-  // A dispute carries its charge either expanded or as a bare id, and a bare
-  // id is not something to fetch from here: this module never calls Stripe.
+  // A dispute carries its charge as a bare id in the ordinary case, and the
+  // customer is only on the charge. This module does not call Stripe, so the
+  // caller supplies the one lookup; without it the dispute path answered
+  // `unresolved` for every real delivery and nothing ever clawed back.
+  let resolved: Stripe.Charge;
   if (typeof charge === 'string') {
-    console.error('stripe reversal with an unexpanded charge', charge);
-    return 'unresolved';
+    if (!resolveCharge) {
+      console.error('stripe reversal with no way to read the charge', charge);
+      return 'unresolved';
+    }
+    try {
+      resolved = await resolveCharge(charge);
+    } catch (error) {
+      // Not `applied`: Stripe was asked and could not answer, so this is
+      // still owed. Marking it done here is how a lost dispute keeps its
+      // reward for ever.
+      console.error('stripe reversal could not read the charge', charge, error);
+      return 'unresolved';
+    }
+  } else {
+    resolved = charge;
   }
 
-  const stripeCustomerId = customerId(charge.customer);
+  const stripeCustomerId = customerId(resolved.customer);
   if (!stripeCustomerId) {
-    console.error('stripe reversal with no customer', charge.id);
+    console.error('stripe reversal with no customer', resolved.id);
     return 'unresolved';
   }
 
   const userId = await store.findUserIdForCustomer(stripeCustomerId);
   if (!userId) {
-    console.error('stripe reversal for an unmapped customer', charge.id);
+    console.error('stripe reversal for an unmapped customer', resolved.id);
     return 'unresolved';
   }
 

@@ -28,7 +28,7 @@
  */
 import type Stripe from 'stripe';
 import { applyStripeEvent } from './billing-events.ts';
-import type { OnPurchaseReversed } from './billing-events.ts';
+import type { OnPurchaseReversed, ResolveCharge } from './billing-events.ts';
 import { BillingStore } from './billing-store.ts';
 import type { EventReplayCursor } from './billing-store.ts';
 
@@ -206,6 +206,7 @@ export async function replayStripeEvents(
   now: () => number = () => Math.floor(Date.now() / 1000),
   queryBudget: number = DEFAULT_QUERY_BUDGET,
   onPurchaseReversed?: OnPurchaseReversed,
+  resolveCharge?: ResolveCharge,
 ): Promise<ReplayResult> {
   const pageSize = pageSizeFor(queryBudget);
   // What a page costs at its worst, which is what decides whether there is
@@ -331,6 +332,7 @@ export async function replayStripeEvents(
           event,
           undefined,
           onPurchaseReversed,
+          resolveCharge,
         );
         if (outcome === 'unresolved') {
           // Nothing was written, so it is not done, and marking it processed
@@ -576,6 +578,7 @@ export async function retryUnattributedEvents(
   limit = retryBatchFor(DEFAULT_QUERY_BUDGET),
   now: () => string = () => new Date().toISOString(),
   onPurchaseReversed?: OnPurchaseReversed,
+  resolveCharge?: ResolveCharge,
 ): Promise<RetryResult> {
   // Least recently tried first, so a row that can never be attributed costs
   // one attempt a night rather than holding the front of the queue for ever.
@@ -602,6 +605,7 @@ export async function retryUnattributedEvents(
         event,
         undefined,
         onPurchaseReversed,
+        resolveCharge,
       );
       if (outcome === 'unresolved') {
         waiting += 1;

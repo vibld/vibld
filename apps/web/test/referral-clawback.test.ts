@@ -242,3 +242,167 @@ describe('the Stripe events that trigger it', () => {
     assert.equal(outcome, 'applied');
   });
 });
+
+describe('a reversal that arrives before the payout it reverses', () => {
+  /**
+   * The ordering hole, and it is not hypothetical: the nightly replay
+   * descends newest pages first, so a refund can be applied in one run
+   * before the older purchase that earns the reward is recovered. A payout
+   * that fails between its first grant and its markPaid leaves the same
+   * shape. In both cases paid_at is NULL while a payout is still coming.
+   */
+  async function attributedNotYetPaid() {
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    await billing.linkCustomer('user_referred', 'cus_referred');
+    return { db, referrals, billing, deps: { referrals, billing } };
+  }
+
+  it('stops the reward being paid afterwards', async () => {
+    const { billing, deps } = await attributedNotYetPaid();
+
+    const reversal = await clawBackReferral(deps, 'user_referred', 'refunded');
+    assert.equal(
+      reversal.found,
+      false,
+      'nothing was paid yet, so nothing to take',
+    );
+
+    const later = await payReferralIfEarned(deps, 'user_referred');
+
+    assert.equal(later.paid, false, 'paid a reward whose payment was returned');
+    assert.equal(await cents(billing, 'user_referrer'), 0);
+    assert.equal(await cents(billing, 'user_referred'), 0);
+  });
+
+  it('records the reversal even with nothing to take back', async () => {
+    // The mark is what makes the early return above safe. Without it the
+    // reversal leaves no trace and the payout path has nothing to refuse.
+    const { referrals, deps } = await attributedNotYetPaid();
+    await clawBackReferral(deps, 'user_referred', 'refunded');
+    const attribution = await referrals.attributionFor('user_referred');
+    assert.notEqual(attribution?.reversedAt ?? null, null);
+  });
+});
+
+describe('two refunds for one referrer at the same moment', () => {
+  it('cannot take more than the referrer has', async () => {
+    // Two refunds of two different referrals sharing one referrer. Reading
+    // the balance here and writing a deduction bounded by it is a check
+    // followed by an act: both read the same remaining $5, both pass the
+    // floor, and the granted total goes to minus $5, which takes the
+    // difference out of credit somebody paid for.
+    const db = new SqliteD1Database(SCHEMA);
+    const billing = new BillingStore(db);
+    await billing.grantAdminCredit(
+      'the-only-credit-they-have',
+      'user_referrer',
+      500,
+      'admin@vibld.com',
+      'one reward is all that is left',
+    );
+
+    const taken = await Promise.all([
+      billing.deductAdminCredit(
+        'clawback-one',
+        'user_referrer',
+        500,
+        'system@vibld.com',
+        'first refund',
+      ),
+      billing.deductAdminCredit(
+        'clawback-two',
+        'user_referrer',
+        500,
+        'system@vibld.com',
+        'second refund',
+      ),
+    ]);
+
+    assert.equal(
+      taken[0] + taken[1],
+      500,
+      'took more than the referrer was ever granted',
+    );
+    assert.equal(
+      await cents(billing, 'user_referrer'),
+      0,
+      'the balance went negative, which is the debt this must never create',
+    );
+  });
+
+  it('writes no row at all when there is nothing left to take', async () => {
+    // A zero-value deduction would have to be explained to anybody reading a
+    // credit history, and there is no such thing as deducting nothing.
+    const db = new SqliteD1Database(SCHEMA);
+    const billing = new BillingStore(db);
+    const taken = await billing.deductAdminCredit(
+      'clawback',
+      'user_broke',
+      500,
+      'system@vibld.com',
+      'refund',
+    );
+    assert.equal(taken, 0);
+    assert.deepEqual(await billing.listAdminCredits('user_broke'), []);
+  });
+});
+
+describe('a dispute that names its charge by id', () => {
+  it('reads the charge rather than giving up on it', async () => {
+    // Stripe sends `charge` as a bare id in the ordinary case, and the
+    // customer is only on the charge. Without a way to read it the whole
+    // dispute path answered unresolved, the webhook marked the event
+    // processed anyway, and lost disputes never clawed anything back.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new BillingStore(db);
+    await store.linkCustomer('user_referred', 'cus_referred');
+    const asked: string[] = [];
+    const seen: string[] = [];
+
+    const outcome = await applyStripeEvent(
+      store,
+      {
+        type: 'charge.dispute.closed',
+        data: { object: { status: 'lost', charge: 'ch_bare' } },
+      } as never,
+      undefined,
+      async (userId) => {
+        seen.push(userId);
+      },
+      async (chargeId) => {
+        asked.push(chargeId);
+        return { id: chargeId, customer: 'cus_referred' } as never;
+      },
+    );
+
+    assert.equal(outcome, 'applied');
+    assert.deepEqual(asked, ['ch_bare']);
+    assert.deepEqual(seen, ['user_referred']);
+  });
+
+  it('stays unresolved when the charge cannot be read', async () => {
+    // Stripe was asked and could not answer, so the reversal is still owed.
+    // Marking it applied is how a lost dispute keeps its reward for ever.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new BillingStore(db);
+    await store.linkCustomer('user_referred', 'cus_referred');
+
+    const outcome = await applyStripeEvent(
+      store,
+      {
+        type: 'charge.dispute.closed',
+        data: { object: { status: 'lost', charge: 'ch_bare' } },
+      } as never,
+      undefined,
+      async () => {},
+      async () => {
+        throw new Error('stripe is down');
+      },
+    );
+    assert.equal(outcome, 'unresolved');
+  });
+});

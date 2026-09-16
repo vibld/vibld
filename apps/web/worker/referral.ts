@@ -188,7 +188,7 @@ export const DEFAULT_REWARD_CENTS: RewardCents = {
 export const MAX_PAID_REFERRALS = 25;
 
 export type PayoutRefusal =
-  'not-attributed' | 'already-paid' | 'referrer-at-cap';
+  'not-attributed' | 'already-paid' | 'referrer-at-cap' | 'reversed';
 
 export type PayoutDecision =
   | { pay: true; referrerUserId: string; reward: RewardCents }
@@ -213,11 +213,19 @@ export function decidePayout(input: {
   referrerUserId: string | undefined;
   paidAlready: boolean;
   reward?: RewardCents;
+  reversed?: boolean;
 }): PayoutDecision {
   if (input.referrerUserId === undefined) {
     return { pay: false, reason: 'not-attributed' };
   }
   if (input.paidAlready) return { pay: false, reason: 'already-paid' };
+  // The payment that would fund this reward has already gone back out. This
+  // is checked rather than inferred from `paidAlready` because the two are
+  // independent: the replay applies newer pages first, so a refund can be
+  // recorded before the purchase that earned the reward is recovered, and
+  // then `resumeStrandedPayouts` would pay on a payment that no longer
+  // exists.
+  if (input.reversed) return { pay: false, reason: 'reversed' };
   return {
     pay: true,
     referrerUserId: input.referrerUserId,

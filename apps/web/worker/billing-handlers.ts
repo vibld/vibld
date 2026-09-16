@@ -223,6 +223,10 @@ export async function handleStripeWebhook(
       // Stripe makes writes the same rows once.
       (userId, reason) =>
         clawBackReferral(deps, userId, reason).then(() => undefined),
+      // A dispute names its charge by id, and the customer is only on the
+      // charge. One request, on the rarest event type this deployment
+      // handles.
+      (chargeId) => stripe.charges.retrieve(chargeId),
     );
   } catch (error) {
     // A 5xx here makes Stripe retry, which is what an unexpected D1/R2
