@@ -39,7 +39,7 @@ Built by the founders of Strapi, which shows: the content model is the most
 mature part of the product.
 
 **This is not Lovable's shape and it is not Vibld's shape.** Lovable and Vibld
-compete over the *build*: prompt to running site. Fimo deliberately does not
+compete over the _build_: prompt to running site. Fimo deliberately does not
 compete there -- it assumes Claude Code or Cursor already did the build, and
 sells everything that happens afterwards. Their comparison page against Cursor
 says so directly: "Cursor builds your website. Fimo makes it run itself."
@@ -50,7 +50,7 @@ Two consequences for Vibld:
    for the same first user action, so almost nothing here is a feature Vibld
    must match defensively. Nearly everything here is a design Vibld can lift
    because it solves problems Vibld will hit at M2 and M3 regardless.
-2. Fimo is what Vibld's *output* could plug into, and equally the roadmap
+2. Fimo is what Vibld's _output_ could plug into, and equally the roadmap
    Vibld would follow if it ever went past the build loop. The overlap arrives
    at M2 (conversational editing), M3 (publish) and M5 (visual iteration).
 
@@ -105,7 +105,7 @@ triggers:
 ```
 
 Triggers are `manual`, a cron schedule with a timezone, or a webhook. A
-*scheduled command* is a separate, lighter thing: one project command on a
+_scheduled command_ is a separate, lighter thing: one project command on a
 cron, explicitly "not an agent bundle".
 
 The whole definition is versioned, reviewed and deployed like code, and it
@@ -135,7 +135,7 @@ them:
 > Branch. Fimo owns the Branch and publication step, so you do not declare
 > `files:*`, `shell:exec`, or `git:*` in `capabilities.yaml`.
 
-`capabilities.yaml` is therefore only for *extra* reach, and defaults closed:
+`capabilities.yaml` is therefore only for _extra_ reach, and defaults closed:
 "An absent or empty file grants no CMS or asset scope."
 
 Wildcards are expanded rather than stored:
@@ -161,7 +161,7 @@ Mid-run escalation is bounded in three ways at once:
 "Selecting none is a valid denial" and "a note never grants access on its own"
 are both defences against an agent talking its way past a human, and the
 per-continuation scope means an approval cannot be banked. The CLI docs then
-carry the matching instruction to the *coding* agent, as a warning:
+carry the matching instruction to the _coding_ agent, as a warning:
 
 > A coding agent must show you the stored form and submit only the answer you
 > gave it. It should never choose for you, and never approve a capability you
@@ -225,7 +225,7 @@ It is cheap to copy and it is culturally already Vibld's.
 > Every branch spins up a complete copy of your stack: its own server, its own
 > database, its own asset bucket.
 
-`fimo checkout -b` creates the git branch *and* the environment: "Use `fimo
+`fimo checkout -b` creates the git branch _and_ the environment: "Use `fimo
 checkout -b` instead of `git checkout -b`." `fimo status` and `fimo diff`
 compare across every surface at once, not just files, and merge semantics are
 spelled out: non-conflicting additions, deletions and renames carry over, "A
@@ -295,7 +295,7 @@ A daily reminder covers still-open questions, one message per organisation,
 ## How Fimo teaches coding agents about a Fimo project
 
 This is the piece I would put in front of Chris first, because Vibld
-*generates* projects and therefore has the same problem in a sharper form.
+_generates_ projects and therefore has the same problem in a sharper form.
 
 Fimo does not vendor its documentation into every repository. `fimo skills
 install` writes one small bootstrap skill per tool, and the real instructions
@@ -387,14 +387,14 @@ not take it off the live site.
   never enter shell history, and agent-requested secrets listed per bundle
   (`fimo agents secrets list <name>`).
 - **Migration from the incumbents**, `--source-platform webflow | framer |
-  squarespace | wix | carrd | wordpress | nextjs | astro | react-router |
-  other`, labelled alpha in their own docs: "Website migration is in alpha and
+squarespace | wix | carrd | wordpress | nextjs | astro | react-router |
+other`, labelled alpha in their own docs: "Website migration is in alpha and
   not stable yet, so review every result before you continue."
 - **Five frameworks**: Next.js App Router (default), React Router, Astro,
   SvelteKit, Vite + React.
 - **A referral CLI**: `fimo referral link`, `fimo referral stats`.
 - **Media generation in the CLI**: `fimo image generate/edit/remove-
-  background/upscale`, `fimo video generate/animate/replace`.
+background/upscale`, `fimo video generate/animate/replace`.
 
 ## Where Fimo is weaker than its marketing
 
