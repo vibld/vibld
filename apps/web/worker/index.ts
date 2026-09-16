@@ -100,6 +100,7 @@ import {
   handleGitHubPush,
   handleGitHubStatus,
 } from './github-handlers.ts';
+import { replayStripeEvents } from './billing-replay.ts';
 import { createStripeClient } from './stripe-client.ts';
 import { isGated } from './access-gate.ts';
 import {
@@ -1525,16 +1526,36 @@ export default {
             console.error('referral payout resume failed', error),
         ),
       );
+      const stripe = createStripeClient(env);
+      const cleared = (userId: string) =>
+        payReferralIfEarned(payout, userId).then(() => undefined);
       ctx.waitUntil(
-        reconcileSubscriptions(createStripeClient(env), billing, (userId) =>
-          payReferralIfEarned(payout, userId).then(() => undefined),
-        ).then(
-          (result) =>
-            console.log(
-              JSON.stringify({ event: 'billing.reconciled', ...result }),
-            ),
-          (error: unknown) => console.error('billing reconcile failed', error),
-        ),
+        // The replay first, and the reconcile after it rather than beside
+        // it. The replay applies events in the order Stripe created them
+        // within a page, but a descent covers older ground on each run, so
+        // across runs an older subscription update can land after a newer
+        // one. `reconcileSubscriptions` re-reads each subscription from
+        // Stripe, so running it afterwards settles the mirror whatever order
+        // the replay left it in. The money the replay recovers does not
+        // depend on order: a top-up and a payment are recorded against the
+        // Stripe object's own id, once.
+        replayStripeEvents(stripe, billing, cleared)
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'billing.replayed', ...result }),
+              ),
+            (error: unknown) => console.error('billing replay failed', error),
+          )
+          .then(() => reconcileSubscriptions(stripe, billing, cleared))
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'billing.reconciled', ...result }),
+              ),
+            (error: unknown) =>
+              console.error('billing reconcile failed', error),
+          ),
       );
     }
 

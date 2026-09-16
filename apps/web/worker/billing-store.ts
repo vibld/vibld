@@ -29,6 +29,27 @@ interface CustomerRow {
   stripe_customer_id: string;
 }
 
+/**
+ * How far the replay of Stripe's event log has got.
+ *
+ * `doneBelow` is the floor: every event Stripe created before that second
+ * has been replayed. `sweepTop` and `sweepAfterId` describe a descent in
+ * progress, and are both null when none is. See
+ * `migrations/0009_event_replay.sql` for why the floor and the top of the
+ * descent are separate numbers.
+ */
+export interface EventReplayCursor {
+  doneBelow: number;
+  sweepTop: number | null;
+  sweepAfterId: string | null;
+}
+
+interface EventReplayRow {
+  done_below: number;
+  sweep_top: number | null;
+  sweep_after_id: string | null;
+}
+
 export interface AdminCreditRecord {
   id: string;
   userId: string;
@@ -449,6 +470,63 @@ export class BillingStore {
       .bind(stripeEventId)
       .first();
     return row !== null;
+  }
+
+  /**
+   * Where the replay of Stripe's event log has got to.
+   *
+   * Null means this deployment has never run one, which asks for everything
+   * Stripe still holds (about 30 days).
+   */
+  async getEventReplayCursor(id: string): Promise<EventReplayCursor | null> {
+    const row = await this.#db
+      .prepare(
+        `SELECT done_below, sweep_top, sweep_after_id
+           FROM billing_event_replay WHERE id = ?1`,
+      )
+      .bind(id)
+      .first<EventReplayRow>();
+    if (row === null) return null;
+    return {
+      doneBelow: row.done_below,
+      sweepTop: row.sweep_top,
+      sweepAfterId: row.sweep_after_id,
+    };
+  }
+
+  /**
+   * Record where a replay run stopped, so the next one carries on from
+   * there.
+   *
+   * Written after every page rather than once at the end of a run. A run that
+   * dies halfway (the scheduled invocation is cut off, Stripe rejects the
+   * next request) then loses one page of progress instead of all of it, and
+   * the alternative is the failure this whole cursor exists to prevent: a
+   * descent that restarts at the top every night never reaches the bottom.
+   */
+  async saveEventReplayCursor(
+    id: string,
+    cursor: EventReplayCursor,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_event_replay
+           (id, done_below, sweep_top, sweep_after_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+           done_below = excluded.done_below,
+           sweep_top = excluded.sweep_top,
+           sweep_after_id = excluded.sweep_after_id,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        id,
+        cursor.doneBelow,
+        cursor.sweepTop,
+        cursor.sweepAfterId,
+        new Date().toISOString(),
+      )
+      .run();
   }
 
   async markEventProcessed(stripeEventId: string, type: string): Promise<void> {
