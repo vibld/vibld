@@ -301,6 +301,24 @@ export function mustReload(action: AnalyticsAction): boolean {
 }
 
 /**
+ * Whether the analytics cookies should be gone after this action.
+ *
+ * Every state that is not a grant, including `nothing`, which is the one that
+ * kept being missed. `nothing` is what a page does when the stored answer is
+ * already `denied`, or when nobody has answered: no tag loads, so there is
+ * nothing to stop, and it looked like there was nothing to do. But a cookie
+ * can predate the answer. A `_ga` written on `.vibld.com` before this change
+ * survives on a denied origin forever, and a later grant resumes that same
+ * identifier, unless something clears it on a page that is not measuring.
+ *
+ * Tying the cleanup to "a tag is running here" was the mistake twice over: it
+ * is the answer that decides, not the state of the page.
+ */
+export function mustForgetCookies(action: AnalyticsAction): boolean {
+  return action === 'deny' || action === 'nothing';
+}
+
+/**
  * Whether a `storage` event is about the consent answer.
  *
  * A `storage` event fires in every *other* document on this origin, never in

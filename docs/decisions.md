@@ -169,10 +169,12 @@ so the two origins could hold opposite answers over one identifier: denying on
 one deleted a cookie the other recreated on its next page view, and deletion
 at the moment of denial could not hold. `config` therefore passes
 `cookie_domain: 'none'`, which makes the cookie host-only and puts its scope
-and the answer's scope in step. Every "no" also expires the cookies whether or
-not that document ever loaded the tag, since an identifier can predate the
-change and tying cleanup to "the tag is running here" leaves it for a later
-grant to resume.
+and the answer's scope in step. Every state that is not a grant also expires the
+cookies, including the one where no tag loads at all, because a cookie can
+predate the answer: a `_ga` written on `.vibld.com` before this change would
+otherwise sit on a denied origin forever, waiting for a later grant to resume
+the same identifier. Cleanup follows the answer, never whether a tag happens
+to be running.
 
 Two origins serving the same pages is the root of that, and the site already
 names `vibld.com` as canonical in its metadata while answering on both. A

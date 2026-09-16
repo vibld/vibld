@@ -28,6 +28,7 @@ import {
   consentSignals,
   isConsentStorageEvent,
   measuresHost,
+  mustForgetCookies,
   mustReload,
   readConsent,
   type ConsentChange,
@@ -179,11 +180,6 @@ function GoogleAnalytics() {
           // cookieless hits while the banner says analytics is off, which is
           // the same overclaim this change has already made four times.
           measurement(false);
-          // And take back what is already stored. Denying consent stops new
-          // cookies; it does not remove the client identifier already in
-          // `_ga`, and leaving that behind means a visitor who said no still
-          // carries the id linking them to what they did before.
-          forgetAnalyticsCookies();
           break;
         case 'nothing':
           break;
@@ -194,6 +190,13 @@ function GoogleAnalytics() {
       // and load analytics again, so a click on "No thanks" would turn it
       // back on. The tag stays in this document, denied, and the banner says
       // why.
+      // Take back what is already stored, on every state that is not a
+      // grant. Denying stops new cookies; it does not remove the client
+      // identifier already in `_ga`, and a cookie can predate the answer, so
+      // a page that loads no tag at all is exactly where a legacy one would
+      // otherwise sit untouched.
+      if (mustForgetCookies(action)) forgetAnalyticsCookies();
+
       if (allowReload && mustReload(action)) window.location.reload();
     };
 
@@ -404,15 +407,6 @@ function ConsentBanner() {
 
   const answer = (choice: ConsentChoice) => {
     const outcome = recordAnswer(storage(), choice);
-    // On any "no", whether or not this document ever loaded the tag. The
-    // answer is kept per origin and the cookie is not: this Worker serves
-    // both vibld.com and www.vibld.com (wrangler.jsonc), so a grant on one
-    // leaves `_ga` on `.vibld.com` while the other origin's storage is
-    // empty. Saying no there used to take the "nothing was running" path and
-    // leave the shared identifier sitting there for a later grant to pick
-    // back up. Clearing site data without clearing cookies gets to the same
-    // place.
-    if (outcome.apply === 'denied') forgetAnalyticsCookies();
     setDecided(outcome.apply);
     setReopened(false);
     setUnsaved(outcome.warn ? outcome.apply : null);

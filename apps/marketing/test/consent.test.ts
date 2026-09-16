@@ -14,6 +14,7 @@ import {
   gaDisableFlag,
   isConsentStorageEvent,
   measuresHost,
+  mustForgetCookies,
   mustReload,
   readConsent,
   shouldLoadAnalytics,
@@ -558,5 +559,43 @@ describe('measuresHost', () => {
     // A misconfigured list denies rather than opening up, the same direction
     // every other rule in this file falls.
     assert.equal(measuresHost('vibld.com', []), false);
+  });
+});
+
+describe('mustForgetCookies', () => {
+  it('clears on a withdrawal', () => {
+    assert.equal(mustForgetCookies('deny'), true);
+  });
+
+  it('clears when nothing is running, which is the case that kept being missed', () => {
+    // `nothing` is what a page does when the stored answer is already denied,
+    // or when nobody has answered. No tag loads, so it looked like there was
+    // nothing to do, and a `_ga` written before this change sat on a denied
+    // origin forever waiting for a later grant to resume it.
+    assert.equal(mustForgetCookies('nothing'), true);
+    assert.equal(mustForgetCookies(analyticsAction('denied', false)), true);
+    assert.equal(mustForgetCookies(analyticsAction(null, false)), true);
+  });
+
+  it('never clears on a grant, in either form', () => {
+    // Deleting the identifier of a visitor who just said yes would restart
+    // them as a new person on every page.
+    assert.equal(mustForgetCookies('load'), false);
+    assert.equal(mustForgetCookies('grant'), false);
+    assert.equal(mustForgetCookies(analyticsAction('granted', false)), false);
+    assert.equal(mustForgetCookies(analyticsAction('granted', true)), false);
+  });
+
+  it('follows the answer rather than whether a tag is running', () => {
+    // The mistake this replaced, twice: cleanup was tied to the state of the
+    // page. For every answer, running or not, what decides is the answer.
+    for (const running of [true, false]) {
+      assert.equal(
+        mustForgetCookies(analyticsAction('granted', running)),
+        false,
+      );
+      assert.equal(mustForgetCookies(analyticsAction('denied', running)), true);
+      assert.equal(mustForgetCookies(analyticsAction(null, running)), true);
+    }
   });
 });
