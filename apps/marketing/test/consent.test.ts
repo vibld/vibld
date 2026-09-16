@@ -7,6 +7,7 @@ import {
   answerOutcome,
   bannerVisible,
   consentSignals,
+  mustReload,
   readConsent,
   shouldLoadAnalytics,
   writeConsent,
@@ -231,5 +232,40 @@ describe('analyticsAction', () => {
         assert.notEqual(analyticsAction(state, running), 'load');
       }
     }
+  });
+});
+
+describe('mustReload', () => {
+  it('replaces the document when a running tag is withdrawn', () => {
+    // The update stops storage, and nothing else can remove a script that is
+    // already in the page. This site navigates without reloading, so without
+    // this the tag keeps sending cookieless hits for the rest of the visit
+    // and "withdrawing takes effect immediately" is not true.
+    assert.equal(mustReload('deny'), true);
+    assert.equal(mustReload(analyticsAction('denied', true)), true);
+    assert.equal(mustReload(analyticsAction(null, true)), true);
+  });
+
+  it('does not jolt the far more common first "No thanks"', () => {
+    // Nothing was loaded, so there is nothing to remove, and a reload would
+    // cost a visitor their place in exchange for no change at all.
+    assert.equal(mustReload('nothing'), false);
+    assert.equal(mustReload(analyticsAction('denied', false)), false);
+    assert.equal(mustReload(analyticsAction(null, false)), false);
+  });
+
+  it('never reloads on a yes, in either form', () => {
+    assert.equal(mustReload('load'), false);
+    assert.equal(mustReload('grant'), false);
+    assert.equal(mustReload(analyticsAction('granted', false)), false);
+    assert.equal(mustReload(analyticsAction('granted', true)), false);
+  });
+
+  it('cannot loop, because a reloaded document has nothing running', () => {
+    // The answer is stored before the reload, so the next document reads
+    // denied with no tag loaded, which is 'nothing', which does not reload.
+    const afterReload = analyticsAction('denied', false);
+    assert.equal(afterReload, 'nothing');
+    assert.equal(mustReload(afterReload), false);
   });
 });

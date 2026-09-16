@@ -20,6 +20,7 @@ import {
   answerOutcome,
   bannerVisible,
   consentSignals,
+  mustReload,
   readConsent,
   writeConsent,
   type ConsentChoice,
@@ -114,7 +115,8 @@ function GoogleAnalytics() {
       // inline is what produced two review findings: a withdrawal that never
       // reached gtag, and a second grant skipped because the tag was already
       // loaded.
-      switch (analyticsAction(state, running.current)) {
+      const action = analyticsAction(state, running.current);
+      switch (action) {
         case 'load': {
           running.current = true;
           // Queued before the script exists, which is how gtag is meant to be
@@ -129,17 +131,31 @@ function GoogleAnalytics() {
           tell('js', new Date());
           tell('config', SITE.ga4MeasurementId);
           setAllowed(true);
-          return;
+          break;
         }
         case 'grant':
           tell('consent', 'update', consentSignals('granted'));
-          return;
+          break;
         case 'deny':
+          // Both halves, in this order. The update stops storage in the
+          // document that is already running, and the reload is what makes
+          // the tag actually gone: this is a single-page app, so internal
+          // links never create a new document, and an update on its own
+          // leaves Enhanced Measurement sending cookieless hits to Google
+          // for the rest of the visit. The Cookie Notice says withdrawal
+          // takes effect immediately, and without the reload that was not
+          // true.
+          //
+          // It cannot loop: the answer is stored before this runs, so the
+          // next document reads denied, loads nothing, and never reaches
+          // this branch.
           tell('consent', 'update', consentSignals('denied'));
-          return;
+          break;
         case 'nothing':
-          return;
+          break;
       }
+
+      if (mustReload(action)) window.location.reload();
     };
 
     apply(readConsent(storage()));

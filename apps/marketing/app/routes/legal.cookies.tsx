@@ -73,10 +73,10 @@ export default function Cookies() {
         on our behalf, and nothing is stored or measured. Saying yes loads it
         from that point on. You can change your answer at any time with the{' '}
         <strong>Cookie preferences</strong> link at the bottom of every page.
-        Withdrawing takes effect immediately on the page you are on, and on
-        every page after it nothing loads at all. Your answer is remembered in
-        your browser rather than in a cookie, so it is not sent to us or to
-        anyone else.
+        Withdrawing stops it at once and reloads the page, so the script is gone
+        rather than merely silenced, and nothing loads on any page after that.
+        Your answer is remembered in your browser rather than in a cookie, so it
+        is not sent to us or to anyone else.
       </p>
       <p>
         Independently of that, browser tracking protection or an ad blocker will

@@ -148,8 +148,11 @@ kept in `localStorage` (`vibld.consent.analytics`), not in a cookie, so it
 never leaves the browser. The first-party counter in `worker/analytics.ts` is
 deliberately outside all of it: no cookie, no identifier, no IP address, so
 there is nothing to consent to and no reason to make anyone click before a
-page works. Rules live in `app/consent.ts`; `app/root.tsx` injects the tag on a grant and
-tells it to stop storing on a withdrawal mid-visit. Consent is still declared
+page works. Rules live in `app/consent.ts`; `app/root.tsx` renders the tag on a grant, and
+a withdrawal mid-visit both denies storage and reloads the document. The
+reload is not belt-and-braces: this is a single-page app, internal links never
+create a new document, and a running tag keeps sending cookieless hits to
+Google for the rest of the visit otherwise. Consent is still declared
 before `config`, because gtag applies the state in force when a command runs
 and the advertising signals are denied in every state.
 

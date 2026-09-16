@@ -174,8 +174,12 @@ export type AnalyticsAction = 'load' | 'grant' | 'deny' | 'nothing';
  * three is a different instruction to gtag:
  *
  * - The first yes loads it, because nothing has been requested from Google.
- * - A no cannot unload a script already in the document, so it has to be an
- *   update to denied. Doing nothing left GA4 storing after "No thanks".
+ * - A no cannot unload a script already in the document. It is an update to
+ *   denied, which stops storage at once, and then the document is replaced,
+ *   because an update alone leaves the tag running: this is a single-page
+ *   app, so internal links never create a new document and Enhanced
+ *   Measurement would keep sending cookieless hits to Google for the rest of
+ *   the visit. Doing nothing at all left GA4 storing after "No thanks".
  * - A second yes must be an update back to granted. Skipping it because the
  *   tag "is already loaded" left GA4 denied for the rest of the visit while
  *   the stored answer and the closed banner both said otherwise.
@@ -188,4 +192,20 @@ export function analyticsAction(
 ): AnalyticsAction {
   if (shouldLoadAnalytics(state)) return running ? 'grant' : 'load';
   return running ? 'deny' : 'nothing';
+}
+
+/**
+ * Whether honouring this action needs the document replaced.
+ *
+ * Only a withdrawal does, and only because the tag is already here. Nothing
+ * in the page can remove a running script, and on a site that navigates
+ * without reloading, "stopped" otherwise means "still measuring, just
+ * without cookies" for as long as the visitor stays.
+ *
+ * It is deliberately not every action. A first "No thanks" loads nothing, so
+ * reloading would be a jolt in exchange for nothing, and it is the far more
+ * common click of the two.
+ */
+export function mustReload(action: AnalyticsAction): boolean {
+  return action === 'deny';
 }
