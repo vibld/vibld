@@ -217,8 +217,9 @@ export function Workspace({ state }: { state: BuilderState }) {
           <div className="problems">
             <h2 className="pane-title">Problems</h2>
             <p className="pane-note">
-              Validation findings for the staged project. Install, build and
-              type errors will appear here once sandbox execution exists.
+              Validation findings for the staged project. Sandbox execution
+              exists; its install, build and type errors are not reported here
+              yet.
             </p>
             {state.problems.length === 0 ? (
               <p className="empty">No problems reported.</p>
