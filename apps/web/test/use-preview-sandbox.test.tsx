@@ -472,9 +472,11 @@ describe('a stop pressed before the sandbox settled', () => {
     view.unmount();
   });
 
-  it('does not start polling a sandbox that had already settled', async () => {
-    // A ready sandbox is not going to change on its own, so a poll here
-    // would be a request per interval for the rest of the session.
+  it('asks once about a ready sandbox, and stops when it is still there', async () => {
+    // A ready sandbox whose DELETE succeeded with the reply lost is the
+    // case that reads worst, so this asks too. It costs one request when
+    // the sandbox really is still ready: `pollUntilSettled` stops on the
+    // first settled answer rather than running for the session.
     let failStop = false;
     serving({
       '/api/preview/share': () => reply({ shares: [] }),
@@ -504,7 +506,16 @@ describe('a stop pressed before the sandbox settled', () => {
         setTimeout(resolve, POLL_INTERVAL_MS + 20),
       );
     });
-    assert.equal(calls.length, before, 'polled a sandbox that had settled');
+    const afterFirst = calls.length;
+    assert.equal(afterFirst, before + 1, 'never asked what happened to it');
+
+    // And then stops, because the answer settled it.
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS * 2 + 20),
+      );
+    });
+    assert.equal(calls.length, afterFirst, 'kept polling a settled sandbox');
     view.unmount();
   });
 });
@@ -624,6 +635,40 @@ describe('an answer the poll cannot read', () => {
       );
     });
     assert.equal(view.sandbox.status?.status, 'ready', 'stopped asking');
+    view.unmount();
+  });
+});
+
+describe('a ready sandbox whose stop was carried out but not confirmed', () => {
+  it('finds out it is gone and stops saying otherwise', async () => {
+    // The worst-reading case of all: the frame, the share list and the
+    // warning all describing something that no longer exists, with nothing
+    // asking. One poll settles it.
+    let failStop = false;
+    let phase: unknown = READY;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    phase = { status: 'failed', error: 'No preview has been started.' };
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to settle');
+
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(view.sandbox.status?.status, 'failed');
+    assert.equal(view.sandbox.stopError, null, 'still warning about a ghost');
     view.unmount();
   });
 });

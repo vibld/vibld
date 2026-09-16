@@ -258,12 +258,16 @@ export function usePreviewSandbox(): PreviewSandbox {
           ? error.message
           : 'Could not stop the sandbox preview.',
       );
-      // The poll was cancelled before the request went out. A sandbox that
-      // had not settled yet (queued, installing, starting) would otherwise
-      // sit on that word for the rest of the session, however the sandbox
-      // itself turned out. Asking again is also the only thing that can
-      // resolve the unconfirmed stop above.
-      if (status !== null && !SETTLED.has(status.status)) pollUntilSettled();
+      // The poll was cancelled before the request went out, and asking
+      // again is the only thing that can settle what just happened.
+      //
+      // For every status, not only the unsettled ones. A ready sandbox
+      // whose DELETE succeeded with the reply lost is the case that reads
+      // worst: the frame, the share list and the warning all sit there
+      // describing something that is gone, and nothing asks. This costs one
+      // request when the sandbox really is still ready, because
+      // `pollUntilSettled` stops on the first settled answer.
+      pollUntilSettled();
     } finally {
       setPending(false);
     }

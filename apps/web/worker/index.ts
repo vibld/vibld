@@ -65,6 +65,7 @@ import {
   listShares,
   previewConfigured,
   previewStatus,
+  UNREADABLE_PREVIEW,
   outcomeResponse,
   revokeShare,
   startPreview,
@@ -1108,7 +1109,14 @@ async function handlePreview(request: Request, env: Env): Promise<Response> {
   const { principal } = resolved;
 
   if (request.method === 'GET') {
-    return json(await previewStatus(env, principal.userId));
+    // A status the service's reply could not be read into is a 502, not a
+    // synthesised failure: the browser reads any refusal as "ask again"
+    // and a failed status as "the sandbox is not running", and only one of
+    // those is established by an unreadable body.
+    const status = await previewStatus(env, principal.userId);
+    return status
+      ? json(status)
+      : json({ error: UNREADABLE_PREVIEW.error }, 502);
   }
 
   if (request.method === 'POST') {
