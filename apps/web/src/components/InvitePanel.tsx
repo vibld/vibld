@@ -38,15 +38,19 @@ export function clerkSentence(clerk: ClerkOutcome | null): string {
   if (clerk === null) {
     return ' Whether Clerk approved them is not known, so check there or they may not be able to sign in.';
   }
-  // Nothing changed here, so there is nothing to add: the sentence before
-  // this one already says the list was not touched.
-  if (!clerk.admitted && clerk.reason === 'not-asked') return '';
   if (clerk.admitted) return ' Approved in Clerk, so they can sign in.';
   if (clerk.reason === 'unconfigured') {
     return ' Clerk approval is not set up on this deployment, so approve them in Clerk or they cannot sign in.';
   }
   if (clerk.reason === 'still-waiting') {
-    return ` Clerk still has them ${clerk.status}, so they cannot sign in yet. Approve them in Clerk.`;
+    // Two different situations, and only one of them is a claim this
+    // deployment can make. When Clerk took the invitation and still lists
+    // the person as waiting, the two answers disagree and which one governs
+    // is undocumented, so the honest thing is to send somebody to look
+    // rather than to pick. When Clerk took nothing, they are plainly not in.
+    return clerk.invited
+      ? ` Clerk took the invitation and still lists them as ${clerk.status}, so check in Clerk whether they can sign in.`
+      : ` Clerk still has them ${clerk.status}, so they cannot sign in yet. Approve them in Clerk.`;
   }
   return ` Clerk could not be asked (${clerk.error}), so check whether they are approved there.`;
 }

@@ -33,10 +33,8 @@ export interface InviteRecord {
 /**
  * What Clerk said when this deployment tried to approve them there too.
  *
- * `not-asked` is the invite row not having changed: nothing happened here,
- * so nothing is claimed about Clerk either. Null is different and means the
- * response carried no answer this could read, which is a gap rather than a
- * silence and the panel says so.
+ * Null means the response carried no answer this could read, which is a gap
+ * rather than a silence, and the panel says so rather than staying quiet.
  *
  * Read strictly, and unreadable means null rather than a guess. "Approved in
  * Clerk" is the strongest claim this panel makes and the one that decides
@@ -45,9 +43,13 @@ export interface InviteRecord {
  */
 export type ClerkOutcome =
   | { admitted: true }
-  | { admitted: false; reason: 'not-asked' }
   | { admitted: false; reason: 'unconfigured' }
-  | { admitted: false; reason: 'still-waiting'; status: string }
+  | {
+      admitted: false;
+      reason: 'still-waiting';
+      status: string;
+      invited: boolean;
+    }
   | { admitted: false; reason: 'error'; error: string };
 
 export function readClerkOutcome(value: unknown): ClerkOutcome | null {
@@ -56,12 +58,11 @@ export function readClerkOutcome(value: unknown): ClerkOutcome | null {
     admitted?: unknown;
     reason?: unknown;
     status?: unknown;
+    invited?: unknown;
     error?: unknown;
   };
   if (row.admitted === true) return { admitted: true };
   if (row.admitted !== false) return null;
-  if (row.reason === 'not-asked')
-    return { admitted: false, reason: 'not-asked' };
   if (row.reason === 'unconfigured')
     return { admitted: false, reason: 'unconfigured' };
   if (row.reason === 'still-waiting') {
@@ -69,6 +70,9 @@ export function readClerkOutcome(value: unknown): ClerkOutcome | null {
       admitted: false,
       reason: 'still-waiting',
       status: typeof row.status === 'string' ? row.status : 'waiting',
+      // Whether Clerk took the invitation, which decides whether this is
+      // "they cannot sign in" or "nobody here can tell".
+      invited: row.invited === true,
     };
   }
   if (row.reason === 'error') {

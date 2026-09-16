@@ -200,10 +200,10 @@ describe('the invite endpoints', () => {
     ).json()) as Record<string, unknown>;
     assert.equal(again.created, false);
     assert.equal(again.reinstated, false);
-    // Nothing changed, so Clerk was not asked. Distinct from "not
-    // configured": one is a deployment that cannot ask, the other is a
-    // deployment that had no reason to.
-    assert.deepEqual(again.clerk, { admitted: false, reason: 'not-asked' });
+    // Clerk is asked again even though the row did not change. Gating it on
+    // the row changing left no way to approve anybody whose invite already
+    // existed, which is every invite issued before Clerk approval shipped.
+    assert.deepEqual(again.clerk, { admitted: false, reason: 'unconfigured' });
   });
 
   it('reports reinstating a revoked invite as its own outcome', async () => {
@@ -246,5 +246,76 @@ describe('the invite endpoints', () => {
       'admin@vibld.com',
     );
     assert.equal(response.status, 400);
+  });
+});
+
+describe('approving in Clerk from the invite route', () => {
+  function post(body: unknown): Request {
+    return new Request('https://app.vibld.com/api/admin/invite', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** A Clerk that records what it was asked and admits the address. */
+  function clerkServing() {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${url.split('?')[0]}`);
+      if (url.includes('/invitations'))
+        return new Response('{}', { status: 200 });
+      return new Response(
+        JSON.stringify({
+          data: [{ email_address: 'sam@example.com', status: 'invited' }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    return { calls, restore: () => (globalThis.fetch = original) };
+  }
+
+  it('asks again for an address that was already invited', async () => {
+    // The retry path, and without it there is none. Every invite issued
+    // before Clerk approval shipped, and every one whose first attempt
+    // failed or ran with no key configured, would be approvable only by
+    // withdrawing the invite and putting it back, which takes somebody's
+    // access away to give it back.
+    const env = newEnv({ CLERK_SECRET_KEY: 'sk_test' });
+    const clerk = clerkServing();
+    try {
+      await handleInvite(
+        post({ email: 'sam@example.com' }),
+        env,
+        'admin@vibld.com',
+      );
+      const before = clerk.calls.length;
+
+      // Same address again. The row does not change this time.
+      const again = (await (
+        await handleInvite(
+          post({ email: 'sam@example.com' }),
+          env,
+          'admin@vibld.com',
+        )
+      ).json()) as Record<string, unknown>;
+
+      assert.equal(
+        again.created,
+        false,
+        'the row changed, so this proves nothing',
+      );
+      assert.ok(
+        clerk.calls.length > before,
+        'never asked Clerk again, so an existing invite can never be approved',
+      );
+      assert.deepEqual(again.clerk, { admitted: true, via: 'waitlist' });
+    } finally {
+      clerk.restore();
+    }
   });
 });

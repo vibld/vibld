@@ -352,18 +352,39 @@ describe('what the panel says about Clerk', () => {
     assert.match(clerkSentence({ admitted: true }), /can sign in/);
   });
 
-  it('says they cannot sign in yet when Clerk still has them waiting', async () => {
+  it('says they cannot sign in yet when Clerk took nothing', async () => {
     // An answer rather than a failure, and the difference matters: this one
     // is not worth trying again, it is worth going to Clerk.
     const said = clerkSentence({
       admitted: false,
       reason: 'still-waiting',
       status: 'pending',
+      invited: false,
     });
 
     assert.match(said, /cannot sign in yet/);
     assert.match(said, /pending/);
     assert.doesNotMatch(said, /could not be asked/);
+  });
+
+  it('sends somebody to look when Clerk contradicts itself', async () => {
+    // Clerk took the invitation and still lists the person as waiting. Which
+    // of those governs is the one thing this deployment cannot establish, so
+    // it must not claim either. What is true under both readings is that
+    // somebody should go and look.
+    const said = clerkSentence({
+      admitted: false,
+      reason: 'still-waiting',
+      status: 'pending',
+      invited: true,
+    });
+
+    // It must not claim either way. "whether they can sign in" is the
+    // question being handed over, not an answer to it, so the assertion is
+    // on the claim rather than on the words.
+    assert.match(said, /check in Clerk/);
+    assert.doesNotMatch(said, /Approved in Clerk/);
+    assert.doesNotMatch(said, /they cannot sign in/);
   });
 
   it('says Clerk was not asked when this deployment cannot ask it', async () => {
@@ -383,12 +404,6 @@ describe('what the panel says about Clerk', () => {
     assert.match(said, /could not be asked/);
     assert.doesNotMatch(said, /can sign in\./);
     assert.doesNotMatch(said, /still has them/);
-  });
-
-  it('says nothing when Clerk was deliberately not asked', async () => {
-    // The invite row did not change, so nothing happened here and nothing is
-    // claimed there either. The sentence before it already says so.
-    assert.equal(clerkSentence({ admitted: false, reason: 'not-asked' }), '');
   });
 
   it('warns when the answer could not be read at all', async () => {

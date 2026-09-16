@@ -21,6 +21,8 @@ function clerkServing(options: {
   entries?: unknown;
   waitlistStatus?: number;
   wrap?: boolean;
+  /** The literal body the waitlist read answers with, before any wrapping. */
+  rawBody?: string;
 }) {
   const calls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -33,7 +35,8 @@ function clerkServing(options: {
     }
     const rows = options.entries ?? [];
     return new Response(
-      JSON.stringify(options.wrap === false ? rows : { data: rows }),
+      options.rawBody ??
+        JSON.stringify(options.wrap === false ? rows : { data: rows }),
       { status: options.waitlistStatus ?? 200 },
     );
   }) as typeof fetch;
@@ -70,6 +73,10 @@ describe('admitting somebody in Clerk', () => {
       admitted: false,
       reason: 'still-waiting',
       status: 'pending',
+      // Clerk took the invitation and still says pending. The two answers
+      // disagree, and which governs is undocumented, so both are carried
+      // rather than one being picked.
+      invited: true,
     });
     assert.ok(
       calls.some(
@@ -149,6 +156,19 @@ describe('admitting somebody in Clerk', () => {
     // Not admitted and not still-waiting: unknown. Saying either would be a
     // claim this deployment cannot make.
     const { fetchImpl } = clerkServing({ waitlistStatus: 500 });
+
+    const result = await admitToClerk(ENV, 'sam@example.com', fetchImpl);
+
+    assert.equal(result.admitted, false);
+    assert.equal(result.admitted === false && result.reason, 'error');
+  });
+
+  it('survives a successful response whose body is null', async () => {
+    // `JSON.parse('null')` is a successful parse, so the parse guard above it
+    // does not catch this, and reading `.data` off null throws. The throw
+    // would escape to the route, which has already written the invite row,
+    // so the operator would get a 500 for a request that half happened.
+    const { fetchImpl } = clerkServing({ rawBody: 'null' });
 
     const result = await admitToClerk(ENV, 'sam@example.com', fetchImpl);
 

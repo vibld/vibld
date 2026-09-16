@@ -167,19 +167,14 @@ export async function handleInvite(
   // supported shape, and an operator with a good admin list has to be able
   // to invite somebody whatever Clerk is doing. So the response says what
   // happened on each side and the panel reports both.
-  const clerk: ClerkAdmission =
-    created || reinstated
-      ? await admitToClerk(env, email)
-      : // Nothing changed here, so nothing is claimed about Clerk either.
-        // Saying "already invited, and approved" would be a second read
-        // nobody asked for and a second thing that could be wrong.
-        //
-        // Said rather than omitted. A missing field and a deliberate silence
-        // are different answers, and the browser has to be able to tell
-        // them apart: a response that does not mention Clerk at all is one
-        // this deployment cannot vouch for, and the panel warns about that
-        // rather than saying nothing.
-        { admitted: false, reason: 'not-asked' };
+  // Asked every time the address is submitted, not only when the row
+  // changed. Gating it on `created || reinstated` left no way to approve
+  // anybody whose row already existed: every invite issued before this
+  // deployment, and every one whose first Clerk attempt failed or ran with
+  // no key configured, could only be approved by withdrawing the invite and
+  // putting it back. `admitToClerk` handles a duplicate invitation, so the
+  // repeat is cheap and it is the retry path.
+  const clerk: ClerkAdmission = await admitToClerk(env, email);
 
   return json({ email, created, reinstated, clerk });
 }

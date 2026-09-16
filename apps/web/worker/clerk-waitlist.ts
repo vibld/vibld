@@ -42,9 +42,13 @@ export function clerkAdmissionConfigured(env: ClerkWaitlistEnv): boolean {
  */
 export type ClerkAdmission =
   | { admitted: true; via: 'waitlist' | 'invitation' }
-  | { admitted: false; reason: 'not-asked' }
   | { admitted: false; reason: 'unconfigured' }
-  | { admitted: false; reason: 'still-waiting'; status: string }
+  | {
+      admitted: false;
+      reason: 'still-waiting';
+      status: string;
+      invited: boolean;
+    }
   | { admitted: false; reason: 'error'; error: string };
 
 const CLERK_API = 'https://api.clerk.com/v1';
@@ -98,9 +102,17 @@ async function entryFor(
 
   // Clerk has served this list both bare and wrapped in `data` across
   // versions, so both are read rather than one being assumed.
+  //
+  // The object check is not decoration: `JSON.parse('null')` is a successful
+  // parse of a 200, and reading `.data` off it throws. That throw would
+  // escape to the route, which has already written the invite row, so the
+  // operator would get a 500 for a request that half happened rather than
+  // the unreadable-answer outcome two lines below.
   const rows = Array.isArray(body)
     ? body
-    : Array.isArray((body as { data?: unknown }).data)
+    : typeof body === 'object' &&
+        body !== null &&
+        Array.isArray((body as { data?: unknown }).data)
       ? (body as { data: unknown[] }).data
       : null;
   if (rows === null) {
@@ -185,7 +197,21 @@ export async function admitToClerk(
         };
   }
 
-  return ADMITTED.has(entry.status)
-    ? { admitted: true, via: 'waitlist' }
-    : { admitted: false, reason: 'still-waiting', status: entry.status };
+  if (ADMITTED.has(entry.status)) return { admitted: true, via: 'waitlist' };
+
+  // The two signals disagree, and which one wins is the thing this module
+  // deliberately does not know: Clerk took the invitation, and Clerk still
+  // lists this person as not admitted. An invitation may let them sign up
+  // anyway, or the waitlist entry may gate them, and Clerk documents
+  // neither.
+  //
+  // So `invited` is carried rather than resolved. Saying they can sign in
+  // and saying they cannot are both guesses; what is true under either
+  // reading is that somebody should go and look, and the panel says that.
+  return {
+    admitted: false,
+    reason: 'still-waiting',
+    status: entry.status,
+    invited: created,
+  };
 }
