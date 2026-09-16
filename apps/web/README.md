@@ -221,11 +221,23 @@ exactly `open` deploys invite-only, and a value that looks like it meant to
 open the deployment (`OPEN`, `open `) is warned about in the run rather than
 silently treated as closed.
 
-**A closed deployment with no `VIBLD_PLATFORM_ADMINS` fails the deploy.** That
-combination admits nobody and gives nobody the ability to issue an invite,
-since the only door is the admin panel and that secret is the only key to it.
-It is a product that is down while looking deployed, and it is cheaper to stop
-at the workflow than to discover it from the outside.
+**A closed deployment with no usable `VIBLD_PLATFORM_ADMINS` fails the
+deploy**, before any secret is written. That combination admits nobody and
+gives nobody the ability to issue an invite, since the only door is the admin
+panel and that secret is the only key to it. It is a product that is down
+while looking deployed, and it is cheaper to stop at the workflow than to
+discover it from the outside.
+
+"Usable" is counted the way the Worker counts it: the list is split on commas
+and trimmed, so `" , "` is a non-empty secret and an empty admin list, and an
+entry that cannot be an email address can never match a Clerk-verified one.
+
+The check is its own step, before the first `wrangler secret put`, and writes
+nothing. That ordering is the point rather than tidiness: a secret put
+deploys a new Worker version immediately, and the admin list is among the
+first secrets this job syncs, so a check that ran alongside the writes would
+publish a broken list, lock out the admins who could have fixed it, and only
+then fail the run.
 
 ## Model generation (optional)
 

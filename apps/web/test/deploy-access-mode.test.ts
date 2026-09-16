@@ -19,6 +19,10 @@ import { describe, it } from 'node:test';
  * place that says which comes first.
  */
 
+/** The step that decides, and the step that writes. */
+const CHECK = 'Check who can get in, before any secret is written';
+const SYNC = 'Sync the access mode';
+
 const WORKFLOW = fileURLToPath(
   new URL('../../../.github/workflows/deploy-web-preview.yml', import.meta.url),
 );
@@ -70,7 +74,7 @@ interface Run {
  * reached from here anyway. The stub records what it was told to put, and
  * its stdin, so "did it set the mode to open" is answerable.
  */
-async function run(env: Record<string, string>): Promise<Run> {
+async function run(step: string, env: Record<string, string>): Promise<Run> {
   const dir = await mkdtemp(join(tmpdir(), 'vibld-deploy-'));
   const summary = join(dir, 'summary.md');
   const wrangler = join(dir, 'wrangler.log');
@@ -83,7 +87,7 @@ async function run(env: Record<string, string>): Promise<Run> {
   await writeFile(summary, '');
   await writeFile(wrangler, '');
 
-  const script = await stepScript('Sync the access mode');
+  const script = await stepScript(step);
   const result = await new Promise<{
     code: number;
     stdout: string;
@@ -124,7 +128,7 @@ describe('the access mode a deploy sets', () => {
     // admits nobody and gives nobody the ability to issue an invite: the
     // only door is the admin panel and this secret is the only key. Green
     // and locked out is the worst of the outcomes available here.
-    const result = await run({
+    const result = await run(CHECK, {
       VIBLD_ACCESS_MODE: '',
       VIBLD_PLATFORM_ADMINS: '',
     });
@@ -142,7 +146,7 @@ describe('the access mode a deploy sets', () => {
     // green and lock everybody out, which is the one outcome this step
     // exists to prevent.
     for (const admins of [' , ', ',,', '   ', 'chris', 'chris@', '@example']) {
-      const result = await run({
+      const result = await run(CHECK, {
         VIBLD_ACCESS_MODE: '',
         VIBLD_PLATFORM_ADMINS: admins,
       });
@@ -159,7 +163,7 @@ describe('the access mode a deploy sets', () => {
       'bad, chris@example.com',
       'chris@example.com,someone@else.io',
     ]) {
-      const result = await run({
+      const result = await run(CHECK, {
         VIBLD_ACCESS_MODE: '',
         VIBLD_PLATFORM_ADMINS: admins,
       });
@@ -170,7 +174,7 @@ describe('the access mode a deploy sets', () => {
   it('is invite-only when nothing says otherwise', async () => {
     // Unset is the launch state, and it is written rather than left absent
     // so that going back to closed is possible from here.
-    const result = await run({
+    const result = await run(SYNC, {
       VIBLD_ACCESS_MODE: '',
       VIBLD_PLATFORM_ADMINS: 'chris@example.com',
     });
@@ -187,16 +191,20 @@ describe('the access mode a deploy sets', () => {
     // A deployment that was meant to open and did not is worth seeing in
     // the run rather than discovering from the door.
     for (const mode of ['OPEN', ' open', 'open ', 'opne', 'true']) {
-      const result = await run({
+      const checked = await run(CHECK, {
         VIBLD_ACCESS_MODE: mode,
         VIBLD_PLATFORM_ADMINS: 'chris@example.com',
       });
-      assert.equal(result.code, 0, mode);
-      assert.match(result.summary, /INVITE ONLY/, mode);
-      assert.match(result.stdout, /::warning::/, `${mode} passed silently`);
+      assert.equal(checked.code, 0, mode);
+      assert.match(checked.stdout, /::warning::/, `${mode} passed silently`);
+
+      const written = await run(SYNC, { VIBLD_ACCESS_MODE: mode });
+      assert.equal(written.code, 0, mode);
+      assert.match(written.summary, /INVITE ONLY/, mode);
+      assert.doesNotMatch(written.wrangler, /open/, `${mode} opened it`);
     }
 
-    const opened = await run({
+    const opened = await run(SYNC, {
       VIBLD_ACCESS_MODE: 'open',
       VIBLD_PLATFORM_ADMINS: '',
     });
@@ -208,13 +216,30 @@ describe('the access mode a deploy sets', () => {
     assert.match(opened.wrangler, /open/);
   });
 
-  it('decides before anything is deployed', async () => {
-    // A refusal that runs after the deploy is not a refusal. The order
-    // lives in the YAML and nowhere else.
+  it('decides before any secret is written, not just before the deploy', async () => {
+    // `wrangler secret put` creates a new Worker version and deploys it
+    // immediately, and the first secret this job syncs is the admin list
+    // itself. A check that ran after that would publish the broken list,
+    // lock out the admins who could have fixed it, and then fail the run.
+    // Failing afterwards is not refusing.
+    //
+    // The order lives in the YAML and nowhere else, which is why this one
+    // rule is structural.
     const source = await workflow();
-    const gate = source.indexOf('- name: Sync the access mode');
+    const check = source.indexOf(`- name: ${CHECK}`);
+    const firstWrite = source.indexOf('wrangler@4.129.1 secret put');
     const deploy = source.indexOf('- name: Deploy to Cloudflare Workers');
-    assert.ok(gate > 0 && deploy > 0);
-    assert.ok(gate < deploy, 'the access mode is decided after the deploy');
+    assert.ok(check > 0 && firstWrite > 0 && deploy > 0);
+
+    assert.ok(check < firstWrite, 'a secret is written before the check runs');
+    assert.ok(check < deploy, 'the access mode is decided after the deploy');
+
+    // And the check itself must not be a writer, or it is the same bug in
+    // one step instead of two.
+    assert.doesNotMatch(
+      await stepScript(CHECK),
+      /secret put/,
+      'the check writes a secret of its own',
+    );
   });
 });
