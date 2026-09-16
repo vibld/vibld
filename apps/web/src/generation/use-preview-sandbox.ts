@@ -33,7 +33,7 @@ export interface PreviewSandbox {
   /** Stop the running preview, if any. */
   stop(): void;
   /**
-   * Why the last stop did not happen, or null.
+   * Why the last stop could not be confirmed, or null.
    *
    * The screen used to clear itself either way, on the reasoning that the
    * sandbox times out on its own eventually (L9) so a failed stop has
@@ -41,6 +41,12 @@ export interface PreviewSandbox {
    * because they want it not running, often because a share link is serving
    * their code to whoever has the URL, and being told it stopped when it did
    * not is the one answer that makes them stop trying.
+   *
+   * Unconfirmed rather than failed, deliberately. A rejected request
+   * establishes that no successful answer arrived, and not that the sandbox
+   * survived: the DELETE may have been carried out with the reply lost.
+   * Saying it is still running would swap one false certainty for its
+   * opposite.
    */
   stopError: string | null;
   /** Every share grant issued for the current preview (docs/decisions.md L10). Empty once the preview itself stops or fails. */
@@ -233,15 +239,24 @@ export function usePreviewSandbox(): PreviewSandbox {
       setStatus(null);
       setRanRevision(null);
     } catch (error) {
-      // The sandbox is still there as far as anybody knows, so the screen
-      // keeps saying so and says the stop failed. `mayExist` was never
-      // cleared on this path either, because the next run still has to stop
+      // What is actually known: the client did not get a successful answer.
+      // Not that the sandbox is still running -- the DELETE may have been
+      // carried out and the response lost -- so the wording says the stop
+      // could not be confirmed, and the screen keeps showing what it last
+      // knew rather than asserting either way. `mayExist` was never cleared
+      // on this path either, because the next run still has to try to stop
       // it first; what changes is that the person is told.
       setStopError(
         error instanceof Error
           ? error.message
           : 'Could not stop the sandbox preview.',
       );
+      // The poll was cancelled before the request went out. A sandbox that
+      // had not settled yet (queued, installing, starting) would otherwise
+      // sit on that word for the rest of the session, however the sandbox
+      // itself turned out. Asking again is also the only thing that can
+      // resolve the unconfirmed stop above.
+      if (status !== null && !SETTLED.has(status.status)) pollUntilSettled();
     } finally {
       setPending(false);
     }

@@ -431,3 +431,80 @@ describe('a stop that the service refused', () => {
     view.unmount();
   });
 });
+
+describe('a stop pressed before the sandbox settled', () => {
+  it('starts polling again when the stop is not confirmed', async () => {
+    // Stop cancels the poll before sending the request. A sandbox still
+    // installing would otherwise sit on that word for the rest of the
+    // session, whatever became of it, and asking again is also the only
+    // thing that can resolve an unconfirmed stop.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+    assert.equal(view.sandbox.status?.status, 'installing');
+
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'the stop was taken as confirmed');
+
+    // The sandbox carried on and became ready. Without a poll the screen
+    // would still say installing.
+    phase = READY;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(
+      view.sandbox.status?.status,
+      'ready',
+      'stopped asking what happened to it',
+    );
+    view.unmount();
+  });
+
+  it('does not start polling a sandbox that had already settled', async () => {
+    // A ready sandbox is not going to change on its own, so a poll here
+    // would be a request per interval for the rest of the session.
+    let failStop = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(READY),
+    });
+    const calls: string[] = [];
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+      return inner(input, init);
+    }) as typeof fetch;
+
+    const view = await mount();
+    await view.run('r1');
+    failStop = true;
+    await view.stop();
+
+    const before = calls.length;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    assert.equal(calls.length, before, 'polled a sandbox that had settled');
+    view.unmount();
+  });
+});

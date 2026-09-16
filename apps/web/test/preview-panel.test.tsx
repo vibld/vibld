@@ -198,7 +198,13 @@ describe('a stop that did not happen', () => {
       ),
     );
 
-    assert.match(view.text(), /still running/i);
+    assert.match(view.text(), /may still be running/i);
+    assert.match(view.text(), /could not be confirmed/i);
+    assert.doesNotMatch(
+      view.text(),
+      /The sandbox is still running/,
+      'swapped one false certainty for its opposite',
+    );
     assert.match(
       view.text(),
       /preview service is unavailable/i,
@@ -214,6 +220,6 @@ describe('a stop that did not happen', () => {
         'r1',
       ),
     );
-    assert.doesNotMatch(view.text(), /still running/i);
+    assert.doesNotMatch(view.text(), /may still be running/i);
   });
 });
