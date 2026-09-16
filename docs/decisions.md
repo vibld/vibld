@@ -205,6 +205,47 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-16 (Chris, asked directly)
+
+**Referral reward: credit to both sides, paid on the referred account's first
+purchase.** Not on signup. Nothing pays out until a card clears, which funds
+the reward from revenue and removes almost all of the abuse exposure: a
+signup-triggered payout on a product that hands out model spend is a faucet,
+and self-referral with disposable addresses costs real money. The cost of this
+choice is a weaker incentive, because the sharer waits and most referred
+signups never convert. Both sides earn so that the person clicking the link
+has a reason to prefer it over signing up directly.
+
+**Guides: two separate tracks, hosted and self-hosted.** Each readable start
+to finish without asides. Chris chose this over one set with callouts knowing
+it roughly doubles the writing and that the two will drift unless something
+enforces parity. Whatever is built should make drift visible rather than rely
+on remembering, the same way the prerender tests hold the legal copy to the
+code.
+
+**Logo: the V chevron and the orange survive; the builder comes to them.**
+vibld.com and app.vibld.com were shipping different marks, which is precisely
+what BRAND-01 forbids: the marketing site an orange chevron on near-black
+(`oklch(0.68 0.19 45)`), the builder a tilde in a purple-to-blue gradient
+(hue 262 to 212). The public mark wins because it is the indexed one: favicon,
+apple-touch-icon, OG image and every share already carry it, and BRAND-01
+exists to consolidate the search entity rather than restart it. The builder's
+purple accent is therefore rebuilt around the orange.
+
+**Wordmark: lowercase `vibld` everywhere.** The header said `vibld` while the
+metadata, schema.org Organization name, title tags and legal copy all said
+`Vibld`. Lowercase wins, so `SITE.name`, page titles, OG metadata, the schema
+and the legal documents change to match. Sentence-initial uses will read
+oddly; that is the known cost of the choice rather than a reason to make
+exceptions, and exceptions are what produced the inconsistency in the first
+place.
+
+**Connector menu: a framework, not a settings page.** Chris chose this with
+the reservation stated: a framework built before its second real member
+usually fits only its first, and GitHub is currently the only integration with
+an auth flow. Recorded so the next reader knows it was a decision taken with
+that risk in view rather than an oversight.
+
 ### Resolved 2026-09-09
 
 **L8 -- preview domain.** `vibld-preview.dev` is purchased and registered on Cloudflare (Chris, 2026-09-09). Confirmed this session has real, live access to that Cloudflare account -- `workers_list` returns `vibld-web-preview` alongside Chris's other projects -- but the Cloudflare Developer Platform connector available here exposes Workers, D1, R2, KV and Hyperdrive, not zone/DNS management, so there is nothing to bind yet from this side. Binding the domain is a `custom_domain` route in `wrangler.jsonc`, the same mechanism already used for `vibld.com` -- that lands when the preview Worker itself is built (item 5 in the build order below), not before, since there's no Worker yet for the domain to route to.
