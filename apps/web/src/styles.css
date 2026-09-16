@@ -427,8 +427,14 @@ body {
   width: 100%;
   min-height: 24rem;
   flex: 1;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: var(--radius);
+  /*
+   * White, and deliberately not a theme token: what this frame contains is
+   * somebody else's project, rendering on its own page. Backing it with the
+   * builder's paper colour would tint their work and make a light project
+   * look broken in dark mode. The border is ours; the canvas is theirs.
+   */
   background: #ffffff;
 }
 
@@ -650,9 +656,14 @@ body {
  * Vibld surface treatment.
  *
  * The rules above define the shell's structure and are left alone. These
- * retune how it reads: a layered dark workspace where the project being built
+ * retune how it reads: a layered workspace where the project being built
  * holds the eye and the chrome recedes. Structure unchanged, so every
  * behavioural test still describes the same markup.
+ *
+ * It said "a layered dark workspace" until the brand landed. The workspace
+ * follows `prefers-color-scheme` now, like the rest of the product, and a
+ * comment describing one of the two themes as the only one is the same
+ * defect as a pane note describing a feature that shipped.
  * ------------------------------------------------------------------------ */
 
 body {
@@ -833,12 +844,6 @@ body {
 .code__body {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-}
-
-.preview__frame {
-  border-radius: var(--radius);
-  border: 1px solid var(--edge);
-  background: hsl(0 0% 100%);
 }
 
 .shell__footer {
