@@ -1,7 +1,7 @@
 import type { BuilderState, BuilderStatus } from '../generation/session.ts';
 
 const MESSAGES: Record<BuilderStatus, string> = {
-  idle: 'Describe the application you want and Vibld will plan, stage and validate it.',
+  idle: 'Describe the application you want and vibld will plan, stage and validate it.',
   planning: 'Planning the change…',
   staging: 'Staging generated files…',
   validating: 'Validating the staged project…',

@@ -15,7 +15,7 @@
   --muted: var(--text-muted);
   --line: var(--edge);
   --accent: var(--brand);
-  --accent-fg: hsl(250 40% 8%);
+  --accent-fg: var(--vibld-on-accent);
   --success: var(--signal);
   --success-bg: var(--signal-dim);
   --error: var(--danger);
@@ -678,14 +678,19 @@ body {
   width: 2.15rem;
   height: 2.15rem;
   border-radius: var(--radius);
-  background: linear-gradient(
-    140deg,
-    hsl(var(--vibld-brand) 92% 72%),
-    hsl(212 92% 60%)
-  );
-  color: hsl(250 40% 8%);
-  font-weight: 800;
-  font-size: 1.1rem;
+  background: var(--vibld-ultramarine);
+  color: var(--vibld-newsprint);
+  /*
+   * A tile, not a bare mark. The header bar is a surface colour and the
+   * mark's two inks are picked for paper, so an untiled mark loses one of
+   * them here. On this ground the newsprint impression carries the shape and
+   * coral stays the ghost, which is the dark-theme arrangement.
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  --vibld-mark-ink: var(--vibld-newsprint);
+  --vibld-mark-offset: var(--vibld-coral);
   box-shadow:
     0 0 0 1px var(--brand-24),
     0 6px 18px -6px var(--brand-40);
@@ -772,23 +777,15 @@ body {
 
 .button--primary {
   border-color: transparent;
-  background: linear-gradient(
-    140deg,
-    hsl(var(--vibld-brand) 92% 68%),
-    hsl(212 92% 56%)
-  );
-  color: hsl(250 40% 8%);
+  background: var(--vibld-accent);
+  color: var(--vibld-on-accent);
   font-weight: 640;
   box-shadow: 0 6px 18px -8px var(--brand-64);
 }
 
 .button--primary:hover:not(:disabled) {
   filter: brightness(1.08);
-  background: linear-gradient(
-    140deg,
-    hsl(var(--vibld-brand) 92% 68%),
-    hsl(212 92% 56%)
-  );
+  background: var(--vibld-accent);
 }
 
 .chip {

@@ -90,7 +90,7 @@ export default function HostedVsSelfHosted() {
           no billing: everyone gets whatever Free-tier allowance you set.
         </li>
         <li>
-          <strong>Publishing to a Vibld URL.</strong> Self-hosted, this becomes
+          <strong>Publishing to a vibld URL.</strong> Self-hosted, this becomes
           publishing to your own domain, which is a different thing wearing the
           same button.
         </li>

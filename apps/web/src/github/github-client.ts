@@ -313,13 +313,13 @@ async function issueState(
       headers: await authHeaders(getToken),
     });
   } catch {
-    return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
+    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
 
   const body = (await response.json()) as { url?: unknown; state?: unknown };
   if (typeof body.url !== 'string' || typeof body.state !== 'string') {
-    return { ok: false, error: 'Vibld could not start that connection.' };
+    return { ok: false, error: 'vibld could not start that connection.' };
   }
   rememberState(body.state, storage);
   return { ok: true, url: body.url, state: body.state };
@@ -419,7 +419,7 @@ export async function completeConnect(
       }),
     });
   } catch {
-    return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
+    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
   }
 
   if (!response.ok) {
@@ -445,7 +445,7 @@ export async function completeConnect(
     truncated?: unknown;
   };
   if (!Array.isArray(body.repositories) || typeof body.ticket !== 'string') {
-    return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
+    return { ok: false, error: 'vibld could not read GitHub’s reply.' };
   }
   const omitted = Array.isArray(body.omitted)
     ? body.omitted.filter((entry): entry is string => typeof entry === 'string')
@@ -552,7 +552,7 @@ export async function bindRepository(
       body: JSON.stringify({ ticket, owner: choice.owner, repo: choice.repo }),
     });
   } catch {
-    return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
+    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
   }
   if (!response.ok) return { ok: false, error: await problemFrom(response) };
 
@@ -736,7 +736,7 @@ export async function pushSnapshot(
       }),
     });
   } catch {
-    return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
+    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
   }
 
   if (!response.ok) {
@@ -775,10 +775,10 @@ export async function pushSnapshot(
   try {
     body = (await response.json()) as Partial<PushedSnapshot>;
   } catch {
-    return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
+    return { ok: false, error: 'vibld could not read GitHub’s reply.' };
   }
   if (typeof body.branch !== 'string' || typeof body.commitSha !== 'string') {
-    return { ok: false, error: 'Vibld could not read GitHub’s reply.' };
+    return { ok: false, error: 'vibld could not read GitHub’s reply.' };
   }
   return {
     ok: true,
@@ -821,7 +821,7 @@ export async function disconnectRepository(
       body: JSON.stringify({ owner: to.owner, repo: to.repo }),
     });
   } catch {
-    return { ok: false, error: 'Could not reach Vibld. Try again shortly.' };
+    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
   }
   if (!response.ok) {
     let error = 'Something went wrong talking to GitHub. Try again shortly.';

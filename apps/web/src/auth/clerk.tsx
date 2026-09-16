@@ -50,7 +50,7 @@ function SignInLanding() {
           ~
         </span>
         <div>
-          <p className="shell__name">Vibld</p>
+          <p className="shell__name">vibld</p>
           <p className="shell__tagline">Vibe. Build. Ship.</p>
         </div>
       </div>

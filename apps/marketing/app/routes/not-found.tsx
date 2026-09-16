@@ -38,7 +38,7 @@ export default function NotFound() {
       <p className="mt-6">
         <Link
           to="/"
-          className="font-medium text-[var(--color-accent)] underline underline-offset-4"
+          className="font-medium text-[var(--color-accent-ink)] underline underline-offset-4"
         >
           Go to the home page
         </Link>

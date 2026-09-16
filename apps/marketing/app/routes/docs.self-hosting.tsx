@@ -12,7 +12,7 @@ export default function SelfHosting() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
-        Vibld’s source is public at{' '}
+        vibld’s source is public at{' '}
         <a href={SITE.repoUrl} rel="noopener noreferrer">
           github.com/vibld/vibld
         </a>
@@ -27,7 +27,7 @@ export default function SelfHosting() {
 
       <h2>Three Workers, not one</h2>
       <p>
-        Vibld is not a single deployable. It is three Cloudflare Workers with
+        vibld is not a single deployable. It is three Cloudflare Workers with
         deliberately different blast radii:
       </p>
       <ul>

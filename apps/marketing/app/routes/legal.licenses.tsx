@@ -12,15 +12,15 @@ export default function Licenses() {
   return (
     <LegalPage title={DOC.label} updated={UPDATED}>
       <p>
-        Vibld is built on open-source foundations, and its own source is
+        vibld is built on open-source foundations, and its own source is
         published openly under a dual-license structure. This page explains what
         that means for the core project, for starter templates, and for what you
-        build with Vibld.
+        build with vibld.
       </p>
 
-      <h2>The Vibld core</h2>
+      <h2>The vibld core</h2>
       <p>
-        The Vibld core (the builder, its provider integrations, and the platform
+        The vibld core (the builder, its provider integrations, and the platform
         code) is licensed under the{' '}
         <a
           href="https://www.apache.org/licenses/LICENSE-2.0"
@@ -39,7 +39,7 @@ export default function Licenses() {
         >
           LICENSE
         </a>{' '}
-        file. Vibld intends to keep a complete, single-user version of the
+        file. vibld intends to keep a complete, single-user version of the
         builder available and self-hostable outside the hosted product: saving
         your work, connecting Git, bringing your own model keys, and exporting
         your project are not features locked behind a paid plan.
@@ -47,7 +47,7 @@ export default function Licenses() {
 
       <h2>Starter templates</h2>
       <p>
-        Reusable starter-template source that Vibld generates from (for example,
+        Reusable starter-template source that vibld generates from (for example,
         the marketing-site template this website itself is an instance of) is
         separately licensed under the{' '}
         <a href="https://opensource.org/license/mit/" rel="noopener noreferrer">
@@ -59,15 +59,15 @@ export default function Licenses() {
 
       <h2>What you build</h2>
       <p>
-        Code that Vibld generates for you is yours to license as you choose,
+        Code that vibld generates for you is yours to license as you choose,
         subject to the obligations of any third-party or open-source components
-        it includes. Vibld does not claim ownership of, or require attribution
+        it includes. vibld does not claim ownership of, or require attribution
         in, projects you build and export.
       </p>
 
       <h2>Third-party components</h2>
       <p>
-        Vibld and this website depend on a number of open-source packages, each
+        vibld and this website depend on a number of open-source packages, each
         under its own license. A complete, current list is available in the
         repository&apos;s package manifests and lockfile at the link above
         rather than duplicated here, so it never falls out of date.

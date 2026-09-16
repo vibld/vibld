@@ -344,7 +344,7 @@ export async function mintInstallationToken(
   if (!jwt) {
     return {
       ok: false,
-      error: 'Vibld is not configured to talk to GitHub correctly.',
+      error: 'vibld is not configured to talk to GitHub correctly.',
       reason: 'config',
     };
   }
@@ -399,7 +399,7 @@ export async function mintInstallationToken(
   if (response.status === 404 || response.status === 401) {
     return {
       ok: false,
-      error: 'Vibld no longer has access to that repository on GitHub.',
+      error: 'vibld no longer has access to that repository on GitHub.',
       reason: 'access',
     };
   }
@@ -439,7 +439,7 @@ export async function mintInstallationToken(
   } catch {
     return {
       ok: false,
-      error: 'GitHub returned a reply Vibld could not read.',
+      error: 'GitHub returned a reply vibld could not read.',
       reason: 'unreadable',
     };
   }
@@ -447,7 +447,7 @@ export async function mintInstallationToken(
   if (typeof record.token !== 'string' || record.token.length === 0) {
     return {
       ok: false,
-      error: 'GitHub returned a reply Vibld could not read.',
+      error: 'GitHub returned a reply vibld could not read.',
       reason: 'unreadable',
     };
   }

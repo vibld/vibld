@@ -1,8 +1,8 @@
 /**
- * A minimal ZIP writer, so a generated project can leave Vibld.
+ * A minimal ZIP writer, so a generated project can leave vibld.
  *
  * ADR-0002 says the output must be a conventional project that builds with
- * ordinary npm commands and needs no Vibld package, account or service. That
+ * ordinary npm commands and needs no vibld package, account or service. That
  * claim is only worth something if the files can actually be taken away, and
  * until now the only way to read them was one at a time in the Code tab.
  *

@@ -15,9 +15,9 @@ export default function Home() {
         Vibe. Build. Ship.
       </h1>
       <p className="mt-6 max-w-2xl text-lg text-[var(--color-ink-muted)] text-pretty sm:text-xl">
-        Vibld is an AI application builder that turns a conversation into a
+        vibld is an AI application builder that turns a conversation into a
         working project, and generates a conventional, portable codebase when
-        it&apos;s done, not a proprietary format that only runs inside Vibld. No
+        it&apos;s done, not a proprietary format that only runs inside vibld. No
         lock-in, no required runtime, code you can actually read and take with
         you.
       </p>
@@ -25,7 +25,7 @@ export default function Home() {
       <WaitlistForm />
 
       <p className="mt-4 text-sm text-[var(--color-ink-muted)]">
-        Vibld's core is open source under Apache-2.0: no lock-in by promise, not
+        vibld's core is open source under Apache-2.0: no lock-in by promise, not
         just by product design.{' '}
         <a
           href={SITE.repoUrl}
@@ -92,7 +92,7 @@ function BuildPreview() {
         </div>
       </div>
       <figcaption className="mt-3 text-sm text-[var(--color-ink-muted)]">
-        An illustration of how Vibld works, not a screenshot of the product.
+        An illustration of how vibld works, not a screenshot of the product.
       </figcaption>
     </figure>
   );

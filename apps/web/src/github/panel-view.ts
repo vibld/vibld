@@ -22,7 +22,7 @@ export type PanelPhase =
       /**
        * The repository this failure is about, when it names one.
        *
-       * A refusal that says Vibld is connected somewhere else is only true
+       * A refusal that says vibld is connected somewhere else is only true
        * of the connection as it stood when the route answered. The panel
        * reads the connection again on the strength of it, and that read can
        * come back naming a third repository, or none: the sentence is then
@@ -119,7 +119,7 @@ const HIDDEN: PanelView = { show: false };
  * without that route is a dead end.
  */
 export const NOTHING_PUSHABLE =
-  'None of the repositories Vibld can reach are ones you can push to. ' +
+  'None of the repositories vibld can reach are ones you can push to. ' +
   'Check the app’s repository access on GitHub, then connect again.';
 
 export function decidePanel(
@@ -191,7 +191,7 @@ export function decidePanel(
 
   // Reported whether or not anything was offered. An empty offer with
   // unread accounts behind it is the case where saying so matters most:
-  // "none of these are pushable" is a different sentence from "and Vibld
+  // "none of these are pushable" is a different sentence from "and vibld
   // did not look at three of your accounts".
   if (phase.at === 'choosing' && (phase.offer.omitted?.length ?? 0) > 0) {
     view.omitted = phase.offer.omitted;

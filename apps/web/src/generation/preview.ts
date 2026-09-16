@@ -67,7 +67,7 @@ export function buildPreviewDocument(
 <div class="page">
 <header class="page__header"><p class="page__brand">${escapeHtml(brief.title)}</p></header>
 <main>${body}</main>
-<footer class="page__footer"><p>Generated with Vibld. This project is yours to edit and deploy.</p></footer>
+<footer class="page__footer"><p>Generated with vibld. This project is yours to edit and deploy.</p></footer>
 </div>
 </body>
 </html>`;

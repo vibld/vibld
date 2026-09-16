@@ -84,7 +84,7 @@ export function WaitlistForm() {
         role="status"
         className="mt-8 rounded-md bg-[var(--color-surface)] px-5 py-4 text-[var(--color-ink)]"
       >
-        You're on the list. We'll email you when Vibld is ready.
+        You're on the list. We'll email you when vibld is ready.
       </p>
     );
   }
@@ -137,7 +137,7 @@ export function WaitlistForm() {
         <button
           type="submit"
           disabled={status === 'submitting'}
-          className="shrink-0 rounded-md bg-[var(--color-accent)] px-6 py-3 font-medium text-white hover:opacity-90 disabled:opacity-60"
+          className="shrink-0 rounded-md bg-[var(--color-accent)] px-6 py-3 font-medium text-[var(--color-on-accent)] hover:opacity-90 disabled:opacity-60"
         >
           {status === 'submitting' ? 'Joining…' : 'Join the waitlist'}
         </button>
@@ -161,7 +161,7 @@ export function WaitlistForm() {
         </p>
       ) : null}
       <p className="mt-3 text-sm text-[var(--color-ink-muted)]">
-        No spam. One email when Vibld opens up. Unsubscribe any time.
+        No spam. One email when vibld opens up. Unsubscribe any time.
       </p>
     </form>
   );

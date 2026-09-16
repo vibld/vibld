@@ -98,7 +98,7 @@ async function sendBalanceAlert(
       body: JSON.stringify({
         from,
         to,
-        subject: `Vibld: ${provider} balance below $${thresholdUsd}`,
+        subject: `vibld: ${provider} balance below $${thresholdUsd}`,
         text: `${provider}'s account balance is $${balance.totalBalance.toFixed(2)} ${balance.currency}, below the $${thresholdUsd} alert threshold. Top it up before it blocks generation.`,
       }),
     });

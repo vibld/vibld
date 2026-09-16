@@ -1,0 +1,69 @@
+/*
+ * The Vibld brand tokens, for both sites.
+ *
+ * Imported by apps/marketing and apps/web, which each keep their own alias
+ * layer mapping their existing vocabulary onto these. That indirection is
+ * deliberate: it means neither app had to be rewritten to adopt the brand,
+ * and it means there is exactly one place a colour is decided.
+ *
+ * The values are generated from packages/brand/src/palette.ts and a test
+ * (test/css.test.ts) re-parses this file and fails if the two disagree, so
+ * this cannot quietly drift from the palette the contrast tests measure.
+ *
+ * Direction: "Offset". Two flat inks, coral and ultramarine, overprinting
+ * slightly out of register on newsprint stock.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* The three inks the direction is built from. */
+  --vibld-coral: oklch(0.7 0.18 25);
+  --vibld-ultramarine: oklch(0.45 0.16 265);
+  --vibld-newsprint: oklch(0.96 0.012 90);
+
+  --vibld-paper: oklch(0.96 0.012 90);
+  --vibld-surface: oklch(0.93 0.014 90);
+  --vibld-surface-strong: oklch(0.9 0.016 90);
+  --vibld-ink: oklch(0.22 0.03 265);
+  --vibld-ink-muted: oklch(0.48 0.02 265);
+
+  /*
+   * Coral is a fill and a mark, never a text colour: against newsprint it
+   * measures 2.60, which fails even the large-text bar. Text set on a coral
+   * fill is --vibld-on-accent, which measures 5.97.
+   */
+  --vibld-accent: oklch(0.7 0.18 25);
+  --vibld-on-accent: oklch(0.22 0.03 265);
+  /* What a link or the wordmark is set in. 6.90 on paper. */
+  --vibld-accent-ink: oklch(0.45 0.16 265);
+
+  /* The mark's two strokes. Coral is always the ghost; the ink changes. */
+  --vibld-mark-ink: oklch(0.45 0.16 265);
+  --vibld-mark-offset: oklch(0.7 0.18 25);
+
+  --vibld-edge: color-mix(in oklch, var(--vibld-ink) 14%, transparent);
+  --vibld-edge-strong: color-mix(in oklch, var(--vibld-ink) 26%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --vibld-paper: oklch(0.18 0.035 265);
+    --vibld-surface: oklch(0.22 0.035 265);
+    --vibld-surface-strong: oklch(0.26 0.035 265);
+    --vibld-ink: oklch(0.96 0.012 90);
+    --vibld-ink-muted: oklch(0.72 0.02 265);
+
+    /*
+     * The accent does not change: the mark is the constant, and an accent
+     * that differed by theme would put the two sites back to looking like two
+     * products. What changes is the ink a link is set in, because ultramarine
+     * on a dark ground is unreadable.
+     */
+    --vibld-accent-ink: oklch(0.78 0.15 25);
+
+    /* They swap: newsprint carries the shape, coral stays the ghost. */
+    --vibld-mark-ink: oklch(0.96 0.012 90);
+    --vibld-mark-offset: oklch(0.7 0.18 25);
+  }
+}

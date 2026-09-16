@@ -23,7 +23,7 @@ export function Transcript({ turns }: { turns: TranscriptTurn[] }) {
           </article>
           <article className={`bubble bubble--vibld bubble--${turn.status}`}>
             <p className="bubble__who">
-              Vibld
+              vibld
               {turn.providerId ? (
                 <span className="bubble__provider"> · {turn.providerId}</span>
               ) : null}

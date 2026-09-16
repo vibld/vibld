@@ -16,7 +16,7 @@ export default function Terms() {
         you and {SITE.legalEntity} (&ldquo;{SITE.name}&rdquo;, &ldquo;
         we&rdquo;, &ldquo;us&rdquo;), a Georgia limited liability company with a
         mailing address of {SITE.mailingAddress}. They govern your use of this
-        website and, once available, the Vibld application-building service
+        website and, once available, the vibld application-building service
         (together, the &ldquo;Service&rdquo;).
       </p>
       <p>
@@ -26,8 +26,8 @@ export default function Terms() {
 
       <h2>1. What the Service is today</h2>
       <p>
-        Vibld is currently in a pre-launch phase. This site collects email
-        addresses from people who want to be notified when Vibld opens for use.
+        vibld is currently in a pre-launch phase. This site collects email
+        addresses from people who want to be notified when vibld opens for use.
         Joining the waitlist is not a purchase, a subscription, a reservation,
         or a guarantee of access, of any particular price, or of any feature. We
         may invite people from the waitlist in any order, or not at all.
@@ -47,7 +47,7 @@ export default function Terms() {
         separate or updated version of these Terms will describe account
         registration, acceptable use of generated content, and ownership of what
         you build. As a general principle we intend for you to own the code
-        Vibld generates for you, subject to the licenses of any third-party or
+        vibld generates for you, subject to the licenses of any third-party or
         open-source components it includes.
       </p>
 
@@ -63,8 +63,8 @@ export default function Terms() {
 
       <h2>5. Intellectual property</h2>
       <p>
-        The Vibld name, logo, and this website&apos;s design and content are
-        owned by {SITE.legalEntity} or its licensors. The Vibld core software is
+        The vibld name, logo, and this website&apos;s design and content are
+        owned by {SITE.legalEntity} or its licensors. The vibld core software is
         separately licensed under the Apache License, Version 2.0; see our{' '}
         <a href="/legal/licenses">Open-Source Notices</a> page. Nothing here
         grants you rights to our trademarks.

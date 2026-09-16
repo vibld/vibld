@@ -408,7 +408,7 @@ describe('ending a connection', () => {
       (async () =>
         json(
           {
-            error: 'Vibld is connected to acme/other.',
+            error: 'vibld is connected to acme/other.',
             movedTo: { owner: 'acme', repo: 'other' },
           },
           409,
@@ -577,7 +577,7 @@ describe('pushing an accepted checkpoint', () => {
       TO,
       (async () =>
         json(
-          { error: 'Vibld’s access was withdrawn.', reconnect: true },
+          { error: 'vibld’s access was withdrawn.', reconnect: true },
           409,
         )) as unknown as typeof fetch,
       TOKEN,
@@ -609,7 +609,7 @@ describe('pushing an accepted checkpoint', () => {
     assert.equal(result.ok, false);
   });
 
-  it('reports being unable to reach Vibld as that', async () => {
+  it('reports being unable to reach vibld as that', async () => {
     const result = await pushSnapshot(
       SNAPSHOT,
       TO,
@@ -619,7 +619,7 @@ describe('pushing an accepted checkpoint', () => {
       TOKEN,
     );
     assert.equal(result.ok, false);
-    if (!result.ok) assert.match(result.error, /Could not reach Vibld/);
+    if (!result.ok) assert.match(result.error, /Could not reach vibld/);
   });
 
   it('carries a conflict with both shas rather than its sentence alone', async () => {
@@ -694,7 +694,7 @@ describe('pushing an accepted checkpoint', () => {
         json(
           {
             error:
-              'Vibld is connected to acme/other, which is not where this push was for.',
+              'vibld is connected to acme/other, which is not where this push was for.',
             movedTo: { owner: 'acme', repo: 'other' },
           },
           409,

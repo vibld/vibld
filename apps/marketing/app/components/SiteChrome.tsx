@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { CONSENT_OPEN_EVENT } from '../consent.ts';
+import { Lockup } from './Mark.tsx';
 import { DOC_TRACKS, LEGAL_DOCS, SITE } from '../site';
 
 /**
@@ -11,30 +12,14 @@ export function SiteHeader() {
     <>
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-3 focus:rounded-md focus:bg-[var(--color-accent)] focus:px-4 focus:py-2 focus:text-white"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-3 focus:rounded-md focus:bg-[var(--color-accent)] focus:px-4 focus:py-2 focus:text-[var(--color-on-accent)]"
       >
         Skip to main content
       </a>
       <header className="border-b border-black/10 dark:border-white/10">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5">
           <Link to="/" className="flex items-center gap-2.5">
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 32 32"
-              fill="none"
-              aria-hidden="true"
-            >
-              <rect width="32" height="32" rx="7" fill="oklch(0.19 0.02 40)" />
-              <path
-                d="M8 10l8 12 8-12"
-                stroke="oklch(0.68 0.19 45)"
-                strokeWidth="3.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span className="text-lg font-semibold tracking-tight">vibld</span>
+            <Lockup />
           </Link>
           <div className="flex items-center gap-4">
             <span className="hidden text-sm text-[var(--color-ink-muted)] sm:inline">

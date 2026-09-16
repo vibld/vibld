@@ -306,7 +306,7 @@ export function GitHubConnection() {
               <>
                 {' '}
                 <button type="button" onClick={() => void install()}>
-                  Install the Vibld app
+                  Install the vibld app
                 </button>
               </>
             )}
@@ -330,12 +330,12 @@ export function GitHubConnection() {
 
       {view.omitted && (
         <p className="github-panel__omitted">
-          Vibld did not read {view.omitted.length}{' '}
+          vibld did not read {view.omitted.length}{' '}
           {view.omitted.length === 1 ? 'account' : 'accounts'}:{' '}
           <strong>{view.omitted.join(', ')}</strong>. To connect a repository on
           one of those,{' '}
           <button type="button" onClick={() => void install()}>
-            install the Vibld app on that account
+            install the vibld app on that account
           </button>
           .
         </p>
@@ -343,7 +343,7 @@ export function GitHubConnection() {
 
       {view.truncated && (
         <p className="github-panel__truncated">
-          GitHub has more accounts or repositories than Vibld reads in one go,
+          GitHub has more accounts or repositories than vibld reads in one go,
           so this list may be short. Installing again does not help here: the
           same limit applies on the next read.
         </p>

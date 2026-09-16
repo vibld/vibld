@@ -108,7 +108,7 @@ export default function Cookies() {
 
       <h2>What will change</h2>
       <p>
-        Once the Vibld application launches, signing in will require an
+        Once the vibld application launches, signing in will require an
         authentication cookie. We will update this page, and the &ldquo;Last
         updated&rdquo; date above, before that ships.
       </p>

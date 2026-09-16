@@ -12,7 +12,7 @@ export default function Refunds() {
   return (
     <LegalPage title={DOC.label} updated={UPDATED}>
       <p>
-        Vibld does not yet have paid plans, so nothing on this page applies
+        vibld does not yet have paid plans, so nothing on this page applies
         today. Joining the waitlist never involves a payment. This policy is
         published in advance of billing so its terms are set before anyone is
         charged, not adjusted afterward.
@@ -20,7 +20,7 @@ export default function Refunds() {
 
       <h2>How billing will work</h2>
       <p>
-        When paid plans launch, Vibld&apos;s subscriptions are structured to
+        When paid plans launch, vibld&apos;s subscriptions are structured to
         avoid surprise charges: usage stops at your plan&apos;s included
         allowance rather than billing overage automatically, and any additional
         spend requires you to actively purchase a top-up.
@@ -46,7 +46,7 @@ export default function Refunds() {
 
       <h2>Errors and outages</h2>
       <p>
-        If you are charged in error, or a sustained Vibld outage prevented you
+        If you are charged in error, or a sustained vibld outage prevented you
         from using a plan you paid for, email{' '}
         <a href={`mailto:${SITE.emails.billing}`}>{SITE.emails.billing}</a> and
         we will make it right.

@@ -13,11 +13,11 @@ export default function AcceptableUse() {
     <LegalPage title={DOC.label} updated={UPDATED}>
       <p>
         This policy describes what may and may not be built, sent, or hosted
-        through Vibld and this website. It applies to the waitlist today and
+        through vibld and this website. It applies to the waitlist today and
         will apply to the full product once it launches.
       </p>
 
-      <h2>You may not use Vibld to</h2>
+      <h2>You may not use vibld to</h2>
       <ul>
         <li>
           Build, generate, or host content that is illegal, or that infringes

@@ -12,7 +12,7 @@ export default function CreditsAndPlans() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
-        Vibld bills for model spend, which is the thing that actually costs
+        vibld bills for model spend, which is the thing that actually costs
         money to run. This page is what a plan includes, how a run is priced,
         and the order the layers are spent in.
       </p>

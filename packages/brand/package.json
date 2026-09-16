@@ -1,0 +1,22 @@
+{
+  "name": "@vibld/brand",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./palette": "./src/palette.ts",
+    "./mark": "./src/mark.ts",
+    "./brand.css": "./src/brand.css"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "check": "pnpm run typecheck && pnpm run test",
+    "lint": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vibld/ai": "workspace:*"
+  }
+}

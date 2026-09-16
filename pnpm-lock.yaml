@@ -26,6 +26,9 @@ importers:
       '@react-router/node':
         specifier: 8.3.1
         version: 8.3.1(react-router@8.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(typescript@5.9.3)
+      '@vibld/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
       isbot:
         specifier: 5.1.36
         version: 5.1.36
@@ -54,6 +57,9 @@ importers:
       '@types/react-dom':
         specifier: 19.2.2
         version: 19.2.2(@types/react@19.2.2)
+      sharp:
+        specifier: '>=0.35.4'
+        version: 0.35.4(@types/node@22.19.1)
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -107,6 +113,9 @@ importers:
       '@vibld/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@vibld/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
       '@vibld/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -163,6 +172,12 @@ importers:
       typescript:
         specifier: 7.0.2
         version: 7.0.2
+
+  packages/brand:
+    devDependencies:
+      '@vibld/ai':
+        specifier: workspace:*
+        version: link:../ai
 
   packages/core: {}
 
@@ -1988,8 +2003,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@img/colour@1.1.0':
-    optional: true
+  '@img/colour@1.1.0': {}
 
   '@img/sharp-darwin-arm64@0.35.4':
     optionalDependencies:
@@ -2808,7 +2822,6 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
       '@types/node': 22.19.1
-    optional: true
 
   source-map-js@1.2.1: {}
 
