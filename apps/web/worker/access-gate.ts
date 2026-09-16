@@ -12,20 +12,36 @@
  * caller who has not been invited may proceed.
  */
 
-/** Routes an uninvited caller must not reach. */
+/**
+ * Methods gated on a path, where gating all of them would trap somebody.
+ *
+ * Revocation is not deletion. An account that loses access still owns what
+ * it started, and taking away the means to stop or withdraw that is not a
+ * gate, it is a trap: a sandbox nobody can stop, a public link nobody can
+ * pull, a repository grant nobody can hand back. Starting new work is what
+ * an invite buys, so the creating method stays gated and the undoing one
+ * does not.
+ */
+export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
+  // POST starts a sandbox and spends time in it. DELETE stops one that is
+  // already running, and its owner must always be able to.
+  '/api/preview': ['POST'],
+  // POST mints a public link to somebody's generated code. DELETE pulls it,
+  // and GET lists what is currently exposed. A revoked owner who cannot do
+  // either is left with their work public and no way to take it down.
+  '/api/preview/share': ['POST'],
+};
+
+/** Routes an uninvited caller must not reach, whatever the method. */
 export const GATED_PATHS: readonly string[] = [
   // Spends model budget.
   '/api/plan',
-  // Spends sandbox time and runs generated code.
-  '/api/preview',
-  '/api/preview/share',
   // Builds and serves a project on Vibld infrastructure.
   '/api/publish',
   // Writes into somebody's repository, and mints tokens to do it.
   '/api/github/connect',
   '/api/github/complete',
   '/api/github/bind',
-  '/api/github/disconnect',
   '/api/github/push',
   // Takes money, which an uninvited account has no reason to be able to do.
   '/api/billing/checkout',
@@ -77,6 +93,11 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // a customer is `/api/billing/checkout`, which stays gated. So an
   // uninvited account finds nothing here.
   '/api/billing/portal': 'the only way to stop being charged',
+  // Withdrawing a grant this account already made. It writes nothing to
+  // GitHub and mints no token; it only takes back what was given. Gating it
+  // left a revoked account able to see its binding through the status route
+  // and unable to remove it, which is the wrong way round.
+  '/api/github/disconnect': 'withdrawing a grant, not making one',
   // Stripe's own POST, authenticated by signature rather than by session.
   // Gating it would mean dropping webhooks for uninvited accounts, which is
   // how a payment that succeeded ends up unmirrored.
@@ -96,6 +117,8 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/admin/invite/revoke': 'behind the platform-admin check instead',
 };
 
-export function isGated(pathname: string): boolean {
-  return GATED_PATHS.includes(pathname);
+export function isGated(pathname: string, method: string): boolean {
+  if (GATED_PATHS.includes(pathname)) return true;
+  const gatedMethods = GATED_METHODS[pathname];
+  return gatedMethods ? gatedMethods.includes(method.toUpperCase()) : false;
 }

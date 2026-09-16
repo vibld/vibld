@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import { GATED_PATHS, UNGATED_PATHS, isGated } from '../worker/access-gate.ts';
+import {
+  GATED_METHODS,
+  GATED_PATHS,
+  UNGATED_PATHS,
+  isGated,
+} from '../worker/access-gate.ts';
 
 /**
  * The rule that keeps the gate honest.
@@ -37,7 +42,10 @@ describe('the invite gate', () => {
     assert.ok(paths.length > 15, `only found ${paths.length} routes`);
 
     const unclassified = paths.filter(
-      (path) => !GATED_PATHS.includes(path) && !(path in UNGATED_PATHS),
+      (path) =>
+        !GATED_PATHS.includes(path) &&
+        !(path in GATED_METHODS) &&
+        !(path in UNGATED_PATHS),
     );
     assert.deepEqual(
       unclassified,
@@ -57,12 +65,49 @@ describe('the invite gate', () => {
       '/api/github/push',
       '/api/billing/checkout',
     ]) {
-      assert.ok(isGated(path), `${path} is not gated`);
+      assert.ok(isGated(path, 'POST'), `${path} is not gated`);
+    }
+  });
+
+  it('lets a revoked owner stop and withdraw what they already started', async () => {
+    // Revocation is not deletion. Starting new work is what an invite buys;
+    // stopping a running sandbox, pulling a public link and handing back a
+    // repository grant are things the owner must always be able to do, or
+    // the gate leaves their sandbox running and their code public with no
+    // way to reach either.
+    assert.equal(isGated('/api/preview', 'POST'), true, 'start is open');
+    assert.equal(isGated('/api/preview', 'DELETE'), false, 'cannot stop it');
+
+    assert.equal(isGated('/api/preview/share', 'POST'), true, 'share is open');
+    assert.equal(
+      isGated('/api/preview/share', 'DELETE'),
+      false,
+      'cannot pull the link',
+    );
+    assert.equal(
+      isGated('/api/preview/share', 'GET'),
+      false,
+      'cannot see what is exposed',
+    );
+
+    assert.equal(isGated('/api/github/connect', 'POST'), true);
+    assert.equal(
+      isGated('/api/github/disconnect', 'POST'),
+      false,
+      'cannot hand the grant back',
+    );
+  });
+
+  it('gates every method of a route that only ever starts work', () => {
+    for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      assert.equal(isGated('/api/plan', method), true, method);
     }
   });
 
   it('never lists a route as both gated and ungated', async () => {
-    const both = GATED_PATHS.filter((path) => path in UNGATED_PATHS);
+    const both = [...GATED_PATHS, ...Object.keys(GATED_METHODS)].filter(
+      (path) => path in UNGATED_PATHS,
+    );
     assert.deepEqual(both, []);
   });
 
@@ -77,12 +122,12 @@ describe('the invite gate', () => {
   it('leaves the webhook open, because Stripe has no invite', () => {
     // Gating it would drop deliveries for uninvited accounts, which is how a
     // payment that succeeded ends up unmirrored.
-    assert.equal(isGated('/api/stripe/webhook'), false);
+    assert.equal(isGated('/api/stripe/webhook', 'POST'), false);
   });
 
   it('leaves the shell able to render its own refusal', () => {
-    assert.equal(isGated('/api/config'), false);
-    assert.equal(isGated('/api/access/status'), false);
+    assert.equal(isGated('/api/config', 'POST'), false);
+    assert.equal(isGated('/api/access/status', 'POST'), false);
   });
 
   it('runs the gate before the router dispatches anything', async () => {
@@ -100,7 +145,7 @@ describe('the invite gate', () => {
     // matters: a gate after the first dispatch is not a gate.
     const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
 
-    const gate = source.indexOf('if (isGated(pathname))');
+    const gate = source.indexOf('if (isGated(pathname, request.method))');
     assert.ok(gate > 0, 'the router does not call the gate at all');
 
     const firstDispatch = source.indexOf("if (pathname === '/api/");
@@ -118,7 +163,7 @@ describe('the invite gate', () => {
     // simply has not signed in.
     const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
     const gate = source.slice(
-      source.indexOf('if (isGated(pathname))'),
+      source.indexOf('if (isGated(pathname, request.method))'),
       source.indexOf("if (pathname === '/api/"),
     );
     assert.match(gate, /resolvePrincipal/);

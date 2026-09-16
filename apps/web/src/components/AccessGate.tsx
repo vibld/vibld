@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { fetchAccess } from '../access/access-client.ts';
+import { AuthStatus } from '../auth/clerk.tsx';
 import { clerkConfigured } from '../auth/clerk-token.ts';
-import type { AccessStatus } from '../access/access-client.ts';
+import { openBillingPortal } from '../billing/billing-client.ts';
+import type { AccessStatus as AccessStatusValue } from '../access/access-client.ts';
 import { Mark, WORDMARK } from './Mark.tsx';
 
 /**
@@ -28,11 +30,19 @@ export function AccessGate({
    * with a key present, so nothing else could drive this branch.
    */
   configured = clerkConfigured,
+  /**
+   * The sign-out control. A prop for the same reason `configured` is: the
+   * real one is Clerk's `UserButton`, which throws without a provider above
+   * it, and a refusal screen that cannot be rendered in a test is a refusal
+   * screen nobody checks.
+   */
+  signOut = <AuthStatus />,
 }: {
   children: ReactNode;
   configured?: boolean;
+  signOut?: ReactNode;
 }) {
-  const [status, setStatus] = useState<AccessStatus | null>(null);
+  const [status, setStatus] = useState<AccessStatusValue | null>(null);
 
   useEffect(() => {
     if (!configured) return;
@@ -62,10 +72,16 @@ export function AccessGate({
   // refusal reads as a product that broke, rather than one that is closed.
   if (status === null) return null;
   if (status.allowed) return children;
-  return <ClosedNotice status={status} />;
+  return <ClosedNotice status={status} signOut={signOut} />;
 }
 
-function ClosedNotice({ status }: { status: AccessStatus }) {
+function ClosedNotice({
+  status,
+  signOut,
+}: {
+  status: AccessStatusValue;
+  signOut: ReactNode;
+}) {
   return (
     <div className="auth-gate">
       <div className="auth-gate__brand">
@@ -83,9 +99,17 @@ function ClosedNotice({ status }: { status: AccessStatus }) {
           {status.message ??
             'This deployment is invite-only at the moment. Your account is ready and will work the moment it is let in.'}
         </p>
+        {/*
+          It used to say "nothing has been charged". That is true of somebody
+          who has never paid and false of a subscriber whose invite was
+          withdrawn, and revocation does not cancel anything in Stripe. The
+          screen cannot tell which it is talking to, so it says what is true
+          of both and gives the second one the way out below.
+        */}
         <p className="banner__detail">
-          Nothing has been charged, and nothing you do here costs anything until
-          access opens.
+          Nothing you do here costs anything while access is closed. If you
+          already have a subscription it is still running, and you can manage or
+          cancel it below.
         </p>
         {/*
           Somewhere to go, rather than a dead end. The waitlist on the
@@ -99,6 +123,51 @@ function ClosedNotice({ status }: { status: AccessStatus }) {
           </a>
         </p>
       </div>
+      {/*
+        The two things somebody locked out still needs, and neither existed
+        here. This screen replaces the whole builder, so it also replaced the
+        only control that opens the billing portal and the only one that signs
+        out. Ungating the portal route did nothing on its own while no button
+        reached it, and an account that signed in as the wrong person had no
+        way to become the right one.
+      */}
+      <ManageBilling />
+      {signOut}
     </div>
+  );
+}
+
+/**
+ * A way out for somebody still being charged.
+ *
+ * Revocation does not cancel a Stripe subscription, so this is the only
+ * thing standing between a withdrawn invite and a card that keeps being
+ * billed. `/api/billing/portal` is deliberately ungated for the same reason.
+ *
+ * An account that never subscribed has no Stripe customer and the request
+ * fails; the message says so plainly rather than looking broken.
+ */
+function ManageBilling() {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function open() {
+    setBusy(true);
+    setError(null);
+    try {
+      window.location.href = await openBillingPortal();
+    } catch {
+      setBusy(false);
+      setError('No subscription found for this account.');
+    }
+  }
+
+  return (
+    <p className="banner__detail">
+      <button type="button" onClick={() => void open()} disabled={busy}>
+        {busy ? 'Opening...' : 'Manage or cancel a subscription'}
+      </button>
+      {error ? <span role="alert"> {error}</span> : null}
+    </p>
   );
 }

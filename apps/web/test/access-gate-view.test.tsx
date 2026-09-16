@@ -31,7 +31,10 @@ async function mount(configured = true) {
   }
   await act(async () => {
     createRoot(container).render(
-      <AccessGate configured={configured}>
+      <AccessGate
+        configured={configured}
+        signOut={<button type="button">Sign out</button>}
+      >
         <Builder />
       </AccessGate>,
     );
@@ -76,10 +79,35 @@ describe('the access gate', () => {
     assert.match(view.text, /Invite only\./);
   });
 
-  it('says nothing has been charged, because nothing has', async () => {
+  it('does not tell a paying customer that nothing has been charged', async () => {
+    // It used to say exactly that. True of somebody who never paid, false of
+    // a subscriber whose invite was withdrawn, and revocation does not
+    // cancel anything in Stripe. The screen cannot tell which it is talking
+    // to, so it must not claim either.
     serving({ allowed: false, mode: 'invite', message: null });
     const view = await mount();
-    assert.match(view.text, /nothing has been charged/i);
+
+    assert.doesNotMatch(
+      view.text,
+      /nothing has been charged/i,
+      'told a possibly-billed customer that nothing was charged',
+    );
+    assert.match(view.text, /costs anything while access is closed/i);
+  });
+
+  it('offers a locked-out customer a way to cancel, and a way to sign out', async () => {
+    // This screen replaces the whole builder, including the only control
+    // that opens the billing portal and the only one that signs out.
+    // Ungating the portal route did nothing while no button reached it.
+    serving({ allowed: false, mode: 'invite', message: null });
+    const view = await mount();
+
+    assert.match(
+      view.text,
+      /manage or cancel a subscription/i,
+      'no way to stop being charged',
+    );
+    assert.match(view.text, /sign out/i, 'no way to switch account');
   });
 
   it('stays closed when the status endpoint cannot be reached', async () => {

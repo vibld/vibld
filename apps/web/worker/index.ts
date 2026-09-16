@@ -1276,7 +1276,7 @@ export default {
      * unauthenticated one get different answers, because they are different
      * problems and only one of them is the caller's to fix.
      */
-    if (isGated(pathname)) {
+    if (isGated(pathname, request.method)) {
       const resolved = await resolvePrincipal(request, env);
       if (resolved.denied) return resolved.denied;
       const decision = await decideAccessFor(env, resolved.principal);
