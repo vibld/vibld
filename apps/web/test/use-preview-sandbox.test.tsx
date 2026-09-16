@@ -508,3 +508,74 @@ describe('a stop pressed before the sandbox settled', () => {
     view.unmount();
   });
 });
+
+describe('what the poll does with an unconfirmed stop', () => {
+  it('puts the warning down once the sandbox is reported gone', async () => {
+    // The DELETE was carried out and its reply lost. The poll finds no
+    // preview, which is the answer to the question the warning was asking,
+    // so the warning goes: "no preview has been started" beside "it may
+    // still be running" is the panel contradicting itself, and a failed
+    // status takes the Stop button away so nobody could clear it by hand.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to reconcile');
+
+    phase = { status: 'failed', error: 'No preview has been started.' };
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(view.sandbox.status?.status, 'failed');
+    assert.equal(
+      view.sandbox.stopError,
+      null,
+      'said the sandbox may still be running and that it does not exist',
+    );
+    view.unmount();
+  });
+
+  it('keeps the warning while the sandbox is still there', async () => {
+    // The other answer to the same question. A sandbox that reaches ready
+    // is running, so the stop plainly did not take effect and saying so is
+    // still the truth.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    await view.stop();
+
+    phase = READY;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(view.sandbox.status?.status, 'ready');
+    assert.ok(view.sandbox.stopError, 'dropped a warning that was still true');
+    view.unmount();
+  });
+});

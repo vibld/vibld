@@ -168,6 +168,13 @@ export function usePreviewSandbox(): PreviewSandbox {
         // than reporting a status the server never actually sent.
         if (result === null) return;
         setStatus(result);
+        // The poll is what settles an unconfirmed stop, so it also has to
+        // put the warning down. A sandbox the service reports as failed is
+        // not running, whether it was deleted or died on its own, and
+        // leaving "it may still be running" beside "no preview has been
+        // started" is the panel contradicting itself. Worse, a failed
+        // status takes the Stop button away, so nobody could clear it.
+        if (result.status === 'failed') setStopError(null);
         if (SETTLED.has(result.status)) stopPolling();
       });
     }, POLL_INTERVAL_MS);
