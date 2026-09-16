@@ -240,6 +240,51 @@ describe('reconcileSubscriptions', () => {
     assert.equal(invoiceCalls, 1, 'asked again after the payment was known');
   });
 
+  it("keeps reconciling when one subscriber's invoice lookup fails", async () => {
+    // The recovery is one request with no retry. If Stripe refuses it, that
+    // subscription's iteration is counted as a failure and tried again
+    // tomorrow, and the subscriptions behind it are still reconciled. A
+    // single bad account must not cost the whole run.
+    const statuses = ['active', 'canceled'];
+    const store = await storeWith(statuses);
+    const offered: string[] = [];
+
+    const stripe = {
+      subscriptions: {
+        async list() {
+          return { data: statuses.map(subscriptionObject), has_more: false };
+        },
+        async retrieve(id: string) {
+          const status = statuses.find((s) => `sub_${s}` === id)!;
+          return subscriptionObject(status);
+        },
+      },
+      invoices: {
+        async list({ subscription }: { subscription: string }) {
+          if (subscription === 'sub_active') throw new Error('stripe down');
+          return {
+            data: [
+              {
+                id: 'in_ok',
+                amount_paid: 2000,
+                amount_paid_off_stripe: 0,
+                status_transitions: { paid_at: 1_800_000_000 },
+              },
+            ],
+            has_more: false,
+          };
+        },
+      },
+    } as unknown as Stripe;
+
+    const result = await reconcileSubscriptions(stripe, store, async (u) => {
+      offered.push(u);
+    });
+
+    assert.equal(result.failed, 1, 'the failure was not reported');
+    assert.deepEqual(offered, ['user_canceled'], 'the healthy one was skipped');
+  });
+
   it('does not offer a subscriber whose only payment took nothing', async () => {
     // A zero-amount invoice is `paid` in Stripe's sense and took no money.
     // Recorded truthfully, and it earns nothing.
