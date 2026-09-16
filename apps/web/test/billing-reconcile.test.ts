@@ -604,6 +604,12 @@ describe('backfillTopupPayments', () => {
     const store = new BillingStore(new SqliteD1Database(SCHEMA));
     await store.linkCustomer('user_bad', 'cus_bad');
     await store.linkCustomer('user_good', 'cus_good');
+    // Explicit stamps rather than whatever `linkCustomer` wrote a
+    // microsecond apart. Both rows can land in the same millisecond, and
+    // then the queue order is a tie that the ordering resolves arbitrarily:
+    // this test failed about one run in three on exactly that.
+    await store.markTopupsChecked('user_bad', '2020-01-01T00:00:00.000Z');
+    await store.markTopupsChecked('user_good', '2021-01-01T00:00:00.000Z');
 
     const stripe = {
       checkout: {

@@ -207,6 +207,11 @@ export class BillingStore {
    * existing customer is never recovered. Coalescing makes a new arrival
    * queue behind somebody who has been waiting longer.
    *
+   * `user_id` breaks the remaining tie, so the order is total. Without it
+   * two accounts sharing a timestamp are returned in whatever order the
+   * query plan happens to produce, which makes "who is next" unanswerable
+   * and made a test of this queue fail about one run in three.
+   *
    * The caller stamps before it reads: an account whose read throws must go
    * to the back, or enough of them hold every slot under the limit and
    * later accounts are never reached.
@@ -218,7 +223,7 @@ export class BillingStore {
       .prepare(
         `SELECT user_id, stripe_customer_id FROM billing_customers AS c
           WHERE NOT ${CLEARED_PAYMENT_SQL.replace(/\?1/g, 'c.user_id')}
-          ORDER BY COALESCE(topups_checked_at, created_at)
+          ORDER BY COALESCE(topups_checked_at, created_at), user_id
           LIMIT ?1`,
       )
       .bind(limit)
