@@ -114,7 +114,17 @@ describe('the access gate', () => {
       },
       '/api/preview': { status: 'ready', url: 'https://x', expiresAt: 1 },
       '/api/preview/share': {
-        shares: [{ shareId: 's1', createdAt: 1, expiresAt: 2, revoked: false }],
+        // A live grant: not revoked, and not yet expired. Both halves matter,
+        // and a fixture with an expiry in the past would pass this test for
+        // the wrong reason before the expiry filter existed.
+        shares: [
+          {
+            shareId: 's1',
+            createdAt: 1,
+            expiresAt: Date.now() + 60_000,
+            revoked: false,
+          },
+        ],
       },
       '/api/github/status': {
         configured: true,
@@ -194,6 +204,108 @@ describe('the access gate', () => {
       container.textContent ?? '',
       /no subscription found/i,
       'told them something untrue about their subscription',
+    );
+  });
+
+  it('hides the portal from an account that never had a subscription', async () => {
+    // An ordinary uninvited signup has no Stripe customer, so the portal
+    // cannot open for them. Showing the only billing control on the screen
+    // and having it fail every time is a dead end dressed as a way out.
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      const path = url.split('?')[0] ?? url;
+      const body =
+        path === '/api/access/status'
+          ? { allowed: false, mode: 'invite', message: null }
+          : path === '/api/billing/status'
+            ? {
+                // A whole status, not the two fields this rule reads.
+                // `fetchBillingStatus` validates the shape and answers null
+                // for anything else, which would leave `hasCustomer`
+                // undefined and show the portal for the wrong reason.
+                tier: 'free',
+                allowanceMicroUsd: 0,
+                spentMicroUsd: 0,
+                topupRemainingMicroUsd: 0,
+                currentPeriodEnd: null,
+                cancelAtPeriodEnd: false,
+                hasStripeCustomer: false,
+                billingConfigured: true,
+              }
+            : {};
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const view = await mount();
+
+    assert.doesNotMatch(
+      view.text,
+      /manage or cancel a subscription/i,
+      'offered a portal to somebody with no customer',
+    );
+  });
+
+  /**
+   * The share list is every grant ever issued, live or not. "Live" is a
+   * conjunction: not revoked *and* not yet expired. Each half is checked on
+   * its own below, because a filter that drops one of them still passes a
+   * fixture that violates both, and the claim on the screen ("your code is
+   * public, here is the button that stops that") is false either way round.
+   */
+  function servingShare(share: Record<string, unknown>): void {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      const path = url.split('?')[0] ?? url;
+      const body =
+        path === '/api/access/status'
+          ? { allowed: false, mode: 'invite', message: null }
+          : path === '/api/preview/share'
+            ? { shares: [share] }
+            : {};
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+  }
+
+  it('does not count an expired share as a live public link', async () => {
+    servingShare({
+      shareId: 'old',
+      createdAt: 1,
+      expiresAt: Date.now() - 60_000,
+      revoked: false,
+    });
+
+    const view = await mount();
+
+    assert.doesNotMatch(
+      view.text,
+      /public link/i,
+      'counted an expired grant as live exposure',
+    );
+  });
+
+  it('does not count a revoked share as a live public link', async () => {
+    // Withdrawn by hand, and still inside its window. Nothing is exposed,
+    // so offering to remove it is an invented worry on the one screen this
+    // account has left.
+    servingShare({
+      shareId: 'pulled',
+      createdAt: 1,
+      expiresAt: Date.now() + 60_000,
+      revoked: true,
+    });
+
+    const view = await mount();
+
+    assert.doesNotMatch(
+      view.text,
+      /public link/i,
+      'counted a withdrawn grant as live exposure',
     );
   });
 

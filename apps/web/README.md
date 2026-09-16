@@ -147,8 +147,17 @@ The gate runs in the router before dispatch, against a route table
 (`worker/access-gate.ts`) that has to classify every path. `test/access-gate.test.ts`
 reads `worker/index.ts`'s own route literals and fails on any path in neither
 list, so a new endpoint that spends money cannot be added without a decision
-about who may reach it. Ungated never means unauthenticated: everything still
-resolves a principal first.
+about who may reach it. The table gates by path and, where gating every method
+would trap somebody, by method: starting a sandbox or minting a public link
+needs an invite, stopping one or pulling a link does not.
+
+For browser routes, ungated never means unauthenticated: they still resolve a
+principal first. Two entries are not browser routes and do not.
+`/api/stripe/webhook` is authenticated by Stripe's signature over the raw body
+and has no session at all, and `/api/github/callback` is a redirect target that
+carries no secret and grants nothing, with the write behind `/api/github/bind`,
+which is gated. Stating the rule absolutely, as this did, is how somebody comes
+to apply it to a third route that deserves neither exception.
 
 Four rules, in order, all failing closed:
 

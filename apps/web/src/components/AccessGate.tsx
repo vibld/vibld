@@ -165,6 +165,12 @@ function ClosedNotice({
  */
 function WindDown() {
   const [credit, setCredit] = useState<number | null>(null);
+  // Undefined until the status answers. Only an explicit `false` hides the
+  // portal: a status call that failed must not take away the control that
+  // stops the charge.
+  const [hasCustomer, setHasCustomer] = useState<boolean | undefined>(
+    undefined,
+  );
   const [sandbox, setSandbox] = useState(false);
   const [shares, setShares] = useState<string[]>([]);
   const [repo, setRepo] = useState<{ owner: string; repo: string } | null>(
@@ -183,8 +189,17 @@ function WindDown() {
       ]);
       if (!live) return;
       setCredit(billing?.topupRemainingMicroUsd ?? null);
+      setHasCustomer(billing?.hasStripeCustomer);
       setSandbox(preview !== null && preview.status !== 'failed');
-      setShares(shareList.filter((s) => !s.revoked).map((s) => s.shareId));
+      // Not revoked and not expired. The share list is every grant ever
+      // issued, so filtering on `revoked` alone counts links that stopped
+      // working months ago and offers to remove exposure that is not there.
+      const now = Date.now();
+      setShares(
+        shareList
+          .filter((s) => !s.revoked && s.expiresAt > now)
+          .map((s) => s.shareId),
+      );
       setRepo(
         github?.connected && github.owner && github.repo
           ? { owner: github.owner, repo: github.repo }
@@ -217,18 +232,20 @@ function WindDown() {
           Unspent credit: {formatUsd(credit)}. It stays on the account.
         </p>
       ) : null}
-      <p className="banner__detail">
-        <button
-          type="button"
-          onClick={() =>
-            void run('Opening the billing portal', async () => {
-              window.location.href = await openBillingPortal();
-            })
-          }
-        >
-          Manage or cancel a subscription
-        </button>
-      </p>
+      {hasCustomer === false ? null : (
+        <p className="banner__detail">
+          <button
+            type="button"
+            onClick={() =>
+              void run('Opening the billing portal', async () => {
+                window.location.href = await openBillingPortal();
+              })
+            }
+          >
+            Manage or cancel a subscription
+          </button>
+        </p>
+      )}
       {sandbox ? (
         <p className="banner__detail">
           <button
