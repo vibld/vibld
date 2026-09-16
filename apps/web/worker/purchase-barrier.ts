@@ -33,8 +33,14 @@ export const PURCHASE_BARRIER_SQL = `(
                 AND status NOT IN ('incomplete', 'incomplete_expired')))`;
 
 /**
- * "Money has actually cleared for this account", which is a different
- * question from the barrier above and must not be confused with it.
+ * "A positive charge has been recorded for this account", which is a
+ * different question from the barrier above and must not be confused with
+ * it.
+ *
+ * Recorded, and deliberately not "still held". A refund or a lost dispute
+ * returns the money afterwards and nothing here reads either, so this stays
+ * true for a purchase that was later reversed. Netting reversals is tracked
+ * separately; reading this as a current balance would be wrong.
  *
  * The barrier is deliberately early: a customer row exists from the moment a
  * Checkout is created, before Stripe can charge. That is right for refusing a

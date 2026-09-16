@@ -420,7 +420,11 @@ export class BillingStore {
   }
 
   /**
-   * Has money actually cleared for this account?
+   * Has a positive charge been recorded for this account?
+   *
+   * Recorded, not still held: a refund or a lost dispute returns the money
+   * and nothing here reads either, so this stays true for a purchase that
+   * was later reversed. See `CLEARED_PAYMENT_SQL`.
    *
    * The late signal, and a different question from `hasBegunAPurchase`: that
    * one refuses a claim from somebody whose purchase is under way, this one

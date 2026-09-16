@@ -256,18 +256,24 @@ async function applySubscriptionEvent(
 }
 
 /**
- * What Stripe actually collected on this invoice, in USD cents.
+ * What this invoice charged through Stripe, in USD cents.
  *
- * Not `amount_paid`, which is the wrong number twice over. It counts money
+ * Deliberately not "what Stripe collected", which is a larger claim than
+ * this makes. A refund or a lost dispute returns money afterwards without
+ * moving `amount_paid`, and nothing here reads either, so this is what was
+ * charged at the time and not a current balance. Netting reversals is
+ * tracked separately; treating this number as one would be wrong.
+ *
+ * Not `amount_paid` either, which is the wrong number twice over. It counts money
  * that never moved through Stripe: an invoice marked paid out of band (a
  * bank transfer, a cheque, a cash payment recorded by hand) reports the full
  * `amount_paid` with `amount_paid_off_stripe` carrying the part Stripe never
  * saw. And a zero-amount invoice is `paid` in Stripe's sense having taken
  * nothing at all, which a trial and a full coupon both produce.
  *
- * Subtracting leaves only money Stripe can attest to, which is the
- * conservative direction on a rule that hands out credit and the same one
- * the purchase barrier takes.
+ * Subtracting leaves only what Stripe itself put through a card, which is
+ * the conservative direction on a rule that hands out credit and the same
+ * one the purchase barrier takes.
  *
  * **This is a product decision, not just a safety one, and it is reversible
  * in one line.** Vibld has no out-of-band invoicing today, so today this
