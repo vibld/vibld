@@ -102,7 +102,29 @@ export async function payReferralIfEarned(
     note,
   );
 
-  await deps.referrals.markPaid(referredUserId, now);
+  // The write that settles it, and the only place that can. `decidePayout`
+  // read `reversed_at` several statements ago, so a refund arriving in
+  // between passes that check: the reversal saw a null `paid_at`, took
+  // nothing back, and this would otherwise mark the row paid with both
+  // grants standing. `markPaid` now carries `AND reversed_at IS NULL`, so
+  // D1's single writer decides which of the two happened second.
+  const marked = await deps.referrals.markPaid(referredUserId, now);
+  if (!marked) {
+    // Either a redelivery of a payout that already landed, which is a no-op
+    // and fine, or the reversal won. Only the second has grants to undo, and
+    // they are undone here rather than through `clawBackReferral`, which
+    // reads `paid_at` and would find nothing to take.
+    const settled = await deps.referrals.attributionFor(referredUserId);
+    if (settled?.reversedAt != null) {
+      await reverseGrants(
+        deps,
+        referredUserId,
+        decision.reward,
+        'Referral reversed: the payment was returned while the reward was being paid.',
+      );
+      return { paid: false, reason: 'reversed' };
+    }
+  }
 
   return {
     paid: true,
@@ -226,14 +248,44 @@ export async function clawBackReferral(
     return { found: false, referrerCents: 0, referredCents: 0 };
   }
 
-  const reward = deps.reward ?? DEFAULT_REWARD_CENTS;
-  const referrerCents = await takeBack(
+  const taken = await reverseGrants(
     deps,
-    clawbackGrantId('referrer', referredUserId),
-    attribution.referrerUserId,
-    reward.referrer,
+    referredUserId,
+    deps.reward ?? DEFAULT_REWARD_CENTS,
     note,
+    attribution.referrerUserId,
   );
+  return { found: true, ...taken };
+}
+
+/**
+ * Take both sides' rewards back.
+ *
+ * Shared by the ordinary reversal and by the payout that loses the race to
+ * one, because those two have the same work to do and only differ in how
+ * they found out. The race path cannot go through `clawBackReferral`: that
+ * reads `paid_at`, which the lost race left null, so it would find nothing
+ * to take and leave the grants it just wrote standing.
+ */
+async function reverseGrants(
+  deps: PayoutDeps,
+  referredUserId: string,
+  reward: RewardCents,
+  note: string,
+  referrerUserId?: string,
+): Promise<{ referrerCents: number; referredCents: number }> {
+  const referrer =
+    referrerUserId ??
+    (await deps.referrals.attributionFor(referredUserId))?.referrerUserId;
+  const referrerCents = referrer
+    ? await takeBack(
+        deps,
+        clawbackGrantId('referrer', referredUserId),
+        referrer,
+        reward.referrer,
+        note,
+      )
+    : 0;
   const referredCents = await takeBack(
     deps,
     clawbackGrantId('referred', referredUserId),
@@ -241,8 +293,7 @@ export async function clawBackReferral(
     reward.referred,
     note,
   );
-
-  return { found: true, referrerCents, referredCents };
+  return { referrerCents, referredCents };
 }
 
 /**

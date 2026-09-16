@@ -276,7 +276,8 @@ export class ReferralStore {
     const result = await this.#db
       .prepare(
         `UPDATE referral_attributions SET paid_at = ?2
-         WHERE referred_user_id = ?1 AND paid_at IS NULL`,
+         WHERE referred_user_id = ?1 AND paid_at IS NULL
+           AND reversed_at IS NULL`,
       )
       .bind(referredUserId, at)
       .run();

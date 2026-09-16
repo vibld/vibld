@@ -483,3 +483,91 @@ describe('whose cancellation it is', () => {
     assert.deepEqual(again, { restored: false, reason: 'not-ours' });
   });
 });
+
+describe('a subscription Stripe has and the mirror does not', () => {
+  /** A Stripe that has a live subscription this deployment never mirrored. */
+  function stripeWithUnmirrored() {
+    const calls: { id: string; params: unknown }[] = [];
+    return {
+      calls,
+      client: {
+        subscriptions: {
+          list: async () => ({
+            data: [
+              {
+                id: 'sub_unmirrored',
+                status: 'active',
+                current_period_end: 1_800_000_000,
+                cancel_at_period_end: false,
+                items: { data: [] },
+              },
+            ],
+          }),
+          update: async (id: string, params: unknown) => {
+            calls.push({ id, params });
+            return {
+              id,
+              current_period_end: 1_800_000_000,
+              items: { data: [] },
+            } as never;
+          },
+        },
+      } as never,
+    };
+  }
+
+  it('still stops the charges', async () => {
+    // A customer.subscription.created that was missed, delayed, or racing
+    // this revoke leaves no local row while Stripe bills on schedule. The
+    // nightly reconcile creates the row later and never asks whether that
+    // person's access was withdrawn, so nothing revisits it and they are
+    // charged indefinitely.
+    const db = new SqliteD1Database(SCHEMA);
+    const access = new AccessStore(db);
+    const billing = new BillingStore(db);
+    await access.invite('sam@example.com', 'admin@vibld.com');
+    await access.claimInvite('sam@example.com', 'user_sam');
+    await billing.linkCustomer('user_sam', 'cus_sam');
+    // Deliberately no upsertSubscription: that is the whole case.
+
+    const stripe = stripeWithUnmirrored();
+    const result = await windDownSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+
+    assert.deepEqual(stripe.calls, [
+      { id: 'sub_unmirrored', params: { cancel_at_period_end: true } },
+    ]);
+    assert.equal(result.scheduled, true);
+    assert.equal(await billing.scheduledCancellation('sub_unmirrored'), true);
+  });
+
+  it('asks Stripe nothing for an account that never reached Checkout', async () => {
+    // No customer mapping means they never bought anything, so there is
+    // nothing to look up and the ordinary revoke costs no Stripe request.
+    const db = new SqliteD1Database(SCHEMA);
+    const access = new AccessStore(db);
+    const billing = new BillingStore(db);
+    await access.invite('free@example.com', 'admin@vibld.com');
+    await access.claimInvite('free@example.com', 'user_free');
+
+    let asked = false;
+    const result = await windDownSubscription(
+      ENV,
+      access,
+      billing,
+      'free@example.com',
+      () => {
+        asked = true;
+        return stripeWithUnmirrored().client;
+      },
+    );
+
+    assert.equal(asked, false);
+    assert.deepEqual(result, { scheduled: false, reason: 'nothing-to-stop' });
+  });
+});

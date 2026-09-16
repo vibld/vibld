@@ -433,3 +433,48 @@ describe('a clawback that cannot be applied yet', () => {
     assert.equal(outcome, 'unresolved');
   });
 });
+
+describe('a reversal that lands while the payout is running', () => {
+  it('leaves no reward standing', async () => {
+    // The race. decidePayout reads reversed_at several statements before the
+    // grants are written, so a refund arriving in between passes that check
+    // while the reversal sees a null paid_at and takes nothing back. Both
+    // halves conclude there is nothing to do and the reward survives.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const billing = new BillingStore(db);
+    const deps = { referrals, billing };
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    await billing.linkCustomer('user_referred', 'cus_referred');
+
+    // The reversal lands after decidePayout would have read the row and
+    // before the payout's own write, which is the window.
+    const payout = payReferralIfEarned(deps, 'user_referred');
+    await clawBackReferral(deps, 'user_referred', 'refunded mid-payout');
+    const result = await payout;
+
+    assert.equal(
+      result.paid,
+      false,
+      'paid a reward whose payment was returned',
+    );
+    assert.equal(await cents(billing, 'user_referrer'), 0);
+    assert.equal(await cents(billing, 'user_referred'), 0);
+  });
+
+  it('does not mark a reversed attribution paid', async () => {
+    // markPaid is the write that settles which of the two happened second,
+    // so it carries the condition rather than a read before it.
+    const db = new SqliteD1Database(SCHEMA);
+    const referrals = new ReferralStore(db);
+    const code = await referrals.codeFor('user_referrer');
+    await referrals.attribute('user_referred', 'user_referrer', code);
+    await referrals.markReversed('user_referred', new Date().toISOString());
+
+    assert.equal(
+      await referrals.markPaid('user_referred', new Date().toISOString()),
+      false,
+    );
+  });
+});

@@ -22,7 +22,7 @@
 import type Stripe from 'stripe';
 
 import type { AccessStore } from './access-store.ts';
-import type { BillingStore } from './billing-store.ts';
+import type { BillingStore, SubscriptionRecord } from './billing-store.ts';
 import { createStripeClient, stripeConfigured } from './stripe-client.ts';
 import type { StripeEnv } from './stripe-client.ts';
 
@@ -69,6 +69,7 @@ export async function windDownSubscription(
   }
 
   let subscription;
+  let userId: string;
   try {
     const invite = await access.redeemedUserId(email);
     // No row at all, which is what a mistyped address in the free-form
@@ -81,7 +82,8 @@ export async function windDownSubscription(
       // a problem.
       return { scheduled: false, reason: 'never-signed-in' };
     }
-    subscription = await billing.findActiveSubscription(invite.userId);
+    userId = invite.userId;
+    subscription = await billing.findActiveSubscription(userId);
   } catch (error) {
     console.error('wind-down: could not read the local records', error);
     return {
@@ -91,7 +93,22 @@ export async function windDownSubscription(
     };
   }
 
-  if (!subscription) return { scheduled: false, reason: 'nothing-to-stop' };
+  // The mirror being empty is not the same as Stripe having nothing. A
+  // `customer.subscription.created` that was missed, delayed, or is racing
+  // this revoke leaves no local row while Stripe bills on schedule, and
+  // nothing revisits a revoked invite afterwards: the nightly reconcile
+  // creates the mirror row and never asks whether that person's access was
+  // withdrawn. So the customer mapping is used to ask Stripe directly.
+  if (!subscription) {
+    const fromStripe = await liveSubscription(env, billing, userId, makeStripe);
+    if (!fromStripe.ok) {
+      return { scheduled: false, reason: 'error', error: fromStripe.error };
+    }
+    if (!fromStripe.subscription) {
+      return { scheduled: false, reason: 'nothing-to-stop' };
+    }
+    subscription = fromStripe.subscription;
+  }
 
   // Already winding down. Saying so is not the same as saying nothing
   // happened: an operator revoking somebody who had already cancelled needs
@@ -292,6 +309,69 @@ export async function restoreSubscription(
       restored: false,
       reason: 'error',
       error: 'Stripe would not clear the scheduled cancellation.',
+    };
+  }
+}
+
+/**
+ * This account's live subscription according to Stripe, when the mirror has
+ * none.
+ *
+ * Asked only in that case, so the ordinary revoke costs no Stripe request.
+ * Returns the subscription in the shape the mirror would have held, so the
+ * caller's one path handles both.
+ *
+ * A customer with no mapping is not an error: they never reached Checkout,
+ * so there is nothing to look up.
+ */
+async function liveSubscription(
+  env: AccessBillingEnv,
+  billing: BillingStore,
+  userId: string,
+  makeStripe: (env: StripeEnv) => Stripe,
+): Promise<
+  | { ok: true; subscription: SubscriptionRecord | undefined }
+  | { ok: false; error: string }
+> {
+  let customerId: string | undefined;
+  try {
+    customerId = await billing.findCustomerId(userId);
+  } catch (error) {
+    console.error('wind-down: could not read the customer mapping', error);
+    return { ok: false, error: 'Could not read the customer mapping.' };
+  }
+  if (!customerId) return { ok: true, subscription: undefined };
+
+  try {
+    const page = await makeStripe(env).subscriptions.list({
+      customer: customerId,
+      status: 'active',
+      limit: 1,
+    });
+    const live = page.data[0];
+    if (!live) return { ok: true, subscription: undefined };
+    return {
+      ok: true,
+      subscription: {
+        stripeSubscriptionId: live.id,
+        userId,
+        stripeCustomerId: customerId,
+        // Only the fields the wind-down reads are meaningful here. This is
+        // not written to the mirror as a subscription record: the reconcile
+        // owns that, and guessing a tier or a price id from a list response
+        // would put a wrong row where a right one is coming.
+        tier: 'build',
+        status: live.status,
+        priceId: '',
+        currentPeriodEnd: periodEndOf(live),
+        cancelAtPeriodEnd: live.cancel_at_period_end === true,
+      },
+    };
+  } catch (error) {
+    console.error('wind-down: could not ask Stripe for a subscription', error);
+    return {
+      ok: false,
+      error: 'Could not ask Stripe about their subscription.',
     };
   }
 }
