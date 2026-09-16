@@ -1,7 +1,13 @@
 import type Stripe from 'stripe';
 import { resolvePrincipal } from './principal.ts';
 import { BillingStore } from './billing-store.ts';
-import { applyStripeEvent, subscriptionRecordFrom } from './billing-events.ts';
+import {
+  applyStripeEvent,
+  ownerOfSubscription,
+  subscriptionRecordFrom,
+} from './billing-events.ts';
+import { payReferralIfEarned } from './referral-payout.ts';
+import { ReferralStore } from './referral-store.ts';
 import {
   createCheckoutSession,
   createPortalSession,
@@ -195,7 +201,19 @@ export async function handleStripeWebhook(
   }
 
   try {
-    await applyStripeEvent(store, event);
+    // The referral payout rides the same delivery that records the money,
+    // because "their first purchase cleared" is exactly what this event
+    // means and there is no second moment that knows it. A payout failure
+    // therefore fails the delivery, on purpose: `markEventProcessed` below
+    // runs only when the whole of this succeeded, so swallowing the failure
+    // here would mark the event done and lose a payout that was owed. The
+    // retry Stripe then makes re-runs an idempotent path.
+    const referrals = new ReferralStore(env.DB!);
+    await applyStripeEvent(store, event, (userId) =>
+      payReferralIfEarned({ referrals, billing: store }, userId).then(
+        () => undefined,
+      ),
+    );
   } catch (error) {
     // A 5xx here makes Stripe retry, which is what an unexpected D1/R2
     // failure should do -- succeeding despite a write that never happened
@@ -218,16 +236,36 @@ export async function handleStripeWebhook(
 export async function reconcileSubscriptions(
   stripe: Stripe,
   store: BillingStore,
-): Promise<{ checked: number; corrected: number; failed: number }> {
-  const ids = await store.listSubscriptionIds();
+  /**
+   * Called for every subscription Stripe reports as active, so a payout whose
+   * webhook never arrived at all is still made. The webhook is the fast path;
+   * this is the one that does not depend on a delivery having happened. It is
+   * idempotent, so calling it nightly for every active subscriber costs one
+   * read each and changes nothing for the ones already paid.
+   */
+  onActiveSubscription?: (userId: string) => Promise<void>,
+): Promise<{
+  checked: number;
+  corrected: number;
+  failed: number;
+  discovered: number;
+}> {
+  const ids = await discoverSubscriptionIds(stripe, store);
   let corrected = 0;
   let failed = 0;
 
-  for (const id of ids) {
+  for (const id of ids.ids) {
     try {
       const subscription = await stripe.subscriptions.retrieve(id);
       const current = await store.getSubscription(id);
-      const record = subscriptionRecordFrom(subscription, current?.userId);
+      // The local row first, since it is the cheapest answer, then the
+      // subscription's own metadata and the customer mapping. A subscription
+      // discovered above has no local row by definition, so without the
+      // fallback every discovered one would count as unresolvable.
+      const record = subscriptionRecordFrom(
+        subscription,
+        current?.userId ?? (await ownerOfSubscription(store, subscription)),
+      );
       if (!record) {
         console.error('reconcile: subscription no longer resolvable', id);
         failed += 1;
@@ -244,11 +282,72 @@ export async function reconcileSubscriptions(
         await store.upsertSubscription(record);
         corrected += 1;
       }
+      if (record.status === 'active' && onActiveSubscription) {
+        // Counted as a failure of this subscription's reconcile, not thrown:
+        // a reward that cannot be paid tonight must not stop the remaining
+        // subscriptions being corrected.
+        try {
+          await onActiveSubscription(record.userId);
+        } catch (error) {
+          console.error('reconcile: referral payout failed', id, error);
+          failed += 1;
+        }
+      }
     } catch (error) {
       console.error('reconcile: failed to check subscription', id, error);
       failed += 1;
     }
   }
 
-  return { checked: ids.length, corrected, failed };
+  return {
+    checked: ids.ids.length,
+    corrected,
+    failed,
+    discovered: ids.discovered,
+  };
+}
+
+/**
+ * Every subscription this reconcile should look at.
+ *
+ * The local mirror is not enough, and assuming it was is what this fixes. A
+ * subscriber whose very first `customer.subscription.created` delivery was
+ * missed has no row here at all, and a subscription-mode
+ * `checkout.session.completed` only links the customer, so nothing else
+ * writes one either. Iterating the mirror alone means that account is never
+ * reconciled and its referral is never paid, which is the opposite of what a
+ * missed-webhook recovery is for.
+ *
+ * Stripe is authoritative (L13), so this asks Stripe. Pagination is explicit
+ * rather than using the SDK's auto-paging helper, because a reconcile that
+ * silently stops after one page is a reconcile that covers the first hundred
+ * subscribers.
+ */
+async function discoverSubscriptionIds(
+  stripe: Stripe,
+  store: BillingStore,
+): Promise<{ ids: string[]; discovered: number }> {
+  const mirrored = await store.listSubscriptionIds();
+  const ids = new Set(mirrored);
+  let discovered = 0;
+  let startingAfter: string | undefined;
+
+  for (;;) {
+    const page = await stripe.subscriptions.list({
+      limit: 100,
+      status: 'all',
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    for (const subscription of page.data) {
+      if (!ids.has(subscription.id)) {
+        ids.add(subscription.id);
+        discovered += 1;
+      }
+    }
+    const last = page.data[page.data.length - 1];
+    if (!page.has_more || !last) break;
+    startingAfter = last.id;
+  }
+
+  return { ids: [...ids], discovered };
 }

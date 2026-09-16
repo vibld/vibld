@@ -38,6 +38,10 @@ import {
 import { decideModel, grantedFor } from './model-access.ts';
 import { grantSignupCreditOnce } from './signup-credit.ts';
 import {
+  handleReferralClaim,
+  handleReferralStatus,
+} from './referral-handlers.ts';
+import {
   ACCOUNT_BUDGET_KEY,
   dayKey,
   parsePrices,
@@ -81,6 +85,11 @@ import {
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
 import { BillingStore } from './billing-store.ts';
+import { ReferralStore } from './referral-store.ts';
+import {
+  payReferralIfEarned,
+  resumeStrandedPayouts,
+} from './referral-payout.ts';
 import {
   handleGitHubBind,
   handleGitHubCallback,
@@ -1353,6 +1362,18 @@ export default {
       );
     }
 
+    if (pathname === '/api/referral/status') {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      return handleReferralStatus(request, env, resolved.principal);
+    }
+
+    if (pathname === '/api/referral/claim') {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      return handleReferralClaim(request, env, resolved.principal);
+    }
+
     if (pathname === '/api/admin/user') {
       return handleAdminUser(request, env);
     }
@@ -1377,10 +1398,26 @@ export default {
     ctx: ExecutionContext,
   ): Promise<void> {
     if (billingConfigured(env)) {
+      const billing = new BillingStore(env.DB!);
+      const referrals = new ReferralStore(env.DB!);
+      const payout = { referrals, billing };
       ctx.waitUntil(
-        reconcileSubscriptions(
-          createStripeClient(env),
-          new BillingStore(env.DB!),
+        // Every referral payout that claimed a slot and never finished, first.
+        // Stripe's redelivery gives up after a few days and a delivery that
+        // was never made is retried by nobody, so without this the slot stays
+        // taken and the reward stays owed.
+        resumeStrandedPayouts(payout).then(
+          (result) =>
+            console.log(
+              JSON.stringify({ event: 'referral.resumed', ...result }),
+            ),
+          (error: unknown) =>
+            console.error('referral payout resume failed', error),
+        ),
+      );
+      ctx.waitUntil(
+        reconcileSubscriptions(createStripeClient(env), billing, (userId) =>
+          payReferralIfEarned(payout, userId).then(() => undefined),
         ).then(
           (result) =>
             console.log(

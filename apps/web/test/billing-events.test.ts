@@ -116,6 +116,149 @@ describe('applyStripeEvent: checkout.session.completed', () => {
   });
 });
 
+describe('applyStripeEvent: the purchase hook', () => {
+  function topup(overrides: Record<string, unknown> = {}): Stripe.Event {
+    return stripeEvent(
+      'checkout.session.completed',
+      checkoutSession({
+        id: 'cs_topup',
+        mode: 'payment',
+        payment_status: 'paid',
+        ...overrides,
+      }),
+    );
+  }
+
+  it('announces a cleared top-up to the hook', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(newStore(), topup(), async (userId) => {
+      seen.push(userId);
+    });
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('lets a failing hook fail the delivery', async () => {
+    // This used to be swallowed, and the comment said a later delivery would
+    // recover it. It would not: handleStripeWebhook marks the event
+    // processed once this returns, and Stripe's redelivery then exits at
+    // that check, so a referral payout that threw here was owed and never
+    // attempted again. Throwing means the event is not marked and Stripe
+    // retries into an idempotent path.
+    await assert.rejects(
+      applyStripeEvent(newStore(), topup(), async () => {
+        throw new Error('payout failed');
+      }),
+      /payout failed/,
+    );
+  });
+
+  it('records the money before it announces anything', async () => {
+    // Which is what makes the retry above safe to ask for: the top-up is
+    // already durable and keyed on the checkout session, so the redelivery
+    // re-runs it as a no-op and the customer's own credit never depends on
+    // the reward working.
+    const store = newStore();
+    let hadCustomer = false;
+    await assert.rejects(
+      applyStripeEvent(store, topup(), async (userId) => {
+        hadCustomer = (await store.findCustomerId(userId)) !== undefined;
+        throw new Error('payout failed');
+      }),
+      /payout failed/,
+    );
+    assert.equal(hadCustomer, true);
+  });
+
+  it('announces nothing for a session that completed unpaid', async () => {
+    // A delayed payment method completes the session and settles later, or
+    // never. Announcing on completion alone pays a referral on money that may
+    // not arrive, and records a top-up for it too.
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      topup({ payment_status: 'unpaid' }),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, []);
+  });
+
+  it('announces the delayed payment when it finally settles', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent(
+        'checkout.session.async_payment_succeeded',
+        checkoutSession({
+          id: 'cs_topup',
+          mode: 'payment',
+          payment_status: 'paid',
+        }),
+      ),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('announces a session that owed nothing to begin with', async () => {
+    // Fully covered by a coupon or a credit balance. Settled, not an edge
+    // case to skip.
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      topup({ payment_status: 'no_payment_required' }),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('does nothing at all for a delayed payment that failed', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent(
+        'checkout.session.async_payment_failed',
+        checkoutSession({ id: 'cs_topup', mode: 'payment' }),
+      ),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, []);
+  });
+
+  it('announces an active subscription, and not a trialing one', async () => {
+    // A trial is not money. Paying on one makes the trial the thing farmed.
+    const active: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent('customer.subscription.updated', subscription()),
+      async (userId) => {
+        active.push(userId);
+      },
+    );
+    assert.deepEqual(active, ['user_1']);
+
+    const trialing: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent(
+        'customer.subscription.updated',
+        subscription({ status: 'trialing' }),
+      ),
+      async (userId) => {
+        trialing.push(userId);
+      },
+    );
+    assert.deepEqual(trialing, []);
+  });
+});
+
 describe('applyStripeEvent: customer.subscription.*', () => {
   it('mirrors a new subscription, resolving the user from its own metadata', async () => {
     const store = newStore();

@@ -520,13 +520,35 @@ Dashboard needs no code change, only the amount to change.
   session exists to check; the `Stripe-Signature` header, verified against
   the raw body before anything is parsed (L30), is the entire
   authentication. Subscribed events: `checkout.session.completed`,
+  `checkout.session.async_payment_succeeded` / `.async_payment_failed`,
   `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
   `invoice.payment_failed` (the last two are acknowledged but not yet
   separately mirrored -- `customer.subscription.updated` already carries
   the status change either one implies).
+
+  The two `async_payment_*` events matter for delayed payment methods, where
+  `checkout.session.completed` arrives with `payment_status: unpaid` and the
+  money settles later or not at all. A top-up is recorded, and a referral paid,
+  only for a session that is actually settled, so without the success event
+  subscribed those purchases never get their credit. Nothing needs handling for
+  the failure case: nothing was granted.
+
 - A nightly Cron Trigger (`wrangler.jsonc`'s `triggers.crons`) re-reads every
   mirrored subscription from Stripe and corrects any drift a missed or
-  failed webhook delivery left behind (L13).
+  failed webhook delivery left behind (L13). It also finishes referral
+  payouts the webhook path could not: every attribution that claimed a cap
+  slot and was never paid is retried, and every active subscriber is offered
+  the (idempotent) payout, so a delivery that was missed outright or whose
+  retries ran out is still recovered.
+
+  The reconcile asks Stripe which subscriptions exist rather than only
+  re-reading the ones already mirrored. A subscriber whose very first
+  `customer.subscription.created` delivery was missed has no local row at all,
+  and a subscription-mode `checkout.session.completed` only links the
+  customer, so iterating the mirror alone would never reach them. The sweep
+  over stranded payouts stamps each attempt before it runs and orders by that
+  stamp, so a row that fails every night moves to the back of the queue
+  instead of holding the front of it and starving every newer one.
 
 ### Provider balance alerts (docs/decisions.md L44)
 

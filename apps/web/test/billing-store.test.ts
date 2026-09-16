@@ -26,6 +26,92 @@ function newStoreWithDb(): { store: BillingStore; db: SqliteD1Database } {
   return { store: new BillingStore(db), db };
 }
 
+describe('BillingStore.hasBegunAPurchase', () => {
+  /** A mirrored subscription, at whatever status the case needs. */
+  function subscriptionAt(status: string) {
+    return {
+      stripeSubscriptionId: `sub_${status}`,
+      userId: 'user_1',
+      stripeCustomerId: 'cus_1',
+      tier: 'build' as const,
+      status,
+      priceId: 'price_build_monthly',
+      currentPeriodEnd: '2026-10-16T00:00:00.000Z',
+      cancelAtPeriodEnd: false,
+    };
+  }
+
+  it('says no for an account that has never paid for anything', async () => {
+    const store = newStore();
+    assert.equal(await store.hasBegunAPurchase('user_1'), false);
+  });
+
+  it('says yes once a top-up has been recorded', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 500);
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+
+  it('says yes from the moment a Checkout exists, before it is paid', async () => {
+    // The barrier has to precede the charge or it is not a barrier: a claim
+    // submitted while a Checkout is in flight would otherwise see no
+    // purchase. The customer row is written at Checkout creation, which is
+    // the earliest point there is.
+    const store = newStore();
+    await store.linkCustomer('user_1', 'cus_1');
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+
+  it('asks about this account only', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 500);
+    assert.equal(await store.hasBegunAPurchase('user_2'), false);
+  });
+
+  it('counts a live subscription, and a trial, but not one Stripe never charged', async () => {
+    // A trial counts because the referral payout fires the moment that
+    // subscription turns active, and arranging a referral in between is the
+    // move being refused. An `incomplete` subscription is a checkout that
+    // never took a payment, which is not a purchase by any reading.
+    for (const status of ['active', 'trialing', 'past_due', 'canceled']) {
+      const store = newStore();
+      await store.upsertSubscription(subscriptionAt(status));
+      assert.equal(
+        await store.hasBegunAPurchase('user_1'),
+        true,
+        `${status} should count as having purchased`,
+      );
+    }
+
+    for (const status of ['incomplete', 'incomplete_expired']) {
+      const store = newStore();
+      await store.upsertSubscription(subscriptionAt(status));
+      assert.equal(
+        await store.hasBegunAPurchase('user_1'),
+        false,
+        `${status} should not count as having purchased`,
+      );
+    }
+  });
+
+  it('does not depend on the credit still being there', async () => {
+    // The question is whether this account has ever paid, not what it has
+    // left, so the 12-month window the credit readers apply is not applied
+    // here. An old top-up still means the account is not a new signup.
+    const { store, db } = newStoreWithDb();
+    await store.recordTopup('cs_old', 'user_1', 'cus_1', 500);
+    await db
+      .prepare(
+        `UPDATE billing_topups SET created_at = '2020-01-01T00:00:00.000Z'
+          WHERE stripe_checkout_session_id = 'cs_old'`,
+      )
+      .run();
+
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 0);
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+});
+
 describe('BillingStore.linkCustomer / findCustomerId / findUserIdForCustomer', () => {
   it('round-trips a user-to-customer mapping in both directions', async () => {
     const store = newStore();
