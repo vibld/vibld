@@ -81,7 +81,11 @@ export function normaliseCode(raw: string | null | undefined): string | null {
 
 /** Why an attribution was refused, for a caller that has to say something. */
 export type AttributionRefusal =
-  'unreadable-code' | 'unknown-code' | 'self-referral' | 'already-attributed';
+  | 'unreadable-code'
+  | 'unknown-code'
+  | 'self-referral'
+  | 'already-attributed'
+  | 'already-purchased';
 
 export type AttributionDecision =
   | { ok: true; referrerUserId: string; code: string }
@@ -97,16 +101,29 @@ export type AttributionDecision =
  * `existing` is any attribution already recorded for this account. First one
  * wins and is never replaced, because an account that can be re-attributed
  * can be sold to whichever referrer asks last.
+ *
+ * `alreadyPurchased` closes the other end of the same hole. The offer is for
+ * somebody who arrived through a link and then bought, so the attribution has
+ * to be fixed before the purchase, not after it. Without this, any
+ * long-standing customer could paste a code today and have their next top-up
+ * pay out both sides, which turns every existing account into a voucher.
  */
 export function decideAttribution(input: {
   rawCode: string | null | undefined;
   referredUserId: string;
   ownerOfCode: string | undefined;
   existing: boolean;
+  alreadyPurchased: boolean;
 }): AttributionDecision {
   const code = normaliseCode(input.rawCode);
   if (code === null) return { ok: false, reason: 'unreadable-code' };
   if (input.existing) return { ok: false, reason: 'already-attributed' };
+  // Before the code is looked at, deliberately: whether this account has ever
+  // paid is nothing to do with which code was pasted, and answering it first
+  // means the refusal cannot be used to probe which codes exist.
+  if (input.alreadyPurchased) {
+    return { ok: false, reason: 'already-purchased' };
+  }
   if (input.ownerOfCode === undefined) {
     return { ok: false, reason: 'unknown-code' };
   }
@@ -144,6 +161,13 @@ export const DEFAULT_REWARD_CENTS: RewardCents = {
  * identical from here: both are a stream of new accounts that paid. The
  * limit does not stop a real advocate being rewarded, it stops an unattended
  * faucet, and passing it is a reason to look rather than to refuse forever.
+ *
+ * It is not enforced here. A count read in this file and compared in this
+ * file is a check-then-act, and two purchases clearing at the same moment
+ * both read the same count and both pay: the first cut of this did exactly
+ * that, and the cap could be walked past by any number at once. The ceiling
+ * is applied inside the statement that claims the slot
+ * (`ReferralStore.reserveSlot`), where SQLite serialises the two writers.
  */
 export const MAX_PAID_REFERRALS = 25;
 
@@ -164,25 +188,46 @@ export type PayoutDecision =
  * Stripe delivers a webhook more than once as a matter of course, and a
  * payout that runs twice is a payout an attacker can run as often as they can
  * make the delivery retry.
+ *
+ * The cap is not decided here. It is a race, not a comparison, so it belongs
+ * in the statement that claims the slot; `reservationOutcome` below reads
+ * what that statement answered.
  */
 export function decidePayout(input: {
   referrerUserId: string | undefined;
   paidAlready: boolean;
-  referrerPaidCount: number;
   reward?: RewardCents;
 }): PayoutDecision {
   if (input.referrerUserId === undefined) {
     return { pay: false, reason: 'not-attributed' };
   }
   if (input.paidAlready) return { pay: false, reason: 'already-paid' };
-  if (input.referrerPaidCount >= MAX_PAID_REFERRALS) {
-    return { pay: false, reason: 'referrer-at-cap' };
-  }
   return {
     pay: true,
     referrerUserId: input.referrerUserId,
     reward: input.reward ?? DEFAULT_REWARD_CENTS,
   };
+}
+
+/**
+ * What a cap reservation attempt means for the payout about to run.
+ *
+ * `won` is this delivery having taken the slot. `heldAlready` is the row
+ * already carrying one, which is what a redelivery sees, and what a payout
+ * that failed between claiming its slot and writing the credit sees when it
+ * is retried. Neither is a refusal: the slot belongs to this attribution
+ * either way, the grants are written on deterministic ids, and refusing here
+ * would abandon a payout that is owed.
+ *
+ * Only a reservation that was neither won nor already held is the cap, and
+ * that is the one case where nothing further should happen.
+ */
+export function reservationOutcome(input: {
+  won: boolean;
+  heldAlready: boolean;
+}): { proceed: true } | { proceed: false; reason: PayoutRefusal } {
+  if (input.won || input.heldAlready) return { proceed: true };
+  return { proceed: false, reason: 'referrer-at-cap' };
 }
 
 /**

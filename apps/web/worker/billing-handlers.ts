@@ -199,10 +199,11 @@ export async function handleStripeWebhook(
   try {
     // The referral payout rides the same delivery that records the money,
     // because "their first purchase cleared" is exactly what this event
-    // means and there is no second moment that knows it. It cannot fail the
-    // delivery: `applyStripeEvent` swallows and logs a hook failure, since a
-    // reward bug must not look like a billing outage, and the payout is
-    // idempotent so a later delivery recovers it.
+    // means and there is no second moment that knows it. A payout failure
+    // therefore fails the delivery, on purpose: `markEventProcessed` below
+    // runs only when the whole of this succeeded, so swallowing the failure
+    // here would mark the event done and lose a payout that was owed. The
+    // retry Stripe then makes re-runs an idempotent path.
     const referrals = new ReferralStore(env.DB!);
     await applyStripeEvent(store, event, (userId) =>
       payReferralIfEarned({ referrals, billing: store }, userId).then(

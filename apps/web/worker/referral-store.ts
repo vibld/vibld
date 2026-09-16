@@ -10,6 +10,8 @@ export interface AttributionRecord {
   referrerUserId: string;
   code: string;
   createdAt: string;
+  /** When this attribution took one of its referrer's capped slots. */
+  claimedAt: string | null;
   paidAt: string | null;
 }
 
@@ -84,7 +86,8 @@ export class ReferralStore {
   ): Promise<AttributionRecord | undefined> {
     const row = await this.#db
       .prepare(
-        `SELECT referred_user_id, referrer_user_id, code, created_at, paid_at
+        `SELECT referred_user_id, referrer_user_id, code, created_at,
+                claimed_at, paid_at
          FROM referral_attributions WHERE referred_user_id = ?1`,
       )
       .bind(referredUserId)
@@ -93,6 +96,7 @@ export class ReferralStore {
         referrer_user_id: string;
         code: string;
         created_at: string;
+        claimed_at: string | null;
         paid_at: string | null;
       }>();
     if (!row) return undefined;
@@ -101,6 +105,7 @@ export class ReferralStore {
       referrerUserId: row.referrer_user_id,
       code: row.code,
       createdAt: row.created_at,
+      claimedAt: row.claimed_at,
       paidAt: row.paid_at,
     };
   }
@@ -121,8 +126,9 @@ export class ReferralStore {
     const result = await this.#db
       .prepare(
         `INSERT INTO referral_attributions
-           (referred_user_id, referrer_user_id, code, created_at, paid_at)
-         VALUES (?1, ?2, ?3, ?4, NULL)
+           (referred_user_id, referrer_user_id, code, created_at,
+            claimed_at, paid_at)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL)
          ON CONFLICT(referred_user_id) DO NOTHING`,
       )
       .bind(referredUserId, referrerUserId, code, new Date().toISOString())
@@ -149,16 +155,43 @@ export class ReferralStore {
     return result.meta.changes > 0;
   }
 
-  /** How many referrals this account has already been paid for, for the cap. */
-  async paidCountFor(referrerUserId: string): Promise<number> {
-    const row = await this.#db
+  /**
+   * Take one of this attribution's referrer's capped slots, if any is left.
+   *
+   * The cap lives in this statement rather than in a count the caller
+   * compares, and that is the whole point. Counting first and paying second
+   * is a check-then-act: two purchases clearing at the same instant both read
+   * the same total, both find it under the ceiling, and both pay. A burst
+   * passes the cap by however many arrive together, which on a program that
+   * writes credit is the difference between a ceiling and a suggestion.
+   *
+   * Here the count is a correlated subquery inside the UPDATE's own WHERE
+   * clause. SQLite (and therefore D1) admits one writer at a time, so the
+   * second statement runs against the first one's committed row and sees the
+   * slot gone. `changes` then says which of the two took it.
+   *
+   * `claimed_at IS NULL` makes it a no-op for a row that already holds a
+   * slot, so a redelivery does not consume a second one.
+   */
+  async reserveSlot(
+    referredUserId: string,
+    at: string,
+    maxClaimed: number,
+  ): Promise<boolean> {
+    const result = await this.#db
       .prepare(
-        `SELECT COUNT(*) AS total FROM referral_attributions
-         WHERE referrer_user_id = ?1 AND paid_at IS NOT NULL`,
+        `UPDATE referral_attributions
+            SET claimed_at = ?2
+          WHERE referred_user_id = ?1
+            AND claimed_at IS NULL
+            AND (SELECT COUNT(*) FROM referral_attributions AS held
+                  WHERE held.referrer_user_id
+                        = referral_attributions.referrer_user_id
+                    AND held.claimed_at IS NOT NULL) < ?3`,
       )
-      .bind(referrerUserId)
-      .first<{ total: number }>();
-    return row?.total ?? 0;
+      .bind(referredUserId, at, maxClaimed)
+      .run();
+    return result.meta.changes > 0;
   }
 
   /** Everyone this account has referred, for their own readout. */

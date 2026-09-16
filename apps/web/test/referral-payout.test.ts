@@ -5,7 +5,7 @@ import {
   REFERRAL_GRANT_ACTOR,
   payReferralIfEarned,
 } from '../worker/referral-payout.ts';
-import { MAX_PAID_REFERRALS, payoutGrantId } from '../worker/referral.ts';
+import { payoutGrantId } from '../worker/referral.ts';
 import type { BillingStore } from '../worker/billing-store.ts';
 import type { ReferralStore } from '../worker/referral-store.ts';
 
@@ -37,18 +37,30 @@ function billingFake() {
   };
 }
 
+/**
+ * A referral store standing in for the rows, not for the cap.
+ *
+ * `slotsLeft` is how many claims the reservation statement would still
+ * accept. The statement itself is the cap, and it is tested against real
+ * SQLite in referral-store.test.ts; what belongs here is what the payout does
+ * with the answer.
+ */
 function referralFake(options: {
   attribution?: {
     referrerUserId: string;
     code: string;
     paidAt: string | null;
+    claimedAt?: string | null;
   };
-  paidCount?: number;
+  slotsLeft?: number;
 }) {
   const state = {
     paidAt: options.attribution?.paidAt ?? null,
+    claimedAt: options.attribution?.claimedAt ?? null,
     markCalls: 0,
+    reserveCalls: 0,
   };
+  let slotsLeft = options.slotsLeft ?? 1;
   return {
     state,
     store: {
@@ -59,11 +71,17 @@ function referralFake(options: {
           referrerUserId: options.attribution.referrerUserId,
           code: options.attribution.code,
           createdAt: '2026-09-16T00:00:00.000Z',
+          claimedAt: state.claimedAt,
           paidAt: state.paidAt,
         };
       },
-      async paidCountFor() {
-        return options.paidCount ?? 0;
+      async reserveSlot(_id: string, at: string) {
+        state.reserveCalls += 1;
+        if (state.claimedAt !== null) return false; // claimed_at IS NULL
+        if (slotsLeft <= 0) return false;
+        slotsLeft -= 1;
+        state.claimedAt = at;
+        return true;
       },
       async markPaid(_id: string, at: string) {
         state.markCalls += 1;
@@ -158,6 +176,56 @@ describe('payReferralIfEarned', () => {
     );
   });
 
+  it('resumes a payout that failed after claiming its slot', async () => {
+    // The state a crashed payout leaves behind, and the one the swallowed
+    // webhook error used to strand for good. The slot is held, nothing has
+    // been granted, and the retry has to finish the job rather than read the
+    // held claim as somebody else's and refuse.
+    const billing = billingFake();
+    const referrals = referralFake({
+      attribution: {
+        referrerUserId: 'user_owner',
+        code: 'ABCD2345',
+        paidAt: null,
+        claimedAt: '2026-09-16T00:00:00.000Z',
+      },
+      slotsLeft: 0, // no slot left to take: it is already holding one
+    });
+
+    const outcome = await payReferralIfEarned(
+      { referrals: referrals.store, billing: billing.store },
+      'user_new',
+    );
+
+    assert.equal(outcome.paid, true);
+    assert.equal(billing.grants.size, 2);
+    assert.notEqual(referrals.state.paidAt, null);
+  });
+
+  it('claims the slot before writing any credit', async () => {
+    // Order again, and the reverse of the grant/mark pair above. A credit
+    // written before the slot is claimed is a credit the cap never counted.
+    const referrals = referralFake({
+      attribution: {
+        referrerUserId: 'user_owner',
+        code: 'ABCD2345',
+        paidAt: null,
+      },
+    });
+    let reservedFirst = false;
+    const watching = {
+      async grantAdminCredit() {
+        reservedFirst = referrals.state.claimedAt !== null;
+      },
+    } as unknown as BillingStore;
+
+    await payReferralIfEarned(
+      { referrals: referrals.store, billing: watching },
+      'user_new',
+    );
+    assert.equal(reservedFirst, true, 'granted credit before claiming a slot');
+  });
+
   it('is a no-op on a redelivered webhook', async () => {
     // Stripe redelivers as a matter of course. Running twice must change
     // nothing, and the deterministic grant id is what guarantees it even if
@@ -196,7 +264,7 @@ describe('payReferralIfEarned', () => {
         code: 'ABCD2345',
         paidAt: null,
       },
-      paidCount: MAX_PAID_REFERRALS,
+      slotsLeft: 0,
     });
     const outcome = await payReferralIfEarned(
       { referrals: referrals.store, billing: billing.store },

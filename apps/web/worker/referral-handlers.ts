@@ -2,6 +2,7 @@
  * The two things a signed-in account does with referrals: see its own code,
  * and claim the one it arrived with.
  */
+import { BillingStore } from './billing-store.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
   DEFAULT_REWARD_CENTS,
@@ -101,6 +102,7 @@ export async function handleReferralClaim(
       : undefined;
 
   const store = new ReferralStore(env.DB);
+  const billing = new BillingStore(env.DB);
   const existing = await store.attributionFor(principal.userId);
   const decision = decideAttribution({
     rawCode: typeof rawCode === 'string' ? rawCode : null,
@@ -109,6 +111,7 @@ export async function handleReferralClaim(
       typeof rawCode === 'string' ? rawCode : null,
     ),
     existing: existing !== undefined,
+    alreadyPurchased: await billing.hasEverPurchased(principal.userId),
   });
 
   if (decision.ok) {

@@ -87,25 +87,28 @@ async function applyCheckoutSessionCompleted(
 }
 
 /**
- * Run the purchase hook without letting it fail the delivery.
+ * Run the purchase hook, and let a failure fail the delivery.
  *
- * The top-up above is the part Stripe is telling us about, and it has already
- * been written. If the referral payout throws, Stripe sees a failed webhook,
- * retries, and the top-up write runs again -- which is safe, but it means a
- * bug in a reward can look like a billing outage. The hook is idempotent by
- * construction, so the retry that a later delivery brings is a better place
- * to recover than this one.
+ * This used to swallow the error, on the reasoning that a reward bug should
+ * not look like a billing outage and that a later delivery would recover it.
+ * The second half was false. `handleStripeWebhook` records the event as
+ * processed once this returns, and Stripe's redelivery then exits at that
+ * check, so a swallowed failure meant a payout that was owed and would never
+ * be attempted again. Half a payout, too: the referrer's credit could land
+ * and the referred account's not.
+ *
+ * Failing is the cheaper half of the trade. The top-up above is already
+ * written and is keyed on the checkout session, so the redelivery Stripe
+ * makes re-runs it as a no-op and the customer's own credit is never at
+ * stake; what is red is a webhook delivery, which is a thing somebody should
+ * be told about. A reward silently not paid is not.
  */
 async function announcePurchase(
   hook: OnPurchaseCleared | undefined,
   userId: string,
 ): Promise<void> {
   if (!hook) return;
-  try {
-    await hook(userId);
-  } catch (error) {
-    console.error('purchase hook failed', userId, error);
-  }
+  await hook(userId);
 }
 
 /**

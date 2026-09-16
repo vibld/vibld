@@ -5,13 +5,13 @@ import {
   CODE_ALPHABET,
   CODE_LENGTH,
   DEFAULT_REWARD_CENTS,
-  MAX_PAID_REFERRALS,
   decideAttribution,
   decidePayout,
   makeCode,
   normaliseCode,
   payoutGrantId,
   referralUrl,
+  reservationOutcome,
 } from '../worker/referral.ts';
 
 /** Bytes in order, wrapping: enough to walk the whole 0-255 range. */
@@ -99,6 +99,7 @@ describe('decideAttribution', () => {
     referredUserId: 'user_new',
     ownerOfCode: 'user_owner',
     existing: false,
+    alreadyPurchased: false,
   };
 
   it('attributes a readable code owned by somebody else', () => {
@@ -138,6 +139,26 @@ describe('decideAttribution', () => {
     assert.deepEqual(decision, { ok: false, reason: 'already-attributed' });
   });
 
+  it('refuses an account that has already bought something', () => {
+    // The offer is for somebody who arrived through a link and then bought.
+    // Without this, a customer of two years pastes a code today and their
+    // next top-up pays out both sides.
+    const decision = decideAttribution({ ...base, alreadyPurchased: true });
+    assert.deepEqual(decision, { ok: false, reason: 'already-purchased' });
+  });
+
+  it('asks whether they have purchased before it looks the code up', () => {
+    // Same reason the existing attribution is checked first: the refusal
+    // must not depend on whether the code exists, or it can be used to find
+    // out which codes do.
+    const decision = decideAttribution({
+      ...base,
+      alreadyPurchased: true,
+      ownerOfCode: undefined,
+    });
+    assert.deepEqual(decision, { ok: false, reason: 'already-purchased' });
+  });
+
   it('refuses an unknown code', () => {
     const decision = decideAttribution({ ...base, ownerOfCode: undefined });
     assert.deepEqual(decision, { ok: false, reason: 'unknown-code' });
@@ -153,7 +174,6 @@ describe('decidePayout', () => {
   const base = {
     referrerUserId: 'user_owner',
     paidAlready: false,
-    referrerPaidCount: 0,
   };
 
   it('pays both sides on a first purchase', () => {
@@ -181,24 +201,34 @@ describe('decidePayout', () => {
     });
   });
 
-  it('stops at the cap', () => {
-    assert.deepEqual(
-      decidePayout({ ...base, referrerPaidCount: MAX_PAID_REFERRALS }),
-      { pay: false, reason: 'referrer-at-cap' },
-    );
-  });
-
-  it('pays up to the cap but not at it', () => {
-    assert.equal(
-      decidePayout({ ...base, referrerPaidCount: MAX_PAID_REFERRALS - 1 }).pay,
-      true,
-    );
-  });
-
   it('takes an overridden reward', () => {
     const reward = { referrer: 250, referred: 1000 };
     const decision = decidePayout({ ...base, reward });
     assert.deepEqual(decision.pay && decision.reward, reward);
+  });
+});
+
+describe('reservationOutcome', () => {
+  it('proceeds for the delivery that took the slot', () => {
+    assert.deepEqual(reservationOutcome({ won: true, heldAlready: false }), {
+      proceed: true,
+    });
+  });
+
+  it('proceeds for a payout resuming on a slot it already holds', () => {
+    // A payout that failed between claiming its slot and writing the credit
+    // is owed both. Refusing here because the UPDATE changed nothing would
+    // abandon it, and the grants it is about to make are idempotent anyway.
+    assert.deepEqual(reservationOutcome({ won: false, heldAlready: true }), {
+      proceed: true,
+    });
+  });
+
+  it('refuses only when the slot was neither taken nor held', () => {
+    assert.deepEqual(reservationOutcome({ won: false, heldAlready: false }), {
+      proceed: false,
+      reason: 'referrer-at-cap',
+    });
   });
 });
 

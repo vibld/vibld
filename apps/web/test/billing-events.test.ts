@@ -116,6 +116,81 @@ describe('applyStripeEvent: checkout.session.completed', () => {
   });
 });
 
+describe('applyStripeEvent: the purchase hook', () => {
+  function topup(): Stripe.Event {
+    return stripeEvent(
+      'checkout.session.completed',
+      checkoutSession({ id: 'cs_topup', mode: 'payment' }),
+    );
+  }
+
+  it('announces a cleared top-up to the hook', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(newStore(), topup(), async (userId) => {
+      seen.push(userId);
+    });
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('lets a failing hook fail the delivery', async () => {
+    // This used to be swallowed, and the comment said a later delivery would
+    // recover it. It would not: handleStripeWebhook marks the event
+    // processed once this returns, and Stripe's redelivery then exits at
+    // that check, so a referral payout that threw here was owed and never
+    // attempted again. Throwing means the event is not marked and Stripe
+    // retries into an idempotent path.
+    await assert.rejects(
+      applyStripeEvent(newStore(), topup(), async () => {
+        throw new Error('payout failed');
+      }),
+      /payout failed/,
+    );
+  });
+
+  it('records the money before it announces anything', async () => {
+    // Which is what makes the retry above safe to ask for: the top-up is
+    // already durable and keyed on the checkout session, so the redelivery
+    // re-runs it as a no-op and the customer's own credit never depends on
+    // the reward working.
+    const store = newStore();
+    let hadCustomer = false;
+    await assert.rejects(
+      applyStripeEvent(store, topup(), async (userId) => {
+        hadCustomer = (await store.findCustomerId(userId)) !== undefined;
+        throw new Error('payout failed');
+      }),
+      /payout failed/,
+    );
+    assert.equal(hadCustomer, true);
+  });
+
+  it('announces an active subscription, and not a trialing one', async () => {
+    // A trial is not money. Paying on one makes the trial the thing farmed.
+    const active: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent('customer.subscription.updated', subscription()),
+      async (userId) => {
+        active.push(userId);
+      },
+    );
+    assert.deepEqual(active, ['user_1']);
+
+    const trialing: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      stripeEvent(
+        'customer.subscription.updated',
+        subscription({ status: 'trialing' }),
+      ),
+      async (userId) => {
+        trialing.push(userId);
+      },
+    );
+    assert.deepEqual(trialing, []);
+  });
+});
+
 describe('applyStripeEvent: customer.subscription.*', () => {
   it('mirrors a new subscription, resolving the user from its own metadata', async () => {
     const store = newStore();
