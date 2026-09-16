@@ -416,6 +416,49 @@ describe('backfillTopupPayments', () => {
     assert.equal(third.checked, 0, 'did not terminate');
   });
 
+  it('reaches later customers even though an earlier one always fails', async () => {
+    // A Stripe customer deleted out from under the mapping fails every
+    // night for ever. Ordered by age alone it leads every run, and with a
+    // limit enough such rows hold every slot: the set stops converging and
+    // nothing reports that it has.
+    const store = new BillingStore(new SqliteD1Database(SCHEMA));
+    await store.linkCustomer('user_bad', 'cus_bad');
+    await store.linkCustomer('user_good', 'cus_good');
+
+    const stripe = {
+      checkout: {
+        sessions: {
+          async list({ customer }: { customer: string }) {
+            if (customer === 'cus_bad') throw new Error('no such customer');
+            return {
+              data: [
+                {
+                  id: 'cs_1',
+                  mode: 'payment',
+                  payment_status: 'paid',
+                  amount_total: 500,
+                  created: 1_800_000_000,
+                },
+              ],
+              has_more: false,
+            };
+          },
+        },
+      },
+    } as unknown as Stripe;
+
+    // One slot a night, and the failing customer is the older row.
+    for (let night = 0; night < 3; night += 1) {
+      await backfillTopupPayments(stripe, store, undefined, 1);
+    }
+
+    assert.equal(
+      await store.hasClearedPayment('user_good'),
+      true,
+      'starved by the failing customer',
+    );
+  });
+
   it('comes back to a customer whose history could not be read', async () => {
     // Stamped only after a complete read. A customer marked done on a
     // failed read would never be reconciled, which is the failure the

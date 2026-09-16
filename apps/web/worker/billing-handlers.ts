@@ -365,6 +365,12 @@ export async function backfillTopupPayments(
 
   for (const { userId, stripeCustomerId } of customers) {
     try {
+      // Before the read, not after. A customer whose read throws is exactly
+      // the one that must move to the back of the queue; stamping
+      // afterwards would skip precisely those, and enough of them at the
+      // front hold every slot under the limit so the rest of the set is
+      // never reached.
+      await store.markTopupsBackfillAttempted(userId, new Date().toISOString());
       let collected = 0;
       let startingAfter: string | undefined;
 

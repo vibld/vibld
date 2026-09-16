@@ -19,7 +19,22 @@
 -- after that arrives by webhook and needs no backfill.
 ALTER TABLE billing_customers ADD COLUMN topups_backfilled_at TEXT;
 
--- The backfill asks for "customers not yet done", oldest first, under a
--- limit. This is the column that answers it.
+-- When the backfill last tried this customer, whether or not it succeeded.
+--
+-- Two stamps rather than one, for the same reason `referral_attributions`
+-- carries both `paid_at` and `last_attempt_at`. Completion alone is not
+-- enough to order the queue by: a customer whose read fails every night --
+-- a Stripe customer deleted out from under the mapping, say -- stays
+-- incomplete for ever, and ordering only by age puts it at the front of
+-- every run. With a limit, enough such rows hold every slot and no later
+-- customer is ever reached. The set stops converging and nothing says so.
+--
+-- Stamped before the attempt rather than after, deliberately: the read that
+-- throws is exactly the one that must go to the back of the queue, and
+-- stamping afterwards would skip precisely those.
+ALTER TABLE billing_customers ADD COLUMN topups_backfill_attempted_at TEXT;
+
+-- The backfill asks for "customers not yet done, least recently tried
+-- first", under a limit. This is the pair of columns that answers it.
 CREATE INDEX idx_billing_customers_backfill
-  ON billing_customers (topups_backfilled_at, created_at);
+  ON billing_customers (topups_backfilled_at, topups_backfill_attempted_at);

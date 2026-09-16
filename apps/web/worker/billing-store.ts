@@ -190,6 +190,12 @@ export class BillingStore {
    * money taken, so the only way to learn what Stripe actually collected is
    * to ask Stripe per customer.
    *
+   * Ordered least-recently-tried first, not simply oldest. A customer whose
+   * read fails every night stays incomplete for ever, and by age alone it
+   * would lead every run; with a limit, enough of those hold every slot and
+   * no later customer is ever reached. Ordering by the attempt stamp moves
+   * a failing row to the back and lets the rest of the set through.
+   *
    * Bounded and self-terminating, which an unfiltered list was neither.
    * Reading every customer every night means a growing number of Stripe
    * calls for work already done, and past some size one scheduled run
@@ -204,7 +210,9 @@ export class BillingStore {
       .prepare(
         `SELECT user_id, stripe_customer_id FROM billing_customers
           WHERE topups_backfilled_at IS NULL
-          ORDER BY created_at
+          ORDER BY topups_backfill_attempted_at IS NOT NULL,
+                   topups_backfill_attempted_at,
+                   created_at
           LIMIT ?1`,
       )
       .bind(limit)
@@ -222,6 +230,25 @@ export class BillingStore {
    * one: a customer whose pages could not be fetched must come back
    * tomorrow rather than be marked done having been half read.
    */
+  /**
+   * Record that the backfill is about to try this customer.
+   *
+   * Before the attempt, not after, and the ordering above depends on it: a
+   * read that throws is exactly the one that must move to the back of the
+   * queue, and stamping afterwards would skip precisely those. Unlike the
+   * completion stamp this is overwritten every time, because the question
+   * it answers is "how long since anyone tried".
+   */
+  async markTopupsBackfillAttempted(userId: string, at: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE billing_customers SET topups_backfill_attempted_at = ?2
+          WHERE user_id = ?1`,
+      )
+      .bind(userId, at)
+      .run();
+  }
+
   async markTopupsBackfilled(userId: string, at: string): Promise<void> {
     await this.#db
       .prepare(
