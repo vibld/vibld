@@ -576,13 +576,19 @@ async function handleBillingStatus(
  * list of admins to check the caller against, and the database they all
  * read or write.
  *
- * `CLERK_SECRET_KEY` is deliberately not here. It buys one thing, turning a
- * typed email into a Clerk user id, and only the two credit routes do that.
+ * `CLERK_SECRET_KEY` is deliberately not here, and is needed by more routes
+ * than it once was. The two credit routes use it to turn a typed email into
+ * a Clerk user id, and `POST /api/admin/invite` now uses it to ask Clerk to
+ * approve the address as well (`clerk-waitlist.ts`).
+ *
+ * That makes leaving it out of this check more important rather than less.
  * Requiring it for every admin route made the invite routes answer 503 on a
  * deployment with no credit tool configured, so an operator with a
  * perfectly good admin list could not invite anybody and was told the
  * credit tool was missing, which is true and not the thing they were doing.
- * The two routes that need it check for it themselves, below.
+ * Each route that wants the key asks for it itself and degrades on its own
+ * terms: the credit routes refuse, and inviting records the invite here and
+ * reports that Clerk was not asked.
  */
 function adminConfigured(env: Env): boolean {
   return Boolean(env.VIBLD_PLATFORM_ADMINS && env.DB);
