@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import {
   CONSENT_KEY,
   analyticsAction,
-  answerOutcome,
+  recordAnswer,
   bannerVisible,
   consentSignals,
   isConsentStorageEvent,
@@ -25,6 +25,7 @@ function working(
     map,
     getItem: (key) => map.get(key) ?? null,
     setItem: (key, value) => void map.set(key, value),
+    removeItem: (key) => void map.delete(key),
   };
 }
 
@@ -36,7 +37,41 @@ const throwing: ConsentStorage = {
   setItem() {
     throw new Error('access denied');
   },
+  removeItem() {
+    throw new Error('access denied');
+  },
 };
+
+/**
+ * The store that made this bug possible: writing fails, removing works, and
+ * something is already in it. A quota error is the ordinary way to get here,
+ * and deleting is what frees the quota.
+ */
+function readOnlyish(initial: string): ConsentStorage & {
+  map: Map<string, string>;
+} {
+  const store = working(initial);
+  return {
+    ...store,
+    setItem() {
+      throw new Error('quota exceeded');
+    },
+  };
+}
+
+/** Writing and removing both fail, with a grant already stored: the worst case. */
+function frozen(initial: string): ConsentStorage {
+  const store = working(initial);
+  return {
+    getItem: store.getItem,
+    setItem() {
+      throw new Error('quota exceeded');
+    },
+    removeItem() {
+      throw new Error('quota exceeded');
+    },
+  };
+}
 
 describe('readConsent', () => {
   it('returns what was stored', () => {
@@ -160,44 +195,81 @@ describe('shouldLoadAnalytics', () => {
   });
 });
 
-describe('answerOutcome', () => {
-  it('applies the answer whether or not it could be stored', () => {
+describe('recordAnswer', () => {
+  it('stores the answer and allows everything when the write works', () => {
+    const store = working();
+    const outcome = recordAnswer(store, 'granted');
+    assert.deepEqual(outcome, {
+      apply: 'granted',
+      safeToReload: true,
+      warn: false,
+    });
+    assert.equal(readConsent(store), 'granted');
+  });
+
+  it('applies a yes it could not store, and says so', () => {
     // Refusing to honour what someone just clicked, because we could not
-    // write it down, would be worse than not remembering it.
-    for (const stored of [true, false]) {
-      assert.equal(answerOutcome('granted', stored).apply, 'granted');
-      assert.equal(answerOutcome('denied', stored).apply, 'denied');
+    // write it down, would be worse than not remembering it. Reloading is
+    // still safe: the next document reads no grant and loads nothing.
+    const outcome = recordAnswer(throwing, 'granted');
+    assert.deepEqual(outcome, {
+      apply: 'granted',
+      safeToReload: true,
+      warn: true,
+    });
+  });
+
+  it('stays quiet about a lost no when nothing was stored', () => {
+    // It re-reads as undecided, which denies anyway, so the only cost is
+    // being asked again and a warning would be noise.
+    const outcome = recordAnswer(throwing, 'denied');
+    assert.equal(outcome.apply, 'denied');
+    assert.equal(outcome.warn, false);
+    assert.equal(outcome.safeToReload, true);
+  });
+
+  it('removes a stale grant when a denial cannot be written', () => {
+    // The recovery, and the reason it is worth trying: removing a key can
+    // succeed where writing one fails, and then the next document reads
+    // nothing and loads nothing.
+    const store = readOnlyish('granted');
+    const outcome = recordAnswer(store, 'denied');
+    assert.equal(readConsent(store), null);
+    assert.deepEqual(outcome, {
+      apply: 'denied',
+      safeToReload: true,
+      warn: false,
+    });
+  });
+
+  it('refuses the reload when a stale grant survives a denial', () => {
+    // The bug two fixes made together. Applying the denial, then replacing
+    // the document, made the new one read the grant still sitting in the
+    // store and load analytics again: "No thanks" would reload the page and
+    // turn it back on, silently.
+    const outcome = recordAnswer(frozen('granted'), 'denied');
+    assert.equal(outcome.apply, 'denied');
+    assert.equal(outcome.safeToReload, false);
+    assert.equal(outcome.warn, true);
+  });
+
+  it('allows the reload when what survives is a denial, not a grant', () => {
+    // Nothing worse than the answer is left behind, so replacing the
+    // document is safe and is the only thing that removes a running tag.
+    const outcome = recordAnswer(frozen('denied'), 'denied');
+    assert.equal(outcome.safeToReload, true);
+    assert.equal(outcome.warn, false);
+  });
+
+  it('never reports a grant it did not leave behind', () => {
+    // safeToReload is read from the store afterwards rather than inferred
+    // from whether a call threw, because only the store knows what the next
+    // document will see.
+    for (const store of [working(), working('denied'), working('granted')]) {
+      const outcome = recordAnswer(store, 'denied');
+      assert.equal(outcome.safeToReload, true);
+      assert.equal(readConsent(store), 'denied');
     }
-  });
-
-  it('says nothing when the answer was stored', () => {
-    assert.equal(answerOutcome('granted', true).warn, false);
-    assert.equal(answerOutcome('denied', true).warn, false);
-  });
-
-  it('warns about a lost yes, because the banner will come back', () => {
-    // The bug this replaced: the write failed, the banner closed as though
-    // it had been remembered, and the next page asked again with no
-    // explanation.
-    assert.equal(answerOutcome('granted', false).warn, true);
-  });
-
-  it('stays quiet about a lost no, which costs the visitor nothing', () => {
-    // An unstored denial re-reads as undecided, which denies anyway. Nobody
-    // is measured against their wishes, so there is nothing to warn about
-    // and a warning would only be noise.
-    assert.equal(answerOutcome('denied', false).warn, false);
-  });
-
-  it('round-trips with the write it is given', () => {
-    assert.equal(
-      answerOutcome('granted', writeConsent(working(), 'granted')).warn,
-      false,
-    );
-    assert.equal(
-      answerOutcome('granted', writeConsent(throwing, 'granted')).warn,
-      true,
-    );
   });
 });
 

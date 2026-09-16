@@ -34,6 +34,7 @@ export type ConsentState = ConsentChoice | null;
 export interface ConsentStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 /**
@@ -116,6 +117,20 @@ export const GA4_SRC = 'https://www.googletagmanager.com/gtag/js?id=';
 export const CONSENT_CHANGED_EVENT = 'vibld:consent-changed';
 
 /**
+ * What that event carries.
+ *
+ * `allowReload` rides along rather than being worked out by the listener,
+ * because only the code that just tried to write the answer knows whether
+ * the store now holds something worse than what is on screen. A listener
+ * re-deriving it would read the same stale `granted` that makes the reload
+ * unsafe in the first place.
+ */
+export interface ConsentChange {
+  state: ConsentState;
+  allowReload: boolean;
+}
+
+/**
  * Whether Google Analytics may be loaded at all.
  *
  * The first version of this shipped the tag to everyone and used Consent
@@ -133,33 +148,80 @@ export function shouldLoadAnalytics(state: ConsentState): boolean {
   return state === 'granted';
 }
 
+/**
+ * Forget the stored answer.
+ *
+ * The recovery path for a denial that could not be written. A stale
+ * `granted` left behind is worse than no answer at all, and removing a key
+ * can succeed where writing one fails: a quota error is the ordinary case,
+ * and deleting is what frees the quota.
+ */
+export function clearConsent(storage: ConsentStorage | null): void {
+  if (!storage) return;
+  try {
+    storage.removeItem(CONSENT_KEY);
+  } catch {
+    // Nothing more to try. `recordAnswer` re-reads rather than trusting this.
+  }
+}
+
 /** What an answer did, once the attempt to remember it has been made. */
 export interface AnswerOutcome {
   /** What the tag should now do. */
   apply: ConsentChoice;
+  /**
+   * Whether the document may be replaced to honour this answer.
+   *
+   * False only when the next document would read something worse than what
+   * is on screen now, which is the one case where reloading makes things
+   * worse rather than better.
+   */
+  safeToReload: boolean;
   /** Whether to tell the visitor their choice will not survive this visit. */
   warn: boolean;
 }
 
 /**
- * What to do after answering, given whether the answer could be stored.
+ * Record an answer, and say what may now be done about it.
  *
- * A write that failed used to be discarded, which made the banner claim
- * something it had not done: it closed, analytics ran for the rest of the
- * document, and the next page load found nothing stored and asked again.
+ * This does the writing as well as the deciding, because the two cannot be
+ * separated here: what is safe to do next depends on what is actually in the
+ * store afterwards, and only a re-read knows that.
  *
- * The answer is still applied, because it is what the visitor just asked
- * for and refusing to honour it would be worse. What changes is that the
- * failure is said rather than hidden. Only a lost `granted` is worth saying:
- * a lost `denied` re-reads as undecided, which denies anyway, so the visitor
- * is never quietly measured against their wishes and the only cost is being
- * asked again.
+ * The case that forced this is the collision of two earlier fixes, and it is
+ * the nastiest bug in the whole change. A visitor with `granted` stored
+ * clicks "No thanks"; the write throws. The old rule called a lost denial
+ * harmless, because a lost denial re-reads as undecided, which denies anyway.
+ * That was only ever true with nothing already stored. With a grant still
+ * there, the denial was applied to the live tag, the document was replaced to
+ * be rid of it, and the new document read `granted` and loaded analytics
+ * again. Clicking "No thanks" would have reloaded the page and turned
+ * analytics back on, with no warning, because each half was reasonable and
+ * nobody had looked at both.
+ *
+ * So a denial that cannot be written tries to remove the key instead, and
+ * then reads the store to find out what the next document would actually
+ * see. Only that decides whether reloading is allowed and whether the
+ * visitor is told. Nothing here trusts a write or a removal to have worked.
  */
-export function answerOutcome(
+export function recordAnswer(
+  storage: ConsentStorage | null,
   choice: ConsentChoice,
-  stored: boolean,
 ): AnswerOutcome {
-  return { apply: choice, warn: !stored && choice === 'granted' };
+  if (writeConsent(storage, choice)) {
+    return { apply: choice, safeToReload: true, warn: false };
+  }
+
+  // A lost "yes" is applied for this document and says so. Reloading is
+  // still safe: the next document reads no grant and simply does not load.
+  if (choice === 'granted') {
+    return { apply: 'granted', safeToReload: true, warn: true };
+  }
+
+  clearConsent(storage);
+  const next = readConsent(storage);
+  const safe = next !== 'granted';
+  return { apply: 'denied', safeToReload: safe, warn: !safe };
 }
 
 /** What the tag should be made to do, given an answer and what it is doing now. */

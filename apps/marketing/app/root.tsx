@@ -17,13 +17,13 @@ import {
   CONSENT_OPEN_EVENT,
   GA4_SRC,
   analyticsAction,
-  answerOutcome,
+  recordAnswer,
   bannerVisible,
   consentSignals,
   isConsentStorageEvent,
   mustReload,
   readConsent,
-  writeConsent,
+  type ConsentChange,
   type ConsentChoice,
   type ConsentState,
 } from './consent.ts';
@@ -111,7 +111,7 @@ function GoogleAnalytics() {
   const running = useRef(false);
 
   useEffect(() => {
-    const apply = (state: ConsentState) => {
+    const apply = (state: ConsentState, allowReload = true) => {
       // Every branch is `analyticsAction`'s, and it is tested. Deciding this
       // inline is what produced two review findings: a withdrawal that never
       // reached gtag, and a second grant skipped because the tag was already
@@ -156,13 +156,19 @@ function GoogleAnalytics() {
           break;
       }
 
-      if (mustReload(action)) window.location.reload();
+      // `allowReload` is false only when the answer could not be written and
+      // the store still holds a grant. Reloading then would read that grant
+      // and load analytics again, so a click on "No thanks" would turn it
+      // back on. The tag stays in this document, denied, and the banner says
+      // why.
+      if (allowReload && mustReload(action)) window.location.reload();
     };
 
     apply(readConsent(storage()));
 
     const onChange = (event: Event) => {
-      apply((event as CustomEvent<ConsentState>).detail ?? null);
+      const detail = (event as CustomEvent<ConsentChange>).detail;
+      apply(detail?.state ?? null, detail?.allowReload ?? true);
     };
     // The same answer arriving from another tab. A `storage` event fires in
     // every other document on this origin and never in the one that wrote,
@@ -303,7 +309,11 @@ function ConsentBanner() {
   // A "yes" we could not write down. Shown instead of the banner's question,
   // because closing silently would claim we had remembered something we had
   // not, and the visitor would be asked again next page with no explanation.
-  const [unsaved, setUnsaved] = useState(false);
+  // Which answer could not be written down, or null when all is well. The
+  // two failures need different sentences: a lost yes costs the visitor a
+  // repeated question, and a lost no means analytics comes back when they
+  // reload.
+  const [unsaved, setUnsaved] = useState<ConsentChoice | null>(null);
 
   useEffect(() => {
     setDecided(readConsent(storage()));
@@ -315,7 +325,7 @@ function ConsentBanner() {
       if (!isConsentStorageEvent(event.key)) return;
       setDecided(readConsent(storage()));
       setReopened(false);
-      setUnsaved(false);
+      setUnsaved(null);
     };
     window.addEventListener(CONSENT_OPEN_EVENT, open);
     window.addEventListener('storage', onStored);
@@ -326,19 +336,19 @@ function ConsentBanner() {
   }, []);
 
   if (decided === undefined) return null;
-  if (!unsaved && !bannerVisible(decided, reopened)) return null;
+  if (unsaved === null && !bannerVisible(decided, reopened)) return null;
 
   const answer = (choice: ConsentChoice) => {
-    const outcome = answerOutcome(choice, writeConsent(storage(), choice));
+    const outcome = recordAnswer(storage(), choice);
     setDecided(outcome.apply);
     setReopened(false);
-    setUnsaved(outcome.warn);
+    setUnsaved(outcome.warn ? outcome.apply : null);
     // `GoogleAnalytics` is what acts on this: it loads the tag on a grant and
     // stops storage on a withdrawal. The banner decides, and says so; it does
     // not reach into gtag itself.
     window.dispatchEvent(
-      new CustomEvent<ConsentState>(CONSENT_CHANGED_EVENT, {
-        detail: outcome.apply,
+      new CustomEvent<ConsentChange>(CONSENT_CHANGED_EVENT, {
+        detail: { state: outcome.apply, allowReload: outcome.safeToReload },
       }),
     );
   };
@@ -352,10 +362,17 @@ function ConsentBanner() {
     >
       <div className="mx-auto flex max-w-5xl flex-col gap-4 px-5 py-5 text-sm sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[var(--color-ink-muted)]">
-          {unsaved ? (
+          {unsaved === 'granted' ? (
             <>
               Google Analytics is on for this visit, but your browser would not
               let us save that choice, so we will have to ask again next time.
+            </>
+          ) : unsaved === 'denied' ? (
+            <>
+              Google Analytics is off for the rest of this visit, but your
+              browser would not let us change the saved setting, so it will come
+              back if you reload. Clearing this site&apos;s data in your browser
+              will remove it for good.
             </>
           ) : (
             <>
@@ -372,14 +389,14 @@ function ConsentBanner() {
           )}
         </p>
         <div className="flex shrink-0 gap-3">
-          {unsaved ? (
+          {unsaved !== null ? (
             // Nothing left to decide: the answer is already applied and the
             // only thing this button does is acknowledge that it will not be
             // remembered. Offering the same two choices again would invite a
             // second click that fails exactly as the first one did.
             <button
               type="button"
-              onClick={() => setUnsaved(false)}
+              onClick={() => setUnsaved(null)}
               className="rounded-md border border-black/15 px-4 py-2 font-medium dark:border-white/20"
             >
               Got it
