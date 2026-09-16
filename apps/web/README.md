@@ -418,7 +418,7 @@ Cloudflare Access is off. The Clerk instance is live: Frontend API at
 points to prohibited IP" error before Clerk ever sees the request), with
 `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` set on the `preview`
 environment, the custom session claim configured, and **Waitlist** sign-up
-mode enabled (L6) so sign-in stays restricted to people Chris approves.
+mode enabled (L6) so sign-in stays restricted to approved accounts.
 
 Two pieces, wired together:
 
@@ -458,7 +458,7 @@ a live deployment now means generation is unreachable, not merely
 unauthenticated, which is the fail-closed behaviour `isConfigured` in
 `worker/index.ts` requires.
 
-**What only Chris can do (one-time, dashboard-only):**
+**Manual setup steps (one-time, dashboard-only):**
 
 - **Remove the Cloudflare Access application** that used to gate this
   Worker's route: <https://one.dash.cloudflare.com/> → **Access →
@@ -775,7 +775,7 @@ so it has to be added here too) to the `preview` environment; the deploy
 workflow syncs it the same way it already syncs every other optional
 secret on this page. Actually sending also needs `notifications.vibld.com`
 verified in Resend -- apps/marketing's own README already tracks that as
-outstanding under its "What only Chris can do."
+outstanding under its "Manual setup steps".
 
 ### What a tier actually buys (docs/decisions.md L35-L39)
 

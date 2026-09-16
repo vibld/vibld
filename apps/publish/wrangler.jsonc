@@ -7,7 +7,7 @@
   // deliberately reuses the control plane's existing storage rather than
   // provisioning a second database/bucket for one more table and one more
   // key prefix. Cloudflare allows the same database_id/bucket_name to be
-  // bound into more than one Worker; nothing here needs Chris to create
+  // bound into more than one Worker; nothing here needs an operator to create
   // anything new in the Cloudflare dashboard.
   "d1_databases": [
     {

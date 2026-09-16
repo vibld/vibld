@@ -2,7 +2,6 @@
 
 - Status: Proposed
 - Date: 2026-09-09
-- Decision owner: Chris Brock
 - Refines: ADR-0007
 
 ## Context
@@ -85,4 +84,4 @@ retrieval lands.
   real option now rather than after #12. It costs one extra model call per
   turn, and it can silently miss a file the plan did not think to look for,
   which the decision above cannot. It should be measured against this decision
-  rather than assumed better. See docs/lovable-gap-analysis.md.
+  rather than assumed better.

@@ -623,7 +623,7 @@ describe('pushing an accepted checkpoint', () => {
   });
 
   it('carries a conflict with both shas rather than its sentence alone', async () => {
-    // `docs/push-and-deploy-plan.md` promises a conflict is surfaced with
+    // A conflict is surfaced with
     // both shas, and the sentence the route writes names the branch and
     // neither of them. This reply is the only place they exist.
     const result = await pushSnapshot(

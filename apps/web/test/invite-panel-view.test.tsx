@@ -106,7 +106,7 @@ async function open() {
 
 const WAITING = {
   email: 'waiting@example.com',
-  invitedByEmail: 'chris@drummond.com',
+  invitedByEmail: 'sam@example.com',
   invitedAt: '2026-09-16T00:00:00.000Z',
   redeemedByUserId: null,
   redeemedAt: null,

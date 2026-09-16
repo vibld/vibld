@@ -11,7 +11,7 @@ const ALL_KEYED = {
 };
 const POLICY = JSON.stringify({
   default: ['deepseek-flash'],
-  users: { 'chris@drummond.com': ['claude-opus-5', 'deepseek-v4-pro'] },
+  users: { 'sam@example.com': ['claude-opus-5', 'deepseek-v4-pro'] },
 });
 
 describe('grantedFor', () => {
@@ -48,7 +48,7 @@ describe('decideModel', () => {
   it('honours a choice the principal is granted', () => {
     const decision = decideModel(
       env,
-      'chris@drummond.com',
+      'sam@example.com',
       'claude-opus-5',
       'deepseek-flash',
     );
@@ -87,7 +87,7 @@ describe('decideModel', () => {
   it('uses the deployment default when the principal is granted it', () => {
     const decision = decideModel(
       env,
-      'chris@drummond.com',
+      'sam@example.com',
       null,
       'deepseek-v4-pro',
     );
@@ -121,7 +121,7 @@ describe('decideModel', () => {
     const cheapest = MODEL_CATALOGUE.filter(
       (m) => m.outputMicroUsd === lowestOutput,
     ).sort((a, b) => a.inputMicroUsd - b.inputMicroUsd)[0]!;
-    for (const who of ['chris@drummond.com', 'stranger@x.com']) {
+    for (const who of ['sam@example.com', 'stranger@x.com']) {
       const decision = decideModel(broken, who, null, 'claude-opus-5');
       assert.equal(decision.ok, true, who);
       if (decision.ok) assert.equal(decision.model, cheapest.id);
@@ -129,7 +129,7 @@ describe('decideModel', () => {
     // And a chosen expensive model is still refused under a broken policy.
     const refused = decideModel(
       broken,
-      'chris@drummond.com',
+      'sam@example.com',
       'claude-opus-5',
       'x',
     );
@@ -137,7 +137,7 @@ describe('decideModel', () => {
   });
 
   it('is unaffected by how the caller cases their identity', () => {
-    for (const who of ['CHRIS@DRUMMOND.COM', ' chris@Drummond.com ']) {
+    for (const who of ['SAM@EXAMPLE.COM', ' sam@example.com ']) {
       const decision = decideModel(env, who, 'claude-opus-5', 'deepseek-flash');
       assert.equal(decision.ok, true, who);
     }
@@ -164,7 +164,7 @@ describe('a renamed model id reaching the endpoint', () => {
     const legacyPolicy = JSON.stringify({ default: ['deepseek-v4-flash'] });
     const env = { ...ALL_KEYED, VIBLD_MODEL_POLICY: legacyPolicy };
 
-    const granted = grantedFor(env, 'chris@drummond.com');
+    const granted = grantedFor(env, 'sam@example.com');
     assert.deepEqual(
       granted.map((model) => model.id),
       ['deepseek-flash'],
@@ -172,7 +172,7 @@ describe('a renamed model id reaching the endpoint', () => {
 
     const decision = decideModel(
       env,
-      'chris@drummond.com',
+      'sam@example.com',
       'deepseek-v4-flash',
       'deepseek-flash',
     );
@@ -188,7 +188,7 @@ describe('a renamed model id reaching the endpoint', () => {
     };
     const decision = decideModel(
       env,
-      'chris@drummond.com',
+      'sam@example.com',
       'claude-opus-5',
       'deepseek-flash',
     );

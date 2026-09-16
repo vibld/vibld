@@ -1,8 +1,8 @@
 # The vibld brand
 
 The direction is **Offset**: two flat inks overprinting slightly out of
-register, the way risograph and cheap two-colour printing do. Chris chose it
-on 2026-09-16 from six studies, along with its palette.
+register, the way risograph and cheap two-colour printing do. Chosen on
+2026-09-16 from six studies, along with its palette.
 
 Everything below that can be checked is checked. The palette lives in
 `packages/brand/src/palette.ts` and its tests recompute every contrast figure

@@ -611,7 +611,7 @@ export interface PushedSnapshot {
  * A branch that is already there and points somewhere else.
  *
  * Carried out of the reply rather than left inside its sentence, because
- * `docs/push-and-deploy-plan.md` commits to surfacing a conflict with both
+ * A conflict is surfaced with both
  * shas, and the sentence names the branch and neither. The reply is the only
  * place they exist: nothing here can ask again, so reading past them loses
  * them for good.

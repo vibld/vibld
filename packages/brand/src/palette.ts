@@ -7,7 +7,7 @@
  * forbids: the name, the mark and the colour have to be the same everywhere
  * or they are not an entity signal at all.
  *
- * The direction is "Offset" (Chris, 2026-09-16): two flat inks overprinting
+ * The direction is "Offset" (2026-09-16): two flat inks overprinting
  * slightly out of register, the way cheap two-colour printing does. Coral and
  * ultramarine are the two inks; newsprint is the stock they print on.
  *

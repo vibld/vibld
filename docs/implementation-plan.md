@@ -76,7 +76,7 @@ Normal CI uses deterministic providers and test data without live credentials. R
 | Budgets and retention                           | Numeric run/account caps, backup deletion windows, telemetry schema and opt-out policy                  | #11, #18                      |
 | Operations                                      | Monitoring, safe diagnostics, incident owner, resource cleanup and restore drill                        | #6, #11, #17, #18             |
 
-Chris Brock approves product/security tradeoffs and spending. Implementation issues identify the engineer or agent doing the work when assigned; this plan does not assign work to external people or authorize new credentials.
+The maintainer approves product/security tradeoffs and spending. Implementation issues identify the engineer or agent doing the work when assigned; this plan does not assign work to external people or authorize new credentials.
 
 ## Scope boundaries
 

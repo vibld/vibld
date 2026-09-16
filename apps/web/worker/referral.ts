@@ -149,7 +149,7 @@ export interface RewardCents {
 /**
  * The reward, both sides, on first purchase.
  *
- * $5 and $5 is Chris's decision rather than the placeholder it started as.
+ * $5 and $5 is a decision rather than the placeholder it started as.
  * Still overridable per deployment.
  *
  * One thing that was put to him with it and is worth keeping written down,
@@ -289,7 +289,7 @@ export function clawbackGrantId(
 /**
  * How much of a reward can actually be taken back from one side.
  *
- * Chris's decision, 2026-09-16, in two parts, and the second is the one that
+ * Decided 2026-09-16, in two parts, and the second is the one that
  * is easy to get wrong.
  *
  * **Floored at zero**, so nobody is ever shown a debt this product has no way

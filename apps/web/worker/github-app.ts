@@ -321,7 +321,7 @@ export type InstallationToken =
  * The reasons are deliberately plain sentences rather than status codes.
  * "The App is no longer installed" is something a person can act on; a 404
  * from an endpoint they have never heard of is not, and the failure modes
- * table in docs/push-and-deploy-plan.md asks for the former by name.
+ * the former is what this deployment wants by name.
  */
 export async function mintInstallationToken(
   credentials: GitHubAppCredentials,
