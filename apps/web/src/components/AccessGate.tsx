@@ -59,6 +59,17 @@ function ClosedNotice({ status }: { status: AccessStatus }) {
           Nothing has been charged, and nothing you do here costs anything until
           access opens.
         </p>
+        {/*
+          Somewhere to go, rather than a dead end. The waitlist on the
+          marketing site is the list invitations are issued from, so it is the
+          answer to "what do I do now" instead of a support address nobody
+          reads.
+        */}
+        <p className="banner__detail">
+          <a href="https://vibld.com" rel="noopener noreferrer">
+            Ask for access at vibld.com
+          </a>
+        </p>
       </div>
     </div>
   );

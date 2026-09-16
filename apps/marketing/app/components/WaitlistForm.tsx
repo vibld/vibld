@@ -161,7 +161,8 @@ export function WaitlistForm() {
         </p>
       ) : null}
       <p className="mt-3 text-sm text-[var(--color-ink-muted)]">
-        No spam. One email when vibld opens up. Unsubscribe any time.
+        vibld is invite-only for now. This is the list invitations go out from.
+        No spam, one email when yours arrives, unsubscribe any time.
       </p>
     </form>
   );
