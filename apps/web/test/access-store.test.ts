@@ -1,15 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { AccessStore } from '../worker/access-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
-const SCHEMA = readFileSync(
-  join(import.meta.dirname, '..', 'migrations', '0008_access.sql'),
-  'utf8',
-);
+const SCHEMA = schemaSql();
 
 function newStore(): AccessStore {
   return new AccessStore(new SqliteD1Database(SCHEMA));
