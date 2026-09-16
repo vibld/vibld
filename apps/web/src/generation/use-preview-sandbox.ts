@@ -127,6 +127,19 @@ export function usePreviewSandbox(): PreviewSandbox {
    * the replacement stops being watched.
    */
   const polls = useRef(createStatusGate());
+  /**
+   * Whether this hook's shell is still on screen.
+   *
+   * Superseding the gate on cleanup ends every poll that had already
+   * started, and cannot end one that has not. `run` and `stop` both start
+   * one from an async continuation, so a request still in flight when the
+   * shell goes away can begin a fresh chain, with a fresh and therefore
+   * valid gate token, that no cleanup will ever run again.
+   *
+   * Set in the effect rather than only here because StrictMode mounts,
+   * cleans up and mounts again, and the second mount is a real one.
+   */
+  const mounted = useRef(true);
 
   const [shares, setShares] = useState<PreviewShare[]>([]);
   const [sharePending, setSharePending] = useState(false);
@@ -152,13 +165,14 @@ export function usePreviewSandbox(): PreviewSandbox {
    * not a reason to stop asking: it would ask forever. Superseding the gate
    * makes the outstanding tick return without rescheduling.
    */
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       stopPolling();
       polls.current.supersede();
-    },
-    [],
-  );
+    };
+  }, []);
 
   // A share only ever makes sense against a preview that is actually
   // running -- once this one stops or fails, its shares are somebody else's
@@ -193,6 +207,9 @@ export function usePreviewSandbox(): PreviewSandbox {
    * status itself.
    */
   function pollUntilSettled() {
+    // Nothing to reconcile for a screen that is gone, and the timer this
+    // would set is one the cleanup has already had its chance to clear.
+    if (!mounted.current) return;
     stopPolling();
     // Once for the chain rather than per tick: every tick of it belongs to
     // the run that started it, and a run or a stop supersedes the lot.

@@ -782,3 +782,42 @@ describe('a poll whose shell goes away', () => {
     assert.equal(gets, 1, 'kept polling after the shell was gone');
   });
 });
+
+describe('a request still in flight when the shell goes', () => {
+  it('does not start reconciling after the hook has unmounted', async () => {
+    // The other half of the same problem, and the one superseding the gate
+    // cannot reach. Cleanup ends every chain that had already started; a
+    // stop whose DELETE is still outstanding starts its chain afterwards,
+    // from the catch, with a gate token taken after the supersede and
+    // therefore valid. Nothing would ever clean that one up, and after
+    // sign-out every answer it gets is unreadable, so it reschedules
+    // forever.
+    let gets = 0;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': async (method) => {
+        if (method === 'GET') {
+          gets += 1;
+          return reply({ status: 'installing' });
+        }
+        if (method !== 'DELETE') return reply({ status: 'installing' });
+        // Still outstanding when the shell goes, which is the whole case.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return reply({ error: 'The preview service is unavailable.' }, 502);
+      },
+    });
+
+    const view = await mount();
+    // No run first: a fresh hook already assumes a sandbox may exist, so
+    // Stop on its own is enough, and it leaves no earlier poll to confuse
+    // the count.
+    await view.stop();
+    view.unmount();
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, POLL_INTERVAL_MS * 2 + 700),
+    );
+
+    assert.equal(gets, 0, 'started a poll nothing can ever stop');
+  });
+});
