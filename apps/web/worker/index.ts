@@ -1321,13 +1321,6 @@ export default {
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
-      if (!isConfigured(env)) {
-        return json(
-          { error: 'Model generation is not configured for this deployment.' },
-          403,
-        );
-      }
-
       // Identified before answered: the picker is per-person now, so this
       // cannot be served to an anonymous caller without telling them what
       // somebody else may use.
@@ -1335,20 +1328,29 @@ export default {
       if (resolved.denied) return resolved.denied;
       const { principal } = resolved;
 
+      // A deployment with no model generation is reported, not refused.
+      // This used to answer 403, and the shell reads any refusal as "nothing
+      // configured, and you are not an admin", which hid the invite panel on
+      // a deployment whose invite routes work perfectly: they need the admin
+      // list and D1, and neither is what generation is missing. This
+      // endpoint's job is to say what the deployment can do, and "it cannot
+      // generate" is an answer to that question rather than a reason to
+      // withhold one.
+      const configured = isConfigured(env);
+
       // Two filters, in order. What the deployment can serve at all --
       // offering a model whose provider has no key produces a run that fails
       // after the user has waited for it. Then what this person is granted
       // (by email, per L4 -- see the same note in handlePlan).
-      const models = grantedFor(env, principal.policyIdentity);
+      const models = configured
+        ? grantedFor(env, principal.policyIdentity)
+        : [];
       // The deployment default is only offered if this person may use it.
-      const decided = decideModel(
-        env,
-        principal.policyIdentity,
-        null,
-        resolveModel(env),
-      );
+      const decided = configured
+        ? decideModel(env, principal.policyIdentity, null, resolveModel(env))
+        : { ok: false as const, error: 'not configured' };
       return json({
-        generation: isConfigured(env) ? 'model' : 'fake',
+        generation: configured ? 'model' : 'fake',
         models: models.map(({ id, label, note, provider }) => ({
           id,
           label,

@@ -232,6 +232,41 @@ describe('what an admin route requires', () => {
     assert.match(body, /env\.DB/);
   });
 
+  it('tells an admin they are one even where nothing can be generated', async () => {
+    // `/api/config` is what the shell asks to decide whether to offer the
+    // admin panels, and it used to answer 403 when model generation was
+    // unconfigured. The client reads any refusal as "nothing configured,
+    // and you are not an admin", so a deployment whose invite routes work
+    // perfectly (they need the admin list and D1, neither of which is what
+    // generation is missing) showed its admin no way to invite anybody.
+    //
+    // The endpoint's job is to say what the deployment can do. "It cannot
+    // generate" is an answer to that, not a reason to withhold one.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const start = source.indexOf("if (pathname === '/api/config')");
+    assert.ok(start > 0, 'no config route');
+    const block = source.slice(
+      start,
+      source.indexOf("if (pathname === '/api/plan')", start),
+    );
+    // Comments stripped before looking for the refusal, or the sentence
+    // explaining why the 403 is gone counts as a 403.
+    const code = block
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n');
+
+    assert.doesNotMatch(code, /403/, 'the config route refuses again');
+    assert.match(code, /isAdmin:/, 'stopped reporting admin membership');
+
+    // Identity first, so the answer is still per-person rather than served
+    // to anybody who asks.
+    const identified = code.indexOf('resolvePrincipal');
+    const configured = code.indexOf('isConfigured(env)');
+    assert.ok(identified > 0 && configured > 0);
+    assert.ok(identified < configured, 'answers before knowing who asked');
+  });
+
   it('still refuses the credit routes without it', async () => {
     // The requirement did not go away, it moved to the two routes that
     // actually have it. Dropping it entirely would let a credit request
