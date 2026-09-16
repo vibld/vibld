@@ -47,16 +47,19 @@ export default function Privacy() {
           linked across visits.
         </li>
         <li>
-          <strong>Page views, measured by Google Analytics 4.</strong> We also
-          load Google Analytics on every page. It works differently from the
-          measurement above, and the difference matters: it sets cookies in your
-          browser, assigns your browser a client identifier that recognises it
-          across pages and visits, and sends your IP address to Google to derive
-          an approximate location. We have not enabled Google Signals,
-          advertising features, or any link to Google Ads, and we run no
-          advertising scripts on this site. Our{' '}
-          <a href="/legal/cookies">Cookie Notice</a> explains how to avoid being
-          counted this way.
+          <strong>
+            Page views, measured by Google Analytics 4, but only if you agree.
+          </strong>{' '}
+          It works differently from the measurement above, and the difference
+          matters: it sets cookies in your browser, assigns your browser a
+          client identifier that recognises it across pages and visits, and
+          sends your IP address to Google to derive an approximate location. So
+          we ask first, with a banner on your first visit, and it stores nothing
+          until you say yes. We have not enabled Google Signals, advertising
+          features, or any link to Google Ads, and we run no advertising scripts
+          on this site. The <strong>Cookie preferences</strong> link at the
+          bottom of every page changes your answer at any time; our{' '}
+          <a href="/legal/cookies">Cookie Notice</a> has the detail.
         </li>
       </ul>
 

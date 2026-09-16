@@ -33,7 +33,10 @@ export default function Cookies() {
         advertising profiles. The second is Google Analytics, described under
         page views below.
       </p>
-      <p>We count page views twice over, in two different ways.</p>
+      <p>
+        We count page views in two different ways, and only one of them needs
+        your permission.
+      </p>
       <p>
         The first is our own first-party measurement. Nothing about it
         identifies you: it sets no cookie, assigns no visitor or device
@@ -45,10 +48,10 @@ export default function Cookies() {
         visits.
       </p>
       <p>
-        The second is Google Analytics 4, which we load on every page from{' '}
-        <code>www.googletagmanager.com</code>. It does not work the way the
-        measurement above does, and we would rather say so plainly than bury it:
-        Google Analytics sets cookies in your browser (names beginning{' '}
+        The second is Google Analytics 4,{' '}
+        <strong>and it runs only if you say yes</strong>. It does not work the
+        way the measurement above does, and we would rather say so plainly than
+        bury it: Google Analytics sets cookies in your browser (names beginning{' '}
         <code>_ga</code>), assigns your browser a client identifier, and uses
         that identifier to recognise the same browser across pages and across
         visits. It also receives your IP address in order to derive an
@@ -65,16 +68,24 @@ export default function Cookies() {
         .
       </p>
       <p>
-        If you would rather not be counted this way, browser tracking protection
-        or an ad blocker will block the script, and Google publishes an{' '}
+        The first time you visit, a banner asks whether Google Analytics may
+        store anything. Until you answer, and if you answer no, it stores
+        nothing in your browser and assigns you no identifier. You can change
+        your answer at any time with the <strong>Cookie preferences</strong>{' '}
+        link at the bottom of every page, and it takes effect immediately. Your
+        answer is remembered in your browser rather than in a cookie, so it is
+        not sent to us or to anyone else.
+      </p>
+      <p>
+        Independently of that, browser tracking protection or an ad blocker will
+        block the script, and Google publishes an{' '}
         <a
           href="https://tools.google.com/dlpage/gaoptout"
           rel="noopener noreferrer"
         >
           opt-out browser add-on
         </a>
-        . Blocking it does not affect anything on this site. We do not currently
-        show a cookie consent banner.
+        . Nothing on this site depends on any of it working.
       </p>
       <p>
         Cloudflare also hosts the site, and may set a small number of

@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  Link,
   Links,
   Meta,
   Outlet,
@@ -11,6 +12,16 @@ import {
 
 import type { Route } from './+types/root';
 import { beaconFor } from './pageview.ts';
+import {
+  CONSENT_KEY,
+  CONSENT_OPEN_EVENT,
+  bannerVisible,
+  consentSignals,
+  readConsent,
+  writeConsent,
+  type ConsentChoice,
+  type ConsentState,
+} from './consent.ts';
 import { SiteFooter, SiteHeader } from './components/SiteChrome';
 import { SITE } from './site';
 import './app.css';
@@ -43,6 +54,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <SiteFooter />
+        <ConsentBanner />
         <ScrollRestoration />
         <Scripts />
         <PageviewBeacon />
@@ -67,17 +79,39 @@ export function Layout({ children }: { children: React.ReactNode }) {
  * would double-count every internal link on the site. See `RouteChangeBeacon`
  * below, which is for our own counter only.
  *
- * Unlike worker/analytics.ts, this does set cookies and does assign a client
- * identifier. The Cookie Notice, the Privacy Policy and the Subprocessors
- * page were updated to say so before this shipped, which is what the Cookie
- * Notice promised. It loads for every visitor regardless of location: there
- * is no consent banner on this site yet, and whether one is required is a
- * decision recorded in docs/decisions.md, not one made here.
+ * Unlike worker/analytics.ts, this sets cookies and assigns a client
+ * identifier, so it runs under Consent Mode and starts denied. Until the
+ * visitor agrees, GA4 stores nothing in the browser and sends cookieless
+ * pings; `ConsentBanner` is what changes that, and the footer's "Cookie
+ * preferences" link is what changes it back.
  */
 function GoogleAnalytics() {
   const id = SITE.ga4MeasurementId;
+  // Consent is set before the property is configured, and denied is the
+  // starting point rather than a correction applied later. Order is the whole
+  // point: gtag applies the consent state in force when a command runs, so a
+  // default that arrives after `config` arrives after the first hit has
+  // already been sent under the wrong assumption.
+  //
+  // The stored answer is read here, synchronously, rather than waiting for
+  // React. A returning visitor who already agreed would otherwise have their
+  // first page of every visit measured without cookies and every page after
+  // it with them, which is worse data than either answer alone. Every failure
+  // path lands on denied: `localStorage` throws outright in a private window
+  // or with site data blocked, and an unreadable store is not permission.
   const bootstrap = `window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
+var vibldConsent = 'denied';
+try {
+  var stored = window.localStorage.getItem('${CONSENT_KEY}');
+  if (stored === 'granted') vibldConsent = 'granted';
+} catch (e) {}
+gtag('consent', 'default', {
+  ad_storage: 'denied',
+  ad_user_data: 'denied',
+  ad_personalization: 'denied',
+  analytics_storage: vibldConsent
+});
 gtag('js', new Date());
 gtag('config', '${id}');`;
   return (
@@ -175,6 +209,103 @@ function RouteChangeBeacon() {
   }, [location.pathname, location.search]);
 
   return null;
+}
+
+/**
+ * Asks whether Google Analytics may store anything, and tells gtag the answer.
+ *
+ * Rendered for everyone and hidden by `bannerVisible`, rather than mounted
+ * conditionally, so the footer link has something to reopen on every page.
+ *
+ * Nothing renders on the server. The stored answer lives in `localStorage`,
+ * which a prerender cannot see, so a server-rendered banner would flash for
+ * visitors who already answered and would be baked into the static HTML a
+ * crawler reads. `decided` starting as `undefined` is what distinguishes
+ * "not read yet" from "read, and nobody has answered".
+ */
+function ConsentBanner() {
+  const [decided, setDecided] = useState<ConsentState | undefined>(undefined);
+  const [reopened, setReopened] = useState(false);
+
+  useEffect(() => {
+    setDecided(readConsent(storage()));
+    const open = () => setReopened(true);
+    window.addEventListener(CONSENT_OPEN_EVENT, open);
+    return () => window.removeEventListener(CONSENT_OPEN_EVENT, open);
+  }, []);
+
+  if (decided === undefined) return null;
+  if (!bannerVisible(decided, reopened)) return null;
+
+  const answer = (choice: ConsentChoice) => {
+    writeConsent(storage(), choice);
+    setDecided(choice);
+    setReopened(false);
+    // Told to gtag directly rather than by reloading the page. `update` is
+    // how Consent Mode is meant to hear about a change mid-visit, and it
+    // applies to the hits that follow without discarding the visit so far.
+    try {
+      const send = (
+        window as unknown as { gtag?: (...args: unknown[]) => void }
+      ).gtag;
+      send?.('consent', 'update', consentSignals(choice));
+    } catch {
+      // A blocked or failed gtag means nothing was going to be stored anyway.
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="false"
+      aria-label="Analytics cookies"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-black/10 bg-[var(--color-surface)] dark:border-white/10"
+    >
+      <div className="mx-auto flex max-w-5xl flex-col gap-4 px-5 py-5 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[var(--color-ink-muted)]">
+          We count page views without cookies. May we also use Google Analytics,
+          which sets cookies and recognises your browser across visits?{' '}
+          <Link
+            to="/legal/cookies"
+            className="underline underline-offset-4 hover:text-[var(--color-ink)]"
+          >
+            Cookie Notice
+          </Link>
+        </p>
+        <div className="flex shrink-0 gap-3">
+          <button
+            type="button"
+            onClick={() => answer('denied')}
+            className="rounded-md border border-black/15 px-4 py-2 font-medium dark:border-white/20"
+          >
+            No thanks
+          </button>
+          <button
+            type="button"
+            onClick={() => answer('granted')}
+            className="rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-[var(--color-accent-contrast)]"
+          >
+            Allow
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * `localStorage` or nothing.
+ *
+ * The property access itself throws in a sandboxed frame and in some
+ * privacy modes, which is why this is a function with a try around it rather
+ * than a reference. Returning null puts every caller on the denied path.
+ */
+function storage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 export default function App() {

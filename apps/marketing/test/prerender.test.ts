@@ -270,6 +270,66 @@ describe('Google Analytics', () => {
     }
   });
 
+  it('denies analytics storage before configuring the property', () => {
+    // Order, not presence. gtag applies the consent state in force when a
+    // command runs, so a default that arrives after `config` arrives after
+    // the first hit has already gone out under the wrong assumption.
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      const consent = html.indexOf("gtag('consent', 'default'");
+      const config = html.indexOf(`gtag('config', '${SITE.ga4MeasurementId}')`);
+      assert.notEqual(consent, -1, `${route.path} sets no consent default`);
+      assert.notEqual(config, -1, `${route.path} configures no property`);
+      assert.ok(
+        consent < config,
+        `${route.path} configures GA4 before telling it what is allowed`,
+      );
+    }
+  });
+
+  it('starts denied, on every page', () => {
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      for (const signal of [
+        'ad_storage',
+        'ad_user_data',
+        'ad_personalization',
+      ]) {
+        assert.ok(
+          html.includes(`${signal}: 'denied'`),
+          `${route.path} does not deny ${signal}`,
+        );
+      }
+      // analytics_storage is the one the banner moves, so it reads from a
+      // variable rather than a literal. What must hold is that the variable
+      // cannot start granted.
+      assert.ok(
+        html.includes("var vibldConsent = 'denied'"),
+        `${route.path} does not start analytics storage denied`,
+      );
+    }
+  });
+
+  it('offers a way to change the answer on every page', () => {
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      assert.ok(
+        html.includes('Cookie preferences'),
+        `${route.path} has no way to reopen the consent choice`,
+      );
+    }
+  });
+
+  it('prerenders no banner, since the stored answer is not knowable here', () => {
+    // A banner baked into the static HTML is one a crawler reads and one that
+    // flashes for every visitor who already answered.
+    const html = read('/');
+    assert.ok(
+      !html.includes('aria-label="Analytics cookies"'),
+      'the consent banner was server-rendered',
+    );
+  });
+
   it('sends no page_view of its own, which would double-count', () => {
     // GA4's Enhanced Measurement counts page changes made through the History
     // API, which is how React Router's Link navigates. An explicit page_view
