@@ -41,6 +41,8 @@
   /* The mark's two strokes. Coral is always the ghost; the ink changes. */
   --vibld-mark-ink: oklch(0.45 0.16 265);
   --vibld-mark-offset: oklch(0.7 0.18 25);
+  /* Overprinting ink on paper darkens. See palette.ts for why this flips. */
+  --vibld-mark-blend: multiply;
 
   --vibld-edge: color-mix(in oklch, var(--vibld-ink) 14%, transparent);
   --vibld-edge-strong: color-mix(in oklch, var(--vibld-ink) 26%, transparent);
@@ -65,5 +67,17 @@
     /* They swap: newsprint carries the shape, coral stays the ghost. */
     --vibld-mark-ink: oklch(0.96 0.012 90);
     --vibld-mark-offset: oklch(0.7 0.18 25);
+    /* multiply here would give the ground back and erase the mark. */
+    --vibld-mark-blend: screen;
   }
+}
+
+/*
+ * The two impressions of the mark. A class rather than an inline style,
+ * because the blend has to follow the ground and a value baked in at render
+ * time cannot: `multiply` is right on newsprint and erases the mark on a dark
+ * one.
+ */
+.vibld-mark__inks {
+  mix-blend-mode: var(--vibld-mark-blend);
 }

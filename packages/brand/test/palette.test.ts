@@ -103,7 +103,10 @@ describe('the Vibld palette', () => {
     // oklch() and falls back to black instead of failing.
     const seen = new Set<string>();
     for (const theme of [LIGHT, DARK]) {
-      for (const colour of Object.values(theme)) {
+      for (const value of Object.values(theme)) {
+        // A theme carries the blend mode as well as its colours.
+        if (typeof value !== 'object') continue;
+        const colour = value;
         const key = `${colour.l} ${colour.c} ${colour.h}`;
         if (seen.has(key)) continue;
         seen.add(key);

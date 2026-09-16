@@ -85,6 +85,20 @@ export interface Theme {
    */
   markInk: Oklch;
   markOffset: Oklch;
+  /**
+   * How the two impressions combine on this theme's ground.
+   *
+   * Not a stylistic choice: `multiply` darkens, which is what overprinting
+   * ink on paper does and why it is right on newsprint. On a dark ground it
+   * is wrong in a way that is easy to ship and hard to see in a diff, because
+   * multiplying a near-white impression with a near-black ground gives the
+   * ground. The mark did exactly that: it was all but invisible in dark mode
+   * until somebody looked at a screenshot.
+   *
+   * `screen` is the same operation reflected, and it is what a light ink on a
+   * dark ground needs.
+   */
+  markBlend: 'multiply' | 'screen';
 }
 
 export const LIGHT: Theme = {
@@ -98,6 +112,7 @@ export const LIGHT: Theme = {
   onAccent: { l: 0.22, c: 0.03, h: 265, hex: '#141a29' },
   markInk: ULTRAMARINE,
   markOffset: CORAL,
+  markBlend: 'multiply',
 };
 
 export const DARK: Theme = {
@@ -111,6 +126,7 @@ export const DARK: Theme = {
   onAccent: { l: 0.22, c: 0.03, h: 265, hex: '#141a29' },
   markInk: NEWSPRINT,
   markOffset: CORAL,
+  markBlend: 'screen',
 };
 
 /** A text-on-background pair the brand claims is legible, and the bar it must clear. */

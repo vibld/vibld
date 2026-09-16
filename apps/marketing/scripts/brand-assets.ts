@@ -48,7 +48,7 @@ function offsetPath(): string {
  * the same arrangement the dark theme uses.
  */
 export function iconSvg({ blend }: { blend: boolean }): string {
-  const group = blend ? '<g style="mix-blend-mode:multiply">' : '<g>';
+  const group = blend ? `<g style="mix-blend-mode:${DARK.markBlend}">` : '<g>';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <rect width="32" height="32" rx="7" fill="${ULTRAMARINE.hex}"/>
   ${group}
@@ -79,7 +79,7 @@ export function monoSvg(): string {
  * relies on the page's own paper colour has none.
  */
 export function socialSvg({ blend }: { blend: boolean }): string {
-  const group = blend ? '<g style="mix-blend-mode:multiply">' : '<g>';
+  const group = blend ? `<g style="mix-blend-mode:${DARK.markBlend}">` : '<g>';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
   <rect width="1200" height="630" fill="${ULTRAMARINE.hex}"/>
   <g transform="translate(110 200) scale(5.5)">

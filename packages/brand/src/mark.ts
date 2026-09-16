@@ -67,7 +67,7 @@ export function markSvg(options: MarkOptions): string {
   if (mono) return `${open}${label}${ink}</svg>`;
 
   const ghost = `<path d="${chevronAt(0)}" stroke="${oklch(theme.markOffset)}" stroke-width="${STROKE}" fill="none" stroke-linejoin="miter"/>`;
-  return `${open}${label}<g style="mix-blend-mode:multiply">${ghost}${ink}</g></svg>`;
+  return `${open}${label}<g style="mix-blend-mode:${theme.markBlend}">${ghost}${ink}</g></svg>`;
 }
 
 /**

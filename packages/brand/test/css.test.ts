@@ -51,6 +51,16 @@ const TOKENS: [keyof Theme, string][] = [
 ];
 
 describe('brand.css', () => {
+  it('flips the blend mode with the theme', () => {
+    // A blend baked in at render time cannot follow the ground, and the wrong
+    // one erases the mark rather than looking slightly off.
+    assert.equal(
+      tokenIn(blockFor('light'), 'vibld-mark-blend'),
+      LIGHT.markBlend,
+    );
+    assert.equal(tokenIn(blockFor('dark'), 'vibld-mark-blend'), DARK.markBlend);
+  });
+
   for (const [theme, source] of [
     ['light', LIGHT],
     ['dark', DARK],

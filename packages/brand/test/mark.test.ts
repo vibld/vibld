@@ -21,9 +21,26 @@ describe('the mark', () => {
   });
 
   it('overprints rather than covering', () => {
-    // Without multiply the second ink simply hides the first where they
-    // cross, and the whole direction is gone.
+    // Without a blend the second ink simply hides the first where they cross,
+    // and the whole direction is gone.
     assert.match(markSvg({ size: 32 }), /mix-blend-mode:multiply/);
+  });
+
+  it('blends the way the ground it is drawn on requires', () => {
+    // The bug this is here for: multiply is what ink on paper does, and on a
+    // dark ground it multiplies a near-white impression with a near-black
+    // one and gives back the ground. The mark was all but invisible in dark
+    // mode until somebody looked at a screenshot of it.
+    assert.match(
+      markSvg({ size: 32, theme: LIGHT }),
+      /mix-blend-mode:multiply/,
+    );
+    assert.match(markSvg({ size: 32, theme: DARK }), /mix-blend-mode:screen/);
+  });
+
+  it('never darkens on a dark ground or lightens on a light one', () => {
+    assert.equal(LIGHT.markBlend, 'multiply');
+    assert.equal(DARK.markBlend, 'screen');
   });
 
   it('draws the ghost first, so the load-bearing ink is on top', () => {

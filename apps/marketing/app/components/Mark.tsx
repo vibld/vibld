@@ -22,12 +22,14 @@ export function Mark({ size = 24, title }: { size?: number; title?: string }) {
     >
       {title ? <title>{title}</title> : null}
       {/*
-        multiply is what makes two flat inks overprint into a third colour
-        where they cross. A renderer without it still draws both strokes in
-        the right places and only loses the overlap, which is why the offset
-        is in the geometry rather than in the blend.
+        The overprint. The blend itself follows the ground (brand.css):
+        multiply is what ink on paper does, and on a dark ground it would
+        multiply a near-white impression with a near-black one and give back
+        the ground, erasing the mark. A renderer without any blend support
+        still draws both strokes in the right places and only loses the
+        colour where they cross, which is why the offset is in the geometry.
       */}
-      <g style={{ mixBlendMode: 'multiply' }}>
+      <g className="vibld-mark__inks">
         <path
           d={CHEVRON}
           stroke="var(--vibld-mark-offset)"

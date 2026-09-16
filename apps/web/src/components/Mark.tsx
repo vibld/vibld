@@ -24,11 +24,13 @@ export function Mark({ size = 22, title }: { size?: number; title?: string }) {
     >
       {title ? <title>{title}</title> : null}
       {/*
-        The overprint. A renderer without `mix-blend-mode` still draws both
-        impressions in the right places and only loses the colour where they
-        cross, which is why the offset lives in the geometry.
+        The overprint. The blend follows the ground (brand.css): multiply is
+        what ink on paper does, and on a dark ground it would give back the
+        ground and erase the mark. A renderer without any blend support still
+        draws both impressions in the right places and only loses the colour
+        where they cross, which is why the offset lives in the geometry.
       */}
-      <g style={{ mixBlendMode: 'multiply' }}>
+      <g className="vibld-mark__inks">
         <path
           d={CHEVRON}
           stroke="var(--vibld-mark-offset)"
