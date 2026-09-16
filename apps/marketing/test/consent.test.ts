@@ -3,6 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
   CONSENT_KEY,
+  analyticsCookieNames,
+  cookieDomainsFor,
+  expiredCookie,
   analyticsAction,
   recordAnswer,
   bannerVisible,
@@ -435,5 +438,80 @@ describe('gaDisableFlag', () => {
   it('is stable for one id, so on and off address the same switch', () => {
     assert.equal(gaDisableFlag('G-ABC123'), gaDisableFlag('G-ABC123'));
     assert.notEqual(gaDisableFlag('G-ABC123'), gaDisableFlag('G-XYZ789'));
+  });
+});
+
+describe('analyticsCookieNames', () => {
+  it('finds the identifier and the per-property cookie', () => {
+    const names = analyticsCookieNames(
+      '_ga=GA1.1.123.456; _ga_ABC123=GS1.1.x; theme=dark',
+    );
+    assert.deepEqual(names, ['_ga', '_ga_ABC123']);
+  });
+
+  it('leaves everything that is not ours alone', () => {
+    // Clearing a cookie we did not set is not harmless: it could be a
+    // session, a preference, or an anti-abuse token.
+    assert.deepEqual(analyticsCookieNames('theme=dark; sid=abc'), []);
+  });
+
+  it('copes with the shapes a cookie header actually takes', () => {
+    // No cookies at all, stray spacing, and a value containing '='.
+    assert.deepEqual(analyticsCookieNames(''), []);
+    assert.deepEqual(analyticsCookieNames('  _ga=a=b  '), ['_ga']);
+    // `_gid` is Universal Analytics and GA4 does not set it, so it is not
+    // ours to delete. This is the assertion that caught the doc comment
+    // claiming otherwise.
+    assert.deepEqual(analyticsCookieNames('_ga=1;_gid=2'), ['_ga']);
+    assert.deepEqual(analyticsCookieNames('_gac_x=1'), ['_gac_x']);
+  });
+});
+
+describe('cookieDomainsFor', () => {
+  it('offers the host-only cookie and every parent domain', () => {
+    // GA writes on the highest registrable domain it can, so for a site
+    // served at www the cookie is on .example.com, not the host.
+    assert.deepEqual(cookieDomainsFor('www.vibld.com'), [
+      null,
+      '.www.vibld.com',
+      '.vibld.com',
+    ]);
+  });
+
+  it('handles an apex domain', () => {
+    assert.deepEqual(cookieDomainsFor('vibld.com'), [null, '.vibld.com']);
+  });
+
+  it('handles a hostname with no dot, which has no parent', () => {
+    assert.deepEqual(cookieDomainsFor('localhost'), [null]);
+  });
+
+  it('always includes the host-only case, which is a different cookie', () => {
+    // `_ga` with no Domain attribute and `_ga` on .vibld.com can both exist
+    // at once, and deleting one does not touch the other.
+    for (const host of ['vibld.com', 'www.vibld.com', 'localhost']) {
+      assert.equal(cookieDomainsFor(host)[0], null);
+    }
+  });
+});
+
+describe('expiredCookie', () => {
+  it('writes the cookie back empty and already stale', () => {
+    assert.equal(expiredCookie('_ga', null), '_ga=; Max-Age=0; path=/');
+  });
+
+  it('carries the domain when there is one, since that selects the cookie', () => {
+    assert.equal(
+      expiredCookie('_ga', '.vibld.com'),
+      '_ga=; Max-Age=0; path=/; domain=.vibld.com',
+    );
+  });
+
+  it('always sets the path, because a cookie is keyed on it', () => {
+    // Omitting path deletes only a cookie scoped to the current directory,
+    // which for a site with nine legal pages is usually the wrong one.
+    for (const domain of [null, '.vibld.com']) {
+      assert.match(expiredCookie('_ga_ABC', domain), /path=\//);
+    }
   });
 });

@@ -148,13 +148,28 @@ kept in `localStorage` (`vibld.consent.analytics`), not in a cookie, so it
 never leaves the browser. The first-party counter in `worker/analytics.ts` is
 deliberately outside all of it: no cookie, no identifier, no IP address, so
 there is nothing to consent to and no reason to make anyone click before a
-page works. Rules live in `app/consent.ts`; `app/root.tsx` renders the tag on a grant, and
-a withdrawal mid-visit both denies storage and reloads the document. The
-reload is not belt-and-braces: this is a single-page app, internal links never
-create a new document, and a running tag keeps sending cookieless hits to
-Google for the rest of the visit otherwise. Consent is still declared
-before `config`, because gtag applies the state in force when a command runs
-and the advertising signals are denied in every state.
+page works. Rules live in `app/consent.ts`; `app/root.tsx` renders the tag on a grant.
+Consent is declared before `config`, because gtag applies the state in force
+when a command runs, and the advertising signals are denied in every state.
+
+A withdrawal mid-visit does four things, and each exists because the previous
+one was not enough. It denies `analytics_storage`, which stops cookies but not
+measurement. It sets `ga-disable-<id>`, Google's own switch, which stops the
+loaded tag sending. It expires the `_ga*` cookies, because denying consent
+does not remove the client identifier already written and the Cookie Notice
+says nothing is stored when the answer is no. Then it reloads, which is the
+only way a page can remove a script already in it: this is a single-page app,
+internal links never create a new document, so a tag left in place would
+otherwise outlive the answer.
+
+**The reload is conditional, and the condition matters.** When the store
+refuses both the write and the removal of the denial, an older grant survives
+in it, and reloading would read that grant and load analytics again: the
+withdrawal would turn it back on. In that case the document is kept, the
+disable switch and the cookie expiry carry the withdrawal on their own, and
+the banner says the setting could not be saved. Anything that removes the
+`ga-disable` fallback on the grounds that "withdrawal reloads anyway" breaks
+exactly this path.
 
 ### Lists confirmed
 

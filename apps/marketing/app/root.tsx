@@ -18,7 +18,10 @@ import {
   CONSENT_OPEN_EVENT,
   GA4_SRC,
   analyticsAction,
+  analyticsCookieNames,
   consentChangeFor,
+  cookieDomainsFor,
+  expiredCookie,
   gaDisableFlag,
   recordAnswer,
   bannerVisible,
@@ -167,6 +170,11 @@ function GoogleAnalytics() {
           // cookieless hits while the banner says analytics is off, which is
           // the same overclaim this change has already made four times.
           measurement(false);
+          // And take back what is already stored. Denying consent stops new
+          // cookies; it does not remove the client identifier already in
+          // `_ga`, and leaving that behind means a visitor who said no still
+          // carries the id linking them to what they did before.
+          forgetAnalyticsCookies();
           break;
         case 'nothing':
           break;
@@ -475,6 +483,28 @@ function ConsentBanner() {
       </div>
     </div>
   );
+}
+
+/**
+ * Expire every analytics cookie on every domain it could have been set on.
+ *
+ * The domain a cookie was written with is not readable from script, so each
+ * candidate is written back empty and already stale. Writing a cookie that
+ * was not there is harmless; missing the one that was is not.
+ */
+function forgetAnalyticsCookies() {
+  try {
+    const names = analyticsCookieNames(document.cookie);
+    const domains = cookieDomainsFor(window.location.hostname);
+    for (const name of names) {
+      for (const domain of domains) {
+        document.cookie = expiredCookie(name, domain);
+      }
+    }
+  } catch {
+    // Cookies unreadable or unwritable, in which case there is nothing of
+    // ours in them to remove.
+  }
 }
 
 /**

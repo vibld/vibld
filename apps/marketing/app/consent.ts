@@ -335,3 +335,60 @@ export function isConsentStorageEvent(key: string | null): boolean {
 export function gaDisableFlag(measurementId: string): string {
   return `ga-disable-${measurementId}`;
 }
+
+/**
+ * The analytics cookies present, by name.
+ *
+ * Denying consent stops new cookies. It does not remove the ones already
+ * written, and `_ga` is the client identifier itself: leaving it behind means
+ * a visitor who says no still carries the id that links them to what they did
+ * before, and granting again months later resumes the same identity. The
+ * Cookie Notice says nothing is stored when the answer is no, so the ones
+ * already there have to go.
+ *
+ * Matched by prefix rather than by an exact list, because the per-property
+ * cookie is `_ga_<container>` and the name of the container is not something
+ * this file should have to know. The prefix covers what GA4 writes: `_ga`,
+ * `_ga_<container>`, and `_gac_*` if Ads linking is ever turned on. It does
+ * not cover `_gid`, which is Universal Analytics and which GA4 does not set;
+ * an earlier version of this comment said otherwise and the test below
+ * caught it.
+ *
+ * Nothing else on this origin uses the prefix, and clearing a cookie we did
+ * not set would not be harmless: it could be a session or an anti-abuse
+ * token.
+ */
+export function analyticsCookieNames(cookie: string): string[] {
+  return cookie
+    .split(';')
+    .map((pair) => pair.split('=')[0]?.trim() ?? '')
+    .filter((name) => name.startsWith('_ga'));
+}
+
+/**
+ * Every domain a GA cookie might have been set on, for this hostname.
+ *
+ * A cookie can only be deleted by writing it back with the same domain and
+ * path, and the domain it was written with is not readable from script: the
+ * cookie header gives names and values and nothing else. So each candidate is
+ * tried. `null` means no `Domain` attribute at all, which is a host-only
+ * cookie and a different cookie from the same name on `.example.com`.
+ *
+ * GA writes on the highest registrable domain it can, which for a site served
+ * at `www.example.com` is `.example.com`, so the parents matter rather than
+ * being defensive padding.
+ */
+export function cookieDomainsFor(hostname: string): (string | null)[] {
+  const parts = hostname.split('.');
+  const domains: (string | null)[] = [null];
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    domains.push(`.${parts.slice(index).join('.')}`);
+  }
+  return domains;
+}
+
+/** One expiry string: the same cookie, empty, already stale. */
+export function expiredCookie(name: string, domain: string | null): string {
+  const base = `${name}=; Max-Age=0; path=/`;
+  return domain === null ? base : `${base}; domain=${domain}`;
+}
