@@ -193,8 +193,8 @@ export function Workspace({ state }: { state: BuilderState }) {
           <div className="console">
             <h2 className="pane-title">Console</h2>
             <p className="pane-note">
-              Generation lifecycle events. Sandbox process output will appear
-              here once sandbox execution exists.
+              Generation lifecycle events. Sandbox execution exists; its process
+              output is not piped here yet.
             </p>
             {state.timeline.length === 0 ? (
               <p className="empty">No events yet.</p>

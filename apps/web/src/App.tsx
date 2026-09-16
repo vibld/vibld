@@ -107,9 +107,16 @@ function Builder() {
           · Model tokens: {usage.modelInputTokens} in /{' '}
           {usage.modelOutputTokens} out
         </span>
+        {/*
+          This used to say that sandbox execution, real providers, Git export
+          and deployment were not implemented. All four shipped, and the line
+          stayed, so the app spent weeks denying the features somebody was
+          using while reading it. What is left here is the part that is still
+          true, and nothing else.
+        */}
         <span>
-          Preview and console are local mocks. Sandbox execution, real
-          providers, Git export and deployment are not implemented yet.
+          Preview shows a local mock until you run the project in the sandbox.
+          The console shows generation events, not sandbox output.
         </span>
       </footer>
     </div>

@@ -10,9 +10,13 @@ Generated applications should be conventional, portable software projects that k
 
 Vibld is early, and the honest summary is narrower than the ambition above.
 
-**What runs today.** `apps/web` is a builder shell that takes a prompt through planning, staged files, validation and an accepted checkpoint, and shows a preview of the result. `packages/core` owns the generation contracts, the state machine and the run budget; `packages/ai` puts a model provider behind them. A hosted deployment can serve model-backed generation through an authenticated endpoint.
+**What runs today.** `apps/web` is a builder shell that takes a prompt through planning, staged files, validation and an accepted checkpoint. From there a checkpoint can be run in a real sandbox, previewed at a shareable URL, published to Cloudflare, exported, or pushed to a connected GitHub repository as a branch and pull request. Accounts are Clerk; projects, budgets and audit records live in D1, R2 and a per-user Durable Object; billing is Stripe, with a spend ceiling enforced before each run rather than after it. `packages/core` owns the generation contracts, the state machine and the run budget; `packages/ai` puts a model provider behind them. It is deployed and live at [app.vibld.com](https://app.vibld.com).
 
-**What does not exist yet.** Sandboxed execution of generated code, durable project storage, accounts and tenant isolation, GitHub branches and pull requests, repository search, permission grants and spend ceilings. Without those the builder is a demonstration of the loop, not a product anyone should trust with their work. By default it runs a deterministic fake provider, so nothing here implies a model wrote what you see.
+**What does not exist yet.** Repository search (issue #12), and the measured model bakeoff that would let us recommend one model over another with evidence rather than by reputation. Sandbox process output is not piped into the console, which still shows generation events only.
+
+**What to be careful of.** Live for invited testing, not for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
+
+A local checkout runs a deterministic fake provider by default, so nothing you see from `pnpm dev` implies a model wrote it.
 
 The [accepted decisions D1-D30](docs/decisions.md) define an invitation-only, Cloudflare-first hosted alpha for technical founders and small agencies creating marketing sites.
 
