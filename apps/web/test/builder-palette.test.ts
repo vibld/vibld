@@ -98,4 +98,33 @@ describe('the builder stylesheet', () => {
 
     assert.deepEqual(offenders, []);
   });
+
+  it('never draws a focus indicator in the accent', async () => {
+    // Two focus rings were drawn in the accent before this existed: the
+    // global one, and the prompt input's override that replaces it. Coral
+    // composites to about 1.9:1 on paper at the alphas those used, which is
+    // a focus indicator nobody can see on the control the product is used
+    // through.
+    //
+    // A focus indicator exists to be seen, which is the one job the brand's
+    // own colour cannot do. The accent ink is the one to reach for.
+    const css = await readFile(STYLES, 'utf8');
+    const offenders: string[] = [];
+
+    const lines = css.split('\n');
+    for (const [index, line] of lines.entries()) {
+      if (!/focus-visible|focus-within/.test(line)) continue;
+      // The declarations belonging to this selector, up to its closing brace.
+      const block = lines.slice(index, index + 12);
+      for (const declaration of block) {
+        if (declaration.includes('}')) break;
+        if (!/outline|border-color|box-shadow/.test(declaration)) continue;
+        if (/var\(--(brand|accent)\b/.test(declaration)) {
+          offenders.push(`${index + 1}: ${declaration.trim()}`);
+        }
+      }
+    }
+
+    assert.deepEqual(offenders, []);
+  });
 });

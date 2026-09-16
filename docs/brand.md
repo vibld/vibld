@@ -34,6 +34,12 @@ convention:
   (`#141a29`, 5.97).
 - Ink on an ultramarine fill: 2.25. Text on ultramarine is newsprint (6.90).
 
+**Every focus indicator takes the accent ink, never the accent.** Every one:
+a control that replaces the global ring with its own border and halo has to
+clear the same bar on its own, and the prompt input's override did not. An
+alpha ramp of the accent does not help, it makes it worse: the accent at 64%
+and 16% composites to roughly 1.87:1 and 1.16:1 on paper.
+
 **The focus ring takes the accent ink, never the accent.** A focus indicator
 exists to be seen, which is the one job coral cannot do: 2.60 against
 newsprint is under the 3:1 bar for a non-text indicator. Pointing it at the

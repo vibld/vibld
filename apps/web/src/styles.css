@@ -775,10 +775,19 @@ body {
     box-shadow var(--fast) var(--ease);
 }
 
+/*
+ * This replaces the global focus ring, so it has to clear the same bar on its
+ * own. It was drawn in the accent at 64% and 16% alpha, which on the paper
+ * ground composite to roughly 1.87:1 and 1.16:1: a focus indicator nobody can
+ * see, on the one control the whole product is used through. The accent ink
+ * carries the edge; the halo stays soft because it is decoration sitting on
+ * top of a border that already reads.
+ */
 .prompt__input:focus-visible {
   outline: none;
-  border-color: var(--brand-64);
-  box-shadow: 0 0 0 3px var(--brand-16);
+  border-color: var(--vibld-accent-ink);
+  box-shadow: 0 0 0 3px
+    color-mix(in oklch, var(--vibld-accent-ink) 24%, transparent);
 }
 
 .button {
