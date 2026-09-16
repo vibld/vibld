@@ -34,6 +34,25 @@ import { DARK, LIGHT, ULTRAMARINE } from '@vibld/brand/palette';
 
 const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
 
+/**
+ * The builder's own static root, written to from here on purpose.
+ *
+ * app.vibld.com shipped no icon at all: no `favicon.svg`, no touch icon, no
+ * `<link rel="icon">` in its shell. So the tab strip, which is the one place
+ * a person sees both halves of this product side by side, showed the mark on
+ * vibld.com and a blank page glyph on app.vibld.com. That is the same
+ * one-product-two-identities failure `@vibld/brand` was created to end, in
+ * its most visible form.
+ *
+ * Copying the file across would have recreated the drift this script exists
+ * to prevent, so the generator writes both and the tests pin both. Only the
+ * two icons: the social card is for a link somebody shares, and the builder
+ * sits behind sign-in.
+ */
+const BUILDER_PUBLIC = fileURLToPath(
+  new URL('../../web/public/', import.meta.url),
+);
+
 function offsetPath(): string {
   return `M${6 + REGISTER_OFFSET} ${9 + REGISTER_OFFSET}l9 15 9-15`;
 }
@@ -96,9 +115,14 @@ export function socialSvg({ blend }: { blend: boolean }): string {
 
 async function main(): Promise<void> {
   await mkdir(PUBLIC, { recursive: true });
+  await mkdir(BUILDER_PUBLIC, { recursive: true });
 
   await writeFile(join(PUBLIC, 'favicon.svg'), iconSvg({ blend: true }));
   await writeFile(join(PUBLIC, 'mark-mono.svg'), monoSvg());
+  await writeFile(
+    join(BUILDER_PUBLIC, 'favicon.svg'),
+    iconSvg({ blend: true }),
+  );
 
   // sharp is a transitive dev dependency (wrangler > miniflare). Required
   // lazily and by path so that generating the SVGs above never depends on it
@@ -124,11 +148,16 @@ async function main(): Promise<void> {
     .png()
     .toFile(join(PUBLIC, 'apple-touch-icon.png'));
 
+  await sharp(Buffer.from(iconSvg({ blend: false })))
+    .resize(180, 180)
+    .png()
+    .toFile(join(BUILDER_PUBLIC, 'apple-touch-icon.png'));
+
   await sharp(Buffer.from(socialSvg({ blend: false })))
     .png()
     .toFile(join(PUBLIC, 'og-image.png'));
 
-  console.log('brand assets written to', PUBLIC);
+  console.log('brand assets written to', PUBLIC, 'and', BUILDER_PUBLIC);
 }
 
 if (process.argv[1] && dirname(process.argv[1]).endsWith('scripts')) {

@@ -4,7 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Vibld Builder</title>
+    <!--
+      Lowercase, because the wordmark is lowercase everywhere (docs/brand.md).
+      This said "Vibld Builder", which is the one form the brand reserves for
+      SITE.legalName, and it sat in the browser tab next to vibld.com's own
+      lowercase titles.
+
+      The separator matches what the marketing site already emits for every
+      page, "Page | vibld", so the two halves read as one product in a tab
+      strip rather than as two applications that happen to share a name.
+    -->
+    <title>Builder | vibld</title>
+    <!--
+      This shell shipped no icon at all, so the tab showed the mark on
+      vibld.com and a blank page glyph on app.vibld.com. Both files are
+      generated from @vibld/brand by apps/marketing/scripts/brand-assets.ts,
+      which writes them here as well, so they cannot drift from the mark.
+    -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <div id="root"></div>
