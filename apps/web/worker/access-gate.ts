@@ -7,9 +7,22 @@
  * has to be classified, and `access-gate.test.ts` reads the router's own
  * source and fails on any path that appears in neither list.
  *
- * "Ungated" never means "unauthenticated". Everything below still resolves a
- * principal; the question this file answers is only whether a signed-in
- * caller who has not been invited may proceed.
+ * "Ungated" never means "unauthenticated", for the browser routes: they all
+ * still resolve a principal, and the question this file answers for them is
+ * only whether a signed-in caller who has not been invited may proceed.
+ *
+ * Two entries are not browser routes and do not resolve one, which the
+ * sentence above used to deny:
+ *
+ * - `/api/stripe/webhook` is Stripe's own POST, authenticated by the
+ *   signature over the raw body and by nothing else. There is no session.
+ * - `/api/github/callback` is a redirect target GitHub sends a browser to.
+ *   It carries no secret and grants nothing; the write is behind `/bind`,
+ *   which is gated.
+ *
+ * Worth stating rather than leaving implied, because this comment is what
+ * the next route classification will be read against, and a rule with two
+ * unmentioned exceptions is a rule somebody will apply to a third.
  */
 
 /**

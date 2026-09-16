@@ -95,6 +95,116 @@ describe('the access gate', () => {
     assert.match(view.text, /costs anything while access is closed/i);
   });
 
+  it('offers a control for each thing the locked-out account still owns', async () => {
+    // Opening the routes was not enough, twice over. An endpoint nobody can
+    // press is not a way out, and this screen replaces every control in the
+    // builder, so a running sandbox, a public link to somebody's code and a
+    // repository grant all became unreachable at the moment access went.
+    const byUrl: Record<string, unknown> = {
+      '/api/access/status': { allowed: false, mode: 'invite', message: null },
+      '/api/billing/status': {
+        tier: 'free',
+        allowanceMicroUsd: 0,
+        spentMicroUsd: 0,
+        topupRemainingMicroUsd: 2_500_000,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        hasStripeCustomer: true,
+        billingConfigured: true,
+      },
+      '/api/preview': { status: 'ready', url: 'https://x', expiresAt: 1 },
+      '/api/preview/share': {
+        shares: [{ shareId: 's1', createdAt: 1, expiresAt: 2, revoked: false }],
+      },
+      '/api/github/status': {
+        configured: true,
+        connected: true,
+        owner: 'chris',
+        repo: 'thing',
+      },
+    };
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      const path = url.split('?')[0] ?? url;
+      return new Response(JSON.stringify(byUrl[path] ?? {}), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const view = await mount();
+
+    assert.match(view.text, /manage or cancel a subscription/i);
+    assert.match(view.text, /stop the running sandbox/i, 'sandbox unreachable');
+    assert.match(view.text, /public link/i, 'public code unreachable');
+    assert.match(view.text, /disconnect chris\/thing/i, 'grant unreachable');
+    assert.match(view.text, /unspent credit/i, 'no sight of their money');
+  });
+
+  it('shows why the portal failed, rather than guessing', async () => {
+    // The catch used to report "No subscription found for this account" for
+    // every failure, including Stripe being unavailable. That is a false
+    // diagnosis handed to a possibly still-billed customer on the only
+    // screen they have left.
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.startsWith('/api/billing/portal')) {
+        return new Response(
+          JSON.stringify({ error: 'Billing is temporarily unavailable.' }),
+          { status: 503, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      const body =
+        url === '/api/access/status'
+          ? { allowed: false, mode: 'invite', message: null }
+          : {};
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    await act(async () => {
+      createRoot(container).render(
+        <AccessGate signOut={<button type="button">Sign out</button>}>
+          <p>the builder</p>
+        </AccessGate>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const button = [...container.querySelectorAll('button')].find((node) =>
+      /manage or cancel/i.test(node.textContent ?? ''),
+    );
+    assert.ok(button, 'no portal control to press');
+
+    await act(async () => {
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.match(
+      container.textContent ?? '',
+      /temporarily unavailable/i,
+      'replaced the real reason with a guess',
+    );
+    assert.doesNotMatch(
+      container.textContent ?? '',
+      /no subscription found/i,
+      'told them something untrue about their subscription',
+    );
+  });
+
+  it('stays quiet for an account that owns none of it', async () => {
+    serving({ allowed: false, mode: 'invite', message: null });
+    const view = await mount();
+
+    assert.doesNotMatch(view.text, /stop the running sandbox/i);
+    assert.doesNotMatch(view.text, /disconnect/i);
+  });
+
   it('offers a locked-out customer a way to cancel, and a way to sign out', async () => {
     // This screen replaces the whole builder, including the only control
     // that opens the billing portal and the only one that signs out.

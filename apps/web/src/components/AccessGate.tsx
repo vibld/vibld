@@ -3,7 +3,21 @@ import type { ReactNode } from 'react';
 import { fetchAccess } from '../access/access-client.ts';
 import { AuthStatus } from '../auth/clerk.tsx';
 import { clerkConfigured } from '../auth/clerk-token.ts';
-import { openBillingPortal } from '../billing/billing-client.ts';
+import {
+  fetchBillingStatus,
+  formatUsd,
+  openBillingPortal,
+} from '../billing/billing-client.ts';
+import {
+  disconnectRepository,
+  fetchGitHubStatus,
+} from '../github/github-client.ts';
+import {
+  fetchPreviewShares,
+  fetchPreviewStatus,
+  revokePreviewShare,
+  stopSandboxPreview,
+} from '../generation/preview-client.ts';
 import type { AccessStatus as AccessStatusValue } from '../access/access-client.ts';
 import { Mark, WORDMARK } from './Mark.tsx';
 
@@ -131,43 +145,142 @@ function ClosedNotice({
         reached it, and an account that signed in as the wrong person had no
         way to become the right one.
       */}
-      <ManageBilling />
+      <WindDown />
       {signOut}
     </div>
   );
 }
 
 /**
- * A way out for somebody still being charged.
+ * Everything a locked-out account still owns, and the control for each.
  *
- * Revocation does not cancel a Stripe subscription, so this is the only
- * thing standing between a withdrawn invite and a card that keeps being
- * billed. `/api/billing/portal` is deliberately ungated for the same reason.
+ * This screen replaces the whole builder, so it replaces every control in
+ * it. Opening the routes was not enough and reporting that as a fix was
+ * wrong twice over: an endpoint nobody can press is not a way out, and the
+ * person on this screen cannot construct an authenticated POST.
  *
- * An account that never subscribed has no Stripe customer and the request
- * fails; the message says so plainly rather than looking broken.
+ * Only what applies is rendered. An account with no subscription, no
+ * sandbox, no public link and no repository grant sees none of this, which
+ * is the common case and should stay quiet.
  */
-function ManageBilling() {
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+function WindDown() {
+  const [credit, setCredit] = useState<number | null>(null);
+  const [sandbox, setSandbox] = useState(false);
+  const [shares, setShares] = useState<string[]>([]);
+  const [repo, setRepo] = useState<{ owner: string; repo: string } | null>(
+    null,
+  );
+  const [note, setNote] = useState<string | null>(null);
 
-  async function open() {
-    setBusy(true);
-    setError(null);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const [billing, preview, shareList, github] = await Promise.all([
+        fetchBillingStatus().catch(() => null),
+        fetchPreviewStatus().catch(() => null),
+        fetchPreviewShares().catch(() => []),
+        fetchGitHubStatus().catch(() => null),
+      ]);
+      if (!live) return;
+      setCredit(billing?.topupRemainingMicroUsd ?? null);
+      setSandbox(preview !== null && preview.status !== 'failed');
+      setShares(shareList.filter((s) => !s.revoked).map((s) => s.shareId));
+      setRepo(
+        github?.connected && github.owner && github.repo
+          ? { owner: github.owner, repo: github.repo }
+          : null,
+      );
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  async function run(what: string, act: () => Promise<unknown>) {
+    setNote(null);
     try {
-      window.location.href = await openBillingPortal();
-    } catch {
-      setBusy(false);
-      setError('No subscription found for this account.');
+      await act();
+      setNote(`${what} done.`);
+    } catch (error) {
+      // The thrown message, not a guess. Telling somebody "no subscription"
+      // when Stripe is down is a false diagnosis on the only screen they
+      // have left.
+      setNote(error instanceof Error ? error.message : `${what} failed.`);
     }
   }
 
   return (
-    <p className="banner__detail">
-      <button type="button" onClick={() => void open()} disabled={busy}>
-        {busy ? 'Opening...' : 'Manage or cancel a subscription'}
-      </button>
-      {error ? <span role="alert"> {error}</span> : null}
-    </p>
+    <div className="banner" role="group" aria-label="Your account">
+      <p className="banner__title">What is still yours</p>
+      {credit !== null ? (
+        <p className="banner__detail">
+          Unspent credit: {formatUsd(credit)}. It stays on the account.
+        </p>
+      ) : null}
+      <p className="banner__detail">
+        <button
+          type="button"
+          onClick={() =>
+            void run('Opening the billing portal', async () => {
+              window.location.href = await openBillingPortal();
+            })
+          }
+        >
+          Manage or cancel a subscription
+        </button>
+      </p>
+      {sandbox ? (
+        <p className="banner__detail">
+          <button
+            type="button"
+            onClick={() =>
+              void run('Stopping the sandbox', async () => {
+                await stopSandboxPreview();
+                setSandbox(false);
+              })
+            }
+          >
+            Stop the running sandbox
+          </button>
+        </p>
+      ) : null}
+      {shares.length > 0 ? (
+        <p className="banner__detail">
+          <button
+            type="button"
+            onClick={() =>
+              void run('Removing the public links', async () => {
+                for (const id of shares) await revokePreviewShare(id);
+                setShares([]);
+              })
+            }
+          >
+            Remove {shares.length} public link
+            {shares.length === 1 ? '' : 's'} to your code
+          </button>
+        </p>
+      ) : null}
+      {repo ? (
+        <p className="banner__detail">
+          <button
+            type="button"
+            onClick={() =>
+              void run('Disconnecting the repository', async () => {
+                const result = await disconnectRepository(repo);
+                if (!result.ok) throw new Error(result.error);
+                setRepo(null);
+              })
+            }
+          >
+            Disconnect {repo.owner}/{repo.repo}
+          </button>
+        </p>
+      ) : null}
+      {note ? (
+        <p className="banner__detail" role="status">
+          {note}
+        </p>
+      ) : null}
+    </div>
   );
 }
