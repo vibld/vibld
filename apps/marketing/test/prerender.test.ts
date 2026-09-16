@@ -244,6 +244,56 @@ describe('legal pages', () => {
   });
 });
 
+describe('Google Analytics', () => {
+  it('loads the tag on every prerendered page', () => {
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      assert.ok(
+        html.includes(
+          `https://www.googletagmanager.com/gtag/js?id=${SITE.ga4MeasurementId}`,
+        ),
+        `${route.path} does not load the GA4 tag`,
+      );
+    }
+  });
+
+  it('configures the property on every prerendered page', () => {
+    // The loader alone measures nothing. A page that fetches gtag.js and
+    // never calls `config` reports no views at all, and looks correct in
+    // view-source.
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      assert.ok(
+        html.includes(`gtag('config', '${SITE.ga4MeasurementId}')`),
+        `${route.path} loads GA4 without configuring it`,
+      );
+    }
+  });
+
+  // These two are here rather than with the legal pages on purpose. The Cookie
+  // Notice promised to be updated before anything that sets a cookie shipped,
+  // and GA4 sets cookies, so the disclosure is part of shipping the tag, not a
+  // separate chore. If the tag is ever removed, these fail and say so.
+  it('is disclosed in the Cookie Notice, cookies and identifier named', () => {
+    const html = read('/legal/cookies');
+    assert.match(html, /Google Analytics/);
+    assert.match(html, /sets cookies in your browser/);
+    assert.match(html, /client identifier/);
+  });
+
+  it('names Google as a current subprocessor, not a planned one', () => {
+    const html = read('/legal/subprocessors');
+    const google = html.indexOf('Google LLC');
+    const planned = html.indexOf('Planned for product launch');
+    assert.notEqual(google, -1, 'Google is not listed as a subprocessor');
+    assert.notEqual(planned, -1, 'the planned table is gone, so this is stale');
+    assert.ok(
+      google < planned,
+      'Google is processing data today, so it belongs in the current table',
+    );
+  });
+});
+
 describe('security.txt', () => {
   it('is published at the well-known path, per RFC 9116', () => {
     const path = join(CLIENT, '.well-known', 'security.txt');

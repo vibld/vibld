@@ -2,7 +2,7 @@ import { LegalPage } from '../components/SiteChrome';
 import { LEGAL_DOCS, SITE, metaFor } from '../site';
 
 const DOC = LEGAL_DOCS.find((d) => d.slug === 'privacy')!;
-const UPDATED = '2026-09-10';
+const UPDATED = '2026-09-16';
 
 export function meta() {
   return metaFor('/legal/privacy');
@@ -39,14 +39,24 @@ export default function Privacy() {
           whether the check passed, never the signals Cloudflare used to decide.
         </li>
         <li>
-          <strong>Aggregate page-view counts</strong>, measured by us rather
-          than by a third-party analytics service. We record the page path, the
-          hostname of the site that linked you here, any campaign tags in that
-          link, and your country. We do not record your IP address, do not set a
-          cookie, and do not assign you a visitor or device identifier, so these
-          counts cannot be traced to a person or linked across visits. We run no
-          advertising scripts on this site. See our{' '}
-          <a href="/legal/cookies">Cookie Notice</a>.
+          <strong>Aggregate page-view counts, measured by us.</strong> We record
+          the page path, the hostname of the site that linked you here, any
+          campaign tags in that link, and your country. We do not record your IP
+          address, do not set a cookie, and do not assign you a visitor or
+          device identifier, so these counts cannot be traced to a person or
+          linked across visits.
+        </li>
+        <li>
+          <strong>Page views, measured by Google Analytics 4.</strong> We also
+          load Google Analytics on every page. It works differently from the
+          measurement above, and the difference matters: it sets cookies in your
+          browser, assigns your browser a client identifier that recognises it
+          across pages and visits, and sends your IP address to Google to derive
+          an approximate location. We have not enabled Google Signals,
+          advertising features, or any link to Google Ads, and we run no
+          advertising scripts on this site. Our{' '}
+          <a href="/legal/cookies">Cookie Notice</a> explains how to avoid being
+          counted this way.
         </li>
       </ul>
 

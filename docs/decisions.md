@@ -118,16 +118,22 @@ Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-de
 | Build tier                     | $29/mo -- $10/mo model spend                             |
 | Ship tier                      | $99/mo -- $40/mo model spend                             |
 | Top-up                         | $20 -- $8 model spend, expires 12 months                 |
-| GA4 measurement ID             | `G-JCWXRRM8R9` (recorded 2026-09-14, not wired)          |
+| GA4 measurement ID             | `G-JCWXRRM8R9` (wired into apps/marketing 2026-09-16)    |
 
-The GA4 ID is recorded here and nothing loads it. `apps/marketing` counts page
-views with its own first-party, cookieless measurement
-(`apps/marketing/worker/analytics.ts`), and the shipped Cookie Notice and
-Privacy Policy say so in as many words: "our own first-party measurement rather
-than a third-party analytics service", "sets no cookie, assigns no visitor or
-device identifier, and stores no IP address". The Cookie Notice also states
-that it will be updated, with its "Last updated" date, before anything of that
-kind ships.
+`apps/marketing` now measures page views twice: with its own first-party,
+cookieless counter (`apps/marketing/worker/analytics.ts`) and with GA4, loaded
+site-wide from `app/root.tsx`. The Cookie Notice, the Privacy Policy and the
+Subprocessors page were rewritten in the same change to say what GA4 does (sets
+cookies, assigns a client identifier, sends the IP address to Google), because
+the Cookie Notice had promised to be updated before anything of that kind
+shipped.
+
+**Open, for Chris:** GA4 loads for every visitor, with no consent banner. In
+the EU and UK, setting analytics cookies normally requires consent first. The
+options are a consent banner gating the GA4 snippet, Google Consent Mode v2
+defaulting to denied (cookieless pings until consent, so much less data), or
+leaving it as it is. Nothing in the code decides this; it is recorded here
+because it is a statement the company makes, not an engineering detail.
 
 ### Lists confirmed
 

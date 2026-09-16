@@ -29,6 +29,14 @@ export const SITE = {
    * committed; it lives on the `marketing` GitHub environment.
    */
   turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',
+  /**
+   * Google Analytics 4's measurement ID (docs/decisions.md). Public by
+   * design: it ships in every page's HTML and identifies the property, not a
+   * person. Unlike the first-party counter in worker/analytics.ts, GA4 sets
+   * cookies and assigns a client identifier, which is why the Cookie Notice,
+   * the Privacy Policy and the Subprocessors page all say so.
+   */
+  ga4MeasurementId: 'G-JCWXRRM8R9',
   /** Issue #7 -- link the repository and the open-source, portable-code promise. */
   repoUrl: 'https://github.com/vibld/vibld',
   /**

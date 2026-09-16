@@ -2,7 +2,7 @@ import { LegalPage } from '../components/SiteChrome';
 import { LEGAL_DOCS, SITE, metaFor } from '../site';
 
 const DOC = LEGAL_DOCS.find((d) => d.slug === 'subprocessors')!;
-const UPDATED = '2026-09-10';
+const UPDATED = '2026-09-16';
 
 interface Subprocessor {
   name: string;
@@ -20,6 +20,12 @@ const CURRENT: Subprocessor[] = [
   {
     name: 'Resend',
     purpose: 'Storing waitlist email addresses and sending notification email',
+    location: 'United States',
+  },
+  {
+    name: 'Google LLC',
+    purpose:
+      'Google Analytics 4, which measures page views on this site and sets cookies to do it',
     location: 'United States',
   },
 ];

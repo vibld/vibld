@@ -12,6 +12,7 @@ import {
 import type { Route } from './+types/root';
 import { beaconFor } from './pageview.ts';
 import { SiteFooter, SiteHeader } from './components/SiteChrome';
+import { SITE } from './site';
 import './app.css';
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -34,6 +35,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           async
           defer
         ></script>
+        <GoogleAnalytics />
       </head>
       <body className="min-h-screen font-sans antialiased">
         <SiteHeader />
@@ -46,6 +48,47 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <PageviewBeacon />
       </body>
     </html>
+  );
+}
+
+/**
+ * Google Analytics 4, loaded on every page.
+ *
+ * This is the standard gtag pair: the loader, then the inline bootstrap that
+ * creates `dataLayer` and configures the property. It sits beside Turnstile in
+ * the head rather than at the end of the body so the queue exists before
+ * anything else on the page can push to it, and the loader is `async` so it
+ * never blocks rendering.
+ *
+ * `send_page_view` is left on, so the `config` call counts the first view.
+ * Every view after it comes from `RouteChangeBeacon` below, for the same
+ * reason the first-party beacon needs one: React Router replaces the page
+ * without reloading the document, so nothing in this script runs again.
+ *
+ * Unlike worker/analytics.ts, this does set cookies and does assign a client
+ * identifier. The Cookie Notice, the Privacy Policy and the Subprocessors
+ * page were updated to say so before this shipped, which is what the Cookie
+ * Notice promised. It loads for every visitor regardless of location: there
+ * is no consent banner on this site yet, and whether one is required is a
+ * decision recorded in docs/decisions.md, not one made here.
+ */
+function GoogleAnalytics() {
+  const id = SITE.ga4MeasurementId;
+  const bootstrap = `window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '${id}');`;
+  return (
+    <>
+      <script
+        async
+        src={`https://www.googletagmanager.com/gtag/js?id=${id}`}
+      ></script>
+      <script
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{ __html: bootstrap }}
+      />
+    </>
   );
 }
 
@@ -117,6 +160,21 @@ function RouteChangeBeacon() {
       navigator.sendBeacon('/api/hit', data);
     } catch {
       // Same contract as the inline script: a lost datapoint never surfaces.
+    }
+    // GA4 needs the same nudge, and the decision above is the same decision:
+    // the gtag `config` call counted the first view, so this fires for every
+    // view after it and never for that one. Guarded because gtag is only
+    // there once the loader has run, and a blocked script must not throw.
+    try {
+      const send = (
+        window as unknown as { gtag?: (...args: unknown[]) => void }
+      ).gtag;
+      send?.('event', 'page_view', {
+        page_location: window.location.href,
+        page_referrer: decision.referrer,
+      });
+    } catch {
+      // Same contract: a lost datapoint never surfaces.
     }
   }, [location.pathname, location.search]);
 
