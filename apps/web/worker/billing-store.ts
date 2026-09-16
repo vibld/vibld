@@ -29,6 +29,38 @@ interface CustomerRow {
   stripe_customer_id: string;
 }
 
+/**
+ * How far the replay of Stripe's event log has got.
+ *
+ * `doneBelow` is the floor: every event Stripe created before that second
+ * has been replayed. `sweepTop` and `sweepAfterId` describe a descent in
+ * progress, and are both null when none is. See
+ * `migrations/0009_event_replay.sql` for why the floor and the top of the
+ * descent are separate numbers.
+ */
+/** One Stripe event whose owner this deployment could not work out yet. */
+export interface UnattributedEvent {
+  stripeEventId: string;
+  type: string;
+  created: number;
+  /** The event as Stripe sent it, so the retry does not depend on Stripe still having it. */
+  payload: string;
+  firstSeenAt: string;
+  attempts: number;
+}
+
+export interface EventReplayCursor {
+  doneBelow: number;
+  sweepTop: number | null;
+  sweepAfterId: string | null;
+}
+
+interface EventReplayRow {
+  done_below: number;
+  sweep_top: number | null;
+  sweep_after_id: string | null;
+}
+
 export interface AdminCreditRecord {
   id: string;
   userId: string;
@@ -440,6 +472,30 @@ export class BillingStore {
     return row !== null;
   }
 
+  /**
+   * Which of these events have already been applied.
+   *
+   * One query for a whole page rather than one per event, because D1 counts
+   * queries per Worker invocation (1000 on Workers Paid, 50 on Free) and the
+   * replay's per-event cost is what decides how much of a backlog a nightly
+   * run can clear.
+   *
+   * The caller keeps the list at or under D1's hundred bound parameters per
+   * query, which is what bounds the page.
+   */
+  async processedEventIds(stripeEventIds: string[]): Promise<Set<string>> {
+    if (stripeEventIds.length === 0) return new Set();
+    const holes = stripeEventIds.map((_, n) => `?${n + 1}`).join(', ');
+    const result = await this.#db
+      .prepare(
+        `SELECT stripe_event_id FROM billing_webhook_events
+          WHERE stripe_event_id IN (${holes})`,
+      )
+      .bind(...stripeEventIds)
+      .all<{ stripe_event_id: string }>();
+    return new Set((result.results ?? []).map((row) => row.stripe_event_id));
+  }
+
   /** Has this Stripe event already been applied? Checked before, not after. */
   async wasEventProcessed(stripeEventId: string): Promise<boolean> {
     const row = await this.#db
@@ -449,6 +505,167 @@ export class BillingStore {
       .bind(stripeEventId)
       .first();
     return row !== null;
+  }
+
+  /**
+   * Where the replay of Stripe's event log has got to.
+   *
+   * Null means this deployment has never run one, which asks for everything
+   * Stripe still holds (about 30 days).
+   */
+  async getEventReplayCursor(id: string): Promise<EventReplayCursor | null> {
+    const row = await this.#db
+      .prepare(
+        `SELECT done_below, sweep_top, sweep_after_id
+           FROM billing_event_replay WHERE id = ?1`,
+      )
+      .bind(id)
+      .first<EventReplayRow>();
+    if (row === null) return null;
+    return {
+      doneBelow: row.done_below,
+      sweepTop: row.sweep_top,
+      sweepAfterId: row.sweep_after_id,
+    };
+  }
+
+  /**
+   * Record where a replay run stopped, so the next one carries on from
+   * there.
+   *
+   * Written after every page rather than once at the end of a run. A run that
+   * dies halfway (the scheduled invocation is cut off, Stripe rejects the
+   * next request) then loses one page of progress instead of all of it, and
+   * the alternative is the failure this whole cursor exists to prevent: a
+   * descent that restarts at the top every night never reaches the bottom.
+   */
+  async saveEventReplayCursor(
+    id: string,
+    cursor: EventReplayCursor,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_event_replay
+           (id, done_below, sweep_top, sweep_after_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(id) DO UPDATE SET
+           done_below = excluded.done_below,
+           sweep_top = excluded.sweep_top,
+           sweep_after_id = excluded.sweep_after_id,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        id,
+        cursor.doneBelow,
+        cursor.sweepTop,
+        cursor.sweepAfterId,
+        new Date().toISOString(),
+      )
+      .run();
+  }
+
+  /**
+   * Keep an event nobody could be attributed to, so the sweep can move on
+   * without it being lost.
+   *
+   * The first sighting wins for `first_seen_at`, which is what makes "this
+   * has been waiting nine days" a thing the row can say.
+   */
+  async parkUnattributedEvent(
+    stripeEventId: string,
+    type: string,
+    created: number,
+    payload: string,
+    at: string = new Date().toISOString(),
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_unattributed_events
+           (stripe_event_id, type, created, payload, first_seen_at,
+            last_attempt_at, attempts)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, 0)
+         ON CONFLICT(stripe_event_id) DO UPDATE SET
+           last_attempt_at = excluded.last_attempt_at,
+           attempts = billing_unattributed_events.attempts + 1`,
+      )
+      .bind(stripeEventId, type, created, payload, at)
+      .run();
+  }
+
+  /**
+   * Record that the retry is about to try this one.
+   *
+   * Stamped before the attempt rather than after it, and the ordering above
+   * reads the same column, so a row that cannot be attributed moves to the
+   * back of the queue instead of holding the front of it. Exactly what
+   * `ReferralStore.markAttempted` does and for the same reason: without it a
+   * fixed batch of the oldest rows is the whole queue for ever, and a
+   * payment parked later is never looked at again.
+   */
+  async markUnattributedAttempted(
+    stripeEventId: string,
+    at: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE billing_unattributed_events
+            SET last_attempt_at = ?2, attempts = attempts + 1
+          WHERE stripe_event_id = ?1`,
+      )
+      .bind(stripeEventId, at)
+      .run();
+  }
+
+  /**
+   * A batch of parked events, least recently tried first.
+   *
+   * By attempt and not by age, which is the difference between a queue and a
+   * dead end. Ordering by `created` meant a fixed batch always returned the
+   * same oldest rows, so once the batch filled with events that can never be
+   * attributed, every payment parked after them was starved: an invoice that
+   * became attributable the moment its customer mapping arrived would never
+   * be tried again.
+   *
+   * The caller applies the batch oldest-first regardless. Fairness decides
+   * which rows are in it; `created` decides the order they go in, because a
+   * Checkout that maps a customer has to be applied before the invoice that
+   * needs the mapping.
+   */
+  async listUnattributedEvents(limit = 200): Promise<UnattributedEvent[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT stripe_event_id, type, created, payload, first_seen_at, attempts
+           FROM billing_unattributed_events
+          ORDER BY last_attempt_at, created, stripe_event_id
+          LIMIT ?1`,
+      )
+      .bind(limit)
+      .all<{
+        stripe_event_id: string;
+        type: string;
+        created: number;
+        payload: string;
+        first_seen_at: string;
+        attempts: number;
+      }>();
+    return (result.results ?? []).map((row) => ({
+      stripeEventId: row.stripe_event_id,
+      type: row.type,
+      created: row.created,
+      payload: row.payload,
+      firstSeenAt: row.first_seen_at,
+      attempts: row.attempts,
+    }));
+  }
+
+  /** Drop a parked event, once it has actually been applied. */
+  async dropUnattributedEvent(stripeEventId: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `DELETE FROM billing_unattributed_events WHERE stripe_event_id = ?1`,
+      )
+      .bind(stripeEventId)
+      .run();
   }
 
   async markEventProcessed(stripeEventId: string, type: string): Promise<void> {

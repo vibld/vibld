@@ -100,6 +100,12 @@ import {
   handleGitHubPush,
   handleGitHubStatus,
 } from './github-handlers.ts';
+import {
+  DEFAULT_QUERY_BUDGET,
+  replayStripeEvents,
+  retryBatchFor,
+  retryUnattributedEvents,
+} from './billing-replay.ts';
 import { createStripeClient } from './stripe-client.ts';
 import { isGated } from './access-gate.ts';
 import {
@@ -301,6 +307,15 @@ export interface Env {
    * the same exception `VIBLD_MODEL_POLICY` is.
    */
   VIBLD_PLATFORM_ADMINS?: string;
+  /**
+   * D1 queries the nightly billing replay may spend in one invocation.
+   *
+   * Unset means the default that is safe on Workers Free. A Workers Paid
+   * deployment sets this to clear a backlog faster; see
+   * `billing-replay.ts`'s `DEFAULT_QUERY_BUDGET` for why setting it above
+   * the plan's real limit is worse than leaving it alone.
+   */
+  VIBLD_REPLAY_QUERY_BUDGET?: string;
   /**
    * Worker secret. Lets `/api/admin/*` resolve an email an admin typed into
    * the Clerk user id the ledger actually keys on -- see clerk-lookup.ts.
@@ -1511,30 +1526,80 @@ export default {
       const billing = new BillingStore(env.DB!);
       const referrals = new ReferralStore(env.DB!);
       const payout = { referrals, billing };
+
+      const stripe = createStripeClient(env);
+      /*
+       * D1 stops a Worker invocation at its query limit by throwing, and the
+       * limit depends on the plan: 1000 on Workers Paid, 50 on Workers Free.
+       * Nothing in the runtime reports which one this deployment is on, so
+       * the default is the one that is safe on either and a Paid deployment
+       * says so here.
+       *
+       * Raising it past the real limit is worse than leaving it low. The
+       * replay would throw partway through a page, which leaves its cursor
+       * where it was, so every following night would die in the same place.
+       */
+      const queryBudget = Number(env.VIBLD_REPLAY_QUERY_BUDGET);
+      const budget =
+        Number.isFinite(queryBudget) && queryBudget > 0
+          ? queryBudget
+          : DEFAULT_QUERY_BUDGET;
+      const cleared = (userId: string) =>
+        payReferralIfEarned(payout, userId).then(() => undefined);
       ctx.waitUntil(
-        // Every referral payout that is owed and has not happened, first.
-        // Stripe's redelivery gives up after a few days and a delivery that
-        // was never made is retried by nobody, so without this the reward
-        // stays owed and nothing ever revisits it.
-        resumeStrandedPayouts(payout).then(
-          (result) =>
-            console.log(
-              JSON.stringify({ event: 'referral.resumed', ...result }),
-            ),
-          (error: unknown) =>
-            console.error('referral payout resume failed', error),
-        ),
-      );
-      ctx.waitUntil(
-        reconcileSubscriptions(createStripeClient(env), billing, (userId) =>
-          payReferralIfEarned(payout, userId).then(() => undefined),
-        ).then(
-          (result) =>
-            console.log(
-              JSON.stringify({ event: 'billing.reconciled', ...result }),
-            ),
-          (error: unknown) => console.error('billing reconcile failed', error),
-        ),
+        // The replay first, and the reconcile after it rather than beside
+        // it. The replay applies events in the order Stripe created them
+        // within a page, but a descent covers older ground on each run, so
+        // across runs an older subscription update can land after a newer
+        // one. `reconcileSubscriptions` re-reads each subscription from
+        // Stripe, so running it afterwards settles the mirror whatever order
+        // the replay left it in. The money the replay recovers does not
+        // depend on order: a top-up and a payment are recorded against the
+        // Stripe object's own id, once.
+        replayStripeEvents(stripe, billing, undefined, undefined, budget)
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'billing.replayed', ...result }),
+              ),
+            (error: unknown) => console.error('billing replay failed', error),
+          )
+          // Then the events parked because nobody could be attributed to
+          // them. No Stripe requests: the payloads were kept, so this keeps
+          // working long after Stripe has forgotten the events existed.
+          .then(() => retryUnattributedEvents(billing, retryBatchFor(budget)))
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'billing.unattributed', ...result }),
+              ),
+            (error: unknown) =>
+              console.error('unattributed retry failed', error),
+          )
+          // Then every referral payout that is owed and has not happened.
+          // Stripe's redelivery gives up after a few days and a delivery that
+          // was never made is retried by nobody, so without this the reward
+          // stays owed and nothing revisits it. After the replay rather than
+          // beside it, so a payment the replay has just recovered is paid out
+          // tonight instead of tomorrow.
+          .then(() => resumeStrandedPayouts(payout))
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'referral.resumed', ...result }),
+              ),
+            (error: unknown) =>
+              console.error('referral payout resume failed', error),
+          )
+          .then(() => reconcileSubscriptions(stripe, billing, cleared))
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'billing.reconciled', ...result }),
+              ),
+            (error: unknown) =>
+              console.error('billing reconcile failed', error),
+          ),
       );
     }
 
