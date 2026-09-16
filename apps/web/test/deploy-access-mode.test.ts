@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
+import { parsePlatformAdmins } from '../worker/platform-admins.ts';
+
 /**
  * The deploy step that decides whether a deployment is open, and refuses one
  * nobody could ever open.
@@ -139,35 +141,47 @@ describe('the access mode a deploy sets', () => {
   });
 
   it('counts admins the way the Worker will', async () => {
-    // The check is "can anybody get in", not "is the string non-empty".
-    // `parsePlatformAdmins` splits on commas, trims and drops the rest, so
-    // " , " is a non-empty secret and an empty admin list, and an entry
-    // that cannot be an email can never match a verified one. Both deploy
-    // green and lock everybody out, which is the one outcome this step
-    // exists to prevent.
-    for (const admins of [' , ', ',,', '   ', 'chris', 'chris@', '@example']) {
-      const result = await run(CHECK, {
-        VIBLD_ACCESS_MODE: '',
-        VIBLD_PLATFORM_ADMINS: admins,
-      });
-      assert.equal(result.code, 1, `"${admins}" was accepted as an admin`);
-      assert.equal(result.wrangler, '', 'closed the door before refusing');
-    }
-
-    // And the ones that do work, including the untidy spellings a person
-    // actually pastes. Refusing these would be the same failure pointed the
-    // other way: a deploy blocked on a list that is fine.
+    // Asked of the Worker's own parser rather than a list of remembered
+    // answers, because every failure here has been the shell and the Worker
+    // disagreeing about what a list means. `" , "` is a non-empty secret and
+    // an empty admin set; `a@x.com` and `b@y.com` joined by a newline is one
+    // member with a newline inside it, which can never match a verified
+    // email, though anything that splits on newlines counts it as two.
+    //
+    // A check more generous than the thing it checks passes exactly the
+    // deployments it exists to stop.
     for (const admins of [
+      ' , ',
+      ',,',
+      '   ',
+      '',
+      'chris',
+      'chris@',
+      '@example',
+      'a@x.com\nb@y.com',
       'chris@example.com',
       '  chris@example.com  ',
+      'chris@example.com\n',
       'bad, chris@example.com',
       'chris@example.com,someone@else.io',
+      'a@x.com,\nb@y.com',
     ]) {
+      const admitted = [...parsePlatformAdmins(admins)].some((entry) =>
+        /^[^@\s]+@[^@\s]+$/.test(entry),
+      );
       const result = await run(CHECK, {
         VIBLD_ACCESS_MODE: '',
         VIBLD_PLATFORM_ADMINS: admins,
       });
-      assert.equal(result.code, 0, `"${admins}" was refused`);
+
+      assert.equal(
+        result.code === 0,
+        admitted,
+        `the deploy and the Worker disagree about ${JSON.stringify(admins)}`,
+      );
+      if (!admitted) {
+        assert.match(result.stdout + result.stderr, /VIBLD_PLATFORM_ADMINS/);
+      }
     }
   });
 

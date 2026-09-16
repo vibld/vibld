@@ -85,10 +85,21 @@ jobs:
           # secret and an empty admin list, and an entry that cannot be an
           # email address can never match a Clerk-verified one. Either way
           # the deployment has no admin, which is the thing being checked.
-          usable="$(printf '%s' "${VIBLD_PLATFORM_ADMINS:-}" \
-            | tr ',' '\n' \
-            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
-            | grep -cE '^[^@[:space:]]+@[^@[:space:]]+$' || true)"
+          #
+          # awk with RS="," rather than a `tr` into lines, because the comma
+          # is the only separator the Worker knows. Splitting on newlines too
+          # would count "a@x.com\nb@y.com" as two admins where the Worker
+          # keeps one member with a newline inside it that can never match a
+          # verified email: a check more generous than the thing it checks
+          # passes exactly the deployments it exists to stop.
+          usable="$(printf '%s' "${VIBLD_PLATFORM_ADMINS:-}" | awk '
+            BEGIN { RS = ","; n = 0 }
+            {
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+              if ($0 ~ /^[^@[:space:]]+@[^@[:space:]]+$/) n++
+            }
+            END { print n + 0 }
+          ')"
           if [ "$usable" -eq 0 ]; then
             echo "::error::This deployment is invite-only and VIBLD_PLATFORM_ADMINS holds no usable admin address, so nobody can reach the admin panel and nobody can issue an invite. Every account, including yours, would be refused with no way to let anybody in. Set VIBLD_PLATFORM_ADMINS on the 'preview' environment (a comma-separated list of admin email addresses) at https://github.com/vibld/vibld/settings/environments and run this workflow again."
             exit 1
