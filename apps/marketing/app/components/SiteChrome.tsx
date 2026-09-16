@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import { CONSENT_OPEN_EVENT } from '../consent.ts';
 import { LEGAL_DOCS, SITE } from '../site';
 
 /**
@@ -75,6 +76,15 @@ export function SiteFooter() {
             ))}
           </ul>
         </nav>
+        <p className="mt-4">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event(CONSENT_OPEN_EVENT))}
+            className="underline underline-offset-4 hover:text-[var(--color-ink)]"
+          >
+            Cookie preferences
+          </button>
+        </p>
         <p className="mt-6">
           © {new Date().getFullYear()} {SITE.legalEntity}. {SITE.mailingAddress}
           .

@@ -29,6 +29,23 @@ export const SITE = {
    * committed; it lives on the `marketing` GitHub environment.
    */
   turnstileSiteKey: '0x4AAAAAAEvZ-7lTZ_uSHPoH',
+  /**
+   * Google Analytics 4's measurement ID (docs/decisions.md). Public by
+   * design: it ships in every page's HTML and identifies the property, not a
+   * person. Unlike the first-party counter in worker/analytics.ts, GA4 sets
+   * cookies and assigns a client identifier, which is why the Cookie Notice,
+   * the Privacy Policy and the Subprocessors page all say so.
+   */
+  ga4MeasurementId: 'G-JCWXRRM8R9',
+  /**
+   * The only hostnames that report to that property.
+   *
+   * Everything else, the workers.dev preview and `pnpm dev` included, loads
+   * no analytics at all and is not asked for consent, because a question
+   * whose answer cannot change anything is noise. Without this the preview
+   * and a laptop both fed the production numbers.
+   */
+  analyticsHosts: ['vibld.com', 'www.vibld.com'] as readonly string[],
   /** Issue #7 -- link the repository and the open-source, portable-code promise. */
   repoUrl: 'https://github.com/vibld/vibld',
   /**
