@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { fetchAccess } from '../access/access-client.ts';
+import { clerkConfigured } from '../auth/clerk-token.ts';
 import type { AccessStatus } from '../access/access-client.ts';
 import { Mark, WORDMARK } from './Mark.tsx';
 
@@ -17,10 +18,24 @@ import { Mark, WORDMARK } from './Mark.tsx';
  * not mount behind `AuthGate`: it probes on mount, and those probes are
  * exactly what an uninvited account may not do.
  */
-export function AccessGate({ children }: { children: ReactNode }) {
+export function AccessGate({
+  children,
+  /**
+   * Whether this deployment has an identity provider at all. Taken as a prop
+   * rather than read directly for the same reason `ReferralStore` takes its
+   * randomness: the unconfigured path is a real behaviour and a test that
+   * cannot reach it is not testing it. The harness builds these components
+   * with a key present, so nothing else could drive this branch.
+   */
+  configured = clerkConfigured,
+}: {
+  children: ReactNode;
+  configured?: boolean;
+}) {
   const [status, setStatus] = useState<AccessStatus | null>(null);
 
   useEffect(() => {
+    if (!configured) return;
     let live = true;
     void fetchAccess().then((next) => {
       if (live) setStatus(next);
@@ -28,7 +43,20 @@ export function AccessGate({ children }: { children: ReactNode }) {
     return () => {
       live = false;
     };
-  }, []);
+  }, [configured]);
+
+  /*
+   * An unconfigured deployment renders the builder, the same as `AuthGate`
+   * does and for the same reason: there is no identity to check, so there is
+   * no list to be on. This is the local `pnpm dev` path, and it is not a hole
+   * -- the Worker refuses every endpoint that costs anything without Clerk
+   * (principal.ts), and the router's own gate is a separate check that does
+   * not consult this component at all.
+   *
+   * Without this the shell would show a signed-out developer a waiting-list
+   * notice for a deployment that has no waiting list.
+   */
+  if (!configured) return children;
 
   // Nothing at all while it is unknown. A flash of the builder followed by a
   // refusal reads as a product that broke, rather than one that is closed.

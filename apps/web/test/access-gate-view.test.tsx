@@ -21,7 +21,7 @@ function serving(body: unknown, ok = true): void {
     })) as typeof fetch;
 }
 
-async function mount() {
+async function mount(configured = true) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   let mounted = false;
@@ -31,7 +31,7 @@ async function mount() {
   }
   await act(async () => {
     createRoot(container).render(
-      <AccessGate>
+      <AccessGate configured={configured}>
         <Builder />
       </AccessGate>,
     );
@@ -41,6 +41,20 @@ async function mount() {
 }
 
 describe('the access gate', () => {
+  it('renders the builder when there is no Clerk to identify anybody', async () => {
+    // The local `pnpm dev` path. There is no identity, so there is no list to
+    // be on, and showing a developer a waiting-list notice for a deployment
+    // that has no waiting list is nonsense. Not a hole either: the Worker
+    // refuses every endpoint that costs anything without Clerk, and the
+    // router's gate is a separate check that never consults this component.
+    //
+    // Serving a refusal proves the endpoint is never consulted: if it were,
+    // this answer would close the gate.
+    serving({ allowed: false, mode: 'invite', message: 'Invite only.' });
+    const view = await mount(false);
+    assert.equal(view.mounted(), true);
+  });
+
   it('renders the builder for an allowed account', async () => {
     serving({ allowed: true, mode: 'open', message: null });
     const view = await mount();
