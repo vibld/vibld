@@ -742,3 +742,43 @@ describe('a status request slower than the poll interval', () => {
     view.unmount();
   });
 });
+
+describe('a poll whose shell goes away', () => {
+  it('stops asking once the hook unmounts, even mid-request', async () => {
+    // Cleanup clears the pending timer, and a tick that is waiting on its
+    // reply has none: the reply is what schedules the next one. So the
+    // timer alone cannot end the poll, and on sign-out, where `AuthGate`
+    // takes the builder away and every request after it is refused, the
+    // unreadable answers that follow are deliberately not a reason to stop
+    // asking. It would ask forever, against a shell nobody can see.
+    let gets = 0;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': async (method) => {
+        if (method !== 'GET') return reply({ status: 'installing' });
+        gets += 1;
+        // Outstanding when the unmount happens, which is the whole case.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return reply({ status: 'installing' });
+      },
+    });
+
+    const view = await mount();
+    await view.run('r1');
+    assert.equal(view.sandbox.status?.status, 'installing');
+
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    assert.equal(gets, 1, 'the poll never started');
+
+    view.unmount();
+    await new Promise((resolve) =>
+      setTimeout(resolve, POLL_INTERVAL_MS * 2 + 800),
+    );
+
+    assert.equal(gets, 1, 'kept polling after the shell was gone');
+  });
+});

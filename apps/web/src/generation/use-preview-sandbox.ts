@@ -139,9 +139,26 @@ export function usePreviewSandbox(): PreviewSandbox {
     }
   }
 
-  // The poll must not outlive the shell even though this hook otherwise
-  // does not track component lifetime.
-  useEffect(() => stopPolling, []);
+  /*
+   * The poll must not outlive the shell even though this hook otherwise
+   * does not track component lifetime.
+   *
+   * Clearing the timer is not enough on its own, and cancelling the gate is
+   * what actually ends it. A tick that is waiting on its reply holds no
+   * timer to clear, so cleanup would find nothing, and the reply would then
+   * schedule the next tick into a shell that no longer exists. On sign-out,
+   * where `AuthGate` takes the builder away and every request that follows
+   * is refused, each of those answers is unreadable, which is deliberately
+   * not a reason to stop asking: it would ask forever. Superseding the gate
+   * makes the outstanding tick return without rescheduling.
+   */
+  useEffect(
+    () => () => {
+      stopPolling();
+      polls.current.supersede();
+    },
+    [],
+  );
 
   // A share only ever makes sense against a preview that is actually
   // running -- once this one stops or fails, its shares are somebody else's
@@ -182,8 +199,9 @@ export function usePreviewSandbox(): PreviewSandbox {
     const current = polls.current.begin();
     const tick = async () => {
       // This one has fired, so there is no pending timer to cancel until
-      // the next is scheduled. `stopPolling` mid-request is still the right
-      // call: it is the gate that discards the reply, not the timer.
+      // the next is scheduled. Anything cancelling a poll mid-request has to
+      // supersede the gate rather than rely on `stopPolling`: the reply is
+      // what schedules the next tick, and only the gate can stop it.
       pollRef.current = null;
       const result = await fetchPreviewStatus();
       // Sent before a run or a stop superseded this poll, answering after.
