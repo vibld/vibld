@@ -228,13 +228,14 @@ panel and that secret is the only key to it. It is a product that is down
 while looking deployed, and it is cheaper to stop at the workflow than to
 discover it from the outside.
 
-A closed deployment with no `CLERK_PUBLISHABLE_KEY` fails the same check, for
-the same reason from the other side: with no browser key the build inlines
-nothing, no request carries a token, and nobody can be identified, so the
-admin in the list never reaches the panel that issues invites. An open
-deployment is not held to this, because a deploy with no Clerk at all is a
-supported shape and it is being closed that makes an identity provider
-load-bearing.
+A deployment with no `CLERK_PUBLISHABLE_KEY` fails the same check, open or
+closed. `wrangler.jsonc` gives every Worker this workflow deploys a Clerk
+issuer, so `resolvePrincipal` demands a bearer token on every `/api/*` route;
+with no browser key the build inlines nothing, the shell renders no session,
+and every request is refused for want of a token. A closed deployment also
+loses the admin panel that way, but an open one is no more usable. (A deploy
+with no Clerk at all is a supported shape for `pnpm dev` and for a
+static-only host, neither of which is what this workflow produces.)
 
 "Usable" is not decided by the workflow. `scripts/access-preflight.ts` makes
 the whole decision and imports the Worker's own `parseAccessMode`,

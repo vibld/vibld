@@ -57,28 +57,35 @@ describe('who the deploy thinks can get in', () => {
     assert.match(result.errors.join(' '), /VIBLD_PLATFORM_ADMINS/);
   });
 
-  it('refuses a closed deployment nobody can sign in to', () => {
-    // The same outage from the other side. With no browser Clerk key the
-    // build inlines nothing, no request carries a token, and `/api/config`
-    // cannot say who is asking: the admin named in the list never sees the
-    // panel that issues invites.
-    const closed = accessPreflight({
-      VIBLD_ACCESS_MODE: '',
-      VIBLD_PLATFORM_ADMINS: 'chris@example.com',
-      CLERK_PUBLISHABLE_KEY: '',
-    });
-    assert.equal(closed.ok, false, 'shipped a product nobody can sign in to');
-    assert.match(closed.errors.join(' '), /CLERK_PUBLISHABLE_KEY/);
+  it('refuses a deployment nobody can sign in to, open or closed', () => {
+    // With no browser Clerk key the build inlines nothing and no request
+    // carries a token. That is not only a closed-deployment problem, which
+    // is what this first asserted and was wrong about: `wrangler.jsonc`
+    // gives every Worker this workflow deploys a Clerk issuer, so
+    // `resolvePrincipal` demands a token on every `/api/*` route and answers
+    // 401 without one. An open deployment nobody can use is not open.
+    for (const mode of ['', 'open']) {
+      const result = accessPreflight({
+        VIBLD_ACCESS_MODE: mode,
+        VIBLD_PLATFORM_ADMINS: 'chris@example.com',
+        CLERK_PUBLISHABLE_KEY: '',
+      });
+      assert.equal(
+        result.ok,
+        false,
+        `${mode || 'invite'} passed with no Clerk`,
+      );
+      assert.match(result.errors.join(' '), /CLERK_PUBLISHABLE_KEY/);
+    }
 
-    // An open deployment is a different question. A deploy with no Clerk at
-    // all is a supported shape, and it is being closed that makes an
-    // identity provider load-bearing.
+    // And with the key, an open deployment needs nothing else: it has no
+    // invites to issue, so it needs nobody to issue them.
     const open = accessPreflight({
       VIBLD_ACCESS_MODE: 'open',
       VIBLD_PLATFORM_ADMINS: '',
-      CLERK_PUBLISHABLE_KEY: '',
+      CLERK_PUBLISHABLE_KEY: KEY,
     });
-    assert.equal(open.ok, true, 'refused an open deployment over Clerk');
+    assert.equal(open.ok, true, 'asked an open deployment for an admin list');
   });
 
   it('agrees with the application about every admin list', () => {

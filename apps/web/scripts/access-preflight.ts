@@ -44,9 +44,29 @@ export function accessPreflight(env: PreflightEnv): Preflight {
   const warnings: string[] = [];
   const errors: string[] = [];
 
+  /*
+   * The browser half of Clerk, asked of every deployment this workflow
+   * makes, open or closed.
+   *
+   * It was asked only of a closed one at first, on the reasoning that a
+   * deployment with no Clerk is a supported shape. That is true of `pnpm
+   * dev` and of a static-only host, and not of anything this workflow
+   * produces: `wrangler.jsonc` gives every Worker it deploys a
+   * CLERK_FRONTEND_API_URL, so `resolvePrincipal` demands a bearer token on
+   * every `/api/*` route. With no publishable key the shell renders no
+   * session, sends no token, and receives 401 from everything including
+   * `/api/config`. An open deployment nobody can use is not open.
+   */
+  if ((env.CLERK_PUBLISHABLE_KEY ?? '') === '') {
+    errors.push(
+      'CLERK_PUBLISHABLE_KEY is empty, so the browser has no way to sign anybody in. This Worker always has a Clerk issuer configured, so every /api/* request would be refused for want of a token: nobody could generate anything, and on a closed deployment no admin could reach the invite panel either. ' +
+        `Set CLERK_PUBLISHABLE_KEY (the pk_live_... key from https://dashboard.clerk.com) at ${ADMINS_URL} and run this workflow again.`,
+    );
+  }
+
   if (mode === 'open') {
     return {
-      ok: true,
+      ok: errors.length === 0,
       mode,
       admins: 0,
       warnings,
@@ -72,21 +92,6 @@ export function accessPreflight(env: PreflightEnv): Preflight {
     errors.push(
       'This deployment is invite-only and VIBLD_PLATFORM_ADMINS holds no usable admin address, so nobody can reach the admin panel and nobody can issue an invite. Every account, including yours, would be refused with no way to let anybody in. ' +
         `Set VIBLD_PLATFORM_ADMINS (a comma-separated list of admin email addresses) at ${ADMINS_URL} and run this workflow again.`,
-    );
-  }
-
-  // The browser half of Clerk. Unset means the build inlines no key, the
-  // shell renders no session, nothing carries a token, and `/api/config` has
-  // nobody to identify: the admin above never reaches the panel. The same
-  // outage as an empty list, from the other side.
-  //
-  // Only asked of a closed deployment. A deploy with no Clerk at all is a
-  // supported shape, and it is being closed that makes an identity provider
-  // load-bearing.
-  if ((env.CLERK_PUBLISHABLE_KEY ?? '') === '') {
-    errors.push(
-      'This deployment is invite-only and CLERK_PUBLISHABLE_KEY is empty, so the browser has no way to sign anybody in. Nobody can be identified, so nobody can be admitted and no admin can reach the invite panel. ' +
-        `Set CLERK_PUBLISHABLE_KEY (the pk_live_... key from https://dashboard.clerk.com) at ${ADMINS_URL} and run this workflow again.`,
     );
   }
 
