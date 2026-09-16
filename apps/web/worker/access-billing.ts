@@ -37,6 +37,7 @@ import type { StripeEnv } from './stripe-client.ts';
 export type SubscriptionWindDown =
   | { scheduled: true; endsAt: string | null }
   | { scheduled: false; reason: 'unconfigured' }
+  | { scheduled: false; reason: 'no-invite' }
   | { scheduled: false; reason: 'never-signed-in' }
   | { scheduled: false; reason: 'nothing-to-stop' }
   | { scheduled: false; reason: 'already-ending'; endsAt: string | null }
@@ -67,17 +68,20 @@ export async function windDownSubscription(
     return { scheduled: false, reason: 'unconfigured' };
   }
 
-  let userId: string | null;
   let subscription;
   try {
-    userId = await access.redeemedUserId(email);
-    if (userId === null) {
+    const invite = await access.redeemedUserId(email);
+    // No row at all, which is what a mistyped address in the free-form
+    // control looks like. Saying "nobody ever signed in with that invite"
+    // here would be a fact about a person who does not exist.
+    if (!invite.exists) return { scheduled: false, reason: 'no-invite' };
+    if (invite.userId === null) {
       // An invite nobody ever took. There is no account, so there is nothing
       // that could be subscribed, and this is the ordinary case rather than
       // a problem.
       return { scheduled: false, reason: 'never-signed-in' };
     }
-    subscription = await billing.findActiveSubscription(userId);
+    subscription = await billing.findActiveSubscription(invite.userId);
   } catch (error) {
     console.error('wind-down: could not read the local records', error);
     return {
@@ -155,4 +159,100 @@ function periodEndOf(subscription: Stripe.Subscription): string | null {
   return typeof seconds === 'number' && Number.isFinite(seconds)
     ? new Date(seconds * 1000).toISOString()
     : null;
+}
+
+/**
+ * What happened when access was restored.
+ *
+ * `restored` means a cancellation that was scheduled is no longer scheduled.
+ * Everything else is a reason nothing needed doing, or could not be done.
+ */
+export type SubscriptionRestore =
+  | { restored: true; renewsOn: string | null }
+  | { restored: false; reason: 'unconfigured' }
+  | { restored: false; reason: 'no-invite' }
+  | { restored: false; reason: 'never-signed-in' }
+  | { restored: false; reason: 'nothing-to-restore' }
+  | { restored: false; reason: 'error'; error: string };
+
+/**
+ * Put back a subscription this deployment scheduled to end.
+ *
+ * This exists because its absence made a claim false. `windDownSubscription`
+ * cancels at period end rather than immediately, and the reason given for
+ * that, here and in docs/decisions.md, is that reinstating before the period
+ * ends puts it back. Nothing did. Re-inviting a revoked subscriber cleared
+ * `revoked_at` and asked Clerk, and left the cancellation standing, so Stripe
+ * ended a subscription belonging to somebody whose access had been restored
+ * and every sentence written about it said otherwise.
+ *
+ * Only ever clears a flag this deployment could have set. A subscriber who
+ * cancelled their own subscription and is then re-invited keeps their
+ * cancellation: it was their decision, and silently reversing it would be
+ * charging somebody who asked not to be charged. That is why the local
+ * mirror is read first and a subscription not marked `cancelAtPeriodEnd` is
+ * left alone, rather than sending `cancel_at_period_end: false`
+ * unconditionally.
+ *
+ * Best-effort on the same terms as the wind-down: the invite has already been
+ * written, so a throw here would answer 500 for a request that half happened.
+ */
+export async function restoreSubscription(
+  env: AccessBillingEnv,
+  access: AccessStore,
+  billing: BillingStore,
+  email: string,
+  makeStripe: (env: StripeEnv) => Stripe = createStripeClient,
+): Promise<SubscriptionRestore> {
+  if (!stripeConfigured(env)) {
+    return { restored: false, reason: 'unconfigured' };
+  }
+
+  let subscription;
+  try {
+    const invite = await access.redeemedUserId(email);
+    if (!invite.exists) return { restored: false, reason: 'no-invite' };
+    if (invite.userId === null) {
+      return { restored: false, reason: 'never-signed-in' };
+    }
+    subscription = await billing.findActiveSubscription(invite.userId);
+  } catch (error) {
+    console.error('restore: could not read the local records', error);
+    return {
+      restored: false,
+      reason: 'error',
+      error: 'Could not read this deployment\u2019s own billing records.',
+    };
+  }
+
+  // Nothing live, or nothing scheduled to end. Both mean there is no
+  // cancellation of this deployment's making to undo.
+  if (!subscription || !subscription.cancelAtPeriodEnd) {
+    return { restored: false, reason: 'nothing-to-restore' };
+  }
+
+  try {
+    const updated = await makeStripe(env).subscriptions.update(
+      subscription.stripeSubscriptionId,
+      { cancel_at_period_end: false },
+    );
+    const renewsOn = periodEndOf(updated) ?? subscription.currentPeriodEnd;
+    try {
+      await billing.upsertSubscription({
+        ...subscription,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: renewsOn,
+      });
+    } catch (error) {
+      console.error('restore: Stripe accepted it, local mirror did not', error);
+    }
+    return { restored: true, renewsOn };
+  } catch (error) {
+    console.error('restore: Stripe refused to clear the cancellation', error);
+    return {
+      restored: false,
+      reason: 'error',
+      error: 'Stripe would not clear the scheduled cancellation.',
+    };
+  }
 }

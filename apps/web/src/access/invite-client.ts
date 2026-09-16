@@ -88,6 +88,61 @@ export function readClerkOutcome(value: unknown): ClerkOutcome | null {
   return null;
 }
 
+/**
+ * What the invite route said about putting a scheduled cancellation back.
+ *
+ * Parsed as strictly as the others: an unreadable answer about somebody's
+ * subscription is not the same as a good one.
+ */
+export type RestoreOutcome =
+  | { restored: true; renewsOn: string | null }
+  | {
+      restored: false;
+      reason:
+        | 'unconfigured'
+        | 'no-invite'
+        | 'never-signed-in'
+        | 'nothing-to-restore'
+        | 'error';
+      error?: string;
+    };
+
+const NOT_RESTORED = new Set([
+  'unconfigured',
+  'no-invite',
+  'never-signed-in',
+  'nothing-to-restore',
+  'error',
+]);
+
+export function readRestoreOutcome(value: unknown): RestoreOutcome | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as {
+    restored?: unknown;
+    reason?: unknown;
+    renewsOn?: unknown;
+    error?: unknown;
+  };
+  if (row.restored === true) {
+    return {
+      restored: true,
+      renewsOn: typeof row.renewsOn === 'string' ? row.renewsOn : null,
+    };
+  }
+  if (row.restored !== false) return null;
+  if (typeof row.reason !== 'string' || !NOT_RESTORED.has(row.reason)) {
+    return null;
+  }
+  return {
+    restored: false,
+    reason: row.reason as Exclude<RestoreOutcome, { restored: true }>['reason'],
+    error:
+      typeof row.error === 'string' && row.error.trim() !== ''
+        ? row.error
+        : undefined,
+  };
+}
+
 export type IssueResult =
   | {
       ok: true;
@@ -95,6 +150,7 @@ export type IssueResult =
       created: boolean;
       reinstated: boolean;
       clerk: ClerkOutcome | null;
+      billing: RestoreOutcome | null;
     }
   | { ok: false; error: string };
 
@@ -111,6 +167,7 @@ export type BillingOutcome =
       scheduled: false;
       reason:
         | 'unconfigured'
+        | 'no-invite'
         | 'never-signed-in'
         | 'nothing-to-stop'
         | 'already-ending'
@@ -121,6 +178,7 @@ export type BillingOutcome =
 
 const NOT_SCHEDULED = new Set([
   'unconfigured',
+  'no-invite',
   'never-signed-in',
   'nothing-to-stop',
   'already-ending',
@@ -304,6 +362,7 @@ export async function issueInvite(
       ok: true,
       email: body.email,
       clerk: readClerkOutcome(body.clerk),
+      billing: readRestoreOutcome(body.billing),
       created: body.created === true,
       reinstated: body.reinstated === true,
     };

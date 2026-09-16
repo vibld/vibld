@@ -189,6 +189,10 @@ describe('the invite endpoints', () => {
       // the panel cannot tell apart from a deployment that did approve
       // somebody, so the silence has to be deliberate and named.
       clerk: { admitted: false, reason: 'unconfigured' },
+      // Named for the same reason `clerk` is: a response that omits it is
+      // one the panel cannot tell apart from a deployment that did put a
+      // scheduled cancellation back.
+      billing: { restored: false, reason: 'unconfigured' },
     });
 
     const again = (await (
@@ -372,5 +376,39 @@ describe('stopping the billing from the revoke route', () => {
       { scheduled: false, reason: 'unconfigured' },
       'never asked about the billing, so a revoked subscriber can never be stopped',
     );
+  });
+});
+
+describe('putting the billing back from the invite route', () => {
+  function post(body: unknown): Request {
+    return new Request('https://app.vibld.com/api/admin/invite', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('says what happened to a scheduled cancellation', async () => {
+    // Without this the reason for cancelling at period end rather than
+    // immediately was false. Revoking schedules the subscription to end, and
+    // re-inviting cleared revoked_at, asked Clerk, and left the cancellation
+    // standing, so Stripe ended a subscription belonging to somebody whose
+    // access had been restored.
+    const env = newEnv();
+    const body = (await (
+      await handleInvite(
+        post({ email: 'sam@example.com' }),
+        env,
+        'admin@vibld.com',
+      )
+    ).json()) as Record<string, unknown>;
+
+    assert.equal(body.created, true);
+    // No Stripe key in this env, and the route says so rather than omitting
+    // the field. A response that does not mention billing is one the panel
+    // cannot tell apart from a deployment that did put the subscription back.
+    assert.deepEqual(body.billing, {
+      restored: false,
+      reason: 'unconfigured',
+    });
   });
 });

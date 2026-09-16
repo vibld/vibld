@@ -5,6 +5,14 @@
  */
 import { normaliseEmail } from './access.ts';
 
+/** What the invite list knows about one address. */
+export interface InviteLookup {
+  /** Whether a row exists at all, revoked or not. */
+  exists: boolean;
+  /** The account that took it, or null when nobody has. */
+  userId: string | null;
+}
+
 export interface InviteRecord {
   email: string;
   invitedByEmail: string;
@@ -113,16 +121,22 @@ export class AccessStore {
    * and then asks, so by the time this runs the row it is asking about has
    * just been withdrawn.
    */
-  async redeemedUserId(rawEmail: string): Promise<string | null> {
+  async redeemedUserId(rawEmail: string): Promise<InviteLookup> {
     const email = normaliseEmail(rawEmail);
-    if (email === null) return null;
+    if (email === null) return { exists: false, userId: null };
     const row = await this.#db
       .prepare(
         `SELECT redeemed_by_user_id FROM access_invites WHERE email = ?1`,
       )
       .bind(email)
       .first<{ redeemed_by_user_id: string | null }>();
-    return row?.redeemed_by_user_id ?? null;
+    // Three states, not two. Returning a bare null conflated "no invite for
+    // that address" with "an invite nobody has taken", and an operator who
+    // mistyped an address in the free-form control was told somebody had an
+    // invite and had never signed in, which is a fact about a person who
+    // does not exist.
+    if (!row) return { exists: false, userId: null };
+    return { exists: true, userId: row.redeemed_by_user_id ?? null };
   }
 
   /** Put a withdrawn invite back, which is a separate act from issuing one. */

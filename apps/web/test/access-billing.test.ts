@@ -3,7 +3,10 @@ import { describe, it } from 'node:test';
 
 import { AccessStore } from '../worker/access-store.ts';
 import { BillingStore } from '../worker/billing-store.ts';
-import { windDownSubscription } from '../worker/access-billing.ts';
+import {
+  restoreSubscription,
+  windDownSubscription,
+} from '../worker/access-billing.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
 
@@ -261,5 +264,123 @@ describe('winding down a revoked subscriber', () => {
     );
 
     assert.equal(result.scheduled, true);
+  });
+});
+
+describe('putting a subscription back when access is restored', () => {
+  it('clears the cancellation this deployment scheduled', async () => {
+    // Without this the reason for cancelling at period end rather than
+    // immediately was false. Revoking schedules the end, re-inviting cleared
+    // revoked_at and asked Clerk, and Stripe ended a subscription belonging
+    // to somebody whose access had been restored.
+    const { access, billing } = await deployment({ cancelAtPeriodEnd: true });
+    const stripe = stripeAccepting();
+
+    const result = await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+
+    assert.deepEqual(stripe.calls, [
+      { id: 'sub_sam', params: { cancel_at_period_end: false } },
+    ]);
+    assert.equal(result.restored, true);
+    const row = await billing.getSubscription('sub_sam');
+    assert.equal(row?.cancelAtPeriodEnd, false);
+  });
+
+  it('leaves a cancellation the subscriber made themselves alone', async () => {
+    // Read from the mirror first, and only a subscription already marked as
+    // ending is touched. Sending cancel_at_period_end: false unconditionally
+    // would charge somebody who asked not to be charged.
+    const { access, billing } = await deployment({ cancelAtPeriodEnd: false });
+    const stripe = stripeAccepting();
+
+    const result = await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () => stripe.client,
+    );
+
+    assert.deepEqual(stripe.calls, []);
+    assert.deepEqual(result, {
+      restored: false,
+      reason: 'nothing-to-restore',
+    });
+  });
+
+  it('asks nothing when Stripe is not configured', async () => {
+    const { access, billing } = await deployment({ cancelAtPeriodEnd: true });
+    let asked = false;
+    const result = await restoreSubscription(
+      {},
+      access,
+      billing,
+      'sam@example.com',
+      () => {
+        asked = true;
+        return stripeAccepting().client;
+      },
+    );
+    assert.equal(asked, false);
+    assert.deepEqual(result, { restored: false, reason: 'unconfigured' });
+  });
+
+  it('reports a Stripe refusal rather than throwing into the route', async () => {
+    const { access, billing } = await deployment({ cancelAtPeriodEnd: true });
+    const result = await restoreSubscription(
+      ENV,
+      access,
+      billing,
+      'sam@example.com',
+      () =>
+        ({
+          subscriptions: {
+            update: async () => {
+              throw new Error('stripe is down');
+            },
+          },
+        }) as never,
+    );
+    assert.equal(result.restored, false);
+    assert.equal(result.restored === false && result.reason, 'error');
+  });
+});
+
+describe('an address the invite list has never heard of', () => {
+  it('is not reported as an invite nobody took', async () => {
+    // Two different facts. A mistyped address in the free-form Withdraw
+    // control has no row at all, and telling an operator that nobody signed
+    // in with that invite is a claim about a person who does not exist.
+    const db = new SqliteD1Database(SCHEMA);
+    const access = new AccessStore(db);
+    const billing = new BillingStore(db);
+
+    const missing = await windDownSubscription(
+      ENV,
+      access,
+      billing,
+      'typo@example.com',
+      () => stripeAccepting().client,
+    );
+    assert.deepEqual(missing, { scheduled: false, reason: 'no-invite' });
+
+    await access.invite('real@example.com', 'admin@vibld.com');
+    const untaken = await windDownSubscription(
+      ENV,
+      access,
+      billing,
+      'real@example.com',
+      () => stripeAccepting().client,
+    );
+    assert.deepEqual(untaken, {
+      scheduled: false,
+      reason: 'never-signed-in',
+    });
   });
 });

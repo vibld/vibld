@@ -4,8 +4,11 @@
  */
 import { AccessStore } from './access-store.ts';
 import { BillingStore } from './billing-store.ts';
-import { windDownSubscription } from './access-billing.ts';
-import type { SubscriptionWindDown } from './access-billing.ts';
+import { restoreSubscription, windDownSubscription } from './access-billing.ts';
+import type {
+  SubscriptionRestore,
+  SubscriptionWindDown,
+} from './access-billing.ts';
 import { admitToClerk } from './clerk-waitlist.ts';
 import type { ClerkAdmission } from './clerk-waitlist.ts';
 import {
@@ -185,7 +188,19 @@ export async function handleInvite(
   // repeat is cheap and it is the retry path.
   const clerk: ClerkAdmission = await admitToClerk(env, email);
 
-  return json({ email, created, reinstated, clerk });
+  // The other half of a reinstatement, and without it the reason given for
+  // cancelling at period end rather than immediately was false: revoking
+  // schedules the subscription to end, and nothing put it back. Asked on
+  // every explicit invite for the same reason Clerk is, and a no-op unless
+  // this deployment has a cancellation of its own to undo.
+  const billing: SubscriptionRestore = await restoreSubscription(
+    env,
+    new AccessStore(env.DB),
+    new BillingStore(env.DB),
+    email,
+  );
+
+  return json({ email, created, reinstated, clerk, billing });
 }
 
 /** Withdraw an invite. Assumes the admin check already ran. */

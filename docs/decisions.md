@@ -260,7 +260,13 @@ revoking closes the door and leaves Stripe billing, so somebody can be
 charged for a month they cannot sign in to. Cancelling at period end is the
 only option that is wrong in neither direction: they keep what they already
 paid for, nothing is charged for time they cannot use, and there is no refund
-to process. Reinstating before the period ends puts it back.
+to process. Reinstating before the period ends puts it back, and that is a
+path that had to be built rather than a property of the flag: the first
+version of this scheduled the cancellation and nothing ever cleared it, so
+re-inviting somebody restored their access and Stripe ended their
+subscription anyway. Restoring only ever clears a cancellation this
+deployment made, so a subscriber who cancelled for themselves keeps their
+cancellation.
 
 **The parked-payment queue: attribute, or dismiss as never ours.** An admin
 can apply a parked payment to an account by email, which pays out any referral
