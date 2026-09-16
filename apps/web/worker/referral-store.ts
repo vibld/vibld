@@ -13,6 +13,8 @@ export interface AttributionRecord {
   createdAt: string;
   /** When this attribution took one of its referrer's capped slots. */
   claimedAt: string | null;
+  /** When the nightly sweep last tried to finish this payout. */
+  lastAttemptAt: string | null;
   paidAt: string | null;
 }
 
@@ -88,7 +90,7 @@ export class ReferralStore {
     const row = await this.#db
       .prepare(
         `SELECT referred_user_id, referrer_user_id, code, created_at,
-                claimed_at, paid_at
+                claimed_at, paid_at, last_attempt_at
          FROM referral_attributions WHERE referred_user_id = ?1`,
       )
       .bind(referredUserId)
@@ -99,6 +101,7 @@ export class ReferralStore {
         created_at: string;
         claimed_at: string | null;
         paid_at: string | null;
+        last_attempt_at: string | null;
       }>();
     if (!row) return undefined;
     return {
@@ -108,6 +111,7 @@ export class ReferralStore {
       createdAt: row.created_at,
       claimedAt: row.claimed_at,
       paidAt: row.paid_at,
+      lastAttemptAt: row.last_attempt_at,
     };
   }
 
@@ -142,8 +146,8 @@ export class ReferralStore {
       .prepare(
         `INSERT INTO referral_attributions
            (referred_user_id, referrer_user_id, code, created_at,
-            claimed_at, paid_at)
-         SELECT ?1, ?2, ?3, ?4, NULL, NULL
+            claimed_at, paid_at, last_attempt_at)
+         SELECT ?1, ?2, ?3, ?4, NULL, NULL, NULL
           WHERE NOT ${PURCHASE_BARRIER_SQL}
          ON CONFLICT(referred_user_id) DO NOTHING`,
       )
@@ -166,12 +170,31 @@ export class ReferralStore {
       .prepare(
         `SELECT referred_user_id FROM referral_attributions
           WHERE claimed_at IS NOT NULL AND paid_at IS NULL
-          ORDER BY claimed_at
+          ORDER BY last_attempt_at IS NOT NULL, last_attempt_at, claimed_at
           LIMIT ?1`,
       )
       .bind(limit)
       .all<{ referred_user_id: string }>();
     return (result.results ?? []).map((row) => row.referred_user_id);
+  }
+
+  /**
+   * Record that the sweep has just tried this one.
+   *
+   * Stamped before the attempt rather than after it, and deliberately: a
+   * payout that throws is exactly the one that must move to the back of the
+   * queue, and stamping afterwards would skip precisely those. A row that
+   * fails for ever then costs one attempt a night rather than blocking every
+   * newer stranded payout behind it.
+   */
+  async markAttempted(referredUserId: string, at: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE referral_attributions SET last_attempt_at = ?2
+          WHERE referred_user_id = ?1`,
+      )
+      .bind(referredUserId, at)
+      .run();
   }
 
   /**

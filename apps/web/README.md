@@ -541,6 +541,15 @@ Dashboard needs no code change, only the amount to change.
   the (idempotent) payout, so a delivery that was missed outright or whose
   retries ran out is still recovered.
 
+  The reconcile asks Stripe which subscriptions exist rather than only
+  re-reading the ones already mirrored. A subscriber whose very first
+  `customer.subscription.created` delivery was missed has no local row at all,
+  and a subscription-mode `checkout.session.completed` only links the
+  customer, so iterating the mirror alone would never reach them. The sweep
+  over stranded payouts stamps each attempt before it runs and orders by that
+  stamp, so a row that fails every night moves to the back of the queue
+  instead of holding the front of it and starving every newer one.
+
 ### Provider balance alerts (docs/decisions.md L44)
 
 The same nightly Cron Trigger also runs `worker/provider-balance.ts`'s

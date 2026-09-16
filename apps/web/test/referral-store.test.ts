@@ -248,3 +248,61 @@ describe('ReferralStore.strandedPayouts', () => {
     assert.deepEqual(await store.strandedPayouts(10), []);
   });
 });
+
+describe('ReferralStore.strandedPayouts: ordering', () => {
+  it('puts a row that has been tried behind one that has not', async () => {
+    // The starvation this fixes: ordering by claimed_at alone keeps a row
+    // that fails every night at the front for ever, and once `limit` of them
+    // accumulate no newer stranded payout is ever attempted again.
+    const store = newStore();
+    const referred = await referAll(store, 'user_owner', 2);
+    await store.reserveSlot(referred[0]!, '2026-09-01T00:00:00.000Z', 5);
+    await store.reserveSlot(referred[1]!, '2026-09-02T00:00:00.000Z', 5);
+
+    // The older one is tried and fails, so it goes to the back.
+    await store.markAttempted(referred[0]!, '2026-09-16T00:00:00.000Z');
+
+    assert.deepEqual(await store.strandedPayouts(10), [
+      referred[1],
+      referred[0],
+    ]);
+  });
+
+  it('orders two attempted rows by which was tried longest ago', async () => {
+    const store = newStore();
+    const referred = await referAll(store, 'user_owner', 2);
+    for (const id of referred) await store.reserveSlot(id, AT, 5);
+    await store.markAttempted(referred[0]!, '2026-09-16T02:00:00.000Z');
+    await store.markAttempted(referred[1]!, '2026-09-16T01:00:00.000Z');
+
+    assert.deepEqual(await store.strandedPayouts(10), [
+      referred[1],
+      referred[0],
+    ]);
+  });
+
+  it('lets a newer row through once the failing one has been tried', async () => {
+    // With a limit of one, the whole question is which single row the sweep
+    // picks tonight. Before the stamp it was the same one every night.
+    const store = newStore();
+    const referred = await referAll(store, 'user_owner', 2);
+    await store.reserveSlot(referred[0]!, '2026-09-01T00:00:00.000Z', 5);
+    await store.reserveSlot(referred[1]!, '2026-09-02T00:00:00.000Z', 5);
+
+    assert.deepEqual(await store.strandedPayouts(1), [referred[0]]);
+    await store.markAttempted(referred[0]!, '2026-09-16T00:00:00.000Z');
+    assert.deepEqual(await store.strandedPayouts(1), [referred[1]]);
+  });
+
+  it('records the attempt on the row itself', async () => {
+    const store = newStore();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    await store.reserveSlot(referred!, AT, 5);
+    await store.markAttempted(referred!, '2026-09-16T00:00:00.000Z');
+
+    assert.equal(
+      (await store.attributionFor(referred!))?.lastAttemptAt,
+      '2026-09-16T00:00:00.000Z',
+    );
+  });
+});

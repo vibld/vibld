@@ -307,8 +307,10 @@ describe('resumeStrandedPayouts', () => {
   /** A store holding a fixed list of stranded rows, each payable once. */
   function strandedFake(ids: string[], failing: string[] = []) {
     const paid = new Set<string>();
+    const attempted: string[] = [];
     return {
       paid,
+      attempted,
       store: {
         async strandedPayouts() {
           return ids;
@@ -335,6 +337,9 @@ describe('resumeStrandedPayouts', () => {
           paid.add(referredUserId);
           return true;
         },
+        async markAttempted(referredUserId: string) {
+          attempted.push(referredUserId);
+        },
       } as unknown as ReferralStore,
     };
   }
@@ -350,6 +355,21 @@ describe('resumeStrandedPayouts', () => {
 
     assert.deepEqual(result, { found: 2, paid: 2, failed: 0 });
     assert.equal(billing.grants.size, 4); // two sides, two accounts
+  });
+
+  it('stamps an attempt on every row it touches, including the ones that fail', async () => {
+    // Stamped before the attempt on purpose: a row that throws is exactly
+    // the one that has to move to the back of the queue, and stamping after
+    // a success would skip precisely those.
+    const billing = billingFake();
+    const referrals = strandedFake(['user_a', 'user_b'], ['user_a']);
+
+    await resumeStrandedPayouts({
+      referrals: referrals.store,
+      billing: billing.store,
+    });
+
+    assert.deepEqual(referrals.attempted, ['user_a', 'user_b']);
   });
 
   it('keeps going when one of them fails', async () => {

@@ -178,17 +178,33 @@ export function subscriptionRecordFrom(
   };
 }
 
+/**
+ * Who a subscription belongs to, from the subscription alone.
+ *
+ * Its own metadata first, then the customer mapping this deployment owns.
+ * Exported because the nightly reconcile needs exactly this: a subscription
+ * Stripe reports that was never mirrored has no local row to read a user id
+ * from, which is the whole reason it was missed.
+ */
+export async function ownerOfSubscription(
+  store: BillingStore,
+  subscription: Stripe.Subscription,
+): Promise<string | undefined> {
+  const stripeCustomerId = customerId(subscription.customer);
+  return (
+    metadataUserId(subscription.metadata) ??
+    (stripeCustomerId
+      ? await store.findUserIdForCustomer(stripeCustomerId)
+      : undefined)
+  );
+}
+
 async function applySubscriptionEvent(
   store: BillingStore,
   subscription: Stripe.Subscription,
   onPurchaseCleared?: OnPurchaseCleared,
 ): Promise<void> {
-  const stripeCustomerId = customerId(subscription.customer);
-  const userId =
-    metadataUserId(subscription.metadata) ??
-    (stripeCustomerId
-      ? await store.findUserIdForCustomer(stripeCustomerId)
-      : undefined);
+  const userId = await ownerOfSubscription(store, subscription);
 
   const record = subscriptionRecordFrom(subscription, userId);
   if (!record) {

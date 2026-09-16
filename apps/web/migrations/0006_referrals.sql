@@ -54,7 +54,19 @@ CREATE TABLE referral_attributions (
   -- referral.ts. Both, because neither alone is enough: the grant id stops a
   -- duplicate credit row, and this stops the payout path running again and
   -- reporting a payout that did not happen.
-  paid_at TEXT
+  paid_at TEXT,
+  -- When the nightly sweep last tried to finish this payout.
+  --
+  -- Ordering the sweep by claimed_at alone starves it: a row that fails every
+  -- night keeps its place at the front for ever, and once `limit` of them
+  -- accumulate no newer stranded payout is ever attempted again. Stamping the
+  -- attempt and ordering by it sends a failure to the back of the queue, so a
+  -- permanently broken row costs one attempt a night instead of the whole
+  -- batch.
+  --
+  -- NULL means never attempted, which sorts first: a payout that has not been
+  -- tried at all is more urgent than one that has.
+  last_attempt_at TEXT
 );
 
 -- The cap's own subquery counts this account's claimed slots on every cleared

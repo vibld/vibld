@@ -139,6 +139,12 @@ export async function resumeStrandedPayouts(
 
   for (const referredUserId of stranded) {
     try {
+      // Stamped before the attempt, so a row that throws moves to the back of
+      // the queue instead of holding the front of it for ever.
+      await deps.referrals.markAttempted(
+        referredUserId,
+        (deps.now ?? new Date()).toISOString(),
+      );
       const outcome = await payReferralIfEarned(deps, referredUserId);
       if (outcome.paid) paid += 1;
     } catch (error) {
