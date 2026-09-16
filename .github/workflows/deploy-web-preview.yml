@@ -93,11 +93,18 @@ jobs:
           # keeps one member with a newline inside it that can never match a
           # verified email: a check more generous than the thing it checks
           # passes exactly the deployments it exists to stop.
+          #
+          # The shape is `normaliseEmail`'s, which is this codebase's own
+          # answer to "could this be an address": at most 254 characters, no
+          # spaces, and a dotted domain. One `@` is not enough -- `a@b` and
+          # `.@.` both have one and no Clerk-verified email can ever equal
+          # them, so an admin list holding only those admits nobody.
           usable="$(printf '%s' "${VIBLD_PLATFORM_ADMINS:-}" | awk '
             BEGIN { RS = ","; n = 0 }
             {
               gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-              if ($0 ~ /^[^@[:space:]]+@[^@[:space:]]+$/) n++
+              if (length($0) <= 254 &&
+                  $0 ~ /^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$/) n++
             }
             END { print n + 0 }
           ')"

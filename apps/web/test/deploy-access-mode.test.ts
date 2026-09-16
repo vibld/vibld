@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
+import { normaliseEmail } from '../worker/access.ts';
 import { parsePlatformAdmins } from '../worker/platform-admins.ts';
 
 /**
@@ -163,6 +164,11 @@ describe('the access mode a deploy sets', () => {
       'chris@',
       '@example',
       'a@x.com\nb@y.com',
+      // One `@` and nothing a verified email could equal: no dotted domain
+      // at all, and a local part that is only punctuation.
+      'a@b',
+      '.@.',
+      `${'a'.repeat(250)}@x.com`,
       'chris@example.com',
       '  chris@example.com  ',
       'chris@example.com\n',
@@ -170,8 +176,12 @@ describe('the access mode a deploy sets', () => {
       'chris@example.com,someone@else.io',
       'a@x.com,\nb@y.com',
     ]) {
-      const admitted = [...parsePlatformAdmins(admins)].some((entry) =>
-        /^[^@\s]+@[^@\s]+$/.test(entry),
+      // Both halves asked of the application: `parsePlatformAdmins` for what
+      // the list means, `normaliseEmail` for whether a member could be an
+      // address at all. A predicate restated here is a predicate that drifts,
+      // which is what every finding on this step has been.
+      const admitted = [...parsePlatformAdmins(admins)].some(
+        (entry) => normaliseEmail(entry) !== null,
       );
       const result = await run(CHECK, {
         VIBLD_ACCESS_MODE: '',
