@@ -156,9 +156,15 @@ export async function replayStripeEvents(
    * One flag rather than a condition per exit, because getting this wrong
    * once per exit is exactly how this function was wrong twice. It means the
    * same thing everywhere: the cursor may not move past a page that still
-   * holds work, and the floor may not move at all. A throw and an event
-   * nobody could be attributed to are the same answer to that question, so
-   * they set the same flag.
+   * holds work, and the floor may not move at all.
+   *
+   * A throw only. An event nobody could be attributed to used to set this
+   * too, and that was wrong for a reason worth keeping written down: a
+   * permanently unattributable event would pin the sweep for ever while
+   * Stripe's retention window kept moving, so the freeze meant to save one
+   * payment would lose every later one. Those are parked instead. A throw
+   * is a bug in this deployment, is expected to be fixed, and is the case
+   * where stopping is right.
    */
   let blocked = false;
   /**
@@ -212,15 +218,31 @@ export async function replayStripeEvents(
         // the same nightly pass.
         const outcome = await applyStripeEvent(store, event);
         if (outcome === 'unresolved') {
-          // Nothing was written, so it is not done. Marking it processed on
-          // a normal return is how a real payment is lost for ever: a
+          // Nothing was written, so it is not done, and marking it processed
+          // on a normal return is how a real payment is lost for ever: a
           // missed `invoice.paid` read before the older Checkout that
           // creates its customer mapping has nobody to attribute to yet,
-          // and does once that older event is applied further down this
-          // same descent. `blocked` holds the floor so the next run comes
-          // back for it.
+          // and does once that older event is applied.
+          //
+          // It does not hold the sweep either, which is the part that took
+          // two goes to get right. Freezing looks like the safe direction
+          // and is not: Stripe keeps events about 30 days, so a freeze holds
+          // the cursor still while the retention boundary moves, and an
+          // event that can never be attributed turns one stuck event into
+          // every future payment. The freeze causes the loss it was meant to
+          // prevent.
+          //
+          // So the event is taken out of Stripe's custody and put into ours,
+          // payload and all, and `retryUnattributedEvents` comes back for it
+          // every night at no request cost. Nothing is lost and nothing is
+          // pinned.
           unresolved += 1;
-          blocked = true;
+          await store.parkUnattributedEvent(
+            event.id,
+            event.type,
+            event.created,
+            JSON.stringify(event),
+          );
           continue;
         }
         await store.markEventProcessed(event.id, event.type);
@@ -293,4 +315,70 @@ export async function replayStripeEvents(
   }
 
   return { read, applied, failed, unresolved, requests, incomplete: true };
+}
+
+export interface RetryResult {
+  /** Parked events this run looked at. */
+  tried: number;
+  /** How many of them could finally be attributed and applied. */
+  applied: number;
+  /** Still waiting for whatever would tell us whose money this is. */
+  waiting: number;
+  /** Rows that threw, left parked. */
+  failed: number;
+}
+
+/**
+ * Come back for the events nobody could be attributed to.
+ *
+ * Reads no Stripe: the payload was kept when the event was parked, which is
+ * the whole reason it was kept. So this costs a few local queries and can
+ * run every night for as long as it takes, long after Stripe has forgotten
+ * the event ever existed.
+ *
+ * Oldest first, the same ordering rule the replay uses within a page, so an
+ * older Checkout that maps a customer is applied before the invoice that
+ * needs the mapping.
+ *
+ * It never gives up. A row that cannot be attributed after a hundred nights
+ * is a question for a person, not a thing to delete: `attempts` and
+ * `first_seen_at` are there so it can be asked.
+ */
+export async function retryUnattributedEvents(
+  store: BillingStore,
+  limit = 200,
+): Promise<RetryResult> {
+  const parked = await store.listUnattributedEvents(limit);
+  let applied = 0;
+  let waiting = 0;
+  let failed = 0;
+
+  for (const row of parked) {
+    try {
+      const event = JSON.parse(row.payload) as Stripe.Event;
+      const outcome = await applyStripeEvent(store, event);
+      if (outcome === 'unresolved') {
+        // Bumps `attempts` and `last_attempt_at` through the same upsert
+        // that parked it, so how long this has been waiting is on the row.
+        await store.parkUnattributedEvent(
+          row.stripeEventId,
+          row.type,
+          row.created,
+          row.payload,
+        );
+        waiting += 1;
+        continue;
+      }
+      await store.markEventProcessed(row.stripeEventId, row.type);
+      await store.dropUnattributedEvent(row.stripeEventId);
+      applied += 1;
+    } catch (error) {
+      // Left parked on purpose. A row that throws is still money somebody
+      // paid, and the next night tries it again.
+      console.error('replay: parked event failed', row.stripeEventId, error);
+      failed += 1;
+    }
+  }
+
+  return { tried: parked.length, applied, waiting, failed };
 }

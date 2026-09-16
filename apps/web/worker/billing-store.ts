@@ -38,6 +38,17 @@ interface CustomerRow {
  * `migrations/0009_event_replay.sql` for why the floor and the top of the
  * descent are separate numbers.
  */
+/** One Stripe event whose owner this deployment could not work out yet. */
+export interface UnattributedEvent {
+  stripeEventId: string;
+  type: string;
+  created: number;
+  /** The event as Stripe sent it, so the retry does not depend on Stripe still having it. */
+  payload: string;
+  firstSeenAt: string;
+  attempts: number;
+}
+
 export interface EventReplayCursor {
   doneBelow: number;
   sweepTop: number | null;
@@ -526,6 +537,72 @@ export class BillingStore {
         cursor.sweepAfterId,
         new Date().toISOString(),
       )
+      .run();
+  }
+
+  /**
+   * Keep an event nobody could be attributed to, so the sweep can move on
+   * without it being lost.
+   *
+   * The first sighting wins for `first_seen_at`, which is what makes "this
+   * has been waiting nine days" a thing the row can say.
+   */
+  async parkUnattributedEvent(
+    stripeEventId: string,
+    type: string,
+    created: number,
+    payload: string,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_unattributed_events
+           (stripe_event_id, type, created, payload, first_seen_at,
+            last_attempt_at, attempts)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, 0)
+         ON CONFLICT(stripe_event_id) DO UPDATE SET
+           last_attempt_at = excluded.last_attempt_at,
+           attempts = billing_unattributed_events.attempts + 1`,
+      )
+      .bind(stripeEventId, type, created, payload, now)
+      .run();
+  }
+
+  /** Parked events, oldest first, which is the order they have to be applied in. */
+  async listUnattributedEvents(limit = 200): Promise<UnattributedEvent[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT stripe_event_id, type, created, payload, first_seen_at, attempts
+           FROM billing_unattributed_events
+          ORDER BY created, stripe_event_id
+          LIMIT ?1`,
+      )
+      .bind(limit)
+      .all<{
+        stripe_event_id: string;
+        type: string;
+        created: number;
+        payload: string;
+        first_seen_at: string;
+        attempts: number;
+      }>();
+    return (result.results ?? []).map((row) => ({
+      stripeEventId: row.stripe_event_id,
+      type: row.type,
+      created: row.created,
+      payload: row.payload,
+      firstSeenAt: row.first_seen_at,
+      attempts: row.attempts,
+    }));
+  }
+
+  /** Drop a parked event, once it has actually been applied. */
+  async dropUnattributedEvent(stripeEventId: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `DELETE FROM billing_unattributed_events WHERE stripe_event_id = ?1`,
+      )
+      .bind(stripeEventId)
       .run();
   }
 

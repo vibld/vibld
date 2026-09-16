@@ -10,6 +10,7 @@ import {
   REPLAYED_EVENT_TYPES,
   STRIPE_EVENTS_CURSOR,
   replayStripeEvents,
+  retryUnattributedEvents,
 } from '../worker/billing-replay.ts';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
@@ -498,14 +499,48 @@ describe('an event whose owner this deployment cannot work out yet', () => {
     const first = await replayStripeEvents(stripe, store, 1);
     assert.equal(first.unresolved, 1, 'attributed an invoice it could not');
     assert.equal(first.applied, 0);
-    assert.equal(first.incomplete, true, 'called the run complete');
     assert.equal(
       await store.wasEventProcessed('evt_invoice'),
       false,
       'marked an event done that wrote nothing',
     );
-    const held = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
-    assert.equal(held?.sweepAfterId, null, 'moved the cursor past it');
+
+    const parked = await store.listUnattributedEvents();
+    assert.equal(parked.length, 1, 'dropped an event it could not attribute');
+    assert.equal(parked[0]?.stripeEventId, 'evt_invoice');
+  });
+
+  it('does not pin the sweep while it waits', async () => {
+    // Freezing the sweep on an unattributable event looks like the safe
+    // direction and is the opposite. Stripe keeps events about 30 days, so a
+    // freeze holds the cursor still while the retention boundary moves: one
+    // event nobody can ever attribute, a subscription on a price this
+    // deployment does not know, would cost every payment missed after it.
+    // The freeze causes the loss it was meant to prevent.
+    const store = newStore();
+    const foreign = {
+      id: 'evt_foreign',
+      created: 3000,
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_x',
+          customer: 'cus_nobody',
+          amount_paid: 500,
+          amount_paid_off_stripe: 0,
+          metadata: {},
+        },
+      },
+    } as unknown as Stripe.Event;
+    const { stripe } = stripeServing([[foreign]]);
+
+    const result = await replayStripeEvents(stripe, store, 5, () => 9000);
+
+    assert.equal(result.unresolved, 1);
+    assert.equal(result.incomplete, false, 'froze the sweep on it');
+    const cursor = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+    assert.equal(cursor?.doneBelow, 9000, 'the floor never moved past it');
+    assert.equal(cursor?.sweepTop, null, 'left the descent open for ever');
   });
 
   it('resolves once the older event that maps the customer is applied', async () => {
@@ -531,16 +566,54 @@ describe('an event whose owner this deployment cannot work out yet', () => {
       [topupEvent('evt_checkout', 1000)],
     ]);
 
-    // One run over the whole descent: the invoice is unresolved, and the
+    // One run over the whole descent: the invoice is parked, and the
     // Checkout below it links the customer.
     await replayStripeEvents(stripe, store);
-    // The next run comes back for the invoice, and now there is an owner.
-    const again = await replayStripeEvents(stripe, store);
+    assert.equal((await store.listUnattributedEvents()).length, 1);
 
-    assert.equal(again.unresolved, 0, 'still could not attribute it');
+    // The local retry comes back for it, and now there is an owner. No
+    // Stripe request: the payload was kept.
+    const retry = await retryUnattributedEvents(store);
+
+    assert.equal(retry.applied, 1, 'still could not attribute it');
+    assert.equal(retry.waiting, 0);
     assert.equal(await store.wasEventProcessed('evt_invoice'), true);
-    const cursor = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
-    assert.ok(cursor && cursor.doneBelow > 0, 'the floor never caught up');
+    assert.equal(
+      (await store.listUnattributedEvents()).length,
+      0,
+      'kept it parked after it was applied',
+    );
+    assert.equal(await store.hasClearedPayment('user_1'), true);
+  });
+
+  it('keeps waiting rather than giving up, and says how long', async () => {
+    // A row nobody can attribute is a question for a person, not a thing to
+    // delete. `attempts` and `first_seen_at` are what lets it be asked.
+    const store = newStore();
+    const foreign = {
+      id: 'evt_foreign',
+      created: 3000,
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: 'in_x',
+          customer: 'cus_nobody',
+          amount_paid: 500,
+          amount_paid_off_stripe: 0,
+          metadata: {},
+        },
+      },
+    } as unknown as Stripe.Event;
+    const { stripe } = stripeServing([[foreign]]);
+    await replayStripeEvents(stripe, store);
+
+    await retryUnattributedEvents(store);
+    const second = await retryUnattributedEvents(store);
+
+    assert.equal(second.waiting, 1, 'threw away money it could not name');
+    const [row] = await store.listUnattributedEvents();
+    assert.ok(row && row.attempts >= 2, 'cannot say how long it has waited');
+    assert.equal(await store.wasEventProcessed('evt_foreign'), false);
   });
 });
 

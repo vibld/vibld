@@ -100,7 +100,10 @@ import {
   handleGitHubPush,
   handleGitHubStatus,
 } from './github-handlers.ts';
-import { replayStripeEvents } from './billing-replay.ts';
+import {
+  replayStripeEvents,
+  retryUnattributedEvents,
+} from './billing-replay.ts';
 import { createStripeClient } from './stripe-client.ts';
 import { isGated } from './access-gate.ts';
 import {
@@ -1533,6 +1536,18 @@ export default {
                 JSON.stringify({ event: 'billing.replayed', ...result }),
               ),
             (error: unknown) => console.error('billing replay failed', error),
+          )
+          // Then the events parked because nobody could be attributed to
+          // them. No Stripe requests: the payloads were kept, so this keeps
+          // working long after Stripe has forgotten the events existed.
+          .then(() => retryUnattributedEvents(billing))
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'billing.unattributed', ...result }),
+              ),
+            (error: unknown) =>
+              console.error('unattributed retry failed', error),
           )
           // Then every referral payout that is owed and has not happened.
           // Stripe's redelivery gives up after a few days and a delivery that
