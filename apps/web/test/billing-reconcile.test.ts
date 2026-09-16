@@ -451,6 +451,28 @@ describe('Stripe pagination that does not advance', () => {
     },
   };
 
+  it('reports an empty page that claims more as truncated too', async () => {
+    // The other shape of "there is more and I cannot reach it": a page with
+    // nothing in it to take a cursor from. Exiting quietly here is the same
+    // silent stall as a repeated cursor, and it was still classified as a
+    // clean end after the repeated-cursor case was fixed.
+    const store = new BillingStore(new SqliteD1Database(SCHEMA));
+    const stripe = {
+      subscriptions: {
+        async list() {
+          return { data: [], has_more: true };
+        },
+        async retrieve() {
+          return subscription;
+        },
+      },
+    } as unknown as Stripe;
+
+    const result = await reconcileSubscriptions(stripe, store);
+
+    assert.ok(result.failed > 0, 'an empty has-more page reported success');
+  });
+
   it('reports a stuck discovery cursor as a failure, not a clean short run', async () => {
     // Breaking out of the loop stops the spin. Reporting it is what stops
     // the stall being invisible: otherwise every night reads the same

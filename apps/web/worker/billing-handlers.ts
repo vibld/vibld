@@ -427,16 +427,21 @@ async function discoverSubscriptionIds(
         discovered += 1;
       }
     }
+    // Stripe saying there is no more is the only clean end.
+    if (!page.has_more) break;
+
+    // Everything else is "there is more and I cannot reach it", which is
+    // one condition with two shapes: a page with nothing to take a cursor
+    // from, and a cursor identical to the one just used, which would
+    // return this same page for ever.
+    //
+    // Both have to report it. Breaking out stops the spin; `truncated` is
+    // what stops the stall being invisible. Returning a short list as
+    // though it were the whole one means every night reads the same first
+    // pages, stops at the same place, logs success, and every subscription
+    // behind that page goes unreconciled with nothing anywhere saying so.
     const last = page.data[page.data.length - 1];
-    if (!page.has_more || !last) break;
-    // A cursor that does not move means the next request returns this same
-    // page for ever. Breaking out of the loop stops the spin; reporting it
-    // is what stops the stall being invisible. Without `truncated` this
-    // returns a short list as though it were the whole one, so every night
-    // reads the same first pages, stops at the same place, logs success,
-    // and every subscription behind that page goes unreconciled with
-    // nothing anywhere saying so.
-    if (last.id === startingAfter) {
+    if (!last || last.id === startingAfter) {
       return { ids: [...ids], discovered, truncated: true };
     }
     startingAfter = last.id;
