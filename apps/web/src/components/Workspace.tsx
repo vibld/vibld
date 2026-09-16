@@ -10,6 +10,7 @@ import { CodeViewer } from './CodeViewer.tsx';
 import { ExportButton } from './ExportButton.tsx';
 import { FileList } from './FileList.tsx';
 import { PreviewPanel } from './PreviewPanel.tsx';
+import { noteFor } from '../generation/pane-gaps.ts';
 import { PublishButton } from './PublishButton.tsx';
 import { GitHubPushButton } from './GitHubPushButton.tsx';
 
@@ -192,10 +193,7 @@ export function Workspace({ state }: { state: BuilderState }) {
         {activeTab === 'console' ? (
           <div className="console">
             <h2 className="pane-title">Console</h2>
-            <p className="pane-note">
-              Generation lifecycle events. Sandbox execution exists; its process
-              output is not piped here yet.
-            </p>
+            <p className="pane-note">{noteFor('console')}</p>
             {state.timeline.length === 0 ? (
               <p className="empty">No events yet.</p>
             ) : (
@@ -216,11 +214,7 @@ export function Workspace({ state }: { state: BuilderState }) {
         {activeTab === 'problems' ? (
           <div className="problems">
             <h2 className="pane-title">Problems</h2>
-            <p className="pane-note">
-              Validation findings for the staged project. Sandbox execution
-              exists; its install, build and type errors are not reported here
-              yet.
-            </p>
+            <p className="pane-note">{noteFor('problems')}</p>
             {state.problems.length === 0 ? (
               <p className="empty">No problems reported.</p>
             ) : (
