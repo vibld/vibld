@@ -179,8 +179,24 @@ has been invited.
 
 ### Running the list
 
+An admin gets an **Admin: invites** panel in the builder shell, which lists
+every invite with what it currently is (waiting, in, withdrawn) and carries
+the two acts that change it. That panel is the way in: without it, letting
+somebody in would mean constructing an authenticated POST by hand.
+
+It is careful about what it claims, because this list is what decides who may
+use the product. Issuing has three outcomes and they are reported apart: a new
+invite, a withdrawn one put back, and an address already on the list where
+nothing changed. A withdrawal that moved no row says so rather than reporting
+success.
+
+Underneath:
+
 - `GET /api/access/status` -- what the shell asks to decide which screen to
-  render. The endpoints are the boundary either way (ADR-0006).
+  render. The endpoints are the boundary either way (ADR-0006). A failure to
+  answer is not a refusal: the shell keeps the builder shut and says the check
+  could not be made, with a way to try again, rather than telling an invited
+  account it is on a waiting list.
 - `GET /api/admin/invites` -- the list, never-used invites first.
 - `POST /api/admin/invite` `{ email }` -- issue one. Re-issuing an existing
   invite does nothing and says so; reinstating a revoked one is reported as
@@ -188,7 +204,23 @@ has been invited.
 - `POST /api/admin/invite/revoke` `{ email }` -- withdraw one. The row stays,
   so the record of what was authorised stays readable.
 
-All three are behind the platform-admin check, not the invite gate.
+All four are behind the platform-admin check, not the invite gate.
+
+### Deploying it
+
+The deploy workflow writes `VIBLD_ACCESS_MODE` explicitly rather than leaving
+it absent, so opening a deployment is a deliberate act the run records and
+closing it again is possible from the same place. It comes from the
+`VIBLD_ACCESS_MODE` secret on the workflow's environment; anything that is not
+exactly `open` deploys invite-only, and a value that looks like it meant to
+open the deployment (`OPEN`, `open `) is warned about in the run rather than
+silently treated as closed.
+
+**A closed deployment with no `VIBLD_PLATFORM_ADMINS` fails the deploy.** That
+combination admits nobody and gives nobody the ability to issue an invite,
+since the only door is the admin panel and that secret is the only key to it.
+It is a product that is down while looking deployed, and it is cheaper to stop
+at the workflow than to discover it from the outside.
 
 ## Model generation (optional)
 

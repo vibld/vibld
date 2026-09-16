@@ -1,0 +1,187 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, writeFile, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, it } from 'node:test';
+
+/**
+ * The deploy step that decides whether a deployment is open, and refuses one
+ * nobody could ever open.
+ *
+ * Tested by running the step's own shell rather than by reading it, because
+ * the thing worth knowing is what it does with a given set of secrets, and a
+ * grep for "exit 1" would pass against a script that never reaches it.
+ *
+ * The one piece that is structural is the ordering: a check that runs after
+ * the deploy has already happened is not a check, and the YAML is the only
+ * place that says which comes first.
+ */
+
+const WORKFLOW = fileURLToPath(
+  new URL('../../../.github/workflows/deploy-web-preview.yml', import.meta.url),
+);
+
+async function workflow(): Promise<string> {
+  return readFile(WORKFLOW, 'utf8');
+}
+
+/**
+ * The `run:` block of a named step, dedented.
+ *
+ * Extracted textually rather than through a YAML parser: this repository has
+ * no YAML dependency, and the alternative is adding one to read a single
+ * literal block.
+ */
+async function stepScript(name: string): Promise<string> {
+  const source = await workflow();
+  const start = source.indexOf(`- name: ${name}`);
+  assert.ok(start > 0, `no step named ${name}`);
+  const body = source.slice(start);
+  const runAt = body.indexOf('run: |\n');
+  assert.ok(runAt > 0, `${name} has no literal run block`);
+  const lines = body.slice(runAt + 'run: |\n'.length).split('\n');
+  const indent = (lines[0] ?? '').match(/^ */)?.[0].length ?? 0;
+  assert.ok(indent > 0, 'expected an indented block');
+  const out: string[] = [];
+  for (const line of lines) {
+    if (line.trim() !== '' && (line.match(/^ */)?.[0].length ?? 0) < indent) {
+      break;
+    }
+    out.push(line.slice(indent));
+  }
+  return out.join('\n');
+}
+
+interface Run {
+  code: number;
+  stdout: string;
+  stderr: string;
+  summary: string;
+  wrangler: string;
+}
+
+/**
+ * Run the step with a given environment.
+ *
+ * `pnpm` is stubbed, because the step's job is to decide and to say; whether
+ * Cloudflare accepts the value is not what is under test and cannot be
+ * reached from here anyway. The stub records what it was told to put, and
+ * its stdin, so "did it set the mode to open" is answerable.
+ */
+async function run(env: Record<string, string>): Promise<Run> {
+  const dir = await mkdtemp(join(tmpdir(), 'vibld-deploy-'));
+  const summary = join(dir, 'summary.md');
+  const wrangler = join(dir, 'wrangler.log');
+  const shim = join(dir, 'pnpm');
+  await writeFile(
+    shim,
+    `#!/bin/sh\nprintf '%s ' "$@" >> ${wrangler}\ncat >> ${wrangler}\nprintf '\\n' >> ${wrangler}\n`,
+  );
+  await chmod(shim, 0o755);
+  await writeFile(summary, '');
+  await writeFile(wrangler, '');
+
+  const script = await stepScript('Sync the access mode');
+  const result = await new Promise<{
+    code: number;
+    stdout: string;
+    stderr: string;
+  }>((resolve) => {
+    execFile(
+      'bash',
+      ['-c', script],
+      {
+        env: {
+          PATH: `${dir}:${process.env.PATH ?? ''}`,
+          GITHUB_STEP_SUMMARY: summary,
+          ...env,
+        },
+      },
+      (error, stdout, stderr) => {
+        const code =
+          error && typeof (error as { code?: unknown }).code === 'number'
+            ? (error as { code: number }).code
+            : error
+              ? 1
+              : 0;
+        resolve({ code, stdout, stderr });
+      },
+    );
+  });
+
+  return {
+    ...result,
+    summary: await readFile(summary, 'utf8'),
+    wrangler: await readFile(wrangler, 'utf8'),
+  };
+}
+
+describe('the access mode a deploy sets', () => {
+  it('refuses a closed deployment that nobody could open', async () => {
+    // The failure this exists for. Invite-only with no platform admin
+    // admits nobody and gives nobody the ability to issue an invite: the
+    // only door is the admin panel and this secret is the only key. Green
+    // and locked out is the worst of the outcomes available here.
+    const result = await run({
+      VIBLD_ACCESS_MODE: '',
+      VIBLD_PLATFORM_ADMINS: '',
+    });
+
+    assert.equal(result.code, 1, 'deployed a product nobody can get into');
+    assert.match(result.stdout + result.stderr, /VIBLD_PLATFORM_ADMINS/);
+    assert.equal(result.wrangler, '', 'set the mode before refusing');
+  });
+
+  it('is invite-only when nothing says otherwise', async () => {
+    // Unset is the launch state, and it is written rather than left absent
+    // so that going back to closed is possible from here.
+    const result = await run({
+      VIBLD_ACCESS_MODE: '',
+      VIBLD_PLATFORM_ADMINS: 'chris@example.com',
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.wrangler, /VIBLD_ACCESS_MODE/);
+    assert.match(result.wrangler, /invite/);
+    assert.doesNotMatch(result.wrangler, /open/);
+    assert.match(result.summary, /INVITE ONLY/);
+  });
+
+  it('opens only on the exact word, and says when it did not', async () => {
+    // The Worker compares the raw value, so ` OPEN ` is invite-only there.
+    // A deployment that was meant to open and did not is worth seeing in
+    // the run rather than discovering from the door.
+    for (const mode of ['OPEN', ' open', 'open ', 'opne', 'true']) {
+      const result = await run({
+        VIBLD_ACCESS_MODE: mode,
+        VIBLD_PLATFORM_ADMINS: 'chris@example.com',
+      });
+      assert.equal(result.code, 0, mode);
+      assert.match(result.summary, /INVITE ONLY/, mode);
+      assert.match(result.stdout, /::warning::/, `${mode} passed silently`);
+    }
+
+    const opened = await run({
+      VIBLD_ACCESS_MODE: 'open',
+      VIBLD_PLATFORM_ADMINS: '',
+    });
+    assert.equal(opened.code, 0);
+    assert.match(opened.summary, /OPEN/);
+    // No admin required to open a deployment: an open one needs nobody to
+    // issue invites, so the refusal above would be answering a question
+    // this deployment does not ask.
+    assert.match(opened.wrangler, /open/);
+  });
+
+  it('decides before anything is deployed', async () => {
+    // A refusal that runs after the deploy is not a refusal. The order
+    // lives in the YAML and nowhere else.
+    const source = await workflow();
+    const gate = source.indexOf('- name: Sync the access mode');
+    const deploy = source.indexOf('- name: Deploy to Cloudflare Workers');
+    assert.ok(gate > 0 && deploy > 0);
+    assert.ok(gate < deploy, 'the access mode is decided after the deploy');
+  });
+});

@@ -364,6 +364,52 @@ jobs:
             echo "CLERK_SECRET_KEY not set -- /api/admin/* stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The invite gate (apps/web/worker/access-gate.ts). Unset means
+      # invite-only, which is the launch state and the safe default, and the
+      # Worker opens only on the exact string `open`.
+      #
+      # Synced explicitly rather than left absent for two reasons. Opening a
+      # deployment becomes a deliberate act that the run records, and
+      # flipping back to closed becomes possible from here rather than only
+      # by hand in the Cloudflare dashboard.
+      #
+      # The refusal below is the one that matters. A closed deployment with
+      # no platform admin configured admits nobody and, worse, gives nobody
+      # the ability to issue an invite: the only door is the admin panel and
+      # the only key to it is this secret. That deployment is not a launch,
+      # it is an outage that looks like a launch, and it is cheaper to fail
+      # here than to discover it by being locked out of the product.
+      - name: Sync the access mode
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIBLD_ACCESS_MODE: ${{ secrets.VIBLD_ACCESS_MODE }}
+          VIBLD_PLATFORM_ADMINS: ${{ secrets.VIBLD_PLATFORM_ADMINS }}
+        run: |
+          set -euo pipefail
+          if [ "${VIBLD_ACCESS_MODE:-}" = "open" ]; then
+            printf 'open' | pnpm dlx wrangler@4.129.1 secret put VIBLD_ACCESS_MODE
+            echo "Access: OPEN. Anybody who signs up can use the builder." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Anything else is invite-only, including a typo. Said out loud
+          # rather than silently coerced, because a value that was meant to
+          # open the deployment and did not is worth seeing in the run.
+          if [ -n "${VIBLD_ACCESS_MODE:-}" ] && [ "$VIBLD_ACCESS_MODE" != "invite" ]; then
+            echo "::warning::VIBLD_ACCESS_MODE is '$VIBLD_ACCESS_MODE', which is not the exact string 'open'. This deployment stays invite-only."
+          fi
+
+          if [ -z "${VIBLD_PLATFORM_ADMINS:-}" ]; then
+            echo "::error::This deployment is invite-only and VIBLD_PLATFORM_ADMINS is empty, so nobody can reach the admin panel and nobody can issue an invite. Every account, including yours, would be refused with no way to let anybody in. Set VIBLD_PLATFORM_ADMINS on the 'preview' environment (a comma-separated list of admin email addresses) at https://github.com/vibld/vibld/settings/environments and run this workflow again."
+            exit 1
+          fi
+
+          printf 'invite' | pnpm dlx wrangler@4.129.1 secret put VIBLD_ACCESS_MODE
+          echo "Access: INVITE ONLY. Admins can issue invites from the builder." >> "$GITHUB_STEP_SUMMARY"
+
       # Idempotent -- wrangler tracks applied migrations in the database's own
       # `d1_migrations` table and only runs what is new. Runs before the
       # deploy itself so a Worker never goes live expecting a table a
