@@ -29,9 +29,12 @@ export interface Env {
   /** Workers Analytics Engine dataset. Absent in local dev; see worker/analytics.ts. */
   ANALYTICS?: AnalyticsDataset;
   /**
-   * The prerendered build, bound by wrangler.jsonc's `assets`. Only reached
-   * on a preview deployment: production routes non-API requests straight to
-   * these assets without invoking this Worker at all.
+   * The prerendered build, bound by wrangler.jsonc's `assets`.
+   *
+   * Production used to serve pages from these assets without invoking this
+   * Worker at all (`run_worker_first: ["/api/*"]`). That is no longer true,
+   * and the reason is `canonicalHost` below: a redirect can only be issued
+   * by something the request reaches, and a page request never reached here.
    *
    * Typed by the one method this file calls rather than as `Fetcher`, which
    * would mean pulling the Workers type package into an app that otherwise
@@ -50,34 +53,84 @@ export interface Env {
 }
 
 /**
- * `run_worker_first: ["/api/*"]` in wrangler.jsonc routes only that pattern
- * here; every other request is served straight from the prerendered build
- * before this Worker is ever invoked, so this fetch handler only ever needs
- * to know about `/api/*` paths.
+ * Every request arrives here now (`run_worker_first: true`), not only
+ * `/api/*`, and the site's own pages are served from the `ASSETS` binding at
+ * the bottom of this handler.
+ *
+ * That changed to make one hostname canonical. `_redirects`, the mechanism
+ * built for exactly this, cannot do it: Cloudflare documents domain-level
+ * redirects as unsupported there, and says in as many words that its rules
+ * are not applied to requests a Worker serves. A second Worker bound to
+ * `www.vibld.com` alone would have kept the apex free of invocations, but a
+ * custom domain belongs to one Worker at a time, so moving it is a step
+ * nothing in CI can take unattended, and a marketing site that is down
+ * because a deploy needed a human is worse than one that costs a Worker
+ * invocation per request.
+ *
+ * So that is the trade, stated rather than buried: every asset request on
+ * this site now runs this script. At this site's size that is a rounding
+ * error against the Workers Paid request allowance, and the thing bought
+ * with it is that `vibld.com` is the only hostname that ever answers 200.
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // First, before any route or asset. A redirect that runs after the thing
+    // it is redirecting away from has already answered is not a redirect.
+    const canonical = canonicalHost(url);
+    if (canonical) {
+      return new Response(null, {
+        // A 301 turns a POST into a GET in most clients, which for
+        // `/api/waitlist` would silently discard somebody's signup. 308 is
+        // the same permanent redirect with the method and body preserved, so
+        // the two are split by method rather than one being chosen for both.
+        // GET and HEAD keep 301 because it is the status every crawler and
+        // link checker already understands.
+        status:
+          request.method === 'GET' || request.method === 'HEAD' ? 301 : 308,
+        headers: { location: canonical },
+      });
+    }
+
     if (url.pathname === '/api/waitlist' && request.method === 'POST') {
       return handleWaitlist(request, env);
     }
     if (url.pathname === '/api/hit' && request.method === 'POST') {
       return handleHit(request, env);
     }
-    // Preview only, and last: this matches any path, so ahead of an /api/
-    // route it would serve that endpoint as a page. `wrangler.preview.jsonc`
-    // sets `run_worker_first: true`, so every request arrives here and is
-    // served from the same prerendered assets production serves, with the
-    // header that keeps a copy of the site out of the index. Production never
-    // takes this branch: VIBLD_NOINDEX is unset there, and
-    // `run_worker_first: ["/api/*"]` means a page request never reaches this
-    // Worker at all.
-    if (env.VIBLD_NOINDEX === '1' && env.ASSETS) {
-      return noindex(await env.ASSETS.fetch(request));
+
+    // Last, so an `/api/` route is never served as a page. `VIBLD_NOINDEX` is
+    // set on the preview deployment only, and keeps a byte-for-byte copy of
+    // this site out of the index; production serves the same bytes without
+    // that header.
+    if (env.ASSETS) {
+      const response = await env.ASSETS.fetch(request);
+      return env.VIBLD_NOINDEX === '1' ? noindex(response) : response;
     }
     return new Response('Not found', { status: 404 });
   },
 };
+
+/**
+ * Where this request should have gone, or null when it is already there.
+ *
+ * Only a leading `www.` is stripped, and only that: this Worker answers on
+ * `vibld.com`, on `www.vibld.com`, and on a `workers.dev` preview hostname,
+ * and the preview must keep serving itself rather than redirecting reviewers
+ * to production.
+ *
+ * The path and query survive, so a shared `www` link to a legal page or a
+ * campaign URL lands on the same page with its UTM parameters intact rather
+ * than on the home page. The fragment is not handled because it is never
+ * sent: the browser reattaches it to whatever this points at.
+ */
+export function canonicalHost(url: URL): string | null {
+  if (!url.hostname.startsWith('www.')) return null;
+  const canonical = new URL(url.toString());
+  canonical.hostname = url.hostname.slice('www.'.length);
+  return canonical.toString();
+}
 
 /**
  * The same response, told not to be indexed.

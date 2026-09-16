@@ -246,6 +246,47 @@ usually fits only its first, and GitHub is currently the only integration with
 an auth flow. Recorded so the next reader knows it was a decision taken with
 that risk in view rather than an oversight.
 
+**Referral clawback: deduct on a refund or dispute, floored at zero.** The $5
+comes back off the referrer's balance when the payment that earned it is
+refunded or disputed. If they have already spent it the balance stops at zero
+rather than going negative, so the loss is capped at what they took and
+nobody is shown a debt this product has no way to collect. The cost is that a
+referrer who spends the credit immediately keeps it, which is the deliberate
+half of the choice: recovering that dollar is worth less than never telling
+somebody they owe money.
+
+**Revoking an invite cancels a live subscription at period end.** Today
+revoking closes the door and leaves Stripe billing, so somebody can be
+charged for a month they cannot sign in to. Cancelling at period end is the
+only option that is wrong in neither direction: they keep what they already
+paid for, nothing is charged for time they cannot use, and there is no refund
+to process. Reinstating before the period ends puts it back.
+
+**The parked-payment queue: attribute, or dismiss as never ours.** An admin
+can apply a parked payment to an account by email, which pays out any referral
+it earns, or mark it permanently unattributable (a test payment, a deleted
+account). Both, rather than attribution alone, because a row that can never
+resolve is otherwise retried every night for ever with no way to end it.
+
+**www.vibld.com redirects to the apex, permanently.** One canonical hostname.
+Both hostnames were serving the site, which splits what the canonical tags
+were written to consolidate, and BRAND-01's whole premise is that this name
+needs one unambiguous entity rather than two.
+
+This one has a cost worth recording, because it is not obvious from the
+result. The marketing Worker ran on `/api/*` only, and every page came
+straight from the asset store without invoking it. A redirect can only be
+issued by something the request reaches, and Cloudflare's `_redirects` file
+cannot do domain-level redirects at all (documented, and documented again as
+never applying to Worker-served requests). A second Worker bound to www alone
+would have kept the apex free of invocations, but a custom domain belongs to
+one Worker at a time, so moving it is a step no unattended CI deploy can
+take. So `run_worker_first` is now `true` and every request to this site,
+assets included, runs the Worker. At this site's size that is a rounding
+error against the Workers Paid allowance; at a much larger one it would be
+worth revisiting with a zone-level redirect rule, which needs an API token
+this deployment does not have.
+
 ### Resolved 2026-09-09
 
 **L8 -- preview domain.** `vibld-preview.dev` is purchased and registered on Cloudflare (Chris, 2026-09-09). Confirmed this session has real, live access to that Cloudflare account -- `workers_list` returns `vibld-web-preview` alongside Chris's other projects -- but the Cloudflare Developer Platform connector available here exposes Workers, D1, R2, KV and Hyperdrive, not zone/DNS management, so there is nothing to bind yet from this side. Binding the domain is a `custom_domain` route in `wrangler.jsonc`, the same mechanism already used for `vibld.com` -- that lands when the preview Worker itself is built (item 5 in the build order below), not before, since there's no Worker yet for the domain to route to.
