@@ -147,9 +147,12 @@ function GoogleAnalytics() {
           // takes effect immediately, and without the reload that was not
           // true.
           //
-          // It cannot loop: the answer is stored before this runs, so the
-          // next document reads denied, loads nothing, and never reaches
-          // this branch.
+          // It cannot loop, though not for the reason this comment used to
+          // give. "The answer is stored before this runs" is not true when
+          // the write failed, which is the whole of `recordAnswer`'s
+          // `safeToReload`. What holds is narrower: the reload happens only
+          // when the store no longer says granted, so the next document
+          // loads nothing and never reaches this branch.
           tell('consent', 'update', consentSignals('denied'));
           break;
         case 'nothing':
