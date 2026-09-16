@@ -32,6 +32,17 @@ export interface PreviewSandbox {
   run(files: ProjectFile[], revision: string): void;
   /** Stop the running preview, if any. */
   stop(): void;
+  /**
+   * Why the last stop did not happen, or null.
+   *
+   * The screen used to clear itself either way, on the reasoning that the
+   * sandbox times out on its own eventually (L9) so a failed stop has
+   * nothing useful left to do. Eventually is not now: somebody presses Stop
+   * because they want it not running, often because a share link is serving
+   * their code to whoever has the URL, and being told it stopped when it did
+   * not is the one answer that makes them stop trying.
+   */
+  stopError: string | null;
   /** Every share grant issued for the current preview (docs/decisions.md L10). Empty once the preview itself stops or fails. */
   shares: PreviewShare[];
   sharePending: boolean;
@@ -79,6 +90,7 @@ export function usePreviewSandbox(): PreviewSandbox {
   const [status, setStatus] = useState<PreviewStatus | null>(null);
   const [ranRevision, setRanRevision] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /**
    * Whether the worker may still be holding a preview for this caller.
@@ -156,6 +168,9 @@ export function usePreviewSandbox(): PreviewSandbox {
   }
 
   async function run(files: ProjectFile[], revision: string) {
+    // A stale complaint about the last sandbox has nothing to say about
+    // this one.
+    setStopError(null);
     stopPolling();
     polls.current.supersede();
     setPending(true);
@@ -208,18 +223,26 @@ export function usePreviewSandbox(): PreviewSandbox {
   async function stop() {
     stopPolling();
     polls.current.supersede();
+    setStopError(null);
     setPending(true);
     try {
       await stopSandboxPreview();
       mayExist.current = false;
-    } catch {
-      // Best-effort for what the screen shows: the sandbox times out on its
-      // own either way (L9), so there is nothing more useful to do with a
-      // failed stop than let the UI forget about it. `mayExist` deliberately
-      // does not forget, because the next run still has to stop it first.
-    } finally {
+      // Only now. Clearing these before the request answered is what made
+      // the screen say the sandbox was gone whatever happened.
       setStatus(null);
       setRanRevision(null);
+    } catch (error) {
+      // The sandbox is still there as far as anybody knows, so the screen
+      // keeps saying so and says the stop failed. `mayExist` was never
+      // cleared on this path either, because the next run still has to stop
+      // it first; what changes is that the person is told.
+      setStopError(
+        error instanceof Error
+          ? error.message
+          : 'Could not stop the sandbox preview.',
+      );
+    } finally {
       setPending(false);
     }
   }
@@ -270,6 +293,7 @@ export function usePreviewSandbox(): PreviewSandbox {
     pending,
     run: (files, revision) => void run(files, revision),
     stop: () => void stop(),
+    stopError,
     shares,
     sharePending,
     shareError,

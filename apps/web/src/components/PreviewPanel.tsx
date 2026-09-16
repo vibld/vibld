@@ -144,6 +144,18 @@ export function PreviewPanel({
               {statusMessage}
             </p>
           ) : null}
+          {/*
+            A stop that did not happen. The sandbox is still up and still
+            serving any share link pointed at it, so the panel keeps showing
+            it and says the stop failed rather than quietly forgetting: Stop
+            is usually pressed by somebody who wants it not running, and
+            "done" is the one answer that stops them trying again.
+          */}
+          {sandbox.stopError ? (
+            <p className="pane-note pane-note--error" role="alert">
+              The sandbox is still running. {sandbox.stopError}
+            </p>
+          ) : null}
         </>
       ) : null}
 

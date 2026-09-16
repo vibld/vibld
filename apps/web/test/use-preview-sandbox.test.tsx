@@ -353,3 +353,81 @@ describe('what a running sandbox remembers', () => {
     view.unmount();
   });
 });
+
+describe('a stop that the service refused', () => {
+  it('keeps showing the sandbox, and says why it is still there', async () => {
+    // The old behaviour cleared the screen either way, arguing that the
+    // sandbox times out on its own (L9) so a failed stop had nothing left
+    // to do. Eventually is not now: any share link pointed at it keeps
+    // serving the code until then, and the person who pressed Stop has been
+    // told they are done.
+    // The flag matters: a run clears any sandbox left by an earlier session
+    // first, so failing every DELETE would fail the run rather than the
+    // stop and this test would be about the wrong thing.
+    let failStop = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    assert.equal(view.sandbox.status?.status, 'ready', 'the run itself failed');
+
+    failStop = true;
+    await view.stop();
+
+    assert.equal(
+      view.sandbox.status?.status,
+      'ready',
+      'told the user a running sandbox was gone',
+    );
+    assert.equal(view.sandbox.ranRevision, 'r1');
+    assert.match(
+      view.sandbox.stopError ?? '',
+      /preview service is unavailable/,
+      'lost the reason the service gave',
+    );
+    view.unmount();
+  });
+
+  it('clears the complaint when a new sandbox is started', async () => {
+    // It was about the last one. Leaving it up would be a different false
+    // statement from the one just fixed.
+    let failStop = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to clear');
+
+    failStop = false;
+    await view.run('r2');
+    assert.equal(view.sandbox.stopError, null);
+    view.unmount();
+  });
+
+  it('still clears it when the stop works', async () => {
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' ? reply({ ok: true }) : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    await view.stop();
+
+    assert.equal(view.sandbox.status, null);
+    assert.equal(view.sandbox.stopError, null);
+    view.unmount();
+  });
+});
