@@ -19,6 +19,7 @@
  */
 import { normaliseEmail, parseAccessMode } from '../worker/access.ts';
 import { parsePlatformAdmins } from '../worker/platform-admins.ts';
+import { usablePublishableKey } from '../src/auth/publishable-key.ts';
 
 export interface PreflightEnv {
   VIBLD_ACCESS_MODE?: string | undefined;
@@ -57,9 +58,9 @@ export function accessPreflight(env: PreflightEnv): Preflight {
    * session, sends no token, and receives 401 from everything including
    * `/api/config`. An open deployment nobody can use is not open.
    */
-  if ((env.CLERK_PUBLISHABLE_KEY ?? '') === '') {
+  if (usablePublishableKey(env.CLERK_PUBLISHABLE_KEY) === null) {
     errors.push(
-      'CLERK_PUBLISHABLE_KEY is empty, so the browser has no way to sign anybody in. This Worker always has a Clerk issuer configured, so every /api/* request would be refused for want of a token: nobody could generate anything, and on a closed deployment no admin could reach the invite panel either. ' +
+      'CLERK_PUBLISHABLE_KEY is empty or not a usable key, so the browser has no way to sign anybody in. This Worker always has a Clerk issuer configured, so every /api/* request would be refused for want of a token: nobody could generate anything, and on a closed deployment no admin could reach the invite panel either. ' +
         `Set CLERK_PUBLISHABLE_KEY (the pk_live_... key from https://dashboard.clerk.com) at ${ADMINS_URL} and run this workflow again.`,
     );
   }

@@ -65,18 +65,35 @@ describe('who the deploy thinks can get in', () => {
     // `resolvePrincipal` demands a token on every `/api/*` route and answers
     // 401 without one. An open deployment nobody can use is not open.
     for (const mode of ['', 'open']) {
-      const result = accessPreflight({
-        VIBLD_ACCESS_MODE: mode,
-        VIBLD_PLATFORM_ADMINS: 'chris@example.com',
-        CLERK_PUBLISHABLE_KEY: '',
-      });
-      assert.equal(
-        result.ok,
-        false,
-        `${mode || 'invite'} passed with no Clerk`,
-      );
-      assert.match(result.errors.join(' '), /CLERK_PUBLISHABLE_KEY/);
+      // Empty, and the shapes that are not empty and not a key either. A key
+      // of one space used to pass here and be handed to `ClerkProvider` as
+      // though it were real, which is worse than absent: absent has a
+      // fallback that renders without Clerk on purpose.
+      for (const key of ['', ' ', '\n', 'pk live key']) {
+        const result = accessPreflight({
+          VIBLD_ACCESS_MODE: mode,
+          VIBLD_PLATFORM_ADMINS: 'chris@example.com',
+          CLERK_PUBLISHABLE_KEY: key,
+        });
+        assert.equal(
+          result.ok,
+          false,
+          `${mode || 'invite'} passed with key ${JSON.stringify(key)}`,
+        );
+        assert.match(result.errors.join(' '), /CLERK_PUBLISHABLE_KEY/);
+      }
     }
+
+    // A real key with surrounding whitespace still deploys: refusing that
+    // would be this failure pointed the other way.
+    assert.equal(
+      accessPreflight({
+        VIBLD_ACCESS_MODE: 'open',
+        CLERK_PUBLISHABLE_KEY: `  ${KEY}  `,
+      }).ok,
+      true,
+      'refused a key that only needed trimming',
+    );
 
     // And with the key, an open deployment needs nothing else: it has no
     // invites to issue, so it needs nobody to issue them.
