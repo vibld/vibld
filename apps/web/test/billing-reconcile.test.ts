@@ -456,6 +456,9 @@ describe('Stripe pagination that does not advance', () => {
     // nothing in it to take a cursor from. Exiting quietly here is the same
     // silent stall as a repeated cursor, and it was still classified as a
     // clean end after the repeated-cursor case was fixed.
+    //
+    // Nothing is discovered, so no subscription is processed and the only
+    // thing that can raise `failed` is the truncation itself.
     const store = new BillingStore(new SqliteD1Database(SCHEMA));
     const stripe = {
       subscriptions: {
@@ -470,7 +473,8 @@ describe('Stripe pagination that does not advance', () => {
 
     const result = await reconcileSubscriptions(stripe, store);
 
-    assert.ok(result.failed > 0, 'an empty has-more page reported success');
+    assert.equal(result.checked, 0, 'something else was reconciled');
+    assert.equal(result.failed, 1, 'an empty has-more page reported success');
   });
 
   it('reports a stuck discovery cursor as a failure, not a clean short run', async () => {
@@ -479,6 +483,11 @@ describe('Stripe pagination that does not advance', () => {
     // first pages, stops at the same place, logs success, and every
     // subscription behind that page goes unreconciled with nothing saying
     // so.
+    //
+    // The invoice lookup has to succeed here. Without it the discovered
+    // subscription throws on a missing `invoices.list` and `failed` is 1
+    // for that reason instead, which made this pass with the truncation
+    // reporting removed entirely.
     const store = new BillingStore(new SqliteD1Database(SCHEMA));
     const stripe = {
       subscriptions: {
@@ -487,10 +496,25 @@ describe('Stripe pagination that does not advance', () => {
           return subscription;
         },
       },
+      invoices: {
+        async list() {
+          return {
+            data: [
+              {
+                id: 'in_ok',
+                amount_paid: 2000,
+                amount_paid_off_stripe: 0,
+                status_transitions: { paid_at: 1_800_000_000 },
+              },
+            ],
+            has_more: false,
+          };
+        },
+      },
     } as unknown as Stripe;
 
     const result = await reconcileSubscriptions(stripe, store);
 
-    assert.ok(result.failed > 0, 'a truncated discovery reported success');
+    assert.equal(result.failed, 1, 'the truncated discovery was not reported');
   });
 });

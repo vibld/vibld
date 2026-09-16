@@ -177,18 +177,35 @@ export class ReferralStore {
    * asks now (`CLEARED_PAYMENT_SQL`). Rows with no cleared payment are not
    * owed anything and are correctly absent: an attribution alone earns
    * nothing.
+   *
+   * The cap term is the difference between owed and merely unpaid. A
+   * referrer holding all `maxClaimed` slots cannot be given another, so
+   * `reserveSlot` refuses that row every time it is offered. Selecting it
+   * anyway means a row that can never be paid comes back every night, takes
+   * a place in the bounded batch from one that could be paid, and leaves the
+   * run reporting rows found, none paid and nothing failed, which reads as a
+   * clean night in which nothing happened.
+   *
+   * A row that already holds a slot stays selected whether or not the
+   * referrer is now at the cap, because it is not asking for a new one: it
+   * is a payout that failed after reserving, and recovering exactly those is
+   * what this sweep is for.
    */
-  async payoutsToRetry(limit: number): Promise<string[]> {
+  async payoutsToRetry(limit: number, maxClaimed: number): Promise<string[]> {
     const result = await this.#db
       .prepare(
         `SELECT referred_user_id FROM referral_attributions AS a
           WHERE a.paid_at IS NULL
             AND ${CLEARED_PAYMENT_SQL.replace(/\?1/g, 'a.referred_user_id')}
+            AND (a.claimed_at IS NOT NULL
+                 OR (SELECT COUNT(*) FROM referral_attributions AS held
+                      WHERE held.referrer_user_id = a.referrer_user_id
+                        AND held.claimed_at IS NOT NULL) < ?2)
           ORDER BY last_attempt_at IS NOT NULL, last_attempt_at,
                    claimed_at, created_at
           LIMIT ?1`,
       )
-      .bind(limit)
+      .bind(limit, maxClaimed)
       .all<{ referred_user_id: string }>();
     return (result.results ?? []).map((row) => row.referred_user_id);
   }

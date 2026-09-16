@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { BillingStore } from '../worker/billing-store.ts';
 import { ReferralStore } from '../worker/referral-store.ts';
+import { MAX_PAID_REFERRALS } from '../worker/referral.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
 
@@ -231,7 +232,9 @@ describe('ReferralStore.payoutsToRetry', () => {
     const referred = await referAll(store, 'user_owner', 2);
     await hasPaid(db, referred[0]!);
 
-    assert.deepEqual(await store.payoutsToRetry(10), [referred[0]]);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
+      referred[0],
+    ]);
   });
 
   it('leaves alone a top-up that granted credit and took no money', async () => {
@@ -250,7 +253,7 @@ describe('ReferralStore.payoutsToRetry', () => {
       '2026-09-01T00:00:00.000Z',
     );
 
-    assert.deepEqual(await store.payoutsToRetry(10), []);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
   });
 
   it('finds one whose payout failed before it ever claimed a slot', async () => {
@@ -263,7 +266,9 @@ describe('ReferralStore.payoutsToRetry', () => {
     await hasPaid(db, referred!);
 
     assert.equal((await store.attributionFor(referred!))?.claimedAt, null);
-    assert.deepEqual(await store.payoutsToRetry(10), [referred]);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
+      referred,
+    ]);
   });
 
   it('finds one for a subscriber who paid once and then cancelled', async () => {
@@ -290,7 +295,61 @@ describe('ReferralStore.payoutsToRetry', () => {
       '2026-09-01T00:00:00.000Z',
     );
 
-    assert.deepEqual(await store.payoutsToRetry(10), [referred]);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
+      referred,
+    ]);
+  });
+
+  it('leaves alone a paid referral whose referrer is already at the cap', async () => {
+    // `reserveSlot` refuses this row every time it is offered, so selecting
+    // it means a row that can never be paid comes back every night, takes a
+    // place in the bounded batch from one that could be paid, and leaves
+    // the run reporting rows found, none paid and nothing failed.
+    const { store, db } = newStoreWithDb();
+    const referred = await referAll(
+      store,
+      'user_owner',
+      MAX_PAID_REFERRALS + 1,
+    );
+    for (const id of referred) await hasPaid(db, id);
+
+    // The referrer takes every slot there is.
+    for (let i = 0; i < MAX_PAID_REFERRALS; i += 1) {
+      assert.equal(
+        await store.reserveSlot(
+          referred[i]!,
+          '2026-09-01T00:00:00.000Z',
+          MAX_PAID_REFERRALS,
+        ),
+        true,
+      );
+    }
+
+    const owed = await store.payoutsToRetry(50, MAX_PAID_REFERRALS);
+
+    assert.ok(
+      !owed.includes(referred[MAX_PAID_REFERRALS]!),
+      'offered a row the cap will refuse for ever',
+    );
+  });
+
+  it('still retries a row that already holds a slot, cap or not', async () => {
+    // Not asking for a new slot: a payout that failed after reserving one,
+    // which is exactly what this sweep exists to recover.
+    const { store, db } = newStoreWithDb();
+    const referred = await referAll(store, 'user_owner', MAX_PAID_REFERRALS);
+    for (const id of referred) await hasPaid(db, id);
+    for (const id of referred) {
+      await store.reserveSlot(
+        id,
+        '2026-09-01T00:00:00.000Z',
+        MAX_PAID_REFERRALS,
+      );
+    }
+
+    const owed = await store.payoutsToRetry(50, MAX_PAID_REFERRALS);
+
+    assert.equal(owed.length, MAX_PAID_REFERRALS, 'dropped reserved rows');
   });
 
   it('leaves alone an attribution for somebody who has not paid', async () => {
@@ -299,7 +358,7 @@ describe('ReferralStore.payoutsToRetry', () => {
     const store = newStore();
     await referAll(store, 'user_owner', 2);
 
-    assert.deepEqual(await store.payoutsToRetry(10), []);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
   });
 
   it('never pays on a checkout somebody merely started', async () => {
@@ -310,7 +369,7 @@ describe('ReferralStore.payoutsToRetry', () => {
     const [referred] = await referAll(store, 'user_owner', 1);
     await new BillingStore(db).linkCustomer(referred!, 'cus_1');
 
-    assert.deepEqual(await store.payoutsToRetry(10), []);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
   });
 
   it('leaves alone one that has already been paid', async () => {
@@ -320,7 +379,7 @@ describe('ReferralStore.payoutsToRetry', () => {
     await store.reserveSlot(referred!, AT, 5);
     await store.markPaid(referred!, AT);
 
-    assert.deepEqual(await store.payoutsToRetry(10), []);
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
   });
 
   it('honours its limit', async () => {
@@ -328,7 +387,7 @@ describe('ReferralStore.payoutsToRetry', () => {
     const referred = await referAll(store, 'user_owner', 3);
     for (const id of referred) await hasPaid(db, id);
 
-    assert.equal((await store.payoutsToRetry(2)).length, 2);
+    assert.equal((await store.payoutsToRetry(2, MAX_PAID_REFERRALS)).length, 2);
   });
 });
 
@@ -346,7 +405,7 @@ describe('ReferralStore.payoutsToRetry: ordering', () => {
     // The older one is tried and fails, so it goes to the back.
     await store.markAttempted(referred[0]!, '2026-09-16T00:00:00.000Z');
 
-    assert.deepEqual(await store.payoutsToRetry(10), [
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
       referred[1],
       referred[0],
     ]);
@@ -360,7 +419,7 @@ describe('ReferralStore.payoutsToRetry: ordering', () => {
     await store.markAttempted(referred[0]!, '2026-09-16T02:00:00.000Z');
     await store.markAttempted(referred[1]!, '2026-09-16T01:00:00.000Z');
 
-    assert.deepEqual(await store.payoutsToRetry(10), [
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), [
       referred[1],
       referred[0],
     ]);
@@ -375,9 +434,13 @@ describe('ReferralStore.payoutsToRetry: ordering', () => {
     await store.reserveSlot(referred[0]!, '2026-09-01T00:00:00.000Z', 5);
     await store.reserveSlot(referred[1]!, '2026-09-02T00:00:00.000Z', 5);
 
-    assert.deepEqual(await store.payoutsToRetry(1), [referred[0]]);
+    assert.deepEqual(await store.payoutsToRetry(1, MAX_PAID_REFERRALS), [
+      referred[0],
+    ]);
     await store.markAttempted(referred[0]!, '2026-09-16T00:00:00.000Z');
-    assert.deepEqual(await store.payoutsToRetry(1), [referred[1]]);
+    assert.deepEqual(await store.payoutsToRetry(1, MAX_PAID_REFERRALS), [
+      referred[1],
+    ]);
   });
 
   it('records the attempt on the row itself', async () => {

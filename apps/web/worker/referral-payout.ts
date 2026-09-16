@@ -138,7 +138,7 @@ export async function resumeStrandedPayouts(
   deps: PayoutDeps,
   limit = 100,
 ): Promise<ResumeResult> {
-  const owed = await deps.referrals.payoutsToRetry(limit);
+  const owed = await deps.referrals.payoutsToRetry(limit, MAX_PAID_REFERRALS);
   let paid = 0;
   let failed = 0;
 
