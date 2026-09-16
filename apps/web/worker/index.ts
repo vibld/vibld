@@ -552,10 +552,37 @@ async function handleBillingStatus(
   }
 }
 
+/**
+ * What every `/api/admin/*` route needs before it can decide anything: a
+ * list of admins to check the caller against, and the database they all
+ * read or write.
+ *
+ * `CLERK_SECRET_KEY` is deliberately not here. It buys one thing, turning a
+ * typed email into a Clerk user id, and only the two credit routes do that.
+ * Requiring it for every admin route made the invite routes answer 503 on a
+ * deployment with no credit tool configured, so an operator with a
+ * perfectly good admin list could not invite anybody and was told the
+ * credit tool was missing, which is true and not the thing they were doing.
+ * The two routes that need it check for it themselves, below.
+ */
 function adminConfigured(env: Env): boolean {
-  return Boolean(
-    env.VIBLD_PLATFORM_ADMINS && clerkLookupConfigured(env) && env.DB,
-  );
+  return Boolean(env.VIBLD_PLATFORM_ADMINS && env.DB);
+}
+
+/**
+ * The extra requirement of the credit routes, asked after the caller has
+ * been established as an admin rather than before: what a deployment has
+ * configured is not something an anonymous caller needs told.
+ */
+function creditToolDenial(env: Env): Response | null {
+  return clerkLookupConfigured(env)
+    ? null
+    : json(
+        {
+          error: 'The admin credit tool is not configured for this deployment.',
+        },
+        503,
+      );
 }
 
 /**
@@ -573,9 +600,7 @@ async function requireAdmin(
   if (!adminConfigured(env)) {
     return {
       denied: json(
-        {
-          error: 'The admin credit tool is not configured for this deployment.',
-        },
+        { error: 'Admin access is not configured for this deployment.' },
         503,
       ),
     };
@@ -604,6 +629,8 @@ async function handleAdminUser(request: Request, env: Env): Promise<Response> {
 
   const admin = await requireAdmin(request, env);
   if (admin.denied) return admin.denied;
+  const unconfigured = creditToolDenial(env);
+  if (unconfigured) return unconfigured;
 
   const email = new URL(request.url).searchParams.get('email');
   if (!email)
@@ -635,6 +662,8 @@ async function handleAdminTopup(request: Request, env: Env): Promise<Response> {
 
   const admin = await requireAdmin(request, env);
   if (admin.denied) return admin.denied;
+  const unconfigured = creditToolDenial(env);
+  if (unconfigured) return unconfigured;
 
   let body: unknown;
   try {

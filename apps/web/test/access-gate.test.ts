@@ -202,3 +202,46 @@ describe('what an ungated route is allowed to do', () => {
     assert.ok(call < write, 'the grant is written before access is decided');
   });
 });
+
+describe('what an admin route requires', () => {
+  /**
+   * The invite panel is the only way anybody is let in, and every one of its
+   * routes goes through `requireAdmin`. That check used to require
+   * `CLERK_SECRET_KEY`, which buys exactly one thing: turning a typed email
+   * into a Clerk user id, which only the two credit routes do. A deployment
+   * with a perfectly good admin list and no credit tool therefore answered
+   * 503 to every invite request and told the operator the credit tool was
+   * missing, which is true and not what they were doing.
+   *
+   * Read from the source, because `worker/index.ts` imports
+   * `cloudflare:workers` and cannot be loaded under `node --test` at all
+   * (see the router-ordering rule above for the same constraint).
+   */
+  it('does not make letting somebody in depend on the credit tool', async () => {
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const start = source.indexOf('function adminConfigured(');
+    assert.ok(start > 0, 'no adminConfigured to check');
+    const body = source.slice(start, source.indexOf('}', start));
+
+    assert.doesNotMatch(
+      body,
+      /clerkLookupConfigured/,
+      'an invite route needs the admin credit tool configured',
+    );
+    assert.match(body, /VIBLD_PLATFORM_ADMINS/);
+    assert.match(body, /env\.DB/);
+  });
+
+  it('still refuses the credit routes without it', async () => {
+    // The requirement did not go away, it moved to the two routes that
+    // actually have it. Dropping it entirely would let a credit request
+    // reach a Clerk lookup that cannot be made.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    for (const handler of ['handleAdminUser', 'handleAdminTopup']) {
+      const start = source.indexOf(`async function ${handler}(`);
+      assert.ok(start > 0, `no ${handler}`);
+      const body = source.slice(start, source.indexOf('\n}', start));
+      assert.match(body, /creditToolDenial\(env\)/, handler);
+    }
+  });
+});

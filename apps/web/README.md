@@ -204,7 +204,12 @@ Underneath:
 - `POST /api/admin/invite/revoke` `{ email }` -- withdraw one. The row stays,
   so the record of what was authorised stays readable.
 
-All four are behind the platform-admin check, not the invite gate.
+All four are behind the platform-admin check, not the invite gate. That
+check needs an admin list and a D1 binding, and deliberately not
+`CLERK_SECRET_KEY`: that secret turns a typed email into a Clerk user id,
+which only the two credit routes do. Requiring it everywhere meant a
+deployment with a good admin list and no credit tool could not invite
+anybody, and said the credit tool was missing when asked why.
 
 ### Deploying it
 
