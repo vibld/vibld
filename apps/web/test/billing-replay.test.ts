@@ -101,6 +101,10 @@ function stripeServing(pages: Stripe.Event[][]) {
       events: {
         async list(params: Stripe.EventListParams) {
           asked.push(params);
+          // A descent that goes back to the top starts this walk again, which
+          // is what re-reading the sweep means. Without it a re-walk would
+          // read nothing and a test of one could not tell the difference.
+          if (params.starting_after === undefined) next = 0;
           const data = pages[next] ?? [];
           next += 1;
           return { data, has_more: next < pages.length };
@@ -242,6 +246,57 @@ describe('an event the replay could not apply', () => {
     const cursor = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
     assert.equal(cursor?.doneBelow, 0, 'stepped over the event that failed');
     assert.ok(cursor?.sweepTop, 'closed a descent that did not finish');
+
+    // The run after it, which is where the first version of this test
+    // stopped and where the bug was. Leaving the resume point below the
+    // failed page sent the next run past the event, let it finish clean, and
+    // moved the floor over the failure anyway: the same silent loss, one run
+    // later. So the next run has to read the failed event again.
+    const again = await replayStripeEvents(stripe, store);
+    assert.equal(again.read, 1, 'never went back for the event that failed');
+    assert.equal(again.failed, 1);
+    const after = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+    assert.equal(after?.doneBelow, 0, 'moved the floor on the second run');
+  });
+
+  it('lets the floor move once the failure clears', async () => {
+    // The other half, and what makes the stall a stall rather than a
+    // deadlock: a sweep that fails is re-walked, and a re-walk that works
+    // finishes. Without this the test above is satisfied by a cursor that
+    // can never advance at all.
+    const store = newStore();
+    let broken = true;
+    const stripe = {
+      events: {
+        async list() {
+          return {
+            data: [
+              broken
+                ? ({
+                    id: 'evt_1',
+                    created: 1000,
+                    type: 'invoice.paid',
+                    data: { object: null },
+                  } as unknown as Stripe.Event)
+                : topupEvent('evt_1', 1000),
+            ],
+            has_more: false,
+          };
+        },
+      },
+    };
+
+    const failing = await replayStripeEvents(stripe, store);
+    assert.equal(failing.incomplete, true);
+
+    broken = false;
+    const clean = await replayStripeEvents(stripe, store);
+
+    assert.equal(clean.incomplete, false, 'stayed stalled after it was fixed');
+    assert.equal(await store.hasClearedPayment('user_1'), true);
+    const cursor = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
+    assert.ok(cursor && cursor.doneBelow > 0, 'floor never caught up');
+    assert.equal(cursor?.sweepTop, null);
   });
 
   it('keeps going through the rest of the page', async () => {

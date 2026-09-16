@@ -178,20 +178,36 @@ export async function replayStripeEvents(
       // The descent reached the floor, so everything below the top of this
       // sweep has now been replayed. Only here does the floor move, and it
       // moves to where the descent started rather than to where it stopped.
-      //
-      // Unless something failed. An event that threw is ground this run did
-      // not cover, and raising the floor past it would put it below the
-      // cursor for ever, which is the silent loss this module exists to
-      // prevent. The sweep is left open and the next run walks it again;
-      // everything that did apply is skipped by `wasEventProcessed`.
       if (failed === 0) {
         await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, {
           doneBelow: sweepTop,
           sweepTop: null,
           sweepAfterId: null,
         });
+        return { read, applied, failed, requests, incomplete: false };
       }
-      return { read, applied, failed, requests, incomplete: failed > 0 };
+
+      // Something threw, so this descent did not cover its ground and the
+      // floor stays where it is. The resume point has to go back to the top
+      // with it: it points below the page the failure was on, so leaving it
+      // would send the next run past the failed event, let that run finish
+      // clean, and move the floor over the event anyway. Which is the silent
+      // loss this module exists to prevent, arrived at one run later.
+      //
+      // So the whole sweep is walked again. Everything that did apply is
+      // skipped by `wasEventProcessed`, so the cost is requests rather than
+      // writes, and the deliberate consequence is that an event which fails
+      // for ever holds the floor for ever: nothing above this sweep is
+      // replayed until it is fixed. That is the trade taken on purpose. The
+      // alternative is stepping over a payment somebody made, and a stall
+      // says so every night in `failed` while a step-over says nothing at
+      // all.
+      await store.saveEventReplayCursor(STRIPE_EVENTS_CURSOR, {
+        doneBelow: cursor.doneBelow,
+        sweepTop,
+        sweepAfterId: null,
+      });
+      return { read, applied, failed, requests, incomplete: true };
     }
   }
 
