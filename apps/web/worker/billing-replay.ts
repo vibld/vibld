@@ -459,9 +459,53 @@ export function parkedReserveFor(queryBudget: number): number {
   return Math.max(MAX_QUERIES_PER_PARKED_ROW, Math.floor(queryBudget / 4));
 }
 
-/** What the replay may reserve, once the parked queue has had its share. */
+/**
+ * D1 queries one stranded referral payout costs at its worst: the attempt
+ * stamp, the attribution read, the slot claim, a credit grant for each side,
+ * then the paid mark. Read off `resumeStrandedPayouts` and
+ * `payReferralIfEarned`.
+ */
+const MAX_QUERIES_PER_PAYOUT_ROW = 6;
+
+/**
+ * How many stranded payouts one run may take on, given an allowance.
+ *
+ * The minus one is the query that selects the batch, which is paid once
+ * rather than per row.
+ */
+export function payoutBatchFor(queryBudget: number): number {
+  return Math.max(
+    0,
+    Math.floor((queryBudget - 1) / MAX_QUERIES_PER_PAYOUT_ROW),
+  );
+}
+
+/**
+ * The share held back for stranded referral payouts.
+ *
+ * Reserved off the top for the same reason the parked queue is: a payout
+ * that is owed is money somebody has already earned, so it does not wait on
+ * whatever discovery happens to leave behind. Its default batch of 100 rows
+ * costs 601 queries on its own, which is most of a Workers Paid invocation,
+ * and nothing used to bound it at all.
+ */
+export function payoutReserveFor(queryBudget: number): number {
+  return Math.max(1 + MAX_QUERIES_PER_PAYOUT_ROW, Math.floor(queryBudget / 4));
+}
+
+/**
+ * What the replay may reserve, once the two phases that pay out what is
+ * already owed have had their shares.
+ *
+ * The replay is last on purpose. It looks for money that may have been
+ * missed; the other two hand over money already established as owed, and a
+ * night that does those and reads less history is the better night.
+ */
 export function replayBudgetFor(queryBudget: number): number {
-  return Math.max(0, queryBudget - parkedReserveFor(queryBudget));
+  return Math.max(
+    0,
+    queryBudget - parkedReserveFor(queryBudget) - payoutReserveFor(queryBudget),
+  );
 }
 
 /**

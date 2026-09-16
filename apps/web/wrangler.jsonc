@@ -63,14 +63,18 @@
     // runtime reports, so it is written down here rather than guessed at.
     //
     // 500 rather than anything near 1000, and the reason is a limit of this
-    // number rather than a margin of safety. Two of the four phases in the
-    // nightly pass are bounded by it: the replay reserves a page's worst
-    // case before spending it and reports what it reserved, and the retry is
-    // sized from what is left, so those two together cannot exceed this.
-    // The other two, the referral payout resume and the subscription
-    // reconcile, are older than this budget and are not bounded by anything.
-    // What is left over is for them, and it is an estimate, not a
-    // guarantee. Raising this takes that room away from them.
+    // number rather than a margin of safety. Three of the four phases in the
+    // nightly pass are bounded by it, and it is split between them off the
+    // top rather than left over: a quarter for parked events, a quarter for
+    // stranded referral payouts, the rest for the replay. Both of the first
+    // two hand over money already established as owed, so they are served
+    // before the one that goes looking for more.
+    //
+    // The fourth, `reconcileSubscriptions`, is not bounded by anything. It
+    // reads every subscription Stripe knows about, so its cost grows with
+    // the customer base and no number here constrains it. The 500 this
+    // leaves is room for it by estimate, not by construction, and that is
+    // the whole of what is not yet guaranteed about this invocation.
     "VIBLD_REPLAY_QUERY_BUDGET": "500",
 
     // A run reserves its worst case up front -- with a 64000-token output

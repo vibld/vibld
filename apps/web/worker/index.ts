@@ -102,6 +102,8 @@ import {
 } from './github-handlers.ts';
 import {
   DEFAULT_QUERY_BUDGET,
+  payoutBatchFor,
+  payoutReserveFor,
   replayBudgetFor,
   replayStripeEvents,
   retryBatchFor,
@@ -1592,7 +1594,10 @@ export default {
           // the invocation past the limit, with every phase believing it
           // stayed inside one.
           .then((reserved) =>
-            retryUnattributedEvents(billing, retryBatchFor(budget - reserved)),
+            retryUnattributedEvents(
+              billing,
+              retryBatchFor(budget - payoutReserveFor(budget) - reserved),
+            ),
           )
           .then(
             (result) =>
@@ -1608,7 +1613,12 @@ export default {
           // stays owed and nothing revisits it. After the replay rather than
           // beside it, so a payment the replay has just recovered is paid out
           // tonight instead of tomorrow.
-          .then(() => resumeStrandedPayouts(payout))
+          .then(() =>
+            resumeStrandedPayouts(
+              payout,
+              payoutBatchFor(payoutReserveFor(budget)),
+            ),
+          )
           .then(
             (result) =>
               console.log(

@@ -10,6 +10,8 @@ import {
   DEFAULT_REQUEST_BUDGET,
   pageSizeFor,
   parkedReserveFor,
+  payoutBatchFor,
+  payoutReserveFor,
   replayBudgetFor,
   retryBatchFor,
   REPLAYED_EVENT_TYPES,
@@ -416,7 +418,7 @@ describe('what the nightly pass hands the replay', () => {
     // records the payment.
     const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
     const replay = source.indexOf('replayStripeEvents(');
-    const payouts = source.indexOf('resumeStrandedPayouts(payout)');
+    const payouts = source.indexOf('resumeStrandedPayouts(');
 
     assert.ok(replay > 0 && payouts > 0, 'the nightly pass lost a step');
     assert.ok(
@@ -930,7 +932,10 @@ describe('two phases in one invocation', () => {
     // worse than one not read yet. So the share is taken off the top rather
     // than left over, and the replay is handed the remainder.
     assert.ok(parkedReserveFor(500) >= 6);
-    assert.equal(replayBudgetFor(500), 500 - parkedReserveFor(500));
+    assert.equal(
+      replayBudgetFor(500),
+      500 - parkedReserveFor(500) - payoutReserveFor(500),
+    );
     // Never fewer than one row's worth, however small the allowance.
     assert.ok(parkedReserveFor(4) >= 6);
   });
@@ -952,26 +957,96 @@ describe('two phases in one invocation', () => {
       'utf8',
     );
 
-    assert.match(source, /retryBatchFor\(budget - reserved\)/);
+    assert.match(
+      source,
+      /retryBatchFor\(\s*budget - payoutReserveFor\(budget\) - reserved,?\s*\)/,
+      'the retry is sized from something other than what is left for it',
+    );
 
     // And the replay is *called* with the remainder. Matching the file
     // anywhere passed while the call itself took the whole allowance,
     // because `replayBudgetFor(budget)` also appears in the error handler
     // beneath it. The argument list is the thing under test, so that is what
     // is read.
-    const call = source.slice(
-      source.indexOf('replayStripeEvents('),
-      source.indexOf('.then(', source.indexOf('replayStripeEvents(')),
-    );
+    // Whitespace-collapsed rather than sliced between two landmarks. The
+    // first version of this matched the file anywhere and passed against its
+    // own mutation, and the second sliced to the next `.then(`, which the
+    // call's own argument list can contain. The argument list is what is
+    // under test, so it is read as one string.
+    const flat = source.replace(/\s+/g, ' ');
     assert.match(
-      call,
-      /replayBudgetFor\(budget\)/,
+      flat,
+      /replayStripeEvents\( stripe, billing, undefined, undefined, replayBudgetFor\(budget\), \)/,
       'the replay is handed the whole allowance again',
     );
     assert.doesNotMatch(
       source,
       /retryBatchFor\(budget\)/,
       'the retry is sized from the whole allowance again',
+    );
+  });
+});
+
+describe('the phases that hand over money already owed', () => {
+  it('reserve their shares before the replay takes any', async () => {
+    // A payout that is owed and a parked payment are both money already
+    // established. The replay goes looking for more. Leftovers were tried
+    // and do not work: a phase that reserves a worst case up front takes
+    // everything and the ones after it get nothing, every night.
+    for (const budget of [40, 120, 500, 900]) {
+      const parked = parkedReserveFor(budget);
+      const payouts = payoutReserveFor(budget);
+      assert.equal(
+        replayBudgetFor(budget),
+        Math.max(0, budget - parked - payouts),
+      );
+      assert.ok(parked >= 6, `budget ${budget} parks nothing`);
+      assert.ok(payoutBatchFor(payouts) >= 1, `budget ${budget} pays nobody`);
+    }
+  });
+
+  it('cannot together exceed the allowance', async () => {
+    // The property the whole split exists for. Three phases, one invocation,
+    // and D1 counts the invocation.
+    const store = newStore();
+    const pages = Array.from({ length: 6 }, (_, n) => [
+      topupEvent(`evt_${n}`, 100_000 - n, `user_${n}`),
+    ]);
+    const { stripe } = stripeServing(pages);
+
+    for (const budget of [40, 120, 500, 900]) {
+      const result = await replayStripeEvents(
+        stripe,
+        store,
+        20,
+        () => 5000,
+        replayBudgetFor(budget),
+      );
+      const payouts = payoutReserveFor(budget);
+      const worstRetry =
+        retryBatchFor(budget - payouts - result.queriesReserved) * 6;
+      const worstPayouts = 1 + payoutBatchFor(payouts) * 6;
+
+      assert.ok(
+        result.queriesReserved + worstRetry + worstPayouts <= budget,
+        `budget ${budget} is exceeded by the three phases that share it`,
+      );
+    }
+  });
+
+  it('is what the nightly pass actually hands the payout resume', async () => {
+    // It defaults to 100 rows at six queries each, 601 in total, which is
+    // most of a Workers Paid invocation and was bounded by nothing.
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/index.ts', import.meta.url)),
+      'utf8',
+    );
+
+    assert.match(source, /payoutBatchFor\(payoutReserveFor\(budget\)\)/);
+    assert.doesNotMatch(
+      source,
+      /resumeStrandedPayouts\(payout\)/,
+      'the payout resume takes its unbounded default again',
     );
   });
 });
