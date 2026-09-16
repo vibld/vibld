@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { appVerdict, blocking } from '../scripts/github-app-verdict.ts';
+import {
+  appVerdict,
+  blocking,
+  neverInstalled,
+} from '../scripts/github-app-verdict.ts';
 
 /**
  * Whether the App can actually do what the push path asks of it.
@@ -103,5 +107,53 @@ describe('what each installation has actually accepted', () => {
 
   it('treats installations it could not read as nothing to report', () => {
     assert.deepEqual(appVerdict(WRITE, null).lagging, []);
+  });
+});
+
+describe('an App nobody has installed', () => {
+  it('is reported, because every other signal says it works', () => {
+    // Perfect permissions, no faults, deploy green, and not one push can
+    // succeed: there is no installation for a token to be minted against.
+    const verdict = appVerdict(WRITE, []);
+    assert.equal(blocking(verdict), false);
+    assert.deepEqual(verdict.missing, []);
+    assert.deepEqual(verdict.extra, []);
+    assert.equal(neverInstalled(verdict), true);
+  });
+
+  it('is not reported once anything has installed it', () => {
+    const verdict = appVerdict(WRITE, [
+      { id: 1, account: { login: 'acme' }, permissions: WRITE },
+    ]);
+    assert.equal(neverInstalled(verdict), false);
+  });
+
+  it('counts a lagging installation as installed, since it is', () => {
+    // It cannot push either, and `lagging` already says so with the reason.
+    // Reporting both would name one installation two different ways.
+    const verdict = appVerdict(WRITE, [
+      {
+        id: 2,
+        account: { login: 'globex' },
+        permissions: { contents: 'read' },
+      },
+    ]);
+    assert.equal(neverInstalled(verdict), false);
+    assert.equal(verdict.lagging.length, 1);
+  });
+
+  it('does not claim nobody installed it when the list could not be read', () => {
+    // Null is not zero. A failed request is an unknown, and turning it into
+    // "nobody has installed this" invents a fact and sends someone to install
+    // an App they may already have.
+    const verdict = appVerdict(WRITE, null);
+    assert.equal(verdict.installed, null);
+    assert.equal(neverInstalled(verdict), false);
+  });
+
+  it('never blocks the deploy on it', () => {
+    // Installing is a click in somebody's browser, not this deployment's
+    // configuration, which is the same line `lagging` draws.
+    assert.equal(blocking(appVerdict(WRITE, [])), false);
   });
 });

@@ -23,7 +23,7 @@
  */
 import { createSign } from 'node:crypto';
 
-import { appVerdict, blocking } from './github-app-verdict.ts';
+import { appVerdict, blocking, neverInstalled } from './github-app-verdict.ts';
 import type { Installation } from './github-app-verdict.ts';
 
 const API = 'https://api.github.com';
@@ -180,12 +180,27 @@ if (summary) {
     installed.ok && installed.more
       ? ` Only the first ${installed.found.length} installations were checked.`
       : '';
+  const none = neverInstalled(verdict)
+    ? `\n\nThe App is installed on **no repository at all**, so nobody can push: there is no installation for a token to be minted against. Install it at https://github.com/apps/${app.slug}/installations/new, or from the Connect button in the builder.`
+    : '';
   const lag = verdict.lagging.length
     ? `\n\n${verdict.lagging.length} installation(s) have not accepted the App's current permissions and answer 422 on every push: ${verdict.lagging
         .map((one) => `**${one.account}** (${one.short.join(', ')})`)
         .join(', ')}.`
     : '';
-  appendFileSync(summary, `${head}${partial}${lag}\n`);
+  appendFileSync(summary, `${head}${partial}${none}${lag}\n`);
+}
+
+// Loud, and not fatal, for the same reason `lagging` is below: installing
+// the App is a click in somebody's browser rather than this deployment's
+// configuration, and a deploy that refused to ship until it happened would
+// be worse than the thing it guards against. Said, though, because
+// "Installations: 0" printed as a neutral fact is how a fully configured
+// feature stays broken without anyone noticing.
+if (neverInstalled(verdict)) {
+  console.error(
+    `::warning::${app.slug} is installed on no repository, so no push can succeed. Install it at https://github.com/apps/${app.slug}/installations/new, or use Connect in the builder.`,
+  );
 }
 
 // Loud, and not fatal. An installation that has not accepted is somebody
@@ -217,3 +232,8 @@ if (blocking(verdict)) {
 console.log(
   'Contents and pull requests are both read and write, and nothing else is held.',
 );
+if (neverInstalled(verdict)) {
+  console.log(
+    `Nothing can be pushed yet: install the App on a repository at https://github.com/apps/${app.slug}/installations/new.`,
+  );
+}

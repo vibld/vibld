@@ -32,6 +32,8 @@ export interface Verdict {
   missing: { name: string; level: string; has: string }[];
   extra: string[];
   lagging: { account: string; short: string[] }[];
+  /** How many installations exist, or null when they could not be read. */
+  installed: number | null;
 }
 
 /**
@@ -63,7 +65,35 @@ export function appVerdict(
     }))
     .filter((one) => one.short.length > 0);
 
-  return { missing, extra, lagging };
+  return {
+    missing,
+    extra,
+    lagging,
+    installed: installed === null ? null : installed.length,
+  };
+}
+
+/**
+ * Whether the App is perfectly configured and has never been installed.
+ *
+ * This is the state a fully configured deployment sits in until somebody
+ * installs the App on a repository, and it is indistinguishable from working
+ * everywhere else: every secret is set, the permissions are exactly right,
+ * the deploy is green, and the status route reports the feature as
+ * configured. Nobody can push anything, because there is no installation for
+ * a token to be minted against.
+ *
+ * It is the same shape as the signup-credit cutoff and the read-only App
+ * this file already guards: green, and silently unable to do the thing.
+ * Reading "Installations: 0" and drawing the conclusion is exactly what
+ * nobody does, so it gets said.
+ *
+ * Null is not zero. An installation list that could not be read is unknown,
+ * and claiming nobody has installed it would be inventing a fact from a
+ * failed request.
+ */
+export function neverInstalled({ installed }: Pick<Verdict, 'installed'>) {
+  return installed === 0;
 }
 
 /**
