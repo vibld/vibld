@@ -1,20 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
-const SCHEMA = [
-  '0002_billing.sql',
-  '0004_admin_credits.sql',
-  '0007_subscription_payments.sql',
-]
-  .map((name) =>
-    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
-  )
-  .join('\n');
+const SCHEMA = schemaSql();
 
 function newStore(): BillingStore {
   return new BillingStore(new SqliteD1Database(SCHEMA));
@@ -153,8 +144,6 @@ describe('BillingStore subscriptions', () => {
 
     assert.deepEqual(await store.getSubscription('sub_1'), {
       ...RECORD,
-      // Never written by the mirror, only by markSubscriptionPaid.
-      everPaidAt: null,
     });
     assert.equal(await store.getSubscription('sub_missing'), undefined);
   });
@@ -216,8 +205,6 @@ describe('BillingStore.findActiveSubscription', () => {
 
     assert.deepEqual(await store.findActiveSubscription('user_1'), {
       ...RECORD,
-      // Never written by the mirror, only by markSubscriptionPaid.
-      everPaidAt: null,
     });
   });
 

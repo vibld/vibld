@@ -41,21 +41,26 @@ export const PURCHASE_BARRIER_SQL = `(
  * referral claim and catastrophic for deciding to pay one, because it would
  * pay out on a checkout somebody abandoned.
  *
- * This is the late signal, and every term is a record that money moved:
+ * This is the late signal, and it asks for a charge rather than for a row.
+ * `billing_payments` records each settled Stripe object with what Stripe
+ * actually took, and the `> 0` is the whole point of the column:
  *
- * - a `billing_topups` row, which is only written for a settled Session
- *   (billing-events.ts checks `payment_status` first), and
- * - a subscription with `ever_paid_at`, which is written from `invoice.paid`,
- *   the only event that says an invoice was actually paid.
+ * - a Checkout fully covered by a coupon settles as `no_payment_required`,
+ * - `invoice.paid` fires for a zero-amount invoice, and
+ * - a trialing subscription reads `active` having charged nothing.
  *
- * A subscription's *current status* is deliberately not a term. It is a fact
- * about now rather than about what happened: a subscriber who paid once and
- * then cancelled reads `canceled` for ever, and reading status was exactly
- * how the recovery sweep came to skip them.
+ * Each of those is a real settlement that took no money. Treated as payment,
+ * every one of them is a way to earn referral credit for free, which on a
+ * rule that hands out credit is the direction that costs money.
+ *
+ * A subscription's *current status* is deliberately not a term, and neither
+ * is the existence of a subscription row. Status is a fact about now rather
+ * than about what happened: a subscriber who paid once and then cancelled
+ * reads `canceled` for ever, and reading status was exactly how the recovery
+ * sweep came to skip them.
  *
  * `?1` is the user id. Every statement embedding this must bind it first.
  */
 export const CLEARED_PAYMENT_SQL = `(
-     EXISTS (SELECT 1 FROM billing_topups WHERE user_id = ?1)
-  OR EXISTS (SELECT 1 FROM billing_subscriptions
-              WHERE user_id = ?1 AND ever_paid_at IS NOT NULL))`;
+  EXISTS (SELECT 1 FROM billing_payments
+           WHERE user_id = ?1 AND amount_usd_cents > 0))`;

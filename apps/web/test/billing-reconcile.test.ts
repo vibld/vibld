@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
 import { reconcileSubscriptions } from '../worker/billing-handlers.ts';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
 /**
  * The nightly pass, and the reason it now carries the referral payout too.
@@ -16,11 +15,7 @@ import { SqliteD1Database } from './fakes/sqlite-d1.ts';
  * retrying a failing one after a few days. This is the path that does not
  * depend on a delivery having happened at all.
  */
-const SCHEMA = ['0002_billing.sql', '0007_subscription_payments.sql']
-  .map((name) =>
-    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
-  )
-  .join('\n');
+const SCHEMA = schemaSql();
 
 function record(status: string) {
   return {
@@ -62,8 +57,17 @@ function subscriptionObject(status: string) {
  * `listed` defaults to everything, which is the normal case. Passing a
  * smaller set is how the discovery tests describe "Stripe knows about this
  * one and the mirror does not".
+ *
+ * `paidCents` says what each subscription's paid invoices took, defaulting
+ * to one real charge. It is what the payout now follows: an empty list is a
+ * subscription that has never been charged, and `[0]` is one whose invoice
+ * is paid in Stripe's sense and took nothing (a trial, or a full coupon).
  */
-function stripeServing(statuses: string[], listed = statuses): Stripe {
+function stripeServing(
+  statuses: string[],
+  listed = statuses,
+  paidCents: (subscriptionId: string) => number[] = () => [2000],
+): Stripe {
   return {
     subscriptions: {
       async list() {
@@ -72,6 +76,18 @@ function stripeServing(statuses: string[], listed = statuses): Stripe {
       async retrieve(id: string) {
         const status = statuses.find((candidate) => `sub_${candidate}` === id)!;
         return subscriptionObject(status);
+      },
+    },
+    invoices: {
+      async list({ subscription }: { subscription: string }) {
+        return {
+          data: paidCents(subscription).map((amount, index) => ({
+            id: `in_${subscription}_${index}`,
+            amount_paid: amount,
+            status_transitions: { paid_at: 1_800_000_000 },
+          })),
+          has_more: false,
+        };
       },
     },
   } as unknown as Stripe;
@@ -84,22 +100,59 @@ async function storeWith(statuses: string[]): Promise<BillingStore> {
 }
 
 describe('reconcileSubscriptions', () => {
-  it('offers every active subscriber to the payout, and nobody else', async () => {
+  it('offers whoever Stripe has taken money from, whatever their status now', async () => {
+    // Status was the wrong question in both directions. A subscriber who
+    // paid once and cancelled reads `canceled` for ever, and skipping them
+    // is the bug this sweep exists for; a trialing subscriber has been
+    // charged nothing, and paying on one makes the trial the thing farmed.
     const statuses = ['active', 'trialing', 'canceled'];
     const store = await storeWith(statuses);
     const offered: string[] = [];
 
     const result = await reconcileSubscriptions(
-      stripeServing(statuses),
+      stripeServing(statuses, statuses, (id) =>
+        id === 'sub_trialing' ? [] : [2000],
+      ),
       store,
       async (userId) => {
         offered.push(userId);
       },
     );
 
-    assert.deepEqual(offered, ['user_active']);
+    assert.deepEqual(offered.sort(), ['user_active', 'user_canceled']);
     assert.equal(result.checked, 3);
     assert.equal(result.failed, 0);
+  });
+
+  it('does not offer a subscriber whose paid invoices took nothing', async () => {
+    // `paid` is Stripe's word for settled, not for charged. A zero-amount
+    // invoice is paid and took no money, and treating it as a purchase is a
+    // way to earn referral credit for free.
+    const statuses = ['active'];
+    const store = await storeWith(statuses);
+    const offered: string[] = [];
+
+    await reconcileSubscriptions(
+      stripeServing(statuses, statuses, () => [0]),
+      store,
+      async (userId) => {
+        offered.push(userId);
+      },
+    );
+
+    assert.deepEqual(offered, []);
+    assert.equal(await store.hasClearedPayment('user_active'), false);
+  });
+
+  it('records the invoices it read, so the payout sweep can see them', async () => {
+    // The delivery-independent half. If `invoice.paid` never arrived,
+    // nothing local says the money cleared, and this is what repairs that.
+    const statuses = ['canceled'];
+    const store = await storeWith(statuses);
+
+    await reconcileSubscriptions(stripeServing(statuses), store);
+
+    assert.equal(await store.hasClearedPayment('user_canceled'), true);
   });
 
   it('keeps reconciling when one payout throws', async () => {

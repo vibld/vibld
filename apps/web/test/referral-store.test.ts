@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { BillingStore } from '../worker/billing-store.ts';
 import { ReferralStore } from '../worker/referral-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
 /**
  * The referral rules that are statements rather than comparisons.
@@ -21,16 +20,7 @@ import { SqliteD1Database } from './fakes/sqlite-d1.ts';
  * coupling is the fix rather than an accident, so the test schema reflects
  * it rather than working around it.
  */
-const SCHEMA = [
-  '0002_billing.sql',
-  '0004_admin_credits.sql',
-  '0006_referrals.sql',
-  '0007_subscription_payments.sql',
-]
-  .map((name) =>
-    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
-  )
-  .join('\n');
+const SCHEMA = schemaSql();
 
 const AT = '2026-09-16T00:00:00.000Z';
 
@@ -50,7 +40,17 @@ function newStoreWithDb(): { store: ReferralStore; db: SqliteD1Database } {
  * every test about what it returns has to say which accounts have paid.
  */
 async function hasPaid(db: SqliteD1Database, userId: string): Promise<void> {
-  await new BillingStore(db).recordTopup(`cs_${userId}`, userId, 'cus_1', 500);
+  const billing = new BillingStore(db);
+  // Both halves of what a settled top-up writes: the credit granted, and the
+  // money taken. Only the second is evidence of a charge -- a coupon-covered
+  // session writes the first and takes nothing.
+  await billing.recordTopup(`cs_${userId}`, userId, 'cus_1', 500);
+  await billing.recordPayment(
+    `cs_${userId}`,
+    userId,
+    500,
+    '2026-09-01T00:00:00.000Z',
+  );
 }
 
 /** `n` accounts referred by one referrer, none of them claimed yet. */
@@ -234,6 +234,25 @@ describe('ReferralStore.payoutsToRetry', () => {
     assert.deepEqual(await store.payoutsToRetry(10), [referred[0]]);
   });
 
+  it('leaves alone a top-up that granted credit and took no money', async () => {
+    // A Checkout fully covered by a coupon settles as `no_payment_required`:
+    // the credit is granted and the card is never charged. Reading the
+    // top-up row as proof of payment made a free coupon a way to earn a
+    // referral.
+    const { store, db } = newStoreWithDb();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    const billing = new BillingStore(db);
+    await billing.recordTopup('cs_free', referred!, 'cus_1', 500);
+    await billing.recordPayment(
+      'cs_free',
+      referred!,
+      0,
+      '2026-09-01T00:00:00.000Z',
+    );
+
+    assert.deepEqual(await store.payoutsToRetry(10), []);
+  });
+
   it('finds one whose payout failed before it ever claimed a slot', async () => {
     // The row the old predicate excluded, and the reason it was wrong: a
     // payout that died in the attribution read or the reservation leaves
@@ -264,7 +283,12 @@ describe('ReferralStore.payoutsToRetry', () => {
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
     });
-    await billing.markSubscriptionPaid('sub_1', '2026-09-01T00:00:00.000Z');
+    await billing.recordPayment(
+      'in_1',
+      referred!,
+      2000,
+      '2026-09-01T00:00:00.000Z',
+    );
 
     assert.deepEqual(await store.payoutsToRetry(10), [referred]);
   });

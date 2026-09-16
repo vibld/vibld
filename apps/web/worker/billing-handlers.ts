@@ -237,13 +237,15 @@ export async function reconcileSubscriptions(
   stripe: Stripe,
   store: BillingStore,
   /**
-   * Called for every subscription Stripe reports as active, so a payout whose
-   * webhook never arrived at all is still made. The webhook is the fast path;
-   * this is the one that does not depend on a delivery having happened. It is
-   * idempotent, so calling it nightly for every active subscriber costs one
-   * read each and changes nothing for the ones already paid.
+   * Called for every subscription Stripe has actually taken money for, so a
+   * payout whose webhook never arrived at all is still made. The webhook is
+   * the fast path; this is the one that does not depend on a delivery having
+   * happened, which is why it reads the invoices back from Stripe rather
+   * than trusting anything mirrored locally. It is idempotent, so calling it
+   * nightly costs one read each and changes nothing for the ones already
+   * paid.
    */
-  onActiveSubscription?: (userId: string) => Promise<void>,
+  onClearedPayment?: (userId: string) => Promise<void>,
 ): Promise<{
   checked: number;
   corrected: number;
@@ -282,19 +284,22 @@ export async function reconcileSubscriptions(
         await store.upsertSubscription(record);
         corrected += 1;
       }
-      if (record.status === 'active') {
-        // Stripe reporting a subscription active is evidence money cleared,
-        // and this is the path that runs when no delivery ever arrived to say
-        // so. Without it, a subscriber discovered here has no durable payment
-        // record and the recovery sweep cannot see them.
-        await store.markSubscriptionPaid(id, new Date().toISOString());
-      }
-      if (record.status === 'active' && onActiveSubscription) {
+      // Deliberately not gated on `record.status`. The bug this recovers
+      // from is a subscriber who paid and then cancelled: their status reads
+      // `canceled` for ever, and reading status was exactly how the sweep
+      // came to skip them. Their paid invoices are still there in Stripe.
+      const clearedUsdCents = await recordPaidInvoices(
+        stripe,
+        store,
+        id,
+        record.userId,
+      );
+      if (clearedUsdCents > 0 && onClearedPayment) {
         // Counted as a failure of this subscription's reconcile, not thrown:
         // a reward that cannot be paid tonight must not stop the remaining
         // subscriptions being corrected.
         try {
-          await onActiveSubscription(record.userId);
+          await onClearedPayment(record.userId);
         } catch (error) {
           console.error('reconcile: referral payout failed', id, error);
           failed += 1;
@@ -312,6 +317,63 @@ export async function reconcileSubscriptions(
     failed,
     discovered: ids.discovered,
   };
+}
+
+/**
+ * Mirror this subscription's paid invoices, and report what they took.
+ *
+ * The delivery-independent half of the payment record. `invoice.paid` is the
+ * fast path; if that delivery never arrived, or the endpoint was not
+ * subscribed to it, nothing local says the money cleared. Stripe still
+ * knows, so this asks Stripe.
+ *
+ * Returns the total actually taken, in USD cents, across every paid invoice
+ * on the subscription. Zero is a real answer and not an error: a trial
+ * invoice and a fully coupon-covered one are both `paid` and both took
+ * nothing, and the caller must not pay a referral on either.
+ *
+ * Writes are keyed on the invoice id, so re-running this every night
+ * re-records the same invoices as no-ops.
+ */
+async function recordPaidInvoices(
+  stripe: Stripe,
+  store: BillingStore,
+  subscriptionId: string,
+  userId: string,
+): Promise<number> {
+  let total = 0;
+  let startingAfter: string | undefined;
+
+  // Paginated explicitly, for the same reason discoverSubscriptionIds is: a
+  // long-lived subscriber has more than one page of invoices, and the first
+  // one is not the interesting one.
+  for (;;) {
+    const page = await stripe.invoices.list({
+      subscription: subscriptionId,
+      status: 'paid',
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+
+    for (const invoice of page.data) {
+      total += invoice.amount_paid;
+      if (!invoice.id) continue;
+      await store.recordPayment(
+        invoice.id,
+        userId,
+        invoice.amount_paid,
+        invoice.status_transitions?.paid_at
+          ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+          : new Date().toISOString(),
+      );
+    }
+
+    const last = page.data.at(-1);
+    if (!page.has_more || !last?.id) break;
+    startingAfter = last.id;
+  }
+
+  return total;
 }
 
 /**

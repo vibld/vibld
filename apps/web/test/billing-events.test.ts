@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
@@ -10,12 +8,9 @@ import {
 } from '../worker/billing-events.ts';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
-const SCHEMA = ['0002_billing.sql', '0007_subscription_payments.sql']
-  .map((name) =>
-    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
-  )
-  .join('\n');
+const SCHEMA = schemaSql();
 
 function newStore(): BillingStore {
   return new BillingStore(new SqliteD1Database(SCHEMA));
@@ -35,6 +30,10 @@ function checkoutSession(overrides: Record<string, unknown> = {}): unknown {
     mode: 'subscription',
     customer: 'cus_1',
     client_reference_id: 'user_1',
+    // What Stripe actually took. Separate from the credit granted, which is
+    // carried in metadata: a coupon-covered session grants credit and takes
+    // nothing.
+    amount_total: 2000,
     metadata: {},
     ...overrides,
   };
@@ -204,18 +203,24 @@ describe('applyStripeEvent: the purchase hook', () => {
     assert.deepEqual(seen, ['user_1']);
   });
 
-  it('announces a session that owed nothing to begin with', async () => {
-    // Fully covered by a coupon or a credit balance. Settled, not an edge
-    // case to skip.
+  it('grants credit for a session that owed nothing, and announces no purchase', async () => {
+    // Fully covered by a coupon or a credit balance. Settled, so the
+    // customer gets the credit they were promised; it took no money, so it
+    // is not a purchase and must not earn a referral. Announcing on it made
+    // a free coupon a way to farm the offer.
+    const store = newStore();
     const seen: string[] = [];
     await applyStripeEvent(
-      newStore(),
-      topup({ payment_status: 'no_payment_required' }),
+      store,
+      topup({ payment_status: 'no_payment_required', amount_total: 0 }),
       async (userId) => {
         seen.push(userId);
       },
     );
-    assert.deepEqual(seen, ['user_1']);
+
+    assert.notEqual(await store.totalTopupCreditMicroUsd('user_1'), 0);
+    assert.equal(await store.hasClearedPayment('user_1'), false);
+    assert.deepEqual(seen, []);
   });
 
   it('does nothing at all for a delayed payment that failed', async () => {
@@ -233,30 +238,25 @@ describe('applyStripeEvent: the purchase hook', () => {
     assert.deepEqual(seen, []);
   });
 
-  it('announces an active subscription, and not a trialing one', async () => {
-    // A trial is not money. Paying on one makes the trial the thing farmed.
-    const active: string[] = [];
-    await applyStripeEvent(
-      newStore(),
-      stripeEvent('customer.subscription.updated', subscription()),
-      async (userId) => {
-        active.push(userId);
-      },
-    );
-    assert.deepEqual(active, ['user_1']);
+  it('announces nothing for a subscription event, whatever its status', async () => {
+    // A status is not a charge. `active` was read as evidence money cleared,
+    // and it is not: a subscription covered in full by a coupon, or one
+    // whose first invoice is zero, is active having taken nothing. The
+    // announce belongs to `invoice.paid`, which carries the amount.
+    for (const status of ['active', 'trialing']) {
+      const store = newStore();
+      const seen: string[] = [];
+      await applyStripeEvent(
+        store,
+        stripeEvent('customer.subscription.updated', subscription({ status })),
+        async (userId) => {
+          seen.push(userId);
+        },
+      );
 
-    const trialing: string[] = [];
-    await applyStripeEvent(
-      newStore(),
-      stripeEvent(
-        'customer.subscription.updated',
-        subscription({ status: 'trialing' }),
-      ),
-      async (userId) => {
-        trialing.push(userId);
-      },
-    );
-    assert.deepEqual(trialing, []);
+      assert.deepEqual(seen, [], status);
+      assert.equal(await store.hasClearedPayment('user_1'), false, status);
+    }
   });
 });
 
@@ -265,34 +265,53 @@ describe('applyStripeEvent: invoice.paid', () => {
     return stripeEvent('invoice.paid', {
       id: 'in_1',
       customer: 'cus_1',
-      subscription: 'sub_1',
+      amount_paid: 2000,
       metadata: { vibld_user_id: 'user_1' },
       ...overrides,
     });
   }
 
-  it('records that the subscription has actually taken money', async () => {
+  it('records that money actually cleared, with what it took', async () => {
     // The durable signal. A subscription's current status cannot answer
     // "did they ever pay" afterwards, and this event is the only one that
     // says money moved.
     const store = newStore();
-    await store.upsertSubscription({
-      stripeSubscriptionId: 'sub_1',
-      userId: 'user_1',
-      stripeCustomerId: 'cus_1',
-      tier: 'build',
-      status: 'active',
-      priceId: 'price_build_monthly',
-      currentPeriodEnd: null,
-      cancelAtPeriodEnd: false,
-    });
 
     await applyStripeEvent(store, invoice());
 
-    assert.notEqual(
-      (await store.getSubscription('sub_1'))?.everPaidAt ?? null,
-      null,
+    assert.equal(await store.hasClearedPayment('user_1'), true);
+  });
+
+  it('records a payment for an invoice whose subscription is not mirrored yet', async () => {
+    // `invoice.paid` can arrive before `customer.subscription.created`. The
+    // record used to be a stamp on the subscription row, so this delivery
+    // updated nothing, reported nothing, and the payment was invisible to
+    // the recovery sweep for ever after.
+    const store = newStore();
+
+    await applyStripeEvent(store, invoice());
+
+    assert.equal(await store.hasClearedPayment('user_1'), true);
+    assert.equal(await store.getSubscription('sub_1'), undefined);
+  });
+
+  it('does not count a zero-amount invoice as payment', async () => {
+    // A trial invoice and a fully coupon-covered one are both `paid` in
+    // Stripe's sense and take nothing. Counting them is a way to earn
+    // referral credit without ever being charged.
+    const store = newStore();
+    const seen: string[] = [];
+
+    await applyStripeEvent(
+      store,
+      invoice({ amount_paid: 0 }),
+      async (userId) => {
+        seen.push(userId);
+      },
     );
+
+    assert.equal(await store.hasClearedPayment('user_1'), false);
+    assert.deepEqual(seen, []);
   });
 
   it('announces the purchase, which is the recovery for a missed subscription event', async () => {

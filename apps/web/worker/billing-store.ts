@@ -8,7 +8,10 @@
  * testable the same way `generation-store.ts` is: a real D1-backed schema
  * (`SqliteD1Database`), no network, no Stripe SDK.
  */
-import { PURCHASE_BARRIER_SQL } from './purchase-barrier.ts';
+import {
+  CLEARED_PAYMENT_SQL,
+  PURCHASE_BARRIER_SQL,
+} from './purchase-barrier.ts';
 
 export interface SubscriptionRecord {
   stripeSubscriptionId: string;
@@ -19,14 +22,6 @@ export interface SubscriptionRecord {
   priceId: string;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
-  /**
-   * When this subscription first took money, from `invoice.paid`.
-   *
-   * Read-only as far as `upsertSubscription` is concerned: the mirror writes
-   * status, and only `markSubscriptionPaid` writes this, so a subscription
-   * event arriving after a payment cannot erase the record of it.
-   */
-  everPaidAt?: string | null;
 }
 
 interface CustomerRow {
@@ -72,7 +67,6 @@ interface SubscriptionRow {
   price_id: string;
   current_period_end: string | null;
   cancel_at_period_end: number;
-  ever_paid_at?: string | null;
 }
 
 function toSubscriptionRecord(row: SubscriptionRow): SubscriptionRecord {
@@ -89,7 +83,6 @@ function toSubscriptionRecord(row: SubscriptionRow): SubscriptionRecord {
     priceId: row.price_id,
     currentPeriodEnd: row.current_period_end,
     cancelAtPeriodEnd: row.cancel_at_period_end !== 0,
-    everPaidAt: row.ever_paid_at ?? null,
   };
 }
 
@@ -158,9 +151,6 @@ export class BillingStore {
            price_id = excluded.price_id,
            current_period_end = excluded.current_period_end,
            cancel_at_period_end = excluded.cancel_at_period_end,
-           -- ever_paid_at is deliberately absent: the mirror writes status,
-           -- and only markSubscriptionPaid writes the payment record, so a
-           -- subscription event arriving after a payment cannot erase it.
            updated_at = excluded.updated_at`,
       )
       .bind(
@@ -183,7 +173,7 @@ export class BillingStore {
     const row = await this.#db
       .prepare(
         `SELECT stripe_subscription_id, user_id, stripe_customer_id, tier, status,
-                price_id, current_period_end, cancel_at_period_end, ever_paid_at
+                price_id, current_period_end, cancel_at_period_end
          FROM billing_subscriptions WHERE stripe_subscription_id = ?1`,
       )
       .bind(stripeSubscriptionId)
@@ -212,7 +202,7 @@ export class BillingStore {
     const row = await this.#db
       .prepare(
         `SELECT stripe_subscription_id, user_id, stripe_customer_id, tier, status,
-                price_id, current_period_end, cancel_at_period_end, ever_paid_at
+                price_id, current_period_end, cancel_at_period_end
          FROM billing_subscriptions
          WHERE user_id = ?1 AND status IN ('active', 'trialing')
          ORDER BY updated_at DESC LIMIT 1`,
@@ -368,24 +358,36 @@ export class BillingStore {
   }
 
   /**
-   * Record that a subscription has taken money at least once.
+   * Record a Stripe object that settled, and what it took.
    *
-   * Written from `invoice.paid`, which is the only event that says so, and
-   * from the nightly reconcile when Stripe reports a subscription active.
-   * `WHERE ever_paid_at IS NULL` keeps the first payment rather than the
-   * latest: the question this answers is whether money ever cleared, and
-   * the first time it did is the more useful of the two answers.
+   * `stripeObjectId` is the Checkout Session id for a top-up or the Invoice
+   * id for a subscription charge. It is the primary key, so this is a no-op
+   * on Stripe's at-least-once redelivery and on the nightly reconcile
+   * re-reading the same invoices.
+   *
+   * `amountUsdCents` is what Stripe actually took, which is not the credit
+   * granted and is legitimately zero: a coupon-covered Checkout settles as
+   * `no_payment_required` and a trial invoice is paid for nothing. Zero is
+   * recorded rather than dropped, because it happened; whether it counts as
+   * payment is `CLEARED_PAYMENT_SQL`'s decision, in one place.
+   *
+   * `ON CONFLICT DO NOTHING` keeps the first settlement rather than the
+   * latest, which is the answer the question wants.
    */
-  async markSubscriptionPaid(
-    stripeSubscriptionId: string,
+  async recordPayment(
+    stripeObjectId: string,
+    userId: string,
+    amountUsdCents: number,
     at: string,
   ): Promise<void> {
     await this.#db
       .prepare(
-        `UPDATE billing_subscriptions SET ever_paid_at = ?2
-          WHERE stripe_subscription_id = ?1 AND ever_paid_at IS NULL`,
+        `INSERT INTO billing_payments
+           (stripe_object_id, user_id, amount_usd_cents, cleared_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(stripe_object_id) DO NOTHING`,
       )
-      .bind(stripeSubscriptionId, at)
+      .bind(stripeObjectId, userId, amountUsdCents, at)
       .run();
   }
 
@@ -412,6 +414,23 @@ export class BillingStore {
   async hasBegunAPurchase(userId: string): Promise<boolean> {
     const row = await this.#db
       .prepare(`SELECT 1 AS found WHERE ${PURCHASE_BARRIER_SQL}`)
+      .bind(userId)
+      .first();
+    return row !== null;
+  }
+
+  /**
+   * Has money actually cleared for this account?
+   *
+   * The late signal, and a different question from `hasBegunAPurchase`: that
+   * one refuses a claim from somebody whose purchase is under way, this one
+   * decides whether a payout is owed. purchase-barrier.ts holds both
+   * predicates side by side and says which is which, because using the wrong
+   * one either pays out on an abandoned checkout or refuses a real customer.
+   */
+  async hasClearedPayment(userId: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(`SELECT 1 AS found WHERE ${CLEARED_PAYMENT_SQL}`)
       .bind(userId)
       .first();
     return row !== null;
