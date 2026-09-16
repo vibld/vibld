@@ -522,9 +522,13 @@ Dashboard needs no code change, only the amount to change.
   authentication. Subscribed events: `checkout.session.completed`,
   `checkout.session.async_payment_succeeded` / `.async_payment_failed`,
   `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
-  `invoice.payment_failed` (the last two are acknowledged but not yet
-  separately mirrored -- `customer.subscription.updated` already carries
-  the status change either one implies).
+  `invoice.payment_failed` (the last is acknowledged but not separately
+  mirrored -- `customer.subscription.updated` already carries the status
+  change it implies).
+
+  `invoice.paid` **is** acted on now: it is the durable record that a
+  subscription took money, and it announces the purchase itself, which is a
+  second recovery path for a missed `customer.subscription.*` delivery.
 
   The two `async_payment_*` events matter for delayed payment methods, where
   `checkout.session.completed` arrives with `payment_status: unpaid` and the
@@ -540,6 +544,14 @@ Dashboard needs no code change, only the amount to change.
   slot and was never paid is retried, and every active subscriber is offered
   the (idempotent) payout, so a delivery that was missed outright or whose
   retries ran out is still recovered.
+
+  What counts as owed is "this account has a cleared payment and no payout",
+  not "this attribution holds a cap reservation". The reservation reading
+  excluded the rows the sweep exists for: a payout that failed before taking
+  its slot leaves nothing to find. `invoice.paid` is now mirrored onto the
+  subscription as `ever_paid_at`, because a subscription's _current_ status
+  cannot answer "did they ever pay" (somebody who paid once and cancelled
+  reads `canceled` for ever), and it is the only event that says money moved.
 
   The reconcile asks Stripe which subscriptions exist rather than only
   re-reading the ones already mirrored. A subscriber whose very first

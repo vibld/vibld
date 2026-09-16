@@ -11,10 +11,11 @@ import {
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
-const SCHEMA = readFileSync(
-  join(import.meta.dirname, '..', 'migrations', '0002_billing.sql'),
-  'utf8',
-);
+const SCHEMA = ['0002_billing.sql', '0008_subscription_payments.sql']
+  .map((name) =>
+    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
+  )
+  .join('\n');
 
 function newStore(): BillingStore {
   return new BillingStore(new SqliteD1Database(SCHEMA));
@@ -256,6 +257,84 @@ describe('applyStripeEvent: the purchase hook', () => {
       },
     );
     assert.deepEqual(trialing, []);
+  });
+});
+
+describe('applyStripeEvent: invoice.paid', () => {
+  function invoice(overrides: Record<string, unknown> = {}): Stripe.Event {
+    return stripeEvent('invoice.paid', {
+      id: 'in_1',
+      customer: 'cus_1',
+      subscription: 'sub_1',
+      metadata: { vibld_user_id: 'user_1' },
+      ...overrides,
+    });
+  }
+
+  it('records that the subscription has actually taken money', async () => {
+    // The durable signal. A subscription's current status cannot answer
+    // "did they ever pay" afterwards, and this event is the only one that
+    // says money moved.
+    const store = newStore();
+    await store.upsertSubscription({
+      stripeSubscriptionId: 'sub_1',
+      userId: 'user_1',
+      stripeCustomerId: 'cus_1',
+      tier: 'build',
+      status: 'active',
+      priceId: 'price_build_monthly',
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+    });
+
+    await applyStripeEvent(store, invoice());
+
+    assert.notEqual(
+      (await store.getSubscription('sub_1'))?.everPaidAt ?? null,
+      null,
+    );
+  });
+
+  it('announces the purchase, which is the recovery for a missed subscription event', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(newStore(), invoice(), async (userId) => {
+      seen.push(userId);
+    });
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('resolves the owner from the customer when the invoice does not name one', async () => {
+    const store = newStore();
+    await store.linkCustomer('user_1', 'cus_1');
+    const seen: string[] = [];
+    await applyStripeEvent(store, invoice({ metadata: {} }), async (userId) => {
+      seen.push(userId);
+    });
+    assert.deepEqual(seen, ['user_1']);
+  });
+
+  it('announces nothing it cannot attribute', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      invoice({ metadata: {}, customer: null }),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, []);
+  });
+
+  it('handles an invoice with no subscription at all', async () => {
+    const seen: string[] = [];
+    await applyStripeEvent(
+      newStore(),
+      invoice({ subscription: null }),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+    assert.deepEqual(seen, ['user_1']);
   });
 });
 

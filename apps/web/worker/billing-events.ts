@@ -9,12 +9,12 @@ import { TOPUP_CREDIT_USD_CENTS, tierForLookupKey } from './stripe-client.ts';
  * `BillingStore`, the same way `generation-workflow.ts`'s `runGeneration` is
  * tested against a fake `GenerationStore`.
  *
- * Dispatches on `event.type`; an event this deployment does not act on
- * (`invoice.paid`, `invoice.payment_failed`) is acknowledged, not ignored --
- * `customer.subscription.updated` already carries the status change either
- * one implies (`past_due`, `unpaid`), so there is nothing further to mirror
- * yet. Kept in the switch, rather than left unsubscribed at the Stripe
- * endpoint, so adding real handling later is a case, not a re-subscription.
+ * Dispatches on `event.type`. `invoice.payment_failed` is acknowledged and
+ * not acted on: `customer.subscription.updated` already carries the status
+ * change it implies (`past_due`, `unpaid`), so there is nothing further to
+ * mirror. `invoice.paid` used to be treated the same way and is not any more,
+ * because it is the only event that records that money actually moved, and a
+ * subscription's current status cannot answer that afterwards.
  */
 
 /**
@@ -227,6 +227,67 @@ async function applySubscriptionEvent(
   }
 }
 
+/**
+ * An invoice that was actually paid.
+ *
+ * This event was acknowledged and discarded, on the reasoning that
+ * `customer.subscription.updated` already carries whatever status change an
+ * invoice implies. That is true about the status and false about the history,
+ * and the difference cost a payout: a subscriber whose first subscription
+ * event was missed and who then cancelled reads as `canceled` for ever, so
+ * nothing downstream could tell they had ever paid.
+ *
+ * It is the only event that says money moved, so it is now the durable record
+ * that it did, and it announces the purchase itself. Announcing on every
+ * paid invoice rather than only the first is safe and deliberate: the payout
+ * is idempotent per referred account, so the second invoice is a no-op and
+ * the first one nobody delivered is recovered by the next.
+ */
+async function applyInvoicePaid(
+  store: BillingStore,
+  invoice: Stripe.Invoice,
+  onPurchaseCleared?: OnPurchaseCleared,
+): Promise<void> {
+  const subscriptionId = subscriptionIdOf(invoice);
+  const stripeCustomerId = customerId(invoice.customer);
+  const userId =
+    metadataUserId(invoice.metadata ?? null) ??
+    (stripeCustomerId
+      ? await store.findUserIdForCustomer(stripeCustomerId)
+      : undefined);
+
+  if (subscriptionId) {
+    await store.markSubscriptionPaid(subscriptionId, new Date().toISOString());
+  }
+
+  // No resolvable owner means nothing to announce. Logged rather than
+  // swallowed: an invoice this deployment cannot attribute is a mirror that
+  // has drifted from Stripe, not a normal event.
+  if (!userId) {
+    console.error('stripe invoice.paid with no resolvable user id', invoice.id);
+    return;
+  }
+
+  await announcePurchase(onPurchaseCleared, userId);
+}
+
+/**
+ * The subscription an invoice belongs to, if any.
+ *
+ * Stripe has moved this field around between API versions and it can be a
+ * bare id, an expanded object, or absent on a one-off invoice, so all three
+ * are handled rather than assumed.
+ */
+function subscriptionIdOf(invoice: Stripe.Invoice): string | undefined {
+  const value = (invoice as { subscription?: unknown }).subscription;
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'id' in value) {
+    const id = (value as { id?: unknown }).id;
+    return typeof id === 'string' ? id : undefined;
+  }
+  return undefined;
+}
+
 export async function applyStripeEvent(
   store: BillingStore,
   event: Stripe.Event,
@@ -254,6 +315,8 @@ export async function applyStripeEvent(
       await applySubscriptionEvent(store, event.data.object, onPurchaseCleared);
       return;
     case 'invoice.paid':
+      await applyInvoicePaid(store, event.data.object, onPurchaseCleared);
+      return;
     case 'invoice.payment_failed':
       // See the module comment: no separate mirror yet, only acknowledged.
       return;

@@ -312,7 +312,7 @@ describe('resumeStrandedPayouts', () => {
       paid,
       attempted,
       store: {
-        async strandedPayouts() {
+        async payoutsToRetry() {
           return ids;
         },
         async attributionFor(referredUserId: string) {

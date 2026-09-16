@@ -282,6 +282,13 @@ export async function reconcileSubscriptions(
         await store.upsertSubscription(record);
         corrected += 1;
       }
+      if (record.status === 'active') {
+        // Stripe reporting a subscription active is evidence money cleared,
+        // and this is the path that runs when no delivery ever arrived to say
+        // so. Without it, a subscriber discovered here has no durable payment
+        // record and the recovery sweep cannot see them.
+        await store.markSubscriptionPaid(id, new Date().toISOString());
+      }
       if (record.status === 'active' && onActiveSubscription) {
         // Counted as a failure of this subscription's reconcile, not thrown:
         // a reward that cannot be paid tonight must not stop the remaining

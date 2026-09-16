@@ -31,3 +31,31 @@ export const PURCHASE_BARRIER_SQL = `(
   OR EXISTS (SELECT 1 FROM billing_subscriptions
               WHERE user_id = ?1
                 AND status NOT IN ('incomplete', 'incomplete_expired')))`;
+
+/**
+ * "Money has actually cleared for this account", which is a different
+ * question from the barrier above and must not be confused with it.
+ *
+ * The barrier is deliberately early: a customer row exists from the moment a
+ * Checkout is created, before Stripe can charge. That is right for refusing a
+ * referral claim and catastrophic for deciding to pay one, because it would
+ * pay out on a checkout somebody abandoned.
+ *
+ * This is the late signal, and every term is a record that money moved:
+ *
+ * - a `billing_topups` row, which is only written for a settled Session
+ *   (billing-events.ts checks `payment_status` first), and
+ * - a subscription with `ever_paid_at`, which is written from `invoice.paid`,
+ *   the only event that says an invoice was actually paid.
+ *
+ * A subscription's *current status* is deliberately not a term. It is a fact
+ * about now rather than about what happened: a subscriber who paid once and
+ * then cancelled reads `canceled` for ever, and reading status was exactly
+ * how the recovery sweep came to skip them.
+ *
+ * `?1` is the user id. Every statement embedding this must bind it first.
+ */
+export const CLEARED_PAYMENT_SQL = `(
+     EXISTS (SELECT 1 FROM billing_topups WHERE user_id = ?1)
+  OR EXISTS (SELECT 1 FROM billing_subscriptions
+              WHERE user_id = ?1 AND ever_paid_at IS NOT NULL))`;

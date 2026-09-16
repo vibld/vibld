@@ -3,7 +3,10 @@
  * and `GitHubStore` present: SQL lives here, decisions live in
  * `referral.ts`, and nothing outside this file writes these rows.
  */
-import { PURCHASE_BARRIER_SQL } from './purchase-barrier.ts';
+import {
+  CLEARED_PAYMENT_SQL,
+  PURCHASE_BARRIER_SQL,
+} from './purchase-barrier.ts';
 import { makeCode, normaliseCode } from './referral.ts';
 
 export interface AttributionRecord {
@@ -157,20 +160,32 @@ export class ReferralStore {
   }
 
   /**
-   * Attributions that claimed a slot and were never paid, oldest first.
+   * Attributions that are owed a payout and have not had one.
    *
-   * The state a payout that died between claiming and granting leaves behind.
-   * Stripe's own redelivery recovers most of them, but its retries run out
-   * after a few days, and a delivery that was never made at all is not
-   * retried by anybody. Without a sweep over these, the slot stays taken and
-   * the referral stays owed, permanently and silently.
+   * This asked for rows holding a cap reservation, which was the wrong
+   * question twice over and Codex found both:
+   *
+   * - A payout that failed **before** claiming its slot, in the attribution
+   *   read or the reservation itself, leaves `claimed_at` NULL, so the row
+   *   this exists to recover was the one it excluded. A top-up event that was
+   *   never delivered at all has the same shape.
+   * - A subscriber whose payout was never attempted was only reachable
+   *   through the reconcile, which offers the payout on *current* status, so
+   *   somebody who paid once and cancelled was never offered it.
+   *
+   * The question is "who has money cleared and no payout", so that is what it
+   * asks now (`CLEARED_PAYMENT_SQL`). Rows with no cleared payment are not
+   * owed anything and are correctly absent: an attribution alone earns
+   * nothing.
    */
-  async strandedPayouts(limit: number): Promise<string[]> {
+  async payoutsToRetry(limit: number): Promise<string[]> {
     const result = await this.#db
       .prepare(
-        `SELECT referred_user_id FROM referral_attributions
-          WHERE claimed_at IS NOT NULL AND paid_at IS NULL
-          ORDER BY last_attempt_at IS NOT NULL, last_attempt_at, claimed_at
+        `SELECT referred_user_id FROM referral_attributions AS a
+          WHERE a.paid_at IS NULL
+            AND ${CLEARED_PAYMENT_SQL.replace(/\?1/g, 'a.referred_user_id')}
+          ORDER BY last_attempt_at IS NOT NULL, last_attempt_at,
+                   claimed_at, created_at
           LIMIT ?1`,
       )
       .bind(limit)

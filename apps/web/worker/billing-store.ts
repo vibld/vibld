@@ -19,6 +19,14 @@ export interface SubscriptionRecord {
   priceId: string;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  /**
+   * When this subscription first took money, from `invoice.paid`.
+   *
+   * Read-only as far as `upsertSubscription` is concerned: the mirror writes
+   * status, and only `markSubscriptionPaid` writes this, so a subscription
+   * event arriving after a payment cannot erase the record of it.
+   */
+  everPaidAt?: string | null;
 }
 
 interface CustomerRow {
@@ -64,6 +72,7 @@ interface SubscriptionRow {
   price_id: string;
   current_period_end: string | null;
   cancel_at_period_end: number;
+  ever_paid_at?: string | null;
 }
 
 function toSubscriptionRecord(row: SubscriptionRow): SubscriptionRecord {
@@ -80,6 +89,7 @@ function toSubscriptionRecord(row: SubscriptionRow): SubscriptionRecord {
     priceId: row.price_id,
     currentPeriodEnd: row.current_period_end,
     cancelAtPeriodEnd: row.cancel_at_period_end !== 0,
+    everPaidAt: row.ever_paid_at ?? null,
   };
 }
 
@@ -137,7 +147,8 @@ export class BillingStore {
       .prepare(
         `INSERT INTO billing_subscriptions
            (stripe_subscription_id, user_id, stripe_customer_id, tier, status,
-            price_id, current_period_end, cancel_at_period_end, created_at, updated_at)
+            price_id, current_period_end, cancel_at_period_end, created_at,
+            updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
          ON CONFLICT(stripe_subscription_id) DO UPDATE SET
            user_id = excluded.user_id,
@@ -147,6 +158,9 @@ export class BillingStore {
            price_id = excluded.price_id,
            current_period_end = excluded.current_period_end,
            cancel_at_period_end = excluded.cancel_at_period_end,
+           -- ever_paid_at is deliberately absent: the mirror writes status,
+           -- and only markSubscriptionPaid writes the payment record, so a
+           -- subscription event arriving after a payment cannot erase it.
            updated_at = excluded.updated_at`,
       )
       .bind(
@@ -169,7 +183,7 @@ export class BillingStore {
     const row = await this.#db
       .prepare(
         `SELECT stripe_subscription_id, user_id, stripe_customer_id, tier, status,
-                price_id, current_period_end, cancel_at_period_end
+                price_id, current_period_end, cancel_at_period_end, ever_paid_at
          FROM billing_subscriptions WHERE stripe_subscription_id = ?1`,
       )
       .bind(stripeSubscriptionId)
@@ -198,7 +212,7 @@ export class BillingStore {
     const row = await this.#db
       .prepare(
         `SELECT stripe_subscription_id, user_id, stripe_customer_id, tier, status,
-                price_id, current_period_end, cancel_at_period_end
+                price_id, current_period_end, cancel_at_period_end, ever_paid_at
          FROM billing_subscriptions
          WHERE user_id = ?1 AND status IN ('active', 'trialing')
          ORDER BY updated_at DESC LIMIT 1`,
@@ -350,6 +364,28 @@ export class BillingStore {
         creditUsdCents,
         now,
       )
+      .run();
+  }
+
+  /**
+   * Record that a subscription has taken money at least once.
+   *
+   * Written from `invoice.paid`, which is the only event that says so, and
+   * from the nightly reconcile when Stripe reports a subscription active.
+   * `WHERE ever_paid_at IS NULL` keeps the first payment rather than the
+   * latest: the question this answers is whether money ever cleared, and
+   * the first time it did is the more useful of the two answers.
+   */
+  async markSubscriptionPaid(
+    stripeSubscriptionId: string,
+    at: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE billing_subscriptions SET ever_paid_at = ?2
+          WHERE stripe_subscription_id = ?1 AND ever_paid_at IS NULL`,
+      )
+      .bind(stripeSubscriptionId, at)
       .run();
   }
 

@@ -6,15 +6,15 @@ import { describe, it } from 'node:test';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
-const SCHEMA =
-  readFileSync(
-    join(import.meta.dirname, '..', 'migrations', '0002_billing.sql'),
-    'utf8',
-  ) +
-  readFileSync(
-    join(import.meta.dirname, '..', 'migrations', '0004_admin_credits.sql'),
-    'utf8',
-  );
+const SCHEMA = [
+  '0002_billing.sql',
+  '0004_admin_credits.sql',
+  '0008_subscription_payments.sql',
+]
+  .map((name) =>
+    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
+  )
+  .join('\n');
 
 function newStore(): BillingStore {
   return new BillingStore(new SqliteD1Database(SCHEMA));
@@ -151,7 +151,11 @@ describe('BillingStore subscriptions', () => {
     const store = newStore();
     await store.upsertSubscription(RECORD);
 
-    assert.deepEqual(await store.getSubscription('sub_1'), RECORD);
+    assert.deepEqual(await store.getSubscription('sub_1'), {
+      ...RECORD,
+      // Never written by the mirror, only by markSubscriptionPaid.
+      everPaidAt: null,
+    });
     assert.equal(await store.getSubscription('sub_missing'), undefined);
   });
 
@@ -210,7 +214,11 @@ describe('BillingStore.findActiveSubscription', () => {
     const store = newStore();
     await store.upsertSubscription(RECORD);
 
-    assert.deepEqual(await store.findActiveSubscription('user_1'), RECORD);
+    assert.deepEqual(await store.findActiveSubscription('user_1'), {
+      ...RECORD,
+      // Never written by the mirror, only by markSubscriptionPaid.
+      everPaidAt: null,
+    });
   });
 
   it('finds a trialing subscription too', async () => {
