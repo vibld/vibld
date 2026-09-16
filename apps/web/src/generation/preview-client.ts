@@ -36,7 +36,7 @@ async function authHeaders(
  * still checked rather than assumed, the same discipline
  * `detectDeploymentConfig` applies to `/api/config`.
  */
-function parseStatus(body: unknown): PreviewStatus {
+function parseStatus(body: unknown): PreviewStatus | null {
   const record = (body ?? {}) as Record<string, unknown>;
   switch (record.status) {
     case 'queued':
@@ -61,18 +61,20 @@ function parseStatus(body: unknown): PreviewStatus {
           expiresAt: record.expiresAt,
         };
       }
-      return {
-        status: 'failed',
-        error: 'The preview service returned an unexpected response.',
-      };
-    default:
+      // A ready with nowhere to point is not a ready, and it is not the
+      // service reporting a failure either. It is an answer this cannot
+      // read, which is the null below.
+      return null;
+    case 'failed':
       return {
         status: 'failed',
         error:
           typeof record.error === 'string'
             ? record.error
-            : 'The preview service returned an unexpected response.',
+            : 'The preview run failed.',
       };
+    default:
+      return null;
   }
 }
 
@@ -98,6 +100,14 @@ export async function fetchPreviewStatus(
   if (!response.ok) return null;
 
   try {
+    // `null` for an answer this cannot read, the same as for a network
+    // failure, and deliberately not a synthesised `failed`.
+    //
+    // A failed status is the service saying the sandbox is not running, and
+    // callers act on that: the poll stops asking, the panel takes the Stop
+    // button away, and an unconfirmed stop treats it as the answer that
+    // settles whether the sandbox survived. None of that is established by
+    // this client being unable to parse a 200.
     return parseStatus(await response.json());
   } catch {
     return null;
@@ -135,13 +145,17 @@ export async function startSandboxPreview(
     body: JSON.stringify({ files }),
   });
   if (!response.ok) throw new Error(await errorMessage(response));
+  const unreadable: PreviewStatus = {
+    status: 'failed',
+    error: 'The preview service returned an unreadable response.',
+  };
   try {
-    return parseStatus(await response.json());
+    // Unlike the poll, a start has to answer the person who pressed the
+    // button with something. `mayExist` is already set, so the sandbox this
+    // may have created is still stopped before the next run.
+    return parseStatus(await response.json()) ?? unreadable;
   } catch {
-    return {
-      status: 'failed',
-      error: 'The preview service returned an unreadable response.',
-    };
+    return unreadable;
   }
 }
 

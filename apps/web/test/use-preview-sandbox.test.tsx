@@ -353,3 +353,471 @@ describe('what a running sandbox remembers', () => {
     view.unmount();
   });
 });
+
+describe('a stop that the service refused', () => {
+  it('keeps showing the sandbox, and says why it is still there', async () => {
+    // The old behaviour cleared the screen either way, arguing that the
+    // sandbox times out on its own (L9) so a failed stop had nothing left
+    // to do. Eventually is not now: any share link pointed at it keeps
+    // serving the code until then, and the person who pressed Stop has been
+    // told they are done.
+    // The flag matters: a run clears any sandbox left by an earlier session
+    // first, so failing every DELETE would fail the run rather than the
+    // stop and this test would be about the wrong thing.
+    let failStop = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    assert.equal(view.sandbox.status?.status, 'ready', 'the run itself failed');
+
+    failStop = true;
+    await view.stop();
+
+    assert.equal(
+      view.sandbox.status?.status,
+      'ready',
+      'told the user a running sandbox was gone',
+    );
+    assert.equal(view.sandbox.ranRevision, 'r1');
+    assert.match(
+      view.sandbox.stopError ?? '',
+      /preview service is unavailable/,
+      'lost the reason the service gave',
+    );
+    view.unmount();
+  });
+
+  it('clears the complaint when a new sandbox is started', async () => {
+    // It was about the last one. Leaving it up would be a different false
+    // statement from the one just fixed.
+    let failStop = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to clear');
+
+    failStop = false;
+    await view.run('r2');
+    assert.equal(view.sandbox.stopError, null);
+    view.unmount();
+  });
+
+  it('still clears it when the stop works', async () => {
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' ? reply({ ok: true }) : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    await view.stop();
+
+    assert.equal(view.sandbox.status, null);
+    assert.equal(view.sandbox.stopError, null);
+    view.unmount();
+  });
+});
+
+describe('a stop pressed before the sandbox settled', () => {
+  it('starts polling again when the stop is not confirmed', async () => {
+    // Stop cancels the poll before sending the request. A sandbox still
+    // installing would otherwise sit on that word for the rest of the
+    // session, whatever became of it, and asking again is also the only
+    // thing that can resolve an unconfirmed stop.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+    assert.equal(view.sandbox.status?.status, 'installing');
+
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'the stop was taken as confirmed');
+
+    // The sandbox carried on and became ready. Without a poll the screen
+    // would still say installing.
+    phase = READY;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(
+      view.sandbox.status?.status,
+      'ready',
+      'stopped asking what happened to it',
+    );
+    view.unmount();
+  });
+
+  it('asks once about a ready sandbox, and stops when it is still there', async () => {
+    // A ready sandbox whose DELETE succeeded with the reply lost is the
+    // case that reads worst, so this asks too. It costs one request when
+    // the sandbox really is still ready: `pollUntilSettled` stops on the
+    // first settled answer rather than running for the session.
+    let failStop = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(READY),
+    });
+    const calls: string[] = [];
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+      return inner(input, init);
+    }) as typeof fetch;
+
+    const view = await mount();
+    await view.run('r1');
+    failStop = true;
+    await view.stop();
+
+    const before = calls.length;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    const afterFirst = calls.length;
+    assert.equal(afterFirst, before + 1, 'never asked what happened to it');
+
+    // And then stops, because the answer settled it.
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS * 2 + 20),
+      );
+    });
+    assert.equal(calls.length, afterFirst, 'kept polling a settled sandbox');
+    view.unmount();
+  });
+});
+
+describe('what the poll does with an unconfirmed stop', () => {
+  it('puts the warning down once the sandbox is reported gone', async () => {
+    // The DELETE was carried out and its reply lost. The poll finds no
+    // preview, which is the answer to the question the warning was asking,
+    // so the warning goes: "no preview has been started" beside "it may
+    // still be running" is the panel contradicting itself, and a failed
+    // status takes the Stop button away so nobody could clear it by hand.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to reconcile');
+
+    phase = { status: 'failed', error: 'No preview has been started.' };
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(view.sandbox.status?.status, 'failed');
+    assert.equal(
+      view.sandbox.stopError,
+      null,
+      'said the sandbox may still be running and that it does not exist',
+    );
+    view.unmount();
+  });
+
+  it('keeps the warning while the sandbox is still there', async () => {
+    // The other answer to the same question. A sandbox that reaches ready
+    // is running, so the stop plainly did not take effect and saying so is
+    // still the truth.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    await view.stop();
+
+    phase = READY;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(view.sandbox.status?.status, 'ready');
+    assert.ok(view.sandbox.stopError, 'dropped a warning that was still true');
+    view.unmount();
+  });
+});
+
+describe('an answer the poll cannot read', () => {
+  it('keeps the stop warning and keeps asking', async () => {
+    // A malformed 200 is not the service saying the sandbox stopped. Read
+    // as a failure it would take the warning down, stop the poll, and
+    // remove the Stop button, all on the strength of a body this client
+    // could not parse, while the sandbox may still be running.
+    let failStop = false;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to keep');
+
+    // Nonsense, then the truth. The poll has to survive the first to report
+    // the second.
+    phase = { status: 'ready' };
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    assert.equal(
+      view.sandbox.status?.status,
+      'installing',
+      'took the nonsense',
+    );
+    assert.ok(view.sandbox.stopError, 'dropped the warning on unreadable news');
+
+    phase = READY;
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    assert.equal(view.sandbox.status?.status, 'ready', 'stopped asking');
+    view.unmount();
+  });
+});
+
+describe('a ready sandbox whose stop was carried out but not confirmed', () => {
+  it('finds out it is gone and stops saying otherwise', async () => {
+    // The worst-reading case of all: the frame, the share list and the
+    // warning all describing something that no longer exists, with nothing
+    // asking. One poll settles it.
+    let failStop = false;
+    let phase: unknown = READY;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'DELETE' && failStop
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(phase),
+    });
+    const view = await mount();
+    await view.run('r1');
+
+    failStop = true;
+    phase = { status: 'failed', error: 'No preview has been started.' };
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to settle');
+
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+
+    assert.equal(view.sandbox.status?.status, 'failed');
+    assert.equal(view.sandbox.stopError, null, 'still warning about a ghost');
+    view.unmount();
+  });
+});
+
+describe('a status request slower than the poll interval', () => {
+  it('never has two of them in flight, and takes the answers in order', async () => {
+    // What an interval does that a chain does not. It fires on the clock
+    // whatever the last request is doing, so a slow status read leaves
+    // several requests outstanding at once, all carrying the same gate
+    // token because the gate is taken once for the whole poll. They land in
+    // whatever order the network gives them and the gate cannot tell them
+    // apart.
+    //
+    // The sequence below is the one that reads worst. The first read is
+    // slow and reports `installing`; the second is prompt and reports the
+    // sandbox gone, which is the answer to the question the warning was
+    // asking. Overlapped, the second lands first and ends the poll, and
+    // then the first overwrites it with news from before the stop: the
+    // panel says a sandbox is installing, with no warning and nothing still
+    // asking, about something that does not exist.
+    let failStop = false;
+    let slowNext = true;
+    let inFlight = 0;
+    let most = 0;
+    let phase: unknown = { status: 'installing' };
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': async (method) => {
+        if (method === 'DELETE') {
+          return failStop
+            ? reply({ error: 'The preview service is unavailable.' }, 502)
+            : reply({ ok: true });
+        }
+        if (method !== 'GET') return reply(phase);
+        inFlight += 1;
+        most = Math.max(most, inFlight);
+        // Only the first read is slow, so a second one issued while it is
+        // outstanding would answer before it.
+        const answer = phase;
+        if (slowNext) {
+          slowNext = false;
+          await new Promise((resolve) =>
+            setTimeout(resolve, POLL_INTERVAL_MS + 400),
+          );
+        }
+        inFlight -= 1;
+        return reply(answer);
+      },
+    });
+
+    const view = await mount();
+    await view.run('r1');
+    failStop = true;
+    await view.stop();
+    assert.ok(view.sandbox.stopError, 'nothing to reconcile');
+
+    phase = { status: 'failed', error: 'No preview has been started.' };
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS * 3 + 600),
+      );
+    });
+
+    assert.equal(most, 1, 'asked again while the last answer was outstanding');
+    assert.equal(
+      view.sandbox.status?.status,
+      'failed',
+      'an answer from before the stop overwrote the one that settled it',
+    );
+    assert.equal(view.sandbox.stopError, null, 'still warning about a ghost');
+    view.unmount();
+  });
+});
+
+describe('a poll whose shell goes away', () => {
+  it('stops asking once the hook unmounts, even mid-request', async () => {
+    // Cleanup clears the pending timer, and a tick that is waiting on its
+    // reply has none: the reply is what schedules the next one. So the
+    // timer alone cannot end the poll, and on sign-out, where `AuthGate`
+    // takes the builder away and every request after it is refused, the
+    // unreadable answers that follow are deliberately not a reason to stop
+    // asking. It would ask forever, against a shell nobody can see.
+    let gets = 0;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': async (method) => {
+        if (method !== 'GET') return reply({ status: 'installing' });
+        gets += 1;
+        // Outstanding when the unmount happens, which is the whole case.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        return reply({ status: 'installing' });
+      },
+    });
+
+    const view = await mount();
+    await view.run('r1');
+    assert.equal(view.sandbox.status?.status, 'installing');
+
+    await act(async () => {
+      await new Promise((resolve) =>
+        setTimeout(resolve, POLL_INTERVAL_MS + 20),
+      );
+    });
+    assert.equal(gets, 1, 'the poll never started');
+
+    view.unmount();
+    await new Promise((resolve) =>
+      setTimeout(resolve, POLL_INTERVAL_MS * 2 + 800),
+    );
+
+    assert.equal(gets, 1, 'kept polling after the shell was gone');
+  });
+});
+
+describe('a request still in flight when the shell goes', () => {
+  it('does not start reconciling after the hook has unmounted', async () => {
+    // The other half of the same problem, and the one superseding the gate
+    // cannot reach. Cleanup ends every chain that had already started; a
+    // stop whose DELETE is still outstanding starts its chain afterwards,
+    // from the catch, with a gate token taken after the supersede and
+    // therefore valid. Nothing would ever clean that one up, and after
+    // sign-out every answer it gets is unreadable, so it reschedules
+    // forever.
+    let gets = 0;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': async (method) => {
+        if (method === 'GET') {
+          gets += 1;
+          return reply({ status: 'installing' });
+        }
+        if (method !== 'DELETE') return reply({ status: 'installing' });
+        // Still outstanding when the shell goes, which is the whole case.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return reply({ error: 'The preview service is unavailable.' }, 502);
+      },
+    });
+
+    const view = await mount();
+    // No run first: a fresh hook already assumes a sandbox may exist, so
+    // Stop on its own is enough, and it leaves no earlier poll to confuse
+    // the count.
+    await view.stop();
+    view.unmount();
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, POLL_INTERVAL_MS * 2 + 700),
+    );
+
+    assert.equal(gets, 0, 'started a poll nothing can ever stop');
+  });
+});

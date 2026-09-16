@@ -76,9 +76,35 @@ describe('fetchPreviewStatus', () => {
     );
   });
 
-  it('treats a ready status missing url/expiresAt as a failure, not a crash', async () => {
-    const status = await fetchPreviewStatus(jsonFetch({ status: 'ready' }));
-    assert.equal(status?.status, 'failed');
+  it('is null for an answer it cannot read, not a failed sandbox', async () => {
+    // A failed status is the service saying the sandbox is not running, and
+    // callers act on it: the poll stops asking, the panel takes the Stop
+    // button away, and an unconfirmed stop treats it as settling whether
+    // the sandbox survived. None of that follows from this client being
+    // unable to parse a 200, so an unreadable answer is the same null a
+    // dropped request produces and the poll keeps going.
+    for (const body of [
+      { status: 'ready' },
+      { status: 'ready', url: 'https://x' },
+      { status: 'nonsense' },
+      {},
+      { error: 'something' },
+    ]) {
+      assert.equal(
+        await fetchPreviewStatus(jsonFetch(body)),
+        null,
+        JSON.stringify(body),
+      );
+    }
+  });
+
+  it('still reports a failure the service actually reported', async () => {
+    assert.deepEqual(
+      await fetchPreviewStatus(
+        jsonFetch({ status: 'failed', error: 'No preview has been started.' }),
+      ),
+      { status: 'failed', error: 'No preview has been started.' },
+    );
   });
 
   it('is null rather than throwing when signed out or unauthorized', async () => {

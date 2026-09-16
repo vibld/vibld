@@ -41,6 +41,7 @@ function sandboxWith(
   ranRevision: string | null,
   ran: Ran[] = [],
   shares: PreviewShare[] = [],
+  stopError: string | null = null,
 ): PreviewSandbox {
   return {
     status,
@@ -50,6 +51,7 @@ function sandboxWith(
       ran.push({ revision, paths: files.map((file) => file.path) });
     },
     stop() {},
+    stopError,
     shares,
     sharePending: false,
     shareError: null,
@@ -176,5 +178,48 @@ describe('the preview, as it is actually wired', () => {
     assert.ok(view.button(/Share/));
     assert.match(view.text(), /Anyone with a share link can view this running/);
     view.unmount();
+  });
+});
+
+describe('a stop that did not happen', () => {
+  it('says the sandbox is still running, rather than removing it', async () => {
+    // The panel used to clear the sandbox whatever the stop answered. Stop
+    // is pressed by somebody who wants it not running, usually because a
+    // share link is serving their code, and "done" is the one answer that
+    // stops them trying again.
+    const view = await mount(
+      stateWith('r1'),
+      sandboxWith(
+        { status: 'ready', url: 'https://sandbox.example', expiresAt: 1 },
+        'r1',
+        [],
+        [],
+        'The preview service is unavailable.',
+      ),
+    );
+
+    assert.match(view.text(), /may still be running/i);
+    assert.match(view.text(), /could not be confirmed/i);
+    assert.doesNotMatch(
+      view.text(),
+      /The sandbox is still running/,
+      'swapped one false certainty for its opposite',
+    );
+    assert.match(
+      view.text(),
+      /preview service is unavailable/i,
+      'replaced the reason with a guess',
+    );
+  });
+
+  it('says nothing when the stop worked', async () => {
+    const view = await mount(
+      stateWith('r1'),
+      sandboxWith(
+        { status: 'ready', url: 'https://sandbox.example', expiresAt: 1 },
+        'r1',
+      ),
+    );
+    assert.doesNotMatch(view.text(), /may still be running/i);
   });
 });

@@ -144,6 +144,22 @@ export function PreviewPanel({
               {statusMessage}
             </p>
           ) : null}
+          {/*
+            A stop that could not be confirmed. Not "the sandbox is still
+            running", which a rejected request does not establish: the
+            DELETE may have been carried out and its reply lost. What is
+            known is that nothing came back to say so, and the sandbox may
+            still be up and still serving any share link pointed at it. Stop
+            is pressed by somebody who wants it not running, so "done" is
+            the one answer that stops them trying again, and the opposite
+            certainty would be just as invented.
+          */}
+          {sandbox.stopError ? (
+            <p className="pane-note pane-note--error" role="alert">
+              The sandbox may still be running: the stop could not be confirmed.{' '}
+              {sandbox.stopError}
+            </p>
+          ) : null}
         </>
       ) : null}
 

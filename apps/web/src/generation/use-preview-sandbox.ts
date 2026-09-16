@@ -32,6 +32,23 @@ export interface PreviewSandbox {
   run(files: ProjectFile[], revision: string): void;
   /** Stop the running preview, if any. */
   stop(): void;
+  /**
+   * Why the last stop could not be confirmed, or null.
+   *
+   * The screen used to clear itself either way, on the reasoning that the
+   * sandbox times out on its own eventually (L9) so a failed stop has
+   * nothing useful left to do. Eventually is not now: somebody presses Stop
+   * because they want it not running, often because a share link is serving
+   * their code to whoever has the URL, and being told it stopped when it did
+   * not is the one answer that makes them stop trying.
+   *
+   * Unconfirmed rather than failed, deliberately. A rejected request
+   * establishes that no successful answer arrived, and not that the sandbox
+   * survived: the DELETE may have been carried out with the reply lost.
+   * Saying it is still running would swap one false certainty for its
+   * opposite.
+   */
+  stopError: string | null;
   /** Every share grant issued for the current preview (docs/decisions.md L10). Empty once the preview itself stops or fails. */
   shares: PreviewShare[];
   sharePending: boolean;
@@ -79,7 +96,8 @@ export function usePreviewSandbox(): PreviewSandbox {
   const [status, setStatus] = useState<PreviewStatus | null>(null);
   const [ranRevision, setRanRevision] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * Whether the worker may still be holding a preview for this caller.
    *
@@ -100,8 +118,8 @@ export function usePreviewSandbox(): PreviewSandbox {
    * Latest wins for the poll, the same `createStatusGate` the connect panel,
    * the push button and the admin panel use.
    *
-   * `stopPolling` clears the interval, which stops the next tick and does
-   * nothing about the request a tick already sent. That reply still arrives,
+   * `stopPolling` clears the pending tick and does nothing about the
+   * request an earlier tick already sent. That reply still arrives,
    * and it is about the sandbox from before the restart: committed, it puts
    * the old frame back while `ranRevision` names the new checkpoint, so the
    * staleness warning stays hidden and the old sandbox is presented as the
@@ -109,6 +127,19 @@ export function usePreviewSandbox(): PreviewSandbox {
    * the replacement stops being watched.
    */
   const polls = useRef(createStatusGate());
+  /**
+   * Whether this hook's shell is still on screen.
+   *
+   * Superseding the gate on cleanup ends every poll that had already
+   * started, and cannot end one that has not. `run` and `stop` both start
+   * one from an async continuation, so a request still in flight when the
+   * shell goes away can begin a fresh chain, with a fresh and therefore
+   * valid gate token, that no cleanup will ever run again.
+   *
+   * Set in the effect rather than only here because StrictMode mounts,
+   * cleans up and mounts again, and the second mount is a real one.
+   */
+  const mounted = useRef(true);
 
   const [shares, setShares] = useState<PreviewShare[]>([]);
   const [sharePending, setSharePending] = useState(false);
@@ -116,14 +147,32 @@ export function usePreviewSandbox(): PreviewSandbox {
 
   function stopPolling() {
     if (pollRef.current !== null) {
-      clearInterval(pollRef.current);
+      clearTimeout(pollRef.current);
       pollRef.current = null;
     }
   }
 
-  // The interval must not outlive the shell even though this hook otherwise
-  // does not track component lifetime.
-  useEffect(() => stopPolling, []);
+  /*
+   * The poll must not outlive the shell even though this hook otherwise
+   * does not track component lifetime.
+   *
+   * Clearing the timer is not enough on its own, and cancelling the gate is
+   * what actually ends it. A tick that is waiting on its reply holds no
+   * timer to clear, so cleanup would find nothing, and the reply would then
+   * schedule the next tick into a shell that no longer exists. On sign-out,
+   * where `AuthGate` takes the builder away and every request that follows
+   * is refused, each of those answers is unreadable, which is deliberately
+   * not a reason to stop asking: it would ask forever. Superseding the gate
+   * makes the outstanding tick return without rescheduling.
+   */
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      stopPolling();
+      polls.current.supersede();
+    };
+  }, []);
 
   // A share only ever makes sense against a preview that is actually
   // running -- once this one stops or fails, its shares are somebody else's
@@ -136,26 +185,68 @@ export function usePreviewSandbox(): PreviewSandbox {
     void fetchPreviewShares().then(setShares);
   }, [status?.status]);
 
+  /**
+   * Ask again every `POLL_INTERVAL_MS` until the sandbox settles, one
+   * request at a time.
+   *
+   * A chain rather than an interval, and the difference is not tidiness.
+   * An interval fires on the clock whatever the last request is doing, so a
+   * status read slower than 1.5 seconds leaves several in flight at once,
+   * all holding the same `current()` token because the gate is taken once
+   * for the whole poll. They then land in whatever order the network gives
+   * them, and the gate cannot tell them apart. That is a real wrong screen,
+   * not a race in the abstract: after an unconfirmed stop, a later request
+   * can come back `failed`, clear the warning and end the poll, and then an
+   * earlier one lands with the stale `installing` it was sent for. The
+   * panel is left saying a sandbox is installing, with no warning and
+   * nothing still asking, about something that no longer exists.
+   *
+   * The next tick is scheduled only once the previous answer has been
+   * handled, so there is never a second request to be out of order with.
+   * The first tick is still one interval out: the caller has just read the
+   * status itself.
+   */
   function pollUntilSettled() {
+    // Nothing to reconcile for a screen that is gone, and the timer this
+    // would set is one the cleanup has already had its chance to clear.
+    if (!mounted.current) return;
     stopPolling();
-    // Once for the interval rather than per tick: every tick of it belongs
-    // to the run that started it.
+    // Once for the chain rather than per tick: every tick of it belongs to
+    // the run that started it, and a run or a stop supersedes the lot.
     const current = polls.current.begin();
-    pollRef.current = setInterval(() => {
-      void fetchPreviewStatus().then((result) => {
-        // Sent before a run or a stop superseded this poll, answering after.
-        if (!current()) return;
-        // A transient read failure (a dropped request, an expired session)
-        // is not the sandbox failing -- the poll itself keeps going rather
-        // than reporting a status the server never actually sent.
-        if (result === null) return;
+    const tick = async () => {
+      // This one has fired, so there is no pending timer to cancel until
+      // the next is scheduled. Anything cancelling a poll mid-request has to
+      // supersede the gate rather than rely on `stopPolling`: the reply is
+      // what schedules the next tick, and only the gate can stop it.
+      pollRef.current = null;
+      const result = await fetchPreviewStatus();
+      // Sent before a run or a stop superseded this poll, answering after.
+      // Nothing is rescheduled either: this chain is no longer the poll.
+      if (!current()) return;
+      if (result !== null) {
         setStatus(result);
-        if (SETTLED.has(result.status)) stopPolling();
-      });
-    }, POLL_INTERVAL_MS);
+        // The poll is what settles an unconfirmed stop, so it also has to
+        // put the warning down. A sandbox the service reports as failed is
+        // not running, whether it was deleted or died on its own, and
+        // leaving "it may still be running" beside "no preview has been
+        // started" is the panel contradicting itself. Worse, a failed
+        // status takes the Stop button away, so nobody could clear it.
+        if (result.status === 'failed') setStopError(null);
+        if (SETTLED.has(result.status)) return;
+      }
+      // A transient read failure (a dropped request, an expired session) is
+      // not the sandbox failing -- `result === null` falls through to here
+      // rather than reporting a status the server never actually sent.
+      pollRef.current = setTimeout(() => void tick(), POLL_INTERVAL_MS);
+    };
+    pollRef.current = setTimeout(() => void tick(), POLL_INTERVAL_MS);
   }
 
   async function run(files: ProjectFile[], revision: string) {
+    // A stale complaint about the last sandbox has nothing to say about
+    // this one.
+    setStopError(null);
     stopPolling();
     polls.current.supersede();
     setPending(true);
@@ -208,18 +299,39 @@ export function usePreviewSandbox(): PreviewSandbox {
   async function stop() {
     stopPolling();
     polls.current.supersede();
+    setStopError(null);
     setPending(true);
     try {
       await stopSandboxPreview();
       mayExist.current = false;
-    } catch {
-      // Best-effort for what the screen shows: the sandbox times out on its
-      // own either way (L9), so there is nothing more useful to do with a
-      // failed stop than let the UI forget about it. `mayExist` deliberately
-      // does not forget, because the next run still has to stop it first.
-    } finally {
+      // Only now. Clearing these before the request answered is what made
+      // the screen say the sandbox was gone whatever happened.
       setStatus(null);
       setRanRevision(null);
+    } catch (error) {
+      // What is actually known: the client did not get a successful answer.
+      // Not that the sandbox is still running -- the DELETE may have been
+      // carried out and the response lost -- so the wording says the stop
+      // could not be confirmed, and the screen keeps showing what it last
+      // knew rather than asserting either way. `mayExist` was never cleared
+      // on this path either, because the next run still has to try to stop
+      // it first; what changes is that the person is told.
+      setStopError(
+        error instanceof Error
+          ? error.message
+          : 'Could not stop the sandbox preview.',
+      );
+      // The poll was cancelled before the request went out, and asking
+      // again is the only thing that can settle what just happened.
+      //
+      // For every status, not only the unsettled ones. A ready sandbox
+      // whose DELETE succeeded with the reply lost is the case that reads
+      // worst: the frame, the share list and the warning all sit there
+      // describing something that is gone, and nothing asks. This costs one
+      // request when the sandbox really is still ready, because
+      // `pollUntilSettled` stops on the first settled answer.
+      pollUntilSettled();
+    } finally {
       setPending(false);
     }
   }
@@ -270,6 +382,7 @@ export function usePreviewSandbox(): PreviewSandbox {
     pending,
     run: (files, revision) => void run(files, revision),
     stop: () => void stop(),
+    stopError,
     shares,
     sharePending,
     shareError,

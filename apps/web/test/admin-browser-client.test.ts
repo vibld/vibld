@@ -36,6 +36,7 @@ describe('lookupAdminUser', () => {
       userId: 'user_1',
       spendableCreditMicroUsd: 5_000_000,
       grants: [],
+      unreadable: 0,
     });
     const [url, init] = calls[0]!;
     assert.equal(url, '/api/admin/user?email=a%40example.com');
@@ -113,5 +114,108 @@ describe('grantAdminCredit', () => {
       ok: false,
       error: 'The admin request failed (500).',
     });
+  });
+});
+
+describe('a grant row the page cannot read', () => {
+  function serving(grants: unknown): typeof fetch {
+    return (async () =>
+      new Response(
+        JSON.stringify({
+          userId: 'user_1',
+          spendableCreditMicroUsd: 5_000_000,
+          grants,
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+  }
+
+  it('does not present a row with no amount or no actor as a grant', async () => {
+    // The cast this replaces rendered these: "$NaN by undefined", which
+    // reads as a broken page rather than a gap in the record, so the
+    // natural response is to ignore it and grant again.
+    const result = await lookupAdminUser(
+      'a@example.com',
+      serving([
+        { grantedByEmail: 'admin@vibld.com', note: null },
+        { creditUsdCents: 500, note: null },
+        { creditUsdCents: 500, grantedByEmail: '  ', note: null },
+        { creditUsdCents: Number.NaN, grantedByEmail: 'a@b.com', note: null },
+        null,
+        'a grant, honestly',
+      ]),
+      async () => null,
+    );
+
+    assert.ok(result.ok);
+    assert.deepEqual(result.grants, []);
+    assert.equal(result.unreadable, 6);
+  });
+
+  it('counts them rather than dropping them quietly', async () => {
+    // A silently shorter history is the one failure this list must not
+    // have: it is read to decide whether an earlier grant already landed,
+    // and a missing row is how the same person gets paid twice.
+    const result = await lookupAdminUser(
+      'a@example.com',
+      serving([
+        {
+          creditUsdCents: 500,
+          grantedByEmail: 'admin@vibld.com',
+          note: 'outage',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        { creditUsdCents: 900 },
+      ]),
+      async () => null,
+    );
+
+    assert.ok(result.ok);
+    assert.equal(result.grants.length, 1);
+    assert.equal(result.grants[0]?.grantedByEmail, 'admin@vibld.com');
+    assert.equal(result.unreadable, 1);
+  });
+
+  it('refuses a lookup whose history it could not read at all', async () => {
+    // Not an empty history. Defaulting to [] here would show "no past
+    // grants" for an answer nobody could read, which is the silently
+    // shortened list this change exists to prevent, at its worst: every row
+    // missing and nothing said.
+    for (const grants of [undefined, null, 'none', 42, { 0: 'a' }]) {
+      const result = await lookupAdminUser(
+        'a@example.com',
+        serving(grants),
+        async () => null,
+      );
+      assert.equal(result.ok, false, JSON.stringify(grants ?? null));
+    }
+  });
+
+  it('is content with a history that is genuinely empty', async () => {
+    // The other direction: a user with no grants is ordinary, and refusing
+    // that lookup would break the common case.
+    const result = await lookupAdminUser(
+      'a@example.com',
+      serving([]),
+      async () => null,
+    );
+    assert.ok(result.ok);
+    assert.deepEqual(result.grants, []);
+    assert.equal(result.unreadable, 0);
+  });
+
+  it('keeps a readable grant that simply has no note', async () => {
+    // The other direction: a note is genuinely optional, and refusing a row
+    // for want of one would hide grants that are perfectly fine.
+    const result = await lookupAdminUser(
+      'a@example.com',
+      serving([{ creditUsdCents: 500, grantedByEmail: 'admin@vibld.com' }]),
+      async () => null,
+    );
+
+    assert.ok(result.ok);
+    assert.equal(result.grants.length, 1);
+    assert.equal(result.grants[0]?.note, null);
+    assert.equal(result.unreadable, 0);
   });
 });

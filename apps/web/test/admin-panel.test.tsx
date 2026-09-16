@@ -439,3 +439,44 @@ describe('granting credit, as it is actually wired', () => {
     view.unmount();
   });
 });
+
+describe('a history with a row the page cannot read', () => {
+  it('says so, instead of leaving the list quietly short', async () => {
+    // The balance above the list is the ledger's own total and includes the
+    // row either way, so a shorter list with no explanation is a panel that
+    // disagrees with itself about what was granted.
+    serving({
+      '/api/admin/user': () =>
+        reply({
+          userId: 'user_alice',
+          spendableCreditMicroUsd: 1_000_000,
+          grants: [
+            {
+              creditUsdCents: 500,
+              grantedByEmail: 'admin@vibld.com',
+              note: 'outage',
+              createdAt: '2026-01-01T00:00:00Z',
+            },
+            { creditUsdCents: 900 },
+          ],
+        }),
+    });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.lookUp();
+
+    assert.match(view.text(), /admin@vibld\.com/);
+    assert.match(view.text(), /1 past grant could not be read/i);
+    assert.doesNotMatch(view.text(), /NaN/);
+    assert.doesNotMatch(view.text(), /undefined/);
+  });
+
+  it('stays quiet when every row reads', async () => {
+    serving({ '/api/admin/user': () => reply(FOUND) });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.lookUp();
+
+    assert.doesNotMatch(view.text(), /could not be read/i);
+  });
+});

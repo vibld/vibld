@@ -48,8 +48,16 @@ function authHeaders(env: PreviewServiceEnv): Record<string, string> {
  * discipline `detectDeploymentConfig` applies to `/api/config`'s own
  * response: a shape that drifted must not hand a browser `undefined` where
  * a URL or a position was expected.
+ *
+ * `null` for an answer this cannot read, and `failed` only when the service
+ * said so. The two were one value, and the browser acts on the difference:
+ * a failed status stops the poll, removes the Stop control, and settles
+ * whether a sandbox survived a stop whose reply was lost. Synthesising it
+ * here would announce all three on the strength of a shape nobody could
+ * parse, and it would do it upstream of the browser's own parser, which is
+ * where the same fault was just fixed.
  */
-function parseStatus(body: unknown): PreviewStatus {
+function parseStatus(body: unknown): PreviewStatus | null {
   const record = (body ?? {}) as Record<string, unknown>;
   switch (record.status) {
     case 'queued':
@@ -74,18 +82,19 @@ function parseStatus(body: unknown): PreviewStatus {
           expiresAt: record.expiresAt,
         };
       }
-      return {
-        status: 'failed',
-        error: 'The preview service returned an unexpected response.',
-      };
-    default:
+      // A ready with nowhere to point is not a ready, and it is not the
+      // service reporting a failure either.
+      return null;
+    case 'failed':
       return {
         status: 'failed',
         error:
           typeof record.error === 'string'
             ? record.error
-            : 'The preview service returned an unexpected response.',
+            : 'The preview run failed.',
       };
+    default:
+      return null;
   }
 }
 
@@ -93,7 +102,7 @@ async function call(
   env: PreviewServiceEnv,
   path: string,
   init: RequestInit = {},
-): Promise<PreviewStatus> {
+): Promise<PreviewStatus | null> {
   const response = await env.PREVIEW!.fetch(
     new Request(new URL(path, INTERNAL_ORIGIN), {
       ...init,
@@ -104,13 +113,16 @@ async function call(
   try {
     body = await response.json();
   } catch {
-    return {
-      status: 'failed',
-      error: 'The preview service returned an unreadable response.',
-    };
+    return null;
   }
   return parseStatus(body);
 }
+
+/** What a caller that has to answer somebody says when this cannot. */
+export const UNREADABLE_PREVIEW = {
+  status: 'failed',
+  error: 'The preview service returned an unreadable response.',
+} as const satisfies PreviewStatus;
 
 /** Whether a service call that answers nothing but success or failure did. */
 export type ServiceOutcome = { ok: true } | { ok: false; error: string };
@@ -148,17 +160,22 @@ export function startPreview(
   userId: string,
   files: PreviewFile[],
 ): Promise<PreviewStatus> {
+  // A start has to answer the person who pressed the button, so an
+  // unreadable reply becomes a failure here rather than nothing. The status
+  // poll below does the opposite, because nobody is waiting on any one of
+  // its answers.
   return call(env, '/internal/preview/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ userId, label: userId, files }),
-  });
+  }).then((status) => status ?? UNREADABLE_PREVIEW);
 }
 
+/** `null` when the service's answer could not be read. */
 export function previewStatus(
   env: PreviewServiceEnv,
   userId: string,
-): Promise<PreviewStatus> {
+): Promise<PreviewStatus | null> {
   return call(
     env,
     `/internal/preview/status?userId=${encodeURIComponent(userId)}`,

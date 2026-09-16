@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import {
   createShare,
@@ -121,19 +123,66 @@ describe('startPreview', () => {
   });
 
   it('does not crash on an unreadable response body', async () => {
-    const { binding } = fakeBinding(
+    // A start answers the person who pressed the button, so unlike the
+    // status poll it has to say something rather than nothing.
+    for (const answer of [
       () => new Response('not json', { status: 200 }),
-    );
-    const result = await startPreview(
-      { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
-      'user_abc',
-      [],
-    );
-    assert.equal(result.status, 'failed');
+      () => jsonResponse({ status: 'ready' }),
+      () => jsonResponse({}),
+    ]) {
+      const { binding } = fakeBinding(answer);
+      const result = await startPreview(
+        { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+        'user_abc',
+        [],
+      );
+      assert.equal(result.status, 'failed');
+      assert.match(
+        result.status === 'failed' ? result.error : '',
+        /unreadable/,
+      );
+    }
   });
 });
 
 describe('previewStatus', () => {
+  it('is null for an answer it cannot read, not a failed sandbox', async () => {
+    // The browser acts on the difference: a failed status stops its poll,
+    // takes the Stop control away, and settles whether a sandbox survived
+    // a stop whose reply was lost. Synthesising one here would announce all
+    // three from a shape nobody could parse, and it would do it upstream of
+    // the browser's own parser where the same fault was just fixed.
+    for (const answer of [
+      () => jsonResponse({ status: 'ready' }),
+      () => jsonResponse({ status: 'ready', url: 'https://x' }),
+      () => jsonResponse({ status: 'nonsense' }),
+      () => jsonResponse({}),
+      () => new Response('not json', { status: 200 }),
+    ]) {
+      const { binding } = fakeBinding(answer);
+      assert.equal(
+        await previewStatus(
+          { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+          'user_abc',
+        ),
+        null,
+      );
+    }
+  });
+
+  it('still reports a failure the service actually reported', async () => {
+    const { binding } = fakeBinding(() =>
+      jsonResponse({ status: 'failed', error: 'No preview has been started.' }),
+    );
+    assert.deepEqual(
+      await previewStatus(
+        { PREVIEW: binding, PREVIEW_INTERNAL_SECRET: 's' },
+        'user_abc',
+      ),
+      { status: 'failed', error: 'No preview has been started.' },
+    );
+  });
+
   it('gets the status endpoint with the userId in the query string', async () => {
     const { binding, calls } = fakeBinding(() =>
       jsonResponse({ status: 'ready-to-start' }),
@@ -352,5 +401,30 @@ describe('outcomeResponse', () => {
     const response = outcomeResponse({ ok: true });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true });
+  });
+});
+
+describe('what the router does with a status it could not read', () => {
+  /**
+   * The half `previewStatus` cannot prove on its own: whether the route
+   * passes the distinction on. A 502 is read by the browser as "ask again";
+   * a synthesised `failed` body would be read as "the sandbox is not
+   * running", and only one of those follows from an unreadable answer.
+   *
+   * Read from the source because `worker/index.ts` imports
+   * `cloudflare:workers` and cannot be loaded under `node --test` at all,
+   * the same constraint the router-ordering rules work around.
+   */
+  it('answers 502 rather than inventing a failed sandbox', async () => {
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/index.ts', import.meta.url)),
+      'utf8',
+    );
+    const start = source.indexOf('const status = await previewStatus(');
+    assert.ok(start > 0, 'the route no longer asks for a status');
+    const block = source.slice(start, start + 400);
+
+    assert.match(block, /502/, 'an unreadable status is not refused');
+    assert.match(block, /status\s*\?/, 'the null answer is not branched on');
   });
 });

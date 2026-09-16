@@ -17,6 +17,7 @@ type LookupState =
       userId: string;
       spendableCreditMicroUsd: number;
       grants: AdminGrant[];
+      unreadable: number;
     }
   | { phase: 'failed'; error: string };
 
@@ -113,6 +114,7 @@ export function AdminPanel() {
             userId: result.userId,
             spendableCreditMicroUsd: result.spendableCreditMicroUsd,
             grants: result.grants,
+            unreadable: result.unreadable,
           }
         : { phase: 'failed', error: result.error },
     );
@@ -252,6 +254,22 @@ export function AdminPanel() {
                 .join('; ')}
             </>
           ) : null}
+        </p>
+      ) : null}
+      {/*
+        A row the history holds and this page cannot read. Said out loud
+        rather than dropped: this list is read to decide whether an earlier
+        grant already landed, and a silently shorter one is how the same
+        person gets paid twice. It is not an error either, because the
+        balance above is still the ledger's own total and includes it.
+      */}
+      {lookup.phase === 'found' && lookup.unreadable > 0 ? (
+        <p className="pane-note pane-note--error" role="alert">
+          {lookup.unreadable} past grant
+          {lookup.unreadable === 1 ? '' : 's'} could not be read, so{' '}
+          {lookup.unreadable === 1 ? 'it is' : 'they are'} missing from the list
+          above. The balance still counts{' '}
+          {lookup.unreadable === 1 ? 'it' : 'them'}.
         </p>
       ) : null}
       {lookup.phase === 'failed' ? (
