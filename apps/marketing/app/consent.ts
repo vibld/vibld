@@ -108,3 +108,56 @@ export const CONSENT_OPEN_EVENT = 'vibld:consent-open';
 export function bannerVisible(state: ConsentState, reopened: boolean): boolean {
   return reopened || state === null;
 }
+
+/** Where gtag.js comes from. Shared so the loader and its test cannot drift. */
+export const GA4_SRC = 'https://www.googletagmanager.com/gtag/js?id=';
+
+/** The window event the banner fires when an answer is given, so the tag hears it. */
+export const CONSENT_CHANGED_EVENT = 'vibld:consent-changed';
+
+/**
+ * Whether Google Analytics may be loaded at all.
+ *
+ * The first version of this shipped the tag to everyone and used Consent
+ * Mode to withhold storage. That is a real mode and it does not match what
+ * the Cookie Notice says. Under denied consent gtag.js is still fetched from
+ * Google and still sends cookieless pings, so "it runs only if you say yes"
+ * would have been false, and a privacy notice that is approximately true is
+ * the kind of thing there is no point writing at all.
+ *
+ * So the rule is the strong one: nothing is requested from Google until the
+ * answer is `granted`. Undecided and denied are the same here, deliberately,
+ * because a visitor who has not been asked has not agreed.
+ */
+export function shouldLoadAnalytics(state: ConsentState): boolean {
+  return state === 'granted';
+}
+
+/** What an answer did, once the attempt to remember it has been made. */
+export interface AnswerOutcome {
+  /** What the tag should now do. */
+  apply: ConsentChoice;
+  /** Whether to tell the visitor their choice will not survive this visit. */
+  warn: boolean;
+}
+
+/**
+ * What to do after answering, given whether the answer could be stored.
+ *
+ * A write that failed used to be discarded, which made the banner claim
+ * something it had not done: it closed, analytics ran for the rest of the
+ * document, and the next page load found nothing stored and asked again.
+ *
+ * The answer is still applied, because it is what the visitor just asked
+ * for and refusing to honour it would be worse. What changes is that the
+ * failure is said rather than hidden. Only a lost `granted` is worth saying:
+ * a lost `denied` re-reads as undecided, which denies anyway, so the visitor
+ * is never quietly measured against their wishes and the only cost is being
+ * asked again.
+ */
+export function answerOutcome(
+  choice: ConsentChoice,
+  stored: boolean,
+): AnswerOutcome {
+  return { apply: choice, warn: !stored && choice === 'granted' };
+}

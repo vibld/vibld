@@ -54,11 +54,13 @@ export default function Privacy() {
           matters: it sets cookies in your browser, assigns your browser a
           client identifier that recognises it across pages and visits, and
           sends your IP address to Google to derive an approximate location. So
-          we ask first, with a banner on your first visit, and it stores nothing
-          until you say yes. We have not enabled Google Signals, advertising
-          features, or any link to Google Ads, and we run no advertising scripts
-          on this site. The <strong>Cookie preferences</strong> link at the
-          bottom of every page changes your answer at any time; our{' '}
+          we ask first, with a banner on your first visit, and unless and until
+          you say yes we do not load it at all: nothing is requested from Google
+          and nothing about your visit reaches them. We have not enabled Google
+          Signals, advertising features, or any link to Google Ads, and we run
+          no advertising scripts on this site. The{' '}
+          <strong>Cookie preferences</strong> link at the bottom of every page
+          changes your answer at any time; our{' '}
           <a href="/legal/cookies">Cookie Notice</a> has the detail.
         </li>
       </ul>

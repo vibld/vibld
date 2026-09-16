@@ -13,11 +13,14 @@ import {
 import type { Route } from './+types/root';
 import { beaconFor } from './pageview.ts';
 import {
-  CONSENT_KEY,
+  CONSENT_CHANGED_EVENT,
   CONSENT_OPEN_EVENT,
+  GA4_SRC,
+  answerOutcome,
   bannerVisible,
   consentSignals,
   readConsent,
+  shouldLoadAnalytics,
   writeConsent,
   type ConsentChoice,
   type ConsentState,
@@ -46,7 +49,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
           async
           defer
         ></script>
-        <GoogleAnalytics />
       </head>
       <body className="min-h-screen font-sans antialiased">
         <SiteHeader />
@@ -54,6 +56,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <SiteFooter />
+        <GoogleAnalytics />
         <ConsentBanner />
         <ScrollRestoration />
         <Scripts />
@@ -64,13 +67,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Google Analytics 4, loaded on every page.
+ * Google Analytics 4, loaded only once the visitor has agreed.
  *
- * This is the standard gtag pair: the loader, then the inline bootstrap that
- * creates `dataLayer` and configures the property. It sits beside Turnstile in
- * the head rather than at the end of the body so the queue exists before
- * anything else on the page can push to it, and the loader is `async` so it
- * never blocks rendering.
+ * The first version of this rendered the tag into every page's head and used
+ * Consent Mode to withhold storage. Codex was right that the Cookie Notice
+ * then said something untrue: under denied consent gtag.js is still fetched
+ * from Google and still sends cookieless pings, so "it runs only if you say
+ * yes" would have been wrong, and an approximately true privacy notice is
+ * not worth writing.
+ *
+ * So nothing is requested from Google until `shouldLoadAnalytics` says so.
+ * Undecided and denied behave identically, because a visitor who has not
+ * been asked has not agreed. The script is injected rather than rendered:
+ * a React element in the head would be part of the prerendered HTML, which
+ * is exactly the thing that must not exist before an answer.
+ *
+ * Consent is declared before `config` even here, where the tag only ever
+ * exists in the granted state, because gtag applies the state in force when
+ * a command runs and the advertising signals still have to be denied.
  *
  * `send_page_view` is left on, so the `config` call counts the first view.
  * Every view after it is counted by GA4's own Enhanced Measurement, which
@@ -78,54 +92,63 @@ export function Layout({ children }: { children: React.ReactNode }) {
  * React Router navigation. Nothing here sends a second `page_view`: doing so
  * would double-count every internal link on the site. See `RouteChangeBeacon`
  * below, which is for our own counter only.
- *
- * Unlike worker/analytics.ts, this sets cookies and assigns a client
- * identifier, so it runs under Consent Mode and starts denied. Until the
- * visitor agrees, GA4 stores nothing in the browser and sends cookieless
- * pings; `ConsentBanner` is what changes that, and the footer's "Cookie
- * preferences" link is what changes it back.
  */
 function GoogleAnalytics() {
-  const id = SITE.ga4MeasurementId;
-  // Consent is set before the property is configured, and denied is the
-  // starting point rather than a correction applied later. Order is the whole
-  // point: gtag applies the consent state in force when a command runs, so a
-  // default that arrives after `config` arrives after the first hit has
-  // already been sent under the wrong assumption.
-  //
-  // The stored answer is read here, synchronously, rather than waiting for
-  // React. A returning visitor who already agreed would otherwise have their
-  // first page of every visit measured without cookies and every page after
-  // it with them, which is worse data than either answer alone. Every failure
-  // path lands on denied: `localStorage` throws outright in a private window
-  // or with site data blocked, and an unreadable store is not permission.
-  const bootstrap = `window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-var vibldConsent = 'denied';
-try {
-  var stored = window.localStorage.getItem('${CONSENT_KEY}');
-  if (stored === 'granted') vibldConsent = 'granted';
-} catch (e) {}
-gtag('consent', 'default', {
-  ad_storage: 'denied',
-  ad_user_data: 'denied',
-  ad_personalization: 'denied',
-  analytics_storage: vibldConsent
-});
-gtag('js', new Date());
-gtag('config', '${id}');`;
-  return (
-    <>
-      <script
-        async
-        src={`https://www.googletagmanager.com/gtag/js?id=${id}`}
-      ></script>
-      <script
-        suppressHydrationWarning
-        dangerouslySetInnerHTML={{ __html: bootstrap }}
-      />
-    </>
-  );
+  const loaded = useRef(false);
+
+  useEffect(() => {
+    const apply = (state: ConsentState) => {
+      if (shouldLoadAnalytics(state)) {
+        load();
+        return;
+      }
+      // Withdrawn mid-visit. The tag is already in this document and cannot
+      // be taken out of it, so it is told to stop storing straight away
+      // rather than left running until the next page load.
+      if (loaded.current) tell('update', consentSignals('denied'));
+    };
+
+    const load = () => {
+      if (loaded.current) return;
+      loaded.current = true;
+      const id = SITE.ga4MeasurementId;
+      const queue = window as unknown as { dataLayer?: unknown[] };
+      queue.dataLayer = queue.dataLayer ?? [];
+      tell('default', consentSignals('granted'));
+      tell('js', new Date());
+      tell('config', id);
+      const tag = document.createElement('script');
+      tag.async = true;
+      tag.src = `${GA4_SRC}${id}`;
+      document.head.appendChild(tag);
+    };
+
+    apply(readConsent(storage()));
+    const onChange = (event: Event) => {
+      apply((event as CustomEvent<ConsentState>).detail ?? null);
+    };
+    window.addEventListener(CONSENT_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(CONSENT_CHANGED_EVENT, onChange);
+  }, []);
+
+  return null;
+}
+
+/**
+ * Push onto gtag's queue.
+ *
+ * `dataLayer.push(arguments)` is what the official snippet's `gtag` does, and
+ * doing it directly avoids defining a global function that only this file
+ * calls. Guarded because a blocked script, a sandboxed frame or a missing
+ * `window` must never throw out of an effect.
+ */
+function tell(...args: unknown[]) {
+  try {
+    const queue = (window as unknown as { dataLayer?: unknown[] }).dataLayer;
+    queue?.push(args);
+  } catch {
+    // Nothing was going to be measured anyway.
+  }
 }
 
 /**
@@ -226,6 +249,10 @@ function RouteChangeBeacon() {
 function ConsentBanner() {
   const [decided, setDecided] = useState<ConsentState | undefined>(undefined);
   const [reopened, setReopened] = useState(false);
+  // A "yes" we could not write down. Shown instead of the banner's question,
+  // because closing silently would claim we had remembered something we had
+  // not, and the visitor would be asked again next page with no explanation.
+  const [unsaved, setUnsaved] = useState(false);
 
   useEffect(() => {
     setDecided(readConsent(storage()));
@@ -235,23 +262,21 @@ function ConsentBanner() {
   }, []);
 
   if (decided === undefined) return null;
-  if (!bannerVisible(decided, reopened)) return null;
+  if (!unsaved && !bannerVisible(decided, reopened)) return null;
 
   const answer = (choice: ConsentChoice) => {
-    writeConsent(storage(), choice);
-    setDecided(choice);
+    const outcome = answerOutcome(choice, writeConsent(storage(), choice));
+    setDecided(outcome.apply);
     setReopened(false);
-    // Told to gtag directly rather than by reloading the page. `update` is
-    // how Consent Mode is meant to hear about a change mid-visit, and it
-    // applies to the hits that follow without discarding the visit so far.
-    try {
-      const send = (
-        window as unknown as { gtag?: (...args: unknown[]) => void }
-      ).gtag;
-      send?.('consent', 'update', consentSignals(choice));
-    } catch {
-      // A blocked or failed gtag means nothing was going to be stored anyway.
-    }
+    setUnsaved(outcome.warn);
+    // `GoogleAnalytics` is what acts on this: it loads the tag on a grant and
+    // stops storage on a withdrawal. The banner decides, and says so; it does
+    // not reach into gtag itself.
+    window.dispatchEvent(
+      new CustomEvent<ConsentState>(CONSENT_CHANGED_EVENT, {
+        detail: outcome.apply,
+      }),
+    );
   };
 
   return (
@@ -263,30 +288,56 @@ function ConsentBanner() {
     >
       <div className="mx-auto flex max-w-5xl flex-col gap-4 px-5 py-5 text-sm sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[var(--color-ink-muted)]">
-          We count page views without cookies. May we also use Google Analytics,
-          which sets cookies and recognises your browser across visits?{' '}
-          <Link
-            to="/legal/cookies"
-            className="underline underline-offset-4 hover:text-[var(--color-ink)]"
-          >
-            Cookie Notice
-          </Link>
+          {unsaved ? (
+            <>
+              Google Analytics is on for this visit, but your browser would not
+              let us save that choice, so we will have to ask again next time.
+            </>
+          ) : (
+            <>
+              We count page views without cookies. May we also use Google
+              Analytics, which sets cookies and recognises your browser across
+              visits?{' '}
+              <Link
+                to="/legal/cookies"
+                className="underline underline-offset-4 hover:text-[var(--color-ink)]"
+              >
+                Cookie Notice
+              </Link>
+            </>
+          )}
         </p>
         <div className="flex shrink-0 gap-3">
-          <button
-            type="button"
-            onClick={() => answer('denied')}
-            className="rounded-md border border-black/15 px-4 py-2 font-medium dark:border-white/20"
-          >
-            No thanks
-          </button>
-          <button
-            type="button"
-            onClick={() => answer('granted')}
-            className="rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-[var(--color-accent-contrast)]"
-          >
-            Allow
-          </button>
+          {unsaved ? (
+            // Nothing left to decide: the answer is already applied and the
+            // only thing this button does is acknowledge that it will not be
+            // remembered. Offering the same two choices again would invite a
+            // second click that fails exactly as the first one did.
+            <button
+              type="button"
+              onClick={() => setUnsaved(false)}
+              className="rounded-md border border-black/15 px-4 py-2 font-medium dark:border-white/20"
+            >
+              Got it
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => answer('denied')}
+                className="rounded-md border border-black/15 px-4 py-2 font-medium dark:border-white/20"
+              >
+                No thanks
+              </button>
+              <button
+                type="button"
+                onClick={() => answer('granted')}
+                className="rounded-md bg-[var(--color-accent)] px-4 py-2 font-medium text-[var(--color-accent-contrast)]"
+              >
+                Allow
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

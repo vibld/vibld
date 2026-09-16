@@ -3,9 +3,11 @@ import { describe, it } from 'node:test';
 
 import {
   CONSENT_KEY,
+  answerOutcome,
   bannerVisible,
   consentSignals,
   readConsent,
+  shouldLoadAnalytics,
   writeConsent,
   type ConsentStorage,
 } from '../app/consent.ts';
@@ -128,5 +130,70 @@ describe('bannerVisible', () => {
     assert.equal(bannerVisible('granted', true), true);
     assert.equal(bannerVisible('denied', true), true);
     assert.equal(bannerVisible(null, true), true);
+  });
+});
+
+describe('shouldLoadAnalytics', () => {
+  it('loads only for an explicit grant', () => {
+    assert.equal(shouldLoadAnalytics('granted'), true);
+  });
+
+  it('treats undecided exactly like denied', () => {
+    // The whole point of gating the load rather than only the storage.
+    // Someone who has not been asked has not agreed, and under Consent Mode
+    // alone gtag.js is still fetched from Google and still pings, which
+    // would make "it runs only if you say yes" false.
+    assert.equal(shouldLoadAnalytics(null), false);
+    assert.equal(shouldLoadAnalytics('denied'), false);
+  });
+
+  it('agrees with readConsent on every unreadable store', () => {
+    // The two rules have to compose: anything readConsent cannot trust
+    // resolves to null, and null must not load.
+    assert.equal(shouldLoadAnalytics(readConsent(null)), false);
+    assert.equal(shouldLoadAnalytics(readConsent(throwing)), false);
+    assert.equal(shouldLoadAnalytics(readConsent(working('yes'))), false);
+    assert.equal(shouldLoadAnalytics(readConsent(working('granted'))), true);
+  });
+});
+
+describe('answerOutcome', () => {
+  it('applies the answer whether or not it could be stored', () => {
+    // Refusing to honour what someone just clicked, because we could not
+    // write it down, would be worse than not remembering it.
+    for (const stored of [true, false]) {
+      assert.equal(answerOutcome('granted', stored).apply, 'granted');
+      assert.equal(answerOutcome('denied', stored).apply, 'denied');
+    }
+  });
+
+  it('says nothing when the answer was stored', () => {
+    assert.equal(answerOutcome('granted', true).warn, false);
+    assert.equal(answerOutcome('denied', true).warn, false);
+  });
+
+  it('warns about a lost yes, because the banner will come back', () => {
+    // The bug this replaced: the write failed, the banner closed as though
+    // it had been remembered, and the next page asked again with no
+    // explanation.
+    assert.equal(answerOutcome('granted', false).warn, true);
+  });
+
+  it('stays quiet about a lost no, which costs the visitor nothing', () => {
+    // An unstored denial re-reads as undecided, which denies anyway. Nobody
+    // is measured against their wishes, so there is nothing to warn about
+    // and a warning would only be noise.
+    assert.equal(answerOutcome('denied', false).warn, false);
+  });
+
+  it('round-trips with the write it is given', () => {
+    assert.equal(
+      answerOutcome('granted', writeConsent(working(), 'granted')).warn,
+      false,
+    );
+    assert.equal(
+      answerOutcome('granted', writeConsent(throwing, 'granted')).warn,
+      true,
+    );
   });
 });

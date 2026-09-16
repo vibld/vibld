@@ -23,15 +23,14 @@ export default function Cookies() {
         no external fonts, and no social, video, or comment embeds.
       </p>
       <p>
-        The site loads two third-party scripts on every page. The first is
-        Cloudflare Turnstile, the anti-abuse check that sits on the waitlist
-        form and establishes that a submission came from a person rather than a
-        bot. It is served from <code>challenges.cloudflare.com</code>, so
-        loading a page contacts Cloudflare, and Turnstile may store values in
-        your browser as part of performing that check. Cloudflare states that it
-        does not use Turnstile to track users across sites or to build
-        advertising profiles. The second is Google Analytics, described under
-        page views below.
+        The site loads one third-party script on every page: Cloudflare
+        Turnstile, the anti-abuse check that sits on the waitlist form and
+        establishes that a submission came from a person rather than a bot. It
+        is served from <code>challenges.cloudflare.com</code>, so loading a page
+        contacts Cloudflare, and Turnstile may store values in your browser as
+        part of performing that check. Cloudflare states that it does not use
+        Turnstile to track users across sites or to build advertising profiles.
+        The second is Google Analytics, described under page views below.
       </p>
       <p>
         We count page views in two different ways, and only one of them needs
@@ -69,12 +68,15 @@ export default function Cookies() {
       </p>
       <p>
         The first time you visit, a banner asks whether Google Analytics may
-        store anything. Until you answer, and if you answer no, it stores
-        nothing in your browser and assigns you no identifier. You can change
-        your answer at any time with the <strong>Cookie preferences</strong>{' '}
-        link at the bottom of every page, and it takes effect immediately. Your
-        answer is remembered in your browser rather than in a cookie, so it is
-        not sent to us or to anyone else.
+        run. Until you answer, and if you answer no, we do not load it at all:
+        no script is requested from Google, your browser does not contact Google
+        on our behalf, and nothing is stored or measured. Saying yes loads it
+        from that point on. You can change your answer at any time with the{' '}
+        <strong>Cookie preferences</strong> link at the bottom of every page.
+        Withdrawing takes effect immediately on the page you are on, and on
+        every page after it nothing loads at all. Your answer is remembered in
+        your browser rather than in a cookie, so it is not sent to us or to
+        anyone else.
       </p>
       <p>
         Independently of that, browser tracking protection or an ad blocker will

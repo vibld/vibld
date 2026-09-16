@@ -137,17 +137,21 @@ ever turned off, GA4 silently counts only the first view of a visit. Check it
 at https://analytics.google.com/analytics/web/#/a/p/admin/streams, under the
 web stream's Enhanced measurement.
 
-**Decided 2026-09-16 (Chris):** a consent banner. GA4 runs under Google
-Consent Mode v2 and starts denied, so it stores nothing in the browser until
-the visitor agrees. The banner asks on the first visit, and the footer's
+**Decided 2026-09-16 (Chris):** a consent banner. GA4 is not loaded at all
+until the visitor agrees: no script is requested from Google, so nothing about
+a visit reaches them. Consent Mode v2 alone was the first attempt and was
+wrong for this site, because under denied consent gtag.js is still fetched and
+still sends cookieless pings, which would have made the Cookie Notice's "runs
+only if you say yes" untrue. The banner asks on the first visit, and the footer's
 "Cookie preferences" link on every page reopens it afterwards. The answer is
 kept in `localStorage` (`vibld.consent.analytics`), not in a cookie, so it
 never leaves the browser. The first-party counter in `worker/analytics.ts` is
 deliberately outside all of it: no cookie, no identifier, no IP address, so
 there is nothing to consent to and no reason to make anyone click before a
-page works. Rules live in `app/consent.ts`; `app/root.tsx` sets the consent
-default before `config`, because gtag applies the state in force when a
-command runs.
+page works. Rules live in `app/consent.ts`; `app/root.tsx` injects the tag on a grant and
+tells it to stop storing on a withdrawal mid-visit. Consent is still declared
+before `config`, because gtag applies the state in force when a command runs
+and the advertising signals are denied in every state.
 
 ### Lists confirmed
 

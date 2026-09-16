@@ -245,67 +245,73 @@ describe('legal pages', () => {
 });
 
 describe('Google Analytics', () => {
-  it('loads the tag on every prerendered page', () => {
+  it('requests nothing from Google before the visitor has agreed', () => {
+    // The guarantee the Cookie Notice makes, checked against the bytes a
+    // visitor actually receives. A prerendered page is what everyone gets
+    // before any script of ours has decided anything, so a tag in here is a
+    // tag that loaded without consent.
     for (const route of ROUTES) {
       const html = read(route.path);
       assert.ok(
-        html.includes(
-          `https://www.googletagmanager.com/gtag/js?id=${SITE.ga4MeasurementId}`,
-        ),
-        `${route.path} does not load the GA4 tag`,
+        !html.includes('googletagmanager.com'),
+        `${route.path} loads gtag.js before anyone has agreed`,
+      );
+      assert.ok(
+        !html.includes(SITE.ga4MeasurementId),
+        `${route.path} carries the GA4 property id in its static HTML`,
       );
     }
   });
 
-  it('configures the property on every prerendered page', () => {
-    // The loader alone measures nothing. A page that fetches gtag.js and
-    // never calls `config` reports no views at all, and looks correct in
-    // view-source.
-    for (const route of ROUTES) {
-      const html = read(route.path);
-      assert.ok(
-        html.includes(`gtag('config', '${SITE.ga4MeasurementId}')`),
-        `${route.path} loads GA4 without configuring it`,
-      );
-    }
+  it('still has the tag to load once somebody does agree', () => {
+    // The pair that matters: the assertion above passes just as well if GA4
+    // was deleted, so this one fails if it was. Both together say "not
+    // before consent", rather than "not at all".
+    const assets = join(CLIENT, 'assets');
+    const bundle = readdirSync(assets)
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => readFileSync(join(assets, name), 'utf8'))
+      .join('\n');
+    assert.ok(
+      bundle.includes(SITE.ga4MeasurementId),
+      'nothing in the client can load GA4 at all',
+    );
+    assert.ok(
+      bundle.includes('googletagmanager.com'),
+      'the client has no loader for GA4',
+    );
   });
 
-  it('denies analytics storage before configuring the property', () => {
-    // Order, not presence. gtag applies the consent state in force when a
-    // command runs, so a default that arrives after `config` arrives after
-    // the first hit has already gone out under the wrong assumption.
-    for (const route of ROUTES) {
-      const html = read(route.path);
-      const consent = html.indexOf("gtag('consent', 'default'");
-      const config = html.indexOf(`gtag('config', '${SITE.ga4MeasurementId}')`);
-      assert.notEqual(consent, -1, `${route.path} sets no consent default`);
-      assert.notEqual(config, -1, `${route.path} configures no property`);
-      assert.ok(
-        consent < config,
-        `${route.path} configures GA4 before telling it what is allowed`,
-      );
+  it('denies every advertising signal wherever consent is declared', () => {
+    const assets = join(CLIENT, 'assets');
+    const bundle = readdirSync(assets)
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => readFileSync(join(assets, name), 'utf8'))
+      .join('\n');
+    for (const signal of ['ad_storage', 'ad_user_data', 'ad_personalization']) {
+      assert.ok(bundle.includes(signal), `${signal} is never declared`);
     }
+    assert.ok(
+      !bundle.includes('ad_storage:"granted"') &&
+        !bundle.includes("ad_storage:'granted'"),
+      'an advertising signal is granted somewhere',
+    );
   });
 
-  it('starts denied, on every page', () => {
-    for (const route of ROUTES) {
-      const html = read(route.path);
-      for (const signal of [
-        'ad_storage',
-        'ad_user_data',
-        'ad_personalization',
-      ]) {
-        assert.ok(
-          html.includes(`${signal}: 'denied'`),
-          `${route.path} does not deny ${signal}`,
-        );
-      }
-      // analytics_storage is the one the banner moves, so it reads from a
-      // variable rather than a literal. What must hold is that the variable
-      // cannot start granted.
+  it('sends no page_view of its own, which would double-count', () => {
+    // GA4's Enhanced Measurement counts page changes made through the History
+    // API, which is how React Router's Link navigates. An explicit page_view
+    // beside it records every internal navigation twice, and the site is nine
+    // legal pages reachable only by internal link, so the inflation would be
+    // most of the traffic.
+    const assets = join(CLIENT, 'assets');
+    const scripts = readdirSync(assets).filter((name) => name.endsWith('.js'));
+    assert.ok(scripts.length > 0, 'no client bundle to check');
+    for (const name of scripts) {
+      const code = readFileSync(join(assets, name), 'utf8');
       assert.ok(
-        html.includes("var vibldConsent = 'denied'"),
-        `${route.path} does not start analytics storage denied`,
+        !code.includes('page_view'),
+        `${name} sends a page_view, which GA4 Enhanced Measurement already sends`,
       );
     }
   });
@@ -330,34 +336,16 @@ describe('Google Analytics', () => {
     );
   });
 
-  it('sends no page_view of its own, which would double-count', () => {
-    // GA4's Enhanced Measurement counts page changes made through the History
-    // API, which is how React Router's Link navigates. An explicit page_view
-    // beside it records every internal navigation twice, and the site is nine
-    // legal pages reachable only by internal link, so the inflation would be
-    // most of the traffic. gtag.js is loaded from Google rather than bundled,
-    // so a `page_view` literal anywhere in our own client build is ours.
-    const assets = join(CLIENT, 'assets');
-    const scripts = readdirSync(assets).filter((name) => name.endsWith('.js'));
-    assert.ok(scripts.length > 0, 'no client bundle to check');
-    for (const name of scripts) {
-      const code = readFileSync(join(assets, name), 'utf8');
-      assert.ok(
-        !code.includes('page_view'),
-        `${name} sends a page_view, which GA4 Enhanced Measurement already sends`,
-      );
-    }
-  });
-
   // These two are here rather than with the legal pages on purpose. The Cookie
-  // Notice promised to be updated before anything that sets a cookie shipped,
-  // and GA4 sets cookies, so the disclosure is part of shipping the tag, not a
-  // separate chore. If the tag is ever removed, these fail and say so.
+  // Notice describes when GA4 loads, and that description is only true because
+  // of the code above, so it is part of shipping the tag rather than a
+  // separate chore.
   it('is disclosed in the Cookie Notice, cookies and identifier named', () => {
     const html = read('/legal/cookies');
     assert.match(html, /Google Analytics/);
     assert.match(html, /sets cookies in your browser/);
     assert.match(html, /client identifier/);
+    assert.match(html, /we do not load it at all/);
   });
 
   it('names Google as a current subprocessor, not a planned one', () => {
