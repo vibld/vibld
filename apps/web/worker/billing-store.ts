@@ -277,15 +277,25 @@ export class BillingStore {
    * caller if that ever matters -- the same reasoning `recordTopup`'s own
    * `ON CONFLICT ... DO NOTHING` serves for a real Stripe session id.
    */
+  /**
+   * Returns whether this call is the one that wrote the row.
+   *
+   * The insert has always been a no-op on a repeated id, which is what makes
+   * every caller safe to retry. What it did not do was say so, and a caller
+   * that assumed it had written reported money moving on a delivery that
+   * moved none: a redelivered refund logged the same five dollars recovered
+   * twice while the balance changed once. `meta.changes` already knows, and
+   * costs nothing to return.
+   */
   async grantAdminCredit(
     id: string,
     userId: string,
     creditUsdCents: number,
     grantedByEmail: string,
     note: string | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const now = new Date().toISOString();
-    await this.#db
+    const result = await this.#db
       .prepare(
         `INSERT INTO billing_admin_credits
            (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
@@ -294,6 +304,7 @@ export class BillingStore {
       )
       .bind(id, userId, creditUsdCents, grantedByEmail, note, now)
       .run();
+    return result.meta.changes > 0;
   }
 
   /**

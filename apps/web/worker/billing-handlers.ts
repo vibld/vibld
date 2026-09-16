@@ -7,7 +7,7 @@ import {
   stripeCollectedUsdCents,
   subscriptionRecordFrom,
 } from './billing-events.ts';
-import { payReferralIfEarned } from './referral-payout.ts';
+import { clawBackReferral, payReferralIfEarned } from './referral-payout.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
   createCheckoutSession,
@@ -210,10 +210,19 @@ export async function handleStripeWebhook(
     // here would mark the event done and lose a payout that was owed. The
     // retry Stripe then makes re-runs an idempotent path.
     const referrals = new ReferralStore(env.DB!);
-    await applyStripeEvent(store, event, (userId) =>
-      payReferralIfEarned({ referrals, billing: store }, userId).then(
-        () => undefined,
-      ),
+    const deps = { referrals, billing: store };
+    await applyStripeEvent(
+      store,
+      event,
+      (userId) => payReferralIfEarned(deps, userId).then(() => undefined),
+      // A reversal rides its own delivery on the same terms, and fails it
+      // the same way. The reward was funded by a payment that has gone
+      // back out, so a clawback that is swallowed here leaves credit this
+      // deployment is paying for with an event marked done and nothing to
+      // come back to it. `clawBackReferral` is idempotent, so the retry
+      // Stripe makes writes the same rows once.
+      (userId, reason) =>
+        clawBackReferral(deps, userId, reason).then(() => undefined),
     );
   } catch (error) {
     // A 5xx here makes Stripe retry, which is what an unexpected D1/R2

@@ -49,6 +49,24 @@ function metadataUserId(metadata: Stripe.Metadata | null): string | undefined {
 export type OnPurchaseCleared = (userId: string) => Promise<void>;
 
 /**
+ * Called when money that had already arrived goes back out: a refund, or a
+ * dispute this deployment lost.
+ *
+ * A separate callback rather than a branch inside this module, for the same
+ * reason `OnPurchaseCleared` is one. What a reversal means for a referral is
+ * the referral module's rule, and importing it here would put a payout
+ * decision inside the file that reads Stripe's envelopes.
+ *
+ * `reason` is carried through to the ledger note, so a negative row in
+ * somebody's credit history says which of the two happened rather than
+ * appearing as an unexplained deduction.
+ */
+export type OnPurchaseReversed = (
+  userId: string,
+  reason: string,
+) => Promise<void>;
+
+/**
  * Whether applying an event actually wrote what the event was about.
  *
  * `unresolved` means the handler could not work out whose money this is, so
@@ -366,6 +384,7 @@ export async function applyStripeEvent(
   store: BillingStore,
   event: Stripe.Event,
   onPurchaseCleared?: OnPurchaseCleared,
+  onPurchaseReversed?: OnPurchaseReversed,
 ): Promise<EventOutcome> {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -395,6 +414,24 @@ export async function applyStripeEvent(
     case 'invoice.payment_failed':
       // See the module comment: no separate mirror yet, only acknowledged.
       return 'applied';
+    case 'charge.refunded':
+      return await applyChargeReversed(
+        store,
+        event.data.object,
+        'Referral reversed: the payment was refunded.',
+        onPurchaseReversed,
+      );
+    case 'charge.dispute.closed':
+      // Only a dispute that was lost took the money back. A won dispute
+      // means it stayed, and clawing back on `dispute.created` instead would
+      // mean re-crediting everybody whose dispute this deployment wins.
+      if (event.data.object.status !== 'lost') return 'applied';
+      return await applyChargeReversed(
+        store,
+        event.data.object.charge,
+        'Referral reversed: the dispute was lost.',
+        onPurchaseReversed,
+      );
     default:
       // Every type here is one this deployment asked Stripe for
       // (billing-handlers.ts registers the webhook's `enabled_events`), so
@@ -407,4 +444,50 @@ export async function applyStripeEvent(
       // reach this same branch.
       return 'applied';
   }
+}
+
+/**
+ * Money that had arrived has gone back out, so tell the caller whose it was.
+ *
+ * Nothing about the payment row is rewritten here. `recordPayment`'s own
+ * comment already says what it records is what was charged at the time and
+ * not a current balance, and changing that now would move a number three
+ * other places read as "they have paid at some point", which is still true
+ * of somebody who was refunded.
+ *
+ * The one thing that must not survive a reversal is credit handed out
+ * because the money arrived, and that is the callback's business.
+ *
+ * `unresolved` rather than `applied` when the customer cannot be mapped to
+ * an account: a refund read before the `checkout.session.completed` that
+ * creates the mapping has nobody to attribute to yet, and will have once
+ * that older event lands. Reporting it applied loses the reversal for good.
+ */
+async function applyChargeReversed(
+  store: BillingStore,
+  charge: Stripe.Charge | string,
+  reason: string,
+  onPurchaseReversed?: OnPurchaseReversed,
+): Promise<EventOutcome> {
+  // A dispute carries its charge either expanded or as a bare id, and a bare
+  // id is not something to fetch from here: this module never calls Stripe.
+  if (typeof charge === 'string') {
+    console.error('stripe reversal with an unexpanded charge', charge);
+    return 'unresolved';
+  }
+
+  const stripeCustomerId = customerId(charge.customer);
+  if (!stripeCustomerId) {
+    console.error('stripe reversal with no customer', charge.id);
+    return 'unresolved';
+  }
+
+  const userId = await store.findUserIdForCustomer(stripeCustomerId);
+  if (!userId) {
+    console.error('stripe reversal for an unmapped customer', charge.id);
+    return 'unresolved';
+  }
+
+  if (onPurchaseReversed) await onPurchaseReversed(userId, reason);
+  return 'applied';
 }

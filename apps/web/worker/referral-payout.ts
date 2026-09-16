@@ -7,7 +7,10 @@
 import type { BillingStore } from './billing-store.ts';
 import type { ReferralStore } from './referral-store.ts';
 import {
+  DEFAULT_REWARD_CENTS,
   MAX_PAID_REFERRALS,
+  clawbackCents,
+  clawbackGrantId,
   decidePayout,
   payoutGrantId,
   reservationOutcome,
@@ -159,4 +162,105 @@ export async function resumeStrandedPayouts(
   }
 
   return { found: owed.length, paid, failed };
+}
+
+/** What one clawback attempt did, per side. */
+export interface ClawbackResult {
+  /** True when this account had a paid referral to reverse at all. */
+  found: boolean;
+  referrerCents: number;
+  referredCents: number;
+}
+
+/**
+ * Take back a referral reward whose funding payment went away.
+ *
+ * A referred account pays, both sides are credited, and then the payment is
+ * refunded or the dispute is lost. Without this the credit stays, which is
+ * the self-refer-pay-collect-refund loop with nothing between it and the
+ * model spend it turns into.
+ *
+ * Two rules from the decision on 2026-09-16, and the second is the one that
+ * is easy to get wrong. Floored at zero, so nobody is shown a debt. Against
+ * granted credit only, so a person holding purchased top-up is never charged
+ * for another account's refund. `clawbackCents` carries both and is where
+ * the reasoning lives.
+ *
+ * Idempotent through `clawbackGrantId`: `grantAdminCredit` does nothing on
+ * conflict, so a redelivered webhook, a replayed event and a second dispute
+ * on the same charge all write the same two rows once. That is also why
+ * nothing is marked "clawed back" anywhere: these rows are the record.
+ *
+ * The attribution is deliberately left marked paid. It records that a reward
+ * was earned and paid, which is true and stays true; that it was later taken
+ * back is what the negative rows say. Clearing `paidAt` would re-arm the
+ * payout path, and the next cleared payment would credit them again.
+ */
+export async function clawBackReferral(
+  deps: PayoutDeps,
+  referredUserId: string,
+  note: string,
+): Promise<ClawbackResult> {
+  const attribution = await deps.referrals.attributionFor(referredUserId);
+  // Nothing was ever paid for this account, so there is nothing to reverse.
+  // Not an error: most refunds are of a purchase no referral was attached to.
+  if (!attribution?.referrerUserId || attribution.paidAt == null) {
+    return { found: false, referrerCents: 0, referredCents: 0 };
+  }
+
+  const reward = deps.reward ?? DEFAULT_REWARD_CENTS;
+  const referrerCents = await takeBack(
+    deps,
+    clawbackGrantId('referrer', referredUserId),
+    attribution.referrerUserId,
+    reward.referrer,
+    note,
+  );
+  const referredCents = await takeBack(
+    deps,
+    clawbackGrantId('referred', referredUserId),
+    referredUserId,
+    reward.referred,
+    note,
+  );
+
+  return { found: true, referrerCents, referredCents };
+}
+
+/**
+ * Deduct one side's reward, and say how much was actually taken.
+ *
+ * The balance is read first and the deduction capped by it, which is the
+ * floor. Reading it as micro-USD and converting back is not a flourish:
+ * `totalAdminCreditMicroUsd` is what every other caller uses, and doing the
+ * arithmetic in cents here against a different total is how two places come
+ * to disagree about what somebody has.
+ */
+async function takeBack(
+  deps: PayoutDeps,
+  id: string,
+  userId: string,
+  rewardCents: number,
+  note: string,
+): Promise<number> {
+  const grantedMicroUsd = await deps.billing.totalAdminCreditMicroUsd(userId);
+  const cents = clawbackCents(
+    rewardCents,
+    Math.floor(grantedMicroUsd / 10_000),
+  );
+  if (cents <= 0) return 0;
+
+  // What this returns is what this call took, not what the reward was worth.
+  // The row is written once for a given id, so a redelivered refund and a
+  // replayed event both reach here and neither writes: reporting the reward
+  // regardless would log the same five dollars recovered every time one
+  // arrived, while the balance moved once.
+  const written = await deps.billing.grantAdminCredit(
+    id,
+    userId,
+    -cents,
+    REFERRAL_GRANT_ACTOR,
+    note,
+  );
+  return written ? cents : 0;
 }

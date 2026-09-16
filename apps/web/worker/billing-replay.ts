@@ -28,6 +28,7 @@
  */
 import type Stripe from 'stripe';
 import { applyStripeEvent } from './billing-events.ts';
+import type { OnPurchaseReversed } from './billing-events.ts';
 import { BillingStore } from './billing-store.ts';
 import type { EventReplayCursor } from './billing-store.ts';
 
@@ -55,8 +56,21 @@ const PAGE_SIZE_CAP = 100;
  *
  * Over-counting here is safe and under-counting is not, so a handler that
  * grows a write has to grow this.
+ *
+ * A reversal is now the worst case, not a top-up Checkout. `charge.refunded`
+ * and a lost `charge.dispute.closed` resolve the customer, then the clawback
+ * reads the attribution, reads each side's granted total and writes each
+ * side's deduction: nine at the worst.
+ *
+ * That worst case is rare (a refund of a purchase no referral was attached
+ * to stops after the attribution read) and this number is a worst case
+ * regardless, so the page size it produces is smaller than the average run
+ * needs. The cost is stated rather than hidden: the replay reads fewer
+ * events per night than it did, so catching up from a backlog takes
+ * proportionally longer. That is the price of a missed refund being
+ * recovered at all, and losing one silently is what the alternative costs.
  */
-const MAX_QUERIES_PER_EVENT = 4;
+const MAX_QUERIES_PER_EVENT = 9;
 
 /** The page's dedupe read, plus the cursor save after it. */
 const QUERIES_PER_PAGE = 2;
@@ -122,6 +136,8 @@ export const REPLAYED_EVENT_TYPES = [
   'customer.subscription.deleted',
   'invoice.paid',
   'invoice.payment_failed',
+  'charge.refunded',
+  'charge.dispute.closed',
 ];
 
 export interface ReplayResult {
@@ -189,6 +205,7 @@ export async function replayStripeEvents(
   budget: number = DEFAULT_REQUEST_BUDGET,
   now: () => number = () => Math.floor(Date.now() / 1000),
   queryBudget: number = DEFAULT_QUERY_BUDGET,
+  onPurchaseReversed?: OnPurchaseReversed,
 ): Promise<ReplayResult> {
   const pageSize = pageSizeFor(queryBudget);
   // What a page costs at its worst, which is what decides whether there is
@@ -301,7 +318,20 @@ export async function replayStripeEvents(
         // happened by then, and `resumeStrandedPayouts` pays on the recorded
         // payment rather than on being told. It runs straight after this in
         // the same nightly pass.
-        const outcome = await applyStripeEvent(store, event);
+        // The reversal hook is passed and the purchase hook is not, which
+        // is not an inconsistency. A payout that fails can be picked up
+        // later because the payment it depends on was recorded, and
+        // `resumeStrandedPayouts` does exactly that. A reversal records
+        // nothing, so a run that applies one without clawing back marks the
+        // event done and the credit stays for ever. The hook below is
+        // wrapped by its caller so a failure inside it can never throw here
+        // and hold the floor.
+        const outcome = await applyStripeEvent(
+          store,
+          event,
+          undefined,
+          onPurchaseReversed,
+        );
         if (outcome === 'unresolved') {
           // Nothing was written, so it is not done, and marking it processed
           // on a normal return is how a real payment is lost for ever: a
@@ -545,6 +575,7 @@ export async function retryUnattributedEvents(
   store: BillingStore,
   limit = retryBatchFor(DEFAULT_QUERY_BUDGET),
   now: () => string = () => new Date().toISOString(),
+  onPurchaseReversed?: OnPurchaseReversed,
 ): Promise<RetryResult> {
   // Least recently tried first, so a row that can never be attributed costs
   // one attempt a night rather than holding the front of the queue for ever.
@@ -566,7 +597,12 @@ export async function retryUnattributedEvents(
     await store.markUnattributedAttempted(row.stripeEventId, now());
     try {
       const event = JSON.parse(row.payload) as Stripe.Event;
-      const outcome = await applyStripeEvent(store, event);
+      const outcome = await applyStripeEvent(
+        store,
+        event,
+        undefined,
+        onPurchaseReversed,
+      );
       if (outcome === 'unresolved') {
         waiting += 1;
         continue;

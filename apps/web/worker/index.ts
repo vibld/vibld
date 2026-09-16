@@ -88,6 +88,7 @@ import { checkProviderBalances } from './provider-balance.ts';
 import { BillingStore } from './billing-store.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
+  clawBackReferral,
   payReferralIfEarned,
   resumeStrandedPayouts,
 } from './referral-payout.ts';
@@ -1555,6 +1556,25 @@ export default {
           : DEFAULT_QUERY_BUDGET;
       const cleared = (userId: string) =>
         payReferralIfEarned(payout, userId).then(() => undefined);
+      /**
+       * Swallowed on purpose, and this is the one place in this file where
+       * that is right.
+       *
+       * Inside the replay a throw is not a retry: it counts as a failure,
+       * holds the floor, and stops every future payment being recovered
+       * over a bug in an unrelated subsystem. Stripe retries a webhook;
+       * nothing retries this. So a clawback that fails here is logged and
+       * the replay carries on, and the same reversal is reached again on
+       * the next run because `clawBackReferral` is idempotent and the
+       * credit it takes back is still there to take.
+       */
+      const reversed = (userId: string, reason: string) =>
+        clawBackReferral(payout, userId, reason).then(
+          () => undefined,
+          (error: unknown) => {
+            console.error('referral clawback failed', userId, error);
+          },
+        );
       ctx.waitUntil(
         // The replay first, and the reconcile after it rather than beside
         // it. The replay applies events in the order Stripe created them
@@ -1571,6 +1591,7 @@ export default {
           undefined,
           undefined,
           replayBudgetFor(budget),
+          reversed,
         )
           .then(
             (result) => {
@@ -1603,6 +1624,8 @@ export default {
             retryUnattributedEvents(
               billing,
               retryBatchFor(budget - payoutReserveFor(budget) - reserved),
+              undefined,
+              reversed,
             ),
           )
           .then(

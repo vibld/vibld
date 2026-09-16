@@ -976,8 +976,8 @@ describe('two phases in one invocation', () => {
     const flat = source.replace(/\s+/g, ' ');
     assert.match(
       flat,
-      /replayStripeEvents\( stripe, billing, undefined, undefined, replayBudgetFor\(budget\), \)/,
-      'the replay is handed the whole allowance again',
+      /replayStripeEvents\( stripe, billing, undefined, undefined, replayBudgetFor\(budget\), reversed, \)/,
+      'the replay is handed the whole allowance again, or lost its clawback hook',
     );
     assert.doesNotMatch(
       source,

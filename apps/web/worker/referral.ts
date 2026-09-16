@@ -262,6 +262,49 @@ export function payoutGrantId(
   return `referral:${side}:${referredUserId}`;
 }
 
+/**
+ * The id of the row that takes a reward back.
+ *
+ * Deterministic for the same reason the payout id is: `grantAdminCredit`
+ * does nothing on conflict, so a redelivered refund, a replayed event and a
+ * second dispute on the same charge all write the same row once. There is no
+ * separate "clawed back" column anywhere, and there does not need to be:
+ * these rows are the record, and their id is what makes them unrepeatable.
+ */
+export function clawbackGrantId(
+  side: 'referrer' | 'referred',
+  referredUserId: string,
+): string {
+  return `referral-clawback:${side}:${referredUserId}`;
+}
+
+/**
+ * How much of a reward can actually be taken back from one side.
+ *
+ * Chris's decision, 2026-09-16, in two parts, and the second is the one that
+ * is easy to get wrong.
+ *
+ * **Floored at zero**, so nobody is ever shown a debt this product has no way
+ * to collect. The cost is that a referrer who spent the credit the day it
+ * arrived keeps it, which is accepted: recovering that dollar is worth less
+ * than telling somebody they owe money.
+ *
+ * **Against granted credit only, never money somebody paid.** Credit here is
+ * one pooled balance, Stripe top-ups and grants together, and nothing tracks
+ * which pool a generation drew from. Deducting from the pool would mean
+ * somebody whose referral credit is already spent has five dollars taken out
+ * of a twenty dollar top-up they bought, which is charging a customer for
+ * another account's refund. So the ceiling is what this deployment gave
+ * away, and a person holding only purchased credit gives back nothing.
+ */
+export function clawbackCents(
+  rewardCents: number,
+  grantedCents: number,
+): number {
+  if (rewardCents <= 0 || grantedCents <= 0) return 0;
+  return Math.min(rewardCents, grantedCents);
+}
+
 /** The link a user shares. */
 export function referralUrl(appOrigin: string, code: string): string {
   const url = new URL(appOrigin);
