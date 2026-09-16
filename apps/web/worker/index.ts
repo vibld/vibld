@@ -100,6 +100,15 @@ import {
   handleGitHubStatus,
 } from './github-handlers.ts';
 import { createStripeClient } from './stripe-client.ts';
+import { isGated } from './access-gate.ts';
+import {
+  decideAccessFor,
+  handleAccessStatus,
+  handleInvite,
+  handleInviteList,
+  handleInviteRevoke,
+  refusal,
+} from './access-handlers.ts';
 
 export interface Env {
   /** Worker secret. Never reaches the browser. */
@@ -167,6 +176,13 @@ export interface Env {
   VIBLD_SIGNUP_CREDIT_FROM?: string;
   /** Runs one user may have in flight at once. */
   VIBLD_MAX_IN_FLIGHT?: string;
+  /**
+   * "open" opens this deployment to anybody who can sign in. Anything else,
+   * including unset, is invite-only (access.ts). Unset is closed on purpose:
+   * a deployment that has never considered the question should not be the
+   * one handing out model spend to the internet.
+   */
+  VIBLD_ACCESS_MODE?: string;
   /**
    * Micro-USD the whole deployment may spend per UTC day, across every user
    * -- docs/decisions.md L29. Layered above the per-user tier allowances so
@@ -476,7 +492,19 @@ async function handleBillingStatus(
     // Before the balance is read, so a brand new account sees its welcome
     // credit on the very first load rather than after a refresh. Idempotent
     // on a deterministic id, so calling it on every status request is free.
-    await grantSignupCreditOnce(billing, principal.userId, env);
+    //
+    // Gated, even though the route is not. This route is ungated so that
+    // somebody invited, who spent, and whose access was then revoked can
+    // still see what happened to their money: refusing a balance read
+    // tells them nothing and looks like theft. But the route was described
+    // as read-only and it is not, and the grant is the exact thing the
+    // invite gate exists to protect: an uninvited account could call this
+    // directly and draw its $1 whatever the UI chose to render.
+    //
+    // So the read stays open to anyone signed in, and the money does not.
+    // The check is inside `grantSignupCreditOnce` rather than here, so that
+    // no caller can be the one that forgets it.
+    await grantSignupCreditOnce(billing, principal, env);
     const subscription = await billing.findActiveSubscription(principal.userId);
     const tier = tierFor(subscription);
     const freeAllowance = positiveInt(
@@ -821,7 +849,7 @@ async function handlePlan(
     // calls the status endpoint must not be refused its first generation for
     // want of a credit it was promised. The deterministic id means whichever
     // path arrives first wins and the other is a no-op.
-    await grantSignupCreditOnce(billing, principal.userId, env);
+    await grantSignupCreditOnce(billing, principal, env);
     const subscription = await billing.findActiveSubscription(principal.userId);
     const tier = tierFor(subscription);
     const freeAllowance = positiveInt(
@@ -1236,6 +1264,31 @@ export default {
   ): Promise<Response> {
     const { pathname } = new URL(request.url);
 
+    /*
+     * The invite gate, before dispatch rather than inside each handler.
+     *
+     * Scattered checks fail silently: a new endpoint that spends money and
+     * forgets the call is open, and nothing says so. Here the route table
+     * (access-gate.ts) has to classify every path, and a test reads this
+     * file's own route literals and fails on any it does not cover.
+     *
+     * It runs after identity, never instead of it: an uninvited caller and an
+     * unauthenticated one get different answers, because they are different
+     * problems and only one of them is the caller's to fix.
+     */
+    if (isGated(pathname, request.method)) {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      const decision = await decideAccessFor(env, resolved.principal);
+      if (!decision.allowed) return refusal();
+    }
+
+    if (pathname === '/api/access/status') {
+      const resolved = await resolvePrincipal(request, env);
+      if (resolved.denied) return resolved.denied;
+      return handleAccessStatus(request, env, resolved.principal);
+    }
+
     // Lets the shell show which provider is actually in use instead of
     // implying AI when it is running the deterministic fake.
     if (pathname === '/api/config') {
@@ -1376,6 +1429,24 @@ export default {
 
     if (pathname === '/api/admin/user') {
       return handleAdminUser(request, env);
+    }
+
+    if (pathname === '/api/admin/invites') {
+      const guard = await requireAdmin(request, env);
+      if (guard.denied) return guard.denied;
+      return handleInviteList(request, env);
+    }
+
+    if (pathname === '/api/admin/invite') {
+      const guard = await requireAdmin(request, env);
+      if (guard.denied) return guard.denied;
+      return handleInvite(request, env, guard.adminEmail);
+    }
+
+    if (pathname === '/api/admin/invite/revoke') {
+      const guard = await requireAdmin(request, env);
+      if (guard.denied) return guard.denied;
+      return handleInviteRevoke(request, env);
     }
 
     if (pathname === '/api/admin/topup') {
