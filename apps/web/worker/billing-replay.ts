@@ -28,7 +28,6 @@
  */
 import type Stripe from 'stripe';
 import { applyStripeEvent } from './billing-events.ts';
-import type { OnPurchaseCleared } from './billing-events.ts';
 import { BillingStore } from './billing-store.ts';
 import type { EventReplayCursor } from './billing-store.ts';
 
@@ -107,7 +106,6 @@ interface EventLister {
 export async function replayStripeEvents(
   stripe: EventLister,
   store: BillingStore,
-  onPurchaseCleared?: OnPurchaseCleared,
   budget: number = DEFAULT_REQUEST_BUDGET,
   now: () => number = () => Math.floor(Date.now() / 1000),
 ): Promise<ReplayResult> {
@@ -155,7 +153,17 @@ export async function replayStripeEvents(
       read += 1;
       try {
         if (await store.wasEventProcessed(event.id)) continue;
-        await applyStripeEvent(store, event, onPurchaseCleared);
+        // No purchase hook, deliberately. `announceIfPaid` lets a failed
+        // referral payout fail the delivery, which is right for a webhook
+        // because Stripe retries it, and wrong here because nothing retries
+        // this: the throw would count as a failure, hold the floor, and stop
+        // every future payment being recovered over a bug in an unrelated
+        // subsystem. The payment is recorded before the payout is announced
+        // in both handlers, so what this module exists for has already
+        // happened by then, and `resumeStrandedPayouts` pays on the recorded
+        // payment rather than on being told. It runs straight after this in
+        // the same nightly pass.
+        await applyStripeEvent(store, event);
         await store.markEventProcessed(event.id, event.type);
         applied += 1;
       } catch (error) {

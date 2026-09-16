@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import type Stripe from 'stripe';
 
@@ -164,11 +167,11 @@ describe('where a run that ran out of budget leaves the cursor', () => {
     const second = topupEvent('evt_old', 1000, 'user_2');
     const { stripe, asked } = stripeServing([[first], [second]]);
 
-    const stopped = await replayStripeEvents(stripe, store, undefined, 1);
+    const stopped = await replayStripeEvents(stripe, store, 1);
     assert.equal(stopped.incomplete, true, 'called a partial run complete');
     assert.equal(stopped.applied, 1);
 
-    const resumed = await replayStripeEvents(stripe, store, undefined, 1);
+    const resumed = await replayStripeEvents(stripe, store, 1);
 
     assert.equal(
       asked[1]?.starting_after,
@@ -189,13 +192,13 @@ describe('where a run that ran out of budget leaves the cursor', () => {
       [topupEvent('evt_old', 1000, 'user_2')],
     ]);
 
-    await replayStripeEvents(stripe, store, undefined, 1);
+    await replayStripeEvents(stripe, store, 1);
     const midway = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
     assert.equal(midway?.doneBelow, 0, 'moved the floor mid-descent');
     assert.equal(midway?.sweepAfterId, 'evt_new');
     assert.ok(midway?.sweepTop, 'forgot the top it has to come back to');
 
-    await replayStripeEvents(stripe, store, undefined, 1);
+    await replayStripeEvents(stripe, store, 1);
     const done = await store.getEventReplayCursor(STRIPE_EVENTS_CURSOR);
 
     assert.equal(done?.doneBelow, midway?.sweepTop, 'floor did not catch up');
@@ -213,9 +216,9 @@ describe('where a run that ran out of budget leaves the cursor', () => {
     ]);
     let clock = 5000;
 
-    await replayStripeEvents(stripe, store, undefined, 1, () => clock);
+    await replayStripeEvents(stripe, store, 1, () => clock);
     clock = 9000;
-    await replayStripeEvents(stripe, store, undefined, 1, () => clock);
+    await replayStripeEvents(stripe, store, 1, () => clock);
 
     assert.equal(
       (asked[1]?.created as { lt: number }).lt,
@@ -364,5 +367,41 @@ describe('the budget', () => {
         `never reached page ${n}`,
       );
     }
+  });
+});
+
+describe('what the nightly pass hands the replay', () => {
+  // The worker entry imports `cloudflare:workers` and cannot be loaded here,
+  // so this reads its source. The same reason `access-gate.test.ts` reads it.
+  const WORKER = fileURLToPath(new URL('../worker/', import.meta.url));
+
+  it('does not give it the referral payout hook', async () => {
+    // `announceIfPaid` lets a failed payout fail the delivery, which is right
+    // for a webhook because Stripe retries it. Nothing retries the replay, so
+    // the same throw would hold the floor and stop every future payment being
+    // recovered over a bug in an unrelated subsystem.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+
+    assert.match(source, /replayStripeEvents\(stripe, billing\)/);
+    assert.doesNotMatch(
+      source,
+      /replayStripeEvents\(stripe, billing, cleared\)/,
+      'a payout failure can stall the recovery again',
+    );
+  });
+
+  it('pays out after it, so tonight rather than tomorrow', async () => {
+    // `payoutsToRetry` finds anybody with a cleared payment and no payout, so
+    // it does not need to be told. It does need to run after the thing that
+    // records the payment.
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const replay = source.indexOf('replayStripeEvents(stripe, billing)');
+    const payouts = source.indexOf('resumeStrandedPayouts(payout)');
+
+    assert.ok(replay > 0 && payouts > 0, 'the nightly pass lost a step');
+    assert.ok(
+      payouts > replay,
+      'the payout resume runs before the payments it would pay on',
+    );
   });
 });

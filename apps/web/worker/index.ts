@@ -1512,20 +1512,7 @@ export default {
       const billing = new BillingStore(env.DB!);
       const referrals = new ReferralStore(env.DB!);
       const payout = { referrals, billing };
-      ctx.waitUntil(
-        // Every referral payout that is owed and has not happened, first.
-        // Stripe's redelivery gives up after a few days and a delivery that
-        // was never made is retried by nobody, so without this the reward
-        // stays owed and nothing ever revisits it.
-        resumeStrandedPayouts(payout).then(
-          (result) =>
-            console.log(
-              JSON.stringify({ event: 'referral.resumed', ...result }),
-            ),
-          (error: unknown) =>
-            console.error('referral payout resume failed', error),
-        ),
-      );
+
       const stripe = createStripeClient(env);
       const cleared = (userId: string) =>
         payReferralIfEarned(payout, userId).then(() => undefined);
@@ -1539,13 +1526,28 @@ export default {
         // the replay left it in. The money the replay recovers does not
         // depend on order: a top-up and a payment are recorded against the
         // Stripe object's own id, once.
-        replayStripeEvents(stripe, billing, cleared)
+        replayStripeEvents(stripe, billing)
           .then(
             (result) =>
               console.log(
                 JSON.stringify({ event: 'billing.replayed', ...result }),
               ),
             (error: unknown) => console.error('billing replay failed', error),
+          )
+          // Then every referral payout that is owed and has not happened.
+          // Stripe's redelivery gives up after a few days and a delivery that
+          // was never made is retried by nobody, so without this the reward
+          // stays owed and nothing revisits it. After the replay rather than
+          // beside it, so a payment the replay has just recovered is paid out
+          // tonight instead of tomorrow.
+          .then(() => resumeStrandedPayouts(payout))
+          .then(
+            (result) =>
+              console.log(
+                JSON.stringify({ event: 'referral.resumed', ...result }),
+              ),
+            (error: unknown) =>
+              console.error('referral payout resume failed', error),
           )
           .then(() => reconcileSubscriptions(stripe, billing, cleared))
           .then(
