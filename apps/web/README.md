@@ -184,6 +184,15 @@ every invite with what it currently is (waiting, in, withdrawn) and carries
 the two acts that change it. That panel is the way in: without it, letting
 somebody in would mean constructing an authenticated POST by hand.
 
+**Two systems have to agree**, and the panel says so rather than implying
+otherwise. Clerk is in Waitlist mode (above), so it decides whether somebody
+can sign in at all; this list decides whether signing in gets them anywhere.
+A row here for an address Clerk has not approved is somebody who cannot
+create a session and so never reaches the gate, which is why the panel's
+confirmation names the Clerk step and links to
+<https://dashboard.clerk.com/~/users/waitlist> rather than reporting an
+invite as access.
+
 It is careful about what it claims, because this list is what decides who may
 use the product. Issuing has three outcomes and they are reported apart: a new
 invite, a withdrawn one put back, and an address already on the list where

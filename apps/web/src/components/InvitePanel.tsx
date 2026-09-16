@@ -78,11 +78,17 @@ export function InvitePanel() {
     // Three outcomes, said apart. "Already invited" reported as success is
     // how somebody concludes they have just let a person in when the list
     // has said so since last week.
+    //
+    // And none of the three is the whole job. Clerk is in Waitlist mode, so
+    // a row here lets somebody past the gate and does not let them create a
+    // session: unapproved in Clerk they cannot sign in at all, and never
+    // reach the gate to be admitted by it. "Invited" on its own is a claim
+    // this panel cannot make.
     setNote(
       result.created
-        ? `Invited ${result.email}.`
+        ? `${result.email} is on the invite list. Approve them in Clerk too, or they cannot sign in.`
         : result.reinstated
-          ? `Put ${result.email}'s withdrawn invite back.`
+          ? `Put ${result.email}'s withdrawn invite back. Approve them in Clerk too, or they cannot sign in.`
           : `${result.email} was already invited. Nothing changed.`,
     );
     if (result.created || result.reinstated) {
@@ -160,6 +166,25 @@ export function InvitePanel() {
           Withdraw
         </button>
       </div>
+
+      {/*
+        Standing, not per-action, because it is true of the list rather than
+        of the last thing pressed. Two systems have to agree before somebody
+        can use the product: Clerk decides whether they can sign in at all,
+        this list decides whether signing in gets them anywhere.
+      */}
+      <p className="pane-note">
+        Sign-in is waitlisted in Clerk, so this list is half of it. Approve
+        people at{' '}
+        <a
+          href="https://dashboard.clerk.com/~/users/waitlist"
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          the Clerk waitlist
+        </a>{' '}
+        as well.
+      </p>
 
       {note ? (
         <p className="pane-note" role="status">

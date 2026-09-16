@@ -139,6 +139,39 @@ describe('the invite panel', () => {
     );
   });
 
+  it('does not call a row on this list a sign-in', async () => {
+    // Clerk is in Waitlist mode, so a row here lets somebody past the gate
+    // and does not let them create a session. Unapproved in Clerk they
+    // cannot sign in at all, and never reach the gate to be admitted by it.
+    // "Invited" on its own is a claim this panel cannot make, and an
+    // operator who believes it stops looking when the person says the
+    // product will not let them in.
+    harness({
+      '/api/admin/invites': [{ invites: [] }],
+      '/api/admin/invite': [
+        { email: 'new@example.com', created: true, reinstated: false },
+      ],
+    });
+    const view = await open();
+
+    // Said whatever was last pressed, because it is true of the list.
+    assert.match(view.text(), /waitlisted in Clerk/i);
+    const link = view.container.querySelector(
+      'a[href="https://dashboard.clerk.com/~/users/waitlist"]',
+    );
+    assert.ok(link, 'no way to reach the place the other half happens');
+
+    await view.type('new@example.com');
+    await view.press(/^Invite$/);
+
+    assert.match(view.text(), /on the invite list/i);
+    assert.match(
+      view.text(),
+      /approve them in clerk/i,
+      'reported an invite as though it were access',
+    );
+  });
+
   it('does not report a withdrawal that did not happen', async () => {
     // `revoked: false` is an address with no invite to withdraw, or one
     // already withdrawn. Either way nothing moved, and telling an operator
