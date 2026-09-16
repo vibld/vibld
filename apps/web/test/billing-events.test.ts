@@ -295,6 +295,36 @@ describe('applyStripeEvent: invoice.paid', () => {
     assert.equal(await store.getSubscription('sub_1'), undefined);
   });
 
+  it('does not count an invoice settled outside Stripe as payment', async () => {
+    // An invoice marked paid out of band (bank transfer, cheque, cash) is
+    // `paid` with the full `amount_paid`, and Stripe never saw the money:
+    // `amount_paid_off_stripe` carries the part it did not collect.
+    const store = newStore();
+    const seen: string[] = [];
+
+    await applyStripeEvent(
+      store,
+      invoice({ amount_paid: 2000, amount_paid_off_stripe: 2000 }),
+      async (userId) => {
+        seen.push(userId);
+      },
+    );
+
+    assert.equal(await store.hasClearedPayment('user_1'), false);
+    assert.deepEqual(seen, []);
+  });
+
+  it('counts only the part Stripe collected on a partly off-Stripe invoice', async () => {
+    const store = newStore();
+
+    await applyStripeEvent(
+      store,
+      invoice({ amount_paid: 2000, amount_paid_off_stripe: 1500 }),
+    );
+
+    assert.equal(await store.hasClearedPayment('user_1'), true);
+  });
+
   it('does not count a zero-amount invoice as payment', async () => {
     // A trial invoice and a fully coupon-covered one are both `paid` in
     // Stripe's sense and take nothing. Counting them is a way to earn

@@ -83,7 +83,10 @@ function stripeServing(
         return {
           data: paidCents(subscription).map((amount, index) => ({
             id: `in_${subscription}_${index}`,
-            amount_paid: amount,
+            // Negative means "settled outside Stripe": the invoice reports
+            // the full amount paid and Stripe collected none of it.
+            amount_paid: Math.abs(amount),
+            amount_paid_off_stripe: amount < 0 ? Math.abs(amount) : 0,
             status_transitions: { paid_at: 1_800_000_000 },
           })),
           has_more: false,
@@ -134,6 +137,26 @@ describe('reconcileSubscriptions', () => {
 
     await reconcileSubscriptions(
       stripeServing(statuses, statuses, () => [0]),
+      store,
+      async (userId) => {
+        offered.push(userId);
+      },
+    );
+
+    assert.deepEqual(offered, []);
+    assert.equal(await store.hasClearedPayment('user_active'), false);
+  });
+
+  it('does not offer a subscriber whose invoices were settled outside Stripe', async () => {
+    // Marked paid by hand rather than collected. `amount_paid` is populated
+    // and no money moved through Stripe, so the same rule the webhook uses
+    // has to apply here too.
+    const statuses = ['active'];
+    const store = await storeWith(statuses);
+    const offered: string[] = [];
+
+    await reconcileSubscriptions(
+      stripeServing(statuses, statuses, () => [-2000]),
       store,
       async (userId) => {
         offered.push(userId);

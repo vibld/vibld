@@ -4,6 +4,7 @@ import { BillingStore } from './billing-store.ts';
 import {
   applyStripeEvent,
   ownerOfSubscription,
+  stripeCollectedUsdCents,
   subscriptionRecordFrom,
 } from './billing-events.ts';
 import { payReferralIfEarned } from './referral-payout.ts';
@@ -356,12 +357,16 @@ async function recordPaidInvoices(
     });
 
     for (const invoice of page.data) {
-      total += invoice.amount_paid;
+      // The same rule the webhook path uses, from the same function: an
+      // invoice settled outside Stripe must not read as a charge here and
+      // not there.
+      const collected = stripeCollectedUsdCents(invoice);
+      total += collected;
       if (!invoice.id) continue;
       await store.recordPayment(
         invoice.id,
         userId,
-        invoice.amount_paid,
+        collected,
         invoice.status_transitions?.paid_at
           ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
           : new Date().toISOString(),

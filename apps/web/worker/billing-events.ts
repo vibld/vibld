@@ -256,6 +256,31 @@ async function applySubscriptionEvent(
 }
 
 /**
+ * What Stripe actually collected on this invoice, in USD cents.
+ *
+ * Not `amount_paid`, which is the wrong number twice over. It counts money
+ * that never moved through Stripe: an invoice marked paid out of band (a
+ * bank transfer, a cheque, a cash payment recorded by hand) reports the full
+ * `amount_paid` with `amount_paid_off_stripe` carrying the part Stripe never
+ * saw. And a zero-amount invoice is `paid` in Stripe's sense having taken
+ * nothing at all, which a trial and a full coupon both produce.
+ *
+ * Subtracting leaves only money Stripe can attest to, which is the
+ * conservative direction on a rule that hands out credit and the same one
+ * the purchase barrier takes.
+ *
+ * **This is a product decision, not just a safety one, and it is reversible
+ * in one line.** Vibld has no out-of-band invoicing today, so today this
+ * changes nothing. If it ever bills an enterprise customer by bank transfer,
+ * that customer really has bought something, and whether their referrer gets
+ * paid is a question about the offer rather than about Stripe. Drop the
+ * subtraction to say yes.
+ */
+export function stripeCollectedUsdCents(invoice: Stripe.Invoice): number {
+  return invoice.amount_paid - (invoice.amount_paid_off_stripe ?? 0);
+}
+
+/**
  * An invoice that was actually paid.
  *
  * This event was acknowledged and discarded, on the reasoning that
@@ -297,10 +322,7 @@ async function applyInvoicePaid(
   // not exist yet changes nothing and reports nothing, which is how a real
   // payment could go unrecorded for ever.
   //
-  // `amount_paid` is what Stripe took. A zero-amount invoice is paid in
-  // Stripe's sense and takes no money, so it is recorded truthfully and
-  // earns nothing.
-  const amountUsdCents = invoice.amount_paid;
+  const amountUsdCents = stripeCollectedUsdCents(invoice);
   await store.recordPayment(
     invoice.id ?? `invoice-unknown-${userId}`,
     userId,
