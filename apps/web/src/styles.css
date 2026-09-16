@@ -51,8 +51,16 @@ body {
   border: 0;
 }
 
+/*
+ * The focus ring is an accent-coloured thing that has to be *seen*, which is
+ * the one job coral cannot do: against newsprint it measures 2.60, under the
+ * 3:1 bar for a non-text indicator. It takes the accent ink instead, which is
+ * ultramarine on light and a lightened coral on dark, and clears the bar in
+ * both. Pointing this at `--accent` when the brand landed quietly halved the
+ * contrast of every keyboard focus indicator in the product.
+ */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--vibld-accent-ink);
   outline-offset: 2px;
 }
 
@@ -702,6 +710,14 @@ body {
   justify-content: center;
   --vibld-mark-ink: var(--vibld-newsprint);
   --vibld-mark-offset: var(--vibld-coral);
+  /*
+   * And the blend, not only the inks. This tile is a dark ground whatever the
+   * page theme is, so in light mode it would otherwise inherit `multiply` and
+   * multiply a near-white stroke into ultramarine, giving the ground back and
+   * erasing the mark. That is the same failure `screen` was introduced for,
+   * one scope further in.
+   */
+  --vibld-mark-blend: screen;
   box-shadow:
     0 0 0 1px var(--brand-24),
     0 6px 18px -6px var(--brand-40);

@@ -68,8 +68,12 @@ body {
  * A visible focus ring on every interactive element. Removing it is the most
  * common way a site becomes unusable by keyboard while still looking fine.
  */
+/*
+ * The accent ink, not the accent: coral against newsprint measures 2.60,
+ * under the 3:1 bar a focus indicator has to clear to be seen at all.
+ */
 :focus-visible {
-  outline: 3px solid var(--color-accent);
+  outline: 3px solid var(--color-accent-ink);
   outline-offset: 2px;
 }
 

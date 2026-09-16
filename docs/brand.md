@@ -34,6 +34,12 @@ convention:
   (`#141a29`, 5.97).
 - Ink on an ultramarine fill: 2.25. Text on ultramarine is newsprint (6.90).
 
+**The focus ring takes the accent ink, never the accent.** A focus indicator
+exists to be seen, which is the one job coral cannot do: 2.60 against
+newsprint is under the 3:1 bar for a non-text indicator. Pointing it at the
+accent when the brand landed quietly halved the contrast of every keyboard
+focus ring in the product.
+
 `apps/marketing/test/palette-use.test.ts` reads the source and fails the build
 if any of these appears. It was written because all three were already
 shipped: the consent banner's "Allow" button set its text colour to
@@ -57,6 +63,13 @@ ground:
 
 A mark drawn in coral alone is not a mark. `packages/brand/test/mark.test.ts`
 asserts the ghost never reads more strongly than the ink.
+
+**Anywhere the mark sits on a fixed ground, override the blend as well as the
+inks.** The builder's logo tile is ultramarine whatever the page theme is, so
+in light mode it inherited `multiply` and multiplied a near-white stroke into
+ultramarine, giving the ground back. Overriding `--vibld-mark-ink` and
+`--vibld-mark-offset` without `--vibld-mark-blend` is the shape of that
+mistake.
 
 ### When the overprint cannot survive
 

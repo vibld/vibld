@@ -64,4 +64,38 @@ describe('the builder stylesheet', () => {
     const css = await readFile(STYLES, 'utf8');
     assert.ok(css.split('\n').length > 500);
   });
+
+  it('never draws the retired mark anywhere in the shell', async () => {
+    // The tilde survived in `SignInLanding` when the shell header was
+    // changed, so the first surface an unauthenticated visitor saw still
+    // carried the old logo while everything else had the new one. A replaced
+    // mark is exactly the kind of thing that gets replaced in one place.
+    const { readdir } = await import('node:fs/promises');
+    const src = fileURLToPath(new URL('../src/', import.meta.url));
+
+    async function sources(dir: string): Promise<string[]> {
+      const entries = await readdir(dir, { withFileTypes: true });
+      const found: string[] = [];
+      for (const entry of entries) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) found.push(...(await sources(path)));
+        else if (/\.tsx$/.test(entry.name)) found.push(path);
+      }
+      return found;
+    }
+
+    const offenders: string[] = [];
+    for (const path of await sources(src)) {
+      const text = await readFile(path, 'utf8');
+      for (const [index, line] of text.split('\n').entries()) {
+        // The retired mark, as it was written: a bare tilde as the whole of
+        // an element's content.
+        if (/^\s*~\s*$/.test(line)) {
+          offenders.push(`${path}:${index + 1}`);
+        }
+      }
+    }
+
+    assert.deepEqual(offenders, []);
+  });
 });
