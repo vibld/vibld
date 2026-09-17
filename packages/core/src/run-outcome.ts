@@ -97,6 +97,22 @@ export type RunStop =
   /** Anything else the provider did that this service could not classify. */
   | 'provider-error'
   /**
+   * The run stopped because only the person can decide something (#158).
+   *
+   * A real end to a real run, not a failure and not a pause: the invocation
+   * is over, and the way forward is a continuation carrying the held work
+   * and the answer (`continuation.ts`), never a retry of this one.
+   */
+  | 'awaiting-answer'
+  /**
+   * Complete and verified, and deliberately not applied.
+   *
+   * Separate from `applied` because the project did not move, and separate
+   * from every failure because nothing went wrong. The work is held for
+   * somebody to look at, and it is still exactly where the run left it.
+   */
+  | 'retained'
+  /**
    * The project's accepted revision moved while this run was working, so its
    * result could not be promoted onto the base it was built against (D12).
    *
@@ -151,6 +167,8 @@ export const RUN_STOPS = [
   'context-exceeded',
   'run-budget-exceeded',
   'provider-error',
+  'awaiting-answer',
+  'retained',
   'conflict',
   'store-unavailable',
   'not-started',
@@ -191,6 +209,10 @@ export function stopChangedTheProject(stop: RunStop): boolean {
  * asking for the same answer twice.
  */
 export function stopIsRetryable(stop: RunStop): boolean {
+  // `awaiting-answer` is deliberately not here. The same prompt asks the
+  // same question; the move is to answer it, and offering a retry instead
+  // spends money to be asked again. `retained` is not here either: the work
+  // is finished and sitting there, and re-running would replace it.
   return (
     stop === 'provider-error' ||
     stop === 'run-budget-exceeded' ||

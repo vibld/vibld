@@ -205,6 +205,33 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-17
+
+**Four outcomes a run can have: ask, retain, apply, discard.** One of them per
+run, and the set is closed. A run that stopped because only the person can
+answer something and a run that finished and wants review are different
+objects: both end without applying anything, and before this they were the
+same `state: 'failed'` with a sentence attached. Asking ends the invocation.
+There is no paused run to resume: answering starts a continuation, a new run
+carrying the work the first one held plus the answer, and answering is not by
+itself an acceptance. Retaining work for review does not ask a question.
+
+Built now rather than when M2's conversational editing needs it, which was a
+deliberate call against the recommendation to wait: the cost is that the first
+real consumer will reshape it, and the reason is that a vaguer model would be
+load-bearing by then. The vocabulary lives in `packages/core`
+(`run-disposition.ts`, `continuation.ts`) with no store, no route and no UI
+behind it, because nothing can ask a question yet: the model returns a plan.
+The one adapter, `settledOutcome`, refuses to infer an `ask` from a finished
+run rather than inventing the question's text.
+
+Two stops join the vocabulary with it: `awaiting-answer` and `retained`.
+Neither is retryable, which is the point. The same prompt asks the same
+question, so the move is to answer it, and retained work is finished and
+sitting there, so re-running replaces it.
+
+Refines D11 and sits beside D12. #158.
+
 ### Resolved 2026-09-16
 
 **Referral reward: credit to both sides, paid on the referred account's first

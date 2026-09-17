@@ -39,6 +39,8 @@ export const STOP_LABELS: Record<RunStop, string> = {
   'context-exceeded': 'Too large to send',
   'run-budget-exceeded': "Ran past this run's budget",
   'provider-error': 'The model provider failed',
+  'awaiting-answer': 'Waiting on your answer',
+  retained: 'Finished, waiting for your review',
   conflict: 'The project moved on before this could apply',
   'store-unavailable': 'Vibld could not save the result',
   'not-started': 'Never started',
@@ -48,8 +50,17 @@ export const STOP_LABELS: Record<RunStop, string> = {
 export function stopTone(stop: RunStop): 'kept' | 'quiet' | 'failed' {
   if (stop === 'applied') return 'kept';
   // Neither a win nor a fault: the run worked and there was nothing to do,
-  // or somebody stopped it themselves.
-  if (stop === 'no-changes' || stop === 'cancelled') return 'quiet';
+  // somebody stopped it themselves, or it is finished and waiting on a
+  // person. Tinting any of these as a failure would report a working run as
+  // a broken one.
+  if (
+    stop === 'no-changes' ||
+    stop === 'cancelled' ||
+    stop === 'awaiting-answer' ||
+    stop === 'retained'
+  ) {
+    return 'quiet';
+  }
   return 'failed';
 }
 
