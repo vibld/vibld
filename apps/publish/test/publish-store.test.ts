@@ -993,6 +993,35 @@ describe('holding a site an operator did not publish', () => {
     );
   });
 
+  it('writes no release record when another release got there first', async () => {
+    // The interleaving that state could not answer. A releases hold X; in
+    // the gap, B holds (Y) and releases it. A's write finds the site unheld
+    // with no entry for X, so every condition that asked "does the world
+    // look released" said yes, and A appended a `released` it had not done.
+    const { store } = stored();
+    await published(store);
+    const at = new Date('2026-09-17T12:00:00.000Z');
+    await store.hold('acme', 'first@vibld.com', 'report 41', at);
+    const x = (await store.siteBySlug('acme'))?.holdToken ?? '';
+
+    // A reads X and is about to release it. B gets in first, twice.
+    await store.hold('acme', 'second@vibld.com', 'report 42', at);
+    const y = (await store.siteBySlug('acme'))?.holdToken ?? '';
+    assert.equal(await store.release('acme', 'second@vibld.com', y, at), true);
+
+    // A arrives. The site is unheld, and it was not A who did it.
+    assert.equal(await store.release('acme', 'first@vibld.com', x, at), false);
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.action),
+      ['held', 'held', 'released'],
+      'a release that cleared nothing was recorded as having released it',
+    );
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.actor),
+      ['first@vibld.com', 'second@vibld.com', 'second@vibld.com'],
+    );
+  });
+
   it('keeps every hold, not just the last one', async () => {
     const { store } = stored();
     await published(store);

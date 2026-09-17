@@ -653,6 +653,13 @@ export class PublishStore {
     at = new Date(),
   ): Promise<boolean> {
     const now = at.toISOString();
+    // A receipt for this attempt, which only the UPDATE below can write
+    // (0024_release_receipt.sql). The record's condition reads it rather
+    // than inspecting the site's state, because the question is whether
+    // *this* write cleared the hold and every state-based answer to that
+    // has been wrong: a timestamp collides, and an unheld site can be the
+    // work of somebody else's release entirely.
+    const receipt = crypto.randomUUID();
     // One batch, for the reason `hold` gives and more sharply: a release
     // that cleared the flag and then lost its record would put the site back
     // on the web with nobody recorded as having done it, and the retry would
@@ -662,30 +669,33 @@ export class PublishStore {
         .prepare(
           `UPDATE published_projects
            SET held_at = NULL, held_by = NULL, held_reason = NULL,
-               hold_token = NULL, updated_at = ?1
+               hold_token = NULL, updated_at = ?1, last_release_token = ?4
            WHERE slug = ?2 AND hold_token = ?3`,
         )
-        .bind(now, slug, holdToken),
-      // Only when the clear above actually happened, and only once.
+        .bind(now, slug, holdToken, receipt),
+      // Only when the clear above actually happened.
       //
-      // I first wrote this unconditional, on the grounds that somebody did
-      // press release and the record should say so. That was wrong in the
-      // worst way for a record whose whole job is to be read later: a lost
-      // release wrote `held, held, released` with the newer hold still
-      // standing, so an audit would conclude the site had been let back on
-      // the web. An entry that cannot be told from a real one is worse than
-      // a missing entry, because it is believed.
+      // Three earlier conditions, each wrong, and all in the same way.
       //
-      // Then I gated it on `updated_at` and made the same mistake this file
-      // had just fixed one column earlier: a millisecond timestamp is not
-      // an identity, so two releases of one hold inside a millisecond both
-      // matched and both wrote an entry.
+      // Unconditional first, on the grounds that somebody did press
+      // release. That wrote `held, held, released` with the newer hold
+      // still standing, which an audit reads as the site having been let
+      // back on the web. An entry that cannot be told from a real one is
+      // worse than a missing entry, because it is believed.
       //
-      // So it names the hold (0023_hold_history_token.sql). A batch runs in
-      // order inside one transaction, so the EXISTS sees the UPDATE above:
-      // `hold_token` is null exactly when this release won, and a hold it
-      // lost to leaves a different token behind. The NOT EXISTS makes it
-      // idempotent, which is what closes the same-millisecond pair.
+      // Then the row's state plus this write's timestamp, which is the
+      // mistake `hold_token` had just been added to fix: two releases of
+      // one hold in a millisecond both matched.
+      //
+      // Then the hold's own token, which fixed that pair and still read the
+      // wrong answer from a longer interleaving: a release of X overtaken
+      // by a hold Y that is itself released arrives to find the site unheld
+      // with no entry for X, and writes one, having cleared nothing.
+      //
+      // All three ask whether the world looks like this write succeeded.
+      // The receipt asks whether it did. A batch runs in order inside one
+      // transaction, so the UPDATE's value is visible here, and only the
+      // UPDATE that matched can have written it.
       this.#db
         .prepare(
           `INSERT INTO published_site_holds
@@ -693,14 +703,10 @@ export class PublishStore {
            SELECT ?1, 'released', ?2, NULL, ?3, ?4
            WHERE EXISTS (
              SELECT 1 FROM published_projects
-             WHERE slug = ?1 AND hold_token IS NULL
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM published_site_holds
-             WHERE slug = ?1 AND action = 'released' AND hold_token = ?4
+             WHERE slug = ?1 AND last_release_token = ?5
            )`,
         )
-        .bind(slug, by, now, holdToken),
+        .bind(slug, by, now, holdToken, receipt),
     ]);
     return cleared?.meta.changes !== 0;
   }
