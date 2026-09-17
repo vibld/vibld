@@ -77,7 +77,7 @@ Accepted 2026-09-09 (PR #70). L1 and L24 amend D30 -- D23 is untouched by both.
 | L28  | a              | No row-level security on the control plane; one enforced authorisation choke point plus a test that no query path bypasses it. RLS is mandatory in the generated-app Supabase template, and generation is refused when it is off there.                                                                                                                                                                                                      |
 | L29  | --             | Turnstile, a per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, and a new account-wide daily ceiling all ship before Access comes off.                                                                                                                                                                                                                                                                        |
 | L30  | a              | Stripe, Clerk (Svix) and the GitHub App webhooks are all signature-verified with a replay window, rejected before the body is parsed.                                                                                                                                                                                                                                                                                                        |
-| L31  | a              | No BYOK storage in the hosted product until a credential vault exists. _(Deployment tokens for L40's auto-publish flow are a separate question -- see "Reopened" below; they are not covered by this line.)_                                                                                                                                                                                                                                 |
+| L31  | a              | No BYOK storage in the hosted product until a credential vault exists. _(Deployment tokens for L40's auto-publish flow are a separate question, resolved under "Resolved 2026-09-09"; they are not covered by this line.)_                                                                                                                                                                                                                   |
 | L32  | --             | Project content purged 30 days after account deletion; audit log kept 12 months with the user id tombstoned.                                                                                                                                                                                                                                                                                                                                 |
 | L33  | **b**          | Security scanning is run directly, and a trust centre is stood up separately.                                                                                                                                                                                                                                                                                                                                                                |
 | L34  | a              | Hosted model access runs on one shared platform key per provider, gated by our own credit ledger.                                                                                                                                                                                                                                                                                                                                            |
@@ -85,7 +85,7 @@ Accepted 2026-09-09 (PR #70). L1 and L24 amend D30 -- D23 is untouched by both.
 | L36  | --             | Free $0/$1 spend, Build $29/$10, Ship $99/$40, top-up $20/$8 expiring 12 months. Recorded in full below.                                                                                                                                                                                                                                                                                                                                     |
 | L37  | a              | Hard stop at the allowance, with one-click top-up. No auto-charged overage.                                                                                                                                                                                                                                                                                                                                                                  |
 | L38  | a              | Annual billing at two months free -- Build $290, Ship $990.                                                                                                                                                                                                                                                                                                                                                                                  |
-| L39  | a              | Opus is available inside a paid tier, drawn from the same allowance. _(Extended -- see "Reopened" below: more providers are to be added as they ship, and hosted BYOK stays off per L45.)_                                                                                                                                                                                                                                                   |
+| L39  | a              | Opus is available inside a paid tier, drawn from the same allowance. _(Extended under "Resolved 2026-09-09": more providers are to be added as they ship, and hosted BYOK stays off per L45.)_                                                                                                                                                                                                                                               |
 | L40  | **b**          | Vibld deploys into the user's own Cloudflare account to auto-publish exported sites, reversing the recommendation against holding deploy credentials. Resolved: a scoped API Token the user pastes in (not OAuth), stored in Cloudflare Secrets Store, Cloudflare only for now, and the primary path is a Vibld-provided subdomain auto-configured on the user's behalf -- not merely a fallback. See "Resolved" below for the exact scheme. |
 | L41  | a              | Cloudflare, Vercel and Netlify at launch; DigitalOcean and a container path after.                                                                                                                                                                                                                                                                                                                                                           |
 | L42a | a              | The GitHub App requests Contents, Pull requests and Metadata permissions only.                                                                                                                                                                                                                                                                                                                                                               |
@@ -100,7 +100,7 @@ Accepted 2026-09-09 (PR #70). L1 and L24 amend D30 -- D23 is untouched by both.
 | L49  | a              | v0.1.0 is tagged once the hosted alpha is stable and a clean checkout is proven in CI to build, run and generate with only a provider key.                                                                                                                                                                                                                                                                                                   |
 | L50  | a              | The generation pattern/style/SEO catalogue is retrieved on demand -- a handful of relevant patterns injected per request -- extending D13's retrieval work and ADR-0009's bounded-context design, not held permanently in the system prompt.                                                                                                                                                                                                 |
 | L51  | a              | Catalogue v1 is small and real: about 10 marketing page types, 6 SaaS app screens, 5 style presets (glassmorphism, minimalist, brutalist, retro, editorial), built well enough to improve output before it grows.                                                                                                                                                                                                                            |
-| L52  | both, weighted | citeunseen.io is both a contextual suggestion in generated SEO/content advice and a built-in integration wired into generated sites by default, weighted toward the built-in path for ease of use. See "Reopened" below for the one open qualifier this raises.                                                                                                                                                                              |
+| L52  | both, weighted | citeunseen.io is both a contextual suggestion in generated SEO/content advice and a built-in integration wired into generated sites by default, weighted toward the built-in path for ease of use. The one open qualifier this raised, disclosure, is resolved under "Resolved 2026-09-17".                                                                                                                                                  |
 
 ### Values set
 
@@ -206,6 +206,42 @@ exactly this path.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
 ### Resolved 2026-09-17
+
+**L52 -- citeunseen.io: on by default, and said out loud.** The framing
+recommended on 2026-09-09 is accepted, which closes the last open qualifier on
+the pattern catalogue and unblocks step 3 of its build order. Wire it into
+generated sites by default, say so plainly at generation time ("this project
+includes citeunseen.io for AEO, remove it any time"), and emit it as ordinary
+removable code in the project. It must not become a Vibld-runtime dependency:
+D21 and ADR-0002 require the generated app to keep working with nothing
+Vibld-specific present, so a project with the integration deleted has to
+install, build and run exactly as it did before.
+
+The cost of this choice, recorded because it is the part that will be argued
+later: a user who never reads the disclosure still ships a third-party script
+they did not ask for by name. On-by-default was weighted for ease of use, and
+the disclosure plus removability is what pays for it.
+
+**ADR-0011, ADR-0012 and ADR-0013 accepted.** Capability manifests
+(refines D14-D16), served agent instructions (refines ADR-0002 and ADR-0009),
+and preview versus publish (refines ADR-0006 and ADR-0010, and sets the rules
+D22's publishing milestone is built against). None of the three is
+implemented. Accepting them is what the work gets built against, not a claim
+that it exists: ADR-0011 has no enforcement point until a run takes a scoped
+action, ADR-0012 should not be built until an instruction set exists to
+serve, and ADR-0013's rules are free today and stop being free the first time
+a run can be triggered by an event.
+
+**Cache-read and cache-write ratios: live, and not yet verified.** The ledger
+prices a cached read at a tenth of a model's input rate at all three
+providers, an Anthropic five-minute cache write at 1.25 times it, and charges
+no write premium for OpenAI or DeepSeek, which cache automatically. These are
+the published ratios as I understood them and were not checkable from the
+working environment. They decide what every run takes out of a user's
+allowance, so they are recorded here as an open verification rather than as a
+settled fact: confirm them against each provider's current pricing, and
+correct `PROVIDER_CACHE_RATES` if any is wrong. `CATALOGUE_VERIFIED_ON` and
+its test re-raise this in 180 days if nothing else does.
 
 **Four outcomes a run can have: ask, retain, apply, discard.** One of them per
 run, and the set is closed. A run that stopped because only the person can
@@ -335,15 +371,11 @@ this deployment does not have.
 
 **L39 -- model catalogue growth (standing note, not a one-time decision).** Confirmed: no hosted BYOK (per L45), and new providers get added to the catalogue as they ship (starting point named: an OpenAI-family model). Governs how `model-catalogue.ts` grows going forward.
 
-### Reopened -- not yet resolved
-
-**L52 -- disclosure for the built-in citeunseen.io integration.** Auto-wiring citeunseen.io into every generated site by default (weighted per L52) means a user gets a live third-party dependency in their project without asking for it by name. Recommendation: default it on for ease of use as directed, but say so plainly at generation time (e.g. "this project includes citeunseen.io for AEO -- remove it any time") and make it a normal removable piece of the generated code, not a Vibld-runtime dependency -- consistent with D21/ADR-0002 portability, since the generated app must not require anything Vibld-specific to keep working. Confirm this framing, or say if it should be opt-out at setup instead of on-by-default-with-disclosure.
-
 ## Generation pattern/style/SEO catalogue (scoped 2026-09-09)
 
-Raised in the response to PR #70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set -- 10 marketing page types, 6 SaaS screens, 5 style presets -- as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, with the disclosure question above resolved first.
+Raised in the response to PR #70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set -- 10 marketing page types, 6 SaaS screens, 5 style presets -- as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, whose disclosure question is resolved above.
 
-Steps (1) and (2) shipped 2026-09-11 (`packages/ai/src/patterns.ts`, alongside the pre-existing `style-presets.ts`): a closed, versioned set of 10 marketing page patterns and 6 SaaS screen patterns, matched by keyword against the request text and injected as structural guidance for whatever matches -- not semantic retrieval (that still needs #12's embedding provider and spend cap), but the smallest thing that satisfies L50's actual "a handful of relevant patterns injected per request" without either dependency. Step (3) is deliberately not started: it means auto-wiring a live third-party dependency into every generated site by default, and the "Reopened" disclosure question above is still open. Confirm that framing (or say it should be opt-out at setup instead) before it's built.
+Steps (1) and (2) shipped 2026-09-11 (`packages/ai/src/patterns.ts`, alongside the pre-existing `style-presets.ts`): a closed, versioned set of 10 marketing page patterns and 6 SaaS screen patterns, matched by keyword against the request text and injected as structural guidance for whatever matches -- not semantic retrieval (that still needs #12's embedding provider and spend cap), but the smallest thing that satisfies L50's actual "a handful of relevant patterns injected per request" without either dependency. Step (3) is unblocked as of 2026-09-17: the disclosure framing is resolved above (on by default, disclosed at generation time, emitted as ordinary removable code that the project does not depend on). It is not yet built.
 
 ## Scale without speculative implementation
 
@@ -353,7 +385,7 @@ Use explicit owner/tenant, project type, template version and provider capabilit
 
 These details do not reopen D1-D30 or the launch decisions above. Record choices in the implementing issue or a new ADR when they affect a durable boundary.
 
-- Resolve the L52 disclosure qualifier above before wiring citeunseen.io into generated sites.
+- Verify the cache-read and cache-write ratios in `PROVIDER_CACHE_RATES` against each provider's current pricing; they are live and decide what a run costs a user's allowance.
 - Calibrate evaluation thresholds from the first baseline; proposed numbers in the implementation plan are engineering targets, not a reliability guarantee.
 - Validate an alternate execution path and self-hosting instructions before claiming a working Cloudflare-independent OSS builder -- the L47 local adapter is the mechanism, not yet proof it works.
 

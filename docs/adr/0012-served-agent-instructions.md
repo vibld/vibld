@@ -1,7 +1,8 @@
 # ADR-0012: Serve agent instructions, version-stamped, rather than vendoring them
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-17
+- Accepted: 2026-09-17
 - Decision owners: maintainers
 - Refines: ADR-0002, ADR-0009
 

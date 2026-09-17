@@ -22,8 +22,8 @@ ADRs record consequential decisions and the reasoning behind them. They compleme
 - [ADR-0008: Prerendered marketing sites as the first generated project](0008-portable-marketing-site-template.md)
 - [ADR-0009: Send the whole generated project when iterating on it](0009-bounded-project-context-for-iteration.md) -- **Proposed**, awaiting the decision owner
 - [ADR-0010: Cloudflare auto-publish for exported projects](0010-cloudflare-auto-publish.md) -- **Proposed**, awaiting the decision owner
-- [ADR-0011: Hold the dangerous primitives rather than granting them](0011-capability-manifests-and-escalation.md) -- **Proposed**, awaiting the decision owner
-- [ADR-0012: Serve agent instructions, version-stamped, rather than vendoring them](0012-served-agent-instructions.md) -- **Proposed**, awaiting the decision owner
-- [ADR-0013: Keep preview and publish separate, and never let a run publish](0013-preview-and-publish-as-separate-verbs.md) -- **Proposed**, awaiting the decision owner
+- [ADR-0011: Hold the dangerous primitives rather than granting them](0011-capability-manifests-and-escalation.md)
+- [ADR-0012: Serve agent instructions, version-stamped, rather than vendoring them](0012-served-agent-instructions.md)
+- [ADR-0013: Keep preview and publish separate, and never let a run publish](0013-preview-and-publish-as-separate-verbs.md)
 
-ADRs 0001-0004 remain unchanged. ADRs 0005-0008 record the founder's accepted [D1-D30 choices](../decisions.md); acceptance of architecture is separate from implementation status and review of the documentation PR. The archived blueprint's suggested ADR filenames were proposals, not assigned numbers.
+ADRs 0001-0004 remain unchanged. ADRs 0005-0008 record the founder's accepted [D1-D30 choices](../decisions.md); acceptance of architecture is separate from implementation status and review of the documentation PR. ADRs 0011-0013 were accepted on 2026-09-17 and refine D14-D16, D22 and the publishing milestone; none of the three is implemented, and accepting them is what the work is built against rather than a claim that it exists. The archived blueprint's suggested ADR filenames were proposals, not assigned numbers.
