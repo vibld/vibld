@@ -191,10 +191,17 @@ export class PublishStore {
    */
   async #stillDown(slug: string, stamp: string): Promise<boolean> {
     const row = await this.#db
-      .prepare(`SELECT unpublished_at FROM published_projects WHERE slug = ?1`)
+      .prepare(
+        `SELECT unpublished_at, held_at FROM published_projects WHERE slug = ?1`,
+      )
       .bind(slug)
-      .first<Pick<PublishedProjectRow, 'unpublished_at'>>();
-    return row?.unpublished_at === stamp;
+      .first<Pick<PublishedProjectRow, 'unpublished_at' | 'held_at'>>();
+    // A hold arriving mid-paging stops the deletion where it is, for the
+    // same reason it is refused at the start: the bytes are what the hold
+    // keeps. The tombstone is left, so the site stays down, which is what
+    // the owner asked for; a later release and republish is what puts it
+    // back, and a repeat of this call clears whatever was left.
+    return row?.unpublished_at === stamp && (row?.held_at ?? null) === null;
   }
 
   /**
@@ -227,32 +234,57 @@ export class PublishStore {
    * decision. Narrowing it here is worth doing on its own; calling it fixed
    * would not be.
    */
-  async unpublish(slug: string, at = new Date()): Promise<void> {
+  async unpublish(slug: string, at = new Date()): Promise<boolean> {
     const stamp = at.toISOString();
-    await this.#db
+    /*
+     * `AND held_at IS NULL` is the guard, not a repeat of one the caller
+     * made. Reading the state and then deleting are two round trips, and a
+     * hold placed between them would find the deletion already committed to
+     * -- so the owner of a site somebody had just held could still empty it
+     * by timing, which is the whole of what the refusal is for. Deciding in
+     * the write is the only way to be sure, and it is the shape `claimSlug`
+     * already settled on for the same reason.
+     *
+     * `changes` is 0 only when the row is held: the slug is never released
+     * (below), so the row is there, and an already-unpublished site still
+     * matches and still has its leftovers cleared.
+     */
+    const marked = await this.#db
       .prepare(
         `UPDATE published_projects
          SET unpublished_at = ?1, updated_at = ?1
-         WHERE slug = ?2`,
+         WHERE slug = ?2 AND held_at IS NULL`,
       )
       .bind(stamp, slug)
       .run();
+    if (marked.meta.changes === 0) return false;
 
     // R2 pages with a cursor, so this loops. A site with more files than one
     // page holds would otherwise be half removed, and the half left behind
     // is content nothing points at and nobody thinks to look for.
     let cursor: string | undefined;
     do {
-      if (!(await this.#stillDown(slug, stamp))) return;
       const page = await this.#bucket.list({
         prefix: `published/${slug}/`,
         ...(cursor === undefined ? {} : { cursor }),
       });
+      // Checked between the listing and the deletion rather than before
+      // both. Listing is a round trip of its own, and a republish or a hold
+      // arriving during it used to find this already committed to deleting
+      // the page it had just read. Moving the check down leaves a window of
+      // one delete call rather than a list and a delete.
+      //
+      // That last window cannot be closed from here: R2 and D1 are two
+      // stores and there is no write that spans them. What closes it is
+      // deleting nothing, which is what the retention work will do by
+      // giving each publish its own prefix and expiring old ones instead.
+      if (!(await this.#stillDown(slug, stamp))) return true;
       if (page.objects.length > 0) {
         await this.#bucket.delete(page.objects.map((object) => object.key));
       }
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor !== undefined);
+    return true;
   }
 
   /**

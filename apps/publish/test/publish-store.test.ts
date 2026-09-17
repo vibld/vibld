@@ -547,6 +547,59 @@ describe('holding a site an operator did not publish', () => {
     assert.equal(left?.n, 0, 'half the batch was committed');
   });
 
+  it('refuses a takedown decided before the hold landed', async () => {
+    // The handler reads the state and then asks for the deletion, which is
+    // two round trips. A hold placed in between finds the read already
+    // past, so a refusal that lived in the handler would be one an owner
+    // could beat by timing -- and the prize for beating it is erasing what
+    // the hold is keeping.
+    //
+    // This is that interleaving: the decision is taken against a live site
+    // and the call arrives after the hold. It has to be refused anyway,
+    // which only the UPDATE can do.
+    const { store, bucket } = stored();
+    await published(store);
+    const live = await store.slugForProject('proj-1');
+    assert.equal(live?.state, 'live', 'the read this test is about');
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.unpublish('acme'), false);
+    assert.ok(bucket.keys().length > 0, 'the owner emptied a held site');
+    assert.equal((await store.siteBySlug('acme'))?.state, 'held');
+  });
+
+  it('stops deleting when a hold lands partway through', async () => {
+    // The same race one step later: the UPDATE won, and the hold arrives
+    // while R2 is still being paged. Whatever is left is what the hold is
+    // for, so the loop stops rather than finishing the job.
+    //
+    // `list` is the seam, because it is what the loop calls each time round.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await store.putFiles('acme', [
+      { path: 'index.html', content: '<h1>acme</h1>' },
+      { path: 'about.html', content: '<h1>about</h1>' },
+    ]);
+
+    let pages = 0;
+    const realList = bucket.list.bind(bucket);
+    bucket.list = async (options) => {
+      pages += 1;
+      if (pages === 1) {
+        await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+      }
+      return realList(options);
+    };
+
+    await store.unpublish('acme');
+
+    assert.ok(
+      bucket.keys().length > 0,
+      'it emptied the site the hold had just claimed',
+    );
+  });
+
   it('keeps every hold, not just the last one', async () => {
     const { store } = stored();
     await published(store);

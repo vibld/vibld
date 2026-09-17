@@ -186,7 +186,12 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
   // off the web, so refusing costs the owner nothing they do not already
   // have; what it costs is the ability to act on a site while somebody else
   // is deciding about it, which is the whole of what a hold is.
-  if (existing.state === 'held') {
+  //
+  // Asked of the write rather than of `existing`, which was read a round
+  // trip ago. A hold placed in between would have found this already past
+  // the check, so the refusal would have been one an owner could beat by
+  // timing. `unpublish` decides it in the UPDATE and says which happened.
+  if (!(await store.unpublish(existing.slug))) {
     return json(
       {
         error:
@@ -195,8 +200,6 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
       409,
     );
   }
-
-  await store.unpublish(existing.slug);
   return json({ slug: existing.slug });
 }
 
