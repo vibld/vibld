@@ -276,11 +276,19 @@ async function handleRelease(request: Request, env: Env): Promise<Response> {
   const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
   const site = await store.siteBySlug(slug);
   if (!site) return json({ error: 'No such published site.' }, 404);
-  if (site.state !== 'held') {
+  if (site.state !== 'held' || site.heldAt === undefined) {
     return json({ error: 'This site is not held.' }, 409);
   }
 
-  await store.release(slug, by);
+  // Named, so a second admin re-holding the site between that read and this
+  // write keeps their hold rather than having it lifted by a release that
+  // was about the earlier one.
+  if (!(await store.release(slug, by, site.heldAt))) {
+    return json(
+      { error: 'This site was held again while you were releasing it.' },
+      409,
+    );
+  }
   const after = await store.siteBySlug(slug);
   return json({ slug, state: after?.state ?? 'down' });
 }

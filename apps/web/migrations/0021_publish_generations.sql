@@ -24,6 +24,29 @@
 -- the state between claiming the name and the first successful publish.
 ALTER TABLE published_projects ADD COLUMN generation TEXT;
 
+-- Refuse to apply where there is anything to migrate.
+--
+-- Every existing row would get a NULL generation while its files sat under
+-- the old flat `published/<slug>/` prefix, and serving reads only the new
+-- layout: every live site would answer 404 until its owner republished,
+-- with the old objects left untracked and nothing naming them.
+--
+-- There is nothing to migrate on this deployment: `published_projects` is
+-- empty, which was checked rather than assumed. But "I checked" is not a
+-- property of the schema, and the next person to run these migrations
+-- somewhere else is owed a loud failure rather than a silently dark estate.
+-- A backfill is the right answer once there are rows worth backfilling; it
+-- cannot be written blind against data that does not exist.
+--
+-- SQLite has no bare assertion, so this is a CHECK that a temporary row has
+-- to satisfy: no published projects means 1, which passes, and anything
+-- else means 0, which aborts the migration and leaves the transaction
+-- rolled back.
+CREATE TABLE migration_0021_guard (ok INTEGER NOT NULL CHECK (ok = 1));
+INSERT INTO migration_0021_guard (ok)
+SELECT CASE WHEN EXISTS (SELECT 1 FROM published_projects) THEN 0 ELSE 1 END;
+DROP TABLE migration_0021_guard;
+
 -- What exists under a slug, newest last by `id`.
 --
 -- Ordered by insertion rather than by a timestamp on purpose. Retention has

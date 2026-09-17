@@ -818,6 +818,46 @@ describe('the reconcile walk', () => {
     );
   });
 
+  it('gives a subscription that succeeded last night its own retry', async () => {
+    // Recording the whole attempted slice counted a subscription that
+    // succeeded as having spent a retry it never needed. When it then threw
+    // on the following run, on its first failure, it was read as a retry
+    // already had and walked past, waiting a full lap.
+    //
+    // What "has had its retry" means is "failed and was tried again", so
+    // the failures are what the cursor keeps.
+    const store = await storeWith(FIVE);
+    const stripe = stripeServing(FIVE);
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    let broken = new Set(['sub_a']);
+    const seen: string[] = [];
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      if (broken.has(id)) throw new Error('not today');
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+
+    // Run one: a fails, b succeeds. The walk parks before a.
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+
+    // Run two: a is fine now, and b throws for the first time.
+    broken = new Set(['sub_b']);
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(seen, ['sub_a', 'sub_b']);
+
+    // Run three has to come back to b. It has failed once and been retried
+    // never, whatever it did on the run before that.
+    broken = new Set();
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(
+      seen,
+      ['sub_b', 'sub_c'],
+      'a subscription that succeeded once was counted as having had its retry',
+    );
+  });
+
   it('stays put when the first subscription in the slice throws', async () => {
     // The edge the arithmetic gets wrong if it reaches for `ids[-1]`: the
     // failure is the first thing in the slice, so there is no earlier id to

@@ -29,6 +29,16 @@ const SCHEMA = readdirSync(MIGRATIONS)
   .map((name) => readFileSync(join(MIGRATIONS, name), 'utf8'))
   .join('\n');
 
+/** Release the hold a site is actually under, the way the handler does. */
+async function release(
+  store: PublishStore,
+  slug: string,
+  by: string,
+): Promise<boolean> {
+  const site = await store.siteBySlug(slug);
+  return store.release(slug, by, site?.heldAt ?? '');
+}
+
 function newStore(): PublishStore {
   return new PublishStore(new SqliteD1Database(SCHEMA), new InMemoryR2Bucket());
 }
@@ -616,14 +626,19 @@ describe('holding a site an operator did not publish', () => {
     await published(store);
     await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
 
-    assert.deepEqual(await store.siteBySlug('acme'), {
+    const site = await store.siteBySlug('acme');
+    assert.deepEqual(site, {
       slug: 'acme',
       projectId: 'proj-1',
       userId: 'user-1',
       state: 'held',
+      // Carried so a release can name the hold it is answering rather than
+      // clearing whatever is there when it arrives.
+      heldAt: site?.heldAt,
       heldBy: 'admin@vibld.com',
       heldReason: 'phishing report 41',
     });
+    assert.match(site?.heldAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('puts a released site back only if its owner had not taken it down', async () => {
@@ -634,7 +649,7 @@ describe('holding a site an operator did not publish', () => {
     await store.unpublish('acme');
     await store.hold('acme', 'admin@vibld.com', 'wrong report');
 
-    await store.release('acme', 'admin@vibld.com');
+    await release(store, 'acme', 'admin@vibld.com');
 
     assert.equal(
       await store.resolveSlug('acme'),
@@ -649,7 +664,7 @@ describe('holding a site an operator did not publish', () => {
     await published(store);
     await store.hold('acme', 'admin@vibld.com', 'wrong report');
 
-    await store.release('acme', 'admin@vibld.com');
+    await release(store, 'acme', 'admin@vibld.com');
 
     const [revision] = await store.revisions('acme');
     assert.deepEqual(await store.resolveSlug('acme'), {
@@ -667,7 +682,7 @@ describe('holding a site an operator did not publish', () => {
     const { store } = stored();
     await published(store);
     await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
-    await store.release('acme', 'someone.else@vibld.com');
+    await release(store, 'acme', 'someone.else@vibld.com');
 
     assert.deepEqual(
       (await store.holdHistory('acme')).map(({ action, actor, reason }) => ({
@@ -722,7 +737,10 @@ describe('holding a site an operator did not publish', () => {
 
     // And the same on the way back out.
     await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
-    await assert.rejects(() => guarded.release('acme', 'admin@vibld.com'));
+    const held = (await store.siteBySlug('acme'))?.heldAt ?? '';
+    await assert.rejects(() =>
+      guarded.release('acme', 'admin@vibld.com', held),
+    );
     assert.equal(
       (await store.siteBySlug('acme'))?.state,
       'held',
@@ -841,18 +859,62 @@ describe('holding a site an operator did not publish', () => {
     await store.discard('acme', racing);
 
     // What the operator kept is what the operator gets back.
-    await store.release('acme', 'admin@vibld.com');
+    await release(store, 'acme', 'admin@vibld.com');
     assert.deepEqual(await store.revisions('acme'), before);
     assert.deepEqual(await served(store, 'acme', 'index.html'), {
       content: '<h1>acme</h1>',
     });
   });
 
+  it('refuses a release that is about a hold somebody has replaced', async () => {
+    // Two admins overlapping. The first reads a hold and decides to lift
+    // it; the second re-holds the site on a newer report in between. An
+    // unconditional clear would lift the newer hold and put the site back
+    // on the web, which is the second admin's decision undone by somebody
+    // who never saw their report.
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'first@vibld.com', 'report 41');
+    const seen = (await store.siteBySlug('acme'))?.heldAt ?? '';
+
+    // A second later, so the timestamps differ the way two presses would.
+    await store.hold(
+      'acme',
+      'second@vibld.com',
+      'report 42, worse',
+      new Date(Date.parse(seen) + 1000),
+    );
+
+    assert.equal(await store.release('acme', 'first@vibld.com', seen), false);
+    const site = await store.siteBySlug('acme');
+    assert.equal(site?.state, 'held', 'a stale release lifted a newer hold');
+    assert.equal(site?.heldReason, 'report 42, worse');
+    // And it is in the record, because somebody did press it. A history
+    // that kept only the presses that won would hide the overlap.
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.action),
+      ['held', 'held', 'released'],
+    );
+  });
+
+  it('reports a site with no revision as down, not live', async () => {
+    // `siteBySlug` is what the operator's release reads, and it listed its
+    // columns by hand. When 0021 added `generation` the type said the
+    // column was there and the query did not fetch it, so the state
+    // computation compared `undefined` against null and answered live for a
+    // site that serves nothing. The compiler could not catch a SELECT.
+    const { store } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    assert.equal((await store.siteBySlug('acme'))?.state, 'down');
+    assert.equal(await store.resolveSlug('acme'), undefined);
+  });
+
   it('keeps every hold, not just the last one', async () => {
     const { store } = stored();
     await published(store);
     await store.hold('acme', 'a@vibld.com', 'first report');
-    await store.release('acme', 'a@vibld.com');
+    await release(store, 'acme', 'a@vibld.com');
     await store.hold('acme', 'b@vibld.com', 'second report');
 
     const history = await store.holdHistory('acme');

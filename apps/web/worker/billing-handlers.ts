@@ -327,7 +327,7 @@ export async function reconcileSubscriptions(
    * subscribes. Sorting makes the walk a walk rather than a re-shuffle.
    */
   const all = [...found.ids].sort();
-  const { afterId: after, attempted } =
+  const { afterId: after, attempted: retried } =
     await store.reconcileCursor(RECONCILE_WALK);
   // The first id past where the last run stopped. An id that has since
   // disappeared costs nothing: the search is for the next one above it.
@@ -349,18 +349,24 @@ export async function reconcileSubscriptions(
   /**
    * The earliest failure this run is seeing for the first time.
    *
-   * "First time" is settled by membership of the set the parked run
-   * attempted, which is the only thing that answers it
-   * (0019_reconcile_attempted.sql). A boolean could not tell a retry from a
-   * first failure at all. A single id told them apart for the earliest
-   * casualty only, so a second failure in the same slice parked the cursor
-   * again and a slice of failing subscriptions advanced one id a night. A
-   * watermark fixed that and assumed the membership of a range, which
-   * changes between runs: Stripe ids are random, so a subscription created
-   * overnight can sort below the mark and, failing on its first
-   * appearance, be read as a retry and walked past.
+   * "First time" is settled by membership of the set that *failed* on the
+   * parked run (0019_reconcile_attempted.sql), because that is what "has
+   * had its retry" means. A subscription that succeeded last night and
+   * throws tonight is failing for the first time and is owed one, so
+   * recording the whole slice would have counted it as spent.
+   *
+   * Three earlier answers, each wrong in its own way. A boolean could not
+   * tell a retry from a first failure at all. A single id told them apart
+   * for the earliest casualty only, so a second failure in the same slice
+   * parked the cursor again and a slice of failures advanced one id a
+   * night. A watermark fixed that and assumed the membership of a range,
+   * which changes between runs: Stripe ids are random, so a subscription
+   * created overnight can sort below the mark and be read as a retry it
+   * never had.
    */
   let firstNewFailure = -1;
+  /** Which subscriptions threw, which is what the next run has to know. */
+  const failures: string[] = [];
   for (const [index, id] of ids.entries()) {
     try {
       const subscription = await stripe.subscriptions.retrieve(id);
@@ -430,7 +436,8 @@ export async function reconcileSubscriptions(
       console.error('reconcile: failed to check subscription', id, error);
       failed += 1;
       if (firstFailed === -1) firstFailed = index;
-      if (firstNewFailure === -1 && !attempted.has(id)) {
+      failures.push(id);
+      if (firstNewFailure === -1 && !retried.has(id)) {
         firstNewFailure = index;
       }
     }
@@ -477,13 +484,13 @@ export async function reconcileSubscriptions(
   await store.saveReconcileCursor(
     RECONCILE_WALK,
     resumeAt,
-    // What this run attempted, not where it stopped: the loop attempts
-    // every id in the slice whatever fails inside it, so all of them have
-    // now had an attempt and the next run can tell "these have had their
-    // second chance" from "this one has not had a first". Named rather than
-    // bounded, because a subscription created overnight can sort anywhere
-    // and a range would count it as attempted without it ever having been.
-    holding ? ids : undefined,
+    // What failed, not what was attempted. The whole slice would count a
+    // subscription that succeeded tonight as having spent a retry it never
+    // needed, so when it throws tomorrow, on its first failure, the walk
+    // goes straight past it. Named rather than bounded, because a
+    // subscription created overnight can sort anywhere and a range would
+    // count it as retried without it ever having been tried.
+    holding ? failures : undefined,
   );
 
   return {

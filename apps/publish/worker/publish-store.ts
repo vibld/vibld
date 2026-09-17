@@ -557,8 +557,14 @@ export class PublishStore {
   > {
     const result = await this.#db
       .prepare(
+        // By insertion, not by the stamp. `at` is a wall clock, and what
+        // this answers is "what happened, in what order" about two people
+        // acting on the same site within seconds of each other. A clock
+        // that steps, or two writes in the same millisecond, would reorder
+        // the very sequence the record exists to settle. `0019` learned
+        // this on the reconcile cursor; it is the same mistake here.
         `SELECT action, actor, reason, at FROM published_site_holds
-         WHERE slug = ?1 ORDER BY at, id`,
+         WHERE slug = ?1 ORDER BY id`,
       )
       .bind(slug)
       .all<{
@@ -587,22 +593,43 @@ export class PublishStore {
    * as much an action somebody took as placing it, and the history is where
    * both are kept once the columns are cleared.
    */
-  async release(slug: string, by: string, at = new Date()): Promise<void> {
+  async release(
+    slug: string,
+    by: string,
+    /**
+     * The hold this release is answering, as the caller saw it.
+     *
+     * Named rather than assumed, because two admins can overlap: one reads
+     * a hold and decides to lift it, a second re-holds the site on a newer
+     * report, and an unconditional clear then lifts the newer hold and puts
+     * the site back on the web. The second admin acted last and their hold
+     * is the one that stands, so a release that was about the earlier one
+     * has to find it gone and say so.
+     */
+    heldAt: string,
+    at = new Date(),
+  ): Promise<boolean> {
     const now = at.toISOString();
     // One batch, for the reason `hold` gives and more sharply: a release
     // that cleared the flag and then lost its record would put the site back
     // on the web with nobody recorded as having done it, and the retry would
     // be refused because it is no longer held.
-    await this.#db.batch([
+    const [cleared] = await this.#db.batch([
       this.#db
         .prepare(
           `UPDATE published_projects
            SET held_at = NULL, held_by = NULL, held_reason = NULL, updated_at = ?1
-           WHERE slug = ?2`,
+           WHERE slug = ?2 AND held_at = ?3`,
         )
-        .bind(now, slug),
+        .bind(now, slug, heldAt),
       this.#recordStatement(slug, 'released', by, undefined, now),
     ]);
+    // The record is written either way, which is the honest shape: somebody
+    // did press release, and a history that only kept the presses that won
+    // would hide exactly the overlap this guard exists for. `holdHistory`
+    // reads in order, so a `released` between two `held` entries is a
+    // release that lost, and the state alongside it says so.
+    return cleared?.meta.changes !== 0;
   }
 
   /** What an operator needs to see about a slug before acting on it. */
@@ -612,6 +639,8 @@ export class PublishStore {
         projectId: string;
         userId: string;
         state: PublishState;
+        /** The timestamp a release has to name to be about this hold. */
+        heldAt?: string;
         heldBy?: string;
         heldReason?: string;
       }
@@ -619,7 +648,7 @@ export class PublishStore {
   > {
     const row = await this.#db
       .prepare(
-        `SELECT slug, project_id, user_id, unpublished_at, held_at, held_by, held_reason
+        `SELECT slug, project_id, user_id, unpublished_at, held_at, held_by, held_reason, generation
          FROM published_projects WHERE slug = ?1`,
       )
       .bind(slug)
@@ -636,6 +665,7 @@ export class PublishStore {
       projectId: row.project_id,
       userId: row.user_id,
       state,
+      ...(row.held_at === null ? {} : { heldAt: row.held_at }),
       ...(row.held_by === null ? {} : { heldBy: row.held_by }),
       ...(row.held_reason === null ? {} : { heldReason: row.held_reason }),
     };
