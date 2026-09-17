@@ -420,6 +420,40 @@ describe('what a slug keeps', () => {
     });
   });
 
+  it('still sweeps a revision whose row has already gone', async () => {
+    // The gate on the claim stops a deletion racing a promotion. It must
+    // not stop a sweep, and for one round it did.
+    //
+    // A takedown removes a revision's row while an upload under that same
+    // prefix is still in flight. The late write lands, `promote` correctly
+    // refuses because the row is gone, and `handlePublish` then calls
+    // `discard` to clean up after itself. With the claim gating the
+    // deletion outright, that cleanup found no row to claim and did
+    // nothing, so the object stayed in R2 with nothing naming it: exactly
+    // the leak cataloguing before writing exists to prevent.
+    //
+    // No row means nothing can promote it and nothing will come back for
+    // it, which is the case for collecting rather than against it.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    const orphaned = randomUUID();
+    await store.putFiles('acme', orphaned, [
+      { path: 'index.html', content: '<h1>in flight</h1>' },
+    ]);
+    // Something else collected it: row and the objects it could see, gone.
+    await store.discard('acme', orphaned);
+    // The write that was still in the air lands afterwards.
+    await bucket.put(`published/acme/${orphaned}/late.html`, 'late');
+
+    await store.discard('acme', orphaned);
+    assert.deepEqual(
+      bucket.keys().filter((key) => key.includes(orphaned)),
+      [],
+      'an object with nothing naming it was left in the bucket',
+    );
+  });
+
   it('refuses to collect the revision that is serving', async () => {
     // The other direction of the same race. Promotion committing first has
     // to beat a collection that is about to start, not only the reverse,

@@ -486,7 +486,31 @@ export class PublishStore {
         )
         .bind(slug, generation, new Date().toISOString()),
     ]);
-    if (claimed?.meta.changes === 0) return;
+    if (claimed?.meta.changes === 0) {
+      // Two different refusals wear the same zero, and only one of them
+      // means stop.
+      //
+      // A row that is there is the live revision, and collecting what is
+      // serving is the thing the condition exists to refuse.
+      //
+      // No row at all is the opposite: nothing can promote it and nothing
+      // else will ever come back for it, so its objects are orphans and
+      // collecting them is the whole point. Treating that as a refusal is
+      // what gating the deletion on the claim got wrong. `handlePublish`
+      // cleans up after a refused publish by calling this, and a takedown
+      // that removed the row first left that cleanup a no-op, so an object
+      // from the upload still in flight stayed in R2 with nothing naming
+      // it. The gate was meant to stop a deletion racing a promotion, not
+      // to stop a sweep.
+      const row = await this.#db
+        .prepare(
+          `SELECT 1 FROM published_generations
+           WHERE slug = ?1 AND generation = ?2`,
+        )
+        .bind(slug, generation)
+        .first<{ 1: number }>();
+      if (row !== null) return;
+    }
 
     let cursor: string | undefined;
     do {
