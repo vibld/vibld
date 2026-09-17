@@ -82,3 +82,59 @@ describe('deploying this Worker', () => {
     }
   });
 });
+
+describe('the secrets file this deployment tells you to create', () => {
+  const read = (path: string) =>
+    readFile(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+
+  it('is ignored by git', async () => {
+    // `.env.example` says to copy it to `.dev.vars`, and for one commit it
+    // said that file was ignored while nothing ignored it. Following the
+    // instruction would have committed a live Stripe key and a GitHub App
+    // private key on the next `git add .`.
+    //
+    // Asserted against `.gitignore` rather than by running `git`, so it
+    // holds in a checkout where git is not available.
+    const ignored = await read('../../../.gitignore');
+    const lines = ignored
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '' && !line.startsWith('#'));
+
+    assert.ok(
+      lines.includes('.dev.vars'),
+      'the local secrets file is not ignored',
+    );
+    assert.ok(
+      lines.includes('.dev.vars.*'),
+      'a per-environment .dev.vars.<name> is not ignored',
+    );
+  });
+
+  it('is the file the example tells you to write secrets into', async () => {
+    // The pairing is the point: an example that named some other path would
+    // leave the ignore rule above guarding a file nobody creates.
+    const example = await read('../.env.example');
+    assert.match(example, /\.dev\.vars/);
+  });
+
+  it('carries no value that looks like a credential', async () => {
+    // Placeholders shaped like real keys trip secret scanners, and GitHub's
+    // push protection rejected the first version of this file for exactly
+    // that. Every credential line is left empty with its shape described in
+    // a comment instead.
+    const example = await read('../.env.example');
+    const assignments = example
+      .split('\n')
+      .filter((line) => /^[A-Z][A-Z0-9_]*=/.test(line));
+
+    for (const line of assignments) {
+      const [name, value] = line.split(/=(.*)/s) as [string, string];
+      assert.doesNotMatch(
+        value,
+        /^(sk|pk|rk|whsec|re)[-_]/,
+        `${name} holds something shaped like a real key`,
+      );
+    }
+  });
+});
