@@ -1,3 +1,4 @@
+import { stopForError } from './run-outcome.ts';
 import type {
   GenerationRequest,
   GenerationResult,
@@ -49,6 +50,7 @@ export class GenerationMachine {
     if (this.#running) {
       return {
         state: 'failed',
+        stop: 'not-started',
         accepted: this.accepted,
         staged: this.#staged ? structuredClone(this.#staged) : undefined,
         errors: ['GenerationMachine already has an active run'],
@@ -101,6 +103,7 @@ export class GenerationMachine {
         this.#state = 'failed';
         return {
           state: this.#state,
+          stop: 'validation-failed',
           accepted: this.accepted,
           staged: structuredClone(this.#staged),
           errors: [...validation.errors],
@@ -109,11 +112,19 @@ export class GenerationMachine {
         };
       }
 
+      // Compared before the promotion overwrites what it was. `revisionFor`
+      // hashes the files, so an identical project hashes identically.
+      const applied = this.#accepted?.revision !== this.#staged.revision;
       this.#accepted = structuredClone(this.#staged);
       this.#state = 'accepted';
 
       return {
         state: this.#state,
+        // `no-changes` when the project this produced is byte-identical to
+        // the one it started from. A run that worked and had nothing to do
+        // is a different fact from one that applied an edit, and both used
+        // to arrive as `accepted`.
+        stop: applied ? 'applied' : 'no-changes',
         accepted: this.accepted,
         staged: structuredClone(this.#staged),
         errors: [],
@@ -124,6 +135,10 @@ export class GenerationMachine {
       this.#state = 'failed';
       return {
         state: this.#state,
+        // The error names its own kind. Stringifying it into `errors` and
+        // reporting a boolean outcome is what made every provider failure
+        // look alike to a finished run.
+        stop: stopForError(error),
         accepted: this.accepted,
         staged: this.#staged ? structuredClone(this.#staged) : undefined,
         errors: [error instanceof Error ? error.message : String(error)],
@@ -138,6 +153,7 @@ export class GenerationMachine {
     this.#state = 'cancelled';
     return {
       state: this.#state,
+      stop: 'cancelled',
       accepted: this.accepted,
       staged: this.#staged ? structuredClone(this.#staged) : undefined,
       errors: [],

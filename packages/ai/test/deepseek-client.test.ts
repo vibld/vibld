@@ -216,6 +216,7 @@ describe('createDeepseekPlanClient', () => {
       inputTokens: 900,
       outputTokens: 12_000,
       cacheReadInputTokens: 512,
+      cacheWriteInputTokens: 0,
     });
     assert.equal(completion.stopReason, 'end_turn');
     assert.deepEqual(completion.plan, PLAN);

@@ -62,6 +62,90 @@ export interface ModelChoice {
   supportsEffort: boolean;
 }
 
+/**
+ * What a cached input token costs, as a multiple of the model's own input
+ * rate (#166, #165).
+ *
+ * A multiple rather than a figure per model, because that is what it is: each
+ * provider publishes one ratio that applies across its line-up, and writing
+ * ten derived numbers into the catalogue would present arithmetic as ten
+ * separately verified prices.
+ *
+ * **These ratios want confirming against each provider's current pricing
+ * before the ledger is trusted to the last cent.** They are the published
+ * ones, and a provider that changes them changes what every run costs here,
+ * so a stale ratio is a bill that is quietly wrong rather than one that
+ * fails loudly.
+ *
+ * `write` is the premium for putting a prefix into the cache, and it is only
+ * ever charged where a provider bills separately for it. OpenAI and DeepSeek
+ * cache automatically and charge nothing extra to write, so a token written
+ * into their cache is an ordinary input token and the multiple is 1.
+ */
+/**
+ * When the rates and limits in this file were last checked against each
+ * vendor's own reference.
+ *
+ * Data rather than the sentence in the comment above, because the sentence
+ * cannot fail. Every figure here is a fact about somebody else's product:
+ * they reprice, they raise a context window, they retire a model, and
+ * nothing in this repository finds out. `model-catalogue.test.ts` fails once
+ * this date is older than `MAX_CATALOGUE_AGE_DAYS`, which is a deliberate
+ * tripwire and not an accident: the alternative is a bill computed from a
+ * price nobody has looked at since it was typed.
+ *
+ * Re-checking means opening each vendor's pricing and model reference,
+ * correcting anything that moved, and moving this date. Moving the date
+ * without re-checking defeats the only mechanism there is.
+ *
+ * This is also the honest answer to "source the facts from the provider's
+ * catalogue at runtime" (#165): no provider serves them. Anthropic, OpenAI
+ * and DeepSeek all expose a models endpoint that lists ids and little else;
+ * prices, context windows, cache rates and modality support live on a
+ * pricing page meant for people. A live call can tell us whether an id still
+ * exists, which is worth having one day and is not what a budget is computed
+ * from, and it would put an availability dependency in front of every run to
+ * learn it.
+ */
+export const CATALOGUE_VERIFIED_ON = '2026-09-13';
+
+/** How long the figures above may go unchecked before the tests say so. */
+export const MAX_CATALOGUE_AGE_DAYS = 180;
+
+/** Whole days since the catalogue's figures were last verified. */
+export function catalogueAgeDays(now: Date = new Date()): number {
+  const verified = Date.parse(`${CATALOGUE_VERIFIED_ON}T00:00:00Z`);
+  return Math.floor((now.getTime() - verified) / 86_400_000);
+}
+
+export interface CacheRates {
+  read: number;
+  write: number;
+}
+
+export const PROVIDER_CACHE_RATES: Readonly<Record<ProviderName, CacheRates>> =
+  {
+    // Anthropic: a cache read is a tenth of the input rate, and a five-minute
+    // cache write is a quarter more than one. The write premium is why a
+    // breakpoint on a prefix that changes between requests costs money rather
+    // than saving it.
+    anthropic: { read: 0.1, write: 1.25 },
+    openai: { read: 0.1, write: 1 },
+    deepseek: { read: 0.1, write: 1 },
+  };
+
+/** This model's cache rates, in micro-USD per token. */
+export function cacheRatesFor(model: ModelChoice): {
+  cachedInputMicroUsd: number;
+  cacheWriteMicroUsd: number;
+} {
+  const rates = PROVIDER_CACHE_RATES[model.provider];
+  return {
+    cachedInputMicroUsd: model.inputMicroUsd * rates.read,
+    cacheWriteMicroUsd: model.inputMicroUsd * rates.write,
+  };
+}
+
 export const MODEL_CATALOGUE: readonly ModelChoice[] = [
   {
     id: 'claude-fable-5-1',

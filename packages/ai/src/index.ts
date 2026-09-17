@@ -141,14 +141,19 @@ export {
 export { PROVIDER_NAMES } from './select-client.ts';
 export type { ProviderEnv, ProviderName } from './select-client.ts';
 export {
+  CATALOGUE_VERIFIED_ON,
   LEGACY_MODEL_IDS,
+  MAX_CATALOGUE_AGE_DAYS,
   MODEL_CATALOGUE,
+  PROVIDER_CACHE_RATES,
   availableModels,
+  catalogueAgeDays,
+  cacheRatesFor,
   canonicalModelId,
   findModel,
   isKnownModel,
 } from './model-catalogue.ts';
-export type { ModelChoice } from './model-catalogue.ts';
+export type { CacheRates, ModelChoice } from './model-catalogue.ts';
 export { allowedModels, grantedIds, parseModelPolicy } from './model-policy.ts';
 export type { ModelPolicy, PolicyParse } from './model-policy.ts';
 export {

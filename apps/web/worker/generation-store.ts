@@ -18,11 +18,13 @@
  * promote the same base revision can both attempt it; at most one succeeds.
  */
 
+import { isRunStop, stopIsRecordable } from '@vibld/core';
 import type {
   GenerationStageRecord,
   GenerationStore,
   ProjectSnapshot,
   PromotionResult,
+  RunTrace,
 } from '@vibld/core';
 
 function snapshotKey(projectId: string, revision: string): string {
@@ -64,6 +66,41 @@ interface StageRow {
   snapshot_revision: string | null;
 }
 
+interface TraceRow {
+  run_id: string;
+  project_id: string;
+  stop: string;
+  model: string;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  context_window: number;
+  cost_micro_usd: number;
+  elapsed_ms: number;
+  ended_at: string;
+}
+
+function toTrace(row: TraceRow): RunTrace {
+  return {
+    runId: row.run_id,
+    projectId: row.project_id,
+    // Read back through the guard rather than cast. A row written by an
+    // older deployment, or by hand, can hold a value this build does not
+    // know, and `provider-error` is the honest answer for a stop that cannot
+    // be read: it says the run did not finish cleanly without inventing a
+    // reason it did not have.
+    stop: isRunStop(row.stop) ? row.stop : 'provider-error',
+    model: row.model,
+    inputTokens: row.input_tokens,
+    cachedInputTokens: row.cached_input_tokens,
+    outputTokens: row.output_tokens,
+    contextWindow: row.context_window,
+    costMicroUsd: row.cost_micro_usd,
+    elapsedMs: row.elapsed_ms,
+    endedAt: row.ended_at,
+  };
+}
+
 export class D1GenerationStore implements GenerationStore {
   #db: D1Database;
   #bucket: R2Bucket;
@@ -71,6 +108,64 @@ export class D1GenerationStore implements GenerationStore {
   constructor(db: D1Database, bucket: R2Bucket) {
     this.#db = db;
     this.#bucket = bucket;
+  }
+
+  /**
+   * Record what became of one run (#167).
+   *
+   * Refuses to write a trace for a stop that did not describe a run, which
+   * is the rule that keeps a refusal out of somebody's generation history.
+   * Asked of the reason rather than remembered here, so the two places that
+   * could disagree cannot.
+   *
+   * `ON CONFLICT DO NOTHING` keeps the first answer. A run ends once; a
+   * second write for the same id is a retried step, and the later attempt
+   * knows no more than the first did.
+   */
+  async saveTrace(trace: RunTrace): Promise<void> {
+    if (!stopIsRecordable(trace.stop)) return;
+    await this.#db
+      .prepare(
+        `INSERT INTO generation_run_traces
+           (run_id, project_id, stop, model, input_tokens, cached_input_tokens,
+            output_tokens, context_window, cost_micro_usd, elapsed_ms, ended_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(run_id) DO NOTHING`,
+      )
+      .bind(
+        trace.runId,
+        trace.projectId,
+        trace.stop,
+        trace.model,
+        trace.inputTokens,
+        trace.cachedInputTokens,
+        trace.outputTokens,
+        trace.contextWindow,
+        trace.costMicroUsd,
+        trace.elapsedMs,
+        trace.endedAt,
+      )
+      .run();
+  }
+
+  /**
+   * This project's runs, newest first, so the builder can rehydrate them
+   * after a reload rather than holding them in memory and losing them.
+   */
+  async tracesForProject(projectId: string, limit = 20): Promise<RunTrace[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT run_id, project_id, stop, model, input_tokens,
+                cached_input_tokens, output_tokens, context_window,
+                cost_micro_usd, elapsed_ms, ended_at
+           FROM generation_run_traces
+          WHERE project_id = ?1
+          ORDER BY ended_at DESC
+          LIMIT ?2`,
+      )
+      .bind(projectId, limit)
+      .all<TraceRow>();
+    return (result.results ?? []).map(toTrace);
   }
 
   async saveStage(record: GenerationStageRecord): Promise<void> {

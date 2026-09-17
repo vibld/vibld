@@ -248,6 +248,9 @@ export function createDeepseekPlanClient(
           inputTokens: usage?.prompt_tokens ?? estimateTokens(promptCharacters),
           outputTokens: usage?.completion_tokens ?? estimateTokens(text.length),
           cacheReadInputTokens: usage?.prompt_cache_hit_tokens ?? 0,
+          // Same as OpenAI: caching is automatic, the write is not charged,
+          // and `prompt_tokens` above already includes the hit tokens.
+          cacheWriteInputTokens: 0,
         },
       };
     },

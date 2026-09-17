@@ -13,12 +13,14 @@ import { PreviewPanel } from './PreviewPanel.tsx';
 import { noteFor } from '../generation/pane-gaps.ts';
 import { PublishButton } from './PublishButton.tsx';
 import { GitHubPushButton } from './GitHubPushButton.tsx';
+import { RunHistory } from './RunHistory.tsx';
 
 const TABS = [
   { id: 'preview', label: 'Preview' },
   { id: 'code', label: 'Code' },
   { id: 'console', label: 'Console' },
   { id: 'problems', label: 'Problems' },
+  { id: 'runs', label: 'Runs' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -210,6 +212,8 @@ export function Workspace({ state }: { state: BuilderState }) {
             )}
           </div>
         ) : null}
+
+        {activeTab === 'runs' ? <RunHistory runCount={state.runCount} /> : null}
 
         {activeTab === 'problems' ? (
           <div className="problems">

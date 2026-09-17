@@ -11,6 +11,25 @@ export interface TokenPrices {
   /** Micro-USD per input token. 5 == $5.00 per million tokens. */
   inputMicroUsd: number;
   outputMicroUsd: number;
+  /**
+   * Micro-USD per input token the provider served from its cache.
+   *
+   * A tenth of the input rate at every provider Vibld talks to, and charged
+   * separately because it is charged separately: pricing a cache read at the
+   * full input rate takes ten times the allowance the run actually consumed.
+   * That was happening before this existed, and not only in theory: OpenAI
+   * and DeepSeek cache prompt prefixes automatically and both already report
+   * the hit, so any run of theirs that matched a prefix was over-charged.
+   */
+  cachedInputMicroUsd: number;
+  /**
+   * Micro-USD per input token the provider wrote into its cache.
+   *
+   * Dearer than an ordinary input token, not cheaper, which is the half of
+   * caching that is easy to forget and the reason a breakpoint on a prefix
+   * that keeps changing costs money.
+   */
+  cacheWriteMicroUsd: number;
 }
 
 /**
@@ -25,6 +44,8 @@ export interface TokenPrices {
 export const DEFAULT_PRICES: TokenPrices = {
   inputMicroUsd: 5,
   outputMicroUsd: 25,
+  cachedInputMicroUsd: 0.5,
+  cacheWriteMicroUsd: 6.25,
 };
 
 /**
@@ -40,7 +61,13 @@ export const DEFAULT_PRICES: TokenPrices = {
  */
 export const PROVIDER_PRICES: Record<string, TokenPrices> = {
   anthropic: DEFAULT_PRICES,
-  deepseek: { inputMicroUsd: 1.32, outputMicroUsd: 3.96 },
+  deepseek: {
+    inputMicroUsd: 1.32,
+    outputMicroUsd: 3.96,
+    // A tenth, and no separate write charge: DeepSeek caches automatically.
+    cachedInputMicroUsd: 0.132,
+    cacheWriteMicroUsd: 1.32,
+  },
 };
 
 function parsePrice(raw: string | undefined, fallback: number): number {
@@ -69,21 +96,40 @@ export function parsePrices(
   // DeepSeek's rate because the deployment happens to default to DeepSeek.
   // An operator's explicit VIBLD_USD_MICRO_PER_* still overrides both.
   const fallback = modelPrices ?? PROVIDER_PRICES[provider] ?? DEFAULT_PRICES;
+  const inputMicroUsd = parsePrice(
+    env.VIBLD_USD_MICRO_PER_INPUT_TOKEN,
+    fallback.inputMicroUsd,
+  );
   return {
-    inputMicroUsd: parsePrice(
-      env.VIBLD_USD_MICRO_PER_INPUT_TOKEN,
-      fallback.inputMicroUsd,
-    ),
+    inputMicroUsd,
     outputMicroUsd: parsePrice(
       env.VIBLD_USD_MICRO_PER_OUTPUT_TOKEN,
       fallback.outputMicroUsd,
     ),
+    // Derived from whatever the input rate ended up being, including an
+    // operator's override. There is no VIBLD_USD_MICRO_PER_CACHED_TOKEN and
+    // there should not be: an operator who sets the input rate and forgets
+    // the cached one would leave the two describing different models, and a
+    // ratio that holds across a provider's line-up is not worth a knob.
+    cachedInputMicroUsd:
+      inputMicroUsd * (fallback.cachedInputMicroUsd / fallback.inputMicroUsd),
+    cacheWriteMicroUsd:
+      inputMicroUsd * (fallback.cacheWriteMicroUsd / fallback.inputMicroUsd),
   };
 }
 
 export interface TokenUsage {
+  /**
+   * Every prompt token, including the cached ones. The two fields below are
+   * subsets of this, never additions to it: see `PlanUsage` in
+   * `packages/ai/src/client.ts`, which normalises three providers that do
+   * not agree about what their own input count includes.
+   */
   inputTokens: number;
   outputTokens: number;
+  /** Optional so the reservation, which knows neither, can share this shape. */
+  cacheReadInputTokens?: number;
+  cacheWriteInputTokens?: number;
 }
 
 /**
@@ -97,9 +143,27 @@ export interface TokenUsage {
  */
 export const ACCOUNT_BUDGET_KEY = '__account__';
 
+/**
+ * What a run cost, with the cached tokens priced as cached.
+ *
+ * The three input rates are applied to three disjoint counts. `inputTokens`
+ * is the whole prompt, so the part charged at the full rate is what is left
+ * after the cached read and the cache write are taken out of it, and a
+ * reservation that reports neither is priced exactly as it was before.
+ *
+ * Clamped at zero rather than trusted: a provider that reported more cached
+ * tokens than input tokens would otherwise produce a negative charge, which
+ * would credit somebody's allowance for a run that cost money. A figure that
+ * cannot be read is not a refund.
+ */
 export function microUsdOf(usage: TokenUsage, prices: TokenPrices): number {
+  const cached = usage.cacheReadInputTokens ?? 0;
+  const written = usage.cacheWriteInputTokens ?? 0;
+  const full = Math.max(0, usage.inputTokens - cached - written);
   return Math.ceil(
-    usage.inputTokens * prices.inputMicroUsd +
+    full * prices.inputMicroUsd +
+      cached * prices.cachedInputMicroUsd +
+      written * prices.cacheWriteMicroUsd +
       usage.outputTokens * prices.outputMicroUsd,
   );
 }

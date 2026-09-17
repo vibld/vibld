@@ -237,6 +237,7 @@ describe('createOpenaiPlanClient', () => {
       inputTokens: 11,
       outputTokens: 22,
       cacheReadInputTokens: 3,
+      cacheWriteInputTokens: 0,
     });
 
     const withoutUsage = await clientWith(

@@ -3,7 +3,11 @@ import { describe, it } from 'node:test';
 import {
   LEGACY_MODEL_IDS,
   MODEL_CATALOGUE,
+  CATALOGUE_VERIFIED_ON,
+  MAX_CATALOGUE_AGE_DAYS,
   availableModels,
+  cacheRatesFor,
+  catalogueAgeDays,
   canonicalModelId,
   findModel,
   isKnownModel,
@@ -145,5 +149,74 @@ describe('legacy model ids', () => {
   it('passes unknown and current ids through untouched', () => {
     assert.equal(canonicalModelId('claude-opus-5'), 'claude-opus-5');
     assert.equal(canonicalModelId('not-a-model'), 'not-a-model');
+  });
+});
+
+describe('cache rates', () => {
+  it('prices a cached read at a tenth of the model own input rate', () => {
+    const haiku = findModel('claude-haiku-4-5');
+    assert.ok(haiku);
+    assert.equal(
+      cacheRatesFor(haiku).cachedInputMicroUsd,
+      haiku.inputMicroUsd * 0.1,
+    );
+  });
+
+  it('prices an Anthropic cache write above an ordinary input token', () => {
+    // The half of caching that is easy to forget: writing a prefix into the
+    // cache costs more than not caching it. A breakpoint on content that
+    // changes every run pays this and matches nothing.
+    const opus = findModel('claude-opus-5');
+    assert.ok(opus);
+    assert.ok(cacheRatesFor(opus).cacheWriteMicroUsd > opus.inputMicroUsd);
+  });
+
+  it('charges nothing extra to write where the provider caches automatically', () => {
+    for (const id of ['gpt-6-astra', 'deepseek-flash']) {
+      const model = findModel(id);
+      assert.ok(model, id);
+      assert.equal(
+        cacheRatesFor(model).cacheWriteMicroUsd,
+        model.inputMicroUsd,
+        id,
+      );
+    }
+  });
+
+  it('has rates for every provider a catalogue entry names', () => {
+    // A model whose provider is missing here would price its cached tokens
+    // as NaN, and a NaN charge settles a reservation at nothing.
+    for (const model of MODEL_CATALOGUE) {
+      const rates = cacheRatesFor(model);
+      assert.ok(Number.isFinite(rates.cachedInputMicroUsd), model.id);
+      assert.ok(Number.isFinite(rates.cacheWriteMicroUsd), model.id);
+    }
+  });
+});
+
+describe('how old the catalogue figures are', () => {
+  it('fails once the figures have gone unchecked for too long', () => {
+    // A deliberate tripwire. Every number in the catalogue is a fact about
+    // somebody else's product, and nothing in this repository finds out when
+    // they reprice. If this test is what brought you here: open each
+    // vendor's pricing and model reference, correct anything that moved,
+    // then move CATALOGUE_VERIFIED_ON. Moving the date alone defeats the
+    // only mechanism there is.
+    const age = catalogueAgeDays();
+    assert.ok(
+      age <= MAX_CATALOGUE_AGE_DAYS,
+      `the model catalogue was last verified ${age} days ago (${CATALOGUE_VERIFIED_ON}); re-check each vendor's pricing and move the date`,
+    );
+  });
+
+  it('counts the age from the recorded date', () => {
+    assert.equal(catalogueAgeDays(new Date('2026-09-13T00:00:00Z')), 0);
+    assert.equal(catalogueAgeDays(new Date('2026-09-23T00:00:00Z')), 10);
+  });
+
+  it('is not dated in the future', () => {
+    // A date ahead of today would hold the tripwire open indefinitely, which
+    // is the one way to disable it without deleting anything.
+    assert.ok(catalogueAgeDays() >= 0, CATALOGUE_VERIFIED_ON);
   });
 });

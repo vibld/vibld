@@ -8,6 +8,7 @@ import {
   SanitizingModelProvider,
   runGeneration,
   settleBudget,
+  traceOf,
 } from './generation-run.ts';
 import type {
   GenerationWorkflowEnv,
@@ -67,6 +68,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         timeout: '10 minutes',
       },
       async () => {
+        const startedAt = Date.now();
         let usage: PlanUsage | undefined;
         const store = new D1GenerationStore(
           this.env.DB,
@@ -115,11 +117,20 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           }),
         );
         const outcome = await runGeneration(store, provider, params);
-        return { ...outcome, usage };
+        // Measured inside the step and returned with the outcome, so it is
+        // the model call that was timed and not the settlement that follows
+        // it. A step's return value is durable, so a later step reads the
+        // same numbers however long it waits or however often it retries.
+        return {
+          ...outcome,
+          usage,
+          elapsedMs: Date.now() - startedAt,
+          endedAt: new Date().toISOString(),
+        };
       },
     );
 
-    await step.do(
+    const costMicroUsd = await step.do(
       'settle-budget',
       // Idempotent: `UserBudget.settle` only writes a reservation that is
       // still open (`WHERE settled IS NULL`), so retrying it after a
@@ -147,6 +158,33 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             inputTokens: generation.usage?.inputTokens ?? 0,
             outputTokens: generation.usage?.outputTokens ?? 0,
             microUsd: actual,
+          }),
+        );
+        return actual;
+      },
+    );
+
+    await step.do(
+      'record-trace',
+      // Its own step rather than a tail on settlement: a trace that fails to
+      // write must not drag the ledger through another settle attempt, and
+      // the two answer different questions. Retrying is safe on its own
+      // terms -- `saveTrace` keeps the first row for a run id and writes
+      // nothing for a stop that did not describe a run.
+      {
+        retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
+        timeout: '30 seconds',
+      },
+      async () => {
+        const store = new D1GenerationStore(
+          this.env.DB,
+          this.env.PROJECT_CONTENT,
+        );
+        await store.saveTrace(
+          traceOf(params, generation.result, generation.usage, {
+            costMicroUsd,
+            elapsedMs: generation.elapsedMs,
+            endedAt: generation.endedAt,
           }),
         );
       },

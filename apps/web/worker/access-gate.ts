@@ -96,6 +96,13 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // the $1 is the one thing this gate exists to prevent. A route listed
   // here has to be read-only in fact, not in description.
   '/api/billing/status': 'a balance read, with its one write behind the gate',
+  // A read of what this caller's own runs did. Same reason as the balance
+  // above: somebody who was invited, generated, and then had access revoked
+  // can still see what became of the runs they paid for. It grants nothing
+  // and starts nothing, and it is read-only in fact as well as in
+  // description -- the writes happen in the Workflow, behind `/api/plan`,
+  // which stays gated.
+  '/api/runs': "a read of the caller's own run history",
   // Revocation does not cancel a subscription in Stripe, and this is the
   // only way to cancel one. Gating it would take a customer's access away
   // while their card kept being charged and leave them no way to stop it,

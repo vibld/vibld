@@ -1,5 +1,23 @@
-/** Base for every failure this adapter reports. Callers can catch one class. */
+import type { RunStop } from '@vibld/core';
+
+/**
+ * Base for every failure this adapter reports. Callers can catch one class.
+ *
+ * Each subclass names the stop it is, from the one vocabulary in
+ * `@vibld/core`. Before this, every provider failure reached the run record
+ * as a string in an `errors` array and a boolean outcome, so "the model
+ * declined" and "the project does not fit" were the same fact to anything
+ * reading a finished run.
+ *
+ * The identifier lives on the error rather than in a classifier somewhere
+ * else because the error is the thing that knows which kind it is. A
+ * `switch` over class names in another module is the same knowledge written
+ * down twice, and the copy goes stale the first time a subclass is added.
+ */
 export class ProviderError extends Error {
+  /** Which stop this failure is, for the run record and the API. */
+  readonly stop: RunStop = 'provider-error';
+
   constructor(message: string) {
     super(message);
     this.name = 'ProviderError';
@@ -8,6 +26,8 @@ export class ProviderError extends Error {
 
 /** The model declined the request. Not retryable with the same prompt. */
 export class ProviderRefusalError extends ProviderError {
+  override readonly stop: RunStop = 'model-refused';
+
   readonly category: string | null;
 
   constructor(category: string | null, explanation: string | null) {
@@ -31,6 +51,8 @@ export class ProviderRefusalError extends ProviderError {
  * the real cause. Fail loudly instead.
  */
 export class ProviderTruncationError extends ProviderError {
+  override readonly stop: RunStop = 'model-truncated';
+
   constructor(maxTokens: number) {
     super(
       `The model hit the ${maxTokens}-token output limit, so the generated project is incomplete. ` +
@@ -42,6 +64,8 @@ export class ProviderTruncationError extends ProviderError {
 
 /** The response did not match the plan schema. */
 export class ProviderShapeError extends ProviderError {
+  override readonly stop: RunStop = 'model-shape';
+
   constructor(detail: string) {
     super(
       `The model returned a plan that does not match the expected shape: ${detail}`,
@@ -59,6 +83,8 @@ export class ProviderShapeError extends ProviderError {
  * which is not a trade anyone would choose.
  */
 export class ProviderContextError extends ProviderError {
+  override readonly stop: RunStop = 'context-exceeded';
+
   readonly chars: number;
   readonly limit: number;
 

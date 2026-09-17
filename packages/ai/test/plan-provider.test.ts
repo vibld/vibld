@@ -25,6 +25,7 @@ const USAGE: PlanUsage = {
   inputTokens: 120,
   outputTokens: 3400,
   cacheReadInputTokens: 0,
+  cacheWriteInputTokens: 0,
 };
 
 const VALID_PLAN = {
@@ -323,6 +324,7 @@ describe('the output ceiling', () => {
           inputTokens: 10,
           outputTokens: DEFAULT_MAX_TOKENS,
           cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
         },
       }),
     });

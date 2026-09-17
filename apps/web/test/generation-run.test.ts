@@ -11,6 +11,7 @@ import {
   SanitizingModelProvider,
   runGeneration,
   settleBudget,
+  traceOf,
 } from '../worker/generation-run.ts';
 import type { WorkflowParams } from '../worker/generation-run.ts';
 import { D1GenerationStore } from '../worker/generation-store.ts';
@@ -182,7 +183,12 @@ describe('settleBudget', () => {
     reservationId: 11,
     accountReservationId: 22,
     worstCaseMicroUsd: 999_999,
-    prices: { inputMicroUsd: 5, outputMicroUsd: 25 },
+    prices: {
+      inputMicroUsd: 5,
+      outputMicroUsd: 25,
+      cachedInputMicroUsd: 0.5,
+      cacheWriteMicroUsd: 6.25,
+    },
   };
 
   it('settles both layers at the usage-derived cost', async () => {
@@ -191,6 +197,7 @@ describe('settleBudget', () => {
       inputTokens: 100,
       outputTokens: 200,
       cacheReadInputTokens: 0,
+      cacheWriteInputTokens: 0,
     });
 
     assert.equal(actual, 100 * 5 + 200 * 25);
@@ -217,9 +224,132 @@ describe('settleBudget', () => {
         reservationId: undefined,
         accountReservationId: undefined,
       },
-      { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0 },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
     );
 
     assert.deepEqual(calls, []);
+  });
+});
+
+describe('traceOf', () => {
+  const TRACE_PARAMS: Pick<WorkflowParams, 'projectId' | 'runId' | 'model'> = {
+    projectId: 'user_abc',
+    runId: 'run-9',
+    model: 'claude-haiku-4-5',
+  };
+  const TIMING = {
+    costMicroUsd: 4321,
+    elapsedMs: 8_000,
+    endedAt: '2026-03-04T05:06:07.000Z',
+  };
+
+  it('carries the run stop, not the run state', () => {
+    const trace = traceOf(
+      TRACE_PARAMS,
+      { stop: 'conflict' },
+      {
+        inputTokens: 900,
+        outputTokens: 100,
+        cacheReadInputTokens: 300,
+        cacheWriteInputTokens: 0,
+      },
+      TIMING,
+    );
+
+    assert.equal(trace.stop, 'conflict');
+    assert.equal(trace.runId, 'run-9');
+    assert.equal(trace.projectId, 'user_abc');
+    assert.equal(trace.model, 'claude-haiku-4-5');
+  });
+
+  it('keeps the cached read split out of the input total', () => {
+    const trace = traceOf(
+      TRACE_PARAMS,
+      { stop: 'applied' },
+      {
+        inputTokens: 900,
+        outputTokens: 100,
+        cacheReadInputTokens: 300,
+        cacheWriteInputTokens: 0,
+      },
+      TIMING,
+    );
+
+    // Not netted off: the reported input is the whole of it, and the cached
+    // part is a fact about that same number.
+    assert.equal(trace.inputTokens, 900);
+    assert.equal(trace.cachedInputTokens, 300);
+    assert.equal(trace.outputTokens, 100);
+  });
+
+  it("reads the window from the model's catalogue entry", () => {
+    const trace = traceOf(
+      TRACE_PARAMS,
+      { stop: 'applied' },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      TIMING,
+    );
+
+    assert.equal(trace.contextWindow, 200_000);
+  });
+
+  it('records no window for a model this build does not know', () => {
+    const trace = traceOf(
+      { ...TRACE_PARAMS, model: 'retired-model-7' },
+      { stop: 'applied' },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      TIMING,
+    );
+
+    // Zero rather than a guess. A policy can still name a model the
+    // catalogue has dropped, and inventing a window for it would make
+    // context pressure read as a real measurement when it is not.
+    assert.equal(trace.contextWindow, 0);
+  });
+
+  it('records zero tokens, and the real cost, when usage never arrived', () => {
+    const trace = traceOf(TRACE_PARAMS, { stop: 'provider-error' }, undefined, {
+      ...TIMING,
+      costMicroUsd: 50_000,
+    });
+
+    assert.equal(trace.inputTokens, 0);
+    assert.equal(trace.cachedInputTokens, 0);
+    assert.equal(trace.outputTokens, 0);
+    // The run still cost its full reservation (`settleBudget`), and the row
+    // says so rather than inventing tokens to justify the money.
+    assert.equal(trace.costMicroUsd, 50_000);
+  });
+
+  it('passes the measured timing through untouched', () => {
+    const trace = traceOf(
+      TRACE_PARAMS,
+      { stop: 'applied' },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      TIMING,
+    );
+
+    assert.equal(trace.elapsedMs, 8_000);
+    assert.equal(trace.endedAt, '2026-03-04T05:06:07.000Z');
   });
 });
