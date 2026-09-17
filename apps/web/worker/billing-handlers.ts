@@ -479,6 +479,20 @@ export async function reconcileSubscriptions(
    * when this run is not parking for anything of its own.
    */
   const carried = [...retried].filter((id) => !ids.includes(id));
+  /**
+   * Failures this run is the first to see.
+   *
+   * A marker records that a subscription is owed a second attempt, so the
+   * attempt is what spends it. Writing every failure back left the ones it
+   * had just retried still marked, which is a marker that is never
+   * consumed: the set only ever grew, carried run after run for every row
+   * that fails permanently, and the bound this column was given
+   * (0019_reconcile_attempted.sql) stopped being true. It also cost the
+   * thing the marker exists for. A subscription still marked is one the
+   * walk refuses to park for, so after its one retry it never got another
+   * next-run attempt on any later lap, only the lap itself.
+   */
+  const unretried = failures.filter((id) => !retried.has(id));
   const holding = firstNewFailure !== -1;
   const resumeAt = holding
     ? // The id before the earliest new failure, so the next run re-reads it.
@@ -491,7 +505,8 @@ export async function reconcileSubscriptions(
   await store.saveReconcileCursor(
     RECONCILE_WALK,
     resumeAt,
-    // What failed, plus what the slice never reached.
+    // What newly failed, plus what the slice never reached. Everything
+    // else has spent its marker.
     //
     // Failures rather than attempts, because the whole slice would count a
     // subscription that succeeded tonight as having spent a retry it never
@@ -505,7 +520,7 @@ export async function reconcileSubscriptions(
     // bounded for the same reason as before: a subscription created
     // overnight can sort anywhere, and a range would count it as retried
     // without it ever having been tried.
-    [...carried, ...failures],
+    [...carried, ...unretried],
   );
 
   return {

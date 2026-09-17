@@ -308,12 +308,20 @@ export class PublishStore {
    * wins, and the loser is told. A republish after the deletion finishes
    * sees it cleared and works, which is what putting a site back means.
    *
-   * And the revision has to still be catalogued. That is the general form
-   * of the same rule, and it is why this no longer inserts the catalogue
-   * row: creating it here would resurrect a revision whose bytes somebody
-   * has already collected. `putFiles` registers it; every way of removing a
-   * revision removes that row; so promotion asking whether the row is still
-   * there is asking whether the bytes are still there.
+   * And the revision has to still be catalogued and unclaimed. That is the
+   * general form of the same rule, and it is why this no longer inserts the
+   * catalogue row: creating it here would resurrect a revision whose bytes
+   * somebody has already collected.
+   *
+   * Catalogued alone was not enough, and the reason is worth keeping. The
+   * claim has to be retracted before the act it guards, and `discard`
+   * deleted the row after the objects, so for the length of a deletion the
+   * row still said the bytes were there. `collecting_at` is written first
+   * (0025_generation_collecting.sql) and the row stays, which is also what
+   * keeps an interrupted deletion's objects nameable. `putFiles` registers
+   * a revision; everything that collects one marks it before touching a
+   * byte; so promotion asking whether the row is there and unmarked is
+   * asking whether the bytes are still there.
    *
    * Without it, a slow upload overtaken by three quicker publishes gets
    * pruned as stale and then promoted anyway, and the site serves 404s
@@ -352,6 +360,7 @@ export class PublishStore {
              AND EXISTS (
                SELECT 1 FROM published_generations
                WHERE slug = ?3 AND generation = ?1
+                 AND collecting_at IS NULL
              )`,
         )
         .bind(generation, now, slug),
@@ -414,15 +423,33 @@ export class PublishStore {
   }
 
   /**
-   * Remove one revision: its objects, then its row.
+   * Remove one revision: claim it, then its objects, then its row.
    *
-   * That order, because a row without objects is a retention slot wasted
-   * and a set of objects without a row is storage nothing will ever come
-   * back for.
+   * The claim is the whole of it. This used to delete the objects and then
+   * the row, on the ground that a row without objects wastes a retention
+   * slot while objects without a row are storage nothing can ever name
+   * again. Both true, and it left the catalogue row, which is what
+   * `promote` reads to decide whether the bytes are still there, present
+   * for the entire deletion. A slow upload selected as stale could have its
+   * objects removed and then promote successfully against the row the
+   * deletion had not reached, pointing the site at an emptied prefix with
+   * both requests reporting success.
    *
-   * Also what a refused publish calls to clean up after itself. The bytes
-   * are the caller's own, written under a prefix nothing points at, so
-   * deleting them cannot touch what a hold is keeping.
+   * Writing `collecting_at` first retracts the claim before anything acts
+   * on it, and keeps the row, so an interrupted deletion still names its
+   * objects for the next prune or takedown to finish. Enumeration does not
+   * skip a marked revision for exactly that reason: resuming is what should
+   * happen to one. Only promotion refuses them.
+   *
+   * The claim also refuses to collect the revision that is serving, which
+   * is the other half of the same race: promotion committing first has to
+   * beat a collection that is about to start, not only the reverse. The
+   * callers that pass an already-stale revision (`#prune` filters the live
+   * one out, `unpublish` has already cleared the pointer, a refused publish
+   * never had it) are unaffected; the condition is what makes that a
+   * property of the write rather than of the caller getting it right.
+   *
+   * Returns having done nothing when the claim is refused.
    */
   async discard(
     slug: string,
@@ -439,6 +466,28 @@ export class PublishStore {
      */
     stillWanted?: () => Promise<boolean>,
   ): Promise<void> {
+    // Claimed before a byte goes (0025_generation_collecting.sql). Refused
+    // when this revision is the one serving, so a promotion that committed
+    // first is not collected out from under itself.
+    //
+    // Re-marking an already-marked revision is a resume, and has to stay
+    // one: a deletion interrupted halfway leaves the row marked, and the
+    // next prune or takedown finishing it is the thing that stops those
+    // objects leaking.
+    const [claimed] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE published_generations SET collecting_at = ?3
+           WHERE slug = ?1 AND generation = ?2
+             AND NOT EXISTS (
+               SELECT 1 FROM published_projects
+               WHERE slug = ?1 AND generation = ?2
+             )`,
+        )
+        .bind(slug, generation, new Date().toISOString()),
+    ]);
+    if (claimed?.meta.changes === 0) return;
+
     let cursor: string | undefined;
     do {
       const page = await this.#bucket.list({

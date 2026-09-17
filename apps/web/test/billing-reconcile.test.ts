@@ -904,6 +904,68 @@ describe('the reconcile walk', () => {
     );
   });
 
+  it('spends a retry marker on the retry, so the set does not grow for ever', async () => {
+    // The marker says a subscription is owed a second attempt, so making
+    // that attempt is what spends it. Writing every failure back left the
+    // ones just retried still marked, and nothing ever removed them.
+    //
+    // Two costs, and the quiet one is worse. A subscription still marked is
+    // one the walk refuses to park for, so after its single retry it never
+    // got another next-run attempt on any later lap. And the set only grew:
+    // every permanently failing row in the database stayed in it, carried
+    // from run to run, in a column 0019_reconcile_attempted.sql bounded to
+    // one night's slice.
+    const store = await storeWith(FIVE);
+    const stripe = stripeServing(FIVE);
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    const seen: string[] = [];
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      if (id === 'sub_b') throw new Error('broken for good');
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+
+    // Run one: a, b. `b` fails for the first time, so the walk parks before
+    // it and records that it is owed an attempt.
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(
+      [...(await store.reconcileCursor('subscriptions')).attempted],
+      ['sub_b'],
+    );
+
+    // Run two: b, c. That is the attempt, and it fails. The walk goes past
+    // rather than starving c, d and e, and the marker is now spent.
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(seen, ['sub_b', 'sub_c']);
+    assert.deepEqual(
+      [...(await store.reconcileCursor('subscriptions')).attempted],
+      [],
+      'the retry it had just made was recorded as still owed',
+    );
+
+    // Run three finishes the lap: d, e, and the cursor clears.
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(seen, ['sub_d', 'sub_e']);
+
+    // Run four is the next lap, and `b` is owed a first attempt again, so
+    // the walk parks for it exactly as it did on run one. Left marked, it
+    // would be read as already retried for the rest of the deployment's
+    // life and only ever seen once a lap.
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(seen, ['sub_a', 'sub_b']);
+
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(
+      seen,
+      ['sub_b', 'sub_c'],
+      'a marker that was never spent cost the retry it exists for',
+    );
+  });
+
   it('stays put when the first subscription in the slice throws', async () => {
     // The edge the arithmetic gets wrong if it reaches for `ids[-1]`: the
     // failure is the first thing in the slice, so there is no earlier id to

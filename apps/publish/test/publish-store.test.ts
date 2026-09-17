@@ -374,6 +374,114 @@ describe('what a slug keeps', () => {
     });
   });
 
+  it('refuses to promote a revision whose collection has already begun', async () => {
+    // The same race, half a step earlier, and the reason the condition
+    // above was not enough on its own. `discard` deleted the objects and
+    // then the row, so for the whole length of a deletion the catalogue
+    // still said the bytes were there. A slow publish promoting inside that
+    // window passed the check and pointed the site at a prefix that was
+    // being emptied underneath it, with both requests reporting success.
+    //
+    // So the claim is written before the first delete, and this promotes
+    // from inside the deletion to prove it.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    const slow = randomUUID();
+    await store.putFiles('acme', slow, [
+      { path: 'index.html', content: '<h1>slow</h1>' },
+    ]);
+
+    let promotedMidCollection: boolean | undefined;
+    const realDelete = bucket.delete.bind(bucket);
+    bucket.delete = async (keys: string[]) => {
+      // Once, and only for the revision being collected: the objects are
+      // going now, and this is the last moment the old order still claimed
+      // they were there.
+      if (
+        promotedMidCollection === undefined &&
+        keys.some((key) => key.includes(slow))
+      ) {
+        promotedMidCollection = await store.promote('acme', slow);
+      }
+      return realDelete(keys);
+    };
+
+    // Three quicker publishes, and the third prunes the slow one.
+    for (let n = 1; n <= REVISIONS_KEPT; n += 1) await version(store, n);
+
+    assert.equal(
+      promotedMidCollection,
+      false,
+      'a revision being collected was promoted anyway',
+    );
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: `<h1>v${REVISIONS_KEPT}</h1>`,
+    });
+  });
+
+  it('refuses to collect the revision that is serving', async () => {
+    // The other direction of the same race. Promotion committing first has
+    // to beat a collection that is about to start, not only the reverse,
+    // and the callers getting that right is not the same as the write
+    // refusing to get it wrong.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const live = await version(store, 1);
+
+    await store.discard('acme', live);
+
+    assert.deepEqual(
+      bucket.keys(),
+      [`published/acme/${live}/index.html`],
+      'the live revision was collected out from under the site',
+    );
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>v1</h1>',
+    });
+  });
+
+  it('can finish a collection that died partway, rather than leaking it', async () => {
+    // Why the row outlives the objects instead of being deleted first.
+    // Deleting the row up front would retract the claim in time too, and a
+    // deletion that then died would leave objects with nothing naming them,
+    // for ever. The marked row is what the next pass comes back for, so
+    // enumeration deliberately does not skip it.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    const doomed = await version(store, 1);
+    await version(store, 2);
+
+    const realDelete = bucket.delete.bind(bucket);
+    let failed = false;
+    bucket.delete = async (keys: string[]) => {
+      if (!failed && keys.some((key) => key.includes(doomed))) {
+        failed = true;
+        throw new Error('R2 went away mid-deletion');
+      }
+      return realDelete(keys);
+    };
+
+    await assert.rejects(() => store.discard('acme', doomed));
+    assert.ok(
+      (await store.revisions('acme')).includes(doomed),
+      'an interrupted collection left nothing naming its objects',
+    );
+    assert.ok(
+      bucket.keys().some((key) => key.includes(doomed)),
+      'the test did not leave anything behind to come back for',
+    );
+
+    // And it is still not promotable, marked and half-collected as it is.
+    assert.equal(await store.promote('acme', doomed), false);
+
+    // The next pass finishes it.
+    await store.discard('acme', doomed);
+    assert.ok(!bucket.keys().some((key) => key.includes(doomed)));
+    assert.ok(!(await store.revisions('acme')).includes(doomed));
+  });
+
   it('counts revisions per slug, not across the bucket', async () => {
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
