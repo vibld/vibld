@@ -36,7 +36,7 @@ async function release(
   by: string,
 ): Promise<boolean> {
   const site = await store.siteBySlug(slug);
-  return store.release(slug, by, site?.heldAt ?? '');
+  return store.release(slug, by, site?.holdToken ?? '');
 }
 
 function newStore(): PublishStore {
@@ -634,11 +634,11 @@ describe('holding a site an operator did not publish', () => {
       state: 'held',
       // Carried so a release can name the hold it is answering rather than
       // clearing whatever is there when it arrives.
-      heldAt: site?.heldAt,
+      holdToken: site?.holdToken,
       heldBy: 'admin@vibld.com',
       heldReason: 'phishing report 41',
     });
-    assert.match(site?.heldAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(site?.holdToken ?? '', /^[0-9a-f-]{36}$/);
   });
 
   it('puts a released site back only if its owner had not taken it down', async () => {
@@ -737,7 +737,7 @@ describe('holding a site an operator did not publish', () => {
 
     // And the same on the way back out.
     await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
-    const held = (await store.siteBySlug('acme'))?.heldAt ?? '';
+    const held = (await store.siteBySlug('acme'))?.holdToken ?? '';
     await assert.rejects(() =>
       guarded.release('acme', 'admin@vibld.com', held),
     );
@@ -802,12 +802,21 @@ describe('holding a site an operator did not publish', () => {
     assert.equal((await store.siteBySlug('acme'))?.state, 'held');
   });
 
-  it('stops deleting when a hold lands partway through', async () => {
-    // The same race one step later: the UPDATE won, and the hold arrives
-    // while R2 is still being paged. Whatever is left is what the hold is
-    // for, so the loop stops rather than finishing the job.
+  it('lets a takedown that has claimed the bytes finish, and says so', async () => {
+    // The protocol, and the one place it says no to an operator.
     //
-    // `list` is the seam, because it is what the loop calls each time round.
+    // A hold landing mid-deletion used to stop the loop, which reads well
+    // and is not an order: the check was in D1 and the delete was in R2,
+    // and a hold arriving between them was ignored anyway. Nothing that
+    // re-checks can fix that, because there is no write spanning the two
+    // stores.
+    //
+    // So the tombstone is the claim. `unpublish` refuses while a hold is
+    // set, and when it does take the site down it stamps `deleting_at` in
+    // that same conditional write. A hold after it is late, and honestly
+    // so: the owner asked for their own content to go and got there first.
+    // What the operator still gets is the hold itself, which is what keeps
+    // the site off the web and unrepublishable.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
     await publish(store, 'acme', [
@@ -825,12 +834,25 @@ describe('holding a site an operator did not publish', () => {
       return realList(options);
     };
 
-    await store.unpublish('acme');
+    assert.equal(await store.unpublish('acme'), true);
 
-    assert.ok(
-      bucket.keys().length > 0,
-      'it emptied the site the hold had just claimed',
-    );
+    // The bytes the owner asked to remove are gone, and the hold stands.
+    assert.deepEqual(bucket.keys(), []);
+    const site = await store.siteBySlug('acme');
+    assert.equal(site?.state, 'held');
+    assert.equal(site?.heldReason, 'phishing report 41');
+  });
+
+  it('refuses a takedown that arrives after the hold', async () => {
+    // The other side of the same order, and the ordinary case: the hold is
+    // already there when the takedown asks, so it is refused outright and
+    // the bytes stay.
+    const { store, bucket } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.unpublish('acme'), false);
+    assert.ok(bucket.keys().length > 0, 'the owner emptied a held site');
   });
 
   it('refuses a publish whose files were written before the hold', async () => {
@@ -874,18 +896,26 @@ describe('holding a site an operator did not publish', () => {
     // who never saw their report.
     const { store } = stored();
     await published(store);
-    await store.hold('acme', 'first@vibld.com', 'report 41');
-    const seen = (await store.siteBySlug('acme'))?.heldAt ?? '';
-
-    // A second later, so the timestamps differ the way two presses would.
+    // In the same millisecond, which is the case a timestamp could not
+    // tell apart and is exactly when it happens: two admins acting on the
+    // same report. The clock is pinned so the two holds are indisputably
+    // simultaneous, and only the token separates them.
+    const sameMoment = new Date('2026-09-17T12:00:00.000Z');
+    await store.hold('acme', 'first@vibld.com', 'report 41', sameMoment);
+    const first = (await store.siteBySlug('acme'))?.holdToken ?? '';
     await store.hold(
       'acme',
       'second@vibld.com',
       'report 42, worse',
-      new Date(Date.parse(seen) + 1000),
+      sameMoment,
     );
 
-    assert.equal(await store.release('acme', 'first@vibld.com', seen), false);
+    assert.notEqual(
+      first,
+      (await store.siteBySlug('acme'))?.holdToken,
+      'two holds a millisecond apart got the same identity',
+    );
+    assert.equal(await store.release('acme', 'first@vibld.com', first), false);
     const site = await store.siteBySlug('acme');
     assert.equal(site?.state, 'held', 'a stale release lifted a newer hold');
     assert.equal(site?.heldReason, 'report 42, worse');

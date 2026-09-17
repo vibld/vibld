@@ -61,6 +61,10 @@ interface PublishedProjectRow {
   held_at: string | null;
   /** The revision the public gets, or null before the first publish lands. 0021. */
   generation: string | null;
+  /** Identifies one hold, so a release can name the one it answers. 0022. */
+  hold_token: string | null;
+  /** Set while a takedown is removing this site's bytes. 0022. */
+  deleting_at: string | null;
 }
 
 /**
@@ -295,7 +299,8 @@ export class PublishStore {
       this.#db
         .prepare(
           `UPDATE published_projects
-           SET generation = ?1, unpublished_at = NULL, updated_at = ?2
+           SET generation = ?1, unpublished_at = NULL, updated_at = ?2,
+               deleting_at = NULL
            WHERE slug = ?3 AND held_at IS NULL`,
         )
         .bind(generation, now, slug),
@@ -394,17 +399,21 @@ export class PublishStore {
    */
   async #stillDown(slug: string, stamp: string): Promise<boolean> {
     const row = await this.#db
-      .prepare(
-        `SELECT unpublished_at, held_at FROM published_projects WHERE slug = ?1`,
-      )
+      .prepare(`SELECT deleting_at FROM published_projects WHERE slug = ?1`)
       .bind(slug)
-      .first<Pick<PublishedProjectRow, 'unpublished_at' | 'held_at'>>();
-    // A hold arriving mid-paging stops the deletion where it is, for the
-    // same reason it is refused at the start: the bytes are what the hold
-    // keeps. The tombstone is left, so the site stays down, which is what
-    // the owner asked for; a later release and republish is what puts it
-    // back, and a repeat of this call clears whatever was left.
-    return row?.unpublished_at === stamp && (row?.held_at ?? null) === null;
+      .first<Pick<PublishedProjectRow, 'deleting_at'>>();
+    // The claim, not the absence of a hold.
+    //
+    // Reading `held_at` here was a check in D1 followed by a delete in R2,
+    // which is not an order: a hold landing between the two was ignored and
+    // its bytes went anyway. What decides it now is the conditional UPDATE
+    // in `unpublish`, which refuses while a hold is set and, when it does
+    // take the site down, stamps `deleting_at` in the same write. So this
+    // asks only whether the claim it made is still the one standing.
+    //
+    // A republish clears the stamp, which is what stops a takedown deleting
+    // files somebody has just put back.
+    return row?.deleting_at === stamp;
   }
 
   /**
@@ -455,7 +464,8 @@ export class PublishStore {
     const marked = await this.#db
       .prepare(
         `UPDATE published_projects
-         SET unpublished_at = ?1, generation = NULL, updated_at = ?1
+         SET unpublished_at = ?1, generation = NULL, updated_at = ?1,
+             deleting_at = ?1
          WHERE slug = ?2 AND held_at IS NULL`,
       )
       .bind(stamp, slug)
@@ -474,6 +484,17 @@ export class PublishStore {
       if (!(await this.#stillDown(slug, stamp))) return true;
       await this.discard(slug, generation, () => this.#stillDown(slug, stamp));
     }
+
+    // The claim is released once there is nothing left to delete. Only this
+    // run's own claim, so a republish that took the site back and started
+    // its own life is not disturbed by a late finisher.
+    await this.#db
+      .prepare(
+        `UPDATE published_projects SET deleting_at = NULL
+         WHERE slug = ?1 AND deleting_at = ?2`,
+      )
+      .bind(slug, stamp)
+      .run();
     return true;
   }
 
@@ -500,19 +521,27 @@ export class PublishStore {
     by: string,
     reason: string,
     at = new Date(),
-  ): Promise<void> {
+  ): Promise<string> {
     const now = at.toISOString();
+    // A token per hold, because a timestamp is not an identity. `release`
+    // names the hold it is answering so that a second admin re-holding the
+    // site keeps theirs, and two holds in the same millisecond share a
+    // `held_at`: `Date` has millisecond resolution and two people acting on
+    // the same report is exactly when that happens.
+    const token = crypto.randomUUID();
     // One batch, so the flag and the record of who set it cannot land apart.
     await this.#db.batch([
       this.#db
         .prepare(
           `UPDATE published_projects
-           SET held_at = ?1, held_by = ?2, held_reason = ?3, updated_at = ?1
+           SET held_at = ?1, held_by = ?2, held_reason = ?3, updated_at = ?1,
+               hold_token = ?5
            WHERE slug = ?4`,
         )
-        .bind(now, by, reason, slug),
+        .bind(now, by, reason, slug, token),
       this.#recordStatement(slug, 'held', by, reason, now),
     ]);
+    return token;
   }
 
   /**
@@ -605,8 +634,12 @@ export class PublishStore {
      * the site back on the web. The second admin acted last and their hold
      * is the one that stands, so a release that was about the earlier one
      * has to find it gone and say so.
+     *
+     * The token rather than `held_at`, which was the first cut: two holds
+     * in the same millisecond share a timestamp, so comparing on it let
+     * exactly the overlap this guards against through.
      */
-    heldAt: string,
+    holdToken: string,
     at = new Date(),
   ): Promise<boolean> {
     const now = at.toISOString();
@@ -618,10 +651,11 @@ export class PublishStore {
       this.#db
         .prepare(
           `UPDATE published_projects
-           SET held_at = NULL, held_by = NULL, held_reason = NULL, updated_at = ?1
-           WHERE slug = ?2 AND held_at = ?3`,
+           SET held_at = NULL, held_by = NULL, held_reason = NULL,
+               hold_token = NULL, updated_at = ?1
+           WHERE slug = ?2 AND hold_token = ?3`,
         )
-        .bind(now, slug, heldAt),
+        .bind(now, slug, holdToken),
       this.#recordStatement(slug, 'released', by, undefined, now),
     ]);
     // The record is written either way, which is the honest shape: somebody
@@ -639,8 +673,8 @@ export class PublishStore {
         projectId: string;
         userId: string;
         state: PublishState;
-        /** The timestamp a release has to name to be about this hold. */
-        heldAt?: string;
+        /** The token a release has to name to be about this hold. */
+        holdToken?: string;
         heldBy?: string;
         heldReason?: string;
       }
@@ -648,7 +682,8 @@ export class PublishStore {
   > {
     const row = await this.#db
       .prepare(
-        `SELECT slug, project_id, user_id, unpublished_at, held_at, held_by, held_reason, generation
+        `SELECT slug, project_id, user_id, unpublished_at, held_at, held_by,
+                held_reason, generation, hold_token
          FROM published_projects WHERE slug = ?1`,
       )
       .bind(slug)
@@ -665,7 +700,7 @@ export class PublishStore {
       projectId: row.project_id,
       userId: row.user_id,
       state,
-      ...(row.held_at === null ? {} : { heldAt: row.held_at }),
+      ...(row.hold_token === null ? {} : { holdToken: row.hold_token }),
       ...(row.held_by === null ? {} : { heldBy: row.held_by }),
       ...(row.held_reason === null ? {} : { heldReason: row.held_reason }),
     };
