@@ -264,6 +264,44 @@ describe('taking a published site down', () => {
     assert.equal(await store.slugForProject('proj-2'), undefined);
   });
 
+  it('stops deleting when the site comes back live under it', async () => {
+    // A republish from another tab clears the tombstone and writes fresh
+    // files. An unguarded delete loop would go on and remove them, leaving
+    // D1 saying live and R2 holding nothing. Re-reading the stamp before
+    // each batch is what stops the loop the moment that happens.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await store.putFiles(
+      'acme',
+      Array.from({ length: 7 }, (_, index) => ({
+        path: `page-${index}.html`,
+        content: `<h1>${index}</h1>`,
+      })),
+    );
+
+    // The republish lands after the first page of deletions: `list` is what
+    // the loop calls each time round, so this is the seam to catch it on.
+    let pages = 0;
+    const realList = bucket.list.bind(bucket);
+    bucket.list = async (options) => {
+      const page = await realList(options);
+      pages += 1;
+      if (pages === 1) await store.touch('acme');
+      return page;
+    };
+
+    await store.unpublish('acme');
+
+    assert.ok(
+      bucket.keys().length > 0,
+      'it deleted the republished files anyway',
+    );
+    assert.deepEqual(await store.resolveSlug('acme'), {
+      projectId: 'proj-1',
+      userId: 'user-1',
+    });
+  });
+
   it('is safe to repeat after a crash between the two writes', async () => {
     // Content first, mapping second. A failure in between leaves a slug
     // resolving to nothing, which the public handler answers as a 404 and

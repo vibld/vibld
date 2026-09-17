@@ -148,6 +148,21 @@ export class PublishStore {
   }
 
   /**
+   * Whether this slug is still marked down with exactly this stamp.
+   *
+   * The stamp is the guard against a republish that arrives mid-takedown:
+   * clearing the tombstone sets it to NULL, and a second takedown writes a
+   * different one, so either answers false and the deletion stops.
+   */
+  async #stillDown(slug: string, stamp: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(`SELECT unpublished_at FROM published_projects WHERE slug = ?1`)
+      .bind(slug)
+      .first<Pick<PublishedProjectRow, 'unpublished_at'>>();
+    return row?.unpublished_at === stamp;
+  }
+
+  /**
    * Take a published site off the web (ADR-0013).
    *
    * The tombstone first, then the bytes. That order is the whole of the care
@@ -163,16 +178,29 @@ export class PublishStore {
    * stays and is marked (0016_unpublish.sql): public serving refuses it, the
    * owner still holds it, and nobody else can claim it. Publishing again
    * under that name is what puts the site back.
+   *
+   * **The stamp, and what it does not fix.** A republish from another tab
+   * can land while this is deleting, clear the tombstone and write fresh
+   * files, and an unguarded loop would then delete those. Re-reading the
+   * stamp before each batch stops the loop as soon as that happens, so the
+   * deletion cannot run on through a site that is live again. It does not
+   * close the window: a republish that lands between the check and the
+   * delete still loses the keys in that one batch. Closing it properly means
+   * either a lock per slug or R2 prefixes scoped to a content generation,
+   * and the second of those is the same mechanism rolling back to a previous
+   * published checkpoint needs -- which ADR-0013 left waiting on a retention
+   * decision. Narrowing it here is worth doing on its own; calling it fixed
+   * would not be.
    */
   async unpublish(slug: string, at = new Date()): Promise<void> {
-    const now = at.toISOString();
+    const stamp = at.toISOString();
     await this.#db
       .prepare(
         `UPDATE published_projects
          SET unpublished_at = ?1, updated_at = ?1
          WHERE slug = ?2`,
       )
-      .bind(now, slug)
+      .bind(stamp, slug)
       .run();
 
     // R2 pages with a cursor, so this loops. A site with more files than one
@@ -180,6 +208,7 @@ export class PublishStore {
     // is content nothing points at and nobody thinks to look for.
     let cursor: string | undefined;
     do {
+      if (!(await this.#stillDown(slug, stamp))) return;
       const page = await this.#bucket.list({
         prefix: `published/${slug}/`,
         ...(cursor === undefined ? {} : { cursor }),

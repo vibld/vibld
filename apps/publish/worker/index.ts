@@ -93,7 +93,6 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
       );
     }
     resolvedSlug = existing.slug;
-    await store.touch(resolvedSlug);
   } else {
     if (typeof slug !== 'string' || !isValidSlug(slug)) {
       return json(
@@ -112,6 +111,17 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   }
 
   await store.putFiles(resolvedSlug, files);
+  // The files first, then the row. `touch` is what clears a tombstone, so
+  // calling it before the content exists would make a taken-down slug
+  // publicly resolvable against an empty prefix, and a failed write would
+  // then leave the site reading as live and serving nothing. That is the
+  // exact failure `unpublish` orders itself to avoid, pointed the other way.
+  //
+  // It still only runs for a project that already held this slug: a first
+  // publish has just claimed the row and has nothing to correct.
+  if (existing) {
+    await store.touch(resolvedSlug);
+  }
 
   const hostname = env.PUBLISH_HOSTNAME ?? 'published.vibld-preview.dev';
   return json({

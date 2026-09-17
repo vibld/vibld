@@ -56,7 +56,16 @@ type PublishState =
   | { phase: 'published'; slug: string; url: string; skipped: string[] }
   /** Off the web, and the name still ours. Publishing again puts it back. */
   | { phase: 'taken-down'; slug: string }
-  | { phase: 'failed'; error: string };
+  /**
+   * Something went wrong, and the site is wherever it already was.
+   *
+   * `publishedSlug` is carried through on purpose. Dropping it hid the
+   * "Take it down" button behind a failure, and a revoked owner cannot get
+   * it back: the POST that would re-establish the name is gated and a fresh
+   * page load has no slug lookup, so a transient error or a rate limit was
+   * enough to leave somebody's site live with no control that reaches it.
+   */
+  | { phase: 'failed'; error: string; publishedSlug?: string };
 
 /**
  * Put the project on the web, and take it off again (ADR-0010,
@@ -90,7 +99,7 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   const knownSlug =
     state.phase === 'published' || state.phase === 'taken-down'
       ? state.slug
-      : state.phase === 'idle'
+      : state.phase === 'idle' || state.phase === 'failed'
         ? state.publishedSlug
         : undefined;
   /** Whether there is something up that could be taken down. */
@@ -194,7 +203,11 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
         setState(
           result.ok
             ? { phase: 'taken-down', slug: result.slug }
-            : { phase: 'failed', error: result.error },
+            : {
+                phase: 'failed',
+                error: result.error,
+                publishedSlug: decision.slug,
+              },
         );
       } catch (error) {
         if (!current()) return;
@@ -204,6 +217,7 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
             error instanceof Error
               ? error.message
               : 'The project could not be taken down.',
+          publishedSlug: decision.slug,
         });
       }
       return;
@@ -225,7 +239,13 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
               url: result.url,
               skipped: result.skipped,
             }
-          : { phase: 'failed', error: result.error },
+          : decision.publishedSlug === undefined
+            ? { phase: 'failed', error: result.error }
+            : {
+                phase: 'failed',
+                error: result.error,
+                publishedSlug: decision.publishedSlug,
+              },
       );
     } catch (error) {
       if (!current()) return;
@@ -235,6 +255,9 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
           error instanceof Error
             ? error.message
             : 'The project could not be published.',
+        ...(decision.publishedSlug === undefined
+          ? {}
+          : { publishedSlug: decision.publishedSlug }),
       });
     }
   }

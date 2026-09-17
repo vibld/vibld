@@ -79,6 +79,7 @@ import {
   autoPublishConfigured,
   buildProject,
   publishProject,
+  publishServiceConfigured,
   unpublishProject,
 } from './publish-client.ts';
 import {
@@ -1399,7 +1400,10 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
  * preceded it.
  */
 async function handleUnpublish(request: Request, env: Env): Promise<Response> {
-  if (!autoPublishConfigured(env)) {
+  // Not `autoPublishConfigured`: that also wants the build service, which a
+  // takedown never calls. Requiring it would answer 503 to the one control
+  // that removes a live site, on a deployment where removing it still works.
+  if (!publishServiceConfigured(env)) {
     return json(
       { error: 'Publishing is not configured for this deployment.' },
       503,

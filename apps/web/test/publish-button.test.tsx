@@ -670,6 +670,36 @@ describe('taking a published site down', () => {
     view.unmount();
   });
 
+  it('stays retryable after a refused takedown', async () => {
+    // The failure that made this necessary: dropping the slug hid the only
+    // control that takes a live site down, and a revoked owner cannot get it
+    // back -- the POST that would re-establish the name is gated, and a
+    // fresh page load has no slug lookup. A rate limit was enough to strand
+    // somebody's site.
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+
+    answer = () =>
+      reply({ error: 'Too many publish requests. Try again shortly.' }, 429);
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.ok(view.takeDownButton(), 'the only way down disappeared');
+    assert.equal(view.slug(), null, 'it forgot the name of the live site');
+
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2]?.method, 'DELETE');
+    assert.match(view.container.textContent ?? '', /off the web/);
+    view.unmount();
+  });
+
   it('reports a refused takedown rather than claiming it worked', async () => {
     let answer = publishReply;
     serving(() => answer());

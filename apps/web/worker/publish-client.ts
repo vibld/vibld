@@ -28,6 +28,19 @@ export function autoPublishConfigured(env: PublishServiceEnv): boolean {
   );
 }
 
+/**
+ * What taking a site down needs, which is less than publishing does.
+ *
+ * Publishing builds first, so it needs apps/preview as well. A takedown
+ * builds nothing. Asking for the build service anyway would mean that
+ * turning preview off, or losing its secret, leaves every already-published
+ * site up with its owner answered 503 by the only control that removes one.
+ * A fail-closed check has to fail closed on the thing it is actually about.
+ */
+export function publishServiceConfigured(env: PublishServiceEnv): boolean {
+  return Boolean(env.PUBLISH && env.PUBLISH_INTERNAL_SECRET);
+}
+
 const INTERNAL_ORIGIN = 'https://internal.invalid';
 
 export type BuildResult =

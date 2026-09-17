@@ -4,6 +4,7 @@ import {
   autoPublishConfigured,
   buildProject,
   publishProject,
+  publishServiceConfigured,
   unpublishProject,
 } from '../worker/publish-client.ts';
 import type { ServiceBinding } from '../worker/publish-client.ts';
@@ -218,6 +219,39 @@ describe('publishProject', () => {
       [],
     );
     assert.equal(result.ok, false);
+  });
+});
+
+describe('publishServiceConfigured', () => {
+  it('asks only for the publish service, not the build one', () => {
+    // Publishing builds first, so it needs apps/preview as well. A takedown
+    // builds nothing, and requiring preview anyway would answer 503 to the
+    // one control that removes a live site on a deployment where removing it
+    // still works. A fail-closed check has to fail closed on its own subject.
+    const { binding } = fakeBinding(() => jsonResponse({}));
+    assert.equal(publishServiceConfigured({}), false);
+    assert.equal(publishServiceConfigured({ PUBLISH: binding }), false);
+    assert.equal(
+      publishServiceConfigured({ PUBLISH_INTERNAL_SECRET: 's' }),
+      false,
+    );
+    assert.equal(
+      publishServiceConfigured({
+        PUBLISH: binding,
+        PUBLISH_INTERNAL_SECRET: 's',
+      }),
+      true,
+      'a takedown was refused on a deployment that can take things down',
+    );
+    // The point of the split, stated as an assertion: publishing still wants
+    // both services.
+    assert.equal(
+      autoPublishConfigured({
+        PUBLISH: binding,
+        PUBLISH_INTERNAL_SECRET: 's',
+      }),
+      false,
+    );
   });
 });
 
