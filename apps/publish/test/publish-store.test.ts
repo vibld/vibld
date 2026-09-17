@@ -1,30 +1,84 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { PublishStore } from '../worker/publish-store.ts';
+import type { ProjectFile } from '@vibld/core';
+import { PublishStore, REVISIONS_KEPT } from '../worker/publish-store.ts';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
 /**
- * The real migrations, not a copy of them.
+ * The real migrations, all of them, not a copy and not a chosen subset.
  *
- * This package binds the same D1 database apps/web migrates (ADR-0010), and
- * an inline copy of the table here is a copy that drifts: the column
- * 0016_unpublish.sql adds is exactly the kind of thing a hand-written
- * fixture keeps passing without.
+ * This package binds the same D1 database apps/web migrates (ADR-0010). An
+ * inline copy of the table drifts, which is what 0016_unpublish.sql's column
+ * would have slipped past; naming the files drifts too, one migration later,
+ * which is what 0018_operator_hold.sql's did. Reading the directory is the
+ * same answer apps/web's own `schemaSql()` settled on, and for the same
+ * reason: the fake gets exactly the schema the deployment gets, and adding a
+ * migration needs no edit here.
+ *
+ * Ordering is the filename's numeric prefix, which is what
+ * `wrangler d1 migrations apply` orders by.
  */
-const SCHEMA = ['0003_publish.sql', '0016_unpublish.sql']
-  .map((file) =>
-    readFileSync(
-      join(import.meta.dirname, '..', '..', 'web', 'migrations', file),
-      'utf8',
-    ),
-  )
+const MIGRATIONS = join(import.meta.dirname, '..', '..', 'web', 'migrations');
+const SCHEMA = readdirSync(MIGRATIONS)
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => readFileSync(join(MIGRATIONS, name), 'utf8'))
   .join('\n');
+
+/** Release the hold a site is actually under, the way the handler does. */
+async function release(
+  store: PublishStore,
+  slug: string,
+  by: string,
+): Promise<boolean> {
+  const site = await store.siteBySlug(slug);
+  return store.release(slug, by, site?.holdToken ?? '');
+}
 
 function newStore(): PublishStore {
   return new PublishStore(new SqliteD1Database(SCHEMA), new InMemoryR2Bucket());
+}
+
+/**
+ * Publish a revision the way the Worker does: write the files, then point
+ * the slug at them (0021_publish_generations.sql).
+ *
+ * Both halves, because either alone is a state the product never reaches
+ * and testing against it would prove nothing. Returns the generation, for
+ * the tests that care which revision they are looking at.
+ */
+async function publish(
+  store: PublishStore,
+  slug: string,
+  files: ProjectFile[],
+  generation: string = randomUUID(),
+): Promise<string> {
+  await store.putFiles(slug, generation, files);
+  await store.promote(slug, generation);
+  return generation;
+}
+
+/**
+ * Read a file the way public serving does: resolve the slug, then fetch
+ * from the revision it names.
+ *
+ * Going through `resolveSlug` rather than straight to `getFile` is the
+ * point. A takedown or a hold is a fact about the row, and a test that
+ * reached past it into R2 would report content as readable that no request
+ * can reach.
+ */
+async function served(
+  store: PublishStore,
+  slug: string,
+  path: string,
+): Promise<{ content: string } | undefined> {
+  const resolved = await store.resolveSlug(slug);
+  if (!resolved) return undefined;
+  return store.getFile(slug, resolved.generation, path);
 }
 
 describe('PublishStore', () => {
@@ -37,15 +91,20 @@ describe('PublishStore', () => {
     const store = newStore();
     const result = await store.claimSlug('acme', 'proj-1', 'user-1');
     assert.deepEqual(result, { claimed: true });
+    // Claimed, not published. The name is held and nothing is serving
+    // under it, which is what `down` says. Calling it live would send the
+    // owner to an address that answers 404.
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
       userId: 'user-1',
-      live: true,
+      live: false,
+      state: 'down',
     });
-    assert.deepEqual(await store.resolveSlug('acme'), {
-      projectId: 'proj-1',
-      userId: 'user-1',
-    });
+    // Claimed, not published. The name is held and nothing serves under
+    // it: a slug that resolved here would answer an empty prefix, which
+    // reads to a visitor as a site that is up and broken rather than one
+    // that is not there.
+    assert.equal(await store.resolveSlug('acme'), undefined);
   });
 
   it('refuses to claim a slug another project already holds', async () => {
@@ -54,10 +113,14 @@ describe('PublishStore', () => {
     const result = await store.claimSlug('acme', 'proj-2', 'user-2');
     assert.deepEqual(result, { claimed: false, reason: 'slug-taken' });
     // The original claim is untouched.
+    // Claimed, not published. The name is held and nothing is serving
+    // under it, which is what `down` says. Calling it live would send the
+    // owner to an address that answers 404.
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
       userId: 'user-1',
-      live: true,
+      live: false,
+      state: 'down',
     });
   });
 
@@ -76,26 +139,26 @@ describe('PublishStore', () => {
   it('stores and serves file content by slug and path', async () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>Hi</h1>' },
       { path: 'about.html', content: '<h1>About</h1>' },
     ]);
 
-    assert.deepEqual(await store.getFile('acme', 'index.html'), {
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
       content: '<h1>Hi</h1>',
     });
-    assert.deepEqual(await store.getFile('acme', 'about.html'), {
+    assert.deepEqual(await served(store, 'acme', 'about.html'), {
       content: '<h1>About</h1>',
     });
-    assert.equal(await store.getFile('acme', 'missing.html'), undefined);
+    assert.equal(await served(store, 'acme', 'missing.html'), undefined);
   });
 
   it("overwrites a slug's content on a later publish rather than appending", async () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [{ path: 'index.html', content: 'v1' }]);
-    await store.putFiles('acme', [{ path: 'index.html', content: 'v2' }]);
-    assert.deepEqual(await store.getFile('acme', 'index.html'), {
+    await publish(store, 'acme', [{ path: 'index.html', content: 'v1' }]);
+    await publish(store, 'acme', [{ path: 'index.html', content: 'v2' }]);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
       content: 'v2',
     });
   });
@@ -104,21 +167,383 @@ describe('PublishStore', () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
     await store.claimSlug('beta', 'proj-2', 'user-2');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: 'acme home' },
     ]);
-    assert.equal(await store.getFile('beta', 'index.html'), undefined);
+    assert.equal(await served(store, 'beta', 'index.html'), undefined);
   });
 
-  it('touch updates updated_at without changing the slug mapping', async () => {
+  it('promoting a revision leaves the slug mapping alone', async () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.touch('acme');
+    // Promoted, so there is a revision behind the name and it reads live.
+    // Its files first, because promotion verifies the catalogue rather than
+    // writing it: a revision nothing registered is one whose bytes may
+    // already have been collected.
+    const generation = randomUUID();
+    await store.putFiles('acme', generation, [
+      { path: 'index.html', content: '<h1>acme</h1>' },
+    ]);
+    assert.equal(await store.promote('acme', generation), true);
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
       userId: 'user-1',
       live: true,
+      state: 'live',
     });
+  });
+});
+
+/**
+ * Keeping the last few revisions (0021_publish_generations.sql).
+ *
+ * A publish used to overwrite its slug's prefix, so there was never a
+ * previous version to go back to: one bad publish and the last good one was
+ * gone. Each publish now writes its own prefix and the row points at one of
+ * them, which is what makes both rollback and the unraceable hold possible.
+ */
+describe('what a slug keeps', () => {
+  function stored(): { store: PublishStore; bucket: InMemoryR2Bucket } {
+    const bucket = new InMemoryR2Bucket();
+    return {
+      store: new PublishStore(new SqliteD1Database(SCHEMA), bucket),
+      bucket,
+    };
+  }
+
+  async function version(store: PublishStore, n: number): Promise<string> {
+    return publish(store, 'acme', [
+      { path: 'index.html', content: `<h1>v${n}</h1>` },
+    ]);
+  }
+
+  it('leaves nothing behind when one file of a revision fails to write', async () => {
+    // The writes run together, so a rejection arrives while others are
+    // still in flight. Those that land afterwards belong to a revision that
+    // will never be promoted: not catalogued, so pruning does not see them,
+    // and not pointed at, so a takedown does not either.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const good = await version(store, 1);
+
+    const realPut = bucket.put.bind(bucket);
+    bucket.put = async (key: string, content: string) => {
+      if (key.endsWith('two.html')) throw new Error('R2 said no');
+      return realPut(key, content);
+    };
+
+    await assert.rejects(() =>
+      store.putFiles('acme', 'gen-doomed', [
+        { path: 'one.html', content: 'one' },
+        { path: 'two.html', content: 'two' },
+        { path: 'three.html', content: 'three' },
+      ]),
+    );
+
+    assert.deepEqual(
+      bucket.keys(),
+      [`published/acme/${good}/index.html`],
+      'a revision that never published left its files behind',
+    );
+  });
+
+  it('never serves a revision it has not catalogued', async () => {
+    // The pointer and the catalogue were two writes. A failure between them
+    // left a revision serving that `published_generations` did not list,
+    // and both retention and the owner's takedown enumerate only that
+    // table: the takedown would clear the pointer and leave the bytes in R2
+    // for ever, with nothing left that names them.
+    //
+    // The db here fails every batch. If either write happened outside one,
+    // this would see it.
+    const bucket = new InMemoryR2Bucket();
+    const real = new SqliteD1Database(SCHEMA);
+    const brittle = {
+      prepare: real.prepare.bind(real),
+      batch: async () => {
+        throw new Error('D1 fell over');
+      },
+    };
+    const store = new PublishStore(real, bucket);
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const guarded = new PublishStore(brittle, bucket);
+
+    await guarded.putFiles('acme', 'gen-1', [
+      { path: 'index.html', content: '<h1>v1</h1>' },
+    ]);
+    await assert.rejects(() => guarded.promote('acme', 'gen-1'));
+
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'it served a revision whose promotion had failed',
+    );
+    // Catalogued all the same, which is the stronger property: `putFiles`
+    // names a revision before writing a byte, so a promotion that throws
+    // leaves something pruning and a takedown can still reach. The failure
+    // this guards against is bytes nothing can enumerate.
+    assert.deepEqual(await store.revisions('acme'), ['gen-1']);
+  });
+
+  it('serves the newest revision and keeps the ones before it', async () => {
+    const { store } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const one = await version(store, 1);
+    const two = await version(store, 2);
+
+    assert.deepEqual(await store.revisions('acme'), [two, one]);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>v2</h1>',
+    });
+    // The old one is still readable, which is what rollback would need.
+    assert.deepEqual(await store.getFile('acme', one, 'index.html'), {
+      content: '<h1>v1</h1>',
+    });
+  });
+
+  it('drops the oldest once there are more than it keeps', async () => {
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const kept: string[] = [];
+    for (let n = 1; n <= REVISIONS_KEPT + 2; n += 1) {
+      kept.push(await version(store, n));
+    }
+
+    const newest = kept.slice(-REVISIONS_KEPT).reverse();
+    assert.deepEqual(await store.revisions('acme'), newest);
+    // The rows are one half; the bytes are the half that costs money.
+    assert.deepEqual(
+      bucket.keys().sort(),
+      newest.map((id) => `published/acme/${id}/index.html`).sort(),
+    );
+  });
+
+  it('does not fail a publish because the old revisions would not go', async () => {
+    // Retention runs after the promotion has committed. A throw here used
+    // to come back out of `promote`, so the publish answered 500 while the
+    // new revision was live, and the obvious retry made another generation:
+    // a publish reported as failed, twice, that had worked both times.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    for (let n = 1; n <= REVISIONS_KEPT; n += 1) await version(store, n);
+
+    // The fourth promotion is the first with anything to prune.
+    bucket.list = async () => {
+      throw new Error('R2 is having a moment');
+    };
+    const latest = randomUUID();
+    await store.putFiles('acme', latest, [
+      { path: 'index.html', content: '<h1>newest</h1>' },
+    ]);
+
+    assert.equal(await store.promote('acme', latest), true);
+    assert.deepEqual(await store.resolveSlug('acme'), {
+      projectId: 'proj-1',
+      userId: 'user-1',
+      generation: latest,
+    });
+  });
+
+  it('refuses to promote a revision something has already collected', async () => {
+    // A slow upload overtaken by quicker publishes. Its revision is
+    // catalogued, so pruning counts it among the stale ones and deletes its
+    // prefix; without this the slow request would then promote the emptied
+    // prefix and report success while the site served 404s.
+    //
+    // Pruning and the takedown both remove a revision by removing its row,
+    // so promotion asking whether the row is still there is asking whether
+    // the bytes are still there. One condition rather than a list of the
+    // collectors that happen to exist today.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    // The slow one: its files land, and then it is overtaken.
+    const slow = randomUUID();
+    await store.putFiles('acme', slow, [
+      { path: 'index.html', content: '<h1>slow</h1>' },
+    ]);
+    for (let n = 1; n <= REVISIONS_KEPT; n += 1) await version(store, n);
+
+    // Pruning collected it while it was still on its way.
+    assert.ok(!(await store.revisions('acme')).includes(slow));
+    assert.ok(!bucket.keys().some((key) => key.includes(slow)));
+
+    assert.equal(await store.promote('acme', slow), false);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: `<h1>v${REVISIONS_KEPT}</h1>`,
+    });
+  });
+
+  it('refuses to promote a revision whose collection has already begun', async () => {
+    // The same race, half a step earlier, and the reason the condition
+    // above was not enough on its own. `discard` deleted the objects and
+    // then the row, so for the whole length of a deletion the catalogue
+    // still said the bytes were there. A slow publish promoting inside that
+    // window passed the check and pointed the site at a prefix that was
+    // being emptied underneath it, with both requests reporting success.
+    //
+    // So the claim is written before the first delete, and this promotes
+    // from inside the deletion to prove it.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    const slow = randomUUID();
+    await store.putFiles('acme', slow, [
+      { path: 'index.html', content: '<h1>slow</h1>' },
+    ]);
+
+    let promotedMidCollection: boolean | undefined;
+    const realDelete = bucket.delete.bind(bucket);
+    bucket.delete = async (keys: string[]) => {
+      // Once, and only for the revision being collected: the objects are
+      // going now, and this is the last moment the old order still claimed
+      // they were there.
+      if (
+        promotedMidCollection === undefined &&
+        keys.some((key) => key.includes(slow))
+      ) {
+        promotedMidCollection = await store.promote('acme', slow);
+      }
+      return realDelete(keys);
+    };
+
+    // Three quicker publishes, and the third prunes the slow one.
+    for (let n = 1; n <= REVISIONS_KEPT; n += 1) await version(store, n);
+
+    assert.equal(
+      promotedMidCollection,
+      false,
+      'a revision being collected was promoted anyway',
+    );
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: `<h1>v${REVISIONS_KEPT}</h1>`,
+    });
+  });
+
+  it('still sweeps a revision whose row has already gone', async () => {
+    // The gate on the claim stops a deletion racing a promotion. It must
+    // not stop a sweep, and for one round it did.
+    //
+    // A takedown removes a revision's row while an upload under that same
+    // prefix is still in flight. The late write lands, `promote` correctly
+    // refuses because the row is gone, and `handlePublish` then calls
+    // `discard` to clean up after itself. With the claim gating the
+    // deletion outright, that cleanup found no row to claim and did
+    // nothing, so the object stayed in R2 with nothing naming it: exactly
+    // the leak cataloguing before writing exists to prevent.
+    //
+    // No row means nothing can promote it and nothing will come back for
+    // it, which is the case for collecting rather than against it.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    const orphaned = randomUUID();
+    await store.putFiles('acme', orphaned, [
+      { path: 'index.html', content: '<h1>in flight</h1>' },
+    ]);
+    // Something else collected it: row and the objects it could see, gone.
+    await store.discard('acme', orphaned);
+    // The write that was still in the air lands afterwards.
+    await bucket.put(`published/acme/${orphaned}/late.html`, 'late');
+
+    await store.discard('acme', orphaned);
+    assert.deepEqual(
+      bucket.keys().filter((key) => key.includes(orphaned)),
+      [],
+      'an object with nothing naming it was left in the bucket',
+    );
+  });
+
+  it('refuses to collect the revision that is serving', async () => {
+    // The other direction of the same race. Promotion committing first has
+    // to beat a collection that is about to start, not only the reverse,
+    // and the callers getting that right is not the same as the write
+    // refusing to get it wrong.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const live = await version(store, 1);
+
+    await store.discard('acme', live);
+
+    assert.deepEqual(
+      bucket.keys(),
+      [`published/acme/${live}/index.html`],
+      'the live revision was collected out from under the site',
+    );
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>v1</h1>',
+    });
+  });
+
+  it('can finish a collection that died partway, rather than leaking it', async () => {
+    // Why the row outlives the objects instead of being deleted first.
+    // Deleting the row up front would retract the claim in time too, and a
+    // deletion that then died would leave objects with nothing naming them,
+    // for ever. The marked row is what the next pass comes back for, so
+    // enumeration deliberately does not skip it.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    const doomed = await version(store, 1);
+    await version(store, 2);
+
+    const realDelete = bucket.delete.bind(bucket);
+    let failed = false;
+    bucket.delete = async (keys: string[]) => {
+      if (!failed && keys.some((key) => key.includes(doomed))) {
+        failed = true;
+        throw new Error('R2 went away mid-deletion');
+      }
+      return realDelete(keys);
+    };
+
+    await assert.rejects(() => store.discard('acme', doomed));
+    assert.ok(
+      (await store.revisions('acme')).includes(doomed),
+      'an interrupted collection left nothing naming its objects',
+    );
+    assert.ok(
+      bucket.keys().some((key) => key.includes(doomed)),
+      'the test did not leave anything behind to come back for',
+    );
+
+    // And it is still not promotable, marked and half-collected as it is.
+    assert.equal(await store.promote('acme', doomed), false);
+
+    // The next pass finishes it.
+    await store.discard('acme', doomed);
+    assert.ok(!bucket.keys().some((key) => key.includes(doomed)));
+    assert.ok(!(await store.revisions('acme')).includes(doomed));
+  });
+
+  it('counts revisions per slug, not across the bucket', async () => {
+    const { store } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await store.claimSlug('beta', 'proj-2', 'user-2');
+    const mine = await version(store, 1);
+    for (let n = 0; n < REVISIONS_KEPT + 2; n += 1) {
+      await publish(store, 'beta', [{ path: 'index.html', content: `${n}` }]);
+    }
+
+    assert.deepEqual(await store.revisions('acme'), [mine]);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>v1</h1>',
+    });
+  });
+
+  it('takes every revision down with the site, not just the live one', async () => {
+    // A takedown is the owner saying the work should not be here. Leaving
+    // two older copies behind because retention happens to keep three would
+    // be answering a different request.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await version(store, 1);
+    await version(store, 2);
+
+    await store.unpublish('acme');
+
+    assert.deepEqual(bucket.keys(), []);
+    assert.deepEqual(await store.revisions('acme'), []);
   });
 });
 
@@ -141,7 +566,7 @@ describe('taking a published site down', () => {
   it('stops the slug resolving for the public', async () => {
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
 
@@ -156,7 +581,7 @@ describe('taking a published site down', () => {
     // site back a republish rather than a race to re-claim the name.
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
 
@@ -166,28 +591,31 @@ describe('taking a published site down', () => {
       slug: 'acme',
       userId: 'user-1',
       live: false,
+      state: 'down',
     });
   });
 
   it('puts the site back when it is published again', async () => {
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
     await store.unpublish('acme');
 
-    // What `handlePublish` does for a project that already holds a slug.
-    await store.touch('acme');
-    await store.putFiles('acme', [
+    // What `handlePublish` does for a project that already holds a slug:
+    // the new revision's files, then the pointer, which is what clears the
+    // tombstone.
+    const back = await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>back</h1>' },
     ]);
 
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
       userId: 'user-1',
+      generation: back,
     });
-    assert.deepEqual(await store.getFile('acme', 'index.html'), {
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
       content: '<h1>back</h1>',
     });
   });
@@ -195,7 +623,7 @@ describe('taking a published site down', () => {
   it('removes the content, so nothing is left to serve', async () => {
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
       { path: 'about/index.html', content: '<h1>about</h1>' },
       { path: 'assets/app.css', content: 'body{}' },
@@ -204,7 +632,7 @@ describe('taking a published site down', () => {
     await store.unpublish('acme');
 
     assert.deepEqual(bucket.keys(), [], 'bytes were left behind');
-    assert.equal(await store.getFile('acme', 'index.html'), undefined);
+    assert.equal(await served(store, 'acme', 'index.html'), undefined);
   });
 
   it('deletes every page of objects, not just the first', async () => {
@@ -213,7 +641,8 @@ describe('taking a published site down', () => {
     // nothing points at and nobody thinks to look for.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles(
+    await publish(
+      store,
       'acme',
       Array.from({ length: 7 }, (_, index) => ({
         path: `page-${index}.html`,
@@ -229,20 +658,21 @@ describe('taking a published site down', () => {
   it("leaves another project's site alone", async () => {
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
     await store.claimSlug('acme-two', 'proj-2', 'user-2');
-    await store.putFiles('acme-two', [
+    const two = await publish(store, 'acme-two', [
       { path: 'index.html', content: '<h1>two</h1>' },
     ]);
 
     await store.unpublish('acme');
 
-    assert.deepEqual(bucket.keys(), ['published/acme-two/index.html']);
+    assert.deepEqual(bucket.keys(), [`published/acme-two/${two}/index.html`]);
     assert.deepEqual(await store.resolveSlug('acme-two'), {
       projectId: 'proj-2',
       userId: 'user-2',
+      generation: two,
     });
   });
 
@@ -254,7 +684,7 @@ describe('taking a published site down', () => {
     // the row is marked rather than deleted.
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
     await store.unpublish('acme');
@@ -264,14 +694,22 @@ describe('taking a published site down', () => {
     assert.equal(await store.slugForProject('proj-2'), undefined);
   });
 
-  it('stops deleting when the site comes back live under it', async () => {
-    // A republish from another tab clears the tombstone and writes fresh
-    // files. An unguarded delete loop would go on and remove them, leaving
-    // D1 saying live and R2 holding nothing. Re-reading the stamp before
-    // each batch is what stops the loop the moment that happens.
+  it('refuses a republish that arrives while the takedown is deleting', async () => {
+    // Both of these cannot win, and for a while both did. Cataloguing a
+    // revision before writing it is what stops bytes leaking, and it also
+    // makes the revision visible to the takedown's own enumeration: the
+    // takedown deletes the files a publish has just written, the promotion
+    // that follows points the site at the emptied prefix, and both calls
+    // answer success over a site that 404s every request.
+    //
+    // `deleting_at` is the takedown's claim and promotion reads it, so
+    // whoever wrote first wins and the loser is told. The publish is
+    // refused rather than half-applied, and publishing again once the
+    // deletion has finished works, which is what putting a site back means.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles(
+    await publish(
+      store,
       'acme',
       Array.from({ length: 7 }, (_, index) => ({
         path: `page-${index}.html`,
@@ -282,23 +720,42 @@ describe('taking a published site down', () => {
     // The republish lands after the first page of deletions: `list` is what
     // the loop calls each time round, so this is the seam to catch it on.
     let pages = 0;
+    let promoted: boolean | undefined;
+    const racing = randomUUID();
     const realList = bucket.list.bind(bucket);
     bucket.list = async (options) => {
       const page = await realList(options);
       pages += 1;
-      if (pages === 1) await store.touch('acme');
+      if (pages === 1) {
+        await store.putFiles('acme', racing, [
+          { path: 'index.html', content: '<h1>back</h1>' },
+        ]);
+        promoted = await store.promote('acme', racing);
+      }
       return page;
     };
 
     await store.unpublish('acme');
 
-    assert.ok(
-      bucket.keys().length > 0,
-      'it deleted the republished files anyway',
+    assert.equal(promoted, false, 'the republish won a race it should lose');
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'the site was pointed at a prefix the takedown had emptied',
     );
+
+    // And once it is over, publishing again is the way back.
+    await store.discard('acme', racing);
+    const back = await publish(store, 'acme', [
+      { path: 'index.html', content: '<h1>back</h1>' },
+    ]);
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
       userId: 'user-1',
+      generation: back,
+    });
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>back</h1>',
     });
   });
 
@@ -308,7 +765,7 @@ describe('taking a published site down', () => {
     // which a second call finishes.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
 
@@ -317,5 +774,488 @@ describe('taking a published site down', () => {
 
     assert.deepEqual(bucket.keys(), []);
     assert.equal(await store.resolveSlug('acme'), undefined);
+  });
+});
+
+/**
+ * An operator taking somebody else's site off the web (#172).
+ *
+ * Not the owner takedown wearing a different hat. There the owner asked for
+ * their own work to go and can put it back; here somebody else is being
+ * stopped, and the thing that must not happen is the owner undoing it.
+ */
+describe('holding a site an operator did not publish', () => {
+  function stored(): { store: PublishStore; bucket: InMemoryR2Bucket } {
+    const bucket = new InMemoryR2Bucket();
+    return {
+      store: new PublishStore(new SqliteD1Database(SCHEMA), bucket),
+      bucket,
+    };
+  }
+
+  async function published(store: PublishStore): Promise<void> {
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await publish(store, 'acme', [
+      { path: 'index.html', content: '<h1>acme</h1>' },
+    ]);
+  }
+
+  it('stops the slug resolving for the public', async () => {
+    const { store } = stored();
+    await published(store);
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.resolveSlug('acme'), undefined);
+  });
+
+  it('leaves the content in place, so a wrong hold can be undone', async () => {
+    // Deleting is irreversible and destroys what was served before anybody
+    // has looked at it. The harm is reachability, and the flag ends that.
+    const { store, bucket } = stored();
+    await published(store);
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    const [revision] = await store.revisions('acme');
+    assert.deepEqual(bucket.keys(), [`published/acme/${revision}/index.html`]);
+  });
+
+  it('cannot be lifted by the owner publishing again', async () => {
+    // The rule the whole column exists for. Promoting a revision is what
+    // clears an owner's own takedown, and it must not clear this. It is
+    // also where the refusal now lives, so it answers false rather than
+    // quietly doing nothing.
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.promote('acme', randomUUID()), false);
+
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'a republish lifted an operator hold',
+    );
+    assert.equal((await store.slugForProject('proj-1'))?.state, 'held');
+  });
+
+  it('tells the owner it is held, not merely down', async () => {
+    // Otherwise they press Publish, get a refusal, and have no idea why.
+    const { store } = stored();
+    await published(store);
+    await store.unpublish('acme');
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal((await store.slugForProject('proj-1'))?.state, 'held');
+  });
+
+  it('records who held it and why', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    const site = await store.siteBySlug('acme');
+    assert.deepEqual(site, {
+      slug: 'acme',
+      projectId: 'proj-1',
+      userId: 'user-1',
+      state: 'held',
+      // Carried so a release can name the hold it is answering rather than
+      // clearing whatever is there when it arrives.
+      holdToken: site?.holdToken,
+      heldBy: 'admin@vibld.com',
+      heldReason: 'phishing report 41',
+    });
+    assert.match(site?.holdToken ?? '', /^[0-9a-f-]{36}$/);
+  });
+
+  it('puts a released site back only if its owner had not taken it down', async () => {
+    // Releasing returns the decision to whoever else has a say. For a site
+    // the owner also took down, that is the owner.
+    const { store } = stored();
+    await published(store);
+    await store.unpublish('acme');
+    await store.hold('acme', 'admin@vibld.com', 'wrong report');
+
+    await release(store, 'acme', 'admin@vibld.com');
+
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'releasing a hold republished a site its owner had taken down',
+    );
+    assert.equal((await store.slugForProject('proj-1'))?.state, 'down');
+  });
+
+  it('serves again once a hold on a live site is lifted', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'wrong report');
+
+    await release(store, 'acme', 'admin@vibld.com');
+
+    const [revision] = await store.revisions('acme');
+    assert.deepEqual(await store.resolveSlug('acme'), {
+      projectId: 'proj-1',
+      userId: 'user-1',
+      generation: revision,
+    });
+  });
+
+  it('keeps the record after the hold is lifted', async () => {
+    // The columns are the current state, not a record. Releasing nulls all
+    // three, so before the history table the ordinary hold-then-release
+    // left no evidence the site had ever been taken down, by whom or why --
+    // which contradicted the reason the columns were added.
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+    await release(store, 'acme', 'someone.else@vibld.com');
+
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map(({ action, actor, reason }) => ({
+        action,
+        actor,
+        ...(reason === undefined ? {} : { reason }),
+      })),
+      [
+        {
+          action: 'held',
+          actor: 'admin@vibld.com',
+          reason: 'phishing report 41',
+        },
+        { action: 'released', actor: 'someone.else@vibld.com' },
+      ],
+    );
+    // And the live columns really are clear, so this is a record rather than
+    // the state not having been cleared.
+    assert.equal((await store.siteBySlug('acme'))?.state, 'live');
+  });
+
+  it('changes nothing when the record cannot be written', async () => {
+    // The flag and the record of who set it are two rows. Written
+    // separately, a failure between them leaves the flag changed and the
+    // record lost -- and on the release path that is a site back on the web
+    // with nobody recorded as having put it there, and a retry refused
+    // because it is no longer held.
+    //
+    // The db here fails every batch. If either write happened outside one,
+    // it would have landed and this would see it.
+    const bucket = new InMemoryR2Bucket();
+    const real = new SqliteD1Database(SCHEMA);
+    const brittle = {
+      prepare: real.prepare.bind(real),
+      batch: async () => {
+        throw new Error('D1 fell over');
+      },
+    };
+    const store = new PublishStore(real, bucket);
+    await published(store);
+    const guarded = new PublishStore(brittle, bucket);
+
+    await assert.rejects(() =>
+      guarded.hold('acme', 'admin@vibld.com', 'phishing report 41'),
+    );
+    assert.equal(
+      (await store.siteBySlug('acme'))?.state,
+      'live',
+      'the hold landed without its record',
+    );
+    assert.deepEqual(await store.holdHistory('acme'), []);
+
+    // And the same on the way back out.
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+    const held = (await store.siteBySlug('acme'))?.holdToken ?? '';
+    await assert.rejects(() =>
+      guarded.release('acme', 'admin@vibld.com', held),
+    );
+    assert.equal(
+      (await store.siteBySlug('acme'))?.state,
+      'held',
+      'the release landed without its record',
+    );
+  });
+
+  it('rolls a batch back when a later statement fails', async () => {
+    // The test above makes `batch` itself throw, which never reaches the
+    // fake's rollback. That leaves the primitive the store now depends on
+    // untested, and a fake that committed a half-batch would let a future
+    // test pass against exactly the bug the batch exists to prevent.
+    //
+    // So this drives the real thing: a good insert followed by one that
+    // violates NOT NULL.
+    const db = new SqliteD1Database(SCHEMA);
+    await assert.rejects(() =>
+      db.batch([
+        db
+          .prepare(
+            `INSERT INTO published_site_holds (slug, action, actor, reason, at)
+             VALUES (?1, ?2, ?3, ?4, ?5)`,
+          )
+          .bind('acme', 'held', 'admin@vibld.com', 'a reason', 'now'),
+        db
+          .prepare(
+            `INSERT INTO published_site_holds (slug, action, actor, reason, at)
+             VALUES (?1, ?2, ?3, ?4, ?5)`,
+          )
+          .bind('acme', null, 'admin@vibld.com', null, 'now'),
+      ]),
+    );
+
+    const left = await db
+      .prepare(`SELECT COUNT(*) AS n FROM published_site_holds`)
+      .first<{ n: number }>();
+    assert.equal(left?.n, 0, 'half the batch was committed');
+  });
+
+  it('refuses a takedown decided before the hold landed', async () => {
+    // The handler reads the state and then asks for the deletion, which is
+    // two round trips. A hold placed in between finds the read already
+    // past, so a refusal that lived in the handler would be one an owner
+    // could beat by timing -- and the prize for beating it is erasing what
+    // the hold is keeping.
+    //
+    // This is that interleaving: the decision is taken against a live site
+    // and the call arrives after the hold. It has to be refused anyway,
+    // which only the UPDATE can do.
+    const { store, bucket } = stored();
+    await published(store);
+    const live = await store.slugForProject('proj-1');
+    assert.equal(live?.state, 'live', 'the read this test is about');
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.unpublish('acme'), false);
+    assert.ok(bucket.keys().length > 0, 'the owner emptied a held site');
+    assert.equal((await store.siteBySlug('acme'))?.state, 'held');
+  });
+
+  it('lets a takedown that has claimed the bytes finish, and says so', async () => {
+    // The protocol, and the one place it says no to an operator.
+    //
+    // A hold landing mid-deletion used to stop the loop, which reads well
+    // and is not an order: the check was in D1 and the delete was in R2,
+    // and a hold arriving between them was ignored anyway. Nothing that
+    // re-checks can fix that, because there is no write spanning the two
+    // stores.
+    //
+    // So the tombstone is the claim. `unpublish` refuses while a hold is
+    // set, and when it does take the site down it stamps `deleting_at` in
+    // that same conditional write. A hold after it is late, and honestly
+    // so: the owner asked for their own content to go and got there first.
+    // What the operator still gets is the hold itself, which is what keeps
+    // the site off the web and unrepublishable.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await publish(store, 'acme', [
+      { path: 'index.html', content: '<h1>acme</h1>' },
+      { path: 'about.html', content: '<h1>about</h1>' },
+    ]);
+
+    let pages = 0;
+    const realList = bucket.list.bind(bucket);
+    bucket.list = async (options) => {
+      pages += 1;
+      if (pages === 1) {
+        await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+      }
+      return realList(options);
+    };
+
+    assert.equal(await store.unpublish('acme'), true);
+
+    // The bytes the owner asked to remove are gone, and the hold stands.
+    assert.deepEqual(bucket.keys(), []);
+    const site = await store.siteBySlug('acme');
+    assert.equal(site?.state, 'held');
+    assert.equal(site?.heldReason, 'phishing report 41');
+  });
+
+  it('refuses a takedown that arrives after the hold', async () => {
+    // The other side of the same order, and the ordinary case: the hold is
+    // already there when the takedown asks, so it is refused outright and
+    // the bytes stay.
+    const { store, bucket } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.unpublish('acme'), false);
+    assert.ok(bucket.keys().length > 0, 'the owner emptied a held site');
+  });
+
+  it('refuses a publish whose files were written before the hold', async () => {
+    // The race the whole generation layout is for. `handlePublish` reads
+    // the state and then writes the files, which are two round trips, and a
+    // hold committing in between used to find the previous revision already
+    // overwritten: an owner could destroy what the hold was keeping, and
+    // releasing it would then serve the unreviewed replacement.
+    //
+    // Writing somewhere nothing points at is what makes the decision
+    // postponable to `promote`, where it is part of the write.
+    const { store } = stored();
+    await published(store);
+    const before = await store.revisions('acme');
+
+    // The publish begins: its files land under their own revision.
+    const racing = randomUUID();
+    await store.putFiles('acme', racing, [
+      { path: 'index.html', content: '<h1>not reviewed</h1>' },
+    ]);
+
+    // The hold commits in the gap.
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.promote('acme', racing), false);
+    await store.discard('acme', racing);
+
+    // What the operator kept is what the operator gets back.
+    await release(store, 'acme', 'admin@vibld.com');
+    assert.deepEqual(await store.revisions('acme'), before);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>acme</h1>',
+    });
+  });
+
+  it('refuses a release that is about a hold somebody has replaced', async () => {
+    // Two admins overlapping. The first reads a hold and decides to lift
+    // it; the second re-holds the site on a newer report in between. An
+    // unconditional clear would lift the newer hold and put the site back
+    // on the web, which is the second admin's decision undone by somebody
+    // who never saw their report.
+    const { store } = stored();
+    await published(store);
+    // In the same millisecond, which is the case a timestamp could not
+    // tell apart and is exactly when it happens: two admins acting on the
+    // same report. The clock is pinned so the two holds are indisputably
+    // simultaneous, and only the token separates them.
+    const sameMoment = new Date('2026-09-17T12:00:00.000Z');
+    await store.hold('acme', 'first@vibld.com', 'report 41', sameMoment);
+    const first = (await store.siteBySlug('acme'))?.holdToken ?? '';
+    await store.hold(
+      'acme',
+      'second@vibld.com',
+      'report 42, worse',
+      sameMoment,
+    );
+
+    assert.notEqual(
+      first,
+      (await store.siteBySlug('acme'))?.holdToken,
+      'two holds a millisecond apart got the same identity',
+    );
+    assert.equal(await store.release('acme', 'first@vibld.com', first), false);
+    const site = await store.siteBySlug('acme');
+    assert.equal(site?.state, 'held', 'a stale release lifted a newer hold');
+    assert.equal(site?.heldReason, 'report 42, worse');
+    // And it is *not* in the record as a release, which is the point. An
+    // entry saying the site was released, with the newer hold still
+    // standing, is what an audit would read as the hold having been lifted.
+    // A missing entry is a gap; a wrong one is believed.
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.action),
+      ['held', 'held'],
+    );
+  });
+
+  it('reports a site with no revision as down, not live', async () => {
+    // `siteBySlug` is what the operator's release reads, and it listed its
+    // columns by hand. When 0021 added `generation` the type said the
+    // column was there and the query did not fetch it, so the state
+    // computation compared `undefined` against null and answered live for a
+    // site that serves nothing. The compiler could not catch a SELECT.
+    const { store } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    assert.equal((await store.siteBySlug('acme'))?.state, 'down');
+    assert.equal(await store.resolveSlug('acme'), undefined);
+  });
+
+  it('writes one release record even when two arrive in the same instant', async () => {
+    // Gating the record on the row's state plus `updated_at` was the first
+    // attempt, and it repeated the mistake the hold token had just fixed:
+    // two releases of one hold inside a millisecond both saw the cleared
+    // token and the identical stamp, and both wrote a `released` entry. One
+    // of them returned 409 while its record said the hold was lifted.
+    const { store } = stored();
+    await published(store);
+    const at = new Date('2026-09-17T12:00:00.000Z');
+    await store.hold('acme', 'admin@vibld.com', 'report 41', at);
+    const token = (await store.siteBySlug('acme'))?.holdToken ?? '';
+
+    // Both name the same hold and both stamp the same instant, which is
+    // what a retry or a double press looks like.
+    const first = await store.release('acme', 'first@vibld.com', token, at);
+    const second = await store.release('acme', 'second@vibld.com', token, at);
+
+    assert.equal(first, true);
+    assert.equal(second, false, 'both releases claimed to have cleared it');
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.action),
+      ['held', 'released'],
+    );
+  });
+
+  it('writes no release record when another release got there first', async () => {
+    // The interleaving that state could not answer. A releases hold X; in
+    // the gap, B holds (Y) and releases it. A's write finds the site unheld
+    // with no entry for X, so every condition that asked "does the world
+    // look released" said yes, and A appended a `released` it had not done.
+    const { store } = stored();
+    await published(store);
+    const at = new Date('2026-09-17T12:00:00.000Z');
+    await store.hold('acme', 'first@vibld.com', 'report 41', at);
+    const x = (await store.siteBySlug('acme'))?.holdToken ?? '';
+
+    // A reads X and is about to release it. B gets in first, twice.
+    await store.hold('acme', 'second@vibld.com', 'report 42', at);
+    const y = (await store.siteBySlug('acme'))?.holdToken ?? '';
+    assert.equal(await store.release('acme', 'second@vibld.com', y, at), true);
+
+    // A arrives. The site is unheld, and it was not A who did it.
+    assert.equal(await store.release('acme', 'first@vibld.com', x, at), false);
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.action),
+      ['held', 'held', 'released'],
+      'a release that cleared nothing was recorded as having released it',
+    );
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.actor),
+      ['first@vibld.com', 'second@vibld.com', 'second@vibld.com'],
+    );
+  });
+
+  it('keeps every hold, not just the last one', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'a@vibld.com', 'first report');
+    await release(store, 'acme', 'a@vibld.com');
+    await store.hold('acme', 'b@vibld.com', 'second report');
+
+    const history = await store.holdHistory('acme');
+    assert.equal(history.length, 3);
+    assert.deepEqual(
+      history.map((entry) => entry.action),
+      ['held', 'released', 'held'],
+    );
+    assert.equal(history[0]?.reason, 'first report');
+    assert.equal(history[2]?.reason, 'second report');
+  });
+
+  it('leaves another site alone', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.claimSlug('acme-two', 'proj-2', 'user-2');
+    const two = await publish(store, 'acme-two', [
+      { path: 'index.html', content: '<h1>two</h1>' },
+    ]);
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.deepEqual(await store.resolveSlug('acme-two'), {
+      projectId: 'proj-2',
+      userId: 'user-2',
+      generation: two,
+    });
   });
 });

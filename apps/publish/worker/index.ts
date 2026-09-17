@@ -86,6 +86,18 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     if (existing.userId !== userId) {
       return json({ error: 'This project is published by another user.' }, 403);
     }
+    // #172. Publishing again is what clears an owner's own takedown, so an
+    // operator hold the owner could lift by pressing Publish would be no
+    // hold at all. This is the refusal that makes it one.
+    if (existing.state === 'held') {
+      return json(
+        {
+          error:
+            'This site has been taken down by the operator and cannot be republished.',
+        },
+        409,
+      );
+    }
     if (typeof slug === 'string' && slug !== existing.slug) {
       return json(
         { error: `This project is already published at "${existing.slug}".` },
@@ -110,17 +122,45 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     resolvedSlug = slug;
   }
 
-  await store.putFiles(resolvedSlug, files);
-  // The files first, then the row. `touch` is what clears a tombstone, so
-  // calling it before the content exists would make a taken-down slug
-  // publicly resolvable against an empty prefix, and a failed write would
-  // then leave the site reading as live and serving nothing. That is the
-  // exact failure `unpublish` orders itself to avoid, pointed the other way.
-  //
-  // It still only runs for a project that already held this slug: a first
-  // publish has just claimed the row and has nothing to correct.
-  if (existing) {
-    await store.touch(resolvedSlug);
+  // The files first, then the pointer. A revision nothing points at is
+  // invisible, so a failure in between leaves the previous one serving; the
+  // other order would make the slug resolve to a prefix that is still being
+  // written. That is the same ordering `unpublish` uses, pointed the other
+  // way, and it is now also what makes the hold unraceable: the request has
+  // written nothing that anybody can see by the time it asks.
+  const generation = crypto.randomUUID();
+  await store.putFiles(resolvedSlug, generation, files);
+  if (!(await store.promote(resolvedSlug, generation))) {
+    // Something else got there first. The bytes are this request's own,
+    // under a prefix nothing points at, so clearing them cannot touch what
+    // the winner is keeping.
+    await store.discard(resolvedSlug, generation);
+
+    // Which refusal it was decides what to say, and only one of the four is
+    // an operator. `promote` also refuses while the owner's own takedown is
+    // removing this slug's bytes, and when the revision has been collected
+    // or is being collected, and those are all states a later publish gets
+    // past. Telling the owner an operator had taken their site down was
+    // alarming and wrong in three cases out of four, and "cannot be
+    // republished" was wrong in the same three.
+    //
+    // Reading the state to choose a message is not the read-before-write
+    // this file spent the review removing. The write has already happened
+    // and already decided; a state that changes under this read costs a
+    // slightly stale sentence, not a wrong outcome.
+    const site = await store.siteBySlug(resolvedSlug);
+    return json(
+      site?.state === 'held'
+        ? {
+            error:
+              'This site has been taken down by the operator and cannot be republished.',
+          }
+        : {
+            error:
+              'This site changed while it was being published. Try publishing again.',
+          },
+      409,
+    );
   }
 
   const hostname = env.PUBLISH_HOSTNAME ?? 'published.vibld-preview.dev';
@@ -165,9 +205,111 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
   if (existing.userId !== userId) {
     return json({ error: 'This project is published by another user.' }, 403);
   }
-
-  await store.unpublish(existing.slug);
+  // #172, and the sharper half of the refusal `handlePublish` makes. An
+  // owner's takedown deletes the objects, which is right when it is their
+  // decision and the site is theirs to empty. Under a hold it would erase
+  // the bytes the hold exists to keep: an owner who disliked being held
+  // could destroy what an operator is holding for review, and a hold placed
+  // on a wrong report could no longer be simply lifted. The site is already
+  // off the web, so refusing costs the owner nothing they do not already
+  // have; what it costs is the ability to act on a site while somebody else
+  // is deciding about it, which is the whole of what a hold is.
+  //
+  // Asked of the write rather than of `existing`, which was read a round
+  // trip ago. A hold placed in between would have found this already past
+  // the check, so the refusal would have been one an owner could beat by
+  // timing. `unpublish` decides it in the UPDATE and says which happened.
+  if (!(await store.unpublish(existing.slug))) {
+    return json(
+      {
+        error:
+          'This site has been taken down by the operator and cannot be changed until that is lifted.',
+      },
+      409,
+    );
+  }
   return json({ slug: existing.slug });
+}
+
+/**
+ * Take somebody else's published site off the web, and put it back (#172).
+ *
+ * Named by slug rather than by project, because that is what an operator has:
+ * a report names an address. There is no ownership check here and that is the
+ * point of the route -- apps/web has already established that the caller is a
+ * platform admin, which is a stricter check than owning the thing.
+ *
+ * The bytes stay. See `PublishStore.hold`.
+ */
+async function handleHold(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { slug, by, reason } = (body ?? {}) as {
+    slug?: unknown;
+    by?: unknown;
+    reason?: unknown;
+  };
+  if (typeof slug !== 'string' || slug.length === 0) {
+    return json({ error: '"slug" is required.' }, 400);
+  }
+  if (typeof by !== 'string' || by.length === 0) {
+    return json({ error: '"by" is required.' }, 400);
+  }
+  // A hold with no reason is a hold nobody can review later, which is the
+  // half of "auditable" that costs nothing to require and everything to add
+  // afterwards.
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    return json({ error: '"reason" is required.' }, 400);
+  }
+
+  const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
+  const site = await store.siteBySlug(slug);
+  if (!site) return json({ error: 'No such published site.' }, 404);
+
+  await store.hold(slug, by, reason.trim());
+  return json({ slug, state: 'held' });
+}
+
+/** Lift a hold. Does not put the site back: see `PublishStore.release`. */
+async function handleRelease(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { slug, by } = (body ?? {}) as { slug?: unknown; by?: unknown };
+  if (typeof slug !== 'string' || slug.length === 0) {
+    return json({ error: '"slug" is required.' }, 400);
+  }
+  // Required, because lifting a hold is as much an action somebody took as
+  // placing it, and the history keeps both.
+  if (typeof by !== 'string' || by.length === 0) {
+    return json({ error: '"by" is required.' }, 400);
+  }
+
+  const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
+  const site = await store.siteBySlug(slug);
+  if (!site) return json({ error: 'No such published site.' }, 404);
+  if (site.state !== 'held' || site.holdToken === undefined) {
+    return json({ error: 'This site is not held.' }, 409);
+  }
+
+  // Named, so a second admin re-holding the site between that read and this
+  // write keeps their hold rather than having it lifted by a release that
+  // was about the earlier one.
+  if (!(await store.release(slug, by, site.holdToken))) {
+    return json(
+      { error: 'This site was held again while you were releasing it.' },
+      409,
+    );
+  }
+  const after = await store.siteBySlug(slug);
+  return json({ slug, state: after?.state ?? 'down' });
 }
 
 async function handleInternal(
@@ -185,6 +327,12 @@ async function handleInternal(
   }
   if (pathname === '/internal/unpublish' && request.method === 'POST') {
     return handleUnpublish(request, env);
+  }
+  if (pathname === '/internal/hold' && request.method === 'POST') {
+    return handleHold(request, env);
+  }
+  if (pathname === '/internal/release' && request.method === 'POST') {
+    return handleRelease(request, env);
   }
   return json({ error: 'Not found.' }, 404);
 }
@@ -206,7 +354,7 @@ async function handlePublished(
   }
 
   for (const candidate of candidatePaths(pathname)) {
-    const file = await store.getFile(slug, candidate);
+    const file = await store.getFile(slug, resolved.generation, candidate);
     if (file) {
       return new Response(file.content, {
         headers: { 'content-type': contentTypeFor(candidate) },

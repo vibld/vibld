@@ -327,7 +327,8 @@ export async function reconcileSubscriptions(
    * subscribes. Sorting makes the walk a walk rather than a re-shuffle.
    */
   const all = [...found.ids].sort();
-  const after = await store.reconcileCursor(RECONCILE_WALK);
+  const { afterId: after, attempted: retried } =
+    await store.reconcileCursor(RECONCILE_WALK);
   // The first id past where the last run stopped. An id that has since
   // disappeared costs nothing: the search is for the next one above it.
   const start = after === undefined ? 0 : all.findIndex((id) => id > after);
@@ -337,7 +338,36 @@ export async function reconcileSubscriptions(
     : all.slice(from);
   const reachedEnd = from + ids.length >= all.length;
 
-  for (const id of ids) {
+  /**
+   * Where the earliest subscription that threw sits in this slice, if any.
+   *
+   * A failure used to be walked straight past: the cursor advanced over the
+   * whole slice whatever happened inside it, so the subscription was not
+   * looked at again until the walk lapped (0019_reconcile_attempted.sql).
+   */
+  let firstFailed = -1;
+  /**
+   * The earliest failure this run is seeing for the first time.
+   *
+   * "First time" is settled by membership of the set that *failed* on the
+   * parked run (0019_reconcile_attempted.sql), because that is what "has
+   * had its retry" means. A subscription that succeeded last night and
+   * throws tonight is failing for the first time and is owed one, so
+   * recording the whole slice would have counted it as spent.
+   *
+   * Three earlier answers, each wrong in its own way. A boolean could not
+   * tell a retry from a first failure at all. A single id told them apart
+   * for the earliest casualty only, so a second failure in the same slice
+   * parked the cursor again and a slice of failures advanced one id a
+   * night. A watermark fixed that and assumed the membership of a range,
+   * which changes between runs: Stripe ids are random, so a subscription
+   * created overnight can sort below the mark and be read as a retry it
+   * never had.
+   */
+  let firstNewFailure = -1;
+  /** Which subscriptions threw, which is what the next run has to know. */
+  const failures: string[] = [];
+  for (const [index, id] of ids.entries()) {
     try {
       const subscription = await stripe.subscriptions.retrieve(id);
       const current = await store.getSubscription(id);
@@ -405,6 +435,11 @@ export async function reconcileSubscriptions(
     } catch (error) {
       console.error('reconcile: failed to check subscription', id, error);
       failed += 1;
+      if (firstFailed === -1) firstFailed = index;
+      failures.push(id);
+      if (firstNewFailure === -1 && !retried.has(id)) {
+        firstNewFailure = index;
+      }
     }
   }
 
@@ -419,9 +454,73 @@ export async function reconcileSubscriptions(
    * so the next run starts from the top. That is what makes this a lap: the
    * walk comes round to the beginning instead of stopping at the end.
    */
+  /*
+   * One retry, then past it (0019_reconcile_attempted.sql).
+   *
+   * A run that saw a subscription throw parks the cursor before it, so the
+   * next run starts there rather than leaving a transient failure until the
+   * walk laps. Holding indefinitely would be worse and the codebase has
+   * already been bitten by it: a row that fails every night would hold the
+   * front of the queue and starve every one behind it, which is what
+   * `resumeStrandedPayouts` stamps each attempt to avoid. So the hold lasts
+   * one night: a parked run records how far it got, and the next one walks
+   * past everything at or below that watermark whatever happens inside it,
+   * reporting the failures in `failed` and picking them up again on the
+   * next lap.
+   *
+   * What is recorded is the whole slice rather than its first casualty, so
+   * a slice with several failures retries all of them in one night instead
+   * of parking once per failure and advancing one id a night.
+   */
+  /**
+   * Failures from the parked run that this slice never got to.
+   *
+   * They are still owed their second attempt, so they stay recorded even
+   * when this run is not parking for anything of its own.
+   */
+  const carried = [...retried].filter((id) => !ids.includes(id));
+  /**
+   * Failures this run is the first to see.
+   *
+   * A marker records that a subscription is owed a second attempt, so the
+   * attempt is what spends it. Writing every failure back left the ones it
+   * had just retried still marked, which is a marker that is never
+   * consumed: the set only ever grew, carried run after run for every row
+   * that fails permanently, and the bound this column was given
+   * (0019_reconcile_attempted.sql) stopped being true. It also cost the
+   * thing the marker exists for. A subscription still marked is one the
+   * walk refuses to park for, so after its one retry it never got another
+   * next-run attempt on any later lap, only the lap itself.
+   */
+  const unretried = failures.filter((id) => !retried.has(id));
+  const holding = firstNewFailure !== -1;
+  const resumeAt = holding
+    ? // The id before the earliest new failure, so the next run re-reads it.
+      // Falling back to the incoming cursor when it was first in the slice,
+      // which leaves the walk exactly where it started.
+      (ids[firstNewFailure - 1] ?? after)
+    : reachedEnd
+      ? undefined
+      : ids.at(-1);
   await store.saveReconcileCursor(
     RECONCILE_WALK,
-    reachedEnd ? undefined : ids.at(-1),
+    resumeAt,
+    // What newly failed, plus what the slice never reached. Everything
+    // else has spent its marker.
+    //
+    // Failures rather than attempts, because the whole slice would count a
+    // subscription that succeeded tonight as having spent a retry it never
+    // needed, and walk past its first real failure tomorrow.
+    //
+    // And carried, because a slice is a window that other subscriptions can
+    // push things out of. A failure recorded last night that this slice did
+    // not reach has still not had its second attempt: dropping it makes its
+    // next failure look like a first one, so the walk parks again and it
+    // takes a third go while everything behind it waits. Named rather than
+    // bounded for the same reason as before: a subscription created
+    // overnight can sort anywhere, and a range would count it as retried
+    // without it ever having been tried.
+    [...carried, ...unretried],
   );
 
   return {
@@ -429,7 +528,11 @@ export async function reconcileSubscriptions(
     corrected,
     failed,
     discovered: found.discovered,
-    remaining: all.length - (from + ids.length),
+    // What this run did not reach. A held cursor puts the failure and
+    // everything after it back on the list rather than reporting it covered.
+    remaining: holding
+      ? all.length - (from + firstNewFailure)
+      : all.length - (from + ids.length),
   };
 }
 

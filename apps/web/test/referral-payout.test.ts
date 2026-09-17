@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { MAX_QUERIES_PER_REFERRAL_PAYOUT } from '../worker/billing-replay.ts';
+import { BillingStore } from '../worker/billing-store.ts';
+import { ReferralStore } from '../worker/referral-store.ts';
+import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 import {
   REFERRAL_GRANT_ACTOR,
   payReferralIfEarned,
   resumeStrandedPayouts,
 } from '../worker/referral-payout.ts';
 import { payoutGrantId } from '../worker/referral.ts';
-import type { BillingStore } from '../worker/billing-store.ts';
-import type { ReferralStore } from '../worker/referral-store.ts';
 
 interface Grant {
   id: string;
@@ -60,6 +63,19 @@ function billingFake(
               creditUsdCents: grant.cents,
             }
           : undefined;
+      },
+      // The reversal's other half. Written once for a given id, like the
+      // grant, so a redelivered refund takes the money back once.
+      async deductAdminCredit(
+        id: string,
+        userId: string,
+        cents: number,
+        actor: string,
+        note: string | null,
+      ) {
+        if (grants.has(id)) return 0;
+        grants.set(id, { id, userId, cents: -cents, actor, note });
+        return cents;
       },
     } as unknown as BillingStore,
   };
@@ -479,6 +495,83 @@ describe('resumeStrandedPayouts', () => {
         billing: billing.store,
       }),
       { found: 0, paid: 0, failed: 0 },
+    );
+  });
+});
+
+/**
+ * What the nightly budget is allowed to assume a payout costs.
+ *
+ * `MAX_QUERIES_PER_REFERRAL_PAYOUT` has been wrong four times now, always
+ * in the same direction. Three times because it was read off the code by
+ * eye and the eye followed the happy path. The fourth time was this test:
+ * it counted calls on a hand-written store, and a call is not a query.
+ * `deductAdminCredit` is an INSERT and a SELECT, so the losing path cost
+ * two more than the count said.
+ *
+ * So it counts statements now, on the real stores over real SQLite. What
+ * the bound is about is D1 statements in one invocation, and that is the
+ * only thing worth counting.
+ */
+describe('what a payout costs the nightly budget', () => {
+  /** The refund lands in the window `markPaid` carries its guard for. */
+  function reversingAt(
+    db: SqliteD1Database,
+    referrals: ReferralStore,
+    referredUserId: string,
+  ): ReferralStore {
+    const markPaid = referrals.markPaid.bind(referrals);
+    referrals.markPaid = async (id: string, at: string, funded?: string[]) => {
+      // Straight to the row, so this is the reversal winning the race
+      // rather than a second path through the code under test. `markPaid`
+      // carries `AND reversed_at IS NULL`, so it now finds nothing to mark.
+      await db
+        .prepare(
+          `UPDATE referral_attributions SET reversed_at = ?2
+           WHERE referred_user_id = ?1`,
+        )
+        .bind(referredUserId, '2026-09-17T00:00:00.000Z')
+        .run();
+      return markPaid(id, at, funded);
+    };
+    return referrals;
+  }
+
+  it('costs no more than the budget is told, even losing to a refund', async () => {
+    const db = new SqliteD1Database(schemaSql());
+    const billing = new BillingStore(db);
+    const referrals = new ReferralStore(db);
+    const referred = 'user_new';
+
+    await referrals.attribute(referred, 'user_owner', 'ABCD2345');
+    await billing.recordTopup(`cs_${referred}`, referred, 'cus_1', 500);
+    await billing.recordPayment(
+      `cs_${referred}`,
+      referred,
+      500,
+      '2026-09-01T00:00:00.000Z',
+    );
+
+    // Counted from here, so the setup above is not in the figure. Every
+    // `prepare` is one D1 statement, which is what the allowance counts.
+    let statements = 0;
+    const prepare = db.prepare.bind(db);
+    db.prepare = (query: string) => {
+      statements += 1;
+      return prepare(query);
+    };
+
+    // No `fundedBy`: neither budgeted caller has one, so both also spend
+    // the `firstClearedPaymentIds` read.
+    const outcome = await payReferralIfEarned(
+      { referrals: reversingAt(db, referrals, referred), billing },
+      referred,
+    );
+
+    assert.equal(outcome.paid, false, 'it did not take the losing path');
+    assert.ok(
+      statements <= MAX_QUERIES_PER_REFERRAL_PAYOUT,
+      `a payout costs ${statements} statements, and the budget is told ${MAX_QUERIES_PER_REFERRAL_PAYOUT}`,
     );
   });
 });

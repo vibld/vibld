@@ -492,12 +492,38 @@ export function parkedReserveFor(queryBudget: number): number {
 }
 
 /**
- * D1 queries one stranded referral payout costs at its worst: the attempt
- * stamp, the attribution read, the slot claim, a credit grant for each side,
- * then the paid mark. Read off `resumeStrandedPayouts` and
- * `payReferralIfEarned`.
+ * D1 queries `payReferralIfEarned` costs at its worst.
+ *
+ * Not derived, measured: `referral-payout.test.ts` drives the payout down
+ * its most expensive path against the real stores over real SQLite and
+ * counts the statements D1 would be asked to run.
+ *
+ * It is measured rather than counted by hand because it has been wrong
+ * four times, always low. Three times from reading the code and following
+ * the success path. The fourth from a test that counted store method calls
+ * as if each were one query, when `deductAdminCredit` is an INSERT and a
+ * SELECT and the losing path makes two of them. A call is not a query, and
+ * the allowance counts queries.
+ *
+ * And six more when it loses the race to a refund, which is the half this
+ * file kept leaving out. `markPaid` carries `AND reversed_at IS NULL`, so a
+ * reversal arriving mid-payout makes it fail: the row is read again to find
+ * out which happened, `reverseGrants` reads the attribution a second time,
+ * and each side is a `findAdminCredit` and a `deductAdminCredit`.
+ *
+ * This number has been wrong three times, always in the same direction and
+ * always because it was read off the happy path. So it is no longer read
+ * off anything: `referral-payout.test.ts` drives the losing race with a
+ * counting store and asserts the measured cost against it. A bound that
+ * holds only when nothing goes wrong is not a bound.
  */
-const MAX_QUERIES_PER_PAYOUT_ROW = 6;
+export const MAX_QUERIES_PER_REFERRAL_PAYOUT = 15;
+
+/**
+ * D1 queries one stranded referral payout costs at its worst: the attempt
+ * stamp, then the payout itself.
+ */
+export const MAX_QUERIES_PER_PAYOUT_ROW = 1 + MAX_QUERIES_PER_REFERRAL_PAYOUT;
 
 /**
  * How many stranded payouts one run may take on, given an allowance.
@@ -522,17 +548,45 @@ export function payoutBatchFor(queryBudget: number): number {
  * and nothing used to bound it at all.
  */
 export function payoutReserveFor(queryBudget: number): number {
-  return Math.max(1 + MAX_QUERIES_PER_PAYOUT_ROW, Math.floor(queryBudget / 4));
+  // A quarter, and no floor under it. It used to hold back at least one
+  // row's worth whatever the allowance was, which is the right instinct and
+  // the wrong phase for it: once the per-row cost was counted honestly, the
+  // three floors together came to more than the whole Workers Free
+  // allowance and the replay was left nothing. The replay is the phase that
+  // applies the events in the first place, so starving it is worse than
+  // anything these reserves prevent.
+  //
+  // The parked queue keeps its floor, because a night where it retries
+  // nothing is money already taken and still not credited. A night where
+  // no stranded payout is resumed is a payout that is resumed tomorrow.
+  // `payoutBatchFor` turns a share too small for a row into a batch of
+  // none, which is that night off rather than an overrun.
+  return Math.floor(queryBudget / 4);
 }
 
 /**
- * D1 queries one subscription costs the nightly reconcile at its worst: the
- * mirrored row, the customer lookup when there is none, the corrected
- * upsert, the cleared-payment check, the recovered invoice's payment record,
- * and the referral payout behind it. Read off `reconcileSubscriptions` and
- * `payReferralIfEarned`.
+ * D1 queries one subscription costs the nightly reconcile at its worst.
+ *
+ * Five of its own: the mirrored row, the customer lookup when there is
+ * none, the corrected upsert, the cleared-payment check, and the recovered
+ * invoice's payment record.
+ *
+ * Plus the payout behind it, which the figure above already counts in
+ * full: it is measured on the no-`fundedBy` path, which is the one this
+ * caller and `resumeStrandedPayouts` both take.
  */
-const MAX_QUERIES_PER_SUBSCRIPTION = 10;
+export const MAX_QUERIES_PER_SUBSCRIPTION = 5 + MAX_QUERIES_PER_REFERRAL_PAYOUT;
+
+/**
+ * What one reconcile run costs before it looks at any subscription: the
+ * mirrored id list, the cursor read, and the cursor write. Paid once, and
+ * paid whether or not the run had anything to do.
+ *
+ * All three, not just the list. The first cut counted one and left the two
+ * cursor queries out, which on a Workers Paid allowance let a full batch
+ * overrun its own share.
+ */
+const FIXED_RECONCILE_QUERIES = 3;
 
 /**
  * The share held back for the nightly subscription reconcile (#47).
@@ -552,24 +606,28 @@ const MAX_QUERIES_PER_SUBSCRIPTION = 10;
  * nobody reaches.
  */
 export function reconcileReserveFor(queryBudget: number): number {
-  return Math.max(
-    1 + MAX_QUERIES_PER_SUBSCRIPTION,
-    Math.floor(queryBudget / 4),
-  );
+  // A quarter, and no floor, for the reason `payoutReserveFor` gives. This
+  // is the phase that can most afford to take a night off: it corrects
+  // drift and recovers a payout whose webhook never arrived, and both of
+  // those keep. `reconcileBatchFor` turns a share too small for one
+  // subscription into a batch of none.
+  return Math.floor(queryBudget / 4);
 }
 
 /**
  * How many subscriptions one run may check, given its share.
  *
- * The minus one is the query that lists the mirrored ids, paid once rather
- * than per subscription. Zero is a legitimate answer, and the cursor is what
- * makes it safe: a run with nothing left checks nothing tonight rather than
- * throwing partway through, and the next one starts where this one stopped.
+ * The subtraction is what the run spends before it reaches the first
+ * subscription. Zero is a legitimate answer, and the cursor is what makes it
+ * safe: a run with nothing left checks nothing tonight rather than throwing
+ * partway through, and the next one starts where this one stopped.
  */
 export function reconcileBatchFor(queryBudget: number): number {
   return Math.max(
     0,
-    Math.floor((queryBudget - 1) / MAX_QUERIES_PER_SUBSCRIPTION),
+    Math.floor(
+      (queryBudget - FIXED_RECONCILE_QUERIES) / MAX_QUERIES_PER_SUBSCRIPTION,
+    ),
   );
 }
 

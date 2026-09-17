@@ -53,6 +53,15 @@ class SqliteD1Statement implements PublishD1Statement {
     };
   }
 
+  async all<T = Record<string, unknown>>(): Promise<PublishD1Result<T>> {
+    const statement = this.#db.prepare(this.#sql);
+    return {
+      results: statement.all(...(this.#values as never[])) as T[],
+      success: true,
+      meta: { changes: 0 },
+    };
+  }
+
   async first<T = Record<string, unknown>>(): Promise<T | null> {
     const statement = this.#db.prepare(this.#sql);
     const row = statement.get(...(this.#values as never[]));
@@ -70,5 +79,29 @@ export class SqliteD1Database implements PublishD1Database {
 
   prepare(query: string): PublishD1Statement {
     return new SqliteD1Statement(this.#db, query);
+  }
+
+  /**
+   * All of them or none, which is what D1 gives a batch.
+   *
+   * `node:sqlite` has the real thing, so this is a transaction rather than a
+   * loop that stops early: a fake that committed the statements it got
+   * through before a failure would let a test pass against exactly the
+   * half-written state `publish-store.ts` uses a batch to prevent.
+   */
+  async batch<T = Record<string, unknown>>(
+    statements: PublishD1Statement[],
+  ): Promise<PublishD1Result<T>[]> {
+    this.#db.exec('BEGIN');
+    try {
+      const results: PublishD1Result<T>[] = [];
+      for (const statement of statements)
+        results.push(await statement.run<T>());
+      this.#db.exec('COMMIT');
+      return results;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
   }
 }

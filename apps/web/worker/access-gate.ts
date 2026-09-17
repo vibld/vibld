@@ -155,6 +155,13 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/admin/invites': 'behind the platform-admin check instead',
   '/api/admin/invite': 'behind the platform-admin check instead',
   '/api/admin/invite/revoke': 'behind the platform-admin check instead',
+  // Taking somebody else's published site off the web (#172). Behind the
+  // platform-admin check, which an invite does not confer and an admin
+  // passes without one -- and this is the control an abuse report is
+  // answered through, so it must not depend on the operator's own invite
+  // being current.
+  '/api/admin/publish/hold': 'behind the platform-admin check instead',
+  '/api/admin/publish/release': 'behind the platform-admin check instead',
 };
 
 export function isGated(pathname: string, method: string): boolean {

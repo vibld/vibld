@@ -1,0 +1,24 @@
+-- Which release last cleared this site's hold.
+--
+-- The release record has to be written in the same batch as the clear it
+-- records, so it cannot branch on whether that clear matched. Two attempts
+-- at inferring it from the row's state both failed, and the second is the
+-- instructive one.
+--
+-- Gating on `hold_token IS NULL` plus this write's own timestamp let two
+-- releases of one hold in the same millisecond both write an entry, because
+-- a millisecond stamp is not an identity. Naming the hold and refusing a
+-- second entry for it fixed that pair, and still read the wrong answer from
+-- a longer interleaving: a release of hold X, overtaken by a hold Y that is
+-- itself released, arrives to find the site unheld with no entry for X, and
+-- writes one. It never cleared anything.
+--
+-- Every version of that is the same mistake: asking whether the world looks
+-- like the write succeeded, when what is being asked is whether this write
+-- succeeded. A value only the winning UPDATE can have written answers it
+-- directly. Unique per attempt, so nothing else can produce it, and no
+-- interleaving of other people's holds and releases can look like it.
+--
+-- It is also readable on its own: the row says which release put the site
+-- back, not merely that one did.
+ALTER TABLE published_projects ADD COLUMN last_release_token TEXT;

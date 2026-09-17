@@ -27,10 +27,34 @@ export interface PublishD1Statement {
   bind(...values: unknown[]): PublishD1Statement;
   run<T = Record<string, unknown>>(): Promise<PublishD1Result<T>>;
   first<T = Record<string, unknown>>(): Promise<T | null>;
+  /**
+   * Every row, for a read that expects more than one.
+   *
+   * Declared separately from `run` rather than leaning on its `results`.
+   * `run` is the write path here and the test fake answers it with an empty
+   * list, which is the honest shape: a statement that changed rows has no
+   * rows to give back. Reading a list through it would have returned nothing
+   * and said nothing, which is how a history that was never read looks
+   * exactly like a history that is empty.
+   */
+  all<T = Record<string, unknown>>(): Promise<PublishD1Result<T>>;
 }
 
 export interface PublishD1Database {
   prepare(query: string): PublishD1Statement;
+  /**
+   * Several statements, or none of them.
+   *
+   * D1 runs a batch inside one implicit transaction, which is the only way
+   * this Worker can make two writes land together. It is needed where a
+   * control flag and the record of who changed it are two rows: writing them
+   * separately lets the flag change while the record is lost, and for the
+   * release path that means a site going live with no releasing actor
+   * recorded and a retry refused because it is no longer held.
+   */
+  batch<T = Record<string, unknown>>(
+    statements: PublishD1Statement[],
+  ): Promise<PublishD1Result<T>[]>;
 }
 
 /**

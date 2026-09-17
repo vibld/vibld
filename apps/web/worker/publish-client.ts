@@ -224,3 +224,82 @@ export async function unpublishProject(
       response.status >= 400 && response.status < 500 ? response.status : 502,
   };
 }
+
+export type HoldResult =
+  | { ok: true; slug: string; state: 'held' | 'live' | 'down' }
+  | { ok: false; error: string; status: number };
+
+/**
+ * Take somebody else's published site off the web, or put the decision back
+ * (#172). Called only from the platform-admin routes.
+ *
+ * `by` and `reason` travel because a takedown of work that is not yours is
+ * the clearest case of the auditable action SECURITY.md asks for, and the
+ * store is where that record belongs.
+ */
+async function holdCall(
+  env: PublishServiceEnv,
+  path: '/internal/hold' | '/internal/release',
+  body: Record<string, string>,
+): Promise<HoldResult> {
+  const response = await env.PUBLISH!.fetch(
+    new Request(new URL(path, INTERNAL_ORIGIN), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${env.PUBLISH_INTERNAL_SECRET}`,
+      },
+      body: JSON.stringify(body),
+    }),
+  );
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch {
+    return {
+      ok: false,
+      error: 'The publish service returned an unreadable response.',
+      status: 502,
+    };
+  }
+  const record = (parsed ?? {}) as {
+    slug?: unknown;
+    state?: unknown;
+    error?: unknown;
+  };
+  if (
+    response.ok &&
+    typeof record.slug === 'string' &&
+    (record.state === 'held' ||
+      record.state === 'live' ||
+      record.state === 'down')
+  ) {
+    return { ok: true, slug: record.slug, state: record.state };
+  }
+  return {
+    ok: false,
+    error:
+      typeof record.error === 'string'
+        ? record.error
+        : 'Could not change this site.',
+    status:
+      response.status >= 400 && response.status < 500 ? response.status : 502,
+  };
+}
+
+export function holdProject(
+  env: PublishServiceEnv,
+  slug: string,
+  by: string,
+  reason: string,
+): Promise<HoldResult> {
+  return holdCall(env, '/internal/hold', { slug, by, reason });
+}
+
+export function releaseProject(
+  env: PublishServiceEnv,
+  slug: string,
+  by: string,
+): Promise<HoldResult> {
+  return holdCall(env, '/internal/release', { slug, by });
+}

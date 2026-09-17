@@ -143,6 +143,28 @@ function toSubscriptionRecord(row: SubscriptionRow): SubscriptionRecord {
   };
 }
 
+/**
+ * The ids a parked reconcile run attempted (0019_reconcile_attempted.sql).
+ *
+ * Anything unreadable comes back empty rather than throwing. A cursor is a
+ * hint about where to resume, and a hint that cannot be read should cost a
+ * repeat of idempotent work, not a nightly pass that dies before it starts.
+ * Empty is also the safe direction for what reads this: every failure then
+ * counts as a first one and gets its retry.
+ */
+function parseAttempted(value: string | null): string[] {
+  if (value === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === 'string')
+      : [];
+  } catch {
+    console.error('reconcile: could not read the attempted list');
+    return [];
+  }
+}
+
 export class BillingStore {
   #db: D1Database;
 
@@ -828,12 +850,29 @@ export class BillingStore {
    * `undefined` means start from the top: a fresh deployment, and every run
    * after a lap completes.
    */
-  async reconcileCursor(id: string): Promise<string | undefined> {
+  async reconcileCursor(id: string): Promise<{
+    afterId: string | undefined;
+    /**
+     * The subscriptions the run that parked here attempted, so each of them
+     * has already had its second chance (0019_reconcile_attempted.sql).
+     *
+     * Empty when nothing is outstanding, and empty too if the stored list
+     * cannot be read. That is the safe direction: every failure then counts
+     * as a first one and parks, which costs a night and cannot lose a
+     * retry, and the next park writes a list that reads back.
+     */
+    attempted: Set<string>;
+  }> {
     const row = await this.#db
-      .prepare(`SELECT after_id FROM billing_reconcile_cursor WHERE id = ?1`)
+      .prepare(
+        `SELECT after_id, attempted FROM billing_reconcile_cursor WHERE id = ?1`,
+      )
       .bind(id)
-      .first<{ after_id: string | null }>();
-    return row?.after_id ?? undefined;
+      .first<{ after_id: string | null; attempted: string | null }>();
+    return {
+      afterId: row?.after_id ?? undefined,
+      attempted: new Set(parseAttempted(row?.attempted ?? null)),
+    };
   }
 
   /**
@@ -845,17 +884,25 @@ export class BillingStore {
   async saveReconcileCursor(
     id: string,
     afterId: string | undefined,
+    attempted: readonly string[] | undefined = undefined,
     at: string = new Date().toISOString(),
   ): Promise<void> {
     await this.#db
       .prepare(
-        `INSERT INTO billing_reconcile_cursor (id, after_id, updated_at)
-         VALUES (?1, ?2, ?3)
+        `INSERT INTO billing_reconcile_cursor
+           (id, after_id, attempted, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(id) DO UPDATE SET
            after_id = excluded.after_id,
+           attempted = excluded.attempted,
            updated_at = excluded.updated_at`,
       )
-      .bind(id, afterId ?? null, at)
+      .bind(
+        id,
+        afterId ?? null,
+        attempted === undefined ? null : JSON.stringify(attempted),
+        at,
+      )
       .run();
   }
 

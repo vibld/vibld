@@ -5,6 +5,8 @@ import {
   buildProject,
   publishProject,
   publishServiceConfigured,
+  holdProject,
+  releaseProject,
   unpublishProject,
 } from '../worker/publish-client.ts';
 import type { ServiceBinding } from '../worker/publish-client.ts';
@@ -338,6 +340,103 @@ describe('unpublishProject', () => {
       ok: false,
       error: 'The publish service returned an unreadable response.',
       status: 502,
+    });
+  });
+});
+
+describe('holdProject and releaseProject', () => {
+  it('sends the slug, the admin and the reason', async () => {
+    // Who and why travel because a takedown of work that is not yours is
+    // the clearest case of an auditable action, and the store is where that
+    // record belongs.
+    const { binding, calls } = fakeBinding(() =>
+      jsonResponse({ slug: 'acme', state: 'held' }),
+    );
+
+    const result = await holdProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 'the-secret' },
+      'acme',
+      'admin@vibld.com',
+      'phishing report 41',
+    );
+
+    assert.deepEqual(result, { ok: true, slug: 'acme', state: 'held' });
+    const sent = calls[0]!;
+    assert.equal(new URL(sent.url).pathname, '/internal/hold');
+    assert.equal(sent.headers.get('Authorization'), 'Bearer the-secret');
+    assert.deepEqual(await sent.json(), {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+      reason: 'phishing report 41',
+    });
+  });
+
+  it('releases with the admin who lifted it, and no reason', async () => {
+    // Lifting a hold is as much an action somebody took as placing it, so it
+    // carries an actor. It carries no reason: the act is undoing rather than
+    // doing, and a required reason on an undo is a field people type "n/a"
+    // into.
+    const { binding, calls } = fakeBinding(() =>
+      jsonResponse({ slug: 'acme', state: 'down' }),
+    );
+
+    const result = await releaseProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'acme',
+      'admin@vibld.com',
+    );
+
+    assert.deepEqual(result, { ok: true, slug: 'acme', state: 'down' });
+    assert.equal(new URL(calls[0]!.url).pathname, '/internal/release');
+    assert.deepEqual(await calls[0]!.json(), {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+    });
+  });
+
+  it('does not report a hold on a reply that never said so', async () => {
+    // Answering "it is off the web" on a reply that did not say so is the
+    // one outcome worth guarding here: somebody stops checking.
+    const { binding } = fakeBinding(() => jsonResponse({ slug: 'acme' }));
+    const result = await holdProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'acme',
+      'admin@vibld.com',
+      'phishing',
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'Could not change this site.',
+      status: 502,
+    });
+  });
+
+  it('rejects a state the publish service did not name', async () => {
+    const { binding } = fakeBinding(() =>
+      jsonResponse({ slug: 'acme', state: 'something-else' }),
+    );
+    const result = await holdProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'acme',
+      'admin@vibld.com',
+      'phishing',
+    );
+    assert.equal(result.ok, false);
+  });
+
+  it('passes a refusal through with its own status', async () => {
+    const { binding } = fakeBinding(() =>
+      jsonResponse({ error: 'No such published site.' }, 404),
+    );
+    const result = await releaseProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'never',
+      'admin@vibld.com',
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'No such published site.',
+      status: 404,
     });
   });
 });

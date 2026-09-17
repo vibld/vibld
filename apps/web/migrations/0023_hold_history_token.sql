@@ -1,0 +1,16 @@
+-- Which hold each history row is about.
+--
+-- The release record is written in the same batch as the clear it records,
+-- and has to be written only when that clear actually happened, or a release
+-- that lost to a newer hold leaves an entry saying the site was let back on
+-- the web when it was not. Gating it on the row's state plus `updated_at`
+-- was the first attempt and it is the same mistake this file's predecessor
+-- fixed one migration ago: a millisecond timestamp is not an identity, so
+-- two releases of the same hold in one millisecond both matched and both
+-- wrote an entry.
+--
+-- Naming the hold fixes it and improves the record besides. An entry that
+-- says which hold it refers to is what an auditor reading a slug with
+-- several holds actually needs, and it makes the release insert idempotent:
+-- a `released` row for a given token can exist only once.
+ALTER TABLE published_site_holds ADD COLUMN hold_token TEXT;

@@ -1,5 +1,6 @@
 import { AdminPanel } from './components/AdminPanel.tsx';
 import { InvitePanel } from './components/InvitePanel.tsx';
+import { SiteTakedown } from './components/SiteTakedown.tsx';
 import { AccessGate } from './components/AccessGate.tsx';
 import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
@@ -119,6 +120,7 @@ function Builder() {
             />
             {state.isAdmin ? <AdminPanel /> : null}
             {state.isAdmin ? <InvitePanel /> : null}
+            {state.isAdmin ? <SiteTakedown /> : null}
             <PromptPanel
               state={state}
               onSubmit={(prompt, mode, style, referenceUrl) => {

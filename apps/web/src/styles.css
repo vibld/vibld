@@ -33,6 +33,26 @@
   box-sizing: border-box;
 }
 
+/*
+ * `hidden` means hidden, whatever a class says.
+ *
+ * The attribute is only honoured by a `[hidden] { display: none }` rule in
+ * the browser's own stylesheet, and every author rule outranks that one. So
+ * a class that sets `display` anywhere below quietly cancels it, and the
+ * element renders as though the attribute were not there. That is not a
+ * theoretical hazard: it shipped. `.settings__panel` sets `display: flex`,
+ * so the settings popover was drawn open on every page load and the gear
+ * toggled an attribute that changed nothing, leaving no way to close it.
+ *
+ * `!important` is the point rather than a shortcut. The rule has to beat
+ * any class on the same element, and specificity alone cannot, because the
+ * class is not known here. An element that needs to be laid out is one that
+ * should not be carrying `hidden`.
+ */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
