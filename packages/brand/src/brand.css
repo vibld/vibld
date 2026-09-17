@@ -48,8 +48,14 @@
   --vibld-edge-strong: color-mix(in oklch, var(--vibld-ink) 26%, transparent);
 }
 
+/*
+ * Dark, when the reader's system asks for it and they have not said
+ * otherwise. The `:not([data-theme='light'])` guard is what lets an explicit
+ * light choice win over a dark OS; without it the toggle would work in one
+ * direction only.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --vibld-paper: oklch(0.18 0.035 265);
     --vibld-surface: oklch(0.22 0.035 265);
     --vibld-surface-strong: oklch(0.26 0.035 265);
@@ -70,6 +76,36 @@
     /* multiply here would give the ground back and erase the mark. */
     --vibld-mark-blend: screen;
   }
+}
+
+/*
+ * Dark, because the reader chose it, whatever their system says.
+ *
+ * The same declarations as the media query above, and deliberately so: CSS
+ * has no way to name one set of values and apply it from two conditions
+ * without a preprocessor. `test/css.test.ts` checks every block that claims
+ * to be dark against the palette, so the two cannot drift apart quietly.
+ */
+:root[data-theme='dark'] {
+  --vibld-paper: oklch(0.18 0.035 265);
+  --vibld-surface: oklch(0.22 0.035 265);
+  --vibld-surface-strong: oklch(0.26 0.035 265);
+  --vibld-ink: oklch(0.96 0.012 90);
+  --vibld-ink-muted: oklch(0.72 0.02 265);
+
+  /*
+     * The accent does not change: the mark is the constant, and an accent
+     * that differed by theme would put the two sites back to looking like two
+     * products. What changes is the ink a link is set in, because ultramarine
+     * on a dark ground is unreadable.
+     */
+  --vibld-accent-ink: oklch(0.78 0.15 25);
+
+  /* They swap: newsprint carries the shape, coral stays the ghost. */
+  --vibld-mark-ink: oklch(0.96 0.012 90);
+  --vibld-mark-offset: oklch(0.7 0.18 25);
+  /* multiply here would give the ground back and erase the mark. */
+  --vibld-mark-blend: screen;
 }
 
 /*

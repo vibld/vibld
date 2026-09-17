@@ -5,7 +5,11 @@ import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
 import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
+import { SettingsMenu } from './components/SettingsMenu.tsx';
+import { BillingStatusWidget } from './components/BillingStatus.tsx';
+import { GitHubPanel } from './components/GitHubPanel.tsx';
 import { describeMode } from './generation/labels.ts';
+import { ThemeToggle } from './components/ThemeToggle.tsx';
 import { footerNote } from './generation/pane-gaps.ts';
 import { saveStyleDna } from './generation/style-dna-store.ts';
 import { saveKnowledge } from './generation/knowledge-store.ts';
@@ -14,8 +18,6 @@ import { PromptPanel } from './components/PromptPanel.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
 import { AuthGate, AuthStatus } from './auth/clerk.tsx';
-import { BillingStatusWidget } from './components/BillingStatus.tsx';
-import { GitHubPanel } from './components/GitHubPanel.tsx';
 
 /**
  * `AuthGate` is the outermost piece deliberately: `Builder` -- and the
@@ -45,6 +47,14 @@ function Builder() {
 
   return (
     <div className="shell">
+      {/*
+        The bar carries what somebody looks at while building, and nothing
+        else. It used to carry the brand, a sentence describing the
+        deployment, a billing readout with three buttons, the whole GitHub
+        connection panel and the account button, all competing for the same
+        row. All of that except the brand and the account is configuration:
+        read once, changed rarely, and now behind the gear.
+      */}
       <header className="shell__header">
         <div className="shell__brand">
           <span className="shell__logo">
@@ -55,24 +65,35 @@ function Builder() {
             <p className="shell__tagline">Vibe. Build. Ship.</p>
           </div>
         </div>
-        {/*
-          This said "deterministic fake provider - no model credentials"
-          unconditionally, which stopped being true the moment the hosted
-          Worker started generating. A header that misdescribes what just ran
-          is worse than no header, so it now reports what actually served the
-          last run and claims nothing before there has been one.
-        */}
-        <p className="shell__mode">{describeMode(state.providerId)}</p>
-        <BillingStatusWidget />
-        {/*
-          In the header rather than beside Publish, because this is also
-          where GitHub lands. The callback puts its code and state in the
-          fragment and redirects here, so whatever handles that has to mount
-          on every page load; behind a workspace tab it would only run if
-          somebody happened to open the right one.
-        */}
-        <GitHubPanel />
-        <AuthStatus />
+        <div className="shell__controls">
+          <ThemeToggle />
+          <SettingsMenu>
+            <section className="settings__section">
+              <h2 className="settings__heading">Plan and usage</h2>
+              <BillingStatusWidget />
+            </section>
+            <section className="settings__section">
+              <h2 className="settings__heading">GitHub</h2>
+              {/*
+                Still mounted on every page load, which is why the panel it
+                sits in is hidden rather than unmounted when the menu is
+                closed: the OAuth callback puts its code in the fragment and
+                redirects here, and whatever claims that has to be running.
+              */}
+              <GitHubPanel />
+            </section>
+            <section className="settings__section">
+              <h2 className="settings__heading">This deployment</h2>
+              {/*
+                Reports what actually served the last run, and claims nothing
+                before there has been one. It used to say the same thing
+                across the header on every screen.
+              */}
+              <p className="settings__note">{describeMode(state.providerId)}</p>
+            </section>
+          </SettingsMenu>
+          <AuthStatus />
+        </div>
       </header>
 
       <main className="shell__body">
@@ -113,12 +134,22 @@ function Builder() {
         <Workspace state={state} />
       </main>
 
+      {/*
+        Folded away by default. The run count and the token figures are
+        reference, not news: worth having, not worth a permanent band across
+        the bottom of every screen competing with the work. `details` rather
+        than a button and a state, because the browser already knows how to
+        do a disclosure and does it accessibly.
+      */}
       <footer className="shell__footer">
-        <span>
-          Runs: {state.runCount} · Provider: {state.providerId ?? 'not run yet'}{' '}
-          · Model tokens: {usage.modelInputTokens} in /{' '}
-          {usage.modelOutputTokens} out
-        </span>
+        <details className="runstats">
+          <summary className="runstats__summary">Run stats</summary>
+          <span className="runstats__figures">
+            Runs: {state.runCount} · Provider:{' '}
+            {state.providerId ?? 'not run yet'} · Model tokens:{' '}
+            {usage.modelInputTokens} in / {usage.modelOutputTokens} out
+          </span>
+        </details>
         {/*
           This used to say that sandbox execution, real providers, Git export
           and deployment were not implemented. All four shipped, and the line
