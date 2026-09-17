@@ -474,6 +474,79 @@ describe('holding a site an operator did not publish', () => {
     assert.equal((await store.siteBySlug('acme'))?.state, 'live');
   });
 
+  it('changes nothing when the record cannot be written', async () => {
+    // The flag and the record of who set it are two rows. Written
+    // separately, a failure between them leaves the flag changed and the
+    // record lost -- and on the release path that is a site back on the web
+    // with nobody recorded as having put it there, and a retry refused
+    // because it is no longer held.
+    //
+    // The db here fails every batch. If either write happened outside one,
+    // it would have landed and this would see it.
+    const bucket = new InMemoryR2Bucket();
+    const real = new SqliteD1Database(SCHEMA);
+    const brittle = {
+      prepare: real.prepare.bind(real),
+      batch: async () => {
+        throw new Error('D1 fell over');
+      },
+    };
+    const store = new PublishStore(real, bucket);
+    await published(store);
+    const guarded = new PublishStore(brittle, bucket);
+
+    await assert.rejects(() =>
+      guarded.hold('acme', 'admin@vibld.com', 'phishing report 41'),
+    );
+    assert.equal(
+      (await store.siteBySlug('acme'))?.state,
+      'live',
+      'the hold landed without its record',
+    );
+    assert.deepEqual(await store.holdHistory('acme'), []);
+
+    // And the same on the way back out.
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+    await assert.rejects(() => guarded.release('acme', 'admin@vibld.com'));
+    assert.equal(
+      (await store.siteBySlug('acme'))?.state,
+      'held',
+      'the release landed without its record',
+    );
+  });
+
+  it('rolls a batch back when a later statement fails', async () => {
+    // The test above makes `batch` itself throw, which never reaches the
+    // fake's rollback. That leaves the primitive the store now depends on
+    // untested, and a fake that committed a half-batch would let a future
+    // test pass against exactly the bug the batch exists to prevent.
+    //
+    // So this drives the real thing: a good insert followed by one that
+    // violates NOT NULL.
+    const db = new SqliteD1Database(SCHEMA);
+    await assert.rejects(() =>
+      db.batch([
+        db
+          .prepare(
+            `INSERT INTO published_site_holds (slug, action, actor, reason, at)
+             VALUES (?1, ?2, ?3, ?4, ?5)`,
+          )
+          .bind('acme', 'held', 'admin@vibld.com', 'a reason', 'now'),
+        db
+          .prepare(
+            `INSERT INTO published_site_holds (slug, action, actor, reason, at)
+             VALUES (?1, ?2, ?3, ?4, ?5)`,
+          )
+          .bind('acme', null, 'admin@vibld.com', null, 'now'),
+      ]),
+    );
+
+    const left = await db
+      .prepare(`SELECT COUNT(*) AS n FROM published_site_holds`)
+      .first<{ n: number }>();
+    assert.equal(left?.n, 0, 'half the batch was committed');
+  });
+
   it('keeps every hold, not just the last one', async () => {
     const { store } = stored();
     await published(store);

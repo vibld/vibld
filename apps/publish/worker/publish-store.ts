@@ -17,7 +17,11 @@
  */
 
 import type { ProjectFile } from '@vibld/core';
-import type { PublishD1Database, PublishR2Bucket } from './types.ts';
+import type {
+  PublishD1Database,
+  PublishD1Statement,
+  PublishR2Bucket,
+} from './types.ts';
 
 function objectKey(slug: string, path: string): string {
   return `published/${slug}/${path}`;
@@ -276,20 +280,28 @@ export class PublishStore {
     at = new Date(),
   ): Promise<void> {
     const now = at.toISOString();
-    await this.#db
-      .prepare(
-        `UPDATE published_projects
-         SET held_at = ?1, held_by = ?2, held_reason = ?3, updated_at = ?1
-         WHERE slug = ?4`,
-      )
-      .bind(now, by, reason, slug)
-      .run();
-    await this.#record(slug, 'held', by, reason, now);
+    // One batch, so the flag and the record of who set it cannot land apart.
+    await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE published_projects
+           SET held_at = ?1, held_by = ?2, held_reason = ?3, updated_at = ?1
+           WHERE slug = ?4`,
+        )
+        .bind(now, by, reason, slug),
+      this.#recordStatement(slug, 'held', by, reason, now),
+    ]);
   }
 
   /**
-   * Append what somebody did, where releasing cannot erase it
-   * (0020_hold_history.sql).
+   * The statement that appends what somebody did, where releasing cannot
+   * erase it (0020_hold_history.sql).
+   *
+   * Returned rather than run, so the caller can put it in the same batch as
+   * the state change it records. Two separate writes let the flag change
+   * while the record is lost, which on the release path means a site going
+   * live with nobody recorded as having lifted it and a retry refused
+   * because it is no longer held.
    *
    * The columns above are the current state, which is what serving and the
    * republish refusal read. They are not a record, and the first cut of this
@@ -297,20 +309,19 @@ export class PublishStore {
    * ordinary hold-then-release there was no evidence the site had ever been
    * taken down, by whom or why. That contradicted the reason they were added.
    */
-  async #record(
+  #recordStatement(
     slug: string,
     action: 'held' | 'released',
     actor: string,
     reason: string | undefined,
     at: string,
-  ): Promise<void> {
-    await this.#db
+  ): PublishD1Statement {
+    return this.#db
       .prepare(
         `INSERT INTO published_site_holds (slug, action, actor, reason, at)
          VALUES (?1, ?2, ?3, ?4, ?5)`,
       )
-      .bind(slug, action, actor, reason ?? null, at)
-      .run();
+      .bind(slug, action, actor, reason ?? null, at);
   }
 
   /** What has been done to this site, oldest first. */
@@ -356,17 +367,20 @@ export class PublishStore {
    */
   async release(slug: string, by: string, at = new Date()): Promise<void> {
     const now = at.toISOString();
-    await this.#db
-      .prepare(
-        `UPDATE published_projects
-         SET held_at = NULL, held_by = NULL, held_reason = NULL, updated_at = ?1
-         WHERE slug = ?2`,
-      )
-      .bind(now, slug)
-      .run();
-    // Appended before the columns are read again, and never updated. Nulling
-    // the state must not be able to erase that the hold happened.
-    await this.#record(slug, 'released', by, undefined, now);
+    // One batch, for the reason `hold` gives and more sharply: a release
+    // that cleared the flag and then lost its record would put the site back
+    // on the web with nobody recorded as having done it, and the retry would
+    // be refused because it is no longer held.
+    await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE published_projects
+           SET held_at = NULL, held_by = NULL, held_reason = NULL, updated_at = ?1
+           WHERE slug = ?2`,
+        )
+        .bind(now, slug),
+      this.#recordStatement(slug, 'released', by, undefined, now),
+    ]);
   }
 
   /** What an operator needs to see about a slug before acting on it. */

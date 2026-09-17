@@ -42,6 +42,19 @@ export interface PublishD1Statement {
 
 export interface PublishD1Database {
   prepare(query: string): PublishD1Statement;
+  /**
+   * Several statements, or none of them.
+   *
+   * D1 runs a batch inside one implicit transaction, which is the only way
+   * this Worker can make two writes land together. It is needed where a
+   * control flag and the record of who changed it are two rows: writing them
+   * separately lets the flag change while the record is lost, and for the
+   * release path that means a site going live with no releasing actor
+   * recorded and a retry refused because it is no longer held.
+   */
+  batch<T = Record<string, unknown>>(
+    statements: PublishD1Statement[],
+  ): Promise<PublishD1Result<T>[]>;
 }
 
 /**
