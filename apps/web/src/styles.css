@@ -973,6 +973,35 @@ body {
     /* Room for the last bubble to clear the composer's top edge. */
     padding-bottom: 0.25rem;
   }
+
+  /*
+   * The composer scrolls too, and this is a bug fix rather than a
+   * refinement: without it the model picker was unreachable.
+   *
+   * The page is bounded to the viewport above (`height: 100vh` with
+   * `overflow: hidden`), which is what lets the conversation scroll on its
+   * own. The composer was left unbounded inside that, so once it grew past
+   * the space left -- which it does as soon as the admin panels are on
+   * screen, and they are for every admin -- everything below the fold was
+   * simply unreachable. No scrollbar, no overflow, nothing to drag: the
+   * model picker and the buttons under it were off the bottom of a page
+   * that had already been told it may not scroll.
+   *
+   * `flex-shrink` with a floor rather than a fixed height, so the composer
+   * takes the room it needs while there is room, and the conversation keeps
+   * a usable minimum when there is not.
+   */
+  .composer {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    /* Never more than two thirds, so the conversation cannot be squeezed to
+       nothing by a tall composer. */
+    max-height: 66%;
+    /* Room for a focus ring on the last control to show inside the
+       scroller rather than being clipped by it. */
+    padding-right: 0.15rem;
+  }
 }
 
 .conversation {
