@@ -9,6 +9,12 @@ test-results/
 .env
 .env.*
 !.env.example
+# Wrangler's local secrets file, which apps/web/.env.example tells you to
+# create. Unignored it would be committed by `git add .` carrying a live
+# Stripe key and a GitHub App private key.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 .DS_Store
 *.log
 
