@@ -432,3 +432,45 @@ describe('previewing the push, as it is actually wired', () => {
     view.unmount();
   });
 });
+
+describe('what became of an earlier pull request', () => {
+  it('says merged rather than drawing a link that says nothing', async () => {
+    // The whole point of the webhook: before it, a merged pull request was
+    // drawn exactly like one still waiting for somebody.
+    serving({
+      '/api/github/status': () =>
+        reply({
+          ...CONNECTED,
+          pullRequest: {
+            url: 'https://github.com/acme/site/pull/9',
+            branch: 'vibld/r7',
+            state: 'merged',
+          },
+        }),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r8')} />);
+
+    assert.match(view.container.textContent ?? '', /Merged:/);
+    view.unmount();
+  });
+
+  it('does not claim it is open when nothing has said', async () => {
+    serving({
+      '/api/github/status': () =>
+        reply({
+          ...CONNECTED,
+          pullRequest: {
+            url: 'https://github.com/acme/site/pull/9',
+            branch: 'vibld/r7',
+            state: null,
+          },
+        }),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r8')} />);
+
+    const text = view.container.textContent ?? '';
+    assert.match(text, /Opened earlier:/);
+    assert.doesNotMatch(text, /Open:/);
+    view.unmount();
+  });
+});

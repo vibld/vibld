@@ -99,6 +99,19 @@ export type PushView =
         conflict?: PushConflict;
       };
       outcome?: PushOutcome;
+      /**
+       * A pull request from a previous session, and what became of it.
+       *
+       * Only when this button has nothing of its own to say: a result from
+       * the push just made is fresher than anything the status was carrying
+       * when it was last read, and two pull request lines under one button
+       * is two answers to one question.
+       */
+      lastPullRequest?: {
+        url: string;
+        branch: string;
+        state: 'open' | 'closed' | 'merged' | null;
+      };
     };
 
 const HIDDEN: PushView = { show: false };
@@ -168,7 +181,11 @@ export function decidePush(
     };
   }
 
+  // Before the outcome, so the outcome can take its place.
+  if (status.pullRequest) view.lastPullRequest = status.pullRequest;
+
   if (phase.at === 'done') {
+    delete view.lastPullRequest;
     view.outcome = {
       branch: phase.pushed.branch,
       created: phase.pushed.created,

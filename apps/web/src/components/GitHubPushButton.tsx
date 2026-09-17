@@ -339,6 +339,31 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
         </div>
       )}
 
+      {view.lastPullRequest && (
+        <p className="github-push__last">
+          {/*
+           * Named by what became of it rather than by its existence. A link
+           * that says nothing about its state is the thing this replaced:
+           * a merged pull request drawn exactly like one still waiting for
+           * somebody.
+           */}
+          {view.lastPullRequest.state === 'merged'
+            ? 'Merged: '
+            : view.lastPullRequest.state === 'closed'
+              ? 'Closed without merging: '
+              : view.lastPullRequest.state === 'open'
+                ? 'Open: '
+                : 'Opened earlier: '}
+          <a
+            href={view.lastPullRequest.url}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <code>{view.lastPullRequest.branch}</code>
+          </a>
+        </p>
+      )}
+
       {view.problem && (
         <p role="alert" className="github-push__problem">
           {view.problem.error}

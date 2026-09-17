@@ -478,3 +478,61 @@ describe('deciding whether a push preview still applies', () => {
     assert.equal(previewIsEmpty(PREVIEW), false);
   });
 });
+
+describe('a pull request from an earlier session', () => {
+  const CONNECTED_WITH_PULL: GitHubStatus = {
+    configured: true,
+    connected: true,
+    canPush: true,
+    owner: 'acme',
+    repo: 'site',
+    pullRequest: {
+      url: 'https://github.com/acme/site/pull/9',
+      branch: 'vibld/r7',
+      state: 'merged',
+    },
+  };
+
+  it('is shown when this button has nothing of its own to say', () => {
+    const view = decidePush({ at: 'idle' }, CONNECTED_WITH_PULL);
+
+    assert.equal(view.show && view.lastPullRequest?.state, 'merged');
+  });
+
+  it('gives way to the push just made', () => {
+    // Two pull request lines under one button is two answers to one
+    // question, and the fresher one is the push that just happened.
+    const view = decidePush(
+      {
+        at: 'done',
+        to: { owner: 'acme', repo: 'site' },
+        pushed: {
+          branch: 'vibld/r8',
+          commitSha: 'c',
+          created: true,
+          pullRequestUrl: 'https://github.com/acme/site/pull/10',
+        },
+      },
+      CONNECTED_WITH_PULL,
+    );
+
+    assert.equal(view.show && view.lastPullRequest, undefined);
+    assert.equal(view.show && view.outcome?.branch, 'vibld/r8');
+  });
+
+  it('carries an unknown state as unknown rather than as open', () => {
+    const view = decidePush(
+      { at: 'idle' },
+      {
+        ...CONNECTED_WITH_PULL,
+        pullRequest: {
+          url: 'https://github.com/acme/site/pull/9',
+          branch: 'vibld/r7',
+          state: null,
+        },
+      },
+    );
+
+    assert.equal(view.show && view.lastPullRequest?.state, null);
+  });
+});

@@ -29,6 +29,7 @@ import {
   type PushTarget,
 } from './github-push.ts';
 import { GitHubStore, type BindingState } from './github-store.ts';
+import { isSignedByGitHub, pullRequestFrom } from './github-webhook.ts';
 import {
   authorizeUrl,
   exchangeCode,
@@ -48,6 +49,14 @@ const GRANT_DAYS = 90;
 
 export interface GitHubHandlerEnv extends GitHubAppEnv, GitHubOAuthEnv {
   DB?: D1Database;
+  /**
+   * The webhook secret configured on the GitHub App.
+   *
+   * Absent means no webhook endpoint: deliveries are refused rather than
+   * trusted, because on this one route the signature is the whole of the
+   * authentication.
+   */
+  VIBLD_GITHUB_WEBHOOK_SECRET?: string;
   GITHUB_BURST?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
@@ -549,6 +558,23 @@ export async function handleGitHubStatus(
       reason: state.reason,
     });
   }
+  // What became of the last pull request vibld opened for this user, if a
+  // webhook has said. Reported here rather than only in a push reply,
+  // because the push that opened it may have been in a session that is over:
+  // after a reload the link was all that survived, and a link cannot say
+  // whether there is anything left to do.
+  //
+  // Only when it is about the repository that is connected now. A pull
+  // request in a repository this user has since disconnected is not news
+  // about the destination on screen, and drawing it there would attach it to
+  // the wrong name.
+  const last = await store.lastPullRequest(principal.userId);
+  const here =
+    last &&
+    last.pullRequestUrl &&
+    last.owner === state.binding.owner &&
+    last.repo === state.binding.repo;
+
   return json({
     configured: true,
     canPush,
@@ -558,7 +584,97 @@ export async function handleGitHubStatus(
     repo: state.binding.repo,
     defaultBranch: state.binding.defaultBranch,
     expiresAt: state.binding.expiresAt,
+    ...(here
+      ? {
+          pullRequest: {
+            url: last.pullRequestUrl,
+            branch: last.branch,
+            // Null until a delivery has arrived. Reported as null rather
+            // than guessed as open: "open" is a claim, and the only thing
+            // that knows is GitHub.
+            state: last.pullRequestState,
+          },
+        }
+      : {}),
   });
+}
+
+/**
+ * A pull request changed on GitHub.
+ *
+ * The one route in this integration nobody is signed in for. A delivery
+ * arrives from GitHub's infrastructure with no session, so the signature is
+ * the whole of the authentication and an unverified body is treated as
+ * something a stranger wrote.
+ *
+ * Answers 2xx for everything it has decided not to act on, and only fails a
+ * delivery it genuinely could not process. GitHub retries a non-2xx and
+ * eventually disables an endpoint that keeps failing, so answering "no" to a
+ * delivery about an event this does not handle would spend that budget on
+ * nothing.
+ */
+export async function handleGitHubWebhook(
+  request: Request,
+  env: GitHubHandlerEnv,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  // No secret, no endpoint. An unsigned delivery is not a delivery.
+  if (!env.DB || !env.VIBLD_GITHUB_WEBHOOK_SECRET) {
+    return json({ error: 'Webhooks are not configured.' }, 503);
+  }
+
+  const delivery = request.headers.get('x-github-delivery');
+  const event = request.headers.get('x-github-event');
+  if (!delivery || !event) {
+    return json({ error: 'Not a GitHub delivery.' }, 400);
+  }
+
+  // Read as text, then verified, then parsed. The signature is over these
+  // bytes: re-serializing parsed JSON produces different ones and would
+  // reject every genuine delivery.
+  const body = await request.text();
+  const signed = await isSignedByGitHub(
+    env.VIBLD_GITHUB_WEBHOOK_SECRET,
+    body,
+    request.headers.get('x-hub-signature-256'),
+  );
+  if (!signed) {
+    // Nothing about which part was wrong: that would tell a forger where to
+    // work. The same sentence for a missing header and a bad digest.
+    return json({ error: 'Invalid signature.' }, 401);
+  }
+
+  const store = new GitHubStore(env.DB);
+  // Before anything is applied, because GitHub redelivers and a redelivery
+  // can be triggered by hand from the App's settings page.
+  if (await store.wasDelivered(delivery)) return json({ received: true });
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    payload = null;
+  }
+
+  const pull = pullRequestFrom(event, payload);
+  if (pull) {
+    await store.recordPullRequest({
+      owner: pull.owner,
+      repo: pull.repo,
+      branch: pull.branch,
+      number: pull.number,
+      url: pull.url,
+      state: pull.state,
+      updatedAt: pull.updatedAt,
+    });
+  }
+
+  // Marked after the work, so a delivery whose write threw is retried rather
+  // than recorded as done. Marked even when there was nothing to do, so a
+  // redelivery of an event this ignores is not re-read.
+  await store.markDelivered(delivery, event, now.toISOString());
+  return json({ received: true });
 }
 
 /** When a grant approved now should stop being usable. */

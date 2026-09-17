@@ -102,6 +102,7 @@ import {
   handleGitHubConnect,
   handleGitHubDisconnect,
   handleGitHubDiff,
+  handleGitHubWebhook,
   handleGitHubPush,
   handleGitHubStatus,
 } from './github-handlers.ts';
@@ -265,6 +266,8 @@ export interface Env {
    */
   VIBLD_GITHUB_APP_ID?: string;
   VIBLD_GITHUB_PRIVATE_KEY?: string;
+  /** Worker secret. The whole of the authentication on /api/github/webhook. */
+  VIBLD_GITHUB_WEBHOOK_SECRET?: string;
   /**
    * The OAuth half of the same App (issue #121). Connecting a repository has
    * to establish that the person doing it controls the GitHub account,
@@ -1560,6 +1563,10 @@ export default {
       return handleGitHub(request, env, (principal) =>
         handleGitHubStatus(request, env, principal),
       );
+    }
+
+    if (pathname === '/api/github/webhook') {
+      return handleGitHubWebhook(request, env);
     }
 
     if (pathname === '/api/github/diff') {

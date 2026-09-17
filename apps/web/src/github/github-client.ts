@@ -27,6 +27,23 @@ export interface GitHubStatus {
   repo?: string;
   defaultBranch?: string;
   expiresAt?: string;
+  /**
+   * The last pull request vibld opened in the repository that is connected
+   * now, and what became of it.
+   *
+   * Reported with the status rather than only in a push reply, because the
+   * push that opened it may have been in a session that is over: after a
+   * reload the link was all that survived, and a link cannot say whether
+   * there is anything left to do.
+   *
+   * `state` is null until a webhook has said. Null rather than "open",
+   * because "open" is a claim and the only thing that knows is GitHub.
+   */
+  pullRequest?: {
+    url: string;
+    branch: string;
+    state: 'open' | 'closed' | 'merged' | null;
+  };
 }
 
 export interface RepositoryChoice {

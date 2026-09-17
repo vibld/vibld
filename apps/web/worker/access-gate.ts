@@ -130,6 +130,12 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // GitHub redirects the browser here after an installation. It carries no
   // secret and grants nothing on its own; the write is behind /bind.
   '/api/github/callback': 'an unauthenticated redirect target, not a grant',
+  // GitHub's own POST, authenticated by an HMAC over the raw body and by
+  // nothing else. There is no session to gate: the delivery is about a pull
+  // request in a repository somebody already connected, and gating it would
+  // mean dropping deliveries for accounts whose access lapsed, which is how
+  // a merged pull request goes on being shown as open forever.
+  '/api/github/webhook': 'GitHub is the caller, and it has no invite',
   // A read of what is already connected. Answering it for an uninvited
   // account tells them nothing they did not already do.
   '/api/github/status': "a read-only view of the caller's own binding",
