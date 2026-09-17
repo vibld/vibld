@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'the-builder')!;
-const CHECKED = '2026-09-16';
+const CHECKED = '2026-09-17';
 
 export function meta() {
   return metaFor('/docs/the-builder');
@@ -73,16 +73,48 @@ export default function TheBuilder() {
         currently the only place that knows.
       </p>
 
+      <h2>Publishing, and taking it back down</h2>
+      <p>
+        <strong>Publish</strong> puts the last accepted checkpoint on the web at
+        a name you choose, and anybody with the address can read it. It takes
+        two presses: the first names the site, the checkpoint and whether this
+        replaces something already live, and the second is the act. It is the
+        only control in the builder whose result a stranger can see, which is
+        what earns the second press.
+      </p>
+      <p>
+        A preview is not a publish. Running a sandbox, or accepting a
+        checkpoint, never makes anything public. Nothing automated can publish
+        either: no scheduled run, no webhook, and no text in a pull request or a
+        commit message. Only a person asking, in the moment, puts a site on the
+        web.
+      </p>
+      <p>
+        <strong>Take it down</strong> is the other half, on the same terms. The
+        address stops working immediately and the files are deleted. The name
+        stays yours: nobody else can claim it, and publishing again under it is
+        what puts the site back. Rolling back to a <em>previous</em> published
+        checkpoint is not built yet.
+      </p>
+
       <h2>The header and the footer</h2>
       <p>
-        The header reports which provider and model served the last run, your
-        tier, and this period’s spend against your allowance. It claims nothing
-        before there has been a run.
+        The header carries what you look at while building, and nothing else:
+        the brand, the light and dark toggle, the settings menu and your
+        account.
+      </p>
+      <p>
+        Everything that is configuration lives behind the gear: your tier and
+        this period’s spend against your allowance, the GitHub connection, and
+        which provider and model served the last run. Read once, changed rarely,
+        and it used to compete with the work for the same row. None of it claims
+        anything before there has been a run.
       </p>
       <p>
         The footer carries the two limitations above in one line, for anybody
         who never opens those tabs. It is built from the same source the panes
-        are, so it cannot drift away from them.
+        are, so it cannot drift away from them. The run count and token figures
+        sit beside it, folded away until you ask for them: reference, not news.
       </p>
 
       <h2>Where this is going</h2>

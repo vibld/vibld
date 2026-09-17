@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'getting-started')!;
-const CHECKED = '2026-09-16';
+const CHECKED = '2026-09-17';
 
 export function meta() {
   return metaFor('/docs/getting-started');
@@ -60,9 +60,10 @@ export default function GettingStarted() {
       </ul>
       <p>
         You can also choose the model. Which models are offered depends on what
-        the deployment can serve and on what your account is allowed, and the
-        header always reports which one actually served the last run rather than
-        which one was requested.
+        the deployment can serve and on what your account is allowed. The
+        settings menu, under <strong>This deployment</strong>, always reports
+        which one actually served the last run rather than which one was
+        requested.
       </p>
 
       <h2>3. Read the checkpoint before accepting it</h2>
