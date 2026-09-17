@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ProjectSnapshot } from '@vibld/core';
+import type { ProjectFile, ProjectSnapshot } from '@vibld/core';
 import { publishProject } from '../generation/publish-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
 
@@ -10,6 +10,31 @@ type PublishState =
    * slug that is already chosen.
    */
   | { phase: 'idle'; publishedSlug?: string }
+  /**
+   * The decision, held open until somebody takes it (ADR-0013). It carries
+   * the checkpoint it was raised for, not just the slug, because that is
+   * what the sentence on screen names: a confirmation that outlives the
+   * checkpoint it described would put something live that nobody read out.
+   */
+  | {
+      phase: 'confirming';
+      slug: string;
+      revision: string;
+      /**
+       * The files the sentence on screen is about.
+       *
+       * Held here rather than read from the snapshot when the second press
+       * arrives, so confirming does exactly what the confirmation said. The
+       * effect below withdraws a confirmation whose checkpoint has moved on,
+       * but it runs after the commit that moved it, and carrying the work
+       * closes that window without a second rule to keep in step with the
+       * first: there is no reading of "current" left to go stale.
+       */
+      files: ProjectFile[];
+      /** Whether this slug already has something live under it. */
+      replacing: boolean;
+      publishedSlug?: string;
+    }
   /**
    * `publishedSlug` here is the same fact carried through the wait: what a
    * publish that already landed went out under, so a request abandoned
@@ -26,6 +51,13 @@ type PublishState =
  * Offered alongside `ExportButton`, for the same reason and under the same
  * condition: an accepted checkpoint only -- staged files have not been
  * validated yet.
+ *
+ * Two presses, not one (ADR-0013). The first raises a sentence naming the
+ * checkpoint and the name it goes out under; the second is the act. That is
+ * the whole of the difference between publishing and every other button in
+ * the builder: this one is the only one a stranger can see the result of,
+ * and it cannot be undone from here yet. A generic "are you sure" would not
+ * earn the extra press -- naming what becomes public does.
  *
  * A slug is required on first publish (it becomes
  * `<slug>.published.vibld-preview.dev`) and reused on every later one; this
@@ -74,22 +106,57 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       if (previous.phase === 'publishing') {
         return { phase: 'idle', publishedSlug: previous.publishedSlug };
       }
+      // An open confirmation names a checkpoint by revision. Once that is no
+      // longer the checkpoint in hand, the sentence on screen is about work
+      // that is not the work that would go out, so the decision is withdrawn
+      // rather than carried over to something nobody was shown.
+      if (previous.phase === 'confirming') {
+        return { phase: 'idle', publishedSlug: previous.publishedSlug };
+      }
       return previous;
     });
   }, [snapshot.revision]);
 
-  async function publish() {
-    if (!knownSlug && slugInput.trim() === '') {
+  /** First press: raise the decision. Nothing has left the browser yet. */
+  function ask() {
+    const slug = knownSlug ?? slugInput.trim();
+    if (slug === '') {
       setState({ phase: 'failed', error: 'Choose a slug to publish under.' });
       return;
     }
+    setState({
+      phase: 'confirming',
+      slug,
+      revision: snapshot.revision,
+      files: snapshot.files,
+      replacing: knownSlug !== undefined,
+      ...(knownSlug === undefined ? {} : { publishedSlug: knownSlug }),
+    });
+  }
+
+  /**
+   * Second press: the act.
+   *
+   * It publishes the confirmation it is answering, not whatever the
+   * component happens to be holding now. That is the whole point of the two
+   * presses: what goes live is what the sentence named, and there is no
+   * moment in between where the answer could apply to different work.
+   */
+  async function confirm(decision: {
+    slug: string;
+    revision: string;
+    files: ProjectFile[];
+    publishedSlug?: string;
+  }) {
     const current = publishes.current.begin();
-    setState({ phase: 'publishing', publishedSlug: knownSlug });
+    setState({
+      phase: 'publishing',
+      ...(decision.publishedSlug === undefined
+        ? {}
+        : { publishedSlug: decision.publishedSlug }),
+    });
     try {
-      const result = await publishProject(
-        snapshot.files,
-        knownSlug ?? slugInput.trim(),
-      );
+      const result = await publishProject(decision.files, decision.slug);
       if (!current()) return;
       setState(
         result.ok
@@ -113,6 +180,44 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     }
   }
 
+  if (state.phase === 'confirming') {
+    const decision = state;
+    return (
+      <div
+        className="publish-button publish-confirm"
+        role="group"
+        aria-label="Confirm publishing"
+      >
+        <p className="pane-note">
+          {decision.replacing ? 'Replace what is live at ' : 'Publish '}
+          <strong>{decision.slug}</strong> with checkpoint{' '}
+          <code>{decision.revision}</code>. Anyone with the address can read it.
+        </p>
+        <button
+          type="button"
+          className="chip chip--on"
+          onClick={() => void confirm(decision)}
+        >
+          {decision.replacing ? 'Replace' : 'Publish'} {decision.slug}
+        </button>
+        <button
+          type="button"
+          className="chip"
+          onClick={() =>
+            setState({
+              phase: 'idle',
+              ...(decision.publishedSlug === undefined
+                ? {}
+                : { publishedSlug: decision.publishedSlug }),
+            })
+          }
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="publish-button">
       {!knownSlug ? (
@@ -130,7 +235,7 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       <button
         type="button"
         className="chip"
-        onClick={publish}
+        onClick={ask}
         disabled={state.phase === 'publishing'}
       >
         {state.phase === 'publishing'

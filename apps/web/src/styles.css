@@ -1175,6 +1175,26 @@ body {
   width: 10rem;
 }
 
+/* The one decision in the builder a stranger can see the result of
+ * (ADR-0013). It is drawn in the caution tone rather than the error one,
+ * because nothing has gone wrong: something is about to become public. */
+.publish-confirm {
+  border: 1px solid var(--caution);
+  border-radius: var(--radius);
+  background: var(--caution-bg);
+  padding: 0.55rem 0.65rem;
+}
+
+.publish-confirm .pane-note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.publish-confirm code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+}
+
 /* --- Standing instructions -----------------------------------------------
  * Collapsed by default: a preference you set and forget should not take
  * space from the composer on every turn. The summary still says when it is

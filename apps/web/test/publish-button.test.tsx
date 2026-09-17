@@ -17,7 +17,9 @@ import { PublishButton } from '../src/components/PublishButton.tsx';
 function snapshot(revision: string): ProjectSnapshot {
   return {
     revision,
-    files: [{ path: 'index.html', content: '<h1>hi</h1>' }],
+    // Content that names its own revision, so a test can tell which
+    // checkpoint's work actually left the browser.
+    files: [{ path: 'index.html', content: `<h1>${revision}</h1>` }],
   } as ProjectSnapshot;
 }
 
@@ -73,6 +75,21 @@ function held(response: () => Response) {
   };
 }
 
+/** The confirmation ADR-0013 requires, if it is on screen. */
+function panelOf(container: HTMLElement): HTMLElement | null {
+  return container.querySelector('[aria-label="Confirm publishing"]');
+}
+
+// `window.HTMLButtonElement` rather than the bare global: the harness puts
+// jsdom's constructors on `window` only, the same reason `type` below reaches
+// through `window.HTMLInputElement`.
+async function press(button: Element | null | undefined, what: string) {
+  assert.ok(button instanceof window.HTMLButtonElement, `no ${what}`);
+  await act(async () => {
+    button.click();
+  });
+}
+
 async function mount(element: React.ReactNode) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -81,8 +98,36 @@ async function mount(element: React.ReactNode) {
     root = createRoot(container);
     root.render(element);
   });
+
+  function confirming(): boolean {
+    return panelOf(container) !== null;
+  }
+
+  /** The first press: raise the decision. */
+  async function ask() {
+    assert.equal(confirming(), false, 'a confirmation was already open');
+    await press(container.querySelector('button'), 'publish button');
+  }
+
+  /** The second press: take it. */
+  async function confirm() {
+    const panel = panelOf(container);
+    assert.ok(panel, 'no confirmation to answer');
+    await press(panel.querySelector('button'), 'confirm button');
+  }
+
+  async function cancel() {
+    const panel = panelOf(container);
+    assert.ok(panel, 'no confirmation to cancel');
+    await press([...panel.querySelectorAll('button')].at(-1), 'cancel button');
+  }
+
   return {
     container,
+    confirming,
+    ask,
+    confirm,
+    cancel,
     async render(next: React.ReactNode) {
       await act(async () => root.render(next));
     },
@@ -102,12 +147,17 @@ async function mount(element: React.ReactNode) {
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
     },
+    /**
+     * Publish, the way somebody does it: raise the decision and take it.
+     *
+     * Two presses rather than one since ADR-0013, and the tests that are
+     * about something else say "publish" rather than spelling both out. The
+     * tests that are about the decision itself use `ask`, `confirm` and
+     * `cancel` directly.
+     */
     async click() {
-      const button = container.querySelector('button');
-      assert.ok(button, 'no publish button');
-      await act(async () => {
-        button.click();
-      });
+      await ask();
+      if (confirming()) await confirm();
     },
     label(): string {
       return container.querySelector('button')?.textContent ?? '';
@@ -315,6 +365,140 @@ describe('publishing an accepted checkpoint', () => {
       /my-site\.example/,
       'it said the new checkpoint was live when only the old one was',
     );
+    view.unmount();
+  });
+});
+
+/**
+ * ADR-0013: publishing is a decision, not a click.
+ *
+ * The rest of this file is about what happens once somebody has decided.
+ * This is about the deciding, which is the half that makes the publish
+ * button different from every other button in the builder: it is the only
+ * one whose result a stranger can see, and there is no undo behind it yet.
+ */
+describe('the publish confirmation', () => {
+  it('sends nothing on the first press', async () => {
+    const calls = serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+
+    assert.equal(view.confirming(), true, 'it did not ask');
+    assert.deepEqual(calls, [], 'one press published');
+    view.unmount();
+  });
+
+  it('names the slug and the checkpoint that would go live', async () => {
+    // Not a generic "are you sure". A confirmation that does not say what is
+    // about to become public is a click with an extra step in front of it.
+    serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+
+    const said = view.container.textContent ?? '';
+    assert.match(said, /my-site/, 'it did not name the slug');
+    assert.match(said, /r1/, 'it did not name the checkpoint');
+    view.unmount();
+  });
+
+  it('says a republish replaces what is already live', async () => {
+    // The first publish and the fifth are different acts: one puts a name on
+    // the web, the other overwrites what that name is already serving.
+    serving(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+    await view.ask();
+
+    const said = view.container.textContent ?? '';
+    assert.match(said, /Replace/, 'a republish read like a first publish');
+    assert.match(said, /r2/, 'it named the wrong checkpoint');
+    view.unmount();
+  });
+
+  it('publishes nothing when the decision is declined', async () => {
+    const calls = serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+    await view.cancel();
+
+    assert.deepEqual(calls, [], 'cancelling published');
+    assert.equal(view.confirming(), false, 'the confirmation stayed open');
+    assert.match(view.label(), /Publish/, 'the button did not come back');
+    view.unmount();
+  });
+
+  it('keeps the typed slug after a declined decision', async () => {
+    // Declining is not a reason to make somebody retype the name. It is a
+    // reason not to publish.
+    const calls = serving(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+    await view.cancel();
+    await view.click();
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.body?.slug, 'my-site');
+    view.unmount();
+  });
+
+  it('sends the files of the checkpoint the confirmation named', async () => {
+    // Only that the right work leaves the browser. The stronger claim --
+    // that answering a confirmation cannot publish a *different* checkpoint
+    // -- is structural rather than tested: the confirmation carries its own
+    // files, so there is no reading of "current" left to go stale. A test
+    // cannot tell the two apart from out here, because the effect above
+    // withdraws a confirmation before the checkpoint it named can change.
+    const calls = serving(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]?.body?.files, [
+      { path: 'index.html', content: '<h1>r1</h1>' },
+    ]);
+    view.unmount();
+  });
+
+  it('withdraws a confirmation whose checkpoint moved on', async () => {
+    // The sentence on screen names a revision. Once the project has moved
+    // past it, answering that sentence would publish work nobody was shown,
+    // which is the one outcome two presses exist to prevent.
+    const calls = serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+
+    assert.equal(view.confirming(), false, 'a stale confirmation stayed up');
+    assert.deepEqual(calls, [], 'it published on the way past');
     view.unmount();
   });
 });
