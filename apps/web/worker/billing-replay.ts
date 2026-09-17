@@ -494,12 +494,16 @@ export function parkedReserveFor(queryBudget: number): number {
 /**
  * D1 queries `payReferralIfEarned` costs at its worst.
  *
- * Six to settle one: the attribution read, the slot claim, a credit grant
- * for each side, the `firstClearedPaymentIds` lookup, then the paid mark.
- * The lookup is counted because both callers budgeted here pay without an
- * event in hand and always spend it. Measuring the other path, with
- * `fundedBy` supplied, was the test agreeing with a caller that does not
- * exist and left this short by exactly that query.
+ * Not derived, measured: `referral-payout.test.ts` drives the payout down
+ * its most expensive path against the real stores over real SQLite and
+ * counts the statements D1 would be asked to run.
+ *
+ * It is measured rather than counted by hand because it has been wrong
+ * four times, always low. Three times from reading the code and following
+ * the success path. The fourth from a test that counted store method calls
+ * as if each were one query, when `deductAdminCredit` is an INSERT and a
+ * SELECT and the losing path makes two of them. A call is not a query, and
+ * the allowance counts queries.
  *
  * And six more when it loses the race to a refund, which is the half this
  * file kept leaving out. `markPaid` carries `AND reversed_at IS NULL`, so a
@@ -513,7 +517,7 @@ export function parkedReserveFor(queryBudget: number): number {
  * counting store and asserts the measured cost against it. A bound that
  * holds only when nothing goes wrong is not a bound.
  */
-export const MAX_QUERIES_PER_REFERRAL_PAYOUT = 12;
+export const MAX_QUERIES_PER_REFERRAL_PAYOUT = 15;
 
 /**
  * D1 queries one stranded referral payout costs at its worst: the attempt

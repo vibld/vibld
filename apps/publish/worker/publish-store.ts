@@ -666,33 +666,41 @@ export class PublishStore {
            WHERE slug = ?2 AND hold_token = ?3`,
         )
         .bind(now, slug, holdToken),
-      // Only when the clear above actually happened.
+      // Only when the clear above actually happened, and only once.
       //
       // I first wrote this unconditional, on the grounds that somebody did
-      // press release and the record should say so. That was wrong, and in
-      // the worst way for a record whose whole job is to be read later: a
-      // lost release wrote `held, held, released` with the newer hold still
+      // press release and the record should say so. That was wrong in the
+      // worst way for a record whose whole job is to be read later: a lost
+      // release wrote `held, held, released` with the newer hold still
       // standing, so an audit would conclude the site had been let back on
       // the web. An entry that cannot be told from a real one is worse than
       // a missing entry, because it is believed.
       //
-      // The condition is this write's own stamp, which only the UPDATE
-      // above can have left, together with the hold having gone. A batch
-      // runs in order inside one transaction, so this sees that UPDATE:
-      // `hold_token` is NULL exactly when the release won, and holds it
-      // lost to leave a different token behind. `handleRelease` refuses a
-      // site that is not held, so there is no case where both are null for
-      // want of a hold in the first place.
+      // Then I gated it on `updated_at` and made the same mistake this file
+      // had just fixed one column earlier: a millisecond timestamp is not
+      // an identity, so two releases of one hold inside a millisecond both
+      // matched and both wrote an entry.
+      //
+      // So it names the hold (0023_hold_history_token.sql). A batch runs in
+      // order inside one transaction, so the EXISTS sees the UPDATE above:
+      // `hold_token` is null exactly when this release won, and a hold it
+      // lost to leaves a different token behind. The NOT EXISTS makes it
+      // idempotent, which is what closes the same-millisecond pair.
       this.#db
         .prepare(
-          `INSERT INTO published_site_holds (slug, action, actor, reason, at)
-           SELECT ?1, 'released', ?2, NULL, ?3
+          `INSERT INTO published_site_holds
+             (slug, action, actor, reason, at, hold_token)
+           SELECT ?1, 'released', ?2, NULL, ?3, ?4
            WHERE EXISTS (
              SELECT 1 FROM published_projects
-             WHERE slug = ?1 AND hold_token IS NULL AND updated_at = ?3
+             WHERE slug = ?1 AND hold_token IS NULL
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM published_site_holds
+             WHERE slug = ?1 AND action = 'released' AND hold_token = ?4
            )`,
         )
-        .bind(slug, by, now),
+        .bind(slug, by, now, holdToken),
     ]);
     return cleared?.meta.changes !== 0;
   }

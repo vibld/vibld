@@ -968,6 +968,31 @@ describe('holding a site an operator did not publish', () => {
     assert.equal(await store.resolveSlug('acme'), undefined);
   });
 
+  it('writes one release record even when two arrive in the same instant', async () => {
+    // Gating the record on the row's state plus `updated_at` was the first
+    // attempt, and it repeated the mistake the hold token had just fixed:
+    // two releases of one hold inside a millisecond both saw the cleared
+    // token and the identical stamp, and both wrote a `released` entry. One
+    // of them returned 409 while its record said the hold was lifted.
+    const { store } = stored();
+    await published(store);
+    const at = new Date('2026-09-17T12:00:00.000Z');
+    await store.hold('acme', 'admin@vibld.com', 'report 41', at);
+    const token = (await store.siteBySlug('acme'))?.holdToken ?? '';
+
+    // Both name the same hold and both stamp the same instant, which is
+    // what a retry or a double press looks like.
+    const first = await store.release('acme', 'first@vibld.com', token, at);
+    const second = await store.release('acme', 'second@vibld.com', token, at);
+
+    assert.equal(first, true);
+    assert.equal(second, false, 'both releases claimed to have cleared it');
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map((entry) => entry.action),
+      ['held', 'released'],
+    );
+  });
+
   it('keeps every hold, not just the last one', async () => {
     const { store } = stored();
     await published(store);
