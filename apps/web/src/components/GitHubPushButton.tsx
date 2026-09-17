@@ -1,17 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import {
-  fetchGitHubStatus,
   noteConnectionChanged,
   onConnectionChanged,
   previewSnapshot,
   pushSnapshot,
 } from '../github/github-client.ts';
-import type { GitHubStatus } from '../github/github-client.ts';
 // The same latest-wins rule the connect panel needed, deliberately used
 // rather than written again: it is one generation counter with tests, and a
 // second copy of it here would be a second place for it to be wrong.
 import { createStatusGate } from '../github/panel-view.ts';
+import { githubStatus } from '../github/github-status.ts';
 import {
   afterConnectionChanged,
   decidePreview,
@@ -76,12 +81,18 @@ function DiffList({
 }
 
 export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
-  const [status, setStatus] = useState<GitHubStatus | null>(null);
+  // The panel's copy, not a second one (#34). Before this each kept its own
+  // and probed separately, so the two could name different repositories at
+  // the same moment: the panel's disconnect path carries a comment saying
+  // exactly that.
+  const status = useSyncExternalStore(
+    githubStatus.subscribe,
+    githubStatus.read,
+  );
   const [phase, setPhase] = useState<PushPhase>({ at: 'idle' });
   const [previewPhase, setPreviewPhase] = useState<PreviewPhase>({
     at: 'none',
   });
-  const probes = useRef(createStatusGate());
   const pushes = useRef(createStatusGate());
   const previews = useRef(createStatusGate());
 
@@ -93,23 +104,22 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   // Outside the effect because a refused push reads the connection again:
   // the route is the one thing that can tell this browser its destination
   // has moved, which is the case no notification from inside it covers.
+  // The store holds the supersede rule and the commit-what-you-got rule, so
+  // this is only the ask.
+  //
+  // What it no longer does is blank the status first. That was this
+  // component's way of never naming a repository that might be gone, and it
+  // cannot be kept once the status is shared: blanking here would empty the
+  // panel too, on every probe. It is safe to drop because the route is the
+  // real guard -- a push names where it believes it is going, and
+  // `/api/github/push` refuses one aimed at a binding that has moved and
+  // says where it moved instead. A briefly stale name cannot become a push
+  // to the wrong repository.
   const probe = useCallback(() => {
-    const gate = probes.current;
-    gate.supersede();
-    const current = gate.begin();
-    // Forgotten before it is read again, so a probe that fails leaves the
-    // button hidden rather than naming a repository somebody has just
-    // disconnected. An unknown connection and a connection that is gone
-    // are not the same thing, but they offer the same thing: nothing.
-    setStatus(null);
-    void (async () => {
-      const read = await fetchGitHubStatus();
-      if (current() && read) setStatus(read);
-    })();
+    void githubStatus.refresh();
   }, []);
 
   useEffect(() => {
-    const gate = probes.current;
     probe();
     const stop = onConnectionChanged(() => {
       // A push already in the air was aimed at the connection that has just
@@ -123,9 +133,6 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     });
     return () => {
       stop();
-      // Nothing in flight may land after this: the last word on an unmounted
-      // component is a React warning and nothing a user sees.
-      gate.supersede();
     };
   }, [probe]);
 

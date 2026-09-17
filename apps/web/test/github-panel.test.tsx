@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
@@ -8,6 +8,7 @@ import {
   onConnectionChanged,
 } from '../src/github/github-client.ts';
 import { GitHubConnection } from '../src/components/GitHubPanel.tsx';
+import { githubStatus } from '../src/github/github-status.ts';
 
 /**
  * The panel had been publishing connection changes and never listening.
@@ -27,6 +28,15 @@ function reply(value: unknown): Response {
     headers: { 'content-type': 'application/json' },
   });
 }
+
+/**
+ * The connection is shared state now (#34), and shared state outlives a
+ * test. Without this, a test mounting after one that connected would find a
+ * repository already there and pass without ever asking for one.
+ */
+beforeEach(() => {
+  githubStatus.forget();
+});
 
 describe('the connect panel, as it is actually wired', () => {
   it('reads the status again when the connection changes', async () => {
