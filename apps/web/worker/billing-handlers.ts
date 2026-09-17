@@ -3,11 +3,12 @@ import { resolvePrincipal } from './principal.ts';
 import { BillingStore } from './billing-store.ts';
 import {
   applyStripeEvent,
+  idsOf,
   ownerOfSubscription,
   stripeCollectedUsdCents,
   subscriptionRecordFrom,
 } from './billing-events.ts';
-import { payReferralIfEarned } from './referral-payout.ts';
+import { clawBackReferral, payReferralIfEarned } from './referral-payout.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
   createCheckoutSession,
@@ -210,11 +211,40 @@ export async function handleStripeWebhook(
     // here would mark the event done and lose a payout that was owed. The
     // retry Stripe then makes re-runs an idempotent path.
     const referrals = new ReferralStore(env.DB!);
-    await applyStripeEvent(store, event, (userId) =>
-      payReferralIfEarned({ referrals, billing: store }, userId).then(
-        () => undefined,
-      ),
+    const deps = { referrals, billing: store };
+    const outcome = await applyStripeEvent(
+      store,
+      event,
+      (userId, fundedBy) =>
+        payReferralIfEarned(deps, userId, fundedBy).then(() => undefined),
+      // A reversal rides its own delivery on the same terms, and fails it
+      // the same way. The reward was funded by a payment that has gone
+      // back out, so a clawback that is swallowed here leaves credit this
+      // deployment is paying for with an event marked done and nothing to
+      // come back to it. `clawBackReferral` is idempotent, so the retry
+      // Stripe makes writes the same rows once.
+      (userId, reason, refundedIds) =>
+        clawBackReferral(deps, userId, reason, refundedIds).then(
+          () => undefined,
+        ),
+      // A dispute names its charge by id, and the customer is only on the
+      // charge. One request, on the rarest event type this deployment
+      // handles.
+      (chargeId) => stripe.charges.retrieve(chargeId),
     );
+
+    // `unresolved` means the handler wrote nothing, so the event is not
+    // done. Marking it processed on a normal return is how it is lost for
+    // good: the replay skips a processed event, so nothing ever revisits it.
+    //
+    // A 5xx is what makes Stripe try again, which is the only retry a
+    // webhook has. Thrown rather than returned so the one handler below
+    // covers both this and an unexpected D1 failure, and so
+    // `markEventProcessed` stays unreachable for anything that did not
+    // finish.
+    if (outcome === 'unresolved') {
+      throw new Error(`stripe event ${event.id} could not be applied yet`);
+    }
   } catch (error) {
     // A 5xx here makes Stripe retry, which is what an unexpected D1/R2
     // failure should do -- succeeding despite a write that never happened
@@ -385,6 +415,13 @@ async function recordLatestPaidInvoice(
     invoice.status_transitions?.paid_at
       ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
       : new Date().toISOString(),
+    // The same aliases the webhook path records, so a payment recovered by
+    // the reconcile is as reversible as one that arrived by delivery.
+    idsOf(
+      invoice.id,
+      (invoice as unknown as { payment_intent?: unknown }).payment_intent,
+      (invoice as unknown as { charge?: unknown }).charge,
+    ),
   );
 
   return collected > 0;

@@ -88,6 +88,63 @@ export function readClerkOutcome(value: unknown): ClerkOutcome | null {
   return null;
 }
 
+/**
+ * What the invite route said about putting a scheduled cancellation back.
+ *
+ * Parsed as strictly as the others: an unreadable answer about somebody's
+ * subscription is not the same as a good one.
+ */
+export type RestoreOutcome =
+  | { restored: true; renewsOn: string | null }
+  | {
+      restored: false;
+      reason:
+        | 'unconfigured'
+        | 'no-invite'
+        | 'never-signed-in'
+        | 'nothing-to-restore'
+        | 'not-ours'
+        | 'error';
+      error?: string;
+    };
+
+const NOT_RESTORED = new Set([
+  'unconfigured',
+  'no-invite',
+  'never-signed-in',
+  'nothing-to-restore',
+  'not-ours',
+  'error',
+]);
+
+export function readRestoreOutcome(value: unknown): RestoreOutcome | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as {
+    restored?: unknown;
+    reason?: unknown;
+    renewsOn?: unknown;
+    error?: unknown;
+  };
+  if (row.restored === true) {
+    return {
+      restored: true,
+      renewsOn: typeof row.renewsOn === 'string' ? row.renewsOn : null,
+    };
+  }
+  if (row.restored !== false) return null;
+  if (typeof row.reason !== 'string' || !NOT_RESTORED.has(row.reason)) {
+    return null;
+  }
+  return {
+    restored: false,
+    reason: row.reason as Exclude<RestoreOutcome, { restored: true }>['reason'],
+    error:
+      typeof row.error === 'string' && row.error.trim() !== ''
+        ? row.error
+        : undefined,
+  };
+}
+
 export type IssueResult =
   | {
       ok: true;
@@ -95,17 +152,99 @@ export type IssueResult =
       created: boolean;
       reinstated: boolean;
       clerk: ClerkOutcome | null;
+      billing: RestoreOutcome | null;
     }
   | { ok: false; error: string };
+
+/**
+ * What the route said about this person's billing, parsed strictly.
+ *
+ * `scheduled` rather than `cancelled`: the subscription runs to `endsAt` and
+ * stops there, so saying it is cancelled would tell an operator the charging
+ * has stopped when the next invoice may still be weeks away.
+ */
+export type BillingOutcome =
+  | { scheduled: true; endsAt: string | null; restorable: boolean }
+  | {
+      scheduled: false;
+      reason:
+        | 'unconfigured'
+        | 'no-invite'
+        | 'never-signed-in'
+        | 'nothing-to-stop'
+        | 'already-ending'
+        | 'error';
+      endsAt?: string | null;
+      error?: string;
+    };
+
+const NOT_SCHEDULED = new Set([
+  'unconfigured',
+  'no-invite',
+  'never-signed-in',
+  'nothing-to-stop',
+  'already-ending',
+  'error',
+]);
+
+/**
+ * Null for anything this cannot read, rather than a cheerful default. An
+ * unreadable answer about somebody's money is not the same as a good one,
+ * and the panel says which it got.
+ */
+export function readBillingOutcome(value: unknown): BillingOutcome | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as {
+    scheduled?: unknown;
+    reason?: unknown;
+    endsAt?: unknown;
+    error?: unknown;
+    restorable?: unknown;
+  };
+  const endsAt = typeof row.endsAt === 'string' ? row.endsAt : null;
+  if (row.scheduled === true) {
+    // Absent reads as restorable, which is what every route before this
+    // field existed meant. The flag says a cancellation cannot be undone,
+    // and a missing field is not evidence of that.
+    return { scheduled: true, endsAt, restorable: row.restorable !== false };
+  }
+  if (row.scheduled !== false) return null;
+  if (typeof row.reason !== 'string' || !NOT_SCHEDULED.has(row.reason)) {
+    return null;
+  }
+  return {
+    scheduled: false,
+    reason: row.reason as Exclude<
+      BillingOutcome,
+      { scheduled: true }
+    >['reason'],
+    endsAt,
+    error:
+      typeof row.error === 'string' && row.error.trim() !== ''
+        ? row.error
+        : undefined,
+  };
+}
 
 /**
  * `revoked` is false when the row did not change: no such invite, or one
  * already withdrawn. Reported rather than smoothed over, because "their
  * access is gone" is a claim, and the only thing that establishes it here
  * is a row that moved.
+ *
+ * `billing` is the other half of the same act. Withdrawing access used to
+ * leave a subscriber being charged every month for a product they could no
+ * longer sign in to, so what happened to their money is reported next to
+ * what happened to their access.
  */
 export type RevokeResult =
-  { ok: true; email: string; revoked: boolean } | { ok: false; error: string };
+  | {
+      ok: true;
+      email: string;
+      revoked: boolean;
+      billing: BillingOutcome | null;
+    }
+  | { ok: false; error: string };
 
 /**
  * `truncated` is the route saying there are more rows than it returned.
@@ -231,6 +370,7 @@ export async function issueInvite(
       ok: true,
       email: body.email,
       clerk: readClerkOutcome(body.clerk),
+      billing: readRestoreOutcome(body.billing),
       created: body.created === true,
       reinstated: body.reinstated === true,
     };
@@ -270,7 +410,12 @@ export async function revokeInvite(
         error: 'The invite service returned an unexpected response.',
       };
     }
-    return { ok: true, email: body.email, revoked: body.revoked === true };
+    return {
+      ok: true,
+      email: body.email,
+      revoked: body.revoked === true,
+      billing: readBillingOutcome(body.billing),
+    };
   } catch {
     return {
       ok: false,

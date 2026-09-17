@@ -149,7 +149,7 @@ export interface RewardCents {
 /**
  * The reward, both sides, on first purchase.
  *
- * $5 and $5 is Chris's decision rather than the placeholder it started as.
+ * $5 and $5 is a decision rather than the placeholder it started as.
  * Still overridable per deployment.
  *
  * One thing that was put to him with it and is worth keeping written down,
@@ -188,7 +188,7 @@ export const DEFAULT_REWARD_CENTS: RewardCents = {
 export const MAX_PAID_REFERRALS = 25;
 
 export type PayoutRefusal =
-  'not-attributed' | 'already-paid' | 'referrer-at-cap';
+  'not-attributed' | 'already-paid' | 'referrer-at-cap' | 'reversed';
 
 export type PayoutDecision =
   | { pay: true; referrerUserId: string; reward: RewardCents }
@@ -213,11 +213,19 @@ export function decidePayout(input: {
   referrerUserId: string | undefined;
   paidAlready: boolean;
   reward?: RewardCents;
+  reversed?: boolean;
 }): PayoutDecision {
   if (input.referrerUserId === undefined) {
     return { pay: false, reason: 'not-attributed' };
   }
   if (input.paidAlready) return { pay: false, reason: 'already-paid' };
+  // The payment that would fund this reward has already gone back out. This
+  // is checked rather than inferred from `paidAlready` because the two are
+  // independent: the replay applies newer pages first, so a refund can be
+  // recorded before the purchase that earned the reward is recovered, and
+  // then `resumeStrandedPayouts` would pay on a payment that no longer
+  // exists.
+  if (input.reversed) return { pay: false, reason: 'reversed' };
   return {
     pay: true,
     referrerUserId: input.referrerUserId,
@@ -260,6 +268,49 @@ export function payoutGrantId(
   referredUserId: string,
 ): string {
   return `referral:${side}:${referredUserId}`;
+}
+
+/**
+ * The id of the row that takes a reward back.
+ *
+ * Deterministic for the same reason the payout id is: `grantAdminCredit`
+ * does nothing on conflict, so a redelivered refund, a replayed event and a
+ * second dispute on the same charge all write the same row once. There is no
+ * separate "clawed back" column anywhere, and there does not need to be:
+ * these rows are the record, and their id is what makes them unrepeatable.
+ */
+export function clawbackGrantId(
+  side: 'referrer' | 'referred',
+  referredUserId: string,
+): string {
+  return `referral-clawback:${side}:${referredUserId}`;
+}
+
+/**
+ * How much of a reward can actually be taken back from one side.
+ *
+ * Decided 2026-09-16, in two parts, and the second is the one that
+ * is easy to get wrong.
+ *
+ * **Floored at zero**, so nobody is ever shown a debt this product has no way
+ * to collect. The cost is that a referrer who spent the credit the day it
+ * arrived keeps it, which is accepted: recovering that dollar is worth less
+ * than telling somebody they owe money.
+ *
+ * **Against granted credit only, never money somebody paid.** Credit here is
+ * one pooled balance, Stripe top-ups and grants together, and nothing tracks
+ * which pool a generation drew from. Deducting from the pool would mean
+ * somebody whose referral credit is already spent has five dollars taken out
+ * of a twenty dollar top-up they bought, which is charging a customer for
+ * another account's refund. So the ceiling is what this deployment gave
+ * away, and a person holding only purchased credit gives back nothing.
+ */
+export function clawbackCents(
+  rewardCents: number,
+  grantedCents: number,
+): number {
+  if (rewardCents <= 0 || grantedCents <= 0) return 0;
+  return Math.min(rewardCents, grantedCents);
 }
 
 /** The link a user shares. */

@@ -3,7 +3,11 @@ import { describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { InvitePanel, clerkSentence } from '../src/components/InvitePanel.tsx';
+import {
+  InvitePanel,
+  billingSentence,
+  clerkSentence,
+} from '../src/components/InvitePanel.tsx';
 
 /**
  * The panel an operator uses to let somebody in.
@@ -102,7 +106,7 @@ async function open() {
 
 const WAITING = {
   email: 'waiting@example.com',
-  invitedByEmail: 'chris@drummond.com',
+  invitedByEmail: 'sam@example.com',
   invitedAt: '2026-09-16T00:00:00.000Z',
   redeemedByUserId: null,
   redeemedAt: null,
@@ -453,5 +457,107 @@ describe('the standing Clerk line, once inviting approves there too', () => {
       ),
       'no way to reach Clerk when the automatic attempt did not work',
     );
+  });
+});
+
+describe('what the panel says about a withdrawn subscriber', () => {
+  it('leads with the date, because that is the whole decision', async () => {
+    // At period end, not immediately: they keep what they paid for and are
+    // not charged again. An operator needs the date to answer the question
+    // the person will ask them.
+    const said = billingSentence({
+      scheduled: true,
+      endsAt: '2026-10-01T00:00:00.000Z',
+      restorable: true,
+    });
+    assert.match(said, /set to end/i);
+    assert.match(said, /2026/);
+    assert.match(said, /not charged again/i);
+  });
+
+  it('does not claim a subscription is cancelled', async () => {
+    // Nothing has stopped yet. "Cancelled" would tell an operator the
+    // charging is over when the next invoice may be weeks away, and that is
+    // the sentence they would repeat to the person.
+    const said = billingSentence({
+      scheduled: true,
+      endsAt: null,
+      restorable: true,
+    });
+    assert.doesNotMatch(said, /cancell?ed/i);
+  });
+
+  it('says when reinstating them will not undo the cancellation', async () => {
+    // Stripe accepted the cancellation and the record of having scheduled it
+    // did not get written, so the restore path will refuse: it cannot tell
+    // this cancellation from one the subscriber made for themselves. An
+    // operator who is not told finds out by pressing Reinstate and watching
+    // nothing happen.
+    const said = billingSentence({
+      scheduled: true,
+      endsAt: '2026-10-01T00:00:00.000Z',
+      restorable: false,
+    });
+    assert.match(said, /set to end/i, 'dropped the part that is still true');
+    assert.match(said, /Reinstating will not undo it/i);
+    assert.match(said, /Stripe/);
+  });
+
+  it('warns rather than reassures when the answer could not be read', async () => {
+    // The dangerous default. Silence reads as "handled", and the thing not
+    // handled is somebody's money.
+    const said = billingSentence(null);
+    assert.match(said, /not known/i);
+    assert.match(said, /Stripe/);
+    assert.doesNotMatch(said, /not charged again/i);
+  });
+
+  it('sends somebody to Stripe when Stripe could not be asked', async () => {
+    const said = billingSentence({
+      scheduled: false,
+      reason: 'error',
+      error: 'Stripe would not schedule the cancellation.',
+    });
+    assert.match(said, /still being charged/i);
+    assert.doesNotMatch(said, /nothing to stop/i);
+  });
+
+  it('tells an unused invite apart from an account that never paid', async () => {
+    const untaken = billingSentence({
+      scheduled: false,
+      reason: 'never-signed-in',
+    });
+    const unpaid = billingSentence({
+      scheduled: false,
+      reason: 'nothing-to-stop',
+    });
+    assert.notEqual(untaken, unpaid);
+    assert.match(untaken, /Nobody ever signed in/i);
+    assert.match(unpaid, /no live subscription/i);
+  });
+
+  it('says so when this deployment has no Stripe to ask', async () => {
+    const said = billingSentence({ scheduled: false, reason: 'unconfigured' });
+    assert.match(said, /not set up/i);
+    assert.match(said, /yourself/i);
+  });
+
+  it('puts the sentence on the withdrawal an operator just made', async () => {
+    harness({
+      '/api/admin/invites': [{ invites: [] }],
+      '/api/admin/invite/revoke': [
+        {
+          email: 'sam@example.com',
+          revoked: true,
+          billing: { scheduled: true, endsAt: '2026-10-01T00:00:00.000Z' },
+        },
+      ],
+    });
+    const view = await open();
+    await view.type('sam@example.com');
+    await view.press(/^Withdraw$/);
+
+    assert.match(view.text(), /Withdrew sam@example\.com/);
+    assert.match(view.text(), /set to end/i);
   });
 });

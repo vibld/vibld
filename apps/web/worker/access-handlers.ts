@@ -3,6 +3,12 @@
  * invite list.
  */
 import { AccessStore } from './access-store.ts';
+import { BillingStore } from './billing-store.ts';
+import { restoreSubscription, windDownSubscription } from './access-billing.ts';
+import type {
+  SubscriptionRestore,
+  SubscriptionWindDown,
+} from './access-billing.ts';
 import { admitToClerk } from './clerk-waitlist.ts';
 import type { ClerkAdmission } from './clerk-waitlist.ts';
 import {
@@ -26,6 +32,12 @@ export interface AccessEnv {
    * invites, and says that Clerk was not asked.
    */
   CLERK_SECRET_KEY?: string;
+  /**
+   * Stripe's secret key, for winding down a revoked subscriber's billing.
+   * Optional on the same terms: without it a revoke still withdraws access
+   * and says that Stripe was not asked, rather than refusing to revoke.
+   */
+  STRIPE_SECRET_KEY?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -176,7 +188,19 @@ export async function handleInvite(
   // repeat is cheap and it is the retry path.
   const clerk: ClerkAdmission = await admitToClerk(env, email);
 
-  return json({ email, created, reinstated, clerk });
+  // The other half of a reinstatement, and without it the reason given for
+  // cancelling at period end rather than immediately was false: revoking
+  // schedules the subscription to end, and nothing put it back. Asked on
+  // every explicit invite for the same reason Clerk is, and a no-op unless
+  // this deployment has a cancellation of its own to undo.
+  const billing: SubscriptionRestore = await restoreSubscription(
+    env,
+    new AccessStore(env.DB),
+    new BillingStore(env.DB),
+    email,
+  );
+
+  return json({ email, created, reinstated, clerk, billing });
 }
 
 /** Withdraw an invite. Assumes the admin check already ran. */
@@ -191,9 +215,20 @@ export async function handleInviteRevoke(
   if (email === null) {
     return json({ error: 'That does not look like an email address.' }, 400);
   }
-  const revoked = await new AccessStore(env.DB).revoke(
+  const access = new AccessStore(env.DB);
+  const revoked = await access.revoke(email, new Date().toISOString());
+
+  // Asked on every explicit revoke, not only when the row changed. Revoking
+  // an address whose invite was already withdrawn is exactly how an operator
+  // would retry this after it failed, or reach somebody revoked before any
+  // of it existed, and gating on `revoked` would leave both with no way
+  // through but reinstating their access to take it away again.
+  const billing: SubscriptionWindDown = await windDownSubscription(
+    env,
+    access,
+    new BillingStore(env.DB),
     email,
-    new Date().toISOString(),
   );
-  return json({ email, revoked });
+
+  return json({ email, revoked, billing });
 }

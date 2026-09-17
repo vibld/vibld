@@ -88,6 +88,7 @@ import { checkProviderBalances } from './provider-balance.ts';
 import { BillingStore } from './billing-store.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
+  clawBackReferral,
   payReferralIfEarned,
   resumeStrandedPayouts,
 } from './referral-payout.ts';
@@ -1555,6 +1556,32 @@ export default {
           : DEFAULT_QUERY_BUDGET;
       const cleared = (userId: string) =>
         payReferralIfEarned(payout, userId).then(() => undefined);
+      /**
+       * Deliberately not swallowed, which is the opposite of what an earlier
+       * version did and said.
+       *
+       * That version caught the failure and resolved, so `applyStripeEvent`
+       * returned `applied`, the replay marked the event processed, and the
+       * next run skipped it: the comment claiming it would be retried
+       * described something that could not happen. A transient D1 failure
+       * left the credit in place for ever.
+       *
+       * Letting it reject is safe here because `applyChargeReversed` catches
+       * it and answers `unresolved`, which parks the event for the retry
+       * sweep rather than throwing into the replay and holding the floor.
+       */
+      // A dispute names its charge by id and the customer is only on the
+      // charge, so the replay needs the same lookup the webhook path has.
+      const readCharge = (chargeId: string) =>
+        stripe.charges.retrieve(chargeId);
+      const reversed = (
+        userId: string,
+        reason: string,
+        refundedIds: string[],
+      ) =>
+        clawBackReferral(payout, userId, reason, refundedIds).then(
+          () => undefined,
+        );
       ctx.waitUntil(
         // The replay first, and the reconcile after it rather than beside
         // it. The replay applies events in the order Stripe created them
@@ -1571,6 +1598,8 @@ export default {
           undefined,
           undefined,
           replayBudgetFor(budget),
+          reversed,
+          readCharge,
         )
           .then(
             (result) => {
@@ -1603,6 +1632,9 @@ export default {
             retryUnattributedEvents(
               billing,
               retryBatchFor(budget - payoutReserveFor(budget) - reserved),
+              undefined,
+              reversed,
+              readCharge,
             ),
           )
           .then(

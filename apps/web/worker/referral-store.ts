@@ -10,6 +10,21 @@ import {
 import { makeCode, normaliseCode } from './referral.ts';
 
 export interface AttributionRecord {
+  /**
+   * When the payment that funded this referral went back out, or null.
+   *
+   * Set whether or not a payout had happened yet, because "no payout yet" is
+   * not proof that none can still happen: the replay can apply a refund
+   * before the older purchase it belongs to, and a payout can fail between
+   * its grant and its markPaid.
+   */
+  reversedAt?: string | null;
+  /**
+   * Every Stripe id the payment that funded this reward can be recognised
+   * by. Empty when it is not known, which the reversal path treats as
+   * unprovable rather than as permission to reverse.
+   */
+  fundedBy?: string[];
   referredUserId: string;
   referrerUserId: string;
   code: string;
@@ -93,7 +108,7 @@ export class ReferralStore {
     const row = await this.#db
       .prepare(
         `SELECT referred_user_id, referrer_user_id, code, created_at,
-                claimed_at, paid_at, last_attempt_at
+                claimed_at, paid_at, last_attempt_at, reversed_at, funded_by
          FROM referral_attributions WHERE referred_user_id = ?1`,
       )
       .bind(referredUserId)
@@ -105,6 +120,8 @@ export class ReferralStore {
         claimed_at: string | null;
         paid_at: string | null;
         last_attempt_at: string | null;
+        reversed_at: string | null;
+        funded_by: string | null;
       }>();
     if (!row) return undefined;
     return {
@@ -115,7 +132,33 @@ export class ReferralStore {
       claimedAt: row.claimed_at,
       paidAt: row.paid_at,
       lastAttemptAt: row.last_attempt_at,
+      reversedAt: row.reversed_at,
+      fundedBy: row.funded_by ? row.funded_by.split(' ') : [],
     };
+  }
+
+  /**
+   * Record that the payment behind this referral went back out.
+   *
+   * Written whether or not a payout had already happened, which is the whole
+   * point: the replay descends newest pages first, so a refund can arrive
+   * before the purchase that earned the reward, and a payout can fail between
+   * its grant and its `markPaid`. In both cases `paid_at` is NULL while a
+   * payout is still coming, and treating that as "nothing to reverse" let the
+   * reward be paid after its payment had been returned.
+   *
+   * `COALESCE` keeps the first reversal's time rather than moving it on every
+   * redelivery, matching how `claimInvite` treats its own timestamp.
+   */
+  async markReversed(referredUserId: string, at: string): Promise<boolean> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE referral_attributions SET reversed_at = COALESCE(reversed_at, ?2)
+         WHERE referred_user_id = ?1`,
+      )
+      .bind(referredUserId, at)
+      .run();
+    return result.meta.changes > 0;
   }
 
   /**
@@ -237,13 +280,27 @@ export class ReferralStore {
    * redelivered webhook that loses this race is told it lost and grants
    * nothing, rather than reading a stale NULL and paying a second time.
    */
-  async markPaid(referredUserId: string, at: string): Promise<boolean> {
+  async markPaid(
+    referredUserId: string,
+    at: string,
+    /**
+     * Every Stripe id the payment that funded this reward can be recognised
+     * by, space separated. Written in the same statement that settles the
+     * payout, so a row can never be paid without recording what paid for it.
+     *
+     * Empty for a payout whose funding payment is not known, which the
+     * reversal path treats as unprovable and leaves alone.
+     */
+    fundedBy: string[] = [],
+  ): Promise<boolean> {
     const result = await this.#db
       .prepare(
-        `UPDATE referral_attributions SET paid_at = ?2
-         WHERE referred_user_id = ?1 AND paid_at IS NULL`,
+        `UPDATE referral_attributions
+            SET paid_at = ?2, funded_by = NULLIF(?3, '')
+         WHERE referred_user_id = ?1 AND paid_at IS NULL
+           AND reversed_at IS NULL`,
       )
-      .bind(referredUserId, at)
+      .bind(referredUserId, at, fundedBy.join(' '))
       .run();
     return result.meta.changes > 0;
   }

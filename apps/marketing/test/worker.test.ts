@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, mock } from 'node:test';
 
-import worker from '../worker/index.ts';
+import worker, { canonicalHost } from '../worker/index.ts';
 
 const ENV = {
   RESEND_API_KEY: 're_test_key',
@@ -338,16 +338,25 @@ describe('preview deployments', () => {
     );
   });
 
-  it('changes nothing in production, where the flag is unset', async () => {
-    // Production routes pages straight from the asset store and never invokes
-    // this Worker for them, so this branch must stay unreachable there even
-    // if an ASSETS binding exists.
+  it('serves production the same page without the noindex header', async () => {
+    // This used to assert a 404, on the grounds that production never
+    // invoked the Worker for a page at all. That premise is gone:
+    // `run_worker_first` is now true so the www redirect can happen, and
+    // production pages come through this handler and out of the same asset
+    // binding.
+    //
+    // The half of the old assertion that was about the risk rather than the
+    // routing is kept and is the reason this test still exists. Telling
+    // crawlers not to index vibld.com is the one mistake in this file that
+    // would be invisible in every check and fatal to the thing the marketing
+    // site is for.
     const response = await worker.fetch(new Request('https://vibld.com/'), {
       ...ENV,
       ASSETS: assets(),
     });
-    assert.equal(response.status, 404);
+    assert.equal(response.status, 200);
     assert.equal(response.headers.get('x-robots-tag'), null);
+    assert.match(await response.text(), /Vibe\. Build\. Ship\./);
   });
 
   it('still routes the waitlist on a preview rather than serving it as a page', async () => {
@@ -567,5 +576,81 @@ describe('attribution a caller cannot forge', () => {
     assert.ok(hit);
     assert.equal(hit.blobs[1], '/legal/privacy');
     assert.equal(hit.blobs[5], 'launch');
+  });
+});
+
+describe('one canonical hostname', () => {
+  /**
+   * www.vibld.com used to serve the whole site at 200, because
+   * wrangler.jsonc routed only /api/* to this Worker and everything else came
+   * straight from the asset store. Two hostnames serving one product is the
+   * duplicate-content split the canonical tags were written to avoid, and the
+   * canonical tags cannot fix it on their own: they name vibld.com while www
+   * kept answering.
+   */
+  it('sends a www page request to the apex, permanently', async () => {
+    const response = await worker.fetch(
+      new Request('https://www.vibld.com/legal/privacy'),
+      ENV,
+    );
+    assert.equal(response.status, 301);
+    assert.equal(
+      response.headers.get('location'),
+      'https://vibld.com/legal/privacy',
+    );
+  });
+
+  it('keeps the query string, so a campaign link survives the hop', async () => {
+    // A www link in an ad or an email carries the UTM parameters that say
+    // where it came from. Redirecting to the bare path throws that away and
+    // files the visit under nothing.
+    const response = await worker.fetch(
+      new Request('https://www.vibld.com/?utm_source=x&utm_campaign=launch'),
+      ENV,
+    );
+    assert.equal(
+      response.headers.get('location'),
+      'https://vibld.com/?utm_source=x&utm_campaign=launch',
+    );
+  });
+
+  it('does not turn a www form post into a GET', async () => {
+    // 301 and 302 both let a client re-issue a POST as a GET, which for
+    // /api/waitlist means the body is dropped and somebody's signup silently
+    // does not happen. 308 is the same permanent redirect with the method
+    // preserved.
+    const response = await worker.fetch(
+      new Request('https://www.vibld.com/api/waitlist', {
+        method: 'POST',
+        body: new URLSearchParams({ email: 'sam@example.com' }).toString(),
+      }),
+      ENV,
+    );
+    assert.equal(response.status, 308);
+    assert.equal(
+      response.headers.get('location'),
+      'https://vibld.com/api/waitlist',
+    );
+  });
+
+  it('leaves the apex alone', async () => {
+    // The redirect must not fire on the hostname it redirects to, or every
+    // request loops until the browser gives up.
+    const response = await worker.fetch(
+      new Request('https://vibld.com/api/nope'),
+      ENV,
+    );
+    assert.equal(response.status, 404);
+  });
+
+  it('leaves a preview hostname serving itself', async () => {
+    // A reviewer opening the preview must see the preview, not be sent to
+    // production. Only a leading "www." is stripped, so a workers.dev host
+    // is untouched.
+    assert.equal(
+      canonicalHost(new URL('https://vibld-marketing-preview.workers.dev/')),
+      null,
+    );
+    assert.equal(canonicalHost(new URL('https://vibld.com/')), null);
   });
 });

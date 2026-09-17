@@ -12,8 +12,8 @@ const ids = (models: { id: string }[]) => models.map((m) => m.id).sort();
 
 const POLICY = JSON.stringify({
   default: ['deepseek-flash'],
-  users: { 'Chris@Drummond.com': ['claude-opus-5', 'deepseek-v4-pro'] },
-  domains: { 'drummond.com': ['deepseek-flash', 'deepseek-v4-pro'] },
+  users: { 'Sam@Example.com': ['claude-opus-5', 'deepseek-v4-pro'] },
+  domains: { 'example.com': ['deepseek-flash', 'deepseek-v4-pro'] },
 });
 
 describe('parseModelPolicy', () => {
@@ -31,7 +31,7 @@ describe('parseModelPolicy', () => {
       assert.deepEqual(parsed.policy.default, ['deepseek-flash']);
       // Identities are compared lower-cased; nobody types their own address
       // the same way twice.
-      assert.ok(parsed.policy.users?.['chris@drummond.com']);
+      assert.ok(parsed.policy.users?.['sam@example.com']);
     }
   });
 
@@ -64,18 +64,18 @@ describe('grantedIds', () => {
   const p = policy?.ok ? policy.policy : null;
 
   it('matches a user exactly, whatever the casing', () => {
-    assert.deepEqual(grantedIds(p!, 'chris@drummond.com'), [
+    assert.deepEqual(grantedIds(p!, 'sam@example.com'), [
       'claude-opus-5',
       'deepseek-v4-pro',
     ]);
-    assert.deepEqual(grantedIds(p!, '  CHRIS@DRUMMOND.COM '), [
+    assert.deepEqual(grantedIds(p!, '  SAM@EXAMPLE.COM '), [
       'claude-opus-5',
       'deepseek-v4-pro',
     ]);
   });
 
   it('falls to the domain when no user matches', () => {
-    assert.deepEqual(grantedIds(p!, 'someone@drummond.com'), [
+    assert.deepEqual(grantedIds(p!, 'someone@example.com'), [
       'deepseek-flash',
       'deepseek-v4-pro',
     ]);
@@ -84,11 +84,11 @@ describe('grantedIds', () => {
   it('prefers the user rule over the domain rule', () => {
     // Otherwise a domain grant would silently widen a named person's access.
     assert.equal(
-      grantedIds(p!, 'chris@drummond.com').includes('claude-opus-5'),
+      grantedIds(p!, 'sam@example.com').includes('claude-opus-5'),
       true,
     );
     assert.equal(
-      grantedIds(p!, 'someone@drummond.com').includes('claude-opus-5'),
+      grantedIds(p!, 'someone@example.com').includes('claude-opus-5'),
       false,
     );
   });
@@ -123,7 +123,7 @@ describe('allowedModels', () => {
 
   it('grants only what the policy names', () => {
     const parsed = parseModelPolicy(POLICY);
-    assert.deepEqual(ids(allowedModels(parsed, 'chris@drummond.com', ALL)), [
+    assert.deepEqual(ids(allowedModels(parsed, 'sam@example.com', ALL)), [
       'claude-opus-5',
       'deepseek-v4-pro',
     ]);
@@ -154,7 +154,7 @@ describe('allowedModels', () => {
     // Failing to nothing would take a working product down. Cheapest does
     // neither, which is the same safe direction the spend ceiling follows.
     const broken = parseModelPolicy('{not json');
-    const allowed = allowedModels(broken, 'chris@drummond.com', ALL);
+    const allowed = allowedModels(broken, 'sam@example.com', ALL);
     assert.equal(allowed.length, 1);
     // Asserted as a property rather than as an id: which model is cheapest
     // moves whenever the catalogue does, and pinning the id turns that into a
@@ -187,7 +187,7 @@ describe('a policy naming a model id that has since been renamed', () => {
   it('resolves the old id rather than filtering the principal to nothing', () => {
     const allowed = allowedModels(
       parseModelPolicy(LEGACY),
-      'chris@drummond.com',
+      'sam@example.com',
       ALL,
     );
     assert.deepEqual(ids(allowed), ['deepseek-flash']);
@@ -199,7 +199,7 @@ describe('a policy naming a model id that has since been renamed', () => {
     });
     const allowed = allowedModels(
       parseModelPolicy(mixed),
-      'chris@drummond.com',
+      'sam@example.com',
       ALL,
     );
     assert.deepEqual(ids(allowed), ['claude-opus-5', 'deepseek-flash']);
@@ -212,7 +212,7 @@ describe('a policy naming a model id that has since been renamed', () => {
     const bogus = JSON.stringify({ default: ['gpt-9-imaginary'] });
     const allowed = allowedModels(
       parseModelPolicy(bogus),
-      'chris@drummond.com',
+      'sam@example.com',
       ALL,
     );
     assert.deepEqual(ids(allowed), []);

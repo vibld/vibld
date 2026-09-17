@@ -2,7 +2,6 @@
 
 - Status: Accepted
 - Date: 2026-09-06
-- Decision owner: Chris Brock
 - Approval: D4(b), D5(b), D6(c), D7(b), D30(a)
 - Refines: ADR-0003 and ADR-0004
 

@@ -98,7 +98,7 @@ DNS records this repository cannot add on its own. Until that domain is
 verified, a signup is captured immediately -- single opt-in -- rather than
 blocked on a feature with an unmet dependency.
 
-## What only Chris can do
+## Manual setup steps
 
 - **Register a DMCA agent** with the U.S. Copyright Office
   (`https://dmca.copyright.gov/osp/`, ~$6). The Terms already publish the

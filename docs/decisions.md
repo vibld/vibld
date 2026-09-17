@@ -1,6 +1,6 @@
 # Accepted product and architecture decisions
 
-Decision owner: Chris Brock. Accepted: 2026-09-06.
+Accepted: 2026-09-06.
 
 This register records the choices approved during the Phase 0 review. Letters retain their conversation identifiers; the descriptions make each choice usable without that conversation. D16(d) was the additional hybrid recommendation. These are approved requirements, not claims of implemented capabilities.
 
@@ -41,7 +41,7 @@ The [charter](../VIBLD.md), [roadmap](../ROADMAP.md), and [ADRs](adr/README.md) 
 
 ## Launch decisions (accepted 2026-09-09)
 
-Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-decisions.md`](launch-decisions.md) (PR #70). IDs retain that document's identifiers; full rationale for each lives there, not repeated here. L1 and L24 amend D30 -- D23 is untouched by both. Four items moved off the recommendation in that document; each is marked below.
+Accepted 2026-09-09 (PR #70). L1 and L24 amend D30 -- D23 is untouched by both.
 
 | ID   | Choice         | Accepted direction                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ---- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -60,7 +60,7 @@ Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-de
 | L13  | a              | Stripe webhooks mirror subscription state into our database; a nightly reconcile against Stripe corrects drift.                                                                                                                                                                                                                                                                                                                              |
 | L14  | a              | Vibld owns the Clerk-user-id-to-Stripe-customer mapping via `client_reference_id` and customer metadata.                                                                                                                                                                                                                                                                                                                                     |
 | L15  | **b**          | Stripe Tax stays off at launch; revisit at volume. _(moved off recommendation -- recommended turning it on from the first invoice)_                                                                                                                                                                                                                                                                                                          |
-| L16  | --             | Entity: Chris Brock LLC. Public mailing address and mailbox list recorded below.                                                                                                                                                                                                                                                                                                                                                             |
+| L16  | --             | Entity and public mailing address recorded in the site's legal pages.                                                                                                                                                                                                                                                                                                                                                                        |
 | L17  | a              | Two Resend sending domains -- `notifications.vibld.com` transactional, `mail.vibld.com` marketing -- kept on separate reputations.                                                                                                                                                                                                                                                                                                           |
 | L18  | a              | Double opt-in on the waitlist and any marketing list.                                                                                                                                                                                                                                                                                                                                                                                        |
 | L19  | a              | DMARC starts `p=none` with reporting, moves to `p=quarantine` after two clean weeks, then `p=reject`.                                                                                                                                                                                                                                                                                                                                        |
@@ -73,13 +73,13 @@ Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-de
 | L24  | a              | Cloudflare D1 for the control plane, R2 for project content. D23 (Supabase for generated apps) is untouched. Amends D30's database half.                                                                                                                                                                                                                                                                                                     |
 | L25  | a              | R2 for project content, checkpoints and export archives.                                                                                                                                                                                                                                                                                                                                                                                     |
 | L26  | a              | Cloudflare Workflows for durable generation, landing in the same change as sandboxes.                                                                                                                                                                                                                                                                                                                                                        |
-| L27  | --             | Paid infrastructure approved per the list recorded below -- fixed floor ≈ $5/mo plus one domain.                                                                                                                                                                                                                                                                                                                                             |
+| L27  | --             | Paid infrastructure approved per the list recorded below.                                                                                                                                                                                                                                                                                                                                                                                    |
 | L28  | a              | No row-level security on the control plane; one enforced authorisation choke point plus a test that no query path bypasses it. RLS is mandatory in the generated-app Supabase template, and generation is refused when it is off there.                                                                                                                                                                                                      |
 | L29  | --             | Turnstile, a per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, and a new account-wide daily ceiling all ship before Access comes off.                                                                                                                                                                                                                                                                        |
 | L30  | a              | Stripe, Clerk (Svix) and the GitHub App webhooks are all signature-verified with a replay window, rejected before the body is parsed.                                                                                                                                                                                                                                                                                                        |
 | L31  | a              | No BYOK storage in the hosted product until a credential vault exists. _(Deployment tokens for L40's auto-publish flow are a separate question -- see "Reopened" below; they are not covered by this line.)_                                                                                                                                                                                                                                 |
 | L32  | --             | Project content purged 30 days after account deletion; audit log kept 12 months with the user id tombstoned.                                                                                                                                                                                                                                                                                                                                 |
-| L33  | **b**          | Chris runs DAST/SAST and other security/pentest scans directly, and stands up a trust centre on Keel GRC. _(moved off recommendation -- recommended no compliance work at alpha)_                                                                                                                                                                                                                                                            |
+| L33  | **b**          | Security scanning is run directly, and a trust centre is stood up separately.                                                                                                                                                                                                                                                                                                                                                                |
 | L34  | a              | Hosted model access runs on one shared platform key per provider, gated by our own credit ledger.                                                                                                                                                                                                                                                                                                                                            |
 | L35  | a              | One credit = 1¢ of model spend; the user sees a plain "generations remaining" for the model they chose.                                                                                                                                                                                                                                                                                                                                      |
 | L36  | --             | Free $0/$1 spend, Build $29/$10, Ship $99/$40, top-up $20/$8 expiring 12 months. Recorded in full below.                                                                                                                                                                                                                                                                                                                                     |
@@ -111,7 +111,7 @@ Decision owner: Chris Brock. Accepted 2026-09-09 in response to [`docs/launch-de
 | Concurrent previews per user   | 1                                                        |
 | Concurrent previews, all users | 25, then queued (not rejected)                           |
 | Preview domain                 | `vibld-preview.dev`                                      |
-| Legal entity                   | Chris Brock LLC                                          |
+| Legal entity                   | Recorded in the site's legal pages                       |
 | Public mailing address         | 285 W Wieuca Rd NE STE 62715, Atlanta, GA 30342          |
 | Data retention after deletion  | project content 30 days; audit log 12 months, tombstoned |
 | Free tier                      | $0 -- $1/mo model spend                                  |
@@ -137,7 +137,7 @@ ever turned off, GA4 silently counts only the first view of a visit. Check it
 at https://analytics.google.com/analytics/web/#/a/p/admin/streams, under the
 web stream's Enhanced measurement.
 
-**Decided 2026-09-16 (Chris):** a consent banner. GA4 is not loaded at all
+**Decided 2026-09-16:** a consent banner. GA4 is not loaded at all
 until the visitor agrees: no script is requested from Google, so nothing about
 a visit reaches them. Consent Mode v2 alone was the first attempt and was
 wrong for this site, because under denied consent gtag.js is still fetched and
@@ -179,7 +179,7 @@ to be running.
 Two origins serving the same pages is the root of that, and the site already
 names `vibld.com` as canonical in its metadata while answering on both. A
 redirect would remove the class of problem rather than managing it, and is
-Chris's call rather than a change to make inside an analytics PR.
+a product decision rather than a change to make inside an analytics PR.
 
 **Only production is measured.** `SITE.analyticsHosts` lists the two hostnames
 that report to the property. The measurement id is a constant, so before this
@@ -205,7 +205,7 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
-### Resolved 2026-09-16 (Chris, asked directly)
+### Resolved 2026-09-16
 
 **Referral reward: credit to both sides, paid on the referred account's first
 purchase.** Not on signup. Nothing pays out until a card clears, which funds
@@ -217,7 +217,7 @@ signups never convert. Both sides earn so that the person clicking the link
 has a reason to prefer it over signing up directly.
 
 **Guides: two separate tracks, hosted and self-hosted.** Each readable start
-to finish without asides. Chris chose this over one set with callouts knowing
+to finish without asides. Chosen over one set with callouts, knowing
 it roughly doubles the writing and that the two will drift unless something
 enforces parity. Whatever is built should make drift visible rather than rely
 on remembering, the same way the prerender tests hold the legal copy to the
@@ -240,15 +240,62 @@ oddly; that is the known cost of the choice rather than a reason to make
 exceptions, and exceptions are what produced the inconsistency in the first
 place.
 
-**Connector menu: a framework, not a settings page.** Chris chose this with
+**Connector menu: a framework, not a settings page.** Chosen with
 the reservation stated: a framework built before its second real member
 usually fits only its first, and GitHub is currently the only integration with
 an auth flow. Recorded so the next reader knows it was a decision taken with
 that risk in view rather than an oversight.
 
+**Referral clawback: deduct on a refund or dispute, floored at zero.** The $5
+comes back off the referrer's balance when the payment that earned it is
+refunded or disputed. If they have already spent it the balance stops at zero
+rather than going negative, so the loss is capped at what they took and
+nobody is shown a debt this product has no way to collect. The cost is that a
+referrer who spends the credit immediately keeps it, which is the deliberate
+half of the choice: recovering that dollar is worth less than never telling
+somebody they owe money.
+
+**Revoking an invite cancels a live subscription at period end.** Today
+revoking closes the door and leaves Stripe billing, so somebody can be
+charged for a month they cannot sign in to. Cancelling at period end is the
+only option that is wrong in neither direction: they keep what they already
+paid for, nothing is charged for time they cannot use, and there is no refund
+to process. Reinstating before the period ends puts it back, and that is a
+path that had to be built rather than a property of the flag: the first
+version of this scheduled the cancellation and nothing ever cleared it, so
+re-inviting somebody restored their access and Stripe ended their
+subscription anyway. Restoring only ever clears a cancellation this
+deployment made, so a subscriber who cancelled for themselves keeps their
+cancellation.
+
+**The parked-payment queue: attribute, or dismiss as never ours.** An admin
+can apply a parked payment to an account by email, which pays out any referral
+it earns, or mark it permanently unattributable (a test payment, a deleted
+account). Both, rather than attribution alone, because a row that can never
+resolve is otherwise retried every night for ever with no way to end it.
+
+**www.vibld.com redirects to the apex, permanently.** One canonical hostname.
+Both hostnames were serving the site, which splits what the canonical tags
+were written to consolidate, and BRAND-01's whole premise is that this name
+needs one unambiguous entity rather than two.
+
+This one has a cost worth recording, because it is not obvious from the
+result. The marketing Worker ran on `/api/*` only, and every page came
+straight from the asset store without invoking it. A redirect can only be
+issued by something the request reaches, and Cloudflare's `_redirects` file
+cannot do domain-level redirects at all (documented, and documented again as
+never applying to Worker-served requests). A second Worker bound to www alone
+would have kept the apex free of invocations, but a custom domain belongs to
+one Worker at a time, so moving it is a step no unattended CI deploy can
+take. So `run_worker_first` is now `true` and every request to this site,
+assets included, runs the Worker. At this site's size that is a rounding
+error against the Workers Paid allowance; at a much larger one it would be
+worth revisiting with a zone-level redirect rule, which needs an API token
+this deployment does not have.
+
 ### Resolved 2026-09-09
 
-**L8 -- preview domain.** `vibld-preview.dev` is purchased and registered on Cloudflare (Chris, 2026-09-09). Confirmed this session has real, live access to that Cloudflare account -- `workers_list` returns `vibld-web-preview` alongside Chris's other projects -- but the Cloudflare Developer Platform connector available here exposes Workers, D1, R2, KV and Hyperdrive, not zone/DNS management, so there is nothing to bind yet from this side. Binding the domain is a `custom_domain` route in `wrangler.jsonc`, the same mechanism already used for `vibld.com` -- that lands when the preview Worker itself is built (item 5 in the build order below), not before, since there's no Worker yet for the domain to route to.
+**L8 -- preview domain.** `vibld-preview.dev` is purchased and registered on Cloudflare (2026-09-09). Binding the domain is a `custom_domain` route in `wrangler.jsonc`, the same mechanism already used for `vibld.com` -- that lands when the preview Worker itself is built (item 5 in the build order below), not before, since there's no Worker yet for the domain to route to.
 
 **L9 -- all-user preview concurrency.** Cap set at 25 concurrent previews across all users (up from the original 10), with the 26th request queued and shown a visible position rather than rejected, per the recommendation.
 

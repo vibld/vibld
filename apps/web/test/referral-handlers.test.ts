@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -10,6 +8,7 @@ import {
 import { BillingStore } from '../worker/billing-store.ts';
 import { ReferralStore } from '../worker/referral-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
 /**
  * The two referral endpoints, against the real tables.
@@ -18,15 +17,12 @@ import { SqliteD1Database } from './fakes/sqlite-d1.ts';
  * whether this account has ever paid: that question is what stops a referral
  * being attached to an account long after its first purchase.
  */
-const SCHEMA = [
-  '0002_billing.sql',
-  '0004_admin_credits.sql',
-  '0006_referrals.sql',
-]
-  .map((name) =>
-    readFileSync(join(import.meta.dirname, '..', 'migrations', name), 'utf8'),
-  )
-  .join('\n');
+// Every migration, not the three this file happens to need. Naming them was
+// a copy of the migration list, and a copy drifts: adding `reversed_at` to
+// referral_attributions broke five tests here that have nothing to do with
+// reversals, because the table they got was a version production never has.
+// `schemaSql` is the fix the rest of the suite already uses.
+const SCHEMA = schemaSql();
 
 const PRINCIPAL = { userId: 'user_new', policyIdentity: 'new@example.com' };
 

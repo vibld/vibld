@@ -54,7 +54,7 @@ const noToken = async () => null;
 function record(over: Partial<InviteRecord> = {}): InviteRecord {
   return {
     email: 'a@example.com',
-    invitedByEmail: 'chris@drummond.com',
+    invitedByEmail: 'sam@example.com',
     invitedAt: '2026-09-16T00:00:00.000Z',
     redeemedByUserId: null,
     redeemedAt: null,

@@ -6,7 +6,7 @@
  * apps/web already binds for billing and generation state (ADR-0005's "R2
  * behind storage contracts" already covers build artifacts) -- one more
  * control-plane table and one more R2 prefix, not a second database or
- * bucket for Chris to provision. wrangler.jsonc binds the identical
+ * bucket for an operator to provision. wrangler.jsonc binds the identical
  * `database_id`/`bucket_name` apps/web uses; Cloudflare allows the same D1
  * database and R2 bucket to be bound into more than one Worker.
  *

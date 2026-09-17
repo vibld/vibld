@@ -21,13 +21,32 @@
     // canonical pointed at /legal/privacy, so every canonical named a URL
     // that redirected.
     "html_handling": "drop-trailing-slash",
-    "run_worker_first": ["/api/*"],
+
+    // Every request, not only /api/*. The Worker issues the www -> apex
+    // redirect (worker/index.ts's canonicalHost), and it can only redirect a
+    // request that reaches it. With ["/api/*"] a page request was served
+    // from the asset store before this script ran, so www answered 200 with
+    // the site and there were two hostnames serving one product.
+    //
+    // This costs a Worker invocation per request, including assets. That is
+    // the price of the redirect, and the alternatives were worse: the
+    // _redirects file cannot do domain-level redirects (Cloudflare documents
+    // that, and documents that its rules never apply to Worker-served
+    // requests), and a second Worker on www.vibld.com alone means moving a
+    // custom domain between Workers, which is not something a CI deploy can
+    // do unattended.
+    "run_worker_first": true,
   },
 
   // vibld.com and www both point at this Worker. There is no DNS step
   // beyond this file: Cloudflare creates the records for an active zone it
   // already controls the first time this deploys. See docs/decisions.md,
   // L20/L21.
+  //
+  // www stays routed here deliberately, now that it redirects. Dropping the
+  // route would make www.vibld.com fail to resolve, which answers nobody who
+  // types it out of habit; keeping it means one 301 and they land on the
+  // page they asked for.
   "routes": [
     { "pattern": "vibld.com", "custom_domain": true },
     { "pattern": "www.vibld.com", "custom_domain": true },

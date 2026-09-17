@@ -46,7 +46,59 @@ function metadataUserId(metadata: Stripe.Metadata | null): string | undefined {
  * the kind of thing that must never be able to fail a webhook delivery: see
  * where it is invoked below.
  */
-export type OnPurchaseCleared = (userId: string) => Promise<void>;
+export type OnPurchaseCleared = (
+  userId: string,
+  /**
+   * Every Stripe id this payment can be recognised by later.
+   *
+   * Carried so a referral reward can be tied to the purchase that funded it.
+   * Without it the reversal path knew only the account, so refunding an
+   * unrelated later top-up took back a reward the original purchase still
+   * funds. More than one because a charge names itself differently
+   * depending on how it was made: a subscription charge carries its invoice,
+   * a Checkout carries its payment intent, and neither carries the other.
+   */
+  fundedBy: string[],
+) => Promise<void>;
+
+/**
+ * Called when money that had already arrived goes back out: a refund, or a
+ * dispute this deployment lost.
+ *
+ * A separate callback rather than a branch inside this module, for the same
+ * reason `OnPurchaseCleared` is one. What a reversal means for a referral is
+ * the referral module's rule, and importing it here would put a payout
+ * decision inside the file that reads Stripe's envelopes.
+ *
+ * `reason` is carried through to the ledger note, so a negative row in
+ * somebody's credit history says which of the two happened rather than
+ * appearing as an unexplained deduction.
+ */
+export type OnPurchaseReversed = (
+  userId: string,
+  reason: string,
+  /**
+   * Every Stripe id the refunded charge can be recognised by, so the reward
+   * taken back is the one this payment earned. See `clawBackReferral`.
+   */
+  refundedIds: string[],
+) => Promise<void>;
+
+/**
+ * Fetch a charge Stripe referred to by id alone.
+ *
+ * `charge.dispute.closed` carries `charge` as a bare id in the ordinary
+ * case, and a dispute is the one reversal whose customer cannot be read off
+ * the event. Without this the whole dispute path was dead: the handler
+ * answered `unresolved`, the webhook marked the event processed anyway, and
+ * a replayed one parked for ever because nothing would ever expand it. Lost
+ * disputes never clawed anything back.
+ *
+ * Injected rather than reached for, because this module reads Stripe's
+ * envelopes and does not call Stripe. The caller has a client; this is the
+ * one question it has to ask on this module's behalf.
+ */
+export type ResolveCharge = (chargeId: string) => Promise<Stripe.Charge>;
 
 /**
  * Whether applying an event actually wrote what the event was about.
@@ -143,14 +195,20 @@ async function applyCheckoutSessionCompleted(
   // not do is earn a referral, which is why the amount is recorded and
   // `announceIfPaid` reads it rather than the fact that a top-up row exists.
   const amountUsdCents = session.amount_total ?? 0;
+  // The ids computed once and used twice: recorded against the payment, and
+  // handed to the payout hook. A Checkout is recorded under its session id,
+  // which a refund never names, so without the aliases stored here a reward
+  // this session funds can only ever be reversed by the event that paid it.
+  const settledBy = idsOf(session.id, session.payment_intent);
   await store.recordPayment(
     session.id,
     userId,
     amountUsdCents,
     new Date().toISOString(),
+    settledBy,
   );
 
-  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
+  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
   return 'applied';
 }
 
@@ -175,6 +233,7 @@ async function announceIfPaid(
   hook: OnPurchaseCleared | undefined,
   userId: string,
   amountUsdCents: number,
+  fundedBy: string[] = [],
 ): Promise<void> {
   // The gate, in the one place every announce goes through. A settlement
   // that took nothing is not a purchase, however settled Stripe considers
@@ -183,7 +242,7 @@ async function announceIfPaid(
   // to disagree about who has paid.
   if (amountUsdCents <= 0) return;
   if (!hook) return;
-  await hook(userId);
+  await hook(userId, fundedBy);
 }
 
 /**
@@ -351,21 +410,52 @@ async function applyInvoicePaid(
   // payment could go unrecorded for ever.
   //
   const amountUsdCents = stripeCollectedUsdCents(invoice);
+  const settledBy = idsOf(
+    invoice.id,
+    (invoice as unknown as { payment_intent?: unknown }).payment_intent,
+    (invoice as unknown as { charge?: unknown }).charge,
+  );
   await store.recordPayment(
     invoice.id ?? `invoice-unknown-${userId}`,
     userId,
     amountUsdCents,
     new Date().toISOString(),
+    settledBy,
   );
 
-  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents);
+  await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
   return 'applied';
+}
+
+/**
+ * The ids among these that are usable, as strings.
+ *
+ * Stripe hands an expandable field back as an id, as the expanded object, or
+ * as null, and which one depends on the caller and the API version. Reading
+ * `.id` off a string or a null is how a plain read here becomes a throw in a
+ * handler that has already written a payment row.
+ */
+export function idsOf(...values: unknown[]): string[] {
+  const ids: string[] = [];
+  for (const value of values) {
+    if (typeof value === 'string' && value !== '') ids.push(value);
+    else if (
+      typeof value === 'object' &&
+      value !== null &&
+      typeof (value as { id?: unknown }).id === 'string'
+    ) {
+      ids.push((value as { id: string }).id);
+    }
+  }
+  return ids;
 }
 
 export async function applyStripeEvent(
   store: BillingStore,
   event: Stripe.Event,
   onPurchaseCleared?: OnPurchaseCleared,
+  onPurchaseReversed?: OnPurchaseReversed,
+  resolveCharge?: ResolveCharge,
 ): Promise<EventOutcome> {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -395,6 +485,26 @@ export async function applyStripeEvent(
     case 'invoice.payment_failed':
       // See the module comment: no separate mirror yet, only acknowledged.
       return 'applied';
+    case 'charge.refunded':
+      return await applyChargeReversed(
+        store,
+        event.data.object,
+        'Referral reversed: the payment was refunded.',
+        onPurchaseReversed,
+        resolveCharge,
+      );
+    case 'charge.dispute.closed':
+      // Only a dispute that was lost took the money back. A won dispute
+      // means it stayed, and clawing back on `dispute.created` instead would
+      // mean re-crediting everybody whose dispute this deployment wins.
+      if (event.data.object.status !== 'lost') return 'applied';
+      return await applyChargeReversed(
+        store,
+        event.data.object.charge,
+        'Referral reversed: the dispute was lost.',
+        onPurchaseReversed,
+        resolveCharge,
+      );
     default:
       // Every type here is one this deployment asked Stripe for
       // (billing-handlers.ts registers the webhook's `enabled_events`), so
@@ -407,4 +517,87 @@ export async function applyStripeEvent(
       // reach this same branch.
       return 'applied';
   }
+}
+
+/**
+ * Money that had arrived has gone back out, so tell the caller whose it was.
+ *
+ * Nothing about the payment row is rewritten here. `recordPayment`'s own
+ * comment already says what it records is what was charged at the time and
+ * not a current balance, and changing that now would move a number three
+ * other places read as "they have paid at some point", which is still true
+ * of somebody who was refunded.
+ *
+ * The one thing that must not survive a reversal is credit handed out
+ * because the money arrived, and that is the callback's business.
+ *
+ * `unresolved` rather than `applied` when the customer cannot be mapped to
+ * an account: a refund read before the `checkout.session.completed` that
+ * creates the mapping has nobody to attribute to yet, and will have once
+ * that older event lands. Reporting it applied loses the reversal for good.
+ */
+async function applyChargeReversed(
+  store: BillingStore,
+  charge: Stripe.Charge | string,
+  reason: string,
+  onPurchaseReversed?: OnPurchaseReversed,
+  resolveCharge?: ResolveCharge,
+): Promise<EventOutcome> {
+  // A dispute carries its charge as a bare id in the ordinary case, and the
+  // customer is only on the charge. This module does not call Stripe, so the
+  // caller supplies the one lookup; without it the dispute path answered
+  // `unresolved` for every real delivery and nothing ever clawed back.
+  let resolved: Stripe.Charge;
+  if (typeof charge === 'string') {
+    if (!resolveCharge) {
+      console.error('stripe reversal with no way to read the charge', charge);
+      return 'unresolved';
+    }
+    try {
+      resolved = await resolveCharge(charge);
+    } catch (error) {
+      // Not `applied`: Stripe was asked and could not answer, so this is
+      // still owed. Marking it done here is how a lost dispute keeps its
+      // reward for ever.
+      console.error('stripe reversal could not read the charge', charge, error);
+      return 'unresolved';
+    }
+  } else {
+    resolved = charge;
+  }
+
+  const stripeCustomerId = customerId(resolved.customer);
+  if (!stripeCustomerId) {
+    console.error('stripe reversal with no customer', resolved.id);
+    return 'unresolved';
+  }
+
+  const userId = await store.findUserIdForCustomer(stripeCustomerId);
+  if (!userId) {
+    console.error('stripe reversal for an unmapped customer', resolved.id);
+    return 'unresolved';
+  }
+
+  if (onPurchaseReversed) {
+    try {
+      await onPurchaseReversed(
+        userId,
+        reason,
+        idsOf(
+          resolved.id,
+          (resolved as unknown as { invoice?: unknown }).invoice,
+          (resolved as unknown as { payment_intent?: unknown }).payment_intent,
+        ),
+      );
+    } catch (error) {
+      // Not `applied`. The clawback is the entire work of this event, so an
+      // event marked done on a failed one is credit this deployment paid for
+      // with nothing left to come back to it. `unresolved` is what the
+      // callers already have machinery for: the replay parks it and retries,
+      // and the webhook answers retryably rather than 200.
+      console.error('stripe reversal could not be applied', userId, error);
+      return 'unresolved';
+    }
+  }
+  return 'applied';
 }

@@ -418,7 +418,7 @@ Cloudflare Access is off. The Clerk instance is live: Frontend API at
 points to prohibited IP" error before Clerk ever sees the request), with
 `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` set on the `preview`
 environment, the custom session claim configured, and **Waitlist** sign-up
-mode enabled (L6) so sign-in stays restricted to people Chris approves.
+mode enabled (L6) so sign-in stays restricted to approved accounts.
 
 Two pieces, wired together:
 
@@ -458,7 +458,7 @@ a live deployment now means generation is unreachable, not merely
 unauthenticated, which is the fail-closed behaviour `isConfigured` in
 `worker/index.ts` requires.
 
-**What only Chris can do (one-time, dashboard-only):**
+**Manual setup steps (one-time, dashboard-only):**
 
 - **Remove the Cloudflare Access application** that used to gate this
   Worker's route: <https://one.dash.cloudflare.com/> → **Access →
@@ -666,7 +666,36 @@ Dashboard needs no code change, only the amount to change.
   `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
   `invoice.payment_failed` (the last is acknowledged but not separately
   mirrored -- `customer.subscription.updated` already carries the status
-  change it implies).
+  change it implies), `charge.refunded` and `charge.dispute.closed`.
+
+  **The last two have to be ticked on the endpoint, or refunds only ever
+  reach this deployment through the nightly replay.** They are what takes a
+  referral reward back when the payment that funded it goes out again, and
+  an endpoint configured from an older copy of this list will never deliver
+  either. Add them at
+  <https://dashboard.stripe.com/webhooks> on the existing endpoint.
+  `charge.dispute.closed` is acted on only when the dispute was lost: a won
+  dispute means the money stayed.
+
+  **A refund takes a reward back only when it is demonstrably the payment
+  that earned it.** The ids a payment can be recognised by are recorded on
+  the attribution when the payout settles (`funded_by`), and the refunded
+  charge has to name one of them. A refund that names none of them, which
+  includes every reward paid before this was recorded, leaves the reward
+  standing and writes one line:
+
+  ```
+  {"event":"referral.reversal_unmatched","referredUserId":...,
+   "refundedIds":[...],"knownFunding":[...]}
+  ```
+
+  Visible in `wrangler tail` and in this Worker's logs at
+  <https://dash.cloudflare.com/?to=/:account/workers/services/view/vibld-web-preview/production/logs>
+  (`vibld-web-preview` is the deployed service name, from `wrangler.jsonc`).
+  The direction is deliberate: refunding an unrelated later top-up must not
+  take back a reward the original purchase still funds, so an unprovable
+  match costs the abuse case rather than taking credit from somebody
+  wrongly.
 
   `invoice.paid` **is** acted on now: it carries `amount_paid`, so it is the
   event that says how much money moved, and it is the only one that
@@ -766,7 +795,7 @@ so it has to be added here too) to the `preview` environment; the deploy
 workflow syncs it the same way it already syncs every other optional
 secret on this page. Actually sending also needs `notifications.vibld.com`
 verified in Resend -- apps/marketing's own README already tracks that as
-outstanding under its "What only Chris can do."
+outstanding under its "Manual setup steps".
 
 ### What a tier actually buys (docs/decisions.md L35-L39)
 

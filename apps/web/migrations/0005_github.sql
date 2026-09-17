@@ -1,5 +1,5 @@
 -- Which GitHub repository a user's work pushes to (issue #13, docs/decisions
--- L30/L42a, docs/push-and-deploy-plan.md phase 1).
+-- L30/L42a).
 --
 -- Nothing in here is a secret, which is the whole reason this table can
 -- exist at all. ADR-0006 separates two credential classes, and the GitHub

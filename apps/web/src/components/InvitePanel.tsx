@@ -5,7 +5,12 @@ import {
   listInvites,
   revokeInvite,
 } from '../access/invite-client.ts';
-import type { ClerkOutcome, InviteRecord } from '../access/invite-client.ts';
+import type {
+  BillingOutcome,
+  ClerkOutcome,
+  InviteRecord,
+  RestoreOutcome,
+} from '../access/invite-client.ts';
 
 /**
  * The invite list, and the two acts that change it.
@@ -31,6 +36,101 @@ import type { ClerkOutcome, InviteRecord } from '../access/invite-client.ts';
  * the invite row did not change. An answer that could not be read is not
  * that, and gets a sentence of its own.
  */
+/**
+ * What happened to a withdrawn person's money, in one sentence.
+ *
+ * Separate from whether their access went, and said next to it, because
+ * revoking used to do only the first and an operator had no way to learn
+ * that the second had not happened. A subscriber who was revoked kept being
+ * charged every month for a product they could no longer sign in to.
+ *
+ * "Ends" rather than "cancelled" throughout: nothing has stopped yet. The
+ * date is the point of the whole decision, so it is the thing the sentence
+ * leads with wherever it is known.
+ */
+/**
+ * What happened to a reinstated person's subscription.
+ *
+ * Only ever says something when there was a cancellation of this
+ * deployment's making to undo. Every other outcome is silent rather than
+ * noise on the ordinary case, which is inviting somebody new.
+ */
+export function restoreSentence(billing: RestoreOutcome | null): string {
+  if (billing === null) return '';
+  if (billing.restored) {
+    return billing.renewsOn
+      ? ` Their subscription was ending and now renews on ${onDay(billing.renewsOn)}.`
+      : ' Their subscription was ending and now renews as before.';
+  }
+  if (billing.reason === 'not-ours') {
+    // They cancelled for themselves. Saying nothing would be wrong here in a
+    // way the other silent outcomes are not: an operator who restores access
+    // and hears nothing will assume the subscription is running again.
+    return ' They had already cancelled their own subscription, which is left as they set it.';
+  }
+  if (billing.reason === 'error') {
+    return ` Stripe could not be asked whether their subscription was ending (${billing.error ?? 'no reason given'}), so check there.`;
+  }
+  // unconfigured, no-invite, never-signed-in and nothing-to-restore all mean
+  // there was nothing of this deployment's to put back, which is the normal
+  // case and not worth a sentence.
+  return '';
+}
+
+export function billingSentence(billing: BillingOutcome | null): string {
+  // Unreadable is not the same as nothing to do. An operator told nothing
+  // concludes the billing was handled.
+  if (billing === null) {
+    return ' What happened to any subscription is not known, so check Stripe before assuming the charges stopped.';
+  }
+  if (billing.scheduled) {
+    const ending = billing.endsAt
+      ? ` Their subscription is set to end on ${onDay(billing.endsAt)}, and they are not charged again.`
+      : ' Their subscription is set to end when the period they paid for does, and they are not charged again.';
+    // The cancellation landed at Stripe and the record of having made it did
+    // not, so reinstating them here will refuse rather than undo it. Said now
+    // rather than discovered by an operator whose Reinstate button does
+    // nothing weeks later.
+    return billing.restorable
+      ? ending
+      : `${ending} Reinstating will not undo it, because the record of scheduling it could not be written; clear it in Stripe if they come back.`;
+  }
+  if (billing.reason === 'already-ending') {
+    return billing.endsAt
+      ? ` Their subscription was already ending on ${onDay(billing.endsAt)}.`
+      : ' Their subscription was already set to end.';
+  }
+  if (billing.reason === 'nothing-to-stop') {
+    return ' They had no live subscription, so there was nothing to stop.';
+  }
+  if (billing.reason === 'no-invite') {
+    // Distinct from the one below on purpose. There is no row for this
+    // address, so saying nobody signed in with the invite would be a fact
+    // about a person who does not exist, which is what a mistyped address
+    // in the free-form control produces.
+    return '';
+  }
+  if (billing.reason === 'never-signed-in') {
+    return ' Nobody ever signed in with that invite, so there is no billing.';
+  }
+  if (billing.reason === 'unconfigured') {
+    return ' Stripe is not set up on this deployment, so cancel any subscription there yourself.';
+  }
+  return ` Stripe could not be asked (${billing.error ?? 'no reason given'}), so check there whether they are still being charged.`;
+}
+
+/** A date an operator can read, falling back to the raw value it cannot. */
+function onDay(iso: string): string {
+  const when = new Date(iso);
+  return Number.isNaN(when.getTime())
+    ? iso
+    : when.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+}
+
 export function clerkSentence(clerk: ClerkOutcome | null): string {
   // No readable answer is a gap, not a silence. A response that does not
   // mention Clerk is one this deployment cannot vouch for, and an operator
@@ -125,7 +225,9 @@ export function InvitePanel() {
       : result.reinstated
         ? `Put ${result.email}'s withdrawn invite back.`
         : `${result.email} was already invited. Nothing changed.`;
-    setNote(`${here}${clerkSentence(result.clerk)}`);
+    setNote(
+      `${here}${clerkSentence(result.clerk)}${restoreSentence(result.billing)}`,
+    );
     if (result.created || result.reinstated) {
       setVersion((n) => n + 1);
       // Compared against the value now, not the one this closure was born
@@ -146,11 +248,10 @@ export function InvitePanel() {
       setFailure(result.error);
       return;
     }
-    setNote(
-      result.revoked
-        ? `Withdrew ${result.email}'s invite.`
-        : `${result.email} had no invite to withdraw.`,
-    );
+    const here = result.revoked
+      ? `Withdrew ${result.email}'s invite.`
+      : `${result.email} had no invite to withdraw.`;
+    setNote(`${here}${billingSentence(result.billing)}`);
     if (result.revoked) setVersion((n) => n + 1);
   }
 

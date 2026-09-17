@@ -189,6 +189,10 @@ describe('the invite endpoints', () => {
       // the panel cannot tell apart from a deployment that did approve
       // somebody, so the silence has to be deliberate and named.
       clerk: { admitted: false, reason: 'unconfigured' },
+      // Named for the same reason `clerk` is: a response that omits it is
+      // one the panel cannot tell apart from a deployment that did put a
+      // scheduled cancellation back.
+      billing: { restored: false, reason: 'unconfigured' },
     });
 
     const again = (await (
@@ -317,5 +321,94 @@ describe('approving in Clerk from the invite route', () => {
     } finally {
       clerk.restore();
     }
+  });
+});
+
+describe('stopping the billing from the revoke route', () => {
+  function post(body: unknown): Request {
+    return new Request('https://app.vibld.com/api/admin/invite/revoke', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('says what happened to their money, not only their access', async () => {
+    // Revoking used to answer with the row alone, so an operator had no way
+    // to learn that a subscriber they had just cut off was still being
+    // charged every month for a product they could no longer sign in to.
+    const env = newEnv();
+    await new AccessStore(env.DB).invite('sam@example.com', 'admin@vibld.com');
+
+    const body = (await (
+      await handleInviteRevoke(post({ email: 'sam@example.com' }), env)
+    ).json()) as Record<string, unknown>;
+
+    assert.equal(body.revoked, true);
+    // No Stripe key in this env, and the route says so rather than omitting
+    // the field. A response that does not mention billing is one the panel
+    // cannot tell apart from a deployment that did stop the charges.
+    assert.deepEqual(body.billing, {
+      scheduled: false,
+      reason: 'unconfigured',
+    });
+  });
+
+  it('asks again for an address that was already withdrawn', async () => {
+    // The retry path, and without it there is none. Every invite revoked
+    // before this shipped, and every one whose first attempt failed or ran
+    // with no Stripe key configured, could only be dealt with by reinstating
+    // their access in order to take it away again.
+    const env = newEnv();
+    await new AccessStore(env.DB).invite('sam@example.com', 'admin@vibld.com');
+    await handleInviteRevoke(post({ email: 'sam@example.com' }), env);
+
+    const again = (await (
+      await handleInviteRevoke(post({ email: 'sam@example.com' }), env)
+    ).json()) as Record<string, unknown>;
+
+    assert.equal(
+      again.revoked,
+      false,
+      'the row changed again, so this proves nothing',
+    );
+    assert.deepEqual(
+      again.billing,
+      { scheduled: false, reason: 'unconfigured' },
+      'never asked about the billing, so a revoked subscriber can never be stopped',
+    );
+  });
+});
+
+describe('putting the billing back from the invite route', () => {
+  function post(body: unknown): Request {
+    return new Request('https://app.vibld.com/api/admin/invite', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('says what happened to a scheduled cancellation', async () => {
+    // Without this the reason for cancelling at period end rather than
+    // immediately was false. Revoking schedules the subscription to end, and
+    // re-inviting cleared revoked_at, asked Clerk, and left the cancellation
+    // standing, so Stripe ended a subscription belonging to somebody whose
+    // access had been restored.
+    const env = newEnv();
+    const body = (await (
+      await handleInvite(
+        post({ email: 'sam@example.com' }),
+        env,
+        'admin@vibld.com',
+      )
+    ).json()) as Record<string, unknown>;
+
+    assert.equal(body.created, true);
+    // No Stripe key in this env, and the route says so rather than omitting
+    // the field. A response that does not mention billing is one the panel
+    // cannot tell apart from a deployment that did put the subscription back.
+    assert.deepEqual(body.billing, {
+      restored: false,
+      reason: 'unconfigured',
+    });
   });
 });
