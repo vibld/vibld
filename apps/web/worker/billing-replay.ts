@@ -492,11 +492,14 @@ export function parkedReserveFor(queryBudget: number): number {
 }
 
 /**
- * D1 queries `payReferralIfEarned` costs at its worst, when a caller
- * already knows what funded the reward.
+ * D1 queries `payReferralIfEarned` costs at its worst.
  *
- * Five to settle one: the attribution read, the slot claim, a credit grant
- * for each side, then the paid mark.
+ * Six to settle one: the attribution read, the slot claim, a credit grant
+ * for each side, the `firstClearedPaymentIds` lookup, then the paid mark.
+ * The lookup is counted because both callers budgeted here pay without an
+ * event in hand and always spend it. Measuring the other path, with
+ * `fundedBy` supplied, was the test agreeing with a caller that does not
+ * exist and left this short by exactly that query.
  *
  * And six more when it loses the race to a refund, which is the half this
  * file kept leaving out. `markPaid` carries `AND reversed_at IS NULL`, so a
@@ -510,13 +513,11 @@ export function parkedReserveFor(queryBudget: number): number {
  * counting store and asserts the measured cost against it. A bound that
  * holds only when nothing goes wrong is not a bound.
  */
-export const MAX_QUERIES_PER_REFERRAL_PAYOUT = 11;
+export const MAX_QUERIES_PER_REFERRAL_PAYOUT = 12;
 
 /**
  * D1 queries one stranded referral payout costs at its worst: the attempt
- * stamp, then the payout itself. `resumeStrandedPayouts` knows what funded
- * the reward, so the payout does not spend the `firstClearedPaymentIds`
- * read.
+ * stamp, then the payout itself.
  */
 export const MAX_QUERIES_PER_PAYOUT_ROW = 1 + MAX_QUERIES_PER_REFERRAL_PAYOUT;
 
@@ -566,12 +567,11 @@ export function payoutReserveFor(queryBudget: number): number {
  * none, the corrected upsert, the cleared-payment check, and the recovered
  * invoice's payment record.
  *
- * Plus the payout behind it, and one more than a stranded payout costs: the
- * reconcile pays without an event in hand, so it also spends the
- * `firstClearedPaymentIds` read that `resumeStrandedPayouts` skips.
+ * Plus the payout behind it, which the figure above already counts in
+ * full: it is measured on the no-`fundedBy` path, which is the one this
+ * caller and `resumeStrandedPayouts` both take.
  */
-export const MAX_QUERIES_PER_SUBSCRIPTION =
-  5 + MAX_QUERIES_PER_REFERRAL_PAYOUT + 1;
+export const MAX_QUERIES_PER_SUBSCRIPTION = 5 + MAX_QUERIES_PER_REFERRAL_PAYOUT;
 
 /**
  * What one reconcile run costs before it looks at any subscription: the

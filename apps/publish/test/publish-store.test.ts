@@ -307,6 +307,32 @@ describe('what a slug keeps', () => {
     );
   });
 
+  it('does not fail a publish because the old revisions would not go', async () => {
+    // Retention runs after the promotion has committed. A throw here used
+    // to come back out of `promote`, so the publish answered 500 while the
+    // new revision was live, and the obvious retry made another generation:
+    // a publish reported as failed, twice, that had worked both times.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    for (let n = 1; n <= REVISIONS_KEPT; n += 1) await version(store, n);
+
+    // The fourth promotion is the first with anything to prune.
+    bucket.list = async () => {
+      throw new Error('R2 is having a moment');
+    };
+    const latest = randomUUID();
+    await store.putFiles('acme', latest, [
+      { path: 'index.html', content: '<h1>newest</h1>' },
+    ]);
+
+    assert.equal(await store.promote('acme', latest), true);
+    assert.deepEqual(await store.resolveSlug('acme'), {
+      projectId: 'proj-1',
+      userId: 'user-1',
+      generation: latest,
+    });
+  });
+
   it('counts revisions per slug, not across the bucket', async () => {
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
@@ -919,11 +945,13 @@ describe('holding a site an operator did not publish', () => {
     const site = await store.siteBySlug('acme');
     assert.equal(site?.state, 'held', 'a stale release lifted a newer hold');
     assert.equal(site?.heldReason, 'report 42, worse');
-    // And it is in the record, because somebody did press it. A history
-    // that kept only the presses that won would hide the overlap.
+    // And it is *not* in the record as a release, which is the point. An
+    // entry saying the site was released, with the newer hold still
+    // standing, is what an audit would read as the hold having been lifted.
+    // A missing entry is a gap; a wrong one is believed.
     assert.deepEqual(
       (await store.holdHistory('acme')).map((entry) => entry.action),
-      ['held', 'held', 'released'],
+      ['held', 'held'],
     );
   });
 

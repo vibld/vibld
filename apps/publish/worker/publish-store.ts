@@ -314,7 +314,17 @@ export class PublishStore {
     ]);
     if (moved?.meta.changes === 0) return false;
 
-    await this.#prune(slug);
+    // Retention runs after the promotion has committed, so it must not be
+    // able to fail it. A throw here used to answer the publish with a 500
+    // while the new revision was live, and the obvious retry then made
+    // another generation: a publish reported as failed, twice, that had
+    // worked both times. What is left behind is storage, which the next
+    // promotion prunes.
+    try {
+      await this.#prune(slug);
+    } catch (error) {
+      console.error('publish: could not prune old revisions', slug, error);
+    }
     return true;
   }
 
@@ -656,13 +666,34 @@ export class PublishStore {
            WHERE slug = ?2 AND hold_token = ?3`,
         )
         .bind(now, slug, holdToken),
-      this.#recordStatement(slug, 'released', by, undefined, now),
+      // Only when the clear above actually happened.
+      //
+      // I first wrote this unconditional, on the grounds that somebody did
+      // press release and the record should say so. That was wrong, and in
+      // the worst way for a record whose whole job is to be read later: a
+      // lost release wrote `held, held, released` with the newer hold still
+      // standing, so an audit would conclude the site had been let back on
+      // the web. An entry that cannot be told from a real one is worse than
+      // a missing entry, because it is believed.
+      //
+      // The condition is this write's own stamp, which only the UPDATE
+      // above can have left, together with the hold having gone. A batch
+      // runs in order inside one transaction, so this sees that UPDATE:
+      // `hold_token` is NULL exactly when the release won, and holds it
+      // lost to leave a different token behind. `handleRelease` refuses a
+      // site that is not held, so there is no case where both are null for
+      // want of a hold in the first place.
+      this.#db
+        .prepare(
+          `INSERT INTO published_site_holds (slug, action, actor, reason, at)
+           SELECT ?1, 'released', ?2, NULL, ?3
+           WHERE EXISTS (
+             SELECT 1 FROM published_projects
+             WHERE slug = ?1 AND hold_token IS NULL AND updated_at = ?3
+           )`,
+        )
+        .bind(slug, by, now),
     ]);
-    // The record is written either way, which is the honest shape: somebody
-    // did press release, and a history that only kept the presses that won
-    // would hide exactly the overlap this guard exists for. `holdHistory`
-    // reads in order, so a `released` between two `held` entries is a
-    // release that lost, and the state alongside it says so.
     return cleared?.meta.changes !== 0;
   }
 

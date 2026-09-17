@@ -561,10 +561,14 @@ describe('what a payout costs the nightly budget', () => {
     const countedBilling = counted(billing.store);
     const countedReferrals = counted(referrals.store);
 
+    // No `fundedBy`, because neither budgeted caller has one:
+    // `resumeStrandedPayouts` and the nightly reconcile both pay without an
+    // event in hand, so both also spend the `firstClearedPaymentIds` read.
+    // Supplying it here was the test measuring a path nothing takes, and
+    // the budget was short by exactly that query.
     const outcome = await payReferralIfEarned(
       { referrals: countedReferrals.store, billing: countedBilling.store },
       'user_new',
-      ['pi_funding'],
     );
 
     assert.equal(outcome.paid, false, 'it did not take the losing path');
