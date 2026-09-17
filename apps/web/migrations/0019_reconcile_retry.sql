@@ -1,0 +1,23 @@
+-- One retry before the reconcile walks past a subscription that threw.
+--
+-- 0017_reconcile_cursor.sql advanced the cursor past the whole slice
+-- whatever happened inside it. A subscription that failed -- a transient
+-- Stripe error, a D1 blip -- was therefore not looked at again until the
+-- walk lapped, which on a deployment sized for the Workers Free default is
+-- one subscription a night and so a very long time to leave an entitlement
+-- uncorrected or a missed payment unrecovered.
+--
+-- Holding the cursor at the failure instead would trade that for something
+-- worse, and the codebase has already been bitten by it once: a row that
+-- fails every night holds the front of the queue and starves every one
+-- behind it. That is the exact failure `resumeStrandedPayouts` stamps each
+-- attempt to avoid ("a row that fails every night moves to the back of the
+-- queue instead of holding the front of it").
+--
+-- So the hold is bounded to one night. A run that saw a failure and has not
+-- already retried parks the cursor before the earliest failed subscription
+-- and sets this flag; the next run re-reads from there and, whatever
+-- happens, advances past the slice and clears it. A transient failure is
+-- retried immediately. A persistent one costs one extra night and is then
+-- walked past, reported in `failed`, and picked up again on the next lap.
+ALTER TABLE billing_reconcile_cursor ADD COLUMN retry_pending INTEGER NOT NULL DEFAULT 0;

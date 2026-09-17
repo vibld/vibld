@@ -532,7 +532,18 @@ export function payoutReserveFor(queryBudget: number): number {
  * and the referral payout behind it. Read off `reconcileSubscriptions` and
  * `payReferralIfEarned`.
  */
-const MAX_QUERIES_PER_SUBSCRIPTION = 10;
+const MAX_QUERIES_PER_SUBSCRIPTION = 11;
+
+/**
+ * What one reconcile run costs before it looks at any subscription: the
+ * mirrored id list, the cursor read, and the cursor write. Paid once, and
+ * paid whether or not the run had anything to do.
+ *
+ * All three, not just the list. The first cut counted one and left the two
+ * cursor queries out, which on a Workers Paid allowance let a full batch
+ * overrun its own share.
+ */
+const FIXED_RECONCILE_QUERIES = 3;
 
 /**
  * The share held back for the nightly subscription reconcile (#47).
@@ -553,7 +564,7 @@ const MAX_QUERIES_PER_SUBSCRIPTION = 10;
  */
 export function reconcileReserveFor(queryBudget: number): number {
   return Math.max(
-    1 + MAX_QUERIES_PER_SUBSCRIPTION,
+    FIXED_RECONCILE_QUERIES + MAX_QUERIES_PER_SUBSCRIPTION,
     Math.floor(queryBudget / 4),
   );
 }
@@ -561,15 +572,17 @@ export function reconcileReserveFor(queryBudget: number): number {
 /**
  * How many subscriptions one run may check, given its share.
  *
- * The minus one is the query that lists the mirrored ids, paid once rather
- * than per subscription. Zero is a legitimate answer, and the cursor is what
- * makes it safe: a run with nothing left checks nothing tonight rather than
- * throwing partway through, and the next one starts where this one stopped.
+ * The subtraction is what the run spends before it reaches the first
+ * subscription. Zero is a legitimate answer, and the cursor is what makes it
+ * safe: a run with nothing left checks nothing tonight rather than throwing
+ * partway through, and the next one starts where this one stopped.
  */
 export function reconcileBatchFor(queryBudget: number): number {
   return Math.max(
     0,
-    Math.floor((queryBudget - 1) / MAX_QUERIES_PER_SUBSCRIPTION),
+    Math.floor(
+      (queryBudget - FIXED_RECONCILE_QUERIES) / MAX_QUERIES_PER_SUBSCRIPTION,
+    ),
   );
 }
 

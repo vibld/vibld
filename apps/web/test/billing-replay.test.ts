@@ -1018,6 +1018,35 @@ describe('the phases that hand over money already owed', () => {
     }
   });
 
+  it('keeps each phase inside its own share, not just the total', async () => {
+    // The total staying under the allowance is not the property the split
+    // exists for, and a test that checks only the total passes while one
+    // phase quietly overruns its share and another goes short. The
+    // reconcile did: it reserved a quarter and then sized a batch from ten
+    // queries a subscription plus one fixed, when the true worst case is
+    // eleven plus three. On a 1000 allowance that is 24 subscriptions
+    // costing 267 out of a 250 share.
+    for (const budget of [40, 120, 500, 900, 1000]) {
+      const reconcile = reconcileReserveFor(budget);
+      assert.ok(
+        3 + reconcileBatchFor(reconcile) * 11 <= reconcile,
+        `budget ${budget}: the reconcile overruns its own share`,
+      );
+
+      const payouts = payoutReserveFor(budget);
+      assert.ok(
+        1 + payoutBatchFor(payouts) * 6 <= payouts,
+        `budget ${budget}: the payout resume overruns its own share`,
+      );
+
+      const parked = parkedReserveFor(budget);
+      assert.ok(
+        retryBatchFor(parked) * 11 <= parked,
+        `budget ${budget}: the parked retry overruns its own share`,
+      );
+    }
+  });
+
   it('cannot together exceed the allowance', async () => {
     // The property the whole split exists for. Three phases, one invocation,
     // and D1 counts the invocation.
@@ -1041,9 +1070,14 @@ describe('the phases that hand over money already owed', () => {
         retryBatchFor(budget - payouts - reconcile - result.queriesReserved) *
         6;
       const worstPayouts = 1 + payoutBatchFor(payouts) * 6;
-      // Ten queries a subscription at its worst, plus the one that lists
-      // them. Read off `reconcileSubscriptions` and `payReferralIfEarned`.
-      const worstReconcile = 1 + reconcileBatchFor(reconcile) * 10;
+      // Eleven queries a subscription at its worst, plus the three the run
+      // pays before it reaches any of them: the id list, the cursor read and
+      // the cursor write. Read off `reconcileSubscriptions` and
+      // `payReferralIfEarned`, whose own worst case is six and not five --
+      // `attributionFor`, `reserveSlot`, two grants, `firstClearedPaymentIds`
+      // and `markPaid`. Counting ten and one let a full batch on a Workers
+      // Paid allowance overrun its own share.
+      const worstReconcile = 3 + reconcileBatchFor(reconcile) * 11;
 
       assert.ok(
         result.queriesReserved + worstRetry + worstPayouts + worstReconcile <=

@@ -327,7 +327,8 @@ export async function reconcileSubscriptions(
    * subscribes. Sorting makes the walk a walk rather than a re-shuffle.
    */
   const all = [...found.ids].sort();
-  const after = await store.reconcileCursor(RECONCILE_WALK);
+  const { afterId: after, retryPending } =
+    await store.reconcileCursor(RECONCILE_WALK);
   // The first id past where the last run stopped. An id that has since
   // disappeared costs nothing: the search is for the next one above it.
   const start = after === undefined ? 0 : all.findIndex((id) => id > after);
@@ -337,7 +338,15 @@ export async function reconcileSubscriptions(
     : all.slice(from);
   const reachedEnd = from + ids.length >= all.length;
 
-  for (const id of ids) {
+  /**
+   * Where the earliest subscription that threw sits in this slice, if any.
+   *
+   * A failure used to be walked straight past: the cursor advanced over the
+   * whole slice whatever happened inside it, so the subscription was not
+   * looked at again until the walk lapped (0019_reconcile_retry.sql).
+   */
+  let firstFailed = -1;
+  for (const [index, id] of ids.entries()) {
     try {
       const subscription = await stripe.subscriptions.retrieve(id);
       const current = await store.getSubscription(id);
@@ -405,6 +414,7 @@ export async function reconcileSubscriptions(
     } catch (error) {
       console.error('reconcile: failed to check subscription', id, error);
       failed += 1;
+      if (firstFailed === -1) firstFailed = index;
     }
   }
 
@@ -419,17 +429,40 @@ export async function reconcileSubscriptions(
    * so the next run starts from the top. That is what makes this a lap: the
    * walk comes round to the beginning instead of stopping at the end.
    */
-  await store.saveReconcileCursor(
-    RECONCILE_WALK,
-    reachedEnd ? undefined : ids.at(-1),
-  );
+  /*
+   * One retry, then past it (0019_reconcile_retry.sql).
+   *
+   * A run that saw a subscription throw parks the cursor before it, so the
+   * next run starts there rather than leaving a transient failure until the
+   * walk laps. Holding indefinitely would be worse and the codebase has
+   * already been bitten by it: a row that fails every night would hold the
+   * front of the queue and starve every one behind it, which is what
+   * `resumeStrandedPayouts` stamps each attempt to avoid. So the hold lasts
+   * one night. A run that was already retrying advances past the slice
+   * whatever happened, reports the failure in `failed`, and picks it up
+   * again on the next lap.
+   */
+  const holding = firstFailed !== -1 && !retryPending;
+  const resumeAt = holding
+    ? // The id before the earliest failure, so the next run re-reads it.
+      // Falling back to the incoming cursor when the failure was first in
+      // the slice, which leaves the walk exactly where it started.
+      (ids[firstFailed - 1] ?? after)
+    : reachedEnd
+      ? undefined
+      : ids.at(-1);
+  await store.saveReconcileCursor(RECONCILE_WALK, resumeAt, holding);
 
   return {
     checked: ids.length,
     corrected,
     failed,
     discovered: found.discovered,
-    remaining: all.length - (from + ids.length),
+    // What this run did not reach. A held cursor puts the failure and
+    // everything after it back on the list rather than reporting it covered.
+    remaining: holding
+      ? all.length - (from + firstFailed)
+      : all.length - (from + ids.length),
   };
 }
 
