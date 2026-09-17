@@ -177,7 +177,14 @@ describe('PublishStore', () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
     // Promoted, so there is a revision behind the name and it reads live.
-    assert.equal(await store.promote('acme', randomUUID()), true);
+    // Its files first, because promotion verifies the catalogue rather than
+    // writing it: a revision nothing registered is one whose bytes may
+    // already have been collected.
+    const generation = randomUUID();
+    await store.putFiles('acme', generation, [
+      { path: 'index.html', content: '<h1>acme</h1>' },
+    ]);
+    assert.equal(await store.promote('acme', generation), true);
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
       userId: 'user-1',
@@ -334,6 +341,36 @@ describe('what a slug keeps', () => {
       projectId: 'proj-1',
       userId: 'user-1',
       generation: latest,
+    });
+  });
+
+  it('refuses to promote a revision something has already collected', async () => {
+    // A slow upload overtaken by quicker publishes. Its revision is
+    // catalogued, so pruning counts it among the stale ones and deletes its
+    // prefix; without this the slow request would then promote the emptied
+    // prefix and report success while the site served 404s.
+    //
+    // Pruning and the takedown both remove a revision by removing its row,
+    // so promotion asking whether the row is still there is asking whether
+    // the bytes are still there. One condition rather than a list of the
+    // collectors that happen to exist today.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    // The slow one: its files land, and then it is overtaken.
+    const slow = randomUUID();
+    await store.putFiles('acme', slow, [
+      { path: 'index.html', content: '<h1>slow</h1>' },
+    ]);
+    for (let n = 1; n <= REVISIONS_KEPT; n += 1) await version(store, n);
+
+    // Pruning collected it while it was still on its way.
+    assert.ok(!(await store.revisions('acme')).includes(slow));
+    assert.ok(!bucket.keys().some((key) => key.includes(slow)));
+
+    assert.equal(await store.promote('acme', slow), false);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: `<h1>v${REVISIONS_KEPT}</h1>`,
     });
   });
 

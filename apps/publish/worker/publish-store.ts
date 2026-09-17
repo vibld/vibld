@@ -307,6 +307,19 @@ export class PublishStore {
    * compare-and-set the rest of this file settled on: whoever wrote first
    * wins, and the loser is told. A republish after the deletion finishes
    * sees it cleared and works, which is what putting a site back means.
+   *
+   * And the revision has to still be catalogued. That is the general form
+   * of the same rule, and it is why this no longer inserts the catalogue
+   * row: creating it here would resurrect a revision whose bytes somebody
+   * has already collected. `putFiles` registers it; every way of removing a
+   * revision removes that row; so promotion asking whether the row is still
+   * there is asking whether the bytes are still there.
+   *
+   * Without it, a slow upload overtaken by three quicker publishes gets
+   * pruned as stale and then promoted anyway, and the site serves 404s
+   * while both requests report success. A takedown could do the same. One
+   * condition covers every collector, present and future, which is worth
+   * more than a list of the ones that exist today.
    */
   async promote(
     slug: string,
@@ -335,21 +348,13 @@ export class PublishStore {
           `UPDATE published_projects
            SET generation = ?1, unpublished_at = NULL, updated_at = ?2,
                deleting_at = NULL
-           WHERE slug = ?3 AND held_at IS NULL AND deleting_at IS NULL`,
+           WHERE slug = ?3 AND held_at IS NULL AND deleting_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM published_generations
+               WHERE slug = ?3 AND generation = ?1
+             )`,
         )
         .bind(generation, now, slug),
-      // Still here, and still in the batch, because `promote` is also
-      // reachable without `putFiles` (a republish of files already stored)
-      // and because `ON CONFLICT DO NOTHING` makes the ordinary case a
-      // no-op. What it no longer has to be is the first time this revision
-      // is named: `putFiles` did that before writing anything.
-      this.#db
-        .prepare(
-          `INSERT INTO published_generations (slug, generation, created_at)
-           VALUES (?1, ?2, ?3)
-           ON CONFLICT(slug, generation) DO NOTHING`,
-        )
-        .bind(slug, generation, now),
     ]);
     if (moved?.meta.changes === 0) return false;
 
