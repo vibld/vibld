@@ -43,14 +43,23 @@ export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
   // and GET lists what is currently exposed. A revoked owner who cannot do
   // either is left with their work public and no way to take it down.
   '/api/preview/share': ['POST'],
+  // POST builds a project and puts it on the open web under a name of its
+  // own. DELETE takes it off again (ADR-0013).
+  //
+  // The same rule as the share link above, and the case it applies to
+  // hardest: a published site is more public than a share link and outlives
+  // the sandbox that made it. Gating the takedown would leave a revoked
+  // account's site serving to anybody who has the address, with the owner
+  // locked out of the only control that stops it, and no operator route to
+  // do it for them. A takedown spends nothing, builds nothing and grants
+  // nothing; it only ever makes less public.
+  '/api/publish': ['POST'],
 };
 
 /** Routes an uninvited caller must not reach, whatever the method. */
 export const GATED_PATHS: readonly string[] = [
   // Spends model budget.
   '/api/plan',
-  // Builds and serves a project on Vibld infrastructure.
-  '/api/publish',
   // Writes into somebody's repository, and mints tokens to do it.
   '/api/github/connect',
   '/api/github/complete',
