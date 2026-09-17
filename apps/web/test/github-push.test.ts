@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  blobSha,
   branchForRevision,
+  previewPush,
   pushCheckpoint,
   resolveBase,
 } from '../worker/github-push.ts';
@@ -64,6 +66,12 @@ function fakeGitHub(state: {
   appearsWithTree?: string;
   /** Branches the repository has, for telling empty apart from missing. */
   branches?: string[];
+  /** What the base branch's commit holds, for the push preview. */
+  baseTree?: {
+    sha: string;
+    entries: { path: string; type: string; sha: string }[];
+    truncated?: boolean;
+  };
 }) {
   const calls: Recorded[] = [];
   let readTheBranch = false;
@@ -124,7 +132,16 @@ function fakeGitHub(state: {
       if (path.endsWith('/the-winner')) {
         return json({ tree: { sha: state.appearsWithTree } });
       }
+      if (state.baseTree && state.base && path.endsWith(`/${state.base}`)) {
+        return json({ tree: { sha: state.baseTree.sha } });
+      }
       return json({ tree: { sha: state.branchTree ?? 'some-other-tree' } });
+    }
+    if (method === 'GET' && path.includes('/git/trees/')) {
+      return json({
+        tree: state.baseTree?.entries ?? [],
+        truncated: state.baseTree?.truncated === true,
+      });
     }
     if (method === 'POST' && path.endsWith('/git/commits')) {
       return json({ sha: 'new-commit' }, 201);
@@ -578,5 +595,189 @@ describe('refs with characters that mean something in a URL', () => {
       asked[0]?.endsWith('/git/ref/heads/release/2026'),
       `asked for ${asked[0]}`,
     );
+  });
+});
+
+describe('naming a blob the way git does', () => {
+  it('matches git for content git has a published sha for', async () => {
+    // Pinned against git itself rather than against this implementation.
+    // These two shas are what `git hash-object` produces, so a change to the
+    // header, the encoding or the algorithm fails here rather than quietly
+    // reporting every file as changed.
+    assert.equal(await blobSha(''), 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
+    assert.equal(
+      await blobSha('hello\n'),
+      'ce013625030ba8dba906f756967f9e9ca394464a',
+    );
+  });
+
+  it('counts the length in bytes, not characters', async () => {
+    // The bug waiting in any implementation that reaches for `.length`, and
+    // it only shows against content where the two differ. These shas were
+    // computed independently of this code, from git's own definition: sha1
+    // of "blob <bytes>", a NUL, and the UTF-8 bytes. One accent makes the
+    // header wrong, git has never heard of the result, and every such file
+    // reads as changed on every preview.
+    //
+    // Comparing two of our own hashes cannot catch this: under a
+    // character-counting header they still differ from each other. Only a
+    // value git itself would produce pins it.
+    assert.equal(
+      await blobSha('\u00e9'),
+      '4b04fff51468d8ab5201ab02b725dc477bc7cb45',
+    );
+    assert.equal(
+      await blobSha('h\u00e9llo w\u00f6rld\n'),
+      '9d4a8bab579c9317dc648e018736aec79914b21a',
+    );
+    // One character, four bytes, in case two ever looks like a coincidence.
+    assert.equal(
+      await blobSha('\ud83c\udf0d'),
+      '332fdb853175d1ecfa60cdacb5f83e9f2ce33a88',
+    );
+  });
+});
+
+describe('previewing what a push would do', () => {
+  const target = { owner: 'acme', repo: 'site', baseBranch: 'main' };
+
+  async function treeOf(files: { path: string; content: string }[]) {
+    return Promise.all(
+      files.map(async (file) => ({
+        path: file.path,
+        type: 'blob',
+        sha: await blobSha(file.content),
+      })),
+    );
+  }
+
+  it('separates what it adds, changes, removes and leaves alone', async () => {
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      baseTree: {
+        sha: 'base-tree',
+        entries: [
+          ...(await treeOf([
+            { path: 'index.html', content: '<h1>old</h1>' },
+            { path: 'src/main.ts', content: 'export const a = 1;' },
+            { path: 'README.md', content: 'kept by nobody' },
+          ])),
+        ],
+      },
+    });
+
+    const result = await previewPush('tok', target, FILES, doFetch);
+
+    assert.ok(result.ok);
+    // `src/main.ts` is byte-identical in FILES, `index.html` is not, and
+    // README.md is in the repository and not in the snapshot.
+    assert.deepEqual(result.preview.changed, ['index.html']);
+    assert.equal(result.preview.unchanged, 1);
+    assert.deepEqual(result.preview.removed, ['README.md']);
+    assert.deepEqual(result.preview.added, []);
+  });
+
+  it('names every deletion the push would make', async () => {
+    // The half that most needs showing: the tree is built without
+    // `base_tree`, so a file the repository has and the snapshot does not is
+    // gone from the branch. A button marked "push" does not say that.
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      baseTree: {
+        sha: 'base-tree',
+        entries: await treeOf([
+          { path: 'index.html', content: '<h1>hi</h1>' },
+          { path: 'src/main.ts', content: 'export const a = 1;' },
+          { path: 'LICENSE', content: 'MIT' },
+          { path: 'docs/guide.md', content: '# guide' },
+        ]),
+      },
+    });
+
+    const result = await previewPush('tok', target, FILES, doFetch);
+
+    assert.ok(result.ok);
+    assert.deepEqual(result.preview.removed, ['LICENSE', 'docs/guide.md']);
+    assert.equal(result.preview.unchanged, 2);
+  });
+
+  it('counts an empty repository as all additions and no deletions', async () => {
+    // Unlike `resolveBase`, a missing base branch is an answerable question
+    // here: everything is new and nothing is lost.
+    const { doFetch } = fakeGitHub({});
+
+    const result = await previewPush('tok', target, FILES, doFetch);
+
+    assert.ok(result.ok);
+    assert.deepEqual(result.preview.added, ['index.html', 'src/main.ts']);
+    assert.deepEqual(result.preview.removed, []);
+    assert.equal(result.preview.baseSha, null);
+  });
+
+  it('says when the listing was truncated rather than under-reporting', async () => {
+    // A short deletion list is the one number nobody should read
+    // optimistically. If GitHub would not list the whole tree, the preview
+    // says so instead of implying the push removes less than it does.
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      baseTree: {
+        sha: 'base-tree',
+        entries: await treeOf([{ path: 'LICENSE', content: 'MIT' }]),
+        truncated: true,
+      },
+    });
+
+    const result = await previewPush('tok', target, FILES, doFetch);
+
+    assert.ok(result.ok);
+    assert.equal(result.preview.truncated, true);
+  });
+
+  it('ignores a submodule rather than calling it a deletion', async () => {
+    // A `commit` entry is a submodule. A push neither writes nor removes
+    // one, so announcing it as removed would promise something this cannot
+    // do.
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      baseTree: {
+        sha: 'base-tree',
+        entries: [
+          ...(await treeOf([{ path: 'index.html', content: '<h1>hi</h1>' }])),
+          { path: 'vendor/lib', type: 'commit', sha: 'submodule-sha' },
+        ],
+      },
+    });
+
+    const result = await previewPush('tok', target, FILES, doFetch);
+
+    assert.ok(result.ok);
+    assert.deepEqual(result.preview.removed, []);
+  });
+
+  it('writes nothing while answering', async () => {
+    const { doFetch, calls } = fakeGitHub({
+      base: 'base-commit',
+      baseTree: { sha: 'base-tree', entries: [] },
+    });
+
+    await previewPush('tok', target, FILES, doFetch);
+
+    assert.deepEqual(
+      calls.filter((call) => call.method !== 'GET'),
+      [],
+      'the preview made a request that was not a read',
+    );
+  });
+
+  it('reports a lost repository as access, not as an empty diff', async () => {
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      failOn: { path: '/git/ref/heads/main', status: 403 },
+    });
+
+    const result = await previewPush('tok', target, FILES, doFetch);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, 'access');
   });
 });

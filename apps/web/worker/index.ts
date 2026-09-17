@@ -101,6 +101,7 @@ import {
   handleGitHubComplete,
   handleGitHubConnect,
   handleGitHubDisconnect,
+  handleGitHubDiff,
   handleGitHubPush,
   handleGitHubStatus,
 } from './github-handlers.ts';
@@ -1558,6 +1559,12 @@ export default {
     if (pathname === '/api/github/status') {
       return handleGitHub(request, env, (principal) =>
         handleGitHubStatus(request, env, principal),
+      );
+    }
+
+    if (pathname === '/api/github/diff') {
+      return handleGitHub(request, env, (principal) =>
+        handleGitHubDiff(request, env, principal),
       );
     }
 

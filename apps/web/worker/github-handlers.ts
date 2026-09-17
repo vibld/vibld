@@ -22,6 +22,7 @@ import {
 } from './github-app.ts';
 import {
   branchForRevision,
+  previewPush,
   pushCheckpoint,
   resolveBase,
   type PushConflict,
@@ -209,6 +210,105 @@ function parseExpectedRepository(
   if (typeof owner !== 'string' || typeof repo !== 'string') return null;
   if (!owner.trim() || !repo.trim()) return null;
   return { owner: owner.trim(), repo: repo.trim() };
+}
+
+/**
+ * What a push would do to the connected repository, before it does it.
+ *
+ * #13 asks for the destination and the diff to be reviewable, and the push is
+ * the irreversible half of this integration. The answer nobody can get today
+ * is the one that matters most: a push writes the accepted snapshot and
+ * nothing else, so a file the repository has and vibld does not is gone from
+ * the branch. That is correct behaviour and it is not visible from a button
+ * marked "push".
+ *
+ * A read, and only a read. Nothing here writes to GitHub, to D1 or to the
+ * push ledger, so asking twice is free and asking at all commits the caller
+ * to nothing.
+ *
+ * It shares the push rate limiter deliberately. Both spend the same thing,
+ * one installation's GitHub quota, and one gate over that quota is easier to
+ * reason about than two that can each be under their own limit while the
+ * quota is gone. The cost is real and accepted: somebody who has just spent
+ * the burst on previews waits a moment before they can push. Waiting to push
+ * is a smaller harm than an unmetered read path against somebody else's API
+ * allowance.
+ */
+export async function handleGitHubDiff(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  doFetch: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env)) {
+    return json(
+      { error: 'Pushing to GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+  const credentials = githubAppCredentials(env)!;
+  const store = new GitHubStore(env.DB!);
+
+  if (env.GITHUB_BURST) {
+    try {
+      const allowed = await env.GITHUB_BURST.limit({
+        key: `github:${principal.userId}`,
+      });
+      if (!allowed.success) {
+        return json({ error: 'Too many requests. Try again shortly.' }, 429);
+      }
+    } catch (error) {
+      console.error('github rate limiter unavailable', error);
+    }
+  }
+
+  const state = await store.usableBinding(principal.userId, now);
+  if (!state.usable) return bindingProblem(state);
+  const { binding } = state;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const files = parsePreviewRequest(body);
+  if (!files.ok) return json({ error: files.error }, files.status);
+
+  const token = await mintInstallationToken(
+    credentials,
+    binding.installationId,
+    { owner: binding.owner, repo: binding.repo },
+    doFetch,
+    now.getTime(),
+  );
+  if (!token.ok) return mintProblem(token);
+
+  const preview = await previewPush(
+    token.token,
+    {
+      owner: binding.owner,
+      repo: binding.repo,
+      baseBranch: binding.defaultBranch,
+    },
+    files.value,
+    doFetch,
+  );
+  if (!preview.ok) return githubProblem(preview);
+
+  // The destination travels with the diff. A caller holding a preview has to
+  // be able to tell whether it describes the repository it is about to push
+  // to: the binding can move between this call and the button, and a diff
+  // labelled with nothing would be read as being about wherever it is
+  // pointing now.
+  return json({
+    owner: binding.owner,
+    repo: binding.repo,
+    ...preview.preview,
+  });
 }
 
 /**

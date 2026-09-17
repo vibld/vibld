@@ -4,6 +4,7 @@ import {
   fetchGitHubStatus,
   noteConnectionChanged,
   onConnectionChanged,
+  previewSnapshot,
   pushSnapshot,
 } from '../github/github-client.ts';
 import type { GitHubStatus } from '../github/github-client.ts';
@@ -11,8 +12,17 @@ import type { GitHubStatus } from '../github/github-client.ts';
 // rather than written again: it is one generation counter with tests, and a
 // second copy of it here would be a second place for it to be wrong.
 import { createStatusGate } from '../github/panel-view.ts';
-import { afterConnectionChanged, decidePush } from '../github/push-view.ts';
-import type { Destination, PushPhase } from '../github/push-view.ts';
+import {
+  afterConnectionChanged,
+  decidePreview,
+  decidePush,
+  previewIsEmpty,
+} from '../github/push-view.ts';
+import type {
+  Destination,
+  PreviewPhase,
+  PushPhase,
+} from '../github/push-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
 /**
@@ -32,11 +42,48 @@ import { clerkConfigured } from '../auth/clerk-token.ts';
  * JSX, so a rule written in here would be typechecked and never run, which
  * is how four findings reached review on the connect panel.
  */
+/**
+ * One part of a diff, or nothing at all.
+ *
+ * An empty list renders as no list rather than as a heading with nothing
+ * under it: three headings and one populated list reads as though the other
+ * two failed to load.
+ */
+function DiffList({
+  label,
+  paths,
+  tone,
+}: {
+  label: string;
+  paths: string[];
+  tone: 'add' | 'change' | 'remove';
+}) {
+  if (paths.length === 0) return null;
+  return (
+    <li className={`github-diff__group github-diff__group--${tone}`}>
+      <p className="github-diff__label">
+        {label} ({paths.length})
+      </p>
+      <ul className="github-diff__paths">
+        {paths.map((path) => (
+          <li key={path}>
+            <code>{path}</code>
+          </li>
+        ))}
+      </ul>
+    </li>
+  );
+}
+
 export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [phase, setPhase] = useState<PushPhase>({ at: 'idle' });
+  const [previewPhase, setPreviewPhase] = useState<PreviewPhase>({
+    at: 'none',
+  });
   const probes = useRef(createStatusGate());
   const pushes = useRef(createStatusGate());
+  const previews = useRef(createStatusGate());
 
   // Probed on mount and again whenever the connection changes. This
   // component keeps its own copy of the status and the panel that binds a
@@ -92,7 +139,33 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   useEffect(() => {
     pushes.current.supersede();
     setPhase({ at: 'idle' });
+    // The preview goes with it. `decidePreview` would already refuse to draw
+    // one from another checkpoint, and dropping it here means the request
+    // behind it cannot land and put it back.
+    previews.current.supersede();
+    setPreviewPhase({ at: 'none' });
   }, [snapshot.revision]);
+
+  /**
+   * Ask what the push would do, on demand rather than on every checkpoint.
+   *
+   * On demand because it spends the same GitHub quota the push does, and a
+   * preview fetched automatically after every generation spends it for
+   * people who never look. The button is one click and the answer stays up
+   * until the checkpoint or the destination moves.
+   */
+  async function preview(to: Destination) {
+    const revision = snapshot.revision;
+    const current = previews.current.begin();
+    setPreviewPhase({ at: 'loading', to, revision });
+    const result = await previewSnapshot(snapshot.files);
+    if (!current()) return;
+    setPreviewPhase(
+      result.ok
+        ? { at: 'ready', to, revision, preview: result.preview }
+        : { at: 'problem', to, revision, error: result.error },
+    );
+  }
 
   async function push(to: Destination) {
     const current = pushes.current.begin();
@@ -140,6 +213,11 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   if (!clerkConfigured) return null;
   const view = decidePush(phase, status);
   if (!view.show) return null;
+  const previewView = decidePreview(
+    previewPhase,
+    view.destination,
+    snapshot.revision,
+  );
 
   return (
     <div className="github-push">
@@ -151,6 +229,25 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
         {view.busy
           ? 'Pushing…'
           : `Push to ${view.destination.owner}/${view.destination.repo}`}
+      </button>
+
+      {/*
+       * Offered beside the push rather than inside it. The push writes a
+       * branch that is never force-pushed and opens a pull request other
+       * people read, and the one thing nobody can see from here is what it
+       * deletes: the branch carries the accepted checkpoint and nothing
+       * else, so a file the repository has and this project does not is
+       * gone from it.
+       */}
+      <button
+        type="button"
+        className="chip"
+        onClick={() => void preview(view.destination)}
+        disabled={previewView.show && previewView.busy}
+      >
+        {previewView.show && previewView.busy
+          ? 'Checking…'
+          : 'What would this change?'}
       </button>
 
       {view.outcome && (
@@ -172,6 +269,67 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
             </>
           )}
         </p>
+      )}
+
+      {previewView.show && previewView.error && (
+        <p role="alert" className="github-push__problem">
+          {previewView.error}
+        </p>
+      )}
+
+      {previewView.show && previewView.preview && (
+        <div className="github-diff">
+          <p className="github-diff__where">
+            Against <code>{previewView.preview.baseBranch}</code> in{' '}
+            <code>
+              {previewView.preview.owner}/{previewView.preview.repo}
+            </code>
+            .
+          </p>
+          {previewIsEmpty(previewView.preview) ? (
+            <p className="github-diff__none">
+              Nothing would change: that branch would carry exactly what is
+              there now.
+            </p>
+          ) : (
+            <ul className="github-diff__lists">
+              <DiffList
+                label="Added"
+                paths={previewView.preview.added}
+                tone="add"
+              />
+              <DiffList
+                label="Changed"
+                paths={previewView.preview.changed}
+                tone="change"
+              />
+              {/*
+               * Last, and named as deletion rather than as "removed from
+               * the list". It is the only part of a push that destroys
+               * something, and it is the part a button marked "push" does
+               * not say.
+               */}
+              <DiffList
+                label="Deleted from the branch"
+                paths={previewView.preview.removed}
+                tone="remove"
+              />
+            </ul>
+          )}
+          {previewView.preview.unchanged > 0 && (
+            <p className="github-diff__same">
+              {previewView.preview.unchanged} file
+              {previewView.preview.unchanged === 1 ? '' : 's'} unchanged.
+            </p>
+          )}
+          {previewView.preview.truncated && (
+            <p className="github-diff__partial">
+              GitHub would not list the whole branch, so this is what would
+              change among the files it did list. Treat the deletions as a
+              floor, not a count.
+            </p>
+          )}
+        </div>
       )}
 
       {view.problem && (

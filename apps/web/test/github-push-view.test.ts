@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { afterConnectionChanged, decidePush } from '../src/github/push-view.ts';
+import {
+  afterConnectionChanged,
+  decidePreview,
+  decidePush,
+  previewIsEmpty,
+} from '../src/github/push-view.ts';
 import type { GitHubStatus } from '../src/github/github-client.ts';
 
 /**
@@ -386,5 +391,90 @@ describe('what it says about a push that failed', () => {
       owner: 'acme',
       repo: 'site',
     });
+  });
+});
+
+describe('deciding whether a push preview still applies', () => {
+  const HERE = { owner: 'acme', repo: 'site' };
+  const PREVIEW = {
+    owner: 'acme',
+    repo: 'site',
+    baseBranch: 'main',
+    added: [],
+    changed: ['index.html'],
+    removed: ['LICENSE'],
+    unchanged: 2,
+    truncated: false,
+  };
+
+  it('shows a preview for this destination and this checkpoint', () => {
+    const view = decidePreview(
+      { at: 'ready', to: HERE, revision: 'r7', preview: PREVIEW },
+      HERE,
+      'r7',
+    );
+
+    assert.equal(view.show, true);
+    assert.deepEqual(view.show && view.preview?.removed, ['LICENSE']);
+  });
+
+  it('drops a preview once the connection has moved', () => {
+    // The same rule everything else in this file goes through: a diff of
+    // acme/site drawn beside a button pushing to other/repo describes
+    // deletions in a repository nobody is about to write to.
+    const view = decidePreview(
+      { at: 'ready', to: HERE, revision: 'r7', preview: PREVIEW },
+      { owner: 'other', repo: 'repo' },
+      'r7',
+    );
+
+    assert.equal(view.show, false);
+  });
+
+  it('drops a preview once the checkpoint has moved', () => {
+    // The same failure wearing different clothes. A diff computed for the
+    // previous checkpoint, drawn beside a button that would push this one,
+    // lists deletions about files that are not the ones going.
+    const view = decidePreview(
+      { at: 'ready', to: HERE, revision: 'r7', preview: PREVIEW },
+      HERE,
+      'r8',
+    );
+
+    assert.equal(view.show, false);
+  });
+
+  it('shows the wait, and the failure, for this destination only', () => {
+    assert.equal(
+      decidePreview({ at: 'loading', to: HERE, revision: 'r7' }, HERE, 'r7')
+        .show,
+      true,
+    );
+    const problem = decidePreview(
+      { at: 'problem', to: HERE, revision: 'r7', error: 'no access' },
+      HERE,
+      'r7',
+    );
+    assert.equal(problem.show && problem.error, 'no access');
+    assert.equal(
+      decidePreview(
+        { at: 'problem', to: HERE, revision: 'r7', error: 'no access' },
+        { owner: 'other', repo: 'repo' },
+        'r7',
+      ).show,
+      false,
+    );
+  });
+
+  it('shows nothing before one has been asked for', () => {
+    assert.equal(decidePreview({ at: 'none' }, HERE, 'r7').show, false);
+  });
+
+  it('recognises a push that would change nothing', () => {
+    assert.equal(
+      previewIsEmpty({ ...PREVIEW, changed: [], removed: [] }),
+      true,
+    );
+    assert.equal(previewIsEmpty(PREVIEW), false);
   });
 });

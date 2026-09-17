@@ -297,3 +297,128 @@ describe('answers that arrive after the thing they were about moved on', () => {
     view.unmount();
   });
 });
+
+describe('previewing the push, as it is actually wired', () => {
+  const DIFF = {
+    owner: 'acme',
+    repo: 'site',
+    baseBranch: 'main',
+    added: ['src/new.ts'],
+    changed: ['index.html'],
+    removed: ['LICENSE'],
+    unchanged: 2,
+    truncated: false,
+  };
+
+  it('asks nothing until somebody asks it to', async () => {
+    // The preview spends the same GitHub quota a push does. Fetching one
+    // after every generation spends it for people who never look.
+    const calls = serving({ '/api/github/status': () => reply(CONNECTED) });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+
+    assert.equal(
+      calls.filter((call) => call.url.includes('/api/github/diff')).length,
+      0,
+    );
+    view.unmount();
+  });
+
+  it('names what the push would delete', async () => {
+    const calls = serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/diff': () => reply(DIFF),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+
+    await view.click('What would this change?');
+
+    const text = view.container.textContent ?? '';
+    assert.match(text, /Deleted from the branch/);
+    assert.match(text, /LICENSE/);
+    assert.match(text, /src\/new\.ts/);
+    // It sends the files, and no revision: a preview is not a push and must
+    // not key one.
+    const asked = calls.find((call) => call.url.includes('/api/github/diff'));
+    assert.deepEqual(Object.keys(asked?.body ?? {}), ['files']);
+    view.unmount();
+  });
+
+  it('drops the preview when the checkpoint moves on', async () => {
+    // A diff computed for the previous checkpoint, drawn beside a button
+    // that would push this one, lists deletions about files that are not
+    // the ones going.
+    serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/diff': () => reply(DIFF),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    await view.click('What would this change?');
+    assert.match(view.container.textContent ?? '', /LICENSE/);
+
+    await view.render(<GitHubPushButton snapshot={snapshot('r2')} />);
+
+    assert.doesNotMatch(view.container.textContent ?? '', /LICENSE/);
+    view.unmount();
+  });
+
+  it('says a push would change nothing rather than drawing empty lists', async () => {
+    serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/diff': () =>
+        reply({ ...DIFF, added: [], changed: [], removed: [] }),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+
+    await view.click('What would this change?');
+
+    assert.match(view.container.textContent ?? '', /Nothing would change/);
+    view.unmount();
+  });
+
+  it('warns that a truncated listing under-reports deletions', async () => {
+    serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/diff': () => reply({ ...DIFF, truncated: true }),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+
+    await view.click('What would this change?');
+
+    assert.match(view.container.textContent ?? '', /floor, not a count/);
+    view.unmount();
+  });
+
+  it('shows the refusal rather than an empty diff', async () => {
+    serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/diff': () => reply({ error: 'vibld lost access.' }, 409),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+
+    await view.click('What would this change?');
+
+    const text = view.container.textContent ?? '';
+    assert.match(text, /vibld lost access\./);
+    assert.doesNotMatch(text, /Nothing would change/);
+    view.unmount();
+  });
+
+  it('still offers the push when the preview failed', async () => {
+    // Nobody is blocked by a missing preview: the button is the feature and
+    // the diff is help.
+    serving({
+      '/api/github/status': () => reply(CONNECTED),
+      '/api/github/diff': () => reply({ error: 'nope' }, 500),
+    });
+    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+
+    await view.click('What would this change?');
+
+    const push = [...view.container.querySelectorAll('button')].find((el) =>
+      el.textContent?.includes('Push to'),
+    );
+    assert.ok(push);
+    assert.equal(push.disabled, false);
+    view.unmount();
+  });
+});

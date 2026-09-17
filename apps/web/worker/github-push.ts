@@ -386,6 +386,193 @@ export async function resolveBase(
 }
 
 /**
+ * What a push would change in the repository, without changing anything.
+ *
+ * #13 asks for a review of "the destination and diff" before the push, and
+ * the push is the irreversible half of this product's GitHub integration: it
+ * writes a branch that is not force-pushed and opens a pull request other
+ * people will read. Somebody pressing that button should know what it does
+ * first, and in particular should know what it deletes.
+ *
+ * Compared by blob sha rather than by fetching content. Git names a blob by
+ * the sha1 of its bytes with a header, so the sha of what vibld holds can be
+ * computed here and matched against the sha the tree listing already carries.
+ * The whole comparison is two calls, whatever the project's size, and no file
+ * content is downloaded to make it.
+ */
+export interface PushPreview {
+  /** Paths the push would create. */
+  added: string[];
+  /** Paths it would overwrite with different content. */
+  changed: string[];
+  /**
+   * Paths it would delete.
+   *
+   * The half that most needs showing. `pushCheckpoint` builds its tree
+   * without `base_tree`, so the branch is exactly the accepted snapshot and
+   * a file the repository has that vibld does not is gone from the branch.
+   * That is the intended semantics and it is not obvious from a button
+   * marked "push".
+   */
+  removed: string[];
+  /** How many paths would be left exactly as they are. */
+  unchanged: number;
+  baseBranch: string;
+  /** Where the base branch points, or null when there is no base yet. */
+  baseSha: string | null;
+  /**
+   * True when GitHub would not list the whole base tree in one reply, so
+   * `removed` and `unchanged` are incomplete.
+   *
+   * Reported rather than hidden. A truncated listing silently produces a
+   * short deletion list, which is the one number here nobody should read
+   * optimistically: a preview that under-reports what a push removes is
+   * worse than no preview.
+   */
+  truncated: boolean;
+}
+
+export type PreviewResult =
+  | { ok: true; preview: PushPreview }
+  | { ok: false; error: string; reason: GitHubFailure };
+
+/**
+ * The name git would give this content: sha1 of `blob <bytes>\0` and the
+ * bytes themselves.
+ *
+ * Length is in bytes, not characters, which is the bug waiting in any
+ * implementation that reaches for `content.length`: a project with an accent
+ * or an emoji in it would hash as something git has never heard of, and every
+ * such file would read as changed on every preview.
+ */
+export async function blobSha(content: string): Promise<string> {
+  const bytes = new TextEncoder().encode(content);
+  const header = new TextEncoder().encode(`blob ${bytes.length}\u0000`);
+  const payload = new Uint8Array(header.length + bytes.length);
+  payload.set(header);
+  payload.set(bytes, header.length);
+  const digest = await crypto.subtle.digest('SHA-1', payload);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Every file the base branch holds, by path, with the sha git gave it.
+ *
+ * One recursive tree read. Entries that are not blobs are skipped: a
+ * submodule is a `commit` entry that a push neither writes nor removes, and
+ * counting one as a deletion would announce something this push cannot do.
+ */
+async function baseTree(
+  token: string,
+  doFetch: typeof fetch,
+  target: Pick<PushTarget, 'owner' | 'repo'>,
+  treeSha: string,
+): Promise<
+  | { blobs: Map<string, string>; truncated: boolean }
+  | { error: string; reason: GitHubFailure }
+> {
+  const reply = await call(token, doFetch, {
+    method: 'GET',
+    path: `/repos/${encodePath(target.owner)}/${encodePath(target.repo)}/git/trees/${encodePath(treeSha)}?recursive=1`,
+  });
+  if (!reply.ok) return { error: reply.error, reason: reply.reason };
+
+  const entries = Array.isArray(reply.body.tree)
+    ? (reply.body.tree as unknown[])
+    : [];
+  const blobs = new Map<string, string>();
+  for (const entry of entries) {
+    const row = entry as { path?: unknown; type?: unknown; sha?: unknown };
+    if (row.type !== 'blob') continue;
+    const path = asString(row.path);
+    const sha = asString(row.sha);
+    if (path && sha) blobs.set(path, sha);
+  }
+  return { blobs, truncated: reply.body.truncated === true };
+}
+
+/**
+ * What `pushCheckpoint` would do to the base branch, computed before it does
+ * it.
+ *
+ * A missing base branch is not a failure here, unlike in `resolveBase`: the
+ * question "what would this change" has an answer for a repository with no
+ * commits, and it is "all of it, and nothing is removed". `resolveBase` is
+ * still the one that refuses the push, because a preview that answers is not
+ * a push that can proceed.
+ */
+export async function previewPush(
+  token: string,
+  target: PushTarget,
+  files: readonly ProjectFile[],
+  doFetch: typeof fetch = fetch,
+): Promise<PreviewResult> {
+  const repo = { owner: target.owner, repo: target.repo };
+  const base = await refCommit(
+    token,
+    doFetch,
+    repo,
+    `heads/${target.baseBranch}`,
+  );
+  if ('error' in base) {
+    return { ok: false, error: base.error, reason: base.reason };
+  }
+
+  const empty: PushPreview = {
+    added: files.map((file) => file.path).sort(),
+    changed: [],
+    removed: [],
+    unchanged: 0,
+    baseBranch: target.baseBranch,
+    baseSha: null,
+    truncated: false,
+  };
+  if (!base.found) return { ok: true, preview: empty };
+
+  const tree = await commitTree(token, doFetch, repo, base.sha);
+  if ('error' in tree) {
+    return { ok: false, error: tree.error, reason: tree.reason };
+  }
+  const listing = await baseTree(token, doFetch, repo, tree.sha);
+  if ('error' in listing) {
+    return { ok: false, error: listing.error, reason: listing.reason };
+  }
+
+  const added: string[] = [];
+  const changed: string[] = [];
+  let unchanged = 0;
+  const ours = new Set<string>();
+  for (const file of files) {
+    ours.add(file.path);
+    const theirs = listing.blobs.get(file.path);
+    if (theirs === undefined) {
+      added.push(file.path);
+    } else if (theirs === (await blobSha(file.content))) {
+      unchanged += 1;
+    } else {
+      changed.push(file.path);
+    }
+  }
+
+  const removed = [...listing.blobs.keys()].filter((path) => !ours.has(path));
+
+  return {
+    ok: true,
+    preview: {
+      added: added.sort(),
+      changed: changed.sort(),
+      removed: removed.sort(),
+      unchanged,
+      baseBranch: target.baseBranch,
+      baseSha: base.sha,
+      truncated: listing.truncated,
+    },
+  };
+}
+
+/**
  * The push, in the order that makes a retry safe.
  *
  * The tree is built before the ref is read, deliberately. Building a tree has

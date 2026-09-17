@@ -56,6 +56,11 @@ export const GATED_PATHS: readonly string[] = [
   '/api/github/complete',
   '/api/github/bind',
   '/api/github/push',
+  // Reads the connected repository with the installation token, and spends
+  // the same GitHub quota a push does. It writes nothing, but the grant it
+  // uses is the one `/api/github/bind` creates, and bind is gated: an
+  // account that may not create the grant may not spend it either.
+  '/api/github/diff',
   // Takes money, which an uninvited account has no reason to be able to do.
   '/api/billing/checkout',
 
