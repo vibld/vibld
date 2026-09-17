@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { MAX_QUERIES_PER_REFERRAL_PAYOUT } from '../worker/billing-replay.ts';
 import {
   REFERRAL_GRANT_ACTOR,
   payReferralIfEarned,
@@ -60,6 +61,19 @@ function billingFake(
               creditUsdCents: grant.cents,
             }
           : undefined;
+      },
+      // The reversal's other half. Written once for a given id, like the
+      // grant, so a redelivered refund takes the money back once.
+      async deductAdminCredit(
+        id: string,
+        userId: string,
+        cents: number,
+        actor: string,
+        note: string | null,
+      ) {
+        if (grants.has(id)) return 0;
+        grants.set(id, { id, userId, cents: -cents, actor, note });
+        return cents;
       },
     } as unknown as BillingStore,
   };
@@ -479,6 +493,85 @@ describe('resumeStrandedPayouts', () => {
         billing: billing.store,
       }),
       { found: 0, paid: 0, failed: 0 },
+    );
+  });
+});
+
+/**
+ * What the nightly budget is allowed to assume a payout costs.
+ *
+ * `MAX_QUERIES_PER_REFERRAL_PAYOUT` has been wrong three times, always in
+ * the same direction, and every time because it was read off the code by
+ * eye and the eye followed the happy path. The two bounds built on it size
+ * the batches the scheduled handler runs, so understating it is how a phase
+ * overruns its share of one D1 invocation and the whole pass throws.
+ *
+ * So this measures it instead of reading it. Both stores are wrapped in a
+ * counter, the payout is driven down its most expensive path, and the count
+ * is compared with the constant. Reading is what got it wrong; counting is
+ * what cannot.
+ */
+describe('what a payout costs the nightly budget', () => {
+  /** Every store method is one D1 query, which is what the bound counts. */
+  function counted<T extends object>(
+    store: T,
+  ): { store: T; count: () => number } {
+    let calls = 0;
+    const proxy = new Proxy(store, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]) => {
+          calls += 1;
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    return { store: proxy, count: () => calls };
+  }
+
+  it('costs no more than the budget is told, even losing to a refund', async () => {
+    // The expensive path: both grants are written, `markPaid` then fails
+    // because a reversal got there first, and the payout has to read what
+    // happened and take both sides back.
+    const billing = billingFake();
+    const referrals = referralFake({
+      attribution: {
+        referrerUserId: 'user_owner',
+        code: 'ABCD2345',
+        paidAt: null,
+      },
+    });
+
+    // The refund lands between `decidePayout` reading the row and `markPaid`
+    // writing it, which is exactly the window `AND reversed_at IS NULL`
+    // exists for.
+    const reversedAt = '2026-09-17T00:00:00.000Z';
+    const attributionFor = referrals.store.attributionFor.bind(referrals.store);
+    let reads = 0;
+    referrals.store.attributionFor = async (id: string) => {
+      reads += 1;
+      const row = await attributionFor(id);
+      // Not on the first read: the payout has to get past `decidePayout`
+      // before the reversal is visible, or there is no race to lose.
+      return row && reads > 1 ? { ...row, reversedAt } : row;
+    };
+    referrals.store.markPaid = async () => false;
+
+    const countedBilling = counted(billing.store);
+    const countedReferrals = counted(referrals.store);
+
+    const outcome = await payReferralIfEarned(
+      { referrals: countedReferrals.store, billing: countedBilling.store },
+      'user_new',
+      ['pi_funding'],
+    );
+
+    assert.equal(outcome.paid, false, 'it did not take the losing path');
+    const spent = countedBilling.count() + countedReferrals.count();
+    assert.ok(
+      spent <= MAX_QUERIES_PER_REFERRAL_PAYOUT,
+      `a payout costs ${spent} queries, and the budget is told ${MAX_QUERIES_PER_REFERRAL_PAYOUT}`,
     );
   });
 });

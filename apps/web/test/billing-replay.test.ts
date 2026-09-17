@@ -8,6 +8,8 @@ import type Stripe from 'stripe';
 import {
   DEFAULT_QUERY_BUDGET,
   DEFAULT_REQUEST_BUDGET,
+  MAX_QUERIES_PER_PAYOUT_ROW,
+  MAX_QUERIES_PER_SUBSCRIPTION,
   pageSizeFor,
   parkedReserveFor,
   payoutBatchFor,
@@ -1007,15 +1009,44 @@ describe('the phases that hand over money already owed', () => {
         Math.max(0, budget - parked - payouts - reconcile),
       );
       assert.ok(parked >= 6, `budget ${budget} parks nothing`);
-      assert.ok(payoutBatchFor(payouts) >= 1, `budget ${budget} pays nobody`);
-      // #47: the reconcile is the fourth phase and had no share at all. It
-      // ran last and took whatever was left, which is how it came to exceed
-      // the allowance on its own past about a hundred subscriptions.
+      // The parked queue is the one phase that must always get a row: a
+      // night where it retries nothing is money already taken and still not
+      // credited, which is the failure it was given a floor for.
       assert.ok(
-        reconcileBatchFor(reconcile) >= 1,
-        `budget ${budget} reconciles nothing, ever`,
+        retryBatchFor(parked) >= 1,
+        `budget ${budget} retries no parked events, ever`,
       );
     }
+  });
+
+  it('gives every phase a working batch on the deployed allowance', async () => {
+    // The figure apps/web/wrangler.jsonc actually sets
+    // (`VIBLD_REPLAY_QUERY_BUDGET`), not a hypothetical. Every phase has to
+    // buy at least one item there, because that is the budget the nightly
+    // pass really runs on.
+    const budget = 500;
+    assert.ok(retryBatchFor(parkedReserveFor(budget)) >= 1);
+    assert.ok(payoutBatchFor(payoutReserveFor(budget)) >= 1);
+    assert.ok(reconcileBatchFor(reconcileReserveFor(budget)) >= 1);
+    assert.ok(replayBudgetFor(budget) > 0);
+  });
+
+  it('takes a night off rather than overrunning when a share is too small', async () => {
+    // Counting the worst case honestly turned up a capacity fact the old
+    // numbers hid: on the Workers Free default of 40, a quarter is 10 and
+    // one subscription can cost 17. There is no batch size that fits, so
+    // the honest answer is none. The alternative is a batch that overruns,
+    // which is the failure #47 exists to prevent, and the work keeps: drift
+    // is corrected and a stranded payout resumed on a later night.
+    //
+    // The replay still gets a share, which is the point of giving these two
+    // no floor. It is the phase that applies the events in the first place.
+    const budget = DEFAULT_QUERY_BUDGET;
+    assert.equal(reconcileBatchFor(reconcileReserveFor(budget)), 0);
+    assert.ok(
+      replayBudgetFor(budget) > 0,
+      'the reserves left the replay nothing',
+    );
   });
 
   it('keeps each phase inside its own share, not just the total', async () => {
@@ -1023,19 +1054,26 @@ describe('the phases that hand over money already owed', () => {
     // exists for, and a test that checks only the total passes while one
     // phase quietly overruns its share and another goes short. The
     // reconcile did: it reserved a quarter and then sized a batch from ten
-    // queries a subscription plus one fixed, when the true worst case is
-    // eleven plus three. On a 1000 allowance that is 24 subscriptions
-    // costing 267 out of a 250 share.
+    // queries a subscription plus one fixed, when the real figure was
+    // higher and the fixed cost was three.
+    //
+    // The per-item costs here are the constants rather than literals, which
+    // on its own would make this self-consistent and prove nothing. What
+    // makes it mean something is that `referral-payout.test.ts` pins the
+    // constant they are built from to a measured count: it drives the
+    // payout down its most expensive path with a counting store and
+    // compares. Measured cost, then the constant, then this arithmetic.
     for (const budget of [40, 120, 500, 900, 1000]) {
       const reconcile = reconcileReserveFor(budget);
       assert.ok(
-        3 + reconcileBatchFor(reconcile) * 11 <= reconcile,
+        3 + reconcileBatchFor(reconcile) * MAX_QUERIES_PER_SUBSCRIPTION <=
+          reconcile,
         `budget ${budget}: the reconcile overruns its own share`,
       );
 
       const payouts = payoutReserveFor(budget);
       assert.ok(
-        1 + payoutBatchFor(payouts) * 6 <= payouts,
+        1 + payoutBatchFor(payouts) * MAX_QUERIES_PER_PAYOUT_ROW <= payouts,
         `budget ${budget}: the payout resume overruns its own share`,
       );
 
