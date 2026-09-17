@@ -802,6 +802,24 @@ Dashboard needs no code change, only the amount to change.
   stamp, so a row that fails every night moves to the back of the queue
   instead of holding the front of it and starving every newer one.
 
+  **The reconcile is bounded like the rest of the pass, and resumable**
+  (#47, `0017_reconcile_cursor.sql`). It used to walk every subscription on
+  every run with nothing bounding it, in an invocation whose D1 allowance
+  three other phases had already drawn on. At roughly ten queries a
+  subscription that exceeds the invocation somewhere past a hundred of them:
+  D1 throws, `scheduled`'s own `.catch` turns the throw into a log line, and
+  the reconcile simply stops happening -- drift uncorrected, missed payouts
+  unrecovered, silently, every night after.
+
+  It now takes a quarter of the allowance like the parked queue and the
+  payout resume do, and walks the subscription ids in sorted order from where
+  the last run stopped. Reaching the end clears the cursor, so the walk laps:
+  every subscription is visited within one lap however many nights that
+  takes. The result carries `remaining`, which is what keeps a deployment
+  whose share never covers its list visible in the logs rather than silent --
+  the "stops early and reports success" failure `0009_event_replay.sql` was
+  written from, three times over.
+
 ### Provider balance alerts (docs/decisions.md L44)
 
 The same nightly Cron Trigger also runs `worker/provider-balance.ts`'s

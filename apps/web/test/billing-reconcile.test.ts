@@ -518,3 +518,139 @@ describe('Stripe pagination that does not advance', () => {
     assert.equal(result.failed, 1, 'the truncated discovery was not reported');
   });
 });
+
+/**
+ * The walk, once it stopped being unbounded (#47).
+ *
+ * `reconcileSubscriptions` checked every subscription on every run, with
+ * nothing bounding it, in an invocation whose D1 allowance three other
+ * phases had already drawn on. Past about a hundred subscriptions D1 throws,
+ * the scheduled handler catches the throw and logs it, and the reconcile
+ * stops happening: drift goes uncorrected and a payout whose `invoice.paid`
+ * never arrived is never recovered, silently, every night after.
+ *
+ * A bound alone would be the failure 0009_event_replay.sql was written from,
+ * three times over: it turns "never finishes" into "stops early and reports
+ * success". So the bound comes with a resume point, and what these tests are
+ * really about is that nothing is skipped.
+ */
+describe('the reconcile walk', () => {
+  /** Sorted, because that is the order the walk uses. */
+  const FIVE = ['a', 'b', 'c', 'd', 'e'];
+
+  async function walk(
+    store: BillingStore,
+    limit: number,
+  ): Promise<{ seen: string[]; remaining: number }> {
+    const seen: string[] = [];
+    const stripe = stripeServing(FIVE);
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+    const result = await reconcileSubscriptions(
+      stripe,
+      store,
+      undefined,
+      limit,
+    );
+    return { seen, remaining: result.remaining };
+  }
+
+  it('checks only as many as it was given', async () => {
+    const store = await storeWith(FIVE);
+    const first = await walk(store, 2);
+    assert.equal(first.seen.length, 2);
+    assert.equal(first.remaining, 3);
+  });
+
+  it('carries on where the last run stopped, and skips nobody', async () => {
+    // The whole point. A bound that restarted at the top every night would
+    // check the same two for ever and never reach the other three.
+    const store = await storeWith(FIVE);
+    const seen: string[] = [];
+    for (let run = 0; run < 3; run += 1) {
+      seen.push(...(await walk(store, 2)).seen);
+    }
+    assert.deepEqual(
+      [...seen].sort(),
+      FIVE.map((s) => `sub_${s}`).sort(),
+      'a full lap did not cover every subscription',
+    );
+    assert.equal(new Set(seen).size, FIVE.length, 'it checked one twice');
+  });
+
+  it('walks in one stable order however the two sources are ordered', async () => {
+    // The merged list is the mirror plus whatever Stripe's list adds that
+    // the mirror did not have, and the second half lands after the first
+    // whatever its ids are. Here the mirror holds the two that sort last, so
+    // the merged order is d, e, a, b, c. Walking that directly with a cursor
+    // that means "after this id" reaches e, finds nothing above it, and
+    // starts again at d: a, b and c are never checked on any night, which is
+    // the exact failure 0009_event_replay.sql was written from.
+    const store = await storeWith(['d', 'e']);
+    const seen: string[] = [];
+    for (let run = 0; run < 3; run += 1) {
+      seen.push(...(await walk(store, 2)).seen);
+    }
+    assert.deepEqual(
+      [...new Set(seen)].sort(),
+      FIVE.map((name) => `sub_${name}`),
+      'the walk never reached the ids Stripe discovered',
+    );
+  });
+
+  it('laps, so a subscription is never checked once and forgotten', async () => {
+    // Reaching the end clears the cursor rather than leaving it at the last
+    // id. Otherwise the walk stops at the end of the list and the first
+    // subscription is never re-checked.
+    const store = await storeWith(FIVE);
+    for (let run = 0; run < 3; run += 1) await walk(store, 2);
+    const next = await walk(store, 2);
+    assert.deepEqual(next.seen, ['sub_a', 'sub_b'], 'the walk did not lap');
+  });
+
+  it('says how many it did not reach', async () => {
+    // The lie 0009_event_replay.sql was written about is a run that stops
+    // early and reports success. The count is what makes a deployment whose
+    // share never covers its list visible rather than silent.
+    const store = await storeWith(FIVE);
+    assert.equal((await walk(store, 2)).remaining, 3);
+    assert.equal((await walk(store, 2)).remaining, 1);
+    assert.equal((await walk(store, 2)).remaining, 0);
+  });
+
+  it('checks everything in one run when the share allows it', async () => {
+    const store = await storeWith(FIVE);
+    const { seen, remaining } = await walk(store, 50);
+    assert.equal(seen.length, FIVE.length);
+    assert.equal(remaining, 0);
+  });
+
+  it('does not lose its place when a subscription disappears', async () => {
+    // The cursor holds an id, and the search is for the next one above it,
+    // so an id that has since gone costs nothing. Holding an index instead
+    // would silently shift the whole walk.
+    const store = await storeWith(FIVE);
+    await walk(store, 2);
+    const stripe = stripeServing(['c', 'd', 'e']);
+    const seen: string[] = [];
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(seen, ['sub_c', 'sub_d']);
+  });
+
+  it('checks everything when given no limit at all', async () => {
+    // The default is what every existing caller and test relies on.
+    const store = await storeWith(FIVE);
+    const stripe = stripeServing(FIVE);
+    const result = await reconcileSubscriptions(stripe, store);
+    assert.equal(result.checked, FIVE.length);
+    assert.equal(result.remaining, 0);
+  });
+});

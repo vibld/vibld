@@ -258,6 +258,12 @@ export async function handleStripeWebhook(
 }
 
 /**
+ * The one reconcile walk this deployment runs, named so a second one is a
+ * new row rather than a schema change (0017_reconcile_cursor.sql).
+ */
+const RECONCILE_WALK = 'subscriptions';
+
+/**
  * Re-read every mirrored subscription from Stripe and correct drift (L13).
  * Called from `index.ts`'s `scheduled` export, on a nightly Cron Trigger.
  * Stripe, not this deployment's own copy, is authoritative -- a subscription
@@ -277,13 +283,30 @@ export async function reconcileSubscriptions(
    * paid.
    */
   onClearedPayment?: (userId: string) => Promise<void>,
+  /**
+   * How many subscriptions this run may check (#47).
+   *
+   * It used to check all of them, every night, with nothing bounding it.
+   * The three phases before this one in the same invocation share one D1
+   * allowance and this one took whatever was left; past about a hundred
+   * subscriptions D1 throws, `scheduled` catches the throw and logs it, and
+   * the reconcile quietly stops happening.
+   *
+   * The bound is only safe because of the cursor below. A bound on its own
+   * is the failure `0009_event_replay.sql` was written from: it turns "never
+   * finishes" into "stops early and reports success", and everything past it
+   * is never reached on any night.
+   */
+  limit = Number.POSITIVE_INFINITY,
 ): Promise<{
   checked: number;
   corrected: number;
   failed: number;
   discovered: number;
+  /** Subscriptions this run did not reach. The next one starts there. */
+  remaining: number;
 }> {
-  const ids = await discoverSubscriptionIds(stripe, store);
+  const found = await discoverSubscriptionIds(stripe, store);
   let corrected = 0;
   let failed = 0;
 
@@ -291,12 +314,30 @@ export async function reconcileSubscriptions(
   // everything, so it is counted as a failure rather than reported as a
   // clean run over a short list. The subscriptions it did find are still
   // worth checking, which is why this does not throw.
-  if (ids.truncated) {
+  if (found.truncated) {
     console.error('reconcile: subscription discovery stopped early');
     failed += 1;
   }
 
-  for (const id of ids.ids) {
+  /*
+   * One stable order, so "after this id" means the same thing on every run.
+   * `discoverSubscriptionIds` merges the mirror with Stripe's own list, and
+   * neither order is stable across nights: the mirror's is whatever D1
+   * returns and Stripe's is newest-first, which shifts every time somebody
+   * subscribes. Sorting makes the walk a walk rather than a re-shuffle.
+   */
+  const all = [...found.ids].sort();
+  const after = await store.reconcileCursor(RECONCILE_WALK);
+  // The first id past where the last run stopped. An id that has since
+  // disappeared costs nothing: the search is for the next one above it.
+  const start = after === undefined ? 0 : all.findIndex((id) => id > after);
+  const from = start === -1 ? all.length : start;
+  const ids = Number.isFinite(limit)
+    ? all.slice(from, from + limit)
+    : all.slice(from);
+  const reachedEnd = from + ids.length >= all.length;
+
+  for (const id of ids) {
     try {
       const subscription = await stripe.subscriptions.retrieve(id);
       const current = await store.getSubscription(id);
@@ -367,11 +408,28 @@ export async function reconcileSubscriptions(
     }
   }
 
+  /*
+   * The cursor moves after the walk, not during it. A run that dies partway
+   * re-reads the same slice tomorrow, which costs a repeat of idempotent
+   * work; advancing per subscription would instead skip whatever was in
+   * flight when it died, and a skipped subscription is one nothing revisits
+   * until the next lap.
+   *
+   * Cleared at the end of the list rather than left pointing at the last id,
+   * so the next run starts from the top. That is what makes this a lap: the
+   * walk comes round to the beginning instead of stopping at the end.
+   */
+  await store.saveReconcileCursor(
+    RECONCILE_WALK,
+    reachedEnd ? undefined : ids.at(-1),
+  );
+
   return {
-    checked: ids.ids.length,
+    checked: ids.length,
     corrected,
     failed,
-    discovered: ids.discovered,
+    discovered: found.discovered,
+    remaining: all.length - (from + ids.length),
   };
 }
 
