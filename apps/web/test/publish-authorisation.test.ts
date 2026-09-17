@@ -45,12 +45,22 @@ function workerFiles(): string[] {
  * formatted by Prettier, so a top-level function's closing brace is the
  * only `}` in the first column between one declaration and the next.
  */
-function handlePublishRange(index: string): { from: number; to: number } {
-  const from = index.indexOf('async function handlePublish(');
-  assert.notEqual(from, -1, 'handlePublish is gone; this test is stale');
+function rangeOf(
+  index: string,
+  declaration: string,
+): {
+  from: number;
+  to: number;
+} {
+  const from = index.indexOf(declaration);
+  assert.notEqual(from, -1, `${declaration} is gone; this test is stale`);
   const end = index.indexOf('\n}\n', from);
-  assert.notEqual(end, -1, 'handlePublish never closes');
+  assert.notEqual(end, -1, `${declaration} never closes`);
   return { from, to: end + 3 };
+}
+
+function handlePublishRange(index: string): { from: number; to: number } {
+  return rangeOf(index, 'async function handlePublish(');
 }
 
 describe('nothing but a person can publish', () => {
@@ -132,6 +142,61 @@ describe('nothing but a person can publish', () => {
     assert.match(body, /request\.method !== 'POST'/);
   });
 
+  it('has exactly one caller of the takedown path, inside handleUnpublish', () => {
+    // Taking a site down is the other half of the same authority. A caller
+    // that can remove somebody's published site without a person asking is
+    // the same failure as one that can publish, pointed the other way.
+    const offenders: string[] = [];
+    for (const name of workerFiles()) {
+      if (name === 'publish-client.ts') continue;
+      for (const [line, content] of source(name).split('\n').entries()) {
+        if (/^\s*(import|export)\b/.test(content)) continue;
+        if (/\bunpublishProject\s*\(/.test(content)) {
+          offenders.push(`${name}:${line + 1}`);
+        }
+      }
+    }
+    assert.equal(
+      offenders.length,
+      1,
+      `unpublishProject is called from: ${offenders.join(', ')}`,
+    );
+
+    const index = source('index.ts');
+    const { from, to } = rangeOf(index, 'async function handleUnpublish(');
+    const call = index.indexOf('await unpublishProject(');
+    assert.ok(
+      call > from && call < to,
+      'unpublishProject is called from outside handleUnpublish',
+    );
+  });
+
+  it('knows who is asking before it takes anything down', () => {
+    const index = source('index.ts');
+    const { from, to } = rangeOf(index, 'async function handleUnpublish(');
+    const body = index.slice(from, to);
+    const identified = body.indexOf('resolvePrincipal(');
+    const removed = body.indexOf('unpublishProject(');
+    assert.notEqual(identified, -1, 'handleUnpublish identifies nobody');
+    assert.ok(
+      identified < removed,
+      'handleUnpublish removes before it knows who is asking',
+    );
+  });
+
+  it('reaches the takedown only through DELETE on the publish route', () => {
+    // The verb is the guard against the accident: a link, an image, a
+    // prefetch and a form can all issue a GET or a POST, and none of them
+    // can issue a DELETE.
+    const index = source('index.ts');
+    const at = index.indexOf("pathname === '/api/publish'");
+    assert.notEqual(at, -1, 'the publish route is gone; this test is stale');
+    const route = index.slice(at, at + 400);
+    assert.match(route, /request\.method === 'DELETE'/);
+    assert.match(route, /handleUnpublish\(request, env\)/);
+    assert.match(route, /handlePublish\(request, env\)/);
+  });
+
   it('declares no cron that could reach publishing', () => {
     // The one scheduled handler in the Worker. If publishing ever becomes
     // reachable from it, it will be reachable with nobody present.
@@ -145,6 +210,7 @@ describe('nothing but a person can publish', () => {
     const scheduled = index.slice(at);
     assert.doesNotMatch(scheduled, /\bpublishProject\s*\(/);
     assert.doesNotMatch(scheduled, /\bbuildProject\s*\(/);
+    assert.doesNotMatch(scheduled, /\bunpublishProject\s*\(/);
   });
 });
 

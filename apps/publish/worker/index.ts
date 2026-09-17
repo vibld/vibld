@@ -120,6 +120,46 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * Take a published project off the web (internal API, ADR-0013).
+ *
+ * Ownership is checked here even though apps/web has already resolved a
+ * principal, for the reason ADR-0006 gives at every boundary: the caller
+ * says who is asking, and the store is what knows whose slug this is. A
+ * project that was never published answers 404 rather than pretending to
+ * have removed something.
+ */
+async function handleUnpublish(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { userId, projectId } = (body ?? {}) as {
+    userId?: unknown;
+    projectId?: unknown;
+  };
+  if (typeof userId !== 'string' || userId.length === 0) {
+    return json({ error: '"userId" is required.' }, 400);
+  }
+  if (typeof projectId !== 'string' || projectId.length === 0) {
+    return json({ error: '"projectId" is required.' }, 400);
+  }
+
+  const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
+  const existing = await store.slugForProject(projectId);
+  if (!existing) {
+    return json({ error: 'This project is not published.' }, 404);
+  }
+  if (existing.userId !== userId) {
+    return json({ error: 'This project is published by another user.' }, 403);
+  }
+
+  await store.unpublish(existing.slug);
+  return json({ slug: existing.slug });
+}
+
 async function handleInternal(
   request: Request,
   env: Env,
@@ -132,6 +172,9 @@ async function handleInternal(
   }
   if (pathname === '/internal/publish' && request.method === 'POST') {
     return handlePublish(request, env);
+  }
+  if (pathname === '/internal/unpublish' && request.method === 'POST') {
+    return handleUnpublish(request, env);
   }
   return json({ error: 'Not found.' }, 404);
 }

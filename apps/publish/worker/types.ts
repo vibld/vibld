@@ -33,7 +33,23 @@ export interface PublishD1Database {
   prepare(query: string): PublishD1Statement;
 }
 
+/**
+ * `delete` and `list` are here for taking a published site down (ADR-0013's
+ * rollback rule). They are the narrowest shape of R2's own: `delete` takes
+ * one key or a batch, and `list` pages with a cursor, which is why
+ * `unpublish` loops rather than assuming one call sees every object.
+ */
 export interface PublishR2Bucket {
   get(key: string): Promise<{ text(): Promise<string> } | null>;
   put(key: string, value: string): Promise<unknown>;
+  delete(keys: string | string[]): Promise<unknown>;
+  list(options?: {
+    prefix?: string;
+    cursor?: string;
+    limit?: number;
+  }): Promise<{
+    objects: { key: string }[];
+    truncated: boolean;
+    cursor?: string;
+  }>;
 }

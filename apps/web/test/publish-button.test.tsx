@@ -32,6 +32,8 @@ function reply(value: unknown, status = 200): Response {
 
 interface Call {
   url: string;
+  /** Publishing and taking down differ by verb, so the verb is recorded. */
+  method?: string;
   body?: Record<string, unknown>;
 }
 
@@ -40,6 +42,7 @@ function serving(answer: () => Response | Promise<Response>): Call[] {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({
       url: String(input),
+      ...(init?.method ? { method: init.method } : {}),
       ...(init?.body
         ? { body: JSON.parse(String(init.body)) as Record<string, unknown> }
         : {}),
@@ -116,6 +119,17 @@ async function mount(element: React.ReactNode) {
     await press(panel.querySelector('button'), 'confirm button');
   }
 
+  /** The takedown trigger, when there is something up to take down. */
+  function takeDownButton(): HTMLButtonElement | undefined {
+    return [...container.querySelectorAll('button')].find((button) =>
+      /Take it down|Taking down/.test(button.textContent ?? ''),
+    );
+  }
+
+  async function askToTakeDown() {
+    await press(takeDownButton(), 'take-down button');
+  }
+
   async function cancel() {
     const panel = panelOf(container);
     assert.ok(panel, 'no confirmation to cancel');
@@ -128,6 +142,8 @@ async function mount(element: React.ReactNode) {
     ask,
     confirm,
     cancel,
+    takeDownButton,
+    askToTakeDown,
     async render(next: React.ReactNode) {
       await act(async () => root.render(next));
     },
@@ -499,6 +515,177 @@ describe('the publish confirmation', () => {
 
     assert.equal(view.confirming(), false, 'a stale confirmation stayed up');
     assert.deepEqual(calls, [], 'it published on the way past');
+    view.unmount();
+  });
+});
+
+/**
+ * ADR-0013 makes rollback "a first-class, person-taken action". Until this
+ * existed there was no way off the web at all: nothing in the product, and
+ * nothing an operator could run, removed a published site.
+ */
+describe('taking a published site down', () => {
+  function publishReply() {
+    return reply({
+      ok: true,
+      slug: 'my-site',
+      url: 'https://my-site.example',
+      skipped: [],
+    });
+  }
+
+  it('offers nothing to take down before anything is published', async () => {
+    serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    assert.equal(view.takeDownButton(), undefined);
+    view.unmount();
+  });
+
+  it('sends nothing on the first press', async () => {
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    assert.equal(calls.length, 1);
+
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+
+    assert.equal(view.confirming(), true, 'it did not ask');
+    assert.equal(calls.length, 1, 'one press took the site down');
+    view.unmount();
+  });
+
+  it('names the site, and says the name is kept', async () => {
+    // The two halves somebody needs to decide: the address stops working,
+    // and nobody else gets to claim it.
+    serving(publishReply);
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    await view.askToTakeDown();
+
+    const said = view.container.textContent ?? '';
+    assert.match(said, /my-site/);
+    assert.match(said, /off the web/);
+    assert.match(said, /name stays yours/);
+    view.unmount();
+  });
+
+  it('takes nothing down when the decision is declined', async () => {
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.cancel();
+
+    assert.equal(calls.length, 1, 'cancelling took the site down');
+    assert.ok(view.takeDownButton(), 'the take-down button did not come back');
+    view.unmount();
+  });
+
+  it('deletes, rather than posting, when the decision is taken', async () => {
+    // The method is the rule: a link or a form cannot reach DELETE by
+    // accident, and the server routes on it.
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.url, '/api/publish');
+    assert.equal(calls[1]?.method, 'DELETE');
+    assert.equal(calls[1]?.body, undefined, 'a takedown named a site');
+    view.unmount();
+  });
+
+  it('stops saying the site is live, and offers to publish again', async () => {
+    let answer = publishReply;
+    serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    assert.match(view.container.textContent ?? '', /my-site\.example/);
+
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    const said = view.container.textContent ?? '';
+    assert.doesNotMatch(said, /Live at/, 'it still said the site was live');
+    assert.match(said, /off the web/);
+    assert.match(view.label(), /Publish again/);
+    assert.equal(view.slug(), null, 'it asked for a name still held');
+    assert.equal(
+      view.takeDownButton(),
+      undefined,
+      'it offered to take down a site that is already down',
+    );
+    view.unmount();
+  });
+
+  it('puts it back under the same name', async () => {
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    answer = publishReply;
+    await view.click();
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2]?.body?.slug, 'my-site');
+    assert.match(view.container.textContent ?? '', /my-site\.example/);
+    view.unmount();
+  });
+
+  it('keeps saying a site is down across a new checkpoint', async () => {
+    // A new checkpoint does not put anything back on the web. Clearing the
+    // sentence would leave somebody guessing whether it had.
+    let answer = publishReply;
+    serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+
+    assert.match(view.container.textContent ?? '', /off the web/);
+    assert.match(view.label(), /Publish again/);
+    view.unmount();
+  });
+
+  it('reports a refused takedown rather than claiming it worked', async () => {
+    let answer = publishReply;
+    serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+
+    answer = () => reply({ error: 'This project is not published.' }, 404);
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.match(
+      view.container.textContent ?? '',
+      /This project is not published/,
+    );
+    assert.doesNotMatch(view.container.textContent ?? '', /off the web/);
     view.unmount();
   });
 });

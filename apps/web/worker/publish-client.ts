@@ -157,3 +157,57 @@ export async function publishProject(
       response.status >= 400 && response.status < 500 ? response.status : 502,
   };
 }
+
+export type UnpublishResult =
+  { ok: true; slug: string } | { ok: false; error: string; status: number };
+
+/**
+ * Take this project's published site off the web (ADR-0013).
+ *
+ * No build step, unlike publishing: there is nothing to make, only
+ * something to stop serving. Ownership is checked again on the other side
+ * -- apps/web knows who is asking, apps/publish knows whose slug this is --
+ * so a caller cannot take down somebody else's site by naming their
+ * project.
+ */
+export async function unpublishProject(
+  env: PublishServiceEnv,
+  userId: string,
+  projectId: string,
+): Promise<UnpublishResult> {
+  const response = await env.PUBLISH!.fetch(
+    new Request(new URL('/internal/unpublish', INTERNAL_ORIGIN), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${env.PUBLISH_INTERNAL_SECRET}`,
+      },
+      body: JSON.stringify({ userId, projectId }),
+    }),
+  );
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return {
+      ok: false,
+      error: 'The publish service returned an unreadable response.',
+      status: 502,
+    };
+  }
+  const record = (body ?? {}) as { slug?: unknown; error?: unknown };
+  if (response.ok && typeof record.slug === 'string') {
+    return { ok: true, slug: record.slug };
+  }
+  return {
+    ok: false,
+    error:
+      typeof record.error === 'string'
+        ? record.error
+        : 'Could not take this project down.',
+    // Same rule publishing uses: a 403 or a 404 is the caller's answer, not
+    // this service failing.
+    status:
+      response.status >= 400 && response.status < 500 ? response.status : 502,
+  };
+}

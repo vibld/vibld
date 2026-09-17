@@ -27,6 +27,8 @@ interface PublishedProjectRow {
   slug: string;
   project_id: string;
   user_id: string;
+  /** ISO timestamp, or null for a site that is live. See 0016_unpublish.sql. */
+  unpublished_at: string | null;
 }
 
 export type ClaimResult =
@@ -41,26 +43,48 @@ export class PublishStore {
     this.#bucket = bucket;
   }
 
-  /** The slug a project already published under, if any. */
+  /**
+   * The slug a project already published under, if any, and whether it is
+   * still live.
+   *
+   * Deliberately finds a taken-down site too. The owner's next publish is
+   * then a republish under the name they already have, rather than a fresh
+   * claim on a name the tombstone is holding for them.
+   */
   async slugForProject(
     projectId: string,
-  ): Promise<{ slug: string; userId: string } | undefined> {
+  ): Promise<{ slug: string; userId: string; live: boolean } | undefined> {
     const row = await this.#db
       .prepare(
-        `SELECT slug, user_id FROM published_projects WHERE project_id = ?1`,
+        `SELECT slug, user_id, unpublished_at FROM published_projects WHERE project_id = ?1`,
       )
       .bind(projectId)
-      .first<Pick<PublishedProjectRow, 'slug' | 'user_id'>>();
-    return row ? { slug: row.slug, userId: row.user_id } : undefined;
+      .first<
+        Pick<PublishedProjectRow, 'slug' | 'user_id' | 'unpublished_at'>
+      >();
+    return row
+      ? {
+          slug: row.slug,
+          userId: row.user_id,
+          live: row.unpublished_at === null,
+        }
+      : undefined;
   }
 
-  /** The project a public request's slug resolves to, if published. */
+  /**
+   * The project a public request's slug resolves to, if published.
+   *
+   * A tombstoned slug resolves to nothing, which is the whole of what
+   * "taken down" means to the outside world. The row is still there,
+   * holding the name (0016_unpublish.sql).
+   */
   async resolveSlug(
     slug: string,
   ): Promise<{ projectId: string; userId: string } | undefined> {
     const row = await this.#db
       .prepare(
-        `SELECT project_id, user_id FROM published_projects WHERE slug = ?1`,
+        `SELECT project_id, user_id FROM published_projects
+         WHERE slug = ?1 AND unpublished_at IS NULL`,
       )
       .bind(slug)
       .first<Pick<PublishedProjectRow, 'project_id' | 'user_id'>>();
@@ -98,9 +122,18 @@ export class PublishStore {
     return { claimed: true };
   }
 
+  /**
+   * Mark a republish. Clearing `unpublished_at` is what puts a taken-down
+   * site back: publishing again under the name you still hold is the same
+   * act as publishing it the first time, so it does not need its own verb.
+   */
   async touch(slug: string): Promise<void> {
     await this.#db
-      .prepare(`UPDATE published_projects SET updated_at = ?1 WHERE slug = ?2`)
+      .prepare(
+        `UPDATE published_projects
+         SET updated_at = ?1, unpublished_at = NULL
+         WHERE slug = ?2`,
+      )
       .bind(new Date().toISOString(), slug)
       .run();
   }
@@ -112,6 +145,50 @@ export class PublishStore {
         this.#bucket.put(objectKey(slug, file.path), file.content),
       ),
     );
+  }
+
+  /**
+   * Take a published site off the web (ADR-0013).
+   *
+   * The tombstone first, then the bytes. That order is the whole of the care
+   * this needs: a failure in between leaves the site down, which is what was
+   * asked for, and some objects still sitting in R2 under a prefix nothing
+   * resolves to. A repeat of this call clears them. The other order fails
+   * the other way -- content gone while the row still says live, so the site
+   * reads as up and serves nothing, and nobody is told.
+   *
+   * The slug is not released. ADR-0010 makes it a durable, semi-public
+   * identifier, and handing a name somebody has linked to over to the next
+   * person who asks for it is a redirect nobody consented to. So the row
+   * stays and is marked (0016_unpublish.sql): public serving refuses it, the
+   * owner still holds it, and nobody else can claim it. Publishing again
+   * under that name is what puts the site back.
+   */
+  async unpublish(slug: string, at = new Date()): Promise<void> {
+    const now = at.toISOString();
+    await this.#db
+      .prepare(
+        `UPDATE published_projects
+         SET unpublished_at = ?1, updated_at = ?1
+         WHERE slug = ?2`,
+      )
+      .bind(now, slug)
+      .run();
+
+    // R2 pages with a cursor, so this loops. A site with more files than one
+    // page holds would otherwise be half removed, and the half left behind
+    // is content nothing points at and nobody thinks to look for.
+    let cursor: string | undefined;
+    do {
+      const page = await this.#bucket.list({
+        prefix: `published/${slug}/`,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      if (page.objects.length > 0) {
+        await this.#bucket.delete(page.objects.map((object) => object.key));
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor !== undefined);
   }
 
   async getFile(

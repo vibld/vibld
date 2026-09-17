@@ -79,6 +79,7 @@ import {
   autoPublishConfigured,
   buildProject,
   publishProject,
+  unpublishProject,
 } from './publish-client.ts';
 import {
   billingConfigured,
@@ -1385,6 +1386,59 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
 }
 
 /**
+ * Take the caller's published site off the web (ADR-0013).
+ *
+ * The other half of publishing, and the half that was missing: until this
+ * existed nothing could remove a published site, not the person who put it
+ * there and not an operator. There is no build and no body: what comes down
+ * is whatever this caller has up, which is the only site they are allowed
+ * to name.
+ *
+ * `PUBLISH_BURST` again rather than a gate of its own. It is the same
+ * caller, the same service, and a takedown is cheaper than the publish that
+ * preceded it.
+ */
+async function handleUnpublish(request: Request, env: Env): Promise<Response> {
+  if (!autoPublishConfigured(env)) {
+    return json(
+      { error: 'Publishing is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (env.PUBLISH_BURST) {
+    try {
+      const result = await env.PUBLISH_BURST.limit({
+        key: `publish:${principal.userId}`,
+      });
+      if (!result.success) {
+        return json(
+          { error: 'Too many publish requests. Try again shortly.' },
+          429,
+        );
+      }
+    } catch (error) {
+      console.error('publish rate limiter unavailable', error);
+    }
+  }
+
+  // One project per Clerk user, the same convention `handlePublish` uses.
+  const removed = await unpublishProject(
+    env,
+    principal.userId,
+    principal.userId,
+  );
+  if (!removed.ok) {
+    return json({ error: removed.error }, removed.status);
+  }
+  return json({ slug: removed.slug });
+}
+
+/**
  * Identify the caller, then hand off to a GitHub handler.
  *
  * The handlers in `github-handlers.ts` take a principal rather than resolving
@@ -1502,7 +1556,12 @@ export default {
     }
 
     if (pathname === '/api/publish') {
-      return handlePublish(request, env);
+      // Two verbs on one path, deliberately: POST puts a checkpoint on the
+      // web, DELETE takes it off. Both are the same resource, and DELETE is
+      // the method a link or a form cannot reach by accident (ADR-0013).
+      return request.method === 'DELETE'
+        ? handleUnpublish(request, env)
+        : handlePublish(request, env);
     }
 
     if (pathname === '/api/runs') {

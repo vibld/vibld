@@ -86,3 +86,41 @@ export async function publishProject(
     };
   }
 }
+
+export type UnpublishResult =
+  { ok: true; slug: string } | { ok: false; error: string };
+
+/**
+ * Take this project's published site off the web (ADR-0013).
+ *
+ * `DELETE` on the same path publishing uses, and no body: what comes down
+ * is whatever this caller has up, which is the only site they can name.
+ */
+export async function unpublishProject(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<UnpublishResult> {
+  const response = await fetchImpl('/api/publish', {
+    method: 'DELETE',
+    headers: await authHeaders(getToken),
+  });
+  if (!response.ok) {
+    return { ok: false, error: await errorMessage(response) };
+  }
+  try {
+    const body: unknown = await response.json();
+    const record = (body ?? {}) as { slug?: unknown };
+    if (typeof record.slug === 'string') {
+      return { ok: true, slug: record.slug };
+    }
+    return {
+      ok: false,
+      error: 'The publish service returned an unexpected response.',
+    };
+  } catch {
+    return {
+      ok: false,
+      error: 'The publish service returned an unreadable response.',
+    };
+  }
+}

@@ -4,6 +4,7 @@ import {
   autoPublishConfigured,
   buildProject,
   publishProject,
+  unpublishProject,
 } from '../worker/publish-client.ts';
 import type { ServiceBinding } from '../worker/publish-client.ts';
 
@@ -217,5 +218,92 @@ describe('publishProject', () => {
       [],
     );
     assert.equal(result.ok, false);
+  });
+});
+
+describe('unpublishProject', () => {
+  it('posts the caller and the project to the publish service', async () => {
+    const { binding, calls } = fakeBinding(() =>
+      jsonResponse({ slug: 'acme' }),
+    );
+
+    const result = await unpublishProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 'the-secret' },
+      'user_1',
+      'proj_1',
+    );
+
+    assert.deepEqual(result, { ok: true, slug: 'acme' });
+    assert.equal(calls.length, 1);
+    const sent = calls[0]!;
+    assert.equal(new URL(sent.url).pathname, '/internal/unpublish');
+    assert.equal(sent.method, 'POST');
+    assert.equal(sent.headers.get('Authorization'), 'Bearer the-secret');
+    assert.deepEqual(await sent.json(), {
+      userId: 'user_1',
+      projectId: 'proj_1',
+    });
+  });
+
+  it('passes a refusal through with its own status', async () => {
+    // A 403 is the caller's answer and a 404 is a project that was never
+    // published. Collapsing either into a 502 would tell somebody this
+    // service is broken when it is working exactly as intended.
+    const { binding } = fakeBinding(() =>
+      jsonResponse(
+        { error: 'This project is published by another user.' },
+        403,
+      ),
+    );
+
+    const result = await unpublishProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'user_2',
+      'proj_1',
+    );
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'This project is published by another user.',
+      status: 403,
+    });
+  });
+
+  it("reports a service failure as 502, not as the caller's fault", async () => {
+    const { binding } = fakeBinding(() => jsonResponse({ error: 'boom' }, 500));
+    const result = await unpublishProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'user_1',
+      'proj_1',
+    );
+    assert.deepEqual(result, { ok: false, error: 'boom', status: 502 });
+  });
+
+  it('does not report success on a reply that never said so', async () => {
+    const { binding } = fakeBinding(() => jsonResponse({}));
+    const result = await unpublishProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'user_1',
+      'proj_1',
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'Could not take this project down.',
+      status: 502,
+    });
+  });
+
+  it('does not crash on an unreadable reply', async () => {
+    const { binding } = fakeBinding(() => new Response('not json'));
+    const result = await unpublishProject(
+      { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
+      'user_1',
+      'proj_1',
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'The publish service returned an unreadable response.',
+      status: 502,
+    });
   });
 });

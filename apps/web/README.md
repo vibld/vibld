@@ -609,20 +609,50 @@ user id (checked after identity, unlike `IP_BURST`) -- publishing runs a
 real sandbox build and a real R2 write, priced per caller rather than per
 flood, so it does not ride `PLAN_BURST`'s ceiling.
 
+`DELETE /api/publish` -- authenticated, no body. Takes the caller's
+published site off the web (ADR-0013). There is no build step and nothing
+to name: what comes down is whatever this caller has up, which is the only
+site they are allowed to name. Shares `PUBLISH_BURST` with the POST, and
+answers `503` under the same fail-closed rule. Returns `{ slug }`; a `403`
+means the project belongs to somebody else and a `404` means it was never
+published.
+
+The two verbs share a path and are told apart by method, deliberately: a
+link, an image, a prefetch and a form can all issue a `GET` or a `POST`,
+and none of them can issue a `DELETE`.
+
+The name is not released by a takedown. `apps/publish/README.md`'s "Taking
+a site down" has the reasoning; the short version is that somebody has
+linked to the address, and handing it to the next claimant would serve
+their content where the previous owner sent people.
+
 ### In the builder shell
 
 The Code tab's `PublishButton` (next to `ExportButton`, both keyed on
 `state.acceptedSnapshot`) calls `/api/publish`
 (`src/generation/publish-client.ts`, the browser-side mirror of
-`worker/publish-client.ts`). A slug is required on first publish; the
-component remembers the slug its own successful publish returned for the
-rest of the page's lifetime, so a later click in the same session
-republishes without asking again -- there is no endpoint yet to ask "what
-slug does this project already have" on a fresh page load, so a returning
-visitor re-enters it once. On success, shows the live URL (and which
-binary asset paths, if any, were skipped); on failure, the error inline.
+`worker/publish-client.ts`).
 
-**Not built yet:** the opt-in custom-domain step ADR-0010 describes.
+**Two presses, not one** (ADR-0013). The first raises a sentence naming the
+slug, the checkpoint by revision, and whether this replaces something
+already live; the second is the act. Taking the site down works the same
+way and names what stops working. These are the only controls in the
+builder whose result a stranger can see, which is what earns the extra
+press; a generic "are you sure" would not.
+
+A slug is required on first publish; the component remembers the slug its
+own successful publish returned for the rest of the page's lifetime, so a
+later click in the same session republishes without asking again -- there
+is no endpoint yet to ask "what slug does this project already have" on a
+fresh page load, so a returning visitor re-enters it once. That is also why
+"Take it down" only appears after a publish in the same page load: it is
+the only time the builder knows there is anything up. On success, shows the
+live URL (and which binary asset paths, if any, were skipped); on failure,
+the error inline.
+
+**Not built yet:** the opt-in custom-domain step ADR-0010 describes, and
+rolling back to a _previous_ published checkpoint rather than taking the
+site down (it needs the retention decision ADR-0013 left open).
 
 ### Setup
 

@@ -1,0 +1,20 @@
+-- Taking a published site off the web (ADR-0013, #162).
+--
+-- Until this column existed there was no way down at all: publishing
+-- claimed a slug and overwrote R2, and nothing removed either. A site
+-- published by mistake, or one an operator has to pull, stayed up.
+--
+-- A tombstone rather than a deleted row, and that is the security half of
+-- the change rather than a tidiness preference. ADR-0010 makes a slug a
+-- durable, semi-public identifier: somebody has linked to it. Deleting the
+-- row would return the name to the pool, so the next person to ask for it
+-- would be served at an address the previous owner advertised. That turns a
+-- dead link into somebody else's content, which is worse than a 404 and is
+-- exactly the shape of a takeover.
+--
+-- So the row stays, `unpublished_at` is set, and the two readers diverge:
+-- public serving (`resolveSlug`) refuses a tombstoned slug, while the
+-- owner's own lookup (`slugForProject`) still finds it, which is what makes
+-- putting the site back a republish under the same name rather than a new
+-- claim. NULL means live, which is what every existing row is.
+ALTER TABLE published_projects ADD COLUMN unpublished_at TEXT;
