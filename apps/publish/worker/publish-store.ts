@@ -230,6 +230,24 @@ export class PublishStore {
     generation: string,
     files: ProjectFile[],
   ): Promise<void> {
+    // Catalogued before a single byte is written, so nothing can ever exist
+    // in R2 that this database cannot name. `promote` used to be where a
+    // revision first became enumerable, which left a window with no way
+    // out: `putFiles` succeeds, `promote` throws, its batch rolls back, and
+    // the objects sit under a prefix no pruning and no takedown can reach,
+    // for ever, with every retry adding another.
+    //
+    // The cost is that the catalogue also lists revisions that never went
+    // live. That is the right way round: a dead revision listed is one
+    // pruning will collect, and a live revision unlisted is a leak.
+    await this.#db
+      .prepare(
+        `INSERT INTO published_generations (slug, generation, created_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(slug, generation) DO NOTHING`,
+      )
+      .bind(slug, generation, new Date().toISOString())
+      .run();
     // Settled rather than raced to the first rejection. `Promise.all`
     // rejects as soon as one write fails while the others are still in
     // flight, and those that land afterwards are objects under a revision
@@ -304,6 +322,11 @@ export class PublishStore {
            WHERE slug = ?3 AND held_at IS NULL`,
         )
         .bind(generation, now, slug),
+      // Still here, and still in the batch, because `promote` is also
+      // reachable without `putFiles` (a republish of files already stored)
+      // and because `ON CONFLICT DO NOTHING` makes the ordinary case a
+      // no-op. What it no longer has to be is the first time this revision
+      // is named: `putFiles` did that before writing anything.
       this.#db
         .prepare(
           `INSERT INTO published_generations (slug, generation, created_at)
@@ -349,7 +372,23 @@ export class PublishStore {
    * overnight.
    */
   async #prune(slug: string): Promise<void> {
-    const stale = (await this.revisions(slug)).slice(REVISIONS_KEPT);
+    // The live one is never stale, whatever its age.
+    //
+    // It usually is the newest, so this looks redundant, and it is not:
+    // the catalogue now lists revisions that never went live, so a slug
+    // that fails to publish several times running can push the revision
+    // actually serving past the keep count. Pruning by age alone would
+    // then delete the site out from under itself.
+    const live = await this.#db
+      .prepare(`SELECT generation FROM published_projects WHERE slug = ?1`)
+      .bind(slug)
+      .first<Pick<PublishedProjectRow, 'generation'>>();
+    // Slice first, so the keep count still means the newest three. Then
+    // take the live one out of whatever that leaves, which normally removes
+    // nothing because the live one is the newest.
+    const stale = (await this.revisions(slug))
+      .slice(REVISIONS_KEPT)
+      .filter((generation) => generation !== live?.generation);
     for (const generation of stale) await this.discard(slug, generation);
   }
 

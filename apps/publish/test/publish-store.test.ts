@@ -269,9 +269,13 @@ describe('what a slug keeps', () => {
     assert.equal(
       await store.resolveSlug('acme'),
       undefined,
-      'it served a revision nothing had catalogued',
+      'it served a revision whose promotion had failed',
     );
-    assert.deepEqual(await store.revisions('acme'), []);
+    // Catalogued all the same, which is the stronger property: `putFiles`
+    // names a revision before writing a byte, so a promotion that throws
+    // leaves something pruning and a takedown can still reach. The failure
+    // this guards against is bytes nothing can enumerate.
+    assert.deepEqual(await store.revisions('acme'), ['gen-1']);
   });
 
   it('serves the newest revision and keeps the ones before it', async () => {

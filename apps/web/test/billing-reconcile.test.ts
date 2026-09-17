@@ -858,6 +858,52 @@ describe('the reconcile walk', () => {
     );
   });
 
+  it('keeps owing a retry to a failure the next slice never reached', async () => {
+    // A slice is a window, and other subscriptions can push things out of
+    // it. `sub_a` and `sub_c` fail; overnight `sub_aa` appears and sorts
+    // between them, so the retry slice is a, aa, b and never reaches c.
+    // Dropping the saved set there makes c's next failure look like a first
+    // one: the walk parks again and c takes a third attempt while
+    // everything behind it waits.
+    const statuses = [...FIVE];
+    const store = await storeWith(statuses);
+    const stripe = stripeServing(statuses);
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    const broken = new Set(['sub_a', 'sub_c']);
+    const seen: string[] = [];
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      if (broken.has(id)) throw new Error('both of these are broken');
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+
+    // Run one: a, b, c. Both failures recorded, parked before a.
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+
+    statuses.push('aa');
+    await store.upsertSubscription(record('aa'));
+
+    // Run two: a, aa, b. `a` fails again and is walked past; `c` is not
+    // even reached, so it is still owed its second attempt.
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+    assert.deepEqual(seen, ['sub_a', 'sub_aa', 'sub_b']);
+
+    // Run three reaches c. It fails, and that is its second attempt, so the
+    // walk goes past rather than parking for a third.
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+    assert.deepEqual(seen, ['sub_c', 'sub_d', 'sub_e']);
+
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+    assert.deepEqual(
+      seen,
+      ['sub_a', 'sub_aa', 'sub_b'],
+      'a failure displaced from its retry slice parked the walk again',
+    );
+  });
+
   it('stays put when the first subscription in the slice throws', async () => {
     // The edge the arithmetic gets wrong if it reaches for `ids[-1]`: the
     // failure is the first thing in the slice, so there is no earlier id to

@@ -472,6 +472,13 @@ export async function reconcileSubscriptions(
    * a slice with several failures retries all of them in one night instead
    * of parking once per failure and advancing one id a night.
    */
+  /**
+   * Failures from the parked run that this slice never got to.
+   *
+   * They are still owed their second attempt, so they stay recorded even
+   * when this run is not parking for anything of its own.
+   */
+  const carried = [...retried].filter((id) => !ids.includes(id));
   const holding = firstNewFailure !== -1;
   const resumeAt = holding
     ? // The id before the earliest new failure, so the next run re-reads it.
@@ -484,13 +491,21 @@ export async function reconcileSubscriptions(
   await store.saveReconcileCursor(
     RECONCILE_WALK,
     resumeAt,
-    // What failed, not what was attempted. The whole slice would count a
+    // What failed, plus what the slice never reached.
+    //
+    // Failures rather than attempts, because the whole slice would count a
     // subscription that succeeded tonight as having spent a retry it never
-    // needed, so when it throws tomorrow, on its first failure, the walk
-    // goes straight past it. Named rather than bounded, because a
-    // subscription created overnight can sort anywhere and a range would
-    // count it as retried without it ever having been tried.
-    holding ? failures : undefined,
+    // needed, and walk past its first real failure tomorrow.
+    //
+    // And carried, because a slice is a window that other subscriptions can
+    // push things out of. A failure recorded last night that this slice did
+    // not reach has still not had its second attempt: dropping it makes its
+    // next failure look like a first one, so the walk parks again and it
+    // takes a third go while everything behind it waits. Named rather than
+    // bounded for the same reason as before: a subscription created
+    // overnight can sort anywhere, and a range would count it as retried
+    // without it ever having been tried.
+    [...carried, ...failures],
   );
 
   return {
