@@ -29,7 +29,17 @@ interface PublishedProjectRow {
   user_id: string;
   /** ISO timestamp, or null for a site that is live. See 0016_unpublish.sql. */
   unpublished_at: string | null;
+  /** ISO timestamp an operator held this site at, or null. 0018_operator_hold.sql. */
+  held_at: string | null;
 }
+
+/**
+ * Why a slug is not serving, for the owner's own lookup.
+ *
+ * `held` is not a variety of `down`: the owner can undo their own takedown
+ * by publishing again, and must not be able to undo an operator's.
+ */
+export type PublishState = 'live' | 'down' | 'held';
 
 export type ClaimResult =
   { claimed: true } | { claimed: false; reason: 'slug-taken' };
@@ -53,22 +63,37 @@ export class PublishStore {
    */
   async slugForProject(
     projectId: string,
-  ): Promise<{ slug: string; userId: string; live: boolean } | undefined> {
+  ): Promise<
+    | { slug: string; userId: string; live: boolean; state: PublishState }
+    | undefined
+  > {
     const row = await this.#db
       .prepare(
-        `SELECT slug, user_id, unpublished_at FROM published_projects WHERE project_id = ?1`,
+        `SELECT slug, user_id, unpublished_at, held_at FROM published_projects WHERE project_id = ?1`,
       )
       .bind(projectId)
       .first<
-        Pick<PublishedProjectRow, 'slug' | 'user_id' | 'unpublished_at'>
+        Pick<
+          PublishedProjectRow,
+          'slug' | 'user_id' | 'unpublished_at' | 'held_at'
+        >
       >();
-    return row
-      ? {
-          slug: row.slug,
-          userId: row.user_id,
-          live: row.unpublished_at === null,
-        }
-      : undefined;
+    if (!row) return undefined;
+    // A hold outranks a takedown: an owner who took their own site down and
+    // was then held must be told the second thing, because it is the one
+    // publishing again will not clear.
+    const state: PublishState =
+      row.held_at !== null
+        ? 'held'
+        : row.unpublished_at === null
+          ? 'live'
+          : 'down';
+    return {
+      slug: row.slug,
+      userId: row.user_id,
+      live: state === 'live',
+      state,
+    };
   }
 
   /**
@@ -76,7 +101,9 @@ export class PublishStore {
    *
    * A tombstoned slug resolves to nothing, which is the whole of what
    * "taken down" means to the outside world. The row is still there,
-   * holding the name (0016_unpublish.sql).
+   * holding the name (0016_unpublish.sql). A slug an operator has held is
+   * refused on the same terms and for the same reason, by a column the
+   * owner cannot clear (0018_operator_hold.sql).
    */
   async resolveSlug(
     slug: string,
@@ -84,7 +111,7 @@ export class PublishStore {
     const row = await this.#db
       .prepare(
         `SELECT project_id, user_id FROM published_projects
-         WHERE slug = ?1 AND unpublished_at IS NULL`,
+         WHERE slug = ?1 AND unpublished_at IS NULL AND held_at IS NULL`,
       )
       .bind(slug)
       .first<Pick<PublishedProjectRow, 'project_id' | 'user_id'>>();
@@ -126,6 +153,10 @@ export class PublishStore {
    * Mark a republish. Clearing `unpublished_at` is what puts a taken-down
    * site back: publishing again under the name you still hold is the same
    * act as publishing it the first time, so it does not need its own verb.
+   *
+   * `held_at` is deliberately untouched. An operator hold the owner could
+   * lift by pressing Publish is not a hold, and `handlePublish` refuses
+   * before reaching here while one is set (0018_operator_hold.sql).
    */
   async touch(slug: string): Promise<void> {
     await this.#db
@@ -218,6 +249,101 @@ export class PublishStore {
       }
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor !== undefined);
+  }
+
+  /**
+   * Take somebody else's site off the web (#172, 0018_operator_hold.sql).
+   *
+   * The flag only. The bytes stay, on purpose: the harm is the content being
+   * reachable and this stops that the moment it is written, while deleting
+   * is irreversible, destroys what was served before anybody has looked at
+   * it, and makes a hold placed in haste on a wrong report impossible to
+   * undo. An operator acting in minutes on somebody else's account should
+   * not be making the irreversible call.
+   *
+   * Who and why are recorded because a takedown of work that is not yours is
+   * the clearest case of the auditable action SECURITY.md asks for.
+   *
+   * Re-holding an already-held site overwrites the reason rather than
+   * refusing. The second report is usually the better-documented one, and a
+   * hold that cannot be annotated is a hold somebody works around by
+   * releasing and re-holding, which is a window where the site serves.
+   */
+  async hold(
+    slug: string,
+    by: string,
+    reason: string,
+    at = new Date(),
+  ): Promise<void> {
+    const now = at.toISOString();
+    await this.#db
+      .prepare(
+        `UPDATE published_projects
+         SET held_at = ?1, held_by = ?2, held_reason = ?3, updated_at = ?1
+         WHERE slug = ?4`,
+      )
+      .bind(now, by, reason, slug)
+      .run();
+  }
+
+  /**
+   * Lift a hold. Only an operator reaches this.
+   *
+   * It does not put the site back by itself, and that is deliberate rather
+   * than an oversight: releasing a site the owner had also taken down must
+   * leave it down. Clearing the hold returns the decision to whoever else
+   * has a say in it, which for an owner takedown is the owner.
+   */
+  async release(slug: string, at = new Date()): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE published_projects
+         SET held_at = NULL, held_by = NULL, held_reason = NULL, updated_at = ?1
+         WHERE slug = ?2`,
+      )
+      .bind(at.toISOString(), slug)
+      .run();
+  }
+
+  /** What an operator needs to see about a slug before acting on it. */
+  async siteBySlug(slug: string): Promise<
+    | {
+        slug: string;
+        projectId: string;
+        userId: string;
+        state: PublishState;
+        heldBy?: string;
+        heldReason?: string;
+      }
+    | undefined
+  > {
+    const row = await this.#db
+      .prepare(
+        `SELECT slug, project_id, user_id, unpublished_at, held_at, held_by, held_reason
+         FROM published_projects WHERE slug = ?1`,
+      )
+      .bind(slug)
+      .first<
+        PublishedProjectRow & {
+          held_by: string | null;
+          held_reason: string | null;
+        }
+      >();
+    if (!row) return undefined;
+    const state: PublishState =
+      row.held_at !== null
+        ? 'held'
+        : row.unpublished_at === null
+          ? 'live'
+          : 'down';
+    return {
+      slug: row.slug,
+      projectId: row.project_id,
+      userId: row.user_id,
+      state,
+      ...(row.held_by === null ? {} : { heldBy: row.held_by }),
+      ...(row.held_reason === null ? {} : { heldReason: row.held_reason }),
+    };
   }
 
   async getFile(

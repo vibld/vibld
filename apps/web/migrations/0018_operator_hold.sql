@@ -1,0 +1,32 @@
+-- An operator taking a published site off the web (#172).
+--
+-- 0016_unpublish.sql gave the owner a way down. This is the other case, and
+-- it is not the same act wearing a different hat: there the owner asked for
+-- their own work to go, here somebody else is being stopped. A phishing page
+-- on a subdomain vibld owns, a site serving malware, content there is a
+-- legal duty to remove, a mistake that published somebody's private data.
+-- Until this existed the only lever was editing D1 and R2 by hand, which is
+-- not a lever to reach for under time pressure and is easy to do half of.
+--
+-- Held rather than unpublished, in its own columns, because the two must not
+-- clear each other. Publishing again is what clears `unpublished_at`, by
+-- design: that is how an owner puts their own site back. An operator hold
+-- that the owner could lift with one press is not a hold, so `touch` leaves
+-- these alone and `handlePublish` refuses outright while `held_at` is set.
+-- Only an operator clears it.
+--
+-- The bytes are deliberately not deleted with the hold. The harm is the
+-- content being reachable, and the flag stops that the moment it is written;
+-- deleting is irreversible, destroys what was served before anybody has
+-- looked at it, and makes a hold placed in haste on a wrong report
+-- impossible to undo. An operator acting in minutes on somebody else's
+-- account should not be making the irreversible call.
+--
+-- Who and why are stored because SECURITY.md calls security-sensitive
+-- actions auditable, and a takedown of somebody else's work is the clearest
+-- case of one. They are kept here rather than in operational telemetry,
+-- which D20 deliberately keeps prompts, source and paths out of: this is a
+-- record of an action taken, not a measurement of a run.
+ALTER TABLE published_projects ADD COLUMN held_at TEXT;
+ALTER TABLE published_projects ADD COLUMN held_by TEXT;
+ALTER TABLE published_projects ADD COLUMN held_reason TEXT;

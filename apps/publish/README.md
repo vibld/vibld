@@ -70,6 +70,41 @@ shape of a takeover. So the row stays, the owner keeps the name, nobody
 else can claim it, and publishing again under that name is what puts the
 site back.
 
+## An operator taking a site down
+
+`POST /internal/hold` with `{slug, by, reason}`, and `POST /internal/release`
+with `{slug}` (#172, `0018_operator_hold.sql`). apps/web reaches both through
+`/api/admin/publish/hold` and `/api/admin/publish/release`, behind the
+platform-admin check. There is no ownership check here, which is the point of
+the route rather than a gap in it: the caller has already been established as
+a platform admin, which is stricter than owning the site.
+
+Named by slug because that is what a report carries: somebody sends an
+address.
+
+**It is not the owner takedown with a different caller.** Publishing again is
+what clears `unpublished_at`, by design, and an operator hold the owner could
+lift by pressing Publish would be no hold at all. So `held_at` is its own
+column, `touch` leaves it alone, and `handlePublish` refuses with 409 while
+it is set. Only `/internal/release` clears it.
+
+**The bytes stay.** The harm is the content being reachable, and the flag
+ends that the moment it is written. Deleting is irreversible, destroys what
+was served before anybody has looked at it, and makes a hold placed in haste
+on a wrong report impossible to undo. An operator acting in minutes on
+somebody else's account should not be making the irreversible call.
+
+**Releasing does not republish.** A site whose owner had also taken it down
+stays down; clearing the hold returns the decision to whoever else has a say
+in it. The reply's `state` says which of `live`, `down` or `held` the site
+ended in, so the operator is told rather than left assuming.
+
+`held_by` and `held_reason` are recorded because SECURITY.md calls
+security-sensitive actions auditable, and a takedown of work that is not
+yours is the clearest case of one. The reason is required, not optional: a
+hold nobody can review later is the half of "auditable" that cannot be added
+afterwards.
+
 ## Why a separate package, not a folder in apps/web
 
 Same first reason apps/preview gives for the same question: a published

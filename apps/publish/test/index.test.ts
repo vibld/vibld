@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import worker, { type Env } from '../worker/index.ts';
@@ -8,20 +8,24 @@ import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
 /**
- * The real migrations, not a copy of them.
+ * The real migrations, all of them, not a copy and not a chosen subset.
  *
- * This package binds the same D1 database apps/web migrates (ADR-0010), and
- * an inline copy of the table here is a copy that drifts: the column
- * 0016_unpublish.sql adds is exactly the kind of thing a hand-written
- * fixture keeps passing without.
+ * This package binds the same D1 database apps/web migrates (ADR-0010). An
+ * inline copy of the table drifts, which is what 0016_unpublish.sql's column
+ * would have slipped past; naming the files drifts too, one migration later,
+ * which is what 0018_operator_hold.sql's did. Reading the directory is the
+ * same answer apps/web's own `schemaSql()` settled on, and for the same
+ * reason: the fake gets exactly the schema the deployment gets, and adding a
+ * migration needs no edit here.
+ *
+ * Ordering is the filename's numeric prefix, which is what
+ * `wrangler d1 migrations apply` orders by.
  */
-const SCHEMA = ['0003_publish.sql', '0016_unpublish.sql']
-  .map((file) =>
-    readFileSync(
-      join(import.meta.dirname, '..', '..', 'web', 'migrations', file),
-      'utf8',
-    ),
-  )
+const MIGRATIONS = join(import.meta.dirname, '..', '..', 'web', 'migrations');
+const SCHEMA = readdirSync(MIGRATIONS)
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => readFileSync(join(MIGRATIONS, name), 'utf8'))
   .join('\n');
 
 const SECRET = 'test-secret';
@@ -508,6 +512,7 @@ describe('apps/publish Worker: taking a site down', () => {
       slug: 'acme',
       userId: 'u1',
       live: false,
+      state: 'down',
     });
 
     const site = await worker.fetch(
@@ -529,6 +534,216 @@ describe('apps/publish Worker: taking a site down', () => {
     );
 
     assert.equal(response.status, 404);
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
+  });
+});
+
+/**
+ * `/internal/hold` and `/internal/release` (#172): an operator taking
+ * somebody else's site off the web.
+ *
+ * No ownership check, which is the point of the route rather than a gap in
+ * it: apps/web has already established the caller is a platform admin, and
+ * that is a stricter thing than owning the site.
+ */
+describe('apps/publish Worker: holding somebody else"s site', () => {
+  async function published(
+    env: Env,
+    slug = 'acme',
+    userId = 'u1',
+    projectId = 'p1',
+  ) {
+    const response = await worker.fetch(
+      internalRequest('internal/publish', {
+        userId,
+        projectId,
+        slug,
+        files: [{ path: 'index.html', content: `<h1>${slug}</h1>` }],
+      }),
+      env,
+    );
+    assert.equal(response.status, 200);
+  }
+
+  const held = (env: Env, body: unknown) =>
+    worker.fetch(internalRequest('internal/hold', body), env);
+
+  it('refuses a caller without the internal secret', async () => {
+    const env = newEnv();
+    await published(env);
+
+    const response = await worker.fetch(
+      internalRequest(
+        'internal/hold',
+        { slug: 'acme', by: 'admin@vibld.com', reason: 'phishing' },
+        'the-wrong-secret',
+      ),
+      env,
+    );
+
+    assert.equal(response.status, 403);
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200, 'a refused hold half-happened');
+  });
+
+  it('requires a reason, so a hold can be reviewed later', async () => {
+    const env = newEnv();
+    await published(env);
+
+    const blank = await held(env, {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+      reason: '   ',
+    });
+    assert.equal(blank.status, 400);
+
+    const missing = await held(env, { slug: 'acme', by: 'admin@vibld.com' });
+    assert.equal(missing.status, 400);
+
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
+  });
+
+  it('answers 404 for a slug nothing published', async () => {
+    const env = newEnv();
+    const response = await held(env, {
+      slug: 'never',
+      by: 'admin@vibld.com',
+      reason: 'phishing',
+    });
+    assert.equal(response.status, 404);
+  });
+
+  it('takes the site off the web', async () => {
+    const env = newEnv();
+    await published(env);
+
+    const response = await held(env, {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+      reason: 'phishing report 41',
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { slug: 'acme', state: 'held' });
+
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 404);
+  });
+
+  it('refuses the owner"s republish while it is held', async () => {
+    // The whole reason a hold is its own column. Publishing again is what
+    // clears an owner"s own takedown; an operator hold it also cleared would
+    // be no hold at all.
+    const env = newEnv();
+    await published(env);
+    await held(env, {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+      reason: 'phishing report 41',
+    });
+
+    const again = await worker.fetch(
+      internalRequest('internal/publish', {
+        userId: 'u1',
+        projectId: 'p1',
+        files: [{ path: 'index.html', content: '<h1>back</h1>' }],
+      }),
+      env,
+    );
+
+    assert.equal(again.status, 409);
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 404, 'a republish lifted an operator hold');
+  });
+
+  it('refuses to release a site that is not held', async () => {
+    const env = newEnv();
+    await published(env);
+    const response = await worker.fetch(
+      internalRequest('internal/release', { slug: 'acme' }),
+      env,
+    );
+    assert.equal(response.status, 409);
+  });
+
+  it('serves again once the hold is lifted', async () => {
+    const env = newEnv();
+    await published(env);
+    await held(env, {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+      reason: 'wrong report',
+    });
+
+    const release = await worker.fetch(
+      internalRequest('internal/release', { slug: 'acme' }),
+      env,
+    );
+    assert.equal(release.status, 200);
+    assert.deepEqual(await release.json(), { slug: 'acme', state: 'live' });
+
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
+    assert.equal(await site.text(), '<h1>acme</h1>');
+  });
+
+  it('does not republish a released site its owner had taken down', async () => {
+    const env = newEnv();
+    await published(env);
+    await worker.fetch(
+      internalRequest('internal/unpublish', { userId: 'u1', projectId: 'p1' }),
+      env,
+    );
+    await held(env, {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+      reason: 'wrong report',
+    });
+
+    const release = await worker.fetch(
+      internalRequest('internal/release', { slug: 'acme' }),
+      env,
+    );
+    assert.deepEqual(await release.json(), { slug: 'acme', state: 'down' });
+
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 404);
+  });
+
+  it('refuses GET, so a link cannot hold or release a site', async () => {
+    const env = newEnv();
+    await published(env);
+    for (const path of ['internal/hold', 'internal/release']) {
+      const response = await worker.fetch(
+        new Request(`https://internal.example/${path}`, {
+          headers: { Authorization: `Bearer ${SECRET}` },
+        }),
+        env,
+      );
+      assert.equal(response.status, 404, path);
+    }
     const site = await worker.fetch(
       publicRequest('acme.published.vibld-preview.dev'),
       env,

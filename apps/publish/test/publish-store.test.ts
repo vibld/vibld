@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { PublishStore } from '../worker/publish-store.ts';
@@ -7,20 +7,24 @@ import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
 /**
- * The real migrations, not a copy of them.
+ * The real migrations, all of them, not a copy and not a chosen subset.
  *
- * This package binds the same D1 database apps/web migrates (ADR-0010), and
- * an inline copy of the table here is a copy that drifts: the column
- * 0016_unpublish.sql adds is exactly the kind of thing a hand-written
- * fixture keeps passing without.
+ * This package binds the same D1 database apps/web migrates (ADR-0010). An
+ * inline copy of the table drifts, which is what 0016_unpublish.sql's column
+ * would have slipped past; naming the files drifts too, one migration later,
+ * which is what 0018_operator_hold.sql's did. Reading the directory is the
+ * same answer apps/web's own `schemaSql()` settled on, and for the same
+ * reason: the fake gets exactly the schema the deployment gets, and adding a
+ * migration needs no edit here.
+ *
+ * Ordering is the filename's numeric prefix, which is what
+ * `wrangler d1 migrations apply` orders by.
  */
-const SCHEMA = ['0003_publish.sql', '0016_unpublish.sql']
-  .map((file) =>
-    readFileSync(
-      join(import.meta.dirname, '..', '..', 'web', 'migrations', file),
-      'utf8',
-    ),
-  )
+const MIGRATIONS = join(import.meta.dirname, '..', '..', 'web', 'migrations');
+const SCHEMA = readdirSync(MIGRATIONS)
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => readFileSync(join(MIGRATIONS, name), 'utf8'))
   .join('\n');
 
 function newStore(): PublishStore {
@@ -41,6 +45,7 @@ describe('PublishStore', () => {
       slug: 'acme',
       userId: 'user-1',
       live: true,
+      state: 'live',
     });
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
@@ -58,6 +63,7 @@ describe('PublishStore', () => {
       slug: 'acme',
       userId: 'user-1',
       live: true,
+      state: 'live',
     });
   });
 
@@ -118,6 +124,7 @@ describe('PublishStore', () => {
       slug: 'acme',
       userId: 'user-1',
       live: true,
+      state: 'live',
     });
   });
 });
@@ -166,6 +173,7 @@ describe('taking a published site down', () => {
       slug: 'acme',
       userId: 'user-1',
       live: false,
+      state: 'down',
     });
   });
 
@@ -317,5 +325,138 @@ describe('taking a published site down', () => {
 
     assert.deepEqual(bucket.keys(), []);
     assert.equal(await store.resolveSlug('acme'), undefined);
+  });
+});
+
+/**
+ * An operator taking somebody else's site off the web (#172).
+ *
+ * Not the owner takedown wearing a different hat. There the owner asked for
+ * their own work to go and can put it back; here somebody else is being
+ * stopped, and the thing that must not happen is the owner undoing it.
+ */
+describe('holding a site an operator did not publish', () => {
+  function stored(): { store: PublishStore; bucket: InMemoryR2Bucket } {
+    const bucket = new InMemoryR2Bucket();
+    return {
+      store: new PublishStore(new SqliteD1Database(SCHEMA), bucket),
+      bucket,
+    };
+  }
+
+  async function published(store: PublishStore): Promise<void> {
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await store.putFiles('acme', [
+      { path: 'index.html', content: '<h1>acme</h1>' },
+    ]);
+  }
+
+  it('stops the slug resolving for the public', async () => {
+    const { store } = stored();
+    await published(store);
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.resolveSlug('acme'), undefined);
+  });
+
+  it('leaves the content in place, so a wrong hold can be undone', async () => {
+    // Deleting is irreversible and destroys what was served before anybody
+    // has looked at it. The harm is reachability, and the flag ends that.
+    const { store, bucket } = stored();
+    await published(store);
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.deepEqual(bucket.keys(), ['published/acme/index.html']);
+  });
+
+  it('cannot be lifted by the owner publishing again', async () => {
+    // The rule the whole column exists for. `touch` is what clears an
+    // owner's own takedown, and it must not clear this.
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    await store.touch('acme');
+
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'a republish lifted an operator hold',
+    );
+    assert.equal((await store.slugForProject('proj-1'))?.state, 'held');
+  });
+
+  it('tells the owner it is held, not merely down', async () => {
+    // Otherwise they press Publish, get a refusal, and have no idea why.
+    const { store } = stored();
+    await published(store);
+    await store.unpublish('acme');
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal((await store.slugForProject('proj-1'))?.state, 'held');
+  });
+
+  it('records who held it and why', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.deepEqual(await store.siteBySlug('acme'), {
+      slug: 'acme',
+      projectId: 'proj-1',
+      userId: 'user-1',
+      state: 'held',
+      heldBy: 'admin@vibld.com',
+      heldReason: 'phishing report 41',
+    });
+  });
+
+  it('puts a released site back only if its owner had not taken it down', async () => {
+    // Releasing returns the decision to whoever else has a say. For a site
+    // the owner also took down, that is the owner.
+    const { store } = stored();
+    await published(store);
+    await store.unpublish('acme');
+    await store.hold('acme', 'admin@vibld.com', 'wrong report');
+
+    await store.release('acme');
+
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'releasing a hold republished a site its owner had taken down',
+    );
+    assert.equal((await store.slugForProject('proj-1'))?.state, 'down');
+  });
+
+  it('serves again once a hold on a live site is lifted', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'wrong report');
+
+    await store.release('acme');
+
+    assert.deepEqual(await store.resolveSlug('acme'), {
+      projectId: 'proj-1',
+      userId: 'user-1',
+    });
+  });
+
+  it('leaves another site alone', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.claimSlug('acme-two', 'proj-2', 'user-2');
+    await store.putFiles('acme-two', [
+      { path: 'index.html', content: '<h1>two</h1>' },
+    ]);
+
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.deepEqual(await store.resolveSlug('acme-two'), {
+      projectId: 'proj-2',
+      userId: 'user-2',
+    });
   });
 });

@@ -86,6 +86,18 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     if (existing.userId !== userId) {
       return json({ error: 'This project is published by another user.' }, 403);
     }
+    // #172. Publishing again is what clears an owner's own takedown, so an
+    // operator hold the owner could lift by pressing Publish would be no
+    // hold at all. This is the refusal that makes it one.
+    if (existing.state === 'held') {
+      return json(
+        {
+          error:
+            'This site has been taken down by the operator and cannot be republished.',
+        },
+        409,
+      );
+    }
     if (typeof slug === 'string' && slug !== existing.slug) {
       return json(
         { error: `This project is already published at "${existing.slug}".` },
@@ -170,6 +182,74 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
   return json({ slug: existing.slug });
 }
 
+/**
+ * Take somebody else's published site off the web, and put it back (#172).
+ *
+ * Named by slug rather than by project, because that is what an operator has:
+ * a report names an address. There is no ownership check here and that is the
+ * point of the route -- apps/web has already established that the caller is a
+ * platform admin, which is a stricter check than owning the thing.
+ *
+ * The bytes stay. See `PublishStore.hold`.
+ */
+async function handleHold(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { slug, by, reason } = (body ?? {}) as {
+    slug?: unknown;
+    by?: unknown;
+    reason?: unknown;
+  };
+  if (typeof slug !== 'string' || slug.length === 0) {
+    return json({ error: '"slug" is required.' }, 400);
+  }
+  if (typeof by !== 'string' || by.length === 0) {
+    return json({ error: '"by" is required.' }, 400);
+  }
+  // A hold with no reason is a hold nobody can review later, which is the
+  // half of "auditable" that costs nothing to require and everything to add
+  // afterwards.
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    return json({ error: '"reason" is required.' }, 400);
+  }
+
+  const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
+  const site = await store.siteBySlug(slug);
+  if (!site) return json({ error: 'No such published site.' }, 404);
+
+  await store.hold(slug, by, reason.trim());
+  return json({ slug, state: 'held' });
+}
+
+/** Lift a hold. Does not put the site back: see `PublishStore.release`. */
+async function handleRelease(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { slug } = (body ?? {}) as { slug?: unknown };
+  if (typeof slug !== 'string' || slug.length === 0) {
+    return json({ error: '"slug" is required.' }, 400);
+  }
+
+  const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
+  const site = await store.siteBySlug(slug);
+  if (!site) return json({ error: 'No such published site.' }, 404);
+  if (site.state !== 'held') {
+    return json({ error: 'This site is not held.' }, 409);
+  }
+
+  await store.release(slug);
+  const after = await store.siteBySlug(slug);
+  return json({ slug, state: after?.state ?? 'down' });
+}
+
 async function handleInternal(
   request: Request,
   env: Env,
@@ -185,6 +265,12 @@ async function handleInternal(
   }
   if (pathname === '/internal/unpublish' && request.method === 'POST') {
     return handleUnpublish(request, env);
+  }
+  if (pathname === '/internal/hold' && request.method === 'POST') {
+    return handleHold(request, env);
+  }
+  if (pathname === '/internal/release' && request.method === 'POST') {
+    return handleRelease(request, env);
   }
   return json({ error: 'Not found.' }, 404);
 }

@@ -80,6 +80,8 @@ import {
   buildProject,
   publishProject,
   publishServiceConfigured,
+  holdProject,
+  releaseProject,
   unpublishProject,
 } from './publish-client.ts';
 import {
@@ -1445,6 +1447,82 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
 }
 
 /**
+ * Take somebody else's published site off the web, or put the decision back
+ * (#172).
+ *
+ * The one control an abuse report has an answer through. Until it existed
+ * the only lever was editing D1 and R2 by hand, which is not a lever to
+ * reach for under time pressure and is easy to do half of.
+ *
+ * Named by slug rather than by project or account, because that is what a
+ * report carries: somebody sends an address. `requireAdmin` is the whole of
+ * the authorisation, and it is stricter than the ownership check the owner's
+ * own takedown makes -- which is the point, since this route exists to act
+ * on sites the caller does not own.
+ *
+ * Only the publish service is required, not the build one, for the reason
+ * `handleUnpublish` gives: a fail-closed check has to fail closed on its own
+ * subject, and losing the preview secret must not disarm the control that
+ * stops a live site.
+ */
+async function handleAdminHold(
+  request: Request,
+  env: Env,
+  release: boolean,
+): Promise<Response> {
+  if (request.method !== 'POST') {
+    return json({ error: 'Use POST.' }, 405);
+  }
+  const guard = await requireAdmin(request, env);
+  if (guard.denied) return guard.denied;
+
+  if (!publishServiceConfigured(env)) {
+    return json(
+      { error: 'Publishing is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { slug, reason } = (body ?? {}) as {
+    slug?: unknown;
+    reason?: unknown;
+  };
+  if (typeof slug !== 'string' || slug.trim().length === 0) {
+    return json({ error: '"slug" is required.' }, 400);
+  }
+
+  if (release) {
+    const lifted = await releaseProject(env, slug.trim());
+    return lifted.ok
+      ? json({ slug: lifted.slug, state: lifted.state })
+      : json({ error: lifted.error }, lifted.status);
+  }
+
+  // Refused here as well as in the publish service, so the reason is asked
+  // for by the surface a person is actually using rather than only by the
+  // one behind it.
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    return json({ error: 'Say why this site is being taken down.' }, 400);
+  }
+
+  const result = await holdProject(
+    env,
+    slug.trim(),
+    guard.adminEmail,
+    reason.trim(),
+  );
+  return result.ok
+    ? json({ slug: result.slug, state: result.state })
+    : json({ error: result.error }, result.status);
+}
+
+/**
  * Identify the caller, then hand off to a GitHub handler.
  *
  * The handlers in `github-handlers.ts` take a principal rather than resolving
@@ -1682,6 +1760,14 @@ export default {
 
     if (pathname === '/api/admin/topup') {
       return handleAdminTopup(request, env);
+    }
+
+    if (pathname === '/api/admin/publish/hold') {
+      return handleAdminHold(request, env, false);
+    }
+
+    if (pathname === '/api/admin/publish/release') {
+      return handleAdminHold(request, env, true);
     }
 
     return json({ error: 'Not found.' }, 404);

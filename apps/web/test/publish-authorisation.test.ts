@@ -197,6 +197,45 @@ describe('nothing but a person can publish', () => {
     assert.match(route, /handlePublish\(request, env\)/);
   });
 
+  it('puts the operator takedown behind the platform-admin check', () => {
+    // #172. This route acts on a site the caller does not own, so the only
+    // thing standing in front of it is `requireAdmin`. A version that read
+    // the body before establishing that would be one an ordinary caller
+    // could probe for which slugs exist.
+    const index = source('index.ts');
+    const { from, to } = rangeOf(index, 'async function handleAdminHold(');
+    const body = index.slice(from, to);
+    const admin = body.indexOf('requireAdmin(');
+    const held = body.indexOf('holdProject(');
+    const released = body.indexOf('releaseProject(');
+    assert.notEqual(admin, -1, 'handleAdminHold checks nobody');
+    assert.ok(admin < released, 'it releases before checking who is asking');
+    assert.ok(admin < held, 'it holds before checking who is asking');
+    assert.match(body, /request\.method !== 'POST'/);
+    // The reason is not optional, and is asked for by the surface a person
+    // is using rather than only by the service behind it.
+    assert.match(body, /Say why this site is being taken down/);
+  });
+
+  it('has exactly one caller of each operator verb', () => {
+    const offenders: string[] = [];
+    for (const name of workerFiles()) {
+      if (name === 'publish-client.ts') continue;
+      for (const [line, content] of source(name).split('\n').entries()) {
+        if (/^\s*(import|export)\b/.test(content)) continue;
+        if (/\b(holdProject|releaseProject)\s*\(/.test(content)) {
+          offenders.push(`${name}:${line + 1}`);
+        }
+      }
+    }
+    assert.equal(
+      offenders.length,
+      2,
+      `the operator verbs are called from: ${offenders.join(', ')}`,
+    );
+    for (const site of offenders) assert.match(site, /^index\.ts:/);
+  });
+
   it('declares no cron that could reach publishing', () => {
     // The one scheduled handler in the Worker. If publishing ever becomes
     // reachable from it, it will be reachable with nobody present.
@@ -211,6 +250,8 @@ describe('nothing but a person can publish', () => {
     assert.doesNotMatch(scheduled, /\bpublishProject\s*\(/);
     assert.doesNotMatch(scheduled, /\bbuildProject\s*\(/);
     assert.doesNotMatch(scheduled, /\bunpublishProject\s*\(/);
+    assert.doesNotMatch(scheduled, /\bholdProject\s*\(/);
+    assert.doesNotMatch(scheduled, /\breleaseProject\s*\(/);
   });
 });
 
