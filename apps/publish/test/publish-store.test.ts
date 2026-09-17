@@ -515,11 +515,18 @@ describe('taking a published site down', () => {
     assert.equal(await store.slugForProject('proj-2'), undefined);
   });
 
-  it('stops deleting when the site comes back live under it', async () => {
-    // A republish from another tab clears the tombstone and writes fresh
-    // files. An unguarded delete loop would go on and remove them, leaving
-    // D1 saying live and R2 holding nothing. Re-reading the stamp before
-    // each batch is what stops the loop the moment that happens.
+  it('refuses a republish that arrives while the takedown is deleting', async () => {
+    // Both of these cannot win, and for a while both did. Cataloguing a
+    // revision before writing it is what stops bytes leaking, and it also
+    // makes the revision visible to the takedown's own enumeration: the
+    // takedown deletes the files a publish has just written, the promotion
+    // that follows points the site at the emptied prefix, and both calls
+    // answer success over a site that 404s every request.
+    //
+    // `deleting_at` is the takedown's claim and promotion reads it, so
+    // whoever wrote first wins and the loser is told. The publish is
+    // refused rather than half-applied, and publishing again once the
+    // deletion has finished works, which is what putting a site back means.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
     await publish(
@@ -534,29 +541,42 @@ describe('taking a published site down', () => {
     // The republish lands after the first page of deletions: `list` is what
     // the loop calls each time round, so this is the seam to catch it on.
     let pages = 0;
-    let back = '';
+    let promoted: boolean | undefined;
+    const racing = randomUUID();
     const realList = bucket.list.bind(bucket);
     bucket.list = async (options) => {
       const page = await realList(options);
       pages += 1;
       if (pages === 1) {
-        back = await publish(store, 'acme', [
+        await store.putFiles('acme', racing, [
           { path: 'index.html', content: '<h1>back</h1>' },
         ]);
+        promoted = await store.promote('acme', racing);
       }
       return page;
     };
 
     await store.unpublish('acme');
 
-    assert.ok(
-      bucket.keys().length > 0,
-      'it deleted the republished files anyway',
+    assert.equal(promoted, false, 'the republish won a race it should lose');
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'the site was pointed at a prefix the takedown had emptied',
     );
+
+    // And once it is over, publishing again is the way back.
+    await store.discard('acme', racing);
+    const back = await publish(store, 'acme', [
+      { path: 'index.html', content: '<h1>back</h1>' },
+    ]);
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
       userId: 'user-1',
       generation: back,
+    });
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>back</h1>',
     });
   });
 

@@ -289,8 +289,24 @@ export class PublishStore {
    * `held_at` is read and never written. An operator hold the owner could
    * lift by pressing Publish is not a hold (0018_operator_hold.sql).
    *
-   * Returns false when the site is held, which is the only reason the row
-   * can fail to match: the slug is never released, so it is always there.
+   * Returns false when the site is held, or when a takedown is part way
+   * through removing this slug's bytes. Those are the only two reasons the
+   * row can fail to match: the slug is never released, so it is always
+   * there.
+   *
+   * The second condition is what stops a publish and a takedown both
+   * reporting success over a site that then serves nothing. Cataloguing a
+   * revision before writing it, which is what keeps bytes from leaking,
+   * also makes it visible to the takedown's own enumeration: the takedown
+   * can delete a revision whose upload has just finished, and without this
+   * the promotion that followed would point the site at a prefix that is
+   * no longer there. Both calls would answer success and every request
+   * would 404.
+   *
+   * `deleting_at` is the takedown's claim, so reading it here is the same
+   * compare-and-set the rest of this file settled on: whoever wrote first
+   * wins, and the loser is told. A republish after the deletion finishes
+   * sees it cleared and works, which is what putting a site back means.
    */
   async promote(
     slug: string,
@@ -319,7 +335,7 @@ export class PublishStore {
           `UPDATE published_projects
            SET generation = ?1, unpublished_at = NULL, updated_at = ?2,
                deleting_at = NULL
-           WHERE slug = ?3 AND held_at IS NULL`,
+           WHERE slug = ?3 AND held_at IS NULL AND deleting_at IS NULL`,
         )
         .bind(generation, now, slug),
       // Still here, and still in the batch, because `promote` is also
