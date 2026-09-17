@@ -79,11 +79,36 @@ export function waitedFor(since: string, now: number): string {
   return 'under an hour';
 }
 
+/**
+ * A Stripe amount, in the currency's own minor unit.
+ *
+ * Stripe sends the smallest unit of the currency, and that is not always a
+ * hundredth. JPY has no minor unit at all, so an amount of 2500 is 2500 yen;
+ * dividing by 100 renders it as 25.00 and sends an operator looking for a
+ * payment a hundred times smaller than the one in front of them. Bahraini
+ * dinar goes the other way, with three places.
+ *
+ * `Intl.NumberFormat` already knows how many places each currency has, so
+ * the divisor is asked for rather than assumed. It also gives the symbol,
+ * which is what makes a row recognisable at a glance.
+ *
+ * An unknown or malformed code makes `Intl` throw, and a panel that throws
+ * shows nothing at all. The raw minor units and the code are still more use
+ * than a blank, so that is the fallback.
+ */
 function money(row: ParkedPayment): string {
   if (typeof row.amountCents !== 'number') return 'amount unknown';
   const currency = (row.currency ?? 'usd').toUpperCase();
-  const amount = (row.amountCents / 100).toFixed(2);
-  return currency === 'USD' ? `$${amount}` : `${amount} ${currency}`;
+  try {
+    const format = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+    });
+    const places = format.resolvedOptions().maximumFractionDigits ?? 2;
+    return format.format(row.amountCents / 10 ** places);
+  } catch {
+    return `${row.amountCents} ${currency}`;
+  }
 }
 
 /**

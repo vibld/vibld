@@ -51,6 +51,14 @@ function generationPrefix(slug: string, generation: string): string {
  */
 export const REVISIONS_KEPT = 3;
 
+/**
+ * What the sweep cursor row is keyed by (0026_publish_sweep_cursor.sql).
+ *
+ * Named rather than implicit, so a second sweep over some other prefix
+ * later needs no migration and cannot silently share this one's place.
+ */
+const SWEEP_CURSOR = 'published';
+
 interface PublishedProjectRow {
   slug: string;
   project_id: string;
@@ -560,32 +568,73 @@ export class PublishStore {
    * delimiter, so this needs nothing of `PublishR2Bucket` that the rest of
    * the file does not already use.
    *
-   * Bounded, like the nightly work in apps/web: a sweep that cannot finish
-   * is one that dies partway and leaves the same mess. It starts from the
-   * top each run rather than keeping a cursor, because orphans are rare and
-   * a cursor is another thing that can be wrong.
+   * Bounded, like the nightly work in apps/web, and it resumes, for the
+   * reason 0026_publish_sweep_cursor.sql gives at length. A bound without a
+   * resume point is not a bound, it is a blind spot: R2 lists in key order,
+   * so once enough catalogued revisions sort ahead of an orphan, a sweep
+   * that always starts from the top spends its whole allowance on them and
+   * stops short of the orphan every night, for ever. Three revisions a slug
+   * means seven published slugs is enough to hide everything after them.
+   *
+   * So a run records the last key it examined, the next starts after it,
+   * and reaching the end clears the mark so the walk laps.
    */
   async sweepOrphans(
     maxGenerations = 20,
+    at = new Date(),
   ): Promise<{ examined: number; collected: string[] }> {
+    const mark = await this.#db
+      .prepare(`SELECT after_key FROM publish_sweep_cursor WHERE id = ?1`)
+      .bind(SWEEP_CURSOR)
+      .first<{ after_key: string | null }>();
+    const startAfter = mark?.after_key ?? undefined;
+
     const seen = new Set<string>();
     let cursor: string | undefined;
+    /** The last key actually examined, which is where the next run resumes. */
+    let stoppedAt: string | undefined;
+    let reachedEnd = false;
     do {
       const page = await this.#bucket.list({
         prefix: 'published/',
-        ...(cursor === undefined ? {} : { cursor }),
+        // `startAfter` opens the walk; `cursor` continues it. Sending both
+        // would be asking R2 two different questions about where to begin.
+        ...(cursor === undefined
+          ? startAfter === undefined
+            ? {}
+            : { startAfter }
+          : { cursor }),
       });
       for (const object of page.objects) {
         // published / <slug> / <generation> / <path...>
         const parts = object.key.split('/');
+        stoppedAt = object.key;
         if (parts.length < 4) continue;
         const [, slug, generation] = parts;
         if (slug === undefined || generation === undefined) continue;
         seen.add(`${slug}/${generation}`);
         if (seen.size >= maxGenerations) break;
       }
+      reachedEnd = !page.truncated;
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor !== undefined && seen.size < maxGenerations);
+
+    // Cleared at the end of the listing rather than left pointing at the
+    // last key, so the next run starts from the top. That is what makes
+    // this a lap instead of a walk that stops at the end and never returns
+    // to an orphan created behind it.
+    const resumeAt =
+      reachedEnd && seen.size < maxGenerations ? null : stoppedAt;
+    await this.#db
+      .prepare(
+        `INSERT INTO publish_sweep_cursor (id, after_key, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+           after_key = excluded.after_key,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(SWEEP_CURSOR, resumeAt ?? null, at.toISOString())
+      .run();
 
     const collected: string[] = [];
     for (const pair of seen) {

@@ -136,24 +136,66 @@ describe('the parked queue on screen', () => {
     assert.equal(view.rows[0]?.attempts, '2 attempts');
   });
 
-  it('keeps a non-dollar currency legible rather than pretending it is dollars', () => {
+  it("uses each currency's own minor unit, not always a hundredth", () => {
+    // Stripe sends the smallest unit of the currency, and that is not
+    // always a hundredth. JPY has no minor unit, so 2500 is 2500 yen;
+    // dividing by 100 shows 25.00 and sends an operator looking for a
+    // payment a hundred times smaller than the one in front of them.
+    // Bahraini dinar goes the other way, with three places.
+    const shown = (amountCents: number, currency: string) =>
+      parkedQueueView(
+        queue({
+          events: [
+            {
+              stripeEventId: 'evt_3',
+              type: 'invoice.paid',
+              created: 1,
+              firstSeenAt: daysAgo(1),
+              attempts: 1,
+              amountCents,
+              currency,
+            },
+          ],
+        }),
+        NOW,
+      )
+        // Intl separates a currency code from the number with a
+        // non-breaking space, and which separator it picks moves with the
+        // ICU version. Normalising it keeps this test about the number of
+        // decimal places, which is what the bug was.
+        .rows[0]?.amount.replace(/\u00a0/g, ' ');
+
+    assert.equal(shown(1999, 'usd'), '$19.99');
+    assert.equal(shown(2500, 'eur'), '€25.00');
+    assert.equal(shown(2500, 'jpy'), '¥2,500', 'yen was divided by a hundred');
+    assert.equal(
+      shown(2500, 'bhd'),
+      'BHD 2.500',
+      'a three-place currency lost a digit',
+    );
+  });
+
+  it('shows the raw amount rather than nothing for a code it cannot parse', () => {
+    // A malformed code makes Intl throw, and a panel that throws shows an
+    // operator nothing at all. The minor units and the code are still more
+    // use than a blank.
     const view = parkedQueueView(
       queue({
         events: [
           {
-            stripeEventId: 'evt_3',
+            stripeEventId: 'evt_4',
             type: 'invoice.paid',
             created: 1,
             firstSeenAt: daysAgo(1),
             attempts: 1,
-            amountCents: 2500,
-            currency: 'eur',
+            amountCents: 1234,
+            currency: 'not-a-currency',
           },
         ],
       }),
       NOW,
     );
-    assert.equal(view.rows[0]?.amount, '25.00 EUR');
+    assert.equal(view.rows[0]?.amount, '1234 NOT-A-CURRENCY');
   });
 
   describe('how long it has waited', () => {

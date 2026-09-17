@@ -28,15 +28,21 @@ export class InMemoryR2Bucket implements PublishR2Bucket {
    * site big enough to need a second page.
    */
   async list(
-    options: { prefix?: string; cursor?: string; limit?: number } = {},
+    options: {
+      prefix?: string;
+      cursor?: string;
+      limit?: number;
+      startAfter?: string;
+    } = {},
   ): Promise<{
     objects: { key: string }[];
     truncated: boolean;
     cursor?: string;
   }> {
-    const { prefix = '', cursor, limit = 2 } = options;
+    const { prefix = '', cursor, limit = 2, startAfter } = options;
     const keys = [...this.#objects.keys()]
       .filter((key) => key.startsWith(prefix))
+      .filter((key) => startAfter === undefined || key > startAfter)
       .sort();
     const from = cursor ? keys.indexOf(cursor) : 0;
     const page = keys.slice(from, from + limit);

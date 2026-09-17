@@ -531,6 +531,70 @@ describe('what a slug keeps', () => {
     );
   });
 
+  it('reaches an orphan sitting behind more revisions than its bound', async () => {
+    // The blind spot a bound without a resume point creates, and the reason
+    // "orphans are rare" was the wrong thing to reason about. Rarity says
+    // how often one exists; it says nothing about whether the sweep can
+    // ever get to one.
+    //
+    // R2 lists in key order, so catalogued revisions sorting ahead of an
+    // orphan eat the whole allowance. Starting from the top every night,
+    // the sweep would run, report honestly, and never collect this object
+    // again for the life of the deployment.
+    const { store, bucket } = stored();
+    await store.claimSlug('aaa', 'proj-1', 'user-1');
+    // Six catalogued revisions under a slug that sorts first, and a bound
+    // of two: three runs' worth of ground before the orphan.
+    for (let n = 0; n < 6; n += 1) {
+      await store.putFiles('aaa', `gen-${n}`, [
+        { path: 'index.html', content: `${n}` },
+      ]);
+    }
+    await bucket.put('published/zzz/gen-orphan/late.html', 'the late write');
+
+    const collected: string[] = [];
+    // Each run is bounded to two revisions, so it takes several to walk
+    // past the catalogued ones. Every one of them is a separate nightly
+    // invocation as far as the store is concerned.
+    for (let run = 0; run < 5; run += 1) {
+      const result = await store.sweepOrphans(2);
+      collected.push(...result.collected);
+    }
+
+    assert.deepEqual(collected, ['zzz/gen-orphan']);
+    assert.ok(
+      !bucket.keys().some((key) => key.includes('gen-orphan')),
+      'the sweep never reached past its first bound',
+    );
+    // And the catalogued revisions it walked over are all still there.
+    assert.equal(
+      bucket.keys().filter((key) => key.startsWith('published/aaa/')).length,
+      6,
+    );
+  });
+
+  it('laps, so an orphan created behind the walk is still collected', async () => {
+    // Reaching the end has to clear the mark. Left pointing at the last key,
+    // the sweep would stop at the end of the bucket and never come back to
+    // anything written before that point.
+    const { store, bucket } = stored();
+    await store.claimSlug('zzz', 'proj-1', 'user-1');
+    await publish(store, 'zzz', [{ path: 'index.html', content: 'z' }]);
+
+    // A full pass that reaches the end and finds nothing.
+    assert.deepEqual((await store.sweepOrphans()).collected, []);
+
+    // Now an orphan appears behind where that walk finished.
+    await bucket.put('published/aaa/gen-orphan/late.html', 'late');
+
+    const { collected } = await store.sweepOrphans();
+    assert.deepEqual(
+      collected,
+      ['aaa/gen-orphan'],
+      'the walk stopped at the end instead of lapping',
+    );
+  });
+
   it('refuses to collect the revision that is serving', async () => {
     // The other direction of the same race. Promotion committing first has
     // to beat a collection that is about to start, not only the reverse,
