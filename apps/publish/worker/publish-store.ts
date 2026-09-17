@@ -23,9 +23,33 @@ import type {
   PublishR2Bucket,
 } from './types.ts';
 
-function objectKey(slug: string, path: string): string {
-  return `published/${slug}/${path}`;
+/**
+ * Where one revision's files live (0021_publish_generations.sql).
+ *
+ * The generation is in the key rather than the row alone, so writing a new
+ * revision cannot touch the one that is serving. That is what lets the
+ * decision about whether a publish is allowed happen after its bytes have
+ * landed, which is the only place it can be made safely: the flag is in D1
+ * and the content is in R2, and no write spans the two.
+ */
+function objectKey(slug: string, generation: string, path: string): string {
+  return `published/${slug}/${generation}/${path}`;
 }
+
+/** Everything under one revision, for listing and deleting it. */
+function generationPrefix(slug: string, generation: string): string {
+  return `published/${slug}/${generation}/`;
+}
+
+/**
+ * How many revisions a slug keeps.
+ *
+ * Three rather than one because a publish that replaced the last good one
+ * with something broken used to leave nothing to go back to, and three
+ * rather than everything because R2 is not free and nobody is reading the
+ * eleventh.
+ */
+export const REVISIONS_KEPT = 3;
 
 interface PublishedProjectRow {
   slug: string;
@@ -35,6 +59,8 @@ interface PublishedProjectRow {
   unpublished_at: string | null;
   /** ISO timestamp an operator held this site at, or null. 0018_operator_hold.sql. */
   held_at: string | null;
+  /** The revision the public gets, or null before the first publish lands. 0021. */
+  generation: string | null;
 }
 
 /**
@@ -109,17 +135,36 @@ export class PublishStore {
    * refused on the same terms and for the same reason, by a column the
    * owner cannot clear (0018_operator_hold.sql).
    */
-  async resolveSlug(
-    slug: string,
-  ): Promise<{ projectId: string; userId: string } | undefined> {
+  async resolveSlug(slug: string): Promise<
+    | {
+        projectId: string;
+        userId: string;
+        /** The revision to read files from. */
+        generation: string;
+      }
+    | undefined
+  > {
     const row = await this.#db
       .prepare(
-        `SELECT project_id, user_id FROM published_projects
-         WHERE slug = ?1 AND unpublished_at IS NULL AND held_at IS NULL`,
+        `SELECT project_id, user_id, generation FROM published_projects
+         WHERE slug = ?1 AND unpublished_at IS NULL AND held_at IS NULL
+           AND generation IS NOT NULL`,
       )
       .bind(slug)
-      .first<Pick<PublishedProjectRow, 'project_id' | 'user_id'>>();
-    return row ? { projectId: row.project_id, userId: row.user_id } : undefined;
+      .first<
+        Pick<PublishedProjectRow, 'project_id' | 'user_id' | 'generation'>
+      >();
+    // `generation IS NOT NULL` is not belt and braces. A slug is claimed
+    // before its first files are written, so between those two there is a
+    // row with a name and nothing behind it; serving it would answer an
+    // empty prefix rather than a 404.
+    return row?.generation
+      ? {
+          projectId: row.project_id,
+          userId: row.user_id,
+          generation: row.generation,
+        }
+      : undefined;
   }
 
   /**
@@ -154,32 +199,148 @@ export class PublishStore {
   }
 
   /**
-   * Mark a republish. Clearing `unpublished_at` is what puts a taken-down
-   * site back: publishing again under the name you still hold is the same
-   * act as publishing it the first time, so it does not need its own verb.
+   * Write a revision's files. Nothing serves them until `promote`.
    *
-   * `held_at` is deliberately untouched. An operator hold the owner could
-   * lift by pressing Publish is not a hold, and `handlePublish` refuses
-   * before reaching here while one is set (0018_operator_hold.sql).
+   * Each call writes its own prefix rather than overwriting the last one,
+   * which is what makes a publish undoable right up to the moment it is
+   * promoted, and what keeps a request that turns out not to be allowed
+   * from having already destroyed the revision it was replacing.
    */
-  async touch(slug: string): Promise<void> {
-    await this.#db
-      .prepare(
-        `UPDATE published_projects
-         SET updated_at = ?1, unpublished_at = NULL
-         WHERE slug = ?2`,
-      )
-      .bind(new Date().toISOString(), slug)
-      .run();
-  }
-
-  /** Overwrites whatever this slug's prefix already held -- publishing is idempotent replace, not append. */
-  async putFiles(slug: string, files: ProjectFile[]): Promise<void> {
+  async putFiles(
+    slug: string,
+    generation: string,
+    files: ProjectFile[],
+  ): Promise<void> {
     await Promise.all(
       files.map((file) =>
-        this.#bucket.put(objectKey(slug, file.path), file.content),
+        this.#bucket.put(objectKey(slug, generation, file.path), file.content),
       ),
     );
+  }
+
+  /**
+   * Make a revision the one the public gets, unless the site is held.
+   *
+   * This is where a publish becomes visible, and it is the whole of the
+   * decision. `handlePublish` checks the state before writing anything, but
+   * that check and this write are two round trips, and a hold arriving
+   * between them used to find the files already overwritten. Here the
+   * condition is part of the write, so a publish that lost that race
+   * changes nothing a reader can see and its bytes are discarded.
+   *
+   * Clearing `unpublished_at` is what puts a taken-down site back:
+   * publishing again under the name you still hold is the same act as
+   * publishing it the first time, so it does not need its own verb.
+   *
+   * `held_at` is read and never written. An operator hold the owner could
+   * lift by pressing Publish is not a hold (0018_operator_hold.sql).
+   *
+   * Returns false when the site is held, which is the only reason the row
+   * can fail to match: the slug is never released, so it is always there.
+   */
+  async promote(
+    slug: string,
+    generation: string,
+    at = new Date(),
+  ): Promise<boolean> {
+    const now = at.toISOString();
+    const moved = await this.#db
+      .prepare(
+        `UPDATE published_projects
+         SET generation = ?1, unpublished_at = NULL, updated_at = ?2
+         WHERE slug = ?3 AND held_at IS NULL`,
+      )
+      .bind(generation, now, slug)
+      .run();
+    if (moved.meta.changes === 0) return false;
+
+    // After the pointer, not with it. A failure here leaves the live
+    // revision untracked, so retention counts one fewer and keeps one more
+    // than it meant to. The other order would leave a revision listed as
+    // kept that nothing points at, and pruning would work from a list that
+    // does not describe what is serving.
+    await this.#db
+      .prepare(
+        `INSERT INTO published_generations (slug, generation, created_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(slug, generation) DO NOTHING`,
+      )
+      .bind(slug, generation, now)
+      .run();
+    await this.#prune(slug);
+    return true;
+  }
+
+  /** The revisions under a slug, newest first (0021_publish_generations.sql). */
+  async revisions(slug: string): Promise<string[]> {
+    const rows = await this.#db
+      .prepare(
+        `SELECT generation FROM published_generations
+         WHERE slug = ?1 ORDER BY id DESC`,
+      )
+      .bind(slug)
+      .all<{ generation: string }>();
+    return rows.results.map((row) => row.generation);
+  }
+
+  /**
+   * Drop everything past the newest `REVISIONS_KEPT`.
+   *
+   * Runs after a promotion rather than on a schedule: the moment a revision
+   * stops being interesting is the moment three newer ones exist, and doing
+   * it here means no second thing to deploy and nothing to go wrong quietly
+   * overnight.
+   */
+  async #prune(slug: string): Promise<void> {
+    const stale = (await this.revisions(slug)).slice(REVISIONS_KEPT);
+    for (const generation of stale) await this.discard(slug, generation);
+  }
+
+  /**
+   * Remove one revision: its objects, then its row.
+   *
+   * That order, because a row without objects is a retention slot wasted
+   * and a set of objects without a row is storage nothing will ever come
+   * back for.
+   *
+   * Also what a refused publish calls to clean up after itself. The bytes
+   * are the caller's own, written under a prefix nothing points at, so
+   * deleting them cannot touch what a hold is keeping.
+   */
+  async discard(
+    slug: string,
+    generation: string,
+    /**
+     * Asked again between each listing and the deletion that follows it,
+     * and a false answer stops the whole thing where it is.
+     *
+     * Listing is a round trip of its own, so without this the loop commits
+     * to deleting a page it read before anything could change. `unpublish`
+     * is what needs it: a hold arriving mid-deletion is a claim on exactly
+     * the bytes being removed. Pruning and cleaning up after a refused
+     * publish pass nothing, because there the revision is already nobody's.
+     */
+    stillWanted?: () => Promise<boolean>,
+  ): Promise<void> {
+    let cursor: string | undefined;
+    do {
+      const page = await this.#bucket.list({
+        prefix: generationPrefix(slug, generation),
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      if (stillWanted && !(await stillWanted())) return;
+      if (page.objects.length > 0) {
+        await this.#bucket.delete(page.objects.map((object) => object.key));
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor !== undefined);
+
+    await this.#db
+      .prepare(
+        `DELETE FROM published_generations WHERE slug = ?1 AND generation = ?2`,
+      )
+      .bind(slug, generation)
+      .run();
   }
 
   /**
@@ -252,38 +413,25 @@ export class PublishStore {
     const marked = await this.#db
       .prepare(
         `UPDATE published_projects
-         SET unpublished_at = ?1, updated_at = ?1
+         SET unpublished_at = ?1, generation = NULL, updated_at = ?1
          WHERE slug = ?2 AND held_at IS NULL`,
       )
       .bind(stamp, slug)
       .run();
     if (marked.meta.changes === 0) return false;
 
-    // R2 pages with a cursor, so this loops. A site with more files than one
-    // page holds would otherwise be half removed, and the half left behind
-    // is content nothing points at and nobody thinks to look for.
-    let cursor: string | undefined;
-    do {
-      const page = await this.#bucket.list({
-        prefix: `published/${slug}/`,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      // Checked between the listing and the deletion rather than before
-      // both. Listing is a round trip of its own, and a republish or a hold
-      // arriving during it used to find this already committed to deleting
-      // the page it had just read. Moving the check down leaves a window of
-      // one delete call rather than a list and a delete.
-      //
-      // That last window cannot be closed from here: R2 and D1 are two
-      // stores and there is no write that spans them. What closes it is
-      // deleting nothing, which is what the retention work will do by
-      // giving each publish its own prefix and expiring old ones instead.
+    // Every revision, not just the one that was serving. A takedown is the
+    // owner saying the work should not be here, and leaving two older
+    // copies behind because retention happens to keep three would be
+    // answering a different request. Retention is for getting back to a
+    // revision of a site you still have; this is not that.
+    //
+    // The pointer is cleared in the same write as the tombstone, so there
+    // is no moment where the row names a revision that is being deleted.
+    for (const generation of await this.revisions(slug)) {
       if (!(await this.#stillDown(slug, stamp))) return true;
-      if (page.objects.length > 0) {
-        await this.#bucket.delete(page.objects.map((object) => object.key));
-      }
-      cursor = page.truncated ? page.cursor : undefined;
-    } while (cursor !== undefined);
+      await this.discard(slug, generation, () => this.#stillDown(slug, stamp));
+    }
     return true;
   }
 
@@ -458,9 +606,10 @@ export class PublishStore {
 
   async getFile(
     slug: string,
+    generation: string,
     path: string,
   ): Promise<{ content: string } | undefined> {
-    const object = await this.#bucket.get(objectKey(slug, path));
+    const object = await this.#bucket.get(objectKey(slug, generation, path));
     if (!object) return undefined;
     return { content: await object.text() };
   }

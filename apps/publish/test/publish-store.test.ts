@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { PublishStore } from '../worker/publish-store.ts';
+import type { ProjectFile } from '@vibld/core';
+import { PublishStore, REVISIONS_KEPT } from '../worker/publish-store.ts';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
@@ -31,6 +33,44 @@ function newStore(): PublishStore {
   return new PublishStore(new SqliteD1Database(SCHEMA), new InMemoryR2Bucket());
 }
 
+/**
+ * Publish a revision the way the Worker does: write the files, then point
+ * the slug at them (0021_publish_generations.sql).
+ *
+ * Both halves, because either alone is a state the product never reaches
+ * and testing against it would prove nothing. Returns the generation, for
+ * the tests that care which revision they are looking at.
+ */
+async function publish(
+  store: PublishStore,
+  slug: string,
+  files: ProjectFile[],
+  generation: string = randomUUID(),
+): Promise<string> {
+  await store.putFiles(slug, generation, files);
+  await store.promote(slug, generation);
+  return generation;
+}
+
+/**
+ * Read a file the way public serving does: resolve the slug, then fetch
+ * from the revision it names.
+ *
+ * Going through `resolveSlug` rather than straight to `getFile` is the
+ * point. A takedown or a hold is a fact about the row, and a test that
+ * reached past it into R2 would report content as readable that no request
+ * can reach.
+ */
+async function served(
+  store: PublishStore,
+  slug: string,
+  path: string,
+): Promise<{ content: string } | undefined> {
+  const resolved = await store.resolveSlug(slug);
+  if (!resolved) return undefined;
+  return store.getFile(slug, resolved.generation, path);
+}
+
 describe('PublishStore', () => {
   it('has no slug for a project that has never published', async () => {
     const store = newStore();
@@ -47,10 +87,11 @@ describe('PublishStore', () => {
       live: true,
       state: 'live',
     });
-    assert.deepEqual(await store.resolveSlug('acme'), {
-      projectId: 'proj-1',
-      userId: 'user-1',
-    });
+    // Claimed, not published. The name is held and nothing serves under
+    // it: a slug that resolved here would answer an empty prefix, which
+    // reads to a visitor as a site that is up and broken rather than one
+    // that is not there.
+    assert.equal(await store.resolveSlug('acme'), undefined);
   });
 
   it('refuses to claim a slug another project already holds', async () => {
@@ -82,26 +123,26 @@ describe('PublishStore', () => {
   it('stores and serves file content by slug and path', async () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>Hi</h1>' },
       { path: 'about.html', content: '<h1>About</h1>' },
     ]);
 
-    assert.deepEqual(await store.getFile('acme', 'index.html'), {
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
       content: '<h1>Hi</h1>',
     });
-    assert.deepEqual(await store.getFile('acme', 'about.html'), {
+    assert.deepEqual(await served(store, 'acme', 'about.html'), {
       content: '<h1>About</h1>',
     });
-    assert.equal(await store.getFile('acme', 'missing.html'), undefined);
+    assert.equal(await served(store, 'acme', 'missing.html'), undefined);
   });
 
   it("overwrites a slug's content on a later publish rather than appending", async () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [{ path: 'index.html', content: 'v1' }]);
-    await store.putFiles('acme', [{ path: 'index.html', content: 'v2' }]);
-    assert.deepEqual(await store.getFile('acme', 'index.html'), {
+    await publish(store, 'acme', [{ path: 'index.html', content: 'v1' }]);
+    await publish(store, 'acme', [{ path: 'index.html', content: 'v2' }]);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
       content: 'v2',
     });
   });
@@ -110,22 +151,109 @@ describe('PublishStore', () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
     await store.claimSlug('beta', 'proj-2', 'user-2');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: 'acme home' },
     ]);
-    assert.equal(await store.getFile('beta', 'index.html'), undefined);
+    assert.equal(await served(store, 'beta', 'index.html'), undefined);
   });
 
-  it('touch updates updated_at without changing the slug mapping', async () => {
+  it('promoting a revision leaves the slug mapping alone', async () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.touch('acme');
+    assert.equal(await store.promote('acme', randomUUID()), true);
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
       userId: 'user-1',
       live: true,
       state: 'live',
     });
+  });
+});
+
+/**
+ * Keeping the last few revisions (0021_publish_generations.sql).
+ *
+ * A publish used to overwrite its slug's prefix, so there was never a
+ * previous version to go back to: one bad publish and the last good one was
+ * gone. Each publish now writes its own prefix and the row points at one of
+ * them, which is what makes both rollback and the unraceable hold possible.
+ */
+describe('what a slug keeps', () => {
+  function stored(): { store: PublishStore; bucket: InMemoryR2Bucket } {
+    const bucket = new InMemoryR2Bucket();
+    return {
+      store: new PublishStore(new SqliteD1Database(SCHEMA), bucket),
+      bucket,
+    };
+  }
+
+  async function version(store: PublishStore, n: number): Promise<string> {
+    return publish(store, 'acme', [
+      { path: 'index.html', content: `<h1>v${n}</h1>` },
+    ]);
+  }
+
+  it('serves the newest revision and keeps the ones before it', async () => {
+    const { store } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const one = await version(store, 1);
+    const two = await version(store, 2);
+
+    assert.deepEqual(await store.revisions('acme'), [two, one]);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>v2</h1>',
+    });
+    // The old one is still readable, which is what rollback would need.
+    assert.deepEqual(await store.getFile('acme', one, 'index.html'), {
+      content: '<h1>v1</h1>',
+    });
+  });
+
+  it('drops the oldest once there are more than it keeps', async () => {
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const kept: string[] = [];
+    for (let n = 1; n <= REVISIONS_KEPT + 2; n += 1) {
+      kept.push(await version(store, n));
+    }
+
+    const newest = kept.slice(-REVISIONS_KEPT).reverse();
+    assert.deepEqual(await store.revisions('acme'), newest);
+    // The rows are one half; the bytes are the half that costs money.
+    assert.deepEqual(
+      bucket.keys().sort(),
+      newest.map((id) => `published/acme/${id}/index.html`).sort(),
+    );
+  });
+
+  it('counts revisions per slug, not across the bucket', async () => {
+    const { store } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await store.claimSlug('beta', 'proj-2', 'user-2');
+    const mine = await version(store, 1);
+    for (let n = 0; n < REVISIONS_KEPT + 2; n += 1) {
+      await publish(store, 'beta', [{ path: 'index.html', content: `${n}` }]);
+    }
+
+    assert.deepEqual(await store.revisions('acme'), [mine]);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>v1</h1>',
+    });
+  });
+
+  it('takes every revision down with the site, not just the live one', async () => {
+    // A takedown is the owner saying the work should not be here. Leaving
+    // two older copies behind because retention happens to keep three would
+    // be answering a different request.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await version(store, 1);
+    await version(store, 2);
+
+    await store.unpublish('acme');
+
+    assert.deepEqual(bucket.keys(), []);
+    assert.deepEqual(await store.revisions('acme'), []);
   });
 });
 
@@ -148,7 +276,7 @@ describe('taking a published site down', () => {
   it('stops the slug resolving for the public', async () => {
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
 
@@ -163,7 +291,7 @@ describe('taking a published site down', () => {
     // site back a republish rather than a race to re-claim the name.
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
 
@@ -180,22 +308,24 @@ describe('taking a published site down', () => {
   it('puts the site back when it is published again', async () => {
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
     await store.unpublish('acme');
 
-    // What `handlePublish` does for a project that already holds a slug.
-    await store.touch('acme');
-    await store.putFiles('acme', [
+    // What `handlePublish` does for a project that already holds a slug:
+    // the new revision's files, then the pointer, which is what clears the
+    // tombstone.
+    const back = await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>back</h1>' },
     ]);
 
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
       userId: 'user-1',
+      generation: back,
     });
-    assert.deepEqual(await store.getFile('acme', 'index.html'), {
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
       content: '<h1>back</h1>',
     });
   });
@@ -203,7 +333,7 @@ describe('taking a published site down', () => {
   it('removes the content, so nothing is left to serve', async () => {
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
       { path: 'about/index.html', content: '<h1>about</h1>' },
       { path: 'assets/app.css', content: 'body{}' },
@@ -212,7 +342,7 @@ describe('taking a published site down', () => {
     await store.unpublish('acme');
 
     assert.deepEqual(bucket.keys(), [], 'bytes were left behind');
-    assert.equal(await store.getFile('acme', 'index.html'), undefined);
+    assert.equal(await served(store, 'acme', 'index.html'), undefined);
   });
 
   it('deletes every page of objects, not just the first', async () => {
@@ -221,7 +351,8 @@ describe('taking a published site down', () => {
     // nothing points at and nobody thinks to look for.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles(
+    await publish(
+      store,
       'acme',
       Array.from({ length: 7 }, (_, index) => ({
         path: `page-${index}.html`,
@@ -237,20 +368,21 @@ describe('taking a published site down', () => {
   it("leaves another project's site alone", async () => {
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
     await store.claimSlug('acme-two', 'proj-2', 'user-2');
-    await store.putFiles('acme-two', [
+    const two = await publish(store, 'acme-two', [
       { path: 'index.html', content: '<h1>two</h1>' },
     ]);
 
     await store.unpublish('acme');
 
-    assert.deepEqual(bucket.keys(), ['published/acme-two/index.html']);
+    assert.deepEqual(bucket.keys(), [`published/acme-two/${two}/index.html`]);
     assert.deepEqual(await store.resolveSlug('acme-two'), {
       projectId: 'proj-2',
       userId: 'user-2',
+      generation: two,
     });
   });
 
@@ -262,7 +394,7 @@ describe('taking a published site down', () => {
     // the row is marked rather than deleted.
     const { store } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
     await store.unpublish('acme');
@@ -279,7 +411,8 @@ describe('taking a published site down', () => {
     // each batch is what stops the loop the moment that happens.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles(
+    await publish(
+      store,
       'acme',
       Array.from({ length: 7 }, (_, index) => ({
         path: `page-${index}.html`,
@@ -290,11 +423,16 @@ describe('taking a published site down', () => {
     // The republish lands after the first page of deletions: `list` is what
     // the loop calls each time round, so this is the seam to catch it on.
     let pages = 0;
+    let back = '';
     const realList = bucket.list.bind(bucket);
     bucket.list = async (options) => {
       const page = await realList(options);
       pages += 1;
-      if (pages === 1) await store.touch('acme');
+      if (pages === 1) {
+        back = await publish(store, 'acme', [
+          { path: 'index.html', content: '<h1>back</h1>' },
+        ]);
+      }
       return page;
     };
 
@@ -307,6 +445,7 @@ describe('taking a published site down', () => {
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
       userId: 'user-1',
+      generation: back,
     });
   });
 
@@ -316,7 +455,7 @@ describe('taking a published site down', () => {
     // which a second call finishes.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
 
@@ -346,7 +485,7 @@ describe('holding a site an operator did not publish', () => {
 
   async function published(store: PublishStore): Promise<void> {
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
     ]);
   }
@@ -368,17 +507,20 @@ describe('holding a site an operator did not publish', () => {
 
     await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
 
-    assert.deepEqual(bucket.keys(), ['published/acme/index.html']);
+    const [revision] = await store.revisions('acme');
+    assert.deepEqual(bucket.keys(), [`published/acme/${revision}/index.html`]);
   });
 
   it('cannot be lifted by the owner publishing again', async () => {
-    // The rule the whole column exists for. `touch` is what clears an
-    // owner's own takedown, and it must not clear this.
+    // The rule the whole column exists for. Promoting a revision is what
+    // clears an owner's own takedown, and it must not clear this. It is
+    // also where the refusal now lives, so it answers false rather than
+    // quietly doing nothing.
     const { store } = stored();
     await published(store);
     await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
 
-    await store.touch('acme');
+    assert.equal(await store.promote('acme', randomUUID()), false);
 
     assert.equal(
       await store.resolveSlug('acme'),
@@ -438,9 +580,11 @@ describe('holding a site an operator did not publish', () => {
 
     await store.release('acme', 'admin@vibld.com');
 
+    const [revision] = await store.revisions('acme');
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
       userId: 'user-1',
+      generation: revision,
     });
   });
 
@@ -577,7 +721,7 @@ describe('holding a site an operator did not publish', () => {
     // `list` is the seam, because it is what the loop calls each time round.
     const { store, bucket } = stored();
     await store.claimSlug('acme', 'proj-1', 'user-1');
-    await store.putFiles('acme', [
+    await publish(store, 'acme', [
       { path: 'index.html', content: '<h1>acme</h1>' },
       { path: 'about.html', content: '<h1>about</h1>' },
     ]);
@@ -598,6 +742,39 @@ describe('holding a site an operator did not publish', () => {
       bucket.keys().length > 0,
       'it emptied the site the hold had just claimed',
     );
+  });
+
+  it('refuses a publish whose files were written before the hold', async () => {
+    // The race the whole generation layout is for. `handlePublish` reads
+    // the state and then writes the files, which are two round trips, and a
+    // hold committing in between used to find the previous revision already
+    // overwritten: an owner could destroy what the hold was keeping, and
+    // releasing it would then serve the unreviewed replacement.
+    //
+    // Writing somewhere nothing points at is what makes the decision
+    // postponable to `promote`, where it is part of the write.
+    const { store } = stored();
+    await published(store);
+    const before = await store.revisions('acme');
+
+    // The publish begins: its files land under their own revision.
+    const racing = randomUUID();
+    await store.putFiles('acme', racing, [
+      { path: 'index.html', content: '<h1>not reviewed</h1>' },
+    ]);
+
+    // The hold commits in the gap.
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+
+    assert.equal(await store.promote('acme', racing), false);
+    await store.discard('acme', racing);
+
+    // What the operator kept is what the operator gets back.
+    await store.release('acme', 'admin@vibld.com');
+    assert.deepEqual(await store.revisions('acme'), before);
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>acme</h1>',
+    });
   });
 
   it('keeps every hold, not just the last one', async () => {
@@ -621,7 +798,7 @@ describe('holding a site an operator did not publish', () => {
     const { store } = stored();
     await published(store);
     await store.claimSlug('acme-two', 'proj-2', 'user-2');
-    await store.putFiles('acme-two', [
+    const two = await publish(store, 'acme-two', [
       { path: 'index.html', content: '<h1>two</h1>' },
     ]);
 
@@ -630,6 +807,7 @@ describe('holding a site an operator did not publish', () => {
     assert.deepEqual(await store.resolveSlug('acme-two'), {
       projectId: 'proj-2',
       userId: 'user-2',
+      generation: two,
     });
   });
 });

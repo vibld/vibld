@@ -122,17 +122,26 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     resolvedSlug = slug;
   }
 
-  await store.putFiles(resolvedSlug, files);
-  // The files first, then the row. `touch` is what clears a tombstone, so
-  // calling it before the content exists would make a taken-down slug
-  // publicly resolvable against an empty prefix, and a failed write would
-  // then leave the site reading as live and serving nothing. That is the
-  // exact failure `unpublish` orders itself to avoid, pointed the other way.
-  //
-  // It still only runs for a project that already held this slug: a first
-  // publish has just claimed the row and has nothing to correct.
-  if (existing) {
-    await store.touch(resolvedSlug);
+  // The files first, then the pointer. A revision nothing points at is
+  // invisible, so a failure in between leaves the previous one serving; the
+  // other order would make the slug resolve to a prefix that is still being
+  // written. That is the same ordering `unpublish` uses, pointed the other
+  // way, and it is now also what makes the hold unraceable: the request has
+  // written nothing that anybody can see by the time it asks.
+  const generation = crypto.randomUUID();
+  await store.putFiles(resolvedSlug, generation, files);
+  if (!(await store.promote(resolvedSlug, generation))) {
+    // A hold landed while this was writing. The bytes are this request's
+    // own, under a prefix nothing points at, so clearing them cannot touch
+    // what the hold is keeping.
+    await store.discard(resolvedSlug, generation);
+    return json(
+      {
+        error:
+          'This site has been taken down by the operator and cannot be republished.',
+      },
+      409,
+    );
   }
 
   const hostname = env.PUBLISH_HOSTNAME ?? 'published.vibld-preview.dev';
@@ -318,7 +327,7 @@ async function handlePublished(
   }
 
   for (const candidate of candidatePaths(pathname)) {
-    const file = await store.getFile(slug, candidate);
+    const file = await store.getFile(slug, resolved.generation, candidate);
     if (file) {
       return new Response(file.content, {
         headers: { 'content-type': contentTypeFor(candidate) },
