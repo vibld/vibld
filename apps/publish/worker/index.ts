@@ -177,6 +177,24 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
   if (existing.userId !== userId) {
     return json({ error: 'This project is published by another user.' }, 403);
   }
+  // #172, and the sharper half of the refusal `handlePublish` makes. An
+  // owner's takedown deletes the objects, which is right when it is their
+  // decision and the site is theirs to empty. Under a hold it would erase
+  // the bytes the hold exists to keep: an owner who disliked being held
+  // could destroy what an operator is holding for review, and a hold placed
+  // on a wrong report could no longer be simply lifted. The site is already
+  // off the web, so refusing costs the owner nothing they do not already
+  // have; what it costs is the ability to act on a site while somebody else
+  // is deciding about it, which is the whole of what a hold is.
+  if (existing.state === 'held') {
+    return json(
+      {
+        error:
+          'This site has been taken down by the operator and cannot be changed until that is lifted.',
+      },
+      409,
+    );
+  }
 
   await store.unpublish(existing.slug);
   return json({ slug: existing.slug });

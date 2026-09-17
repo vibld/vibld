@@ -672,6 +672,44 @@ describe('apps/publish Worker: holding somebody else"s site', () => {
     assert.equal(site.status, 404, 'a republish lifted an operator hold');
   });
 
+  it("refuses the owner's takedown while it is held", async () => {
+    // The owner's takedown deletes the objects, which is right when it is
+    // their decision. Under a hold it would erase the bytes the hold exists
+    // to keep: an owner who disliked being held could destroy what an
+    // operator is holding for review, and a wrong hold could no longer be
+    // simply lifted.
+    //
+    // So the proof is not the 409. It is that the content is still there
+    // afterwards, which is what releasing shows.
+    const env = newEnv();
+    await published(env);
+    await held(env, {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+      reason: 'phishing report 41',
+    });
+
+    const down = await worker.fetch(
+      internalRequest('internal/unpublish', { userId: 'u1', projectId: 'p1' }),
+      env,
+    );
+    assert.equal(down.status, 409);
+
+    await worker.fetch(
+      internalRequest('internal/release', {
+        slug: 'acme',
+        by: 'admin@vibld.com',
+      }),
+      env,
+    );
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200, 'the owner emptied a held site');
+    assert.equal(await site.text(), '<h1>acme</h1>');
+  });
+
   it('refuses to release a site that is not held', async () => {
     const env = newEnv();
     await published(env);
