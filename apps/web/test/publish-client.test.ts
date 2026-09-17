@@ -371,7 +371,11 @@ describe('holdProject and releaseProject', () => {
     });
   });
 
-  it('releases by slug alone', async () => {
+  it('releases with the admin who lifted it, and no reason', async () => {
+    // Lifting a hold is as much an action somebody took as placing it, so it
+    // carries an actor. It carries no reason: the act is undoing rather than
+    // doing, and a required reason on an undo is a field people type "n/a"
+    // into.
     const { binding, calls } = fakeBinding(() =>
       jsonResponse({ slug: 'acme', state: 'down' }),
     );
@@ -379,11 +383,15 @@ describe('holdProject and releaseProject', () => {
     const result = await releaseProject(
       { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
       'acme',
+      'admin@vibld.com',
     );
 
     assert.deepEqual(result, { ok: true, slug: 'acme', state: 'down' });
     assert.equal(new URL(calls[0]!.url).pathname, '/internal/release');
-    assert.deepEqual(await calls[0]!.json(), { slug: 'acme' });
+    assert.deepEqual(await calls[0]!.json(), {
+      slug: 'acme',
+      by: 'admin@vibld.com',
+    });
   });
 
   it('does not report a hold on a reply that never said so', async () => {
@@ -423,6 +431,7 @@ describe('holdProject and releaseProject', () => {
     const result = await releaseProject(
       { PUBLISH: binding, PUBLISH_INTERNAL_SECRET: 's' },
       'never',
+      'admin@vibld.com',
     );
     assert.deepEqual(result, {
       ok: false,

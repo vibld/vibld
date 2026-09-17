@@ -676,7 +676,10 @@ describe('apps/publish Worker: holding somebody else"s site', () => {
     const env = newEnv();
     await published(env);
     const response = await worker.fetch(
-      internalRequest('internal/release', { slug: 'acme' }),
+      internalRequest('internal/release', {
+        slug: 'acme',
+        by: 'admin@vibld.com',
+      }),
       env,
     );
     assert.equal(response.status, 409);
@@ -692,7 +695,10 @@ describe('apps/publish Worker: holding somebody else"s site', () => {
     });
 
     const release = await worker.fetch(
-      internalRequest('internal/release', { slug: 'acme' }),
+      internalRequest('internal/release', {
+        slug: 'acme',
+        by: 'admin@vibld.com',
+      }),
       env,
     );
     assert.equal(release.status, 200);
@@ -720,7 +726,10 @@ describe('apps/publish Worker: holding somebody else"s site', () => {
     });
 
     const release = await worker.fetch(
-      internalRequest('internal/release', { slug: 'acme' }),
+      internalRequest('internal/release', {
+        slug: 'acme',
+        by: 'admin@vibld.com',
+      }),
       env,
     );
     assert.deepEqual(await release.json(), { slug: 'acme', state: 'down' });

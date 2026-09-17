@@ -830,16 +830,16 @@ export class BillingStore {
    */
   async reconcileCursor(
     id: string,
-  ): Promise<{ afterId: string | undefined; retryPending: boolean }> {
+  ): Promise<{ afterId: string | undefined; retryOf: string | undefined }> {
     const row = await this.#db
       .prepare(
-        `SELECT after_id, retry_pending FROM billing_reconcile_cursor WHERE id = ?1`,
+        `SELECT after_id, retry_of FROM billing_reconcile_cursor WHERE id = ?1`,
       )
       .bind(id)
-      .first<{ after_id: string | null; retry_pending: number }>();
+      .first<{ after_id: string | null; retry_of: string | null }>();
     return {
       afterId: row?.after_id ?? undefined,
-      retryPending: row?.retry_pending === 1,
+      retryOf: row?.retry_of ?? undefined,
     };
   }
 
@@ -852,20 +852,20 @@ export class BillingStore {
   async saveReconcileCursor(
     id: string,
     afterId: string | undefined,
-    retryPending = false,
+    retryOf: string | undefined = undefined,
     at: string = new Date().toISOString(),
   ): Promise<void> {
     await this.#db
       .prepare(
         `INSERT INTO billing_reconcile_cursor
-           (id, after_id, retry_pending, updated_at)
+           (id, after_id, retry_of, updated_at)
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(id) DO UPDATE SET
            after_id = excluded.after_id,
-           retry_pending = excluded.retry_pending,
+           retry_of = excluded.retry_of,
            updated_at = excluded.updated_at`,
       )
-      .bind(id, afterId ?? null, retryPending ? 1 : 0, at)
+      .bind(id, afterId ?? null, retryOf ?? null, at)
       .run();
   }
 

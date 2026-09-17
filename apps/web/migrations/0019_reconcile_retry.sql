@@ -14,10 +14,14 @@
 -- attempt to avoid ("a row that fails every night moves to the back of the
 -- queue instead of holding the front of it").
 --
--- So the hold is bounded to one night. A run that saw a failure and has not
--- already retried parks the cursor before the earliest failed subscription
--- and sets this flag; the next run re-reads from there and, whatever
--- happens, advances past the slice and clears it. A transient failure is
--- retried immediately. A persistent one costs one extra night and is then
--- walked past, reported in `failed`, and picked up again on the next lap.
-ALTER TABLE billing_reconcile_cursor ADD COLUMN retry_pending INTEGER NOT NULL DEFAULT 0;
+-- So this records *which* subscription the outstanding retry belongs to
+-- rather than merely that one is outstanding. A boolean was the first cut
+-- and it was wrong in a way worth writing down: during a retry run, a
+-- different subscription failing for the first time found the flag already
+-- set, so it was walked past with no retry of its own. Naming the id
+-- separates "this one has had its second chance" from "this one has not
+-- had its first", which is the whole distinction.
+--
+-- NULL means nothing is outstanding. A run holds for any failure that is
+-- not the id named here, and walks past one that is.
+ALTER TABLE billing_reconcile_cursor ADD COLUMN retry_of TEXT;

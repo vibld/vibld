@@ -421,7 +421,7 @@ describe('holding a site an operator did not publish', () => {
     await store.unpublish('acme');
     await store.hold('acme', 'admin@vibld.com', 'wrong report');
 
-    await store.release('acme');
+    await store.release('acme', 'admin@vibld.com');
 
     assert.equal(
       await store.resolveSlug('acme'),
@@ -436,12 +436,59 @@ describe('holding a site an operator did not publish', () => {
     await published(store);
     await store.hold('acme', 'admin@vibld.com', 'wrong report');
 
-    await store.release('acme');
+    await store.release('acme', 'admin@vibld.com');
 
     assert.deepEqual(await store.resolveSlug('acme'), {
       projectId: 'proj-1',
       userId: 'user-1',
     });
+  });
+
+  it('keeps the record after the hold is lifted', async () => {
+    // The columns are the current state, not a record. Releasing nulls all
+    // three, so before the history table the ordinary hold-then-release
+    // left no evidence the site had ever been taken down, by whom or why --
+    // which contradicted the reason the columns were added.
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'admin@vibld.com', 'phishing report 41');
+    await store.release('acme', 'someone.else@vibld.com');
+
+    assert.deepEqual(
+      (await store.holdHistory('acme')).map(({ action, actor, reason }) => ({
+        action,
+        actor,
+        ...(reason === undefined ? {} : { reason }),
+      })),
+      [
+        {
+          action: 'held',
+          actor: 'admin@vibld.com',
+          reason: 'phishing report 41',
+        },
+        { action: 'released', actor: 'someone.else@vibld.com' },
+      ],
+    );
+    // And the live columns really are clear, so this is a record rather than
+    // the state not having been cleared.
+    assert.equal((await store.siteBySlug('acme'))?.state, 'live');
+  });
+
+  it('keeps every hold, not just the last one', async () => {
+    const { store } = stored();
+    await published(store);
+    await store.hold('acme', 'a@vibld.com', 'first report');
+    await store.release('acme', 'a@vibld.com');
+    await store.hold('acme', 'b@vibld.com', 'second report');
+
+    const history = await store.holdHistory('acme');
+    assert.equal(history.length, 3);
+    assert.deepEqual(
+      history.map((entry) => entry.action),
+      ['held', 'released', 'held'],
+    );
+    assert.equal(history[0]?.reason, 'first report');
+    assert.equal(history[2]?.reason, 'second report');
   });
 
   it('leaves another site alone', async () => {

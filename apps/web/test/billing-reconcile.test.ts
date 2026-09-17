@@ -698,6 +698,42 @@ describe('the reconcile walk', () => {
     );
   });
 
+  it('gives a first-time failure its own retry, even during a retry run', async () => {
+    // The distinction a boolean could not make. While retrying `sub_b`, a
+    // different subscription failing for the first time found the flag
+    // already set and was walked past with no retry of its own -- the exact
+    // delay the retry exists to remove, moved one subscription along.
+    const store = await storeWith(FIVE);
+    const stripe = stripeServing(FIVE);
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    let broken = new Set(['sub_b']);
+    const seen: string[] = [];
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      if (broken.has(id)) throw new Error('not today');
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+
+    // Run one: a, b. b fails, so the walk parks before it.
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+
+    // Run two: b succeeds this time, and c fails for the first time.
+    broken = new Set(['sub_c']);
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(seen, ['sub_b', 'sub_c']);
+
+    // Run three has to come back to c rather than walking past it.
+    broken = new Set();
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 2);
+    assert.deepEqual(
+      seen,
+      ['sub_c', 'sub_d'],
+      'a first-time failure during a retry run got no retry of its own',
+    );
+  });
+
   it('stays put when the first subscription in the slice throws', async () => {
     // The edge the arithmetic gets wrong if it reaches for `ids[-1]`: the
     // failure is the first thing in the slice, so there is no earlier id to

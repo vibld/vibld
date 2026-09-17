@@ -1498,7 +1498,7 @@ async function handleAdminHold(
   }
 
   if (release) {
-    const lifted = await releaseProject(env, slug.trim());
+    const lifted = await releaseProject(env, slug.trim(), guard.adminEmail);
     return lifted.ok
       ? json({ slug: lifted.slug, state: lifted.state })
       : json({ error: lifted.error }, lifted.status);

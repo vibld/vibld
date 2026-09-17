@@ -284,6 +284,62 @@ export class PublishStore {
       )
       .bind(now, by, reason, slug)
       .run();
+    await this.#record(slug, 'held', by, reason, now);
+  }
+
+  /**
+   * Append what somebody did, where releasing cannot erase it
+   * (0020_hold_history.sql).
+   *
+   * The columns above are the current state, which is what serving and the
+   * republish refusal read. They are not a record, and the first cut of this
+   * mistook one for the other: `release` nulled all three, so after the
+   * ordinary hold-then-release there was no evidence the site had ever been
+   * taken down, by whom or why. That contradicted the reason they were added.
+   */
+  async #record(
+    slug: string,
+    action: 'held' | 'released',
+    actor: string,
+    reason: string | undefined,
+    at: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO published_site_holds (slug, action, actor, reason, at)
+         VALUES (?1, ?2, ?3, ?4, ?5)`,
+      )
+      .bind(slug, action, actor, reason ?? null, at)
+      .run();
+  }
+
+  /** What has been done to this site, oldest first. */
+  async holdHistory(slug: string): Promise<
+    {
+      action: 'held' | 'released';
+      actor: string;
+      reason?: string;
+      at: string;
+    }[]
+  > {
+    const result = await this.#db
+      .prepare(
+        `SELECT action, actor, reason, at FROM published_site_holds
+         WHERE slug = ?1 ORDER BY at, id`,
+      )
+      .bind(slug)
+      .all<{
+        action: string;
+        actor: string;
+        reason: string | null;
+        at: string;
+      }>();
+    return result.results.map((row) => ({
+      action: row.action === 'released' ? 'released' : 'held',
+      actor: row.actor,
+      ...(row.reason === null ? {} : { reason: row.reason }),
+      at: row.at,
+    }));
   }
 
   /**
@@ -293,16 +349,24 @@ export class PublishStore {
    * than an oversight: releasing a site the owner had also taken down must
    * leave it down. Clearing the hold returns the decision to whoever else
    * has a say in it, which for an owner takedown is the owner.
+   *
+   * `by` is required for the same reason `hold` takes one: lifting a hold is
+   * as much an action somebody took as placing it, and the history is where
+   * both are kept once the columns are cleared.
    */
-  async release(slug: string, at = new Date()): Promise<void> {
+  async release(slug: string, by: string, at = new Date()): Promise<void> {
+    const now = at.toISOString();
     await this.#db
       .prepare(
         `UPDATE published_projects
          SET held_at = NULL, held_by = NULL, held_reason = NULL, updated_at = ?1
          WHERE slug = ?2`,
       )
-      .bind(at.toISOString(), slug)
+      .bind(now, slug)
       .run();
+    // Appended before the columns are read again, and never updated. Nulling
+    // the state must not be able to erase that the hold happened.
+    await this.#record(slug, 'released', by, undefined, now);
   }
 
   /** What an operator needs to see about a slug before acting on it. */

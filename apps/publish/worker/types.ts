@@ -27,6 +27,17 @@ export interface PublishD1Statement {
   bind(...values: unknown[]): PublishD1Statement;
   run<T = Record<string, unknown>>(): Promise<PublishD1Result<T>>;
   first<T = Record<string, unknown>>(): Promise<T | null>;
+  /**
+   * Every row, for a read that expects more than one.
+   *
+   * Declared separately from `run` rather than leaning on its `results`.
+   * `run` is the write path here and the test fake answers it with an empty
+   * list, which is the honest shape: a statement that changed rows has no
+   * rows to give back. Reading a list through it would have returned nothing
+   * and said nothing, which is how a history that was never read looks
+   * exactly like a history that is empty.
+   */
+  all<T = Record<string, unknown>>(): Promise<PublishD1Result<T>>;
 }
 
 export interface PublishD1Database {

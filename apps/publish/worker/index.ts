@@ -233,9 +233,14 @@ async function handleRelease(request: Request, env: Env): Promise<Response> {
   } catch {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
-  const { slug } = (body ?? {}) as { slug?: unknown };
+  const { slug, by } = (body ?? {}) as { slug?: unknown; by?: unknown };
   if (typeof slug !== 'string' || slug.length === 0) {
     return json({ error: '"slug" is required.' }, 400);
+  }
+  // Required, because lifting a hold is as much an action somebody took as
+  // placing it, and the history keeps both.
+  if (typeof by !== 'string' || by.length === 0) {
+    return json({ error: '"by" is required.' }, 400);
   }
 
   const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
@@ -245,7 +250,7 @@ async function handleRelease(request: Request, env: Env): Promise<Response> {
     return json({ error: 'This site is not held.' }, 409);
   }
 
-  await store.release(slug);
+  await store.release(slug, by);
   const after = await store.siteBySlug(slug);
   return json({ slug, state: after?.state ?? 'down' });
 }

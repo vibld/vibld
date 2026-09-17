@@ -327,7 +327,7 @@ export async function reconcileSubscriptions(
    * subscribes. Sorting makes the walk a walk rather than a re-shuffle.
    */
   const all = [...found.ids].sort();
-  const { afterId: after, retryPending } =
+  const { afterId: after, retryOf } =
     await store.reconcileCursor(RECONCILE_WALK);
   // The first id past where the last run stopped. An id that has since
   // disappeared costs nothing: the search is for the next one above it.
@@ -346,6 +346,15 @@ export async function reconcileSubscriptions(
    * looked at again until the walk lapped (0019_reconcile_retry.sql).
    */
   let firstFailed = -1;
+  /**
+   * The earliest failure that is not the one this run was already retrying.
+   *
+   * The distinction a boolean could not make. During a retry run, a
+   * different subscription failing for the first time would find the flag
+   * already set and be walked past with no retry of its own, which is the
+   * delay the retry exists to remove, moved one subscription along.
+   */
+  let firstNewFailure = -1;
   for (const [index, id] of ids.entries()) {
     try {
       const subscription = await stripe.subscriptions.retrieve(id);
@@ -415,6 +424,7 @@ export async function reconcileSubscriptions(
       console.error('reconcile: failed to check subscription', id, error);
       failed += 1;
       if (firstFailed === -1) firstFailed = index;
+      if (firstNewFailure === -1 && id !== retryOf) firstNewFailure = index;
     }
   }
 
@@ -442,16 +452,22 @@ export async function reconcileSubscriptions(
    * whatever happened, reports the failure in `failed`, and picks it up
    * again on the next lap.
    */
-  const holding = firstFailed !== -1 && !retryPending;
+  const holding = firstNewFailure !== -1;
   const resumeAt = holding
-    ? // The id before the earliest failure, so the next run re-reads it.
-      // Falling back to the incoming cursor when the failure was first in
-      // the slice, which leaves the walk exactly where it started.
-      (ids[firstFailed - 1] ?? after)
+    ? // The id before the earliest new failure, so the next run re-reads it.
+      // Falling back to the incoming cursor when it was first in the slice,
+      // which leaves the walk exactly where it started.
+      (ids[firstNewFailure - 1] ?? after)
     : reachedEnd
       ? undefined
       : ids.at(-1);
-  await store.saveReconcileCursor(RECONCILE_WALK, resumeAt, holding);
+  await store.saveReconcileCursor(
+    RECONCILE_WALK,
+    resumeAt,
+    // The id whose second chance is outstanding, so the next run can tell
+    // "this one has had it" from "this one has not had a first".
+    holding ? ids[firstNewFailure] : undefined,
+  );
 
   return {
     checked: ids.length,
@@ -461,7 +477,7 @@ export async function reconcileSubscriptions(
     // What this run did not reach. A held cursor puts the failure and
     // everything after it back on the list rather than reporting it covered.
     remaining: holding
-      ? all.length - (from + firstFailed)
+      ? all.length - (from + firstNewFailure)
       : all.length - (from + ids.length),
   };
 }

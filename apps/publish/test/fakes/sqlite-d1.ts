@@ -53,6 +53,15 @@ class SqliteD1Statement implements PublishD1Statement {
     };
   }
 
+  async all<T = Record<string, unknown>>(): Promise<PublishD1Result<T>> {
+    const statement = this.#db.prepare(this.#sql);
+    return {
+      results: statement.all(...(this.#values as never[])) as T[],
+      success: true,
+      meta: { changes: 0 },
+    };
+  }
+
   async first<T = Record<string, unknown>>(): Promise<T | null> {
     const statement = this.#db.prepare(this.#sql);
     const row = statement.get(...(this.#values as never[]));

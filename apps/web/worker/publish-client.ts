@@ -299,6 +299,7 @@ export function holdProject(
 export function releaseProject(
   env: PublishServiceEnv,
   slug: string,
+  by: string,
 ): Promise<HoldResult> {
-  return holdCall(env, '/internal/release', { slug });
+  return holdCall(env, '/internal/release', { slug, by });
 }
