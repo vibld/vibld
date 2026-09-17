@@ -1,5 +1,6 @@
 import {
   DEFAULT_MAX_TOKENS,
+  cacheRatesFor,
   configuredProviders,
   findModel,
   providerForRequest,
@@ -948,6 +949,11 @@ async function handlePlan(
       ? {
           inputMicroUsd: chosen.inputMicroUsd,
           outputMicroUsd: chosen.outputMicroUsd,
+          // The cached rates follow the model rather than the provider
+          // default, for the same reason the input rate does: a run on Opus
+          // must not be priced at DeepSeek's rate because the deployment
+          // happens to default to DeepSeek.
+          ...cacheRatesFor(chosen),
         }
       : undefined,
   );

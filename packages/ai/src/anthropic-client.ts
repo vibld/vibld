@@ -2,7 +2,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { GenerationPlanSchema } from './plan-schema.ts';
 import { findModel } from './model-catalogue.ts';
-import type { PlanClient, PlanCompletion, PlanRequest } from './client.ts';
+import type {
+  PlanClient,
+  PlanCompletion,
+  PlanRequest,
+  PlanUsage,
+} from './client.ts';
 
 /**
  * Pull the structured output out of the response without throwing.
@@ -27,6 +32,32 @@ export function readStructuredOutput(
     void stopReason;
     return null;
   }
+}
+
+/**
+ * Anthropic's three input counters, totalled into the one meaning
+ * `PlanUsage` defines.
+ *
+ * `input_tokens` here is the uncached remainder: it excludes both cache
+ * figures rather than breaking down into them, which is the opposite of what
+ * OpenAI and DeepSeek report. Mapping it straight across would under-report
+ * the input side of every cached run, and would make the cached fraction a
+ * ratio of one number to a different number that does not contain it.
+ */
+export function usageOf(usage: {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+}): PlanUsage {
+  const read = usage.cache_read_input_tokens ?? 0;
+  const written = usage.cache_creation_input_tokens ?? 0;
+  return {
+    inputTokens: usage.input_tokens + read + written,
+    outputTokens: usage.output_tokens,
+    cacheReadInputTokens: read,
+    cacheWriteInputTokens: written,
+  };
 }
 
 export interface AnthropicPlanClientOptions {
@@ -93,7 +124,37 @@ export function createAnthropicPlanClient(
         {
           model: request.model,
           max_tokens: maxTokens,
-          system: request.system,
+          // One cache breakpoint, on the system prompt, and it is the only
+          // one this request can honestly place (#166).
+          //
+          // A cache entry matches a prefix, so a marker only pays where
+          // everything before it is byte-identical from one request to the
+          // next. Exactly one part of this request is: the system prompt,
+          // which is the same ~2,700 tokens for every run by every user of
+          // the deployment. Everything in the user message begins with the
+          // person's own words and is different every time.
+          //
+          // The project's own files are the larger half of an iterating
+          // run's input and are deliberately *not* cached: the accepted
+          // revision changes on every run that applies anything, so the
+          // block would be rewritten between consecutive turns and the
+          // marker would pay the write premium every time to match nothing.
+          // A breakpoint there starts paying the day two requests share a
+          // base revision, which is not the loop this product has.
+          //
+          // As an array rather than the plain string this used to be,
+          // because the directive is read from inside a content block. At
+          // the message level it is ignored silently, so the failure mode is
+          // an unchanged bill rather than an error, which is why
+          // `anthropic-client.test.ts` asserts the shape rather than trusting
+          // it.
+          system: [
+            {
+              type: 'text',
+              text: request.system,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
           output_config: {
             ...(effort ? { effort } : {}),
             format: zodOutputFormat(GenerationPlanSchema),
@@ -126,11 +187,7 @@ export function createAnthropicPlanClient(
                 explanation: response.stop_details?.explanation ?? null,
               }
             : undefined,
-        usage: {
-          inputTokens: response.usage.input_tokens,
-          outputTokens: response.usage.output_tokens,
-          cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
-        },
+        usage: usageOf(response.usage),
       };
     },
   };

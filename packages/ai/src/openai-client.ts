@@ -325,6 +325,11 @@ export function createOpenaiPlanClient(
             final?.usage?.output_tokens ?? estimateTokens(body.length),
           cacheReadInputTokens:
             final?.usage?.input_tokens_details?.cached_tokens ?? 0,
+          // OpenAI caches prompt prefixes automatically and charges nothing
+          // to write one, so there is no write to report. `input_tokens`
+          // above already includes the cached ones, which is the meaning
+          // `PlanUsage` defines.
+          cacheWriteInputTokens: 0,
         },
       };
     },

@@ -143,12 +143,14 @@ export type { ProviderEnv, ProviderName } from './select-client.ts';
 export {
   LEGACY_MODEL_IDS,
   MODEL_CATALOGUE,
+  PROVIDER_CACHE_RATES,
   availableModels,
+  cacheRatesFor,
   canonicalModelId,
   findModel,
   isKnownModel,
 } from './model-catalogue.ts';
-export type { ModelChoice } from './model-catalogue.ts';
+export type { CacheRates, ModelChoice } from './model-catalogue.ts';
 export { allowedModels, grantedIds, parseModelPolicy } from './model-policy.ts';
 export type { ModelPolicy, PolicyParse } from './model-policy.ts';
 export {

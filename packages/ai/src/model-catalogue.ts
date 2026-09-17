@@ -62,6 +62,54 @@ export interface ModelChoice {
   supportsEffort: boolean;
 }
 
+/**
+ * What a cached input token costs, as a multiple of the model's own input
+ * rate (#166, #165).
+ *
+ * A multiple rather than a figure per model, because that is what it is: each
+ * provider publishes one ratio that applies across its line-up, and writing
+ * ten derived numbers into the catalogue would present arithmetic as ten
+ * separately verified prices.
+ *
+ * **These ratios want confirming against each provider's current pricing
+ * before the ledger is trusted to the last cent.** They are the published
+ * ones, and a provider that changes them changes what every run costs here,
+ * so a stale ratio is a bill that is quietly wrong rather than one that
+ * fails loudly.
+ *
+ * `write` is the premium for putting a prefix into the cache, and it is only
+ * ever charged where a provider bills separately for it. OpenAI and DeepSeek
+ * cache automatically and charge nothing extra to write, so a token written
+ * into their cache is an ordinary input token and the multiple is 1.
+ */
+export interface CacheRates {
+  read: number;
+  write: number;
+}
+
+export const PROVIDER_CACHE_RATES: Readonly<Record<ProviderName, CacheRates>> =
+  {
+    // Anthropic: a cache read is a tenth of the input rate, and a five-minute
+    // cache write is a quarter more than one. The write premium is why a
+    // breakpoint on a prefix that changes between requests costs money rather
+    // than saving it.
+    anthropic: { read: 0.1, write: 1.25 },
+    openai: { read: 0.1, write: 1 },
+    deepseek: { read: 0.1, write: 1 },
+  };
+
+/** This model's cache rates, in micro-USD per token. */
+export function cacheRatesFor(model: ModelChoice): {
+  cachedInputMicroUsd: number;
+  cacheWriteMicroUsd: number;
+} {
+  const rates = PROVIDER_CACHE_RATES[model.provider];
+  return {
+    cachedInputMicroUsd: model.inputMicroUsd * rates.read,
+    cacheWriteMicroUsd: model.inputMicroUsd * rates.write,
+  };
+}
+
 export const MODEL_CATALOGUE: readonly ModelChoice[] = [
   {
     id: 'claude-fable-5-1',

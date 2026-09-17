@@ -183,7 +183,12 @@ describe('settleBudget', () => {
     reservationId: 11,
     accountReservationId: 22,
     worstCaseMicroUsd: 999_999,
-    prices: { inputMicroUsd: 5, outputMicroUsd: 25 },
+    prices: {
+      inputMicroUsd: 5,
+      outputMicroUsd: 25,
+      cachedInputMicroUsd: 0.5,
+      cacheWriteMicroUsd: 6.25,
+    },
   };
 
   it('settles both layers at the usage-derived cost', async () => {
@@ -192,6 +197,7 @@ describe('settleBudget', () => {
       inputTokens: 100,
       outputTokens: 200,
       cacheReadInputTokens: 0,
+      cacheWriteInputTokens: 0,
     });
 
     assert.equal(actual, 100 * 5 + 200 * 25);
@@ -218,7 +224,12 @@ describe('settleBudget', () => {
         reservationId: undefined,
         accountReservationId: undefined,
       },
-      { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0 },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
     );
 
     assert.deepEqual(calls, []);
@@ -241,7 +252,12 @@ describe('traceOf', () => {
     const trace = traceOf(
       TRACE_PARAMS,
       { stop: 'conflict' },
-      { inputTokens: 900, outputTokens: 100, cacheReadInputTokens: 300 },
+      {
+        inputTokens: 900,
+        outputTokens: 100,
+        cacheReadInputTokens: 300,
+        cacheWriteInputTokens: 0,
+      },
       TIMING,
     );
 
@@ -255,7 +271,12 @@ describe('traceOf', () => {
     const trace = traceOf(
       TRACE_PARAMS,
       { stop: 'applied' },
-      { inputTokens: 900, outputTokens: 100, cacheReadInputTokens: 300 },
+      {
+        inputTokens: 900,
+        outputTokens: 100,
+        cacheReadInputTokens: 300,
+        cacheWriteInputTokens: 0,
+      },
       TIMING,
     );
 
@@ -270,7 +291,12 @@ describe('traceOf', () => {
     const trace = traceOf(
       TRACE_PARAMS,
       { stop: 'applied' },
-      { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0 },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
       TIMING,
     );
 
@@ -281,7 +307,12 @@ describe('traceOf', () => {
     const trace = traceOf(
       { ...TRACE_PARAMS, model: 'retired-model-7' },
       { stop: 'applied' },
-      { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0 },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
       TIMING,
     );
 
@@ -309,7 +340,12 @@ describe('traceOf', () => {
     const trace = traceOf(
       TRACE_PARAMS,
       { stop: 'applied' },
-      { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0 },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
       TIMING,
     );
 

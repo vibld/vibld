@@ -36,10 +36,37 @@ export interface PlanProgress {
   characters: number;
 }
 
+/**
+ * What one call to a model consumed, in the one meaning every client reports.
+ *
+ * `inputTokens` is **all** prompt tokens, including the ones served from the
+ * provider's cache and the ones it wrote into the cache. That has to be said,
+ * because the providers do not agree: OpenAI's `input_tokens` and DeepSeek's
+ * `prompt_tokens` already include their cached tokens (the cached count is a
+ * breakdown of the total), while Anthropic's `input_tokens` excludes both
+ * `cache_read_input_tokens` and `cache_creation_input_tokens`. Mapped
+ * straight across, the same field would mean two different things and the
+ * cached fraction would be a ratio of unrelated numbers.
+ *
+ * So each client normalises to this definition, and the two cache figures are
+ * subsets of the total rather than additions to it:
+ *
+ *     inputTokens = uncached + cacheReadInputTokens + cacheWriteInputTokens
+ */
 export interface PlanUsage {
   inputTokens: number;
   outputTokens: number;
+  /** Prompt tokens the provider served from its cache, at its cached rate. */
   cacheReadInputTokens: number;
+  /**
+   * Prompt tokens the provider wrote into its cache on this request, which
+   * cost more than an ordinary input token rather than less.
+   *
+   * Zero for a provider that caches automatically and does not charge for
+   * the write (OpenAI and DeepSeek both do this): there is no write to
+   * report, not a write being hidden.
+   */
+  cacheWriteInputTokens: number;
 }
 
 export interface PlanRefusal {

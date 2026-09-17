@@ -12,6 +12,27 @@ import {
 } from '../worker/spend.ts';
 import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
 import { DEFAULT_MAX_TOKENS } from '@vibld/ai';
+import type { TokenPrices } from '../worker/spend.ts';
+
+/**
+ * A full price set from the two rates a test cares about.
+ *
+ * The cached rates are derived at the published ratios rather than written
+ * out, which is also how `parsePrices` derives them, so a test that sets a
+ * rate does not have to restate arithmetic it is not testing.
+ */
+function priced(
+  inputMicroUsd: number,
+  outputMicroUsd: number,
+  write = 1.25,
+): TokenPrices {
+  return {
+    inputMicroUsd,
+    outputMicroUsd,
+    cachedInputMicroUsd: inputMicroUsd * 0.1,
+    cacheWriteMicroUsd: inputMicroUsd * write,
+  };
+}
 
 describe('spend pricing', () => {
   it('prices a run from its token counts', () => {
@@ -21,13 +42,62 @@ describe('spend pricing', () => {
     );
   });
 
-  it('never returns a fractional charge', () => {
-    const priced = microUsdOf(
-      { inputTokens: 3, outputTokens: 3 },
-      { inputMicroUsd: 0.5, outputMicroUsd: 0.5 },
+  it('prices a cached read at the cached rate, not the input rate', () => {
+    // Not a refinement: at the full input rate a cached token takes ten
+    // times the allowance the run actually consumed. This was happening
+    // before the rate existed, and not hypothetically -- OpenAI and DeepSeek
+    // cache prompt prefixes automatically and both already report the hit.
+    const prices = priced(5, 25);
+    const charge = microUsdOf(
+      { inputTokens: 1_000, outputTokens: 0, cacheReadInputTokens: 800 },
+      prices,
     );
-    assert.equal(priced, 3);
-    assert.ok(Number.isInteger(priced));
+
+    assert.equal(charge, 200 * 5 + 800 * 0.5);
+  });
+
+  it('prices a cache write above an ordinary input token', () => {
+    const charge = microUsdOf(
+      { inputTokens: 1_000, outputTokens: 0, cacheWriteInputTokens: 1_000 },
+      priced(5, 25),
+    );
+
+    // Dearer than the 5_000 the same tokens would cost uncached. Caching is
+    // not free on the turn that fills it, which is the reason a breakpoint
+    // goes only where the prefix repeats.
+    assert.equal(charge, 1_000 * 6.25);
+    assert.ok(charge > 1_000 * 5);
+  });
+
+  it('prices a run that reports no cache figures exactly as before', () => {
+    // The reservation path passes only the two counts, and it must not
+    // change meaning because two optional fields were added beside them.
+    assert.equal(
+      microUsdOf({ inputTokens: 1_000, outputTokens: 2_000 }, DEFAULT_PRICES),
+      1_000 * 5 + 2_000 * 25,
+    );
+  });
+
+  it('never credits an allowance for a run that cost money', () => {
+    // A provider reporting more cached tokens than input tokens should not
+    // produce a negative charge: settling one would hand back allowance for
+    // a run that really happened. A figure that cannot be read is not a
+    // refund.
+    const charge = microUsdOf(
+      { inputTokens: 100, outputTokens: 0, cacheReadInputTokens: 900 },
+      priced(5, 25),
+    );
+
+    assert.ok(charge >= 0);
+  });
+
+  it('never returns a fractional charge', () => {
+    const charge = microUsdOf(
+      { inputTokens: 3, outputTokens: 3 },
+      priced(0.5, 0.5),
+    );
+    assert.equal(charge, 3);
+    assert.ok(Number.isInteger(charge));
   });
 
   it('reads prices from configuration', () => {
@@ -36,7 +106,7 @@ describe('spend pricing', () => {
         VIBLD_USD_MICRO_PER_INPUT_TOKEN: '3',
         VIBLD_USD_MICRO_PER_OUTPUT_TOKEN: '15',
       }),
-      { inputMicroUsd: 3, outputMicroUsd: 15 },
+      priced(3, 15),
     );
   });
 
@@ -199,7 +269,9 @@ describe('prices follow the selected provider', () => {
       },
       'deepseek',
     );
-    assert.deepEqual(explicit, { inputMicroUsd: 0.22, outputMicroUsd: 0.66 });
+    // DeepSeek charges nothing extra to write a cache entry, so the write
+    // rate follows its own ratio rather than Anthropic's.
+    assert.deepEqual(explicit, priced(0.22, 0.66, 1));
   });
 
   it('defaults to Anthropic when no provider is named', () => {
@@ -215,11 +287,8 @@ describe('the chosen model prices its own run', () => {
   it('uses the model rate over the provider default', () => {
     // A run on Opus must not be ceilinged at DeepSeek's rate because the
     // deployment happens to default to DeepSeek.
-    const opus = parsePrices({}, 'deepseek', {
-      inputMicroUsd: 5,
-      outputMicroUsd: 25,
-    });
-    assert.deepEqual(opus, { inputMicroUsd: 5, outputMicroUsd: 25 });
+    const opus = parsePrices({}, 'deepseek', priced(5, 25));
+    assert.deepEqual(opus, priced(5, 25));
   });
 
   it('still lets an operator override win over the model rate', () => {
@@ -229,9 +298,12 @@ describe('the chosen model prices its own run', () => {
         VIBLD_USD_MICRO_PER_OUTPUT_TOKEN: '99',
       },
       'deepseek',
-      { inputMicroUsd: 5, outputMicroUsd: 25 },
+      priced(5, 25),
     );
-    assert.deepEqual(forced, { inputMicroUsd: 9, outputMicroUsd: 99 });
+    // The cached rates move with the overridden input rate rather than
+    // staying at the model's: a price set half at one model's rate and half
+    // at another's describes no model at all.
+    assert.deepEqual(forced, priced(9, 99));
   });
 
   it('falls back to the provider default when no model was chosen', () => {
