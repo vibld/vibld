@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  handleGitHubDiff,
   handleGitHubPush,
   handleGitHubStatus,
 } from '../worker/github-handlers.ts';
+import { blobSha } from '../worker/github-push.ts';
 import { GitHubStore } from '../worker/github-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
@@ -62,6 +64,8 @@ function fakeGitHub(state: {
   base: string;
   branch?: string;
   branchTree?: string;
+  /** What the base commit holds, for the diff route. */
+  baseTree?: { path: string; type: string; sha: string }[];
 }) {
   const calls: { method: string; path: string; body?: unknown }[] = [];
   const doFetch = (async (url: string, init?: RequestInit) => {
@@ -91,6 +95,9 @@ function fakeGitHub(state: {
     }
     if (path.includes('/git/commits/')) {
       return json({ tree: { sha: state.branchTree ?? 'another-tree' } });
+    }
+    if (method === 'GET' && path.includes('/git/trees/')) {
+      return json({ tree: state.baseTree ?? [], truncated: false });
     }
     if (method === 'POST' && path.endsWith('/git/trees')) {
       return json({ sha: 'the-tree' }, 201);
@@ -924,5 +931,122 @@ describe('when the repository has left the installation', () => {
     };
     assert.equal(body.reconnect, true);
     assert.match(body.error, /Approve it again/);
+  });
+});
+
+describe('previewing a push', () => {
+  function diffRequest(body: unknown = undefined): Request {
+    return new Request('https://app.vibld.com/api/github/diff', {
+      method: 'POST',
+      body: JSON.stringify(
+        body ?? { files: [{ path: 'index.html', content: '<h1>hi</h1>' }] },
+      ),
+    });
+  }
+
+  it('reports what the push would add, change and remove', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({
+      base: 'base-commit',
+      baseTree: [
+        {
+          path: 'index.html',
+          type: 'blob',
+          sha: await blobSha('<h1>old</h1>'),
+        },
+        { path: 'LICENSE', type: 'blob', sha: await blobSha('MIT') },
+      ],
+    });
+
+    const response = await handleGitHubDiff(
+      diffRequest(),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      owner: string;
+      repo: string;
+      changed: string[];
+      removed: string[];
+    };
+    assert.equal(body.changed[0], 'index.html');
+    assert.deepEqual(body.removed, ['LICENSE']);
+    // The destination travels with the diff: a caller has to be able to tell
+    // whether the preview describes the repository it is about to push to.
+    assert.equal(body.owner, 'acme');
+    assert.equal(body.repo, 'site');
+  });
+
+  it('writes nothing to GitHub', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch, calls } = fakeGitHub({
+      base: 'base-commit',
+      baseTree: [],
+    });
+
+    await handleGitHubDiff(diffRequest(), env(db), PRINCIPAL, doFetch, NOW);
+
+    // The token mint is a POST GitHub requires; nothing else may be.
+    const writes = calls.filter(
+      (call) => call.method === 'POST' && !call.path.endsWith('/access_tokens'),
+    );
+    assert.deepEqual(writes, []);
+  });
+
+  it('records no push attempt, so a preview cannot pin a parent', async () => {
+    // The push ledger is what makes a retry commit onto the same parent. A
+    // preview that wrote to it would pin a base the user never pushed
+    // against, and a later real push would inherit it.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new GitHubStore(db as unknown as D1Database);
+    await store.bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit', baseTree: [] });
+
+    await handleGitHubDiff(diffRequest(), env(db), PRINCIPAL, doFetch, NOW);
+
+    assert.equal(
+      await store.push({
+        userId: 'user_1',
+        owner: 'acme',
+        repo: 'site',
+        revision: 'r7',
+      }),
+      null,
+    );
+  });
+
+  it('asks for a connection when there is not one', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    const response = await handleGitHubDiff(
+      diffRequest(),
+      env(db),
+      PRINCIPAL,
+      (async () =>
+        new Response('', { status: 500 })) as unknown as typeof fetch,
+      NOW,
+    );
+    assert.equal(response.status, 409);
+  });
+
+  it('refuses a body with no files rather than answering an empty diff', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new GitHubStore(db as unknown as D1Database).bind(GRANT);
+    const { doFetch } = fakeGitHub({ base: 'base-commit', baseTree: [] });
+
+    const response = await handleGitHubDiff(
+      diffRequest({ files: [] }),
+      env(db),
+      PRINCIPAL,
+      doFetch,
+      NOW,
+    );
+
+    assert.ok(response.status >= 400);
   });
 });

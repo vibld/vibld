@@ -1,5 +1,5 @@
 import { Show } from '@clerk/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   beginConnect,
   beginInstall,
@@ -8,16 +8,15 @@ import {
   completeClaimedConnect,
   disconnectRepository,
   holdHandoff,
-  fetchGitHubStatus,
   noteConnectionChanged,
   onConnectionChanged,
 } from '../github/github-client.ts';
 import type {
   ConnectOffer,
-  GitHubStatus,
   RepositoryChoice,
 } from '../github/github-client.ts';
-import { createStatusGate, decidePanel } from '../github/panel-view.ts';
+import { decidePanel } from '../github/panel-view.ts';
+import { githubStatus } from '../github/github-status.ts';
 import type { PanelPhase } from '../github/panel-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
@@ -59,27 +58,20 @@ export function GitHubPanel() {
  * what it looks like: two lines with nothing in them to get wrong.
  */
 export function GitHubConnection() {
-  const [status, setStatus] = useState<GitHubStatus | null>(null);
+  // Shared with the push button (#34), so the two cannot describe the same
+  // connection differently. The supersede rule this used to hold in a local
+  // gate lives in the store now, along with "a probe only commits what it
+  // got": both are properties of the connection rather than of this panel,
+  // and a second copy of either here would be a second place for it to be
+  // wrong.
+  const status = useSyncExternalStore(
+    githubStatus.subscribe,
+    githubStatus.read,
+  );
   const [phase, setPhase] = useState<PanelPhase>({ at: 'loading' });
 
-  // Which answer about the connection is allowed to win. The rule and its
-  // tests are in `panel-view.ts`; this is only where it is held, in a ref
-  // rather than state because changing it must never draw anything.
-  const gate = useRef(createStatusGate());
-
-  /**
-   * Read the status, and commit it only if no write has landed since.
-   *
-   * Without the gate the first probe races every write. It starts alongside
-   * the callback exchange, so it can still be in flight when a repository is
-   * bound, and it would then overwrite a confirmed binding with the
-   * `connected: false` it read beforehand: a write that landed, shown as one
-   * that never happened.
-   */
   async function refreshStatus() {
-    const commit = gate.current.begin();
-    const current = await fetchGitHubStatus();
-    if (current && commit()) setStatus(current);
+    await githubStatus.refresh();
   }
 
   // Finishing a return from GitHub, if that is what this page load is.
@@ -116,11 +108,7 @@ export function GitHubConnection() {
     // Alongside, never in front of it. The status only decides what the panel
     // offers once there is nothing in flight, and it is gated so that landing
     // late cannot undo a binding written while it was away.
-    void (async () => {
-      const commit = gate.current.begin();
-      const current = await fetchGitHubStatus();
-      if (!cancelled && current && commit()) setStatus(current);
-    })();
+    void githubStatus.refresh();
 
     void (async () => {
       if (!completing) {
@@ -213,8 +201,7 @@ export function GitHubConnection() {
     // connected. What the reply does not say, it does not say: `canPush`
     // stays undefined here when nothing has reported it, and `decidePanel`
     // keeps that as unknown rather than reading it as a no.
-    gate.current.supersede();
-    setStatus((previous) => ({
+    githubStatus.amend((previous) => ({
       configured: true,
       canPush: previous?.canPush,
       canConnect: previous?.canConnect,
@@ -254,8 +241,7 @@ export function GitHubConnection() {
         // it is connected to somewhere else, and still offering to
         // disconnect the wrong one. The push button was given this on #123
         // for the same reason; the panel was not.
-        gate.current.supersede();
-        setStatus(null);
+        githubStatus.forget();
         noteConnectionChanged();
       }
       return;
@@ -263,8 +249,7 @@ export function GitHubConnection() {
     // Same rule as binding: the write landed, so say so without depending on
     // a second request succeeding, and supersede any read still in flight so
     // it cannot put the disconnected repository back.
-    gate.current.supersede();
-    setStatus((previous) =>
+    githubStatus.amend((previous) =>
       previous
         ? { ...previous, connected: false, reason: 'revoked' }
         : previous,

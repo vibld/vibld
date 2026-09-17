@@ -1,5 +1,9 @@
 import type { GitHubStatus } from './github-client.ts';
-import type { PushConflict, PushedSnapshot } from './github-client.ts';
+import type {
+  PushConflict,
+  PushPreview,
+  PushedSnapshot,
+} from './github-client.ts';
 
 /**
  * Whether to offer a push, and what to say about one that happened.
@@ -95,6 +99,19 @@ export type PushView =
         conflict?: PushConflict;
       };
       outcome?: PushOutcome;
+      /**
+       * A pull request from a previous session, and what became of it.
+       *
+       * Only when this button has nothing of its own to say: a result from
+       * the push just made is fresher than anything the status was carrying
+       * when it was last read, and two pull request lines under one button
+       * is two answers to one question.
+       */
+      lastPullRequest?: {
+        url: string;
+        branch: string;
+        state: 'open' | 'closed' | 'merged' | null;
+      };
     };
 
 const HIDDEN: PushView = { show: false };
@@ -164,7 +181,11 @@ export function decidePush(
     };
   }
 
+  // Before the outcome, so the outcome can take its place.
+  if (status.pullRequest) view.lastPullRequest = status.pullRequest;
+
   if (phase.at === 'done') {
+    delete view.lastPullRequest;
     view.outcome = {
       branch: phase.pushed.branch,
       created: phase.pushed.created,
@@ -175,4 +196,72 @@ export function decidePush(
   }
 
   return view;
+}
+
+/**
+ * Whether the push preview on screen is still about what the button would do.
+ *
+ * Its own decision rather than a field on `PushView`, because it answers a
+ * question the push phase does not: a preview describes a destination *and*
+ * a set of files, and either can move out from under it. The destination
+ * rule is the one this file already applies everywhere. The revision rule is
+ * the same failure wearing different clothes: a diff computed for the
+ * checkpoint before last, drawn beside a button that would push the current
+ * one, is a list of deletions about files that are no longer the ones going.
+ *
+ * Both are dropped rather than redrawn with a caveat. A stale preview of an
+ * irreversible action is worse than none: somebody reads "removes nothing"
+ * and presses a button that removes four files.
+ */
+export type PreviewPhase =
+  | { at: 'none' }
+  | { at: 'loading'; to: Destination; revision: string }
+  | {
+      at: 'ready';
+      to: Destination;
+      revision: string;
+      preview: PushPreview;
+    }
+  | { at: 'problem'; to: Destination; revision: string; error: string };
+
+export type PreviewView =
+  | { show: false }
+  | {
+      show: true;
+      busy: boolean;
+      preview?: PushPreview;
+      error?: string;
+    };
+
+export function decidePreview(
+  phase: PreviewPhase,
+  destination: Destination | null,
+  revision: string | null,
+): PreviewView {
+  if (phase.at === 'none' || !destination || !revision) return { show: false };
+
+  const sameDestination =
+    phase.to.owner === destination.owner && phase.to.repo === destination.repo;
+  if (!sameDestination || phase.revision !== revision) return { show: false };
+
+  if (phase.at === 'loading') return { show: true, busy: true };
+  if (phase.at === 'problem') {
+    return { show: true, busy: false, error: phase.error };
+  }
+  return { show: true, busy: false, preview: phase.preview };
+}
+
+/**
+ * What a preview says, in one line, when there is nothing to list.
+ *
+ * "Nothing to change" is a real and useful answer: it means the branch would
+ * carry exactly what the repository already has, and a push would be a
+ * no-op. Saying it is better than drawing three empty lists.
+ */
+export function previewIsEmpty(preview: PushPreview): boolean {
+  return (
+    preview.added.length === 0 &&
+    preview.changed.length === 0 &&
+    preview.removed.length === 0
+  );
 }

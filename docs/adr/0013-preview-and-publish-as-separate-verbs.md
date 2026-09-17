@@ -1,10 +1,11 @@
 # ADR-0013: Keep preview and publish separate, and never let a run publish
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-17
+- Accepted: 2026-09-17
 - Decision owners: maintainers
 - Refines: ADR-0006, ADR-0010
-- Approval sought for: the authorisation rules D22's publishing milestone is built against
+- Approval: the authorisation rules D22's publishing milestone is built against
 
 ## Context
 

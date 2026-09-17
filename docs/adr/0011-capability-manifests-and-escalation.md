@@ -1,10 +1,11 @@
 # ADR-0011: Hold the dangerous primitives rather than granting them
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-17
+- Accepted: 2026-09-17
 - Decision owners: maintainers
 - Refines: ADR-0006
-- Approval sought for: D14, D15, D16 applied to a concrete manifest format
+- Approval: D14, D15, D16 applied to a concrete manifest format
 
 ## Context
 

@@ -22,12 +22,14 @@ import {
 } from './github-app.ts';
 import {
   branchForRevision,
+  previewPush,
   pushCheckpoint,
   resolveBase,
   type PushConflict,
   type PushTarget,
 } from './github-push.ts';
 import { GitHubStore, type BindingState } from './github-store.ts';
+import { isSignedByGitHub, pullRequestFrom } from './github-webhook.ts';
 import {
   authorizeUrl,
   exchangeCode,
@@ -47,6 +49,14 @@ const GRANT_DAYS = 90;
 
 export interface GitHubHandlerEnv extends GitHubAppEnv, GitHubOAuthEnv {
   DB?: D1Database;
+  /**
+   * The webhook secret configured on the GitHub App.
+   *
+   * Absent means no webhook endpoint: deliveries are refused rather than
+   * trusted, because on this one route the signature is the whole of the
+   * authentication.
+   */
+  VIBLD_GITHUB_WEBHOOK_SECRET?: string;
   GITHUB_BURST?: {
     limit(options: { key: string }): Promise<{ success: boolean }>;
   };
@@ -209,6 +219,105 @@ function parseExpectedRepository(
   if (typeof owner !== 'string' || typeof repo !== 'string') return null;
   if (!owner.trim() || !repo.trim()) return null;
   return { owner: owner.trim(), repo: repo.trim() };
+}
+
+/**
+ * What a push would do to the connected repository, before it does it.
+ *
+ * #13 asks for the destination and the diff to be reviewable, and the push is
+ * the irreversible half of this integration. The answer nobody can get today
+ * is the one that matters most: a push writes the accepted snapshot and
+ * nothing else, so a file the repository has and vibld does not is gone from
+ * the branch. That is correct behaviour and it is not visible from a button
+ * marked "push".
+ *
+ * A read, and only a read. Nothing here writes to GitHub, to D1 or to the
+ * push ledger, so asking twice is free and asking at all commits the caller
+ * to nothing.
+ *
+ * It shares the push rate limiter deliberately. Both spend the same thing,
+ * one installation's GitHub quota, and one gate over that quota is easier to
+ * reason about than two that can each be under their own limit while the
+ * quota is gone. The cost is real and accepted: somebody who has just spent
+ * the burst on previews waits a moment before they can push. Waiting to push
+ * is a smaller harm than an unmetered read path against somebody else's API
+ * allowance.
+ */
+export async function handleGitHubDiff(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  doFetch: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env)) {
+    return json(
+      { error: 'Pushing to GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+  const credentials = githubAppCredentials(env)!;
+  const store = new GitHubStore(env.DB!);
+
+  if (env.GITHUB_BURST) {
+    try {
+      const allowed = await env.GITHUB_BURST.limit({
+        key: `github:${principal.userId}`,
+      });
+      if (!allowed.success) {
+        return json({ error: 'Too many requests. Try again shortly.' }, 429);
+      }
+    } catch (error) {
+      console.error('github rate limiter unavailable', error);
+    }
+  }
+
+  const state = await store.usableBinding(principal.userId, now);
+  if (!state.usable) return bindingProblem(state);
+  const { binding } = state;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const files = parsePreviewRequest(body);
+  if (!files.ok) return json({ error: files.error }, files.status);
+
+  const token = await mintInstallationToken(
+    credentials,
+    binding.installationId,
+    { owner: binding.owner, repo: binding.repo },
+    doFetch,
+    now.getTime(),
+  );
+  if (!token.ok) return mintProblem(token);
+
+  const preview = await previewPush(
+    token.token,
+    {
+      owner: binding.owner,
+      repo: binding.repo,
+      baseBranch: binding.defaultBranch,
+    },
+    files.value,
+    doFetch,
+  );
+  if (!preview.ok) return githubProblem(preview);
+
+  // The destination travels with the diff. A caller holding a preview has to
+  // be able to tell whether it describes the repository it is about to push
+  // to: the binding can move between this call and the button, and a diff
+  // labelled with nothing would be read as being about wherever it is
+  // pointing now.
+  return json({
+    owner: binding.owner,
+    repo: binding.repo,
+    ...preview.preview,
+  });
 }
 
 /**
@@ -449,6 +558,23 @@ export async function handleGitHubStatus(
       reason: state.reason,
     });
   }
+  // What became of the last pull request vibld opened for this user, if a
+  // webhook has said. Reported here rather than only in a push reply,
+  // because the push that opened it may have been in a session that is over:
+  // after a reload the link was all that survived, and a link cannot say
+  // whether there is anything left to do.
+  //
+  // Only when it is about the repository that is connected now. A pull
+  // request in a repository this user has since disconnected is not news
+  // about the destination on screen, and drawing it there would attach it to
+  // the wrong name.
+  const last = await store.lastPullRequest(principal.userId);
+  const here =
+    last &&
+    last.pullRequestUrl &&
+    last.owner === state.binding.owner &&
+    last.repo === state.binding.repo;
+
   return json({
     configured: true,
     canPush,
@@ -458,7 +584,97 @@ export async function handleGitHubStatus(
     repo: state.binding.repo,
     defaultBranch: state.binding.defaultBranch,
     expiresAt: state.binding.expiresAt,
+    ...(here
+      ? {
+          pullRequest: {
+            url: last.pullRequestUrl,
+            branch: last.branch,
+            // Null until a delivery has arrived. Reported as null rather
+            // than guessed as open: "open" is a claim, and the only thing
+            // that knows is GitHub.
+            state: last.pullRequestState,
+          },
+        }
+      : {}),
   });
+}
+
+/**
+ * A pull request changed on GitHub.
+ *
+ * The one route in this integration nobody is signed in for. A delivery
+ * arrives from GitHub's infrastructure with no session, so the signature is
+ * the whole of the authentication and an unverified body is treated as
+ * something a stranger wrote.
+ *
+ * Answers 2xx for everything it has decided not to act on, and only fails a
+ * delivery it genuinely could not process. GitHub retries a non-2xx and
+ * eventually disables an endpoint that keeps failing, so answering "no" to a
+ * delivery about an event this does not handle would spend that budget on
+ * nothing.
+ */
+export async function handleGitHubWebhook(
+  request: Request,
+  env: GitHubHandlerEnv,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  // No secret, no endpoint. An unsigned delivery is not a delivery.
+  if (!env.DB || !env.VIBLD_GITHUB_WEBHOOK_SECRET) {
+    return json({ error: 'Webhooks are not configured.' }, 503);
+  }
+
+  const delivery = request.headers.get('x-github-delivery');
+  const event = request.headers.get('x-github-event');
+  if (!delivery || !event) {
+    return json({ error: 'Not a GitHub delivery.' }, 400);
+  }
+
+  // Read as text, then verified, then parsed. The signature is over these
+  // bytes: re-serializing parsed JSON produces different ones and would
+  // reject every genuine delivery.
+  const body = await request.text();
+  const signed = await isSignedByGitHub(
+    env.VIBLD_GITHUB_WEBHOOK_SECRET,
+    body,
+    request.headers.get('x-hub-signature-256'),
+  );
+  if (!signed) {
+    // Nothing about which part was wrong: that would tell a forger where to
+    // work. The same sentence for a missing header and a bad digest.
+    return json({ error: 'Invalid signature.' }, 401);
+  }
+
+  const store = new GitHubStore(env.DB);
+  // Before anything is applied, because GitHub redelivers and a redelivery
+  // can be triggered by hand from the App's settings page.
+  if (await store.wasDelivered(delivery)) return json({ received: true });
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    payload = null;
+  }
+
+  const pull = pullRequestFrom(event, payload);
+  if (pull) {
+    await store.recordPullRequest({
+      owner: pull.owner,
+      repo: pull.repo,
+      branch: pull.branch,
+      number: pull.number,
+      url: pull.url,
+      state: pull.state,
+      updatedAt: pull.updatedAt,
+    });
+  }
+
+  // Marked after the work, so a delivery whose write threw is retried rather
+  // than recorded as done. Marked even when there was nothing to do, so a
+  // redelivery of an event this ignores is not re-read.
+  await store.markDelivered(delivery, event, now.toISOString());
+  return json({ received: true });
 }
 
 /** When a grant approved now should stop being usable. */

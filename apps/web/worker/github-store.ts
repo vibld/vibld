@@ -49,8 +49,25 @@ export interface PushAttempt {
   commitSha: string | null;
   treeSha: string | null;
   pullRequestUrl: string | null;
+  /** What became of that pull request, once a webhook has said (#13). */
+  pullRequestNumber: number | null;
+  pullRequestState: PullRequestState | null;
+  /** GitHub's own clock, which is what orders two deliveries. */
+  pullRequestUpdatedAt: string | null;
   startedAt: string;
   finishedAt: string | null;
+}
+
+/**
+ * `merged` is its own answer rather than `closed` with a flag beside it.
+ *
+ * They are different news. Somebody reading "closed" about work that shipped
+ * goes looking for what went wrong.
+ */
+export type PullRequestState = 'open' | 'closed' | 'merged';
+
+export function isPullRequestState(value: unknown): value is PullRequestState {
+  return value === 'open' || value === 'closed' || value === 'merged';
 }
 
 interface PushRow {
@@ -63,6 +80,9 @@ interface PushRow {
   commit_sha: string | null;
   tree_sha: string | null;
   pull_request_url: string | null;
+  pull_request_number: number | null;
+  pull_request_state: string | null;
+  pull_request_updated_at: string | null;
   started_at: string;
   finished_at: string | null;
 }
@@ -92,6 +112,14 @@ function toAttempt(row: PushRow): PushAttempt {
     commitSha: row.commit_sha,
     treeSha: row.tree_sha,
     pullRequestUrl: row.pull_request_url,
+    pullRequestNumber: row.pull_request_number,
+    // Read back through the guard rather than cast: a value this build does
+    // not know is not a state to show somebody, and an unknown one is
+    // better reported as nothing than as a word nobody chose.
+    pullRequestState: isPullRequestState(row.pull_request_state)
+      ? row.pull_request_state
+      : null,
+    pullRequestUpdatedAt: row.pull_request_updated_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };
@@ -319,6 +347,103 @@ export class GitHubStore {
   }
 
   /** An attempt, for a caller deciding whether there is anything to resume. */
+  /**
+   * Has this delivery been seen before?
+   *
+   * GitHub redelivers, and a redelivery can be triggered by hand from the
+   * App's settings page. Asked before anything is applied, so a repeat is a
+   * no-op rather than a second write.
+   */
+  async wasDelivered(deliveryId: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(
+        `SELECT delivery_id FROM github_webhook_deliveries WHERE delivery_id = ?1`,
+      )
+      .bind(deliveryId)
+      .first<{ delivery_id: string }>();
+    return row !== null;
+  }
+
+  async markDelivered(
+    deliveryId: string,
+    event: string,
+    receivedAt: string,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO github_webhook_deliveries (delivery_id, event, received_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(delivery_id) DO NOTHING`,
+      )
+      .bind(deliveryId, event, receivedAt)
+      .run();
+  }
+
+  /**
+   * Record what became of the pull request on a branch.
+   *
+   * Matched on the branch, because that is all a delivery knows: it names a
+   * repository and a head ref and nothing about who pushed it. The branch is
+   * derived from the checkpoint (`branchForRevision`), so it identifies the
+   * push without the user.
+   *
+   * The `updated_at` comparison is the part that matters. Webhook delivery
+   * is at-least-once and unordered, so `closed` can arrive after `merged`,
+   * and without this the worse answer would overwrite the better one. A row
+   * with no recorded time yet accepts the first delivery it sees.
+   */
+  async recordPullRequest(update: {
+    owner: string;
+    repo: string;
+    branch: string;
+    number: number;
+    url: string;
+    state: PullRequestState;
+    updatedAt: string;
+  }): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE github_pushes
+            SET pull_request_number = ?4,
+                pull_request_url = ?5,
+                pull_request_state = ?6,
+                pull_request_updated_at = ?7
+          WHERE owner = ?1 AND repo = ?2 AND branch = ?3
+            AND (pull_request_updated_at IS NULL
+                 OR pull_request_updated_at <= ?7)`,
+      )
+      .bind(
+        update.owner,
+        update.repo,
+        update.branch,
+        update.number,
+        update.url,
+        update.state,
+        update.updatedAt,
+      )
+      .run();
+  }
+
+  /**
+   * The most recent push by this user that opened a pull request.
+   *
+   * What the builder shows after a reload, when the push that opened it
+   * happened in a session that is over. Newest first by when the push
+   * started, because that is the order the user made them in.
+   */
+  async lastPullRequest(userId: string): Promise<PushAttempt | null> {
+    const row = await this.#db
+      .prepare(
+        `SELECT * FROM github_pushes
+          WHERE user_id = ?1 AND pull_request_url IS NOT NULL
+          ORDER BY started_at DESC
+          LIMIT 1`,
+      )
+      .bind(userId)
+      .first<PushRow>();
+    return row ? toAttempt(row) : null;
+  }
+
   async push(key: PushKey): Promise<PushAttempt | null> {
     const row = await this.#db
       .prepare(

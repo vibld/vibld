@@ -1338,3 +1338,51 @@ body {
    * runs can be compared by eye. */
   font-variant-numeric: tabular-nums;
 }
+
+/* --- GitHub push preview -------------------------------------------------
+ * What a push would do, read before the push does it. Deletions are the
+ * part this exists for, so they are the part that is coloured. */
+.github-diff {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.github-diff__where,
+.github-diff__same,
+.github-diff__none,
+.github-diff__partial {
+  margin: 0.2rem 0;
+  color: var(--muted);
+}
+
+.github-diff__partial {
+  color: var(--caution);
+}
+
+.github-diff__lists,
+.github-diff__paths {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+
+.github-diff__group {
+  margin-bottom: 0.4rem;
+}
+
+.github-diff__label {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.github-diff__group--remove .github-diff__label {
+  color: var(--danger);
+}
+
+.github-diff__paths li {
+  overflow-wrap: anywhere;
+}

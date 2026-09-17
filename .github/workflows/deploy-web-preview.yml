@@ -277,6 +277,7 @@ jobs:
           VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
           VIBLD_GITHUB_CLIENT_ID: ${{ secrets.VIBLD_GITHUB_CLIENT_ID }}
           VIBLD_GITHUB_CLIENT_SECRET: ${{ secrets.VIBLD_GITHUB_CLIENT_SECRET }}
+          VIBLD_GITHUB_WEBHOOK_SECRET: ${{ secrets.VIBLD_GITHUB_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
           if [ -n "$VIBLD_GITHUB_APP_ID" ] && [ -n "$VIBLD_GITHUB_PRIVATE_KEY" ]; then
@@ -296,6 +297,17 @@ jobs:
             echo "Synced the GitHub OAuth credentials." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "VIBLD_GITHUB_CLIENT_ID/VIBLD_GITHUB_CLIENT_SECRET not both set -- connecting a repository stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # The webhook secret, which is the whole of the authentication on
+          # /api/github/webhook: no session reaches that route. Unset means
+          # the route answers 503 and a merged pull request goes on being
+          # reported as open, which is a stale readout rather than a broken
+          # push.
+          if [ -n "$VIBLD_GITHUB_WEBHOOK_SECRET" ]; then
+            printf '%s' "$VIBLD_GITHUB_WEBHOOK_SECRET" | pnpm dlx wrangler@4.129.1 secret put VIBLD_GITHUB_WEBHOOK_SECRET
+            echo "Synced the GitHub webhook secret." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_GITHUB_WEBHOOK_SECRET not set -- pull request state stays unreported on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # L44's nightly provider-balance check. Optional, same rule as every

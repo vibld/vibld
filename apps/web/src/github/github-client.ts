@@ -27,6 +27,23 @@ export interface GitHubStatus {
   repo?: string;
   defaultBranch?: string;
   expiresAt?: string;
+  /**
+   * The last pull request vibld opened in the repository that is connected
+   * now, and what became of it.
+   *
+   * Reported with the status rather than only in a push reply, because the
+   * push that opened it may have been in a session that is over: after a
+   * reload the link was all that survived, and a link cannot say whether
+   * there is anything left to do.
+   *
+   * `state` is null until a webhook has said. Null rather than "open",
+   * because "open" is a claim and the only thing that knows is GitHub.
+   */
+  pullRequest?: {
+    url: string;
+    branch: string;
+    state: 'open' | 'closed' | 'merged' | null;
+  };
 }
 
 export interface RepositoryChoice {
@@ -840,4 +857,118 @@ export async function disconnectRepository(
   }
   announceConnectionChanged();
   return { ok: true };
+}
+
+/**
+ * What a push would do to the connected repository, as `/api/github/diff`
+ * reports it.
+ *
+ * The destination is part of the answer rather than something the caller
+ * remembers, because the binding can move between asking and pushing: a
+ * preview labelled with nothing reads as being about wherever the connection
+ * points now.
+ */
+export interface PushPreview {
+  owner: string;
+  repo: string;
+  baseBranch: string;
+  added: string[];
+  changed: string[];
+  /** Paths the push would delete, which is the half worth reading twice. */
+  removed: string[];
+  unchanged: number;
+  /** The base listing was incomplete, so `removed` is a floor and not a count. */
+  truncated: boolean;
+}
+
+export type PreviewResult =
+  { ok: true; preview: PushPreview } | { ok: false; error: string };
+
+function stringList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.every((entry) => typeof entry === 'string')
+    ? (value as string[])
+    : null;
+}
+
+/**
+ * All of it or none of it.
+ *
+ * A half-read preview is worse than none: the deletion list is the reason
+ * this exists, and a missing one drawn as an empty one says a push removes
+ * nothing when it may remove everything the repository has.
+ */
+function previewFrom(value: unknown): PushPreview | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const body = value as Record<string, unknown>;
+  const added = stringList(body.added);
+  const changed = stringList(body.changed);
+  const removed = stringList(body.removed);
+  if (!added || !changed || !removed) return null;
+  if (
+    typeof body.owner !== 'string' ||
+    typeof body.repo !== 'string' ||
+    typeof body.baseBranch !== 'string' ||
+    typeof body.unchanged !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    owner: body.owner,
+    repo: body.repo,
+    baseBranch: body.baseBranch,
+    added,
+    changed,
+    removed,
+    unchanged: body.unchanged,
+    truncated: body.truncated === true,
+  };
+}
+
+/**
+ * Ask what pushing this snapshot would change, without pushing it.
+ *
+ * A failure is a sentence and nothing else: unlike a push, nobody is waiting
+ * on an irreversible action here, and the button stays usable without a
+ * preview. What it must never do is answer with a preview it could not
+ * read.
+ */
+export async function previewSnapshot(
+  files: { path: string; content: string }[],
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<PreviewResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl('/api/github/diff', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(await authHeaders(getToken)),
+      },
+      body: JSON.stringify({ files }),
+    });
+  } catch {
+    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok) {
+    const error =
+      typeof (body as { error?: unknown })?.error === 'string'
+        ? (body as { error: string }).error
+        : 'Could not read what this push would change.';
+    return { ok: false, error };
+  }
+
+  const preview = previewFrom(body);
+  return preview
+    ? { ok: true, preview }
+    : { ok: false, error: 'Could not read what this push would change.' };
 }

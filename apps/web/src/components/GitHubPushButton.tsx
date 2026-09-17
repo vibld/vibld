@@ -1,18 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import {
-  fetchGitHubStatus,
   noteConnectionChanged,
   onConnectionChanged,
+  previewSnapshot,
   pushSnapshot,
 } from '../github/github-client.ts';
-import type { GitHubStatus } from '../github/github-client.ts';
 // The same latest-wins rule the connect panel needed, deliberately used
 // rather than written again: it is one generation counter with tests, and a
 // second copy of it here would be a second place for it to be wrong.
 import { createStatusGate } from '../github/panel-view.ts';
-import { afterConnectionChanged, decidePush } from '../github/push-view.ts';
-import type { Destination, PushPhase } from '../github/push-view.ts';
+import { githubStatus } from '../github/github-status.ts';
+import {
+  afterConnectionChanged,
+  decidePreview,
+  decidePush,
+  previewIsEmpty,
+} from '../github/push-view.ts';
+import type {
+  Destination,
+  PreviewPhase,
+  PushPhase,
+} from '../github/push-view.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
 /**
@@ -32,11 +47,54 @@ import { clerkConfigured } from '../auth/clerk-token.ts';
  * JSX, so a rule written in here would be typechecked and never run, which
  * is how four findings reached review on the connect panel.
  */
+/**
+ * One part of a diff, or nothing at all.
+ *
+ * An empty list renders as no list rather than as a heading with nothing
+ * under it: three headings and one populated list reads as though the other
+ * two failed to load.
+ */
+function DiffList({
+  label,
+  paths,
+  tone,
+}: {
+  label: string;
+  paths: string[];
+  tone: 'add' | 'change' | 'remove';
+}) {
+  if (paths.length === 0) return null;
+  return (
+    <li className={`github-diff__group github-diff__group--${tone}`}>
+      <p className="github-diff__label">
+        {label} ({paths.length})
+      </p>
+      <ul className="github-diff__paths">
+        {paths.map((path) => (
+          <li key={path}>
+            <code>{path}</code>
+          </li>
+        ))}
+      </ul>
+    </li>
+  );
+}
+
 export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
-  const [status, setStatus] = useState<GitHubStatus | null>(null);
+  // The panel's copy, not a second one (#34). Before this each kept its own
+  // and probed separately, so the two could name different repositories at
+  // the same moment: the panel's disconnect path carries a comment saying
+  // exactly that.
+  const status = useSyncExternalStore(
+    githubStatus.subscribe,
+    githubStatus.read,
+  );
   const [phase, setPhase] = useState<PushPhase>({ at: 'idle' });
-  const probes = useRef(createStatusGate());
+  const [previewPhase, setPreviewPhase] = useState<PreviewPhase>({
+    at: 'none',
+  });
   const pushes = useRef(createStatusGate());
+  const previews = useRef(createStatusGate());
 
   // Probed on mount and again whenever the connection changes. This
   // component keeps its own copy of the status and the panel that binds a
@@ -46,23 +104,22 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   // Outside the effect because a refused push reads the connection again:
   // the route is the one thing that can tell this browser its destination
   // has moved, which is the case no notification from inside it covers.
+  // The store holds the supersede rule and the commit-what-you-got rule, so
+  // this is only the ask.
+  //
+  // What it no longer does is blank the status first. That was this
+  // component's way of never naming a repository that might be gone, and it
+  // cannot be kept once the status is shared: blanking here would empty the
+  // panel too, on every probe. It is safe to drop because the route is the
+  // real guard -- a push names where it believes it is going, and
+  // `/api/github/push` refuses one aimed at a binding that has moved and
+  // says where it moved instead. A briefly stale name cannot become a push
+  // to the wrong repository.
   const probe = useCallback(() => {
-    const gate = probes.current;
-    gate.supersede();
-    const current = gate.begin();
-    // Forgotten before it is read again, so a probe that fails leaves the
-    // button hidden rather than naming a repository somebody has just
-    // disconnected. An unknown connection and a connection that is gone
-    // are not the same thing, but they offer the same thing: nothing.
-    setStatus(null);
-    void (async () => {
-      const read = await fetchGitHubStatus();
-      if (current() && read) setStatus(read);
-    })();
+    void githubStatus.refresh();
   }, []);
 
   useEffect(() => {
-    const gate = probes.current;
     probe();
     const stop = onConnectionChanged(() => {
       // A push already in the air was aimed at the connection that has just
@@ -76,9 +133,6 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     });
     return () => {
       stop();
-      // Nothing in flight may land after this: the last word on an unmounted
-      // component is a React warning and nothing a user sees.
-      gate.supersede();
     };
   }, [probe]);
 
@@ -92,7 +146,33 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   useEffect(() => {
     pushes.current.supersede();
     setPhase({ at: 'idle' });
+    // The preview goes with it. `decidePreview` would already refuse to draw
+    // one from another checkpoint, and dropping it here means the request
+    // behind it cannot land and put it back.
+    previews.current.supersede();
+    setPreviewPhase({ at: 'none' });
   }, [snapshot.revision]);
+
+  /**
+   * Ask what the push would do, on demand rather than on every checkpoint.
+   *
+   * On demand because it spends the same GitHub quota the push does, and a
+   * preview fetched automatically after every generation spends it for
+   * people who never look. The button is one click and the answer stays up
+   * until the checkpoint or the destination moves.
+   */
+  async function preview(to: Destination) {
+    const revision = snapshot.revision;
+    const current = previews.current.begin();
+    setPreviewPhase({ at: 'loading', to, revision });
+    const result = await previewSnapshot(snapshot.files);
+    if (!current()) return;
+    setPreviewPhase(
+      result.ok
+        ? { at: 'ready', to, revision, preview: result.preview }
+        : { at: 'problem', to, revision, error: result.error },
+    );
+  }
 
   async function push(to: Destination) {
     const current = pushes.current.begin();
@@ -140,6 +220,11 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   if (!clerkConfigured) return null;
   const view = decidePush(phase, status);
   if (!view.show) return null;
+  const previewView = decidePreview(
+    previewPhase,
+    view.destination,
+    snapshot.revision,
+  );
 
   return (
     <div className="github-push">
@@ -151,6 +236,25 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
         {view.busy
           ? 'Pushing…'
           : `Push to ${view.destination.owner}/${view.destination.repo}`}
+      </button>
+
+      {/*
+       * Offered beside the push rather than inside it. The push writes a
+       * branch that is never force-pushed and opens a pull request other
+       * people read, and the one thing nobody can see from here is what it
+       * deletes: the branch carries the accepted checkpoint and nothing
+       * else, so a file the repository has and this project does not is
+       * gone from it.
+       */}
+      <button
+        type="button"
+        className="chip"
+        onClick={() => void preview(view.destination)}
+        disabled={previewView.show && previewView.busy}
+      >
+        {previewView.show && previewView.busy
+          ? 'Checking…'
+          : 'What would this change?'}
       </button>
 
       {view.outcome && (
@@ -171,6 +275,92 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
               </a>
             </>
           )}
+        </p>
+      )}
+
+      {previewView.show && previewView.error && (
+        <p role="alert" className="github-push__problem">
+          {previewView.error}
+        </p>
+      )}
+
+      {previewView.show && previewView.preview && (
+        <div className="github-diff">
+          <p className="github-diff__where">
+            Against <code>{previewView.preview.baseBranch}</code> in{' '}
+            <code>
+              {previewView.preview.owner}/{previewView.preview.repo}
+            </code>
+            .
+          </p>
+          {previewIsEmpty(previewView.preview) ? (
+            <p className="github-diff__none">
+              Nothing would change: that branch would carry exactly what is
+              there now.
+            </p>
+          ) : (
+            <ul className="github-diff__lists">
+              <DiffList
+                label="Added"
+                paths={previewView.preview.added}
+                tone="add"
+              />
+              <DiffList
+                label="Changed"
+                paths={previewView.preview.changed}
+                tone="change"
+              />
+              {/*
+               * Last, and named as deletion rather than as "removed from
+               * the list". It is the only part of a push that destroys
+               * something, and it is the part a button marked "push" does
+               * not say.
+               */}
+              <DiffList
+                label="Deleted from the branch"
+                paths={previewView.preview.removed}
+                tone="remove"
+              />
+            </ul>
+          )}
+          {previewView.preview.unchanged > 0 && (
+            <p className="github-diff__same">
+              {previewView.preview.unchanged} file
+              {previewView.preview.unchanged === 1 ? '' : 's'} unchanged.
+            </p>
+          )}
+          {previewView.preview.truncated && (
+            <p className="github-diff__partial">
+              GitHub would not list the whole branch, so this is what would
+              change among the files it did list. Treat the deletions as a
+              floor, not a count.
+            </p>
+          )}
+        </div>
+      )}
+
+      {view.lastPullRequest && (
+        <p className="github-push__last">
+          {/*
+           * Named by what became of it rather than by its existence. A link
+           * that says nothing about its state is the thing this replaced:
+           * a merged pull request drawn exactly like one still waiting for
+           * somebody.
+           */}
+          {view.lastPullRequest.state === 'merged'
+            ? 'Merged: '
+            : view.lastPullRequest.state === 'closed'
+              ? 'Closed without merging: '
+              : view.lastPullRequest.state === 'open'
+                ? 'Open: '
+                : 'Opened earlier: '}
+          <a
+            href={view.lastPullRequest.url}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <code>{view.lastPullRequest.branch}</code>
+          </a>
         </p>
       )}
 
