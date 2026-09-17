@@ -665,11 +665,107 @@ describe('apps/publish Worker: holding somebody else"s site', () => {
     );
 
     assert.equal(again.status, 409);
+    assert.match(
+      ((await again.json()) as { error: string }).error,
+      /taken down by the operator/,
+      'the one refusal that is an operator did not say so',
+    );
     const site = await worker.fetch(
       publicRequest('acme.published.vibld-preview.dev'),
       env,
     );
     assert.equal(site.status, 404, 'a republish lifted an operator hold');
+  });
+
+  it('does not blame an operator for a refusal no operator caused', async () => {
+    // `promote` refuses for four reasons and only one of them is a hold: the
+    // owner's own takedown holds a claim while it removes the bytes, and the
+    // revision can be collected or being collected. Reporting all four as an
+    // operator takedown told an owner racing their own unpublish that
+    // somebody had taken their site down for cause, and told them it could
+    // not be republished when publishing again is exactly what works.
+    const env = newEnv();
+    await published(env);
+
+    // The interleaving, made to happen rather than waited for: the owner's
+    // takedown lands while this publish is still writing its files.
+    const bucket = env.PROJECT_CONTENT as InMemoryR2Bucket;
+    const realPut = bucket.put.bind(bucket);
+    let raced = false;
+    bucket.put = async (key: string, content: string) => {
+      const written = await realPut(key, content);
+      if (!raced) {
+        raced = true;
+        await worker.fetch(
+          internalRequest('internal/unpublish', {
+            userId: 'u1',
+            projectId: 'p1',
+          }),
+          env,
+        );
+      }
+      return written;
+    };
+
+    const again = await worker.fetch(
+      internalRequest('internal/publish', {
+        userId: 'u1',
+        projectId: 'p1',
+        files: [{ path: 'index.html', content: '<h1>back</h1>' }],
+      }),
+      env,
+    );
+
+    assert.equal(again.status, 409);
+    const { error } = (await again.json()) as { error: string };
+    assert.doesNotMatch(
+      error,
+      /operator/,
+      'the owner was told an operator had taken their own site down',
+    );
+    assert.match(error, /Try publishing again/);
+  });
+
+  it('still names the operator when the hold lands mid-publish', async () => {
+    // The other side of the same branch. The up-front refusal catches a
+    // republish of an already-held site; this one catches the hold that
+    // arrives while the files are being written, which is the race the
+    // generation prefix exists for. It is a real operator takedown, so it
+    // has to say so rather than fall back to the generic conflict.
+    const env = newEnv();
+    await published(env);
+
+    const bucket = env.PROJECT_CONTENT as InMemoryR2Bucket;
+    const realPut = bucket.put.bind(bucket);
+    let raced = false;
+    bucket.put = async (key: string, content: string) => {
+      const written = await realPut(key, content);
+      if (!raced) {
+        raced = true;
+        await held(env, {
+          slug: 'acme',
+          by: 'admin@vibld.com',
+          reason: 'phishing report 42',
+        });
+      }
+      return written;
+    };
+
+    const again = await worker.fetch(
+      internalRequest('internal/publish', {
+        userId: 'u1',
+        projectId: 'p1',
+        files: [{ path: 'index.html', content: '<h1>back</h1>' }],
+      }),
+      env,
+    );
+
+    assert.equal(again.status, 409);
+    assert.match(
+      ((await again.json()) as { error: string }).error,
+      /taken down by the operator/,
+      'a hold that landed mid-publish was reported as an ordinary conflict',
+    );
   });
 
   it("refuses the owner's takedown while it is held", async () => {

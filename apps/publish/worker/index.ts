@@ -131,15 +131,34 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   const generation = crypto.randomUUID();
   await store.putFiles(resolvedSlug, generation, files);
   if (!(await store.promote(resolvedSlug, generation))) {
-    // A hold landed while this was writing. The bytes are this request's
-    // own, under a prefix nothing points at, so clearing them cannot touch
-    // what the hold is keeping.
+    // Something else got there first. The bytes are this request's own,
+    // under a prefix nothing points at, so clearing them cannot touch what
+    // the winner is keeping.
     await store.discard(resolvedSlug, generation);
+
+    // Which refusal it was decides what to say, and only one of the four is
+    // an operator. `promote` also refuses while the owner's own takedown is
+    // removing this slug's bytes, and when the revision has been collected
+    // or is being collected, and those are all states a later publish gets
+    // past. Telling the owner an operator had taken their site down was
+    // alarming and wrong in three cases out of four, and "cannot be
+    // republished" was wrong in the same three.
+    //
+    // Reading the state to choose a message is not the read-before-write
+    // this file spent the review removing. The write has already happened
+    // and already decided; a state that changes under this read costs a
+    // slightly stale sentence, not a wrong outcome.
+    const site = await store.siteBySlug(resolvedSlug);
     return json(
-      {
-        error:
-          'This site has been taken down by the operator and cannot be republished.',
-      },
+      site?.state === 'held'
+        ? {
+            error:
+              'This site has been taken down by the operator and cannot be republished.',
+          }
+        : {
+            error:
+              'This site changed while it was being published. Try publishing again.',
+          },
       409,
     );
   }
