@@ -9,7 +9,6 @@
     "deploy": "pnpm run migrate && pnpm dlx wrangler@4.129.1 deploy",
     "deploy:preview": "pnpm run deploy",
     "dev": "vite",
-    "lint": "tsc --noEmit",
     "migrate": "pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote",
     "preview": "vite preview",
     "test": "node --test --experimental-strip-types --import ./test/harness/components.mjs test/*.test.ts test/*.test.tsx",

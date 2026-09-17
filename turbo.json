@@ -6,14 +6,11 @@
       "outputs": ["dist/**", "build/**", ".next/**", "!.next/cache/**"]
     },
     "check": {
-      "dependsOn": ["lint", "typecheck", "test"]
+      "dependsOn": ["typecheck", "test"]
     },
     "dev": {
       "cache": false,
       "persistent": true
-    },
-    "lint": {
-      "dependsOn": ["^lint"]
     },
     "test": {
       "dependsOn": ["^build"],
