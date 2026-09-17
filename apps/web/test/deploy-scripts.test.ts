@@ -109,6 +109,52 @@ describe('the secrets file this deployment tells you to create', () => {
       lines.includes('.dev.vars.*'),
       'a per-environment .dev.vars.<name> is not ignored',
     );
+    // The example names a second local file, because Vite does not read
+    // wrangler's. `.env.*` covers it, and an exception keeps this very file
+    // tracked.
+    assert.ok(lines.includes('.env.*'), '.env.local is not ignored');
+    assert.ok(lines.includes('!.env.example'), 'the example itself is ignored');
+  });
+
+  it('sends the browser key to the file Vite actually reads', async () => {
+    // `pnpm dev` runs plain Vite: no Cloudflare plugin, no custom loadEnv,
+    // and no knowledge of `.dev.vars`. A VITE_ value put there is silently
+    // absent, and the app then renders as though signed in, because
+    // ClerkRoot and AccessGate both pass their children through when no key
+    // is present, while the Worker refuses every call it makes.
+    const example = await read('../.env.example');
+    const vite = example
+      .split('\n')
+      .filter((line) => line.startsWith('VITE_'))
+      .map((line) => line.split('=')[0]);
+
+    assert.ok(vite.length > 0, 'no VITE_ value to place');
+    for (const name of vite) {
+      assert.match(
+        example,
+        new RegExp(
+          `${name}[\\s\\S]{0,400}?\\.env\\.local|\\.env\\.local[\\s\\S]{0,400}?${name}`,
+        ),
+        `${name} is not pointed at .env.local`,
+      );
+    }
+  });
+
+  it('turns nothing on by being copied', async () => {
+    // The signup credit is the one setting here that spends money by being
+    // present. A valid cutoff would grant a dollar to every allowed account
+    // created after it, which on a self-host reusing an existing Clerk
+    // tenant means accounts that predate the deployment.
+    //
+    // The previous value was safe only by accident: it was an email address,
+    // which `signupCohortStart` rejects. Fixing the shape made it live, so
+    // the shape now lives in the comment and the assignment is empty.
+    const example = await read('../.env.example');
+    assert.match(
+      example,
+      /^VIBLD_SIGNUP_CREDIT_FROM=$/m,
+      'copying this file switches the signup credit on',
+    );
   });
 
   it('is the file the example tells you to write secrets into', async () => {
