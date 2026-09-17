@@ -82,6 +82,42 @@ export interface ModelChoice {
  * cache automatically and charge nothing extra to write, so a token written
  * into their cache is an ordinary input token and the multiple is 1.
  */
+/**
+ * When the rates and limits in this file were last checked against each
+ * vendor's own reference.
+ *
+ * Data rather than the sentence in the comment above, because the sentence
+ * cannot fail. Every figure here is a fact about somebody else's product:
+ * they reprice, they raise a context window, they retire a model, and
+ * nothing in this repository finds out. `model-catalogue.test.ts` fails once
+ * this date is older than `MAX_CATALOGUE_AGE_DAYS`, which is a deliberate
+ * tripwire and not an accident: the alternative is a bill computed from a
+ * price nobody has looked at since it was typed.
+ *
+ * Re-checking means opening each vendor's pricing and model reference,
+ * correcting anything that moved, and moving this date. Moving the date
+ * without re-checking defeats the only mechanism there is.
+ *
+ * This is also the honest answer to "source the facts from the provider's
+ * catalogue at runtime" (#165): no provider serves them. Anthropic, OpenAI
+ * and DeepSeek all expose a models endpoint that lists ids and little else;
+ * prices, context windows, cache rates and modality support live on a
+ * pricing page meant for people. A live call can tell us whether an id still
+ * exists, which is worth having one day and is not what a budget is computed
+ * from, and it would put an availability dependency in front of every run to
+ * learn it.
+ */
+export const CATALOGUE_VERIFIED_ON = '2026-09-13';
+
+/** How long the figures above may go unchecked before the tests say so. */
+export const MAX_CATALOGUE_AGE_DAYS = 180;
+
+/** Whole days since the catalogue's figures were last verified. */
+export function catalogueAgeDays(now: Date = new Date()): number {
+  const verified = Date.parse(`${CATALOGUE_VERIFIED_ON}T00:00:00Z`);
+  return Math.floor((now.getTime() - verified) / 86_400_000);
+}
+
 export interface CacheRates {
   read: number;
   write: number;

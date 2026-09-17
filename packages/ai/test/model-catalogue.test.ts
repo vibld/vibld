@@ -3,8 +3,11 @@ import { describe, it } from 'node:test';
 import {
   LEGACY_MODEL_IDS,
   MODEL_CATALOGUE,
+  CATALOGUE_VERIFIED_ON,
+  MAX_CATALOGUE_AGE_DAYS,
   availableModels,
   cacheRatesFor,
+  catalogueAgeDays,
   canonicalModelId,
   findModel,
   isKnownModel,
@@ -188,5 +191,32 @@ describe('cache rates', () => {
       assert.ok(Number.isFinite(rates.cachedInputMicroUsd), model.id);
       assert.ok(Number.isFinite(rates.cacheWriteMicroUsd), model.id);
     }
+  });
+});
+
+describe('how old the catalogue figures are', () => {
+  it('fails once the figures have gone unchecked for too long', () => {
+    // A deliberate tripwire. Every number in the catalogue is a fact about
+    // somebody else's product, and nothing in this repository finds out when
+    // they reprice. If this test is what brought you here: open each
+    // vendor's pricing and model reference, correct anything that moved,
+    // then move CATALOGUE_VERIFIED_ON. Moving the date alone defeats the
+    // only mechanism there is.
+    const age = catalogueAgeDays();
+    assert.ok(
+      age <= MAX_CATALOGUE_AGE_DAYS,
+      `the model catalogue was last verified ${age} days ago (${CATALOGUE_VERIFIED_ON}); re-check each vendor's pricing and move the date`,
+    );
+  });
+
+  it('counts the age from the recorded date', () => {
+    assert.equal(catalogueAgeDays(new Date('2026-09-13T00:00:00Z')), 0);
+    assert.equal(catalogueAgeDays(new Date('2026-09-23T00:00:00Z')), 10);
+  });
+
+  it('is not dated in the future', () => {
+    // A date ahead of today would hold the tripwire open indefinitely, which
+    // is the one way to disable it without deleting anything.
+    assert.ok(catalogueAgeDays() >= 0, CATALOGUE_VERIFIED_ON);
   });
 });

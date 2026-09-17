@@ -141,10 +141,13 @@ export {
 export { PROVIDER_NAMES } from './select-client.ts';
 export type { ProviderEnv, ProviderName } from './select-client.ts';
 export {
+  CATALOGUE_VERIFIED_ON,
   LEGACY_MODEL_IDS,
+  MAX_CATALOGUE_AGE_DAYS,
   MODEL_CATALOGUE,
   PROVIDER_CACHE_RATES,
   availableModels,
+  catalogueAgeDays,
   cacheRatesFor,
   canonicalModelId,
   findModel,
