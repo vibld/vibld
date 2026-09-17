@@ -327,7 +327,7 @@ export async function reconcileSubscriptions(
    * subscribes. Sorting makes the walk a walk rather than a re-shuffle.
    */
   const all = [...found.ids].sort();
-  const { afterId: after, retryOf } =
+  const { afterId: after, attemptedThrough } =
     await store.reconcileCursor(RECONCILE_WALK);
   // The first id past where the last run stopped. An id that has since
   // disappeared costs nothing: the search is for the next one above it.
@@ -343,16 +343,20 @@ export async function reconcileSubscriptions(
    *
    * A failure used to be walked straight past: the cursor advanced over the
    * whole slice whatever happened inside it, so the subscription was not
-   * looked at again until the walk lapped (0019_reconcile_retry.sql).
+   * looked at again until the walk lapped (0019_reconcile_attempted_through.sql).
    */
   let firstFailed = -1;
   /**
-   * The earliest failure that is not the one this run was already retrying.
+   * The earliest failure this run is seeing for the first time.
    *
-   * The distinction a boolean could not make. During a retry run, a
-   * different subscription failing for the first time would find the flag
-   * already set and be walked past with no retry of its own, which is the
-   * delay the retry exists to remove, moved one subscription along.
+   * "First time" is settled by the watermark rather than by one id, because
+   * two ids in a slice can both be on a second attempt. A boolean could not
+   * tell a retry from a first failure at all; a single id told them apart
+   * for the earliest casualty only, so a second failure in the same slice
+   * parked the cursor again and took a third attempt, and a slice of
+   * failing subscriptions advanced one id a night with everything healthy
+   * behind them waiting. Every id at or below `attemptedThrough` was
+   * attempted by the run that parked (0019_reconcile_attempted_through.sql).
    */
   let firstNewFailure = -1;
   for (const [index, id] of ids.entries()) {
@@ -424,7 +428,12 @@ export async function reconcileSubscriptions(
       console.error('reconcile: failed to check subscription', id, error);
       failed += 1;
       if (firstFailed === -1) firstFailed = index;
-      if (firstNewFailure === -1 && id !== retryOf) firstNewFailure = index;
+      if (
+        firstNewFailure === -1 &&
+        (attemptedThrough === undefined || id > attemptedThrough)
+      ) {
+        firstNewFailure = index;
+      }
     }
   }
 
@@ -440,7 +449,7 @@ export async function reconcileSubscriptions(
    * walk comes round to the beginning instead of stopping at the end.
    */
   /*
-   * One retry, then past it (0019_reconcile_retry.sql).
+   * One retry, then past it (0019_reconcile_attempted_through.sql).
    *
    * A run that saw a subscription throw parks the cursor before it, so the
    * next run starts there rather than leaving a transient failure until the
@@ -448,9 +457,14 @@ export async function reconcileSubscriptions(
    * already been bitten by it: a row that fails every night would hold the
    * front of the queue and starve every one behind it, which is what
    * `resumeStrandedPayouts` stamps each attempt to avoid. So the hold lasts
-   * one night. A run that was already retrying advances past the slice
-   * whatever happened, reports the failure in `failed`, and picks it up
-   * again on the next lap.
+   * one night: a parked run records how far it got, and the next one walks
+   * past everything at or below that watermark whatever happens inside it,
+   * reporting the failures in `failed` and picking them up again on the
+   * next lap.
+   *
+   * The watermark is the whole slice rather than its first casualty, so a
+   * slice with several failures retries all of them in one night instead of
+   * parking once per failure and advancing one id a night.
    */
   const holding = firstNewFailure !== -1;
   const resumeAt = holding
@@ -464,9 +478,11 @@ export async function reconcileSubscriptions(
   await store.saveReconcileCursor(
     RECONCILE_WALK,
     resumeAt,
-    // The id whose second chance is outstanding, so the next run can tell
-    // "this one has had it" from "this one has not had a first".
-    holding ? ids[firstNewFailure] : undefined,
+    // How far this run got, not where it stopped: the loop attempts every
+    // id in the slice whatever fails inside it, so all of them have now had
+    // an attempt and the next run can tell "these have had their second
+    // chance" from "this one has not had a first".
+    holding ? ids.at(-1) : undefined,
   );
 
   return {

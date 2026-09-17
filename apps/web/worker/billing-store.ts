@@ -828,18 +828,24 @@ export class BillingStore {
    * `undefined` means start from the top: a fresh deployment, and every run
    * after a lap completes.
    */
-  async reconcileCursor(
-    id: string,
-  ): Promise<{ afterId: string | undefined; retryOf: string | undefined }> {
+  async reconcileCursor(id: string): Promise<{
+    afterId: string | undefined;
+    /**
+     * The last subscription the run that parked here attempted, so every id
+     * at or below it has already had its second chance
+     * (0019_reconcile_attempted_through.sql).
+     */
+    attemptedThrough: string | undefined;
+  }> {
     const row = await this.#db
       .prepare(
-        `SELECT after_id, retry_of FROM billing_reconcile_cursor WHERE id = ?1`,
+        `SELECT after_id, attempted_through FROM billing_reconcile_cursor WHERE id = ?1`,
       )
       .bind(id)
-      .first<{ after_id: string | null; retry_of: string | null }>();
+      .first<{ after_id: string | null; attempted_through: string | null }>();
     return {
       afterId: row?.after_id ?? undefined,
-      retryOf: row?.retry_of ?? undefined,
+      attemptedThrough: row?.attempted_through ?? undefined,
     };
   }
 
@@ -852,20 +858,20 @@ export class BillingStore {
   async saveReconcileCursor(
     id: string,
     afterId: string | undefined,
-    retryOf: string | undefined = undefined,
+    attemptedThrough: string | undefined = undefined,
     at: string = new Date().toISOString(),
   ): Promise<void> {
     await this.#db
       .prepare(
         `INSERT INTO billing_reconcile_cursor
-           (id, after_id, retry_of, updated_at)
+           (id, after_id, attempted_through, updated_at)
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(id) DO UPDATE SET
            after_id = excluded.after_id,
-           retry_of = excluded.retry_of,
+           attempted_through = excluded.attempted_through,
            updated_at = excluded.updated_at`,
       )
-      .bind(id, afterId ?? null, retryOf ?? null, at)
+      .bind(id, afterId ?? null, attemptedThrough ?? null, at)
       .run();
   }
 

@@ -1,0 +1,40 @@
+-- One retry before the reconcile walks past a subscription that threw.
+--
+-- 0017_reconcile_cursor.sql advanced the cursor past the whole slice
+-- whatever happened inside it. A subscription that failed -- a transient
+-- Stripe error, a D1 blip -- was therefore not looked at again until the
+-- walk lapped, which on a deployment sized for the Workers Free default is
+-- one subscription a night and so a very long time to leave an entitlement
+-- uncorrected or a missed payment unrecovered.
+--
+-- Holding the cursor at the failure instead would trade that for something
+-- worse, and the codebase has already been bitten by it once: a row that
+-- fails every night holds the front of the queue and starves every one
+-- behind it. That is the exact failure `resumeStrandedPayouts` stamps each
+-- attempt to avoid ("a row that fails every night moves to the back of the
+-- queue instead of holding the front of it").
+--
+-- So a run that parks records how far it got: every subscription up to and
+-- including this id was attempted. The next run treats a failure at or
+-- below it as one that has had its second chance and walks past, and a
+-- failure above it as one that has not had a first and parks again.
+--
+-- Two earlier cuts were wrong, and both are worth writing down because the
+-- second looked right.
+--
+-- A boolean, first. During a retry run, a different subscription failing
+-- for the first time found the flag already set, so it was walked past with
+-- no retry of its own: the delay the retry exists to remove, moved one
+-- subscription along.
+--
+-- Then the single id of the earliest failure. That fixed the boolean's case
+-- and left a slower version of the same one. With two failures in a slice,
+-- the second is on its own second attempt but its id differs from the one
+-- named, so it reads as first-time, parks the cursor again and takes a
+-- third. A slice of failing subscriptions therefore advanced one id a
+-- night, with every healthy subscription behind them waiting. A watermark
+-- says what an id cannot: the whole slice was attempted, not just its
+-- first casualty.
+--
+-- NULL means nothing is outstanding.
+ALTER TABLE billing_reconcile_cursor ADD COLUMN attempted_through TEXT;

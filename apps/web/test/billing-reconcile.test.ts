@@ -734,6 +734,44 @@ describe('the reconcile walk', () => {
     );
   });
 
+  it('retries a whole slice of failures in one night, not one a night', async () => {
+    // What naming a single id could not do. Two failures in a slice, and
+    // only the earliest was recorded: the second was on its own second
+    // attempt but its id differed from the one named, so it read as
+    // first-time, parked the cursor again and took a third. A slice of
+    // failing subscriptions therefore advanced one id a night, with every
+    // healthy subscription behind them waiting.
+    //
+    // The watermark says what an id cannot: the whole slice was attempted.
+    const store = await storeWith(FIVE);
+    const stripe = stripeServing(FIVE);
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    const broken = new Set(['sub_b', 'sub_c']);
+    const seen: string[] = [];
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      if (broken.has(id)) throw new Error('both of these are broken for good');
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+
+    // Run one: a, b, c. Two failures, so the walk parks before the earlier.
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+
+    // Run two retries both of them and moves on, rather than parking again
+    // on the second and giving it a third attempt.
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+    assert.deepEqual(seen, ['sub_b', 'sub_c', 'sub_d']);
+
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+    assert.deepEqual(
+      seen,
+      ['sub_e'],
+      'the second failure in the slice parked the walk all over again',
+    );
+  });
+
   it('stays put when the first subscription in the slice throws', async () => {
     // The edge the arithmetic gets wrong if it reaches for `ids[-1]`: the
     // failure is the first thing in the slice, so there is no earlier id to
