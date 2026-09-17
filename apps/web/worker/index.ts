@@ -5,6 +5,7 @@ import {
   providerForRequest,
   resolveModel,
 } from '@vibld/ai';
+import type { RunRefusal } from '@vibld/core';
 
 import {
   clerkConfigured,
@@ -347,6 +348,24 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+}
+
+/**
+ * Refuse a run, naming which refusal it is.
+ *
+ * The sentence is for the person reading it and may be rewritten at any
+ * time; `reason` is the contract (`RunRefusal` in @vibld/core), and it is
+ * what a script branches on, what the builder disables a control with, and
+ * what an audit record stores. Before this, every one of these arrived as
+ * prose and a status, so "your allowance is spent" and "a run is already
+ * going" were both 429 and told apart by reading English.
+ *
+ * Deliberately not a run record: a refused run is not a failed run, and
+ * writing one would put a generation in somebody's history that never
+ * happened.
+ */
+function refuse(reason: RunRefusal, error: string, status: number): Response {
+  return json({ error, reason }, status);
 }
 
 /**
@@ -741,10 +760,12 @@ async function handlePlan(
     request.headers,
     new URL(request.url).origin,
   );
-  if (!origin.ok) return json({ error: origin.error }, origin.status);
+  if (!origin.ok) {
+    return refuse('request-invalid', origin.error, origin.status);
+  }
 
   const size = checkBodySize(request.headers);
-  if (!size.ok) return json({ error: size.error }, size.status);
+  if (!size.ok) return refuse('request-invalid', size.error, size.status);
 
   // Per-IP, ahead of identity (docs/decisions.md L29): the burst gates below
   // key on the caller's Clerk user id, so a flood of garbage or expired
@@ -757,7 +778,11 @@ async function handlePlan(
       const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
       const result = await env.IP_BURST.limit({ key: `ip:${ip}` });
       if (!result.success) {
-        return json({ error: 'Too many requests from this address.' }, 429);
+        return refuse(
+          'rate-limited',
+          'Too many requests from this address.',
+          429,
+        );
       }
     } catch (error) {
       console.error('IP rate limiter unavailable', error);
@@ -767,8 +792,9 @@ async function handlePlan(
   // Whether this deployment can generate at all -- keys, Clerk, and the
   // ledger -- is checked before spending effort on any one caller's token.
   if (!isConfigured(env)) {
-    return json(
-      { error: 'Model generation is not configured for this deployment.' },
+    return refuse(
+      'not-configured',
+      'Model generation is not configured for this deployment.',
       403,
     );
   }
@@ -781,32 +807,32 @@ async function handlePlan(
   try {
     body = await request.json();
   } catch {
-    return json({ error: 'Body must be valid JSON.' }, 400);
+    return refuse('request-invalid', 'Body must be valid JSON.', 400);
   }
 
   const parsed = parseGenerationRequest(body);
   if (!parsed.ok) {
-    return json({ error: parsed.error }, parsed.status);
+    return refuse('request-invalid', parsed.error, parsed.status);
   }
 
   const style = parseStylePreset(body);
   if (!style.ok) {
-    return json({ error: style.error }, style.status);
+    return refuse('request-invalid', style.error, style.status);
   }
 
   const styleDna = parseStyleDna(body);
   if (!styleDna.ok) {
-    return json({ error: styleDna.error }, styleDna.status);
+    return refuse('request-invalid', styleDna.error, styleDna.status);
   }
 
   const knowledge = parseKnowledge(body);
   if (!knowledge.ok) {
-    return json({ error: knowledge.error }, knowledge.status);
+    return refuse('request-invalid', knowledge.error, knowledge.status);
   }
 
   const referenceUrl = parseReferenceUrl(body);
   if (!referenceUrl.ok) {
-    return json({ error: referenceUrl.error }, referenceUrl.status);
+    return refuse('request-invalid', referenceUrl.error, referenceUrl.status);
   }
   // Fetched here, before anything is reserved against the caller's budget --
   // the same reasoning as every other validation above. A failed fetch is
@@ -824,7 +850,7 @@ async function handlePlan(
   if (referenceUrl.value) {
     const fetched = await fetchReferenceContext(referenceUrl.value);
     if (!fetched.ok) {
-      return json({ error: fetched.error }, 422);
+      return refuse('request-invalid', fetched.error, 422);
     }
     referenceContext = fetched.text;
     referencePaletteSource = fetched.palette?.source;
@@ -833,7 +859,7 @@ async function handlePlan(
 
   const chosenModel = parseModel(body, configuredProviders(env));
   if (!chosenModel.ok) {
-    return json({ error: chosenModel.error }, chosenModel.status);
+    return refuse('request-invalid', chosenModel.error, chosenModel.status);
   }
 
   // The picker only offers what this person may use, but the picker is a
@@ -846,7 +872,9 @@ async function handlePlan(
     chosenModel.value,
     resolveModel(env),
   );
-  if (!decision.ok) return json({ error: decision.error }, decision.status);
+  if (!decision.ok) {
+    return refuse('model-not-allowed', decision.error, decision.status);
+  }
   const effectiveModel = decision.model;
 
   // Layer one: a burst gate keyed on the caller. It is per-location and
@@ -859,8 +887,9 @@ async function handlePlan(
     );
     const results = await Promise.all(gates.map((gate) => gate.limit({ key })));
     if (results.some((result) => !result.success)) {
-      return json(
-        { error: 'Too many generation requests. Try again shortly.' },
+      return refuse(
+        'rate-limited',
+        'Too many generation requests. Try again shortly.',
         429,
       );
     }
@@ -931,22 +960,31 @@ async function handlePlan(
     // a public URL costs real money. 503 rather than 429: this is the
     // service's problem, and telling the user they did too much is a lie.
     console.error('spend ledger unavailable', error);
+    // Its own reason, not `account-ceiling`. Being unable to read the ledger
+    // and having spent the allowance are different facts, and reporting the
+    // second when the first happened tells a user with money left that they
+    // are out of it.
     return new Response(
       JSON.stringify({
         error: 'Usage accounting is unavailable; generation is paused.',
+        reason: 'accounting-unavailable' satisfies RunRefusal,
       }),
       { status: 503, headers: { ...JSON_HEADERS, 'retry-after': '30' } },
     );
   }
 
   if (!reserved.ok) {
-    return json(
-      {
-        error:
-          reserved.verdict.reason === 'period-ceiling'
-            ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
-            : 'A generation is already running. Wait for it to finish.',
-      },
+    // The two refusals #159 asks for by name. Both were 429 with different
+    // prose, so a caller could only tell them apart by reading the sentence,
+    // and they lead somewhere completely different: one is resolved by
+    // buying a top-up or waiting for the month to turn, the other by waiting
+    // about a minute.
+    const ceiling = reserved.verdict.reason === 'period-ceiling';
+    return refuse(
+      ceiling ? 'account-ceiling' : 'already-running',
+      ceiling
+        ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
+        : 'A generation is already running. Wait for it to finish.',
       429,
     );
   }

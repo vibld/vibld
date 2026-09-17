@@ -20,6 +20,7 @@ import {
 import type { AccessDecision } from './access.ts';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import type { Principal } from './principal.ts';
+import type { RunRefusal } from '@vibld/core';
 
 export interface AccessEnv {
   DB?: D1Database;
@@ -99,7 +100,20 @@ export async function decideAccessFor(
 
 /** The refusal a gated route returns. 403, and the same words either way. */
 export function refusal(): Response {
-  return json({ error: REFUSED_MESSAGE, accessRefused: true }, 403);
+  // `reason` beside the existing flag, from the one vocabulary every other
+  // refusal now uses (`RunRefusal` in @vibld/core). Still one reason for
+  // both refusals rather than two: the comment on `handleAccessStatus`
+  // below explains why this boundary does not say which, and putting the
+  // distinction in a machine-readable field would defeat that more
+  // thoroughly than putting it in the sentence would.
+  return json(
+    {
+      error: REFUSED_MESSAGE,
+      accessRefused: true,
+      reason: 'access-refused' satisfies RunRefusal,
+    },
+    403,
+  );
 }
 
 /**

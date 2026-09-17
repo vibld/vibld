@@ -20,6 +20,7 @@
  */
 
 import { fetchClerkKeys, verifyClerkJwt } from './clerk-auth.ts';
+import type { RunRefusal } from '@vibld/core';
 
 export interface Principal {
   /** The Clerk user id, e.g. "user_2abc...". The ledger/ownership key (L3). */
@@ -78,7 +79,10 @@ export async function resolvePrincipal(
   if (!clerkConfigured(env)) {
     return {
       denied: json(
-        { error: 'Model generation is not configured for this deployment.' },
+        {
+          error: 'Model generation is not configured for this deployment.',
+          reason: 'not-configured' satisfies RunRefusal,
+        },
         403,
       ),
     };
@@ -86,7 +90,12 @@ export async function resolvePrincipal(
 
   const token = bearerToken(request);
   if (!token) {
-    return { denied: json({ error: 'Sign in required.' }, 401) };
+    return {
+      denied: json(
+        { error: 'Sign in required.', reason: 'not-signed-in' },
+        401,
+      ),
+    };
   }
 
   try {
@@ -106,7 +115,17 @@ export async function resolvePrincipal(
     };
   } catch {
     // Deliberately opaque: a verification failure should not tell a caller
-    // which check failed.
-    return { denied: json({ error: 'Sign-in verification failed.' }, 403) };
+    // which check failed. The reason is the same identifier the missing-token
+    // case carries, for that reason: one machine-readable value for "this
+    // request has no usable identity", not two that split it apart again.
+    return {
+      denied: json(
+        {
+          error: 'Sign-in verification failed.',
+          reason: 'not-signed-in' satisfies RunRefusal,
+        },
+        403,
+      ),
+    };
   }
 }

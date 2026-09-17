@@ -6,6 +6,17 @@ export type {
 export { FakeModelProvider } from './fake-provider.ts';
 export { GenerationMachine } from './generation-machine.ts';
 export { InMemoryGenerationStore } from './memory-store.ts';
+export {
+  RUN_REFUSALS,
+  RUN_STOPS,
+  cachedFraction,
+  contextPressure,
+  isRunRefusal,
+  isRunStop,
+  stopChangedTheProject,
+  stopIsRetryable,
+} from './run-outcome.ts';
+export type { RunRefusal, RunStop, RunTrace } from './run-outcome.ts';
 export { BudgetExceededError, RunBudgetLedger } from './run-budget.ts';
 export type {
   BudgetReservation,
