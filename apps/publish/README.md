@@ -73,7 +73,7 @@ site back.
 ## An operator taking a site down
 
 `POST /internal/hold` with `{slug, by, reason}`, and `POST /internal/release`
-with `{slug}` (#172, `0018_operator_hold.sql`). apps/web reaches both through
+with `{slug, by}` (#172, `0018_operator_hold.sql`, `0020_hold_history.sql`). apps/web reaches both through
 `/api/admin/publish/hold` and `/api/admin/publish/release`, behind the
 platform-admin check. There is no ownership check here, which is the point of
 the route rather than a gap in it: the caller has already been established as
@@ -104,6 +104,15 @@ security-sensitive actions auditable, and a takedown of work that is not
 yours is the clearest case of one. The reason is required, not optional: a
 hold nobody can review later is the half of "auditable" that cannot be added
 afterwards.
+
+**The state is not the record.** The columns above are what serving and the
+republish refusal read, and `release` clears them; a first cut of this left
+that as the only evidence, so after an ordinary hold-then-release there was
+nothing to say the site had ever been taken down, by whom or why. So the
+record lives in `published_site_holds`, appended and never updated, and
+`release` carries a `by` for the same reason `hold` does: lifting a hold is
+as much an action somebody took as placing it. Each write is one batch with
+the state change it records, so neither can land without the other.
 
 ## Why a separate package, not a folder in apps/web
 
