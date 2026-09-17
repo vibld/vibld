@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'credits-and-plans')!;
-const CHECKED = '2026-09-16';
+const CHECKED = '2026-09-17';
 
 export function meta() {
   return metaFor('/docs/credits-and-plans');
@@ -81,16 +81,17 @@ export default function CreditsAndPlans() {
       </ol>
       <p>
         When a run is refused for spend, the reason names which ceiling it hit.
-        The header readout is a read-only mirror of the same figures the gate
-        uses, so what it shows and what it enforces cannot disagree.
+        The readout under <strong>Plan and usage</strong> in the settings menu
+        is a read-only mirror of the same figures the gate uses, so what it
+        shows and what it enforces cannot disagree.
       </p>
 
       <h2>Changing or cancelling</h2>
       <p>
         Upgrading starts a Stripe Checkout session. Once you have a Stripe
-        customer record, <strong>Manage billing</strong> appears in the header
-        and opens Stripe’s own billing portal, where cards, invoices and
-        cancellation live.
+        customer record, <strong>Manage billing</strong> appears under{' '}
+        <strong>Plan and usage</strong> in the settings menu and opens Stripe’s
+        own billing portal, where cards, invoices and cancellation live.
       </p>
       <p>
         Refunds are covered by the <a href="/legal/refunds">Refund Policy</a>.

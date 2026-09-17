@@ -1,18 +1,28 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import worker, { type Env } from '../worker/index.ts';
+import { PublishStore } from '../worker/publish-store.ts';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
-const SCHEMA = `
-CREATE TABLE published_projects (
-  slug TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL UNIQUE,
-  user_id TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-`;
+/**
+ * The real migrations, not a copy of them.
+ *
+ * This package binds the same D1 database apps/web migrates (ADR-0010), and
+ * an inline copy of the table here is a copy that drifts: the column
+ * 0016_unpublish.sql adds is exactly the kind of thing a hand-written
+ * fixture keeps passing without.
+ */
+const SCHEMA = ['0003_publish.sql', '0016_unpublish.sql']
+  .map((file) =>
+    readFileSync(
+      join(import.meta.dirname, '..', '..', 'web', 'migrations', file),
+      'utf8',
+    ),
+  )
+  .join('\n');
 
 const SECRET = 'test-secret';
 
@@ -315,5 +325,214 @@ describe('apps/publish Worker: public serving', () => {
     const env = await publishedEnv();
     const response = await worker.fetch(publicRequest('example.com', '/'), env);
     assert.equal(response.status, 404);
+  });
+});
+
+/**
+ * `/internal/unpublish` (ADR-0013): the route that takes a site down.
+ *
+ * Same trust model as `/internal/publish` -- the shared secret proves the
+ * caller is apps/web, and apps/web has already resolved a Clerk principal
+ * -- plus the ownership check this Worker is the only one able to make,
+ * since the store is what knows whose slug this is.
+ */
+describe('apps/publish Worker: taking a site down', () => {
+  async function published(env: Env): Promise<void> {
+    const response = await worker.fetch(
+      internalRequest('internal/publish', {
+        userId: 'u1',
+        projectId: 'p1',
+        slug: 'acme',
+        files: [{ path: 'index.html', content: '<h1>acme</h1>' }],
+      }),
+      env,
+    );
+    assert.equal(response.status, 200);
+  }
+
+  it('refuses a caller without the internal secret', async () => {
+    const env = newEnv();
+    await published(env);
+
+    const response = await worker.fetch(
+      internalRequest(
+        'internal/unpublish',
+        { userId: 'u1', projectId: 'p1' },
+        'the-wrong-secret',
+      ),
+      env,
+    );
+
+    assert.equal(response.status, 403);
+    // Still serving: a refused takedown must not half-happen.
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
+  });
+
+  it('refuses to take down a project belonging to somebody else', async () => {
+    const env = newEnv();
+    await published(env);
+
+    const response = await worker.fetch(
+      internalRequest('internal/unpublish', {
+        userId: 'u2',
+        projectId: 'p1',
+      }),
+      env,
+    );
+
+    assert.equal(response.status, 403);
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
+  });
+
+  it('answers 404 for a project that was never published', async () => {
+    const env = newEnv();
+    const response = await worker.fetch(
+      internalRequest('internal/unpublish', {
+        userId: 'u1',
+        projectId: 'never',
+      }),
+      env,
+    );
+    assert.equal(response.status, 404);
+  });
+
+  it('takes the site off the web', async () => {
+    const env = newEnv();
+    await published(env);
+
+    const before = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(before.status, 200);
+
+    const response = await worker.fetch(
+      internalRequest('internal/unpublish', {
+        userId: 'u1',
+        projectId: 'p1',
+      }),
+      env,
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { slug: 'acme' });
+
+    const after = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(after.status, 404, 'the site was still being served');
+  });
+
+  it('puts it back under the same name when it is published again', async () => {
+    // ADR-0013 calls rollback a first-class, person-taken action. This is
+    // the half of it that exists today: down, then up again, under the name
+    // the owner never lost.
+    const env = newEnv();
+    await published(env);
+    await worker.fetch(
+      internalRequest('internal/unpublish', { userId: 'u1', projectId: 'p1' }),
+      env,
+    );
+
+    const again = await worker.fetch(
+      internalRequest('internal/publish', {
+        userId: 'u1',
+        projectId: 'p1',
+        files: [{ path: 'index.html', content: '<h1>back</h1>' }],
+      }),
+      env,
+    );
+    assert.equal(again.status, 200);
+    assert.deepEqual(await again.json(), {
+      slug: 'acme',
+      url: 'https://acme.published.vibld-preview.dev/',
+    });
+
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
+    assert.equal(await site.text(), '<h1>back</h1>');
+  });
+
+  it('keeps the site down when the replacement files cannot be stored', async () => {
+    // Clearing the tombstone is what puts a site back, so it must not happen
+    // before the content exists. Otherwise a republish whose R2 write fails
+    // reports failure and leaves the slug resolving to an empty prefix: the
+    // site reads as live and serves nothing, which is the failure `unpublish`
+    // orders itself to avoid, pointed the other way.
+    const env = newEnv();
+    await published(env);
+    await worker.fetch(
+      internalRequest('internal/unpublish', { userId: 'u1', projectId: 'p1' }),
+      env,
+    );
+
+    const bucket = env.PROJECT_CONTENT as InMemoryR2Bucket;
+    bucket.put = async () => {
+      throw new Error('R2 is having a day');
+    };
+
+    await assert.rejects(() =>
+      worker.fetch(
+        internalRequest('internal/publish', {
+          userId: 'u1',
+          projectId: 'p1',
+          files: [{ path: 'index.html', content: '<h1>back</h1>' }],
+        }),
+        env,
+      ),
+    );
+
+    // The public answer is 404 either way, because the content is gone --
+    // which is exactly why asserting on it would prove nothing. What differs
+    // is the row: clearing the mark before the write lands leaves the slug
+    // resolving to a project with an empty prefix, so the site reads as live
+    // and serves nothing, and the owner's builder is told it is up.
+    const store = new PublishStore(env.DB, env.PROJECT_CONTENT);
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'a failed republish marked the site live with nothing to serve',
+    );
+    assert.deepEqual(await store.slugForProject('p1'), {
+      slug: 'acme',
+      userId: 'u1',
+      live: false,
+    });
+
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 404, 'a failed republish put the site back up');
+  });
+
+  it('refuses GET, so a link cannot take a site down', async () => {
+    const env = newEnv();
+    await published(env);
+
+    const response = await worker.fetch(
+      new Request('https://internal.example/internal/unpublish', {
+        headers: { Authorization: `Bearer ${SECRET}` },
+      }),
+      env,
+    );
+
+    assert.equal(response.status, 404);
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
   });
 });

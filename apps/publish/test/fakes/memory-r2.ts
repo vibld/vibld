@@ -14,4 +14,44 @@ export class InMemoryR2Bucket implements PublishR2Bucket {
     this.#objects.set(key, value);
     return undefined;
   }
+
+  async delete(keys: string | string[]): Promise<unknown> {
+    for (const key of typeof keys === 'string' ? [keys] : keys) {
+      this.#objects.delete(key);
+    }
+    return undefined;
+  }
+
+  /**
+   * Pages like R2 does, including the small default, so a caller that
+   * forgets the cursor is caught here rather than on the first published
+   * site big enough to need a second page.
+   */
+  async list(
+    options: { prefix?: string; cursor?: string; limit?: number } = {},
+  ): Promise<{
+    objects: { key: string }[];
+    truncated: boolean;
+    cursor?: string;
+  }> {
+    const { prefix = '', cursor, limit = 2 } = options;
+    const keys = [...this.#objects.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .sort();
+    const from = cursor ? keys.indexOf(cursor) : 0;
+    const page = keys.slice(from, from + limit);
+    const next = keys[from + limit];
+    return next === undefined
+      ? { objects: page.map((key) => ({ key })), truncated: false }
+      : {
+          objects: page.map((key) => ({ key })),
+          truncated: true,
+          cursor: next,
+        };
+  }
+
+  /** What is actually stored, for a test that wants to see nothing left. */
+  keys(): string[] {
+    return [...this.#objects.keys()].sort();
+  }
 }

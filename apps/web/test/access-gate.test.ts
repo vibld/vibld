@@ -64,6 +64,7 @@ describe('the invite gate', () => {
       '/api/publish',
       '/api/github/push',
       '/api/billing/checkout',
+      '/api/publish',
     ]) {
       assert.ok(isGated(path, 'POST'), `${path} is not gated`);
     }
@@ -88,6 +89,17 @@ describe('the invite gate', () => {
       isGated('/api/preview/share', 'GET'),
       false,
       'cannot see what is exposed',
+    );
+
+    // The hardest case of the same rule, and the newest. A published site
+    // is more public than a share link and outlives the sandbox that made
+    // it, so a revoked owner who cannot take it down is left serving to
+    // anybody with the address, with no operator route to do it for them.
+    assert.equal(isGated('/api/publish', 'POST'), true, 'publishing is open');
+    assert.equal(
+      isGated('/api/publish', 'DELETE'),
+      false,
+      'cannot take their own site off the web',
     );
 
     assert.equal(isGated('/api/github/connect', 'POST'), true);

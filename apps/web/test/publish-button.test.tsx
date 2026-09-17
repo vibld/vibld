@@ -17,7 +17,9 @@ import { PublishButton } from '../src/components/PublishButton.tsx';
 function snapshot(revision: string): ProjectSnapshot {
   return {
     revision,
-    files: [{ path: 'index.html', content: '<h1>hi</h1>' }],
+    // Content that names its own revision, so a test can tell which
+    // checkpoint's work actually left the browser.
+    files: [{ path: 'index.html', content: `<h1>${revision}</h1>` }],
   } as ProjectSnapshot;
 }
 
@@ -30,6 +32,8 @@ function reply(value: unknown, status = 200): Response {
 
 interface Call {
   url: string;
+  /** Publishing and taking down differ by verb, so the verb is recorded. */
+  method?: string;
   body?: Record<string, unknown>;
 }
 
@@ -38,6 +42,7 @@ function serving(answer: () => Response | Promise<Response>): Call[] {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({
       url: String(input),
+      ...(init?.method ? { method: init.method } : {}),
       ...(init?.body
         ? { body: JSON.parse(String(init.body)) as Record<string, unknown> }
         : {}),
@@ -73,6 +78,21 @@ function held(response: () => Response) {
   };
 }
 
+/** The confirmation ADR-0013 requires, if it is on screen. */
+function panelOf(container: HTMLElement): HTMLElement | null {
+  return container.querySelector('[aria-label="Confirm publishing"]');
+}
+
+// `window.HTMLButtonElement` rather than the bare global: the harness puts
+// jsdom's constructors on `window` only, the same reason `type` below reaches
+// through `window.HTMLInputElement`.
+async function press(button: Element | null | undefined, what: string) {
+  assert.ok(button instanceof window.HTMLButtonElement, `no ${what}`);
+  await act(async () => {
+    button.click();
+  });
+}
+
 async function mount(element: React.ReactNode) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -81,8 +101,49 @@ async function mount(element: React.ReactNode) {
     root = createRoot(container);
     root.render(element);
   });
+
+  function confirming(): boolean {
+    return panelOf(container) !== null;
+  }
+
+  /** The first press: raise the decision. */
+  async function ask() {
+    assert.equal(confirming(), false, 'a confirmation was already open');
+    await press(container.querySelector('button'), 'publish button');
+  }
+
+  /** The second press: take it. */
+  async function confirm() {
+    const panel = panelOf(container);
+    assert.ok(panel, 'no confirmation to answer');
+    await press(panel.querySelector('button'), 'confirm button');
+  }
+
+  /** The takedown trigger, when there is something up to take down. */
+  function takeDownButton(): HTMLButtonElement | undefined {
+    return [...container.querySelectorAll('button')].find((button) =>
+      /Take it down|Taking down/.test(button.textContent ?? ''),
+    );
+  }
+
+  async function askToTakeDown() {
+    await press(takeDownButton(), 'take-down button');
+  }
+
+  async function cancel() {
+    const panel = panelOf(container);
+    assert.ok(panel, 'no confirmation to cancel');
+    await press([...panel.querySelectorAll('button')].at(-1), 'cancel button');
+  }
+
   return {
     container,
+    confirming,
+    ask,
+    confirm,
+    cancel,
+    takeDownButton,
+    askToTakeDown,
     async render(next: React.ReactNode) {
       await act(async () => root.render(next));
     },
@@ -102,12 +163,17 @@ async function mount(element: React.ReactNode) {
         input.dispatchEvent(new Event('input', { bubbles: true }));
       });
     },
+    /**
+     * Publish, the way somebody does it: raise the decision and take it.
+     *
+     * Two presses rather than one since ADR-0013, and the tests that are
+     * about something else say "publish" rather than spelling both out. The
+     * tests that are about the decision itself use `ask`, `confirm` and
+     * `cancel` directly.
+     */
     async click() {
-      const button = container.querySelector('button');
-      assert.ok(button, 'no publish button');
-      await act(async () => {
-        button.click();
-      });
+      await ask();
+      if (confirming()) await confirm();
     },
     label(): string {
       return container.querySelector('button')?.textContent ?? '';
@@ -315,6 +381,341 @@ describe('publishing an accepted checkpoint', () => {
       /my-site\.example/,
       'it said the new checkpoint was live when only the old one was',
     );
+    view.unmount();
+  });
+});
+
+/**
+ * ADR-0013: publishing is a decision, not a click.
+ *
+ * The rest of this file is about what happens once somebody has decided.
+ * This is about the deciding, which is the half that makes the publish
+ * button different from every other button in the builder: it is the only
+ * one whose result a stranger can see, and there is no undo behind it yet.
+ */
+describe('the publish confirmation', () => {
+  it('sends nothing on the first press', async () => {
+    const calls = serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+
+    assert.equal(view.confirming(), true, 'it did not ask');
+    assert.deepEqual(calls, [], 'one press published');
+    view.unmount();
+  });
+
+  it('names the slug and the checkpoint that would go live', async () => {
+    // Not a generic "are you sure". A confirmation that does not say what is
+    // about to become public is a click with an extra step in front of it.
+    serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+
+    const said = view.container.textContent ?? '';
+    assert.match(said, /my-site/, 'it did not name the slug');
+    assert.match(said, /r1/, 'it did not name the checkpoint');
+    view.unmount();
+  });
+
+  it('says a republish replaces what is already live', async () => {
+    // The first publish and the fifth are different acts: one puts a name on
+    // the web, the other overwrites what that name is already serving.
+    serving(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+    await view.ask();
+
+    const said = view.container.textContent ?? '';
+    assert.match(said, /Replace/, 'a republish read like a first publish');
+    assert.match(said, /r2/, 'it named the wrong checkpoint');
+    view.unmount();
+  });
+
+  it('publishes nothing when the decision is declined', async () => {
+    const calls = serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+    await view.cancel();
+
+    assert.deepEqual(calls, [], 'cancelling published');
+    assert.equal(view.confirming(), false, 'the confirmation stayed open');
+    assert.match(view.label(), /Publish/, 'the button did not come back');
+    view.unmount();
+  });
+
+  it('keeps the typed slug after a declined decision', async () => {
+    // Declining is not a reason to make somebody retype the name. It is a
+    // reason not to publish.
+    const calls = serving(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+    await view.cancel();
+    await view.click();
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.body?.slug, 'my-site');
+    view.unmount();
+  });
+
+  it('sends the files of the checkpoint the confirmation named', async () => {
+    // Only that the right work leaves the browser. The stronger claim --
+    // that answering a confirmation cannot publish a *different* checkpoint
+    // -- is structural rather than tested: the confirmation carries its own
+    // files, so there is no reading of "current" left to go stale. A test
+    // cannot tell the two apart from out here, because the effect above
+    // withdraws a confirmation before the checkpoint it named can change.
+    const calls = serving(() =>
+      reply({
+        ok: true,
+        slug: 'my-site',
+        url: 'https://my-site.example',
+        skipped: [],
+      }),
+    );
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]?.body?.files, [
+      { path: 'index.html', content: '<h1>r1</h1>' },
+    ]);
+    view.unmount();
+  });
+
+  it('withdraws a confirmation whose checkpoint moved on', async () => {
+    // The sentence on screen names a revision. Once the project has moved
+    // past it, answering that sentence would publish work nobody was shown,
+    // which is the one outcome two presses exist to prevent.
+    const calls = serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.ask();
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+
+    assert.equal(view.confirming(), false, 'a stale confirmation stayed up');
+    assert.deepEqual(calls, [], 'it published on the way past');
+    view.unmount();
+  });
+});
+
+/**
+ * ADR-0013 makes rollback "a first-class, person-taken action". Until this
+ * existed there was no way off the web at all: nothing in the product, and
+ * nothing an operator could run, removed a published site.
+ */
+describe('taking a published site down', () => {
+  function publishReply() {
+    return reply({
+      ok: true,
+      slug: 'my-site',
+      url: 'https://my-site.example',
+      skipped: [],
+    });
+  }
+
+  it('offers nothing to take down before anything is published', async () => {
+    serving(() => reply({}));
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    assert.equal(view.takeDownButton(), undefined);
+    view.unmount();
+  });
+
+  it('sends nothing on the first press', async () => {
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    assert.equal(calls.length, 1);
+
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+
+    assert.equal(view.confirming(), true, 'it did not ask');
+    assert.equal(calls.length, 1, 'one press took the site down');
+    view.unmount();
+  });
+
+  it('names the site, and says the name is kept', async () => {
+    // The two halves somebody needs to decide: the address stops working,
+    // and nobody else gets to claim it.
+    serving(publishReply);
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    await view.askToTakeDown();
+
+    const said = view.container.textContent ?? '';
+    assert.match(said, /my-site/);
+    assert.match(said, /off the web/);
+    assert.match(said, /name stays yours/);
+    view.unmount();
+  });
+
+  it('takes nothing down when the decision is declined', async () => {
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.cancel();
+
+    assert.equal(calls.length, 1, 'cancelling took the site down');
+    assert.ok(view.takeDownButton(), 'the take-down button did not come back');
+    view.unmount();
+  });
+
+  it('deletes, rather than posting, when the decision is taken', async () => {
+    // The method is the rule: a link or a form cannot reach DELETE by
+    // accident, and the server routes on it.
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]?.url, '/api/publish');
+    assert.equal(calls[1]?.method, 'DELETE');
+    assert.equal(calls[1]?.body, undefined, 'a takedown named a site');
+    view.unmount();
+  });
+
+  it('stops saying the site is live, and offers to publish again', async () => {
+    let answer = publishReply;
+    serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    assert.match(view.container.textContent ?? '', /my-site\.example/);
+
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    const said = view.container.textContent ?? '';
+    assert.doesNotMatch(said, /Live at/, 'it still said the site was live');
+    assert.match(said, /off the web/);
+    assert.match(view.label(), /Publish again/);
+    assert.equal(view.slug(), null, 'it asked for a name still held');
+    assert.equal(
+      view.takeDownButton(),
+      undefined,
+      'it offered to take down a site that is already down',
+    );
+    view.unmount();
+  });
+
+  it('puts it back under the same name', async () => {
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    answer = publishReply;
+    await view.click();
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2]?.body?.slug, 'my-site');
+    assert.match(view.container.textContent ?? '', /my-site\.example/);
+    view.unmount();
+  });
+
+  it('keeps saying a site is down across a new checkpoint', async () => {
+    // A new checkpoint does not put anything back on the web. Clearing the
+    // sentence would leave somebody guessing whether it had.
+    let answer = publishReply;
+    serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    await view.render(<PublishButton snapshot={snapshot('r2')} />);
+
+    assert.match(view.container.textContent ?? '', /off the web/);
+    assert.match(view.label(), /Publish again/);
+    view.unmount();
+  });
+
+  it('stays retryable after a refused takedown', async () => {
+    // The failure that made this necessary: dropping the slug hid the only
+    // control that takes a live site down, and a revoked owner cannot get it
+    // back -- the POST that would re-establish the name is gated, and a
+    // fresh page load has no slug lookup. A rate limit was enough to strand
+    // somebody's site.
+    let answer = publishReply;
+    const calls = serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+
+    answer = () =>
+      reply({ error: 'Too many publish requests. Try again shortly.' }, 429);
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.ok(view.takeDownButton(), 'the only way down disappeared');
+    assert.equal(view.slug(), null, 'it forgot the name of the live site');
+
+    answer = () => reply({ slug: 'my-site' });
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2]?.method, 'DELETE');
+    assert.match(view.container.textContent ?? '', /off the web/);
+    view.unmount();
+  });
+
+  it('reports a refused takedown rather than claiming it worked', async () => {
+    let answer = publishReply;
+    serving(() => answer());
+    const view = await mount(<PublishButton snapshot={snapshot('r1')} />);
+    await view.type('my-site');
+    await view.click();
+
+    answer = () => reply({ error: 'This project is not published.' }, 404);
+    await view.askToTakeDown();
+    await view.confirm();
+
+    assert.match(
+      view.container.textContent ?? '',
+      /This project is not published/,
+    );
+    assert.doesNotMatch(view.container.textContent ?? '', /off the web/);
     view.unmount();
   });
 });
