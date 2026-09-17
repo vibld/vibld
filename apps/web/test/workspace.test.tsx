@@ -209,10 +209,10 @@ describe('the workspace, as it is actually wired', () => {
     assert.equal(view.tab(/Preview/).getAttribute('aria-selected'), 'true');
 
     await view.press(/Preview/, 'End');
-    assert.equal(view.tab(/Problems/).getAttribute('aria-selected'), 'true');
+    assert.equal(view.tab(/Runs/).getAttribute('aria-selected'), 'true');
 
     // Wrapping, so End then Right returns to the first rather than sticking.
-    await view.press(/Problems/, 'ArrowRight');
+    await view.press(/Runs/, 'ArrowRight');
     assert.equal(view.tab(/Preview/).getAttribute('aria-selected'), 'true');
     view.unmount();
   });
@@ -233,6 +233,17 @@ describe('the workspace, as it is actually wired', () => {
     assert.equal(panel?.getAttribute('aria-labelledby'), 'tab-problems');
     assert.match(view.text(), /No problems reported/);
     assert.doesNotMatch(view.text(), /No events yet/);
+    view.unmount();
+  });
+
+  it('gives run history a tab of its own', async () => {
+    // Reachable at all is the thing worth asserting here: the pane's own
+    // rules live in `run-history.test.tsx`, but a panel nothing routes to
+    // is a panel nobody sees.
+    const view = await mount(builder());
+    await view.open(/Runs/);
+
+    assert.equal(view.panel()?.getAttribute('aria-labelledby'), 'tab-runs');
     view.unmount();
   });
 

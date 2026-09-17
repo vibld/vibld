@@ -76,6 +76,10 @@ export class DurableGenerationRunner {
 
         return {
           state: 'failed',
+          // Its own stop, not the model's. The run produced work and the
+          // base moved underneath it, which is a different thing from a
+          // generation that failed, and the two arrived identically before.
+          stop: 'conflict',
           accepted: promotion.current,
           staged: result.accepted,
           errors: ['Accepted revision changed before promotion'],

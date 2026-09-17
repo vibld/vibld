@@ -1,3 +1,5 @@
+import type { RunStop } from './run-outcome.ts';
+
 export type GenerationState =
   | 'idle'
   | 'planning'
@@ -52,6 +54,17 @@ export type Validator = (
 
 export interface GenerationResult {
   state: GenerationState;
+  /**
+   * Why this run ended, as an identifier from the one vocabulary
+   * (`run-outcome.ts`) rather than as a state plus a string to read.
+   *
+   * `state` says where the machine stopped; this says why, and the two are
+   * not the same question. Every provider failure used to arrive as
+   * `state: 'failed'` and a sentence in `errors`, so a run that was declined
+   * and a run whose project no longer fits were indistinguishable to
+   * anything looking at the finished run.
+   */
+  stop: RunStop;
   accepted?: ProjectSnapshot;
   staged?: ProjectSnapshot;
   errors: string[];

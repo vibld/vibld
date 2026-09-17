@@ -15,6 +15,7 @@ import {
 import { UserBudget } from './budget.ts';
 import type { Reservation } from './budget.ts';
 import { GenerationWorkflow } from './generation-workflow.ts';
+import { D1GenerationStore } from './generation-store.ts';
 import type { WorkflowParams } from './generation-workflow.ts';
 import {
   DEFAULT_LIMITS,
@@ -508,6 +509,45 @@ async function reserveBudget(
  * only reads it back for the shell to show a "generations remaining"
  * readout and drive its checkout/portal buttons (L35).
  */
+/**
+ * This project's finished runs, newest first (#167).
+ *
+ * Read-only, and scoped to the caller's own project by construction: the
+ * project id is the principal's user id, so there is no identifier on the
+ * request that could name somebody else's runs.
+ *
+ * Deliberately not gated behind the invite check, for the same reason
+ * `/api/billing/status` is not: somebody whose access was revoked can still
+ * see what their own runs did, and refusing the history of a run they paid
+ * for reads as the record being taken away.
+ */
+async function handleRuns(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  if (!env.DB || !env.PROJECT_CONTENT) {
+    return json(
+      { error: 'Run history is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  // One project per Clerk user, the same convention `handlePlan` uses.
+  const store = new D1GenerationStore(env.DB, env.PROJECT_CONTENT);
+  try {
+    return json({ runs: await store.tracesForProject(principal.userId) });
+  } catch (error) {
+    // The history is not the run. A database that will not answer must not
+    // turn into a builder that looks broken, so this says what failed and
+    // the caller renders the rest of the page without it.
+    console.error('run history unavailable', error);
+    return json({ error: 'Run history is unavailable right now.' }, 503);
+  }
+}
+
 async function handleBillingStatus(
   request: Request,
   env: Env,
@@ -1453,6 +1493,10 @@ export default {
 
     if (pathname === '/api/publish') {
       return handlePublish(request, env);
+    }
+
+    if (pathname === '/api/runs') {
+      return handleRuns(request, env);
     }
 
     if (pathname === '/api/billing/status') {

@@ -1286,3 +1286,55 @@ body {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* --- Runs ----------------------------------------------------------------
+ * One row per finished run: what it did, then the measurements under it.
+ * The stop leads because it is the thing somebody came here to find out;
+ * the numbers are what they compare once they have found it. */
+.runs__list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.runs__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.runs__item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.runs__stop {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.runs__stop--kept {
+  color: var(--accent);
+}
+
+/* Not coloured at all: a run that had nothing to do, or that somebody
+ * stopped themselves, is neither a win nor a fault, and tinting it either
+ * way misreports it. */
+.runs__stop--failed {
+  color: var(--danger);
+}
+
+.runs__detail,
+.runs__when {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  /* The columns of digits line up between rows, which is the only way two
+   * runs can be compared by eye. */
+  font-variant-numeric: tabular-nums;
+}

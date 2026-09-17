@@ -6,8 +6,9 @@ import {
   type GenerationStore,
   type ModelProvider,
   type ProjectSnapshot,
+  type RunTrace,
 } from '@vibld/core';
-import { ProviderError } from '@vibld/ai';
+import { ProviderError, findModel } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -167,12 +168,56 @@ export async function runGeneration(
     return {
       result: {
         state: 'failed',
+        // D1 or R2, not the model: `runner.run()` and `GenerationMachine`
+        // both catch a provider failure and return rather than throw, so
+        // anything reaching here is this service's own storage.
+        stop: 'store-unavailable',
         errors: ['Generation failed unexpectedly.'],
         conflict: false,
       },
       outcome: 'failed',
     };
   }
+}
+
+/**
+ * What this run is worth recording (#167).
+ *
+ * Pure, and built from values the workflow already had in hand at
+ * settlement: the same model, tokens and cost its `generation.settled` log
+ * line has always carried, shaped into the record `RunTrace` describes so
+ * they reach the person whose run it was rather than only the server output.
+ *
+ * Nothing is derived here that the caller could get wrong later: the window
+ * is read from the catalogue at the moment of the run, because a model's
+ * window changes and the one this run actually had is the one worth seeing.
+ * An unknown model yields zero, which `contextPressure` already treats as
+ * "no window known" rather than dividing by it.
+ */
+export function traceOf(
+  params: Pick<WorkflowParams, 'projectId' | 'runId' | 'model'>,
+  result: Pick<DurableGenerationResult, 'stop'>,
+  usage: PlanUsage | undefined,
+  timing: { costMicroUsd: number; elapsedMs: number; endedAt: string },
+): RunTrace {
+  return {
+    runId: params.runId,
+    projectId: params.projectId,
+    stop: result.stop,
+    model: params.model,
+    // Zero where the provider reported nothing, which is the honest figure
+    // for "not reported". The cost beside it is not zero in that case: an
+    // unreported run settles at its full reservation (`settleBudget`), so a
+    // row with no tokens and a real cost is exactly what happened, and
+    // inventing token counts to match the money would be the lie.
+    inputTokens: usage?.inputTokens ?? 0,
+    cachedInputTokens: usage?.cacheReadInputTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? 0,
+    contextWindow: findModel(params.model)?.contextWindow ?? 0,
+    costMicroUsd: timing.costMicroUsd,
+    elapsedMs: timing.elapsedMs,
+    endedAt: timing.endedAt,
+  };
 }
 
 /**

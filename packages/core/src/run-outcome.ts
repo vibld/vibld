@@ -95,7 +95,36 @@ export type RunStop =
   /** The run's own spend ceiling was reached while it ran. */
   | 'run-budget-exceeded'
   /** Anything else the provider did that this service could not classify. */
-  | 'provider-error';
+  | 'provider-error'
+  /**
+   * The project's accepted revision moved while this run was working, so its
+   * result could not be promoted onto the base it was built against (D12).
+   *
+   * A real outcome of a run that really happened, and not a failure of the
+   * model: the work exists and is staged, it just no longer applies.
+   */
+  | 'conflict'
+  /**
+   * This service's own storage failed while the run was in flight.
+   *
+   * Separated from `provider-error` because they send a person to different
+   * places: one is the model's doing and retrying may work, the other is
+   * ours and retrying repeats it. Only D1 or R2 can reach here; the machine
+   * and the runner both catch a provider failure and return rather than
+   * throw.
+   */
+  | 'store-unavailable'
+  /**
+   * This result does not describe a run. The one value that means "nothing
+   * started", produced where `GenerationMachine` refuses a second concurrent
+   * run on the same instance and has to answer through the result type.
+   *
+   * It exists so that case is nameable rather than disguised as a provider
+   * failure, and `RunTrace` is deliberately never written for it: a refusal
+   * leaves no run record, which is the rule the two unions here exist to
+   * keep.
+   */
+  | 'not-started';
 
 /** Every refusal, so a check over all of them cannot miss a new one. */
 export const RUN_REFUSALS = [
@@ -122,6 +151,9 @@ export const RUN_STOPS = [
   'context-exceeded',
   'run-budget-exceeded',
   'provider-error',
+  'conflict',
+  'store-unavailable',
+  'not-started',
 ] as const satisfies readonly RunStop[];
 
 export function isRunRefusal(value: unknown): value is RunRefusal {
@@ -159,7 +191,24 @@ export function stopChangedTheProject(stop: RunStop): boolean {
  * asking for the same answer twice.
  */
 export function stopIsRetryable(stop: RunStop): boolean {
-  return stop === 'provider-error' || stop === 'run-budget-exceeded';
+  return (
+    stop === 'provider-error' ||
+    stop === 'run-budget-exceeded' ||
+    // The same prompt against the revision that won is a different request,
+    // and it is the one the user meant.
+    stop === 'conflict'
+  );
+}
+
+/**
+ * Whether a stop describes a run that actually happened, and therefore one
+ * worth recording.
+ *
+ * The rule that keeps a refusal out of the run history, asked as a question
+ * about the reason rather than remembered separately at each call site.
+ */
+export function stopIsRecordable(stop: RunStop): boolean {
+  return stop !== 'not-started';
 }
 
 /**
@@ -226,4 +275,24 @@ export function contextPressure(trace: RunTrace): number {
 export function cachedFraction(trace: RunTrace): number {
   if (trace.inputTokens <= 0) return 0;
   return trace.cachedInputTokens / trace.inputTokens;
+}
+
+/**
+ * Which stop a thrown value represents.
+ *
+ * Reads a `stop` the error declares about itself, which is how the provider
+ * adapter's error classes carry their own kind (`packages/ai/src/errors.ts`).
+ * Anything else is `provider-error`: an unclassified failure is not the same
+ * as a classified one, and guessing from a message would turn a reworded
+ * error into a silently different stop.
+ *
+ * Deliberately structural rather than `instanceof`. This package cannot
+ * import the adapter that defines those classes without inverting the
+ * dependency, and an `instanceof` check across a bundle boundary is a known
+ * way to get `false` for the right class.
+ */
+export function stopForError(error: unknown): RunStop {
+  if (typeof error !== 'object' || error === null) return 'provider-error';
+  const declared = (error as { stop?: unknown }).stop;
+  return isRunStop(declared) ? declared : 'provider-error';
 }

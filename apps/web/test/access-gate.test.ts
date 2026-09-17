@@ -98,6 +98,15 @@ describe('the invite gate', () => {
     );
   });
 
+  it('leaves a revoked account able to read what it already did', () => {
+    // The balance and the run history are the same argument: somebody who
+    // was invited, spent money, and then lost access still gets to see what
+    // happened to it. Gating either turns revocation into the record being
+    // taken away, and neither read grants or starts anything.
+    assert.equal(isGated('/api/billing/status', 'GET'), false);
+    assert.equal(isGated('/api/runs', 'GET'), false);
+  });
+
   it('gates every method of a route that only ever starts work', () => {
     for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
       assert.equal(isGated('/api/plan', method), true, method);

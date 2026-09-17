@@ -14,6 +14,8 @@ export {
   isRunRefusal,
   isRunStop,
   stopChangedTheProject,
+  stopForError,
+  stopIsRecordable,
   stopIsRetryable,
 } from './run-outcome.ts';
 export type { RunRefusal, RunStop, RunTrace } from './run-outcome.ts';
