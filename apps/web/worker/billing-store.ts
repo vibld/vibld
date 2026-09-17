@@ -822,6 +822,44 @@ export class BillingStore {
   }
 
   /**
+   * Where the subscription reconcile's walk has got to (#47,
+   * 0017_reconcile_cursor.sql).
+   *
+   * `undefined` means start from the top: a fresh deployment, and every run
+   * after a lap completes.
+   */
+  async reconcileCursor(id: string): Promise<string | undefined> {
+    const row = await this.#db
+      .prepare(`SELECT after_id FROM billing_reconcile_cursor WHERE id = ?1`)
+      .bind(id)
+      .first<{ after_id: string | null }>();
+    return row?.after_id ?? undefined;
+  }
+
+  /**
+   * Record the last subscription a reconcile run reached.
+   *
+   * `undefined` clears it, which is what a run that reached the end of the
+   * list writes: the next run starts from the top and the walk laps.
+   */
+  async saveReconcileCursor(
+    id: string,
+    afterId: string | undefined,
+    at: string = new Date().toISOString(),
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_reconcile_cursor (id, after_id, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+           after_id = excluded.after_id,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(id, afterId ?? null, at)
+      .run();
+  }
+
+  /**
    * Keep an event nobody could be attributed to, so the sweep can move on
    * without it being lost.
    *

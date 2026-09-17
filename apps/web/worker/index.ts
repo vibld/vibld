@@ -112,6 +112,8 @@ import {
   DEFAULT_QUERY_BUDGET,
   payoutBatchFor,
   payoutReserveFor,
+  reconcileBatchFor,
+  reconcileReserveFor,
   replayBudgetFor,
   replayStripeEvents,
   retryBatchFor,
@@ -1796,7 +1798,12 @@ export default {
           .then((reserved) =>
             retryUnattributedEvents(
               billing,
-              retryBatchFor(budget - payoutReserveFor(budget) - reserved),
+              retryBatchFor(
+                budget -
+                  payoutReserveFor(budget) -
+                  reconcileReserveFor(budget) -
+                  reserved,
+              ),
               undefined,
               reversed,
               readCharge,
@@ -1830,7 +1837,22 @@ export default {
             (error: unknown) =>
               console.error('referral payout resume failed', error),
           )
-          .then(() => reconcileSubscriptions(stripe, billing, cleared))
+          // Last, and bounded like the rest of the pass (#47). It used to
+          // take whatever the allowance had left and then keep going, which
+          // past about a hundred subscriptions meant D1 threw, the handler
+          // below caught it, and the reconcile stopped happening with
+          // nothing but a log line to say so. Its share is reserved off the
+          // top like the other two, and the walk resumes where the last run
+          // stopped rather than starting again at the same place every
+          // night.
+          .then(() =>
+            reconcileSubscriptions(
+              stripe,
+              billing,
+              cleared,
+              reconcileBatchFor(reconcileReserveFor(budget)),
+            ),
+          )
           .then(
             (result) =>
               console.log(

@@ -526,17 +526,69 @@ export function payoutReserveFor(queryBudget: number): number {
 }
 
 /**
- * What the replay may reserve, once the two phases that pay out what is
- * already owed have had their shares.
+ * D1 queries one subscription costs the nightly reconcile at its worst: the
+ * mirrored row, the customer lookup when there is none, the corrected
+ * upsert, the cleared-payment check, the recovered invoice's payment record,
+ * and the referral payout behind it. Read off `reconcileSubscriptions` and
+ * `payReferralIfEarned`.
+ */
+const MAX_QUERIES_PER_SUBSCRIPTION = 10;
+
+/**
+ * The share held back for the nightly subscription reconcile (#47).
+ *
+ * It had none. It ran last, after the three phases above had taken their
+ * shares of the allowance, and then walked every subscription the deployment
+ * knows about with nothing bounding it. Past about a hundred of them D1
+ * throws, the scheduled handler catches the throw and logs it, and the
+ * reconcile stops happening: drift goes uncorrected and a payout whose
+ * `invoice.paid` never arrived is never recovered, silently, every night
+ * after.
+ *
+ * A quarter, like the other two, and never fewer than one subscription's
+ * worth plus the query that lists them. The walk itself is a resume point
+ * rather than a bound (0017_reconcile_cursor.sql), so a share that only
+ * covers part of the list is a lap that takes several nights, not a tail
+ * nobody reaches.
+ */
+export function reconcileReserveFor(queryBudget: number): number {
+  return Math.max(
+    1 + MAX_QUERIES_PER_SUBSCRIPTION,
+    Math.floor(queryBudget / 4),
+  );
+}
+
+/**
+ * How many subscriptions one run may check, given its share.
+ *
+ * The minus one is the query that lists the mirrored ids, paid once rather
+ * than per subscription. Zero is a legitimate answer, and the cursor is what
+ * makes it safe: a run with nothing left checks nothing tonight rather than
+ * throwing partway through, and the next one starts where this one stopped.
+ */
+export function reconcileBatchFor(queryBudget: number): number {
+  return Math.max(
+    0,
+    Math.floor((queryBudget - 1) / MAX_QUERIES_PER_SUBSCRIPTION),
+  );
+}
+
+/**
+ * What the replay may reserve, once the phases that settle what is already
+ * owed have had their shares.
  *
  * The replay is last on purpose. It looks for money that may have been
- * missed; the other two hand over money already established as owed, and a
- * night that does those and reads less history is the better night.
+ * missed; the others hand over money already established as owed, or correct
+ * what a person is allowed to spend right now, and a night that does those
+ * and reads less history is the better night.
  */
 export function replayBudgetFor(queryBudget: number): number {
   return Math.max(
     0,
-    queryBudget - parkedReserveFor(queryBudget) - payoutReserveFor(queryBudget),
+    queryBudget -
+      parkedReserveFor(queryBudget) -
+      payoutReserveFor(queryBudget) -
+      reconcileReserveFor(queryBudget),
   );
 }
 

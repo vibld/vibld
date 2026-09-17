@@ -12,6 +12,8 @@ import {
   parkedReserveFor,
   payoutBatchFor,
   payoutReserveFor,
+  reconcileBatchFor,
+  reconcileReserveFor,
   replayBudgetFor,
   retryBatchFor,
   REPLAYED_EVENT_TYPES,
@@ -934,7 +936,10 @@ describe('two phases in one invocation', () => {
     assert.ok(parkedReserveFor(500) >= 6);
     assert.equal(
       replayBudgetFor(500),
-      500 - parkedReserveFor(500) - payoutReserveFor(500),
+      500 -
+        parkedReserveFor(500) -
+        payoutReserveFor(500) -
+        reconcileReserveFor(500),
     );
     // Never fewer than one row's worth, however small the allowance.
     assert.ok(parkedReserveFor(4) >= 6);
@@ -959,7 +964,7 @@ describe('two phases in one invocation', () => {
 
     assert.match(
       source,
-      /retryBatchFor\(\s*budget - payoutReserveFor\(budget\) - reserved,?\s*\)/,
+      /retryBatchFor\(\s*budget\s*-\s*payoutReserveFor\(budget\)\s*-\s*reconcileReserveFor\(budget\)\s*-\s*reserved,?\s*\)/,
       'the retry is sized from something other than what is left for it',
     );
 
@@ -996,12 +1001,20 @@ describe('the phases that hand over money already owed', () => {
     for (const budget of [40, 120, 500, 900]) {
       const parked = parkedReserveFor(budget);
       const payouts = payoutReserveFor(budget);
+      const reconcile = reconcileReserveFor(budget);
       assert.equal(
         replayBudgetFor(budget),
-        Math.max(0, budget - parked - payouts),
+        Math.max(0, budget - parked - payouts - reconcile),
       );
       assert.ok(parked >= 6, `budget ${budget} parks nothing`);
       assert.ok(payoutBatchFor(payouts) >= 1, `budget ${budget} pays nobody`);
+      // #47: the reconcile is the fourth phase and had no share at all. It
+      // ran last and took whatever was left, which is how it came to exceed
+      // the allowance on its own past about a hundred subscriptions.
+      assert.ok(
+        reconcileBatchFor(reconcile) >= 1,
+        `budget ${budget} reconciles nothing, ever`,
+      );
     }
   });
 
@@ -1023,13 +1036,19 @@ describe('the phases that hand over money already owed', () => {
         replayBudgetFor(budget),
       );
       const payouts = payoutReserveFor(budget);
+      const reconcile = reconcileReserveFor(budget);
       const worstRetry =
-        retryBatchFor(budget - payouts - result.queriesReserved) * 6;
+        retryBatchFor(budget - payouts - reconcile - result.queriesReserved) *
+        6;
       const worstPayouts = 1 + payoutBatchFor(payouts) * 6;
+      // Ten queries a subscription at its worst, plus the one that lists
+      // them. Read off `reconcileSubscriptions` and `payReferralIfEarned`.
+      const worstReconcile = 1 + reconcileBatchFor(reconcile) * 10;
 
       assert.ok(
-        result.queriesReserved + worstRetry + worstPayouts <= budget,
-        `budget ${budget} is exceeded by the three phases that share it`,
+        result.queriesReserved + worstRetry + worstPayouts + worstReconcile <=
+          budget,
+        `budget ${budget} is exceeded by the four phases that share it`,
       );
     }
   });
@@ -1047,6 +1066,28 @@ describe('the phases that hand over money already owed', () => {
       source,
       /resumeStrandedPayouts\(payout\)/,
       'the payout resume takes its unbounded default again',
+    );
+  });
+
+  it('is what the nightly pass actually hands the reconcile', async () => {
+    // #47. The reconcile's default is every subscription the deployment
+    // knows about, which is what it used to be called with: past about a
+    // hundred it exceeds the invocation on its own, D1 throws, and the
+    // handler's own catch turns that into a log line nobody reads.
+    const source = await readFile(
+      fileURLToPath(new URL('../worker/index.ts', import.meta.url)),
+      'utf8',
+    );
+
+    assert.match(
+      source,
+      /reconcileBatchFor\(reconcileReserveFor\(budget\)\)/,
+      'the reconcile is sized from something other than its own share',
+    );
+    assert.doesNotMatch(
+      source,
+      /reconcileSubscriptions\(stripe, billing, cleared\)/,
+      'the reconcile takes its unbounded default again',
     );
   });
 });
