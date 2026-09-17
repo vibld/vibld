@@ -131,3 +131,39 @@ describe('brand.css', () => {
     assert.ok(TOKENS.length >= 10);
   });
 });
+
+describe('the two dark blocks', () => {
+  /**
+   * The declarations of one block, by selector, with comments already gone.
+   *
+   * Values only: the two blocks are formatted differently by the formatter,
+   * and whitespace is not the thing that can drift.
+   */
+  function declarationsOf(selector: string): Map<string, string> {
+    const at = CSS.indexOf(selector);
+    assert.ok(at >= 0, `${selector} is gone from brand.css`);
+    const open = CSS.indexOf('{', at);
+    const close = CSS.indexOf('}', open);
+    const declarations = new Map<string, string>();
+    for (const line of CSS.slice(open + 1, close).split(';')) {
+      const [name, value] = line.split(':');
+      if (name?.trim().startsWith('--')) {
+        declarations.set(name.trim(), value!.trim());
+      }
+    }
+    return declarations;
+  }
+
+  it('say exactly the same thing', () => {
+    // CSS has no way to name one set of values and apply it from two
+    // conditions, so dark is written twice: once for the system preference,
+    // once for a reader who chose it. The check above measures the first
+    // against the palette; this is what stops the second drifting away from
+    // it, which would give one of the two paths a theme nobody designed.
+    const fromSystem = declarationsOf(":root:not([data-theme='light'])");
+    const fromChoice = declarationsOf(":root[data-theme='dark']");
+
+    assert.ok(fromSystem.size > 0, 'the dark media query declares nothing');
+    assert.deepEqual([...fromChoice.entries()], [...fromSystem.entries()]);
+  });
+});

@@ -691,36 +691,31 @@ body {
   border-bottom: 1px solid var(--edge);
 }
 
-/* The mark: a gradient tile rather than a flat swatch, so the brand reads as
-   a product and not as a placeholder. */
+/*
+ * The mark, on the bar, with no tile behind it.
+ *
+ * There was an ultramarine tile here, with the mark's inks and blend
+ * overridden inside it. It was internally consistent and it fought the
+ * brand: in dark mode the page ground is a blue at hue 265 and the tile was
+ * a lighter blue at the same hue, so the first thing on the page was a
+ * slightly-off blue block next to a coral button, and the two most
+ * saturated things in the header disagreed.
+ *
+ * Nothing needs overriding once the tile is gone. The bar is `--surface`,
+ * which is the paper family in light and the dark family in dark, and the
+ * mark's own tokens are already picked per theme for exactly that ground:
+ * ultramarine carries the shape on paper, newsprint carries it on the dark
+ * one, and coral stays the ghost in both. Which is the direction the brand
+ * is named for.
+ */
 .shell__logo {
   width: 2.15rem;
   height: 2.15rem;
-  border-radius: var(--radius);
-  background: var(--vibld-ultramarine);
-  color: var(--vibld-newsprint);
-  /*
-   * A tile, not a bare mark. The header bar is a surface colour and the
-   * mark's two inks are picked for paper, so an untiled mark loses one of
-   * them here. On this ground the newsprint impression carries the shape and
-   * coral stays the ghost, which is the dark-theme arrangement.
-   */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  --vibld-mark-ink: var(--vibld-newsprint);
-  --vibld-mark-offset: var(--vibld-coral);
-  /*
-   * And the blend, not only the inks. This tile is a dark ground whatever the
-   * page theme is, so in light mode it would otherwise inherit `multiply` and
-   * multiply a near-white stroke into ultramarine, giving the ground back and
-   * erasing the mark. That is the same failure `screen` was introduced for,
-   * one scope further in.
-   */
-  --vibld-mark-blend: screen;
-  box-shadow:
-    0 0 0 1px var(--brand-24),
-    0 6px 18px -6px var(--brand-40);
+  background: none;
+  box-shadow: none;
 }
 
 .shell__name {
@@ -1414,4 +1409,141 @@ body {
 
 .github-diff__paths li {
   overflow-wrap: anywhere;
+}
+
+/* --- Header controls -----------------------------------------------------
+ * Three compact controls at the end of the bar rather than four panels
+ * spread across it. Everything that used to live here is behind the gear. */
+.shell__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.iconbutton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.15rem;
+  height: 2.15rem;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+
+.iconbutton:hover {
+  color: var(--fg);
+  background: var(--brand-8);
+  border-color: var(--line);
+}
+
+.iconbutton:focus-visible {
+  /* The accent ink, not the accent: coral composites to about 1.9:1 on
+     paper, which is a focus indicator nobody can see. */
+  outline: 2px solid var(--vibld-accent-ink);
+  outline-offset: 2px;
+}
+
+.iconbutton[aria-expanded='true'] {
+  color: var(--fg);
+  background: var(--brand-16);
+  border-color: var(--line);
+}
+
+/* --- Settings ------------------------------------------------------------
+ * A popover, anchored to the gear. Wide enough for the GitHub panel, which
+ * is the largest thing in it, and capped so a long repository list scrolls
+ * rather than running off the bottom of the window. */
+.settings {
+  position: relative;
+}
+
+.settings__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 20;
+  width: min(26rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100vh - 6rem));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.settings__section + .settings__section {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.settings__heading {
+  margin: 0;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.settings__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+/* --- Run stats -----------------------------------------------------------
+ * Folded away: reference rather than news, and it was a permanent band
+ * across the bottom of every screen. */
+.runstats {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.runstats__summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+}
+
+.runstats__summary::-webkit-details-marker {
+  display: none;
+}
+
+.runstats__summary::before {
+  content: '▸ ';
+}
+
+.runstats[open] .runstats__summary::before {
+  content: '▾ ';
+}
+
+.runstats__summary:focus-visible {
+  outline: 2px solid var(--vibld-accent-ink);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.runstats__figures {
+  display: block;
+  padding-top: 0.25rem;
+  font-variant-numeric: tabular-nums;
 }
