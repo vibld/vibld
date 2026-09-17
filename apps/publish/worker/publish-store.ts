@@ -534,6 +534,82 @@ export class PublishStore {
   }
 
   /**
+   * Collect objects that no catalogue row names (#177).
+   *
+   * Everything else in this file keeps D1 ahead of R2 so that bytes are
+   * never unreachable: `putFiles` catalogues a revision before writing one,
+   * and every collector marks the row before deleting anything. That holds
+   * against every race where both sides are D1 writes, because D1
+   * serialises them. It does not hold against the one where a side is in
+   * R2: a listing is a round trip, and no condition on a row can tell a
+   * collector that a write it cannot see is still in the air.
+   *
+   * So a publish whose upload runs long can have its revision collected
+   * underneath it and then land one more object, under a prefix nothing
+   * names any more. That object is unreachable rather than wrong: serving
+   * resolves through `published_projects.generation`, and a collected
+   * revision has no row to point at. What it costs is storage, for ever.
+   *
+   * This is the other half of that: rather than coordinating the writer and
+   * the collector, which needs a handshake across two stores that cannot
+   * share a write, it comes back afterwards and asks the only question that
+   * settles it. Is there a row for these bytes. No row means nothing can
+   * ever promote them and nothing will ever come back for them.
+   *
+   * Deriving the prefixes from object keys rather than listing with a
+   * delimiter, so this needs nothing of `PublishR2Bucket` that the rest of
+   * the file does not already use.
+   *
+   * Bounded, like the nightly work in apps/web: a sweep that cannot finish
+   * is one that dies partway and leaves the same mess. It starts from the
+   * top each run rather than keeping a cursor, because orphans are rare and
+   * a cursor is another thing that can be wrong.
+   */
+  async sweepOrphans(
+    maxGenerations = 20,
+  ): Promise<{ examined: number; collected: string[] }> {
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const page = await this.#bucket.list({
+        prefix: 'published/',
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      for (const object of page.objects) {
+        // published / <slug> / <generation> / <path...>
+        const parts = object.key.split('/');
+        if (parts.length < 4) continue;
+        const [, slug, generation] = parts;
+        if (slug === undefined || generation === undefined) continue;
+        seen.add(`${slug}/${generation}`);
+        if (seen.size >= maxGenerations) break;
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor !== undefined && seen.size < maxGenerations);
+
+    const collected: string[] = [];
+    for (const pair of seen) {
+      const slash = pair.indexOf('/');
+      const slug = pair.slice(0, slash);
+      const generation = pair.slice(slash + 1);
+      const row = await this.#db
+        .prepare(
+          `SELECT 1 FROM published_generations
+           WHERE slug = ?1 AND generation = ?2`,
+        )
+        .bind(slug, generation)
+        .first<{ 1: number }>();
+      // A row, of any kind, means somebody still owns these bytes: a
+      // revision being uploaded, one serving, one part way through being
+      // collected. Only the complete absence of one makes them nobody's.
+      if (row !== null) continue;
+      await this.discard(slug, generation);
+      collected.push(pair);
+    }
+    return { examined: seen.size, collected };
+  }
+
+  /**
    * Whether this slug is still marked down with exactly this stamp.
    *
    * The stamp is the guard against a republish that arrives mid-takedown:
