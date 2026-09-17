@@ -327,7 +327,7 @@ export async function reconcileSubscriptions(
    * subscribes. Sorting makes the walk a walk rather than a re-shuffle.
    */
   const all = [...found.ids].sort();
-  const { afterId: after, attemptedThrough } =
+  const { afterId: after, attempted } =
     await store.reconcileCursor(RECONCILE_WALK);
   // The first id past where the last run stopped. An id that has since
   // disappeared costs nothing: the search is for the next one above it.
@@ -343,20 +343,22 @@ export async function reconcileSubscriptions(
    *
    * A failure used to be walked straight past: the cursor advanced over the
    * whole slice whatever happened inside it, so the subscription was not
-   * looked at again until the walk lapped (0019_reconcile_attempted_through.sql).
+   * looked at again until the walk lapped (0019_reconcile_attempted.sql).
    */
   let firstFailed = -1;
   /**
    * The earliest failure this run is seeing for the first time.
    *
-   * "First time" is settled by the watermark rather than by one id, because
-   * two ids in a slice can both be on a second attempt. A boolean could not
-   * tell a retry from a first failure at all; a single id told them apart
-   * for the earliest casualty only, so a second failure in the same slice
-   * parked the cursor again and took a third attempt, and a slice of
-   * failing subscriptions advanced one id a night with everything healthy
-   * behind them waiting. Every id at or below `attemptedThrough` was
-   * attempted by the run that parked (0019_reconcile_attempted_through.sql).
+   * "First time" is settled by membership of the set the parked run
+   * attempted, which is the only thing that answers it
+   * (0019_reconcile_attempted.sql). A boolean could not tell a retry from a
+   * first failure at all. A single id told them apart for the earliest
+   * casualty only, so a second failure in the same slice parked the cursor
+   * again and a slice of failing subscriptions advanced one id a night. A
+   * watermark fixed that and assumed the membership of a range, which
+   * changes between runs: Stripe ids are random, so a subscription created
+   * overnight can sort below the mark and, failing on its first
+   * appearance, be read as a retry and walked past.
    */
   let firstNewFailure = -1;
   for (const [index, id] of ids.entries()) {
@@ -428,10 +430,7 @@ export async function reconcileSubscriptions(
       console.error('reconcile: failed to check subscription', id, error);
       failed += 1;
       if (firstFailed === -1) firstFailed = index;
-      if (
-        firstNewFailure === -1 &&
-        (attemptedThrough === undefined || id > attemptedThrough)
-      ) {
+      if (firstNewFailure === -1 && !attempted.has(id)) {
         firstNewFailure = index;
       }
     }
@@ -449,7 +448,7 @@ export async function reconcileSubscriptions(
    * walk comes round to the beginning instead of stopping at the end.
    */
   /*
-   * One retry, then past it (0019_reconcile_attempted_through.sql).
+   * One retry, then past it (0019_reconcile_attempted.sql).
    *
    * A run that saw a subscription throw parks the cursor before it, so the
    * next run starts there rather than leaving a transient failure until the
@@ -462,9 +461,9 @@ export async function reconcileSubscriptions(
    * reporting the failures in `failed` and picking them up again on the
    * next lap.
    *
-   * The watermark is the whole slice rather than its first casualty, so a
-   * slice with several failures retries all of them in one night instead of
-   * parking once per failure and advancing one id a night.
+   * What is recorded is the whole slice rather than its first casualty, so
+   * a slice with several failures retries all of them in one night instead
+   * of parking once per failure and advancing one id a night.
    */
   const holding = firstNewFailure !== -1;
   const resumeAt = holding
@@ -478,11 +477,13 @@ export async function reconcileSubscriptions(
   await store.saveReconcileCursor(
     RECONCILE_WALK,
     resumeAt,
-    // How far this run got, not where it stopped: the loop attempts every
-    // id in the slice whatever fails inside it, so all of them have now had
-    // an attempt and the next run can tell "these have had their second
-    // chance" from "this one has not had a first".
-    holding ? ids.at(-1) : undefined,
+    // What this run attempted, not where it stopped: the loop attempts
+    // every id in the slice whatever fails inside it, so all of them have
+    // now had an attempt and the next run can tell "these have had their
+    // second chance" from "this one has not had a first". Named rather than
+    // bounded, because a subscription created overnight can sort anywhere
+    // and a range would count it as attempted without it ever having been.
+    holding ? ids : undefined,
   );
 
   return {

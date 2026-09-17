@@ -772,6 +772,52 @@ describe('the reconcile walk', () => {
     );
   });
 
+  it('gives a subscription created overnight its own first attempt', async () => {
+    // What a range could not do, however it was drawn. Recording "attempted
+    // up to sub_c" is true of the ids that were there, and the set changes
+    // between runs: Stripe ids are random, so a subscription created
+    // overnight can sort anywhere, here between sub_b and sub_c. Failing on
+    // its first appearance it would be inside the attempted range, read as
+    // a retry, and walked past with no attempt of its own.
+    //
+    // Membership is the question, so membership is what is stored.
+    const statuses = [...FIVE];
+    const store = await storeWith(statuses);
+    const stripe = stripeServing(statuses);
+    const real = stripe.subscriptions.retrieve.bind(stripe.subscriptions);
+    let broken = new Set(['sub_b']);
+    const seen: string[] = [];
+    stripe.subscriptions.retrieve = (async (id: string) => {
+      seen.push(id);
+      if (broken.has(id)) throw new Error('not today');
+      return real(id);
+    }) as typeof stripe.subscriptions.retrieve;
+
+    // Run one: a, b, c. b fails, so the walk parks before it.
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+
+    // Overnight, somebody subscribes, and their id sorts inside the ground
+    // the parked run covered.
+    statuses.push('bb');
+    await store.upsertSubscription(record('bb'));
+
+    // Run two: b is fine now, and the newcomer fails on first sight.
+    broken = new Set(['sub_bb']);
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+    assert.deepEqual(seen, ['sub_b', 'sub_bb', 'sub_c']);
+
+    // Run three has to come back to it.
+    broken = new Set();
+    seen.length = 0;
+    await reconcileSubscriptions(stripe, store, undefined, 3);
+    assert.deepEqual(
+      seen,
+      ['sub_bb', 'sub_c', 'sub_d'],
+      'a subscription that had never been attempted was counted as retried',
+    );
+  });
+
   it('stays put when the first subscription in the slice throws', async () => {
     // The edge the arithmetic gets wrong if it reaches for `ids[-1]`: the
     // failure is the first thing in the slice, so there is no earlier id to
