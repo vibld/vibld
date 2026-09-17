@@ -81,11 +81,14 @@ describe('PublishStore', () => {
     const store = newStore();
     const result = await store.claimSlug('acme', 'proj-1', 'user-1');
     assert.deepEqual(result, { claimed: true });
+    // Claimed, not published. The name is held and nothing is serving
+    // under it, which is what `down` says. Calling it live would send the
+    // owner to an address that answers 404.
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
       userId: 'user-1',
-      live: true,
-      state: 'live',
+      live: false,
+      state: 'down',
     });
     // Claimed, not published. The name is held and nothing serves under
     // it: a slug that resolved here would answer an empty prefix, which
@@ -100,11 +103,14 @@ describe('PublishStore', () => {
     const result = await store.claimSlug('acme', 'proj-2', 'user-2');
     assert.deepEqual(result, { claimed: false, reason: 'slug-taken' });
     // The original claim is untouched.
+    // Claimed, not published. The name is held and nothing is serving
+    // under it, which is what `down` says. Calling it live would send the
+    // owner to an address that answers 404.
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
       userId: 'user-1',
-      live: true,
-      state: 'live',
+      live: false,
+      state: 'down',
     });
   });
 
@@ -160,6 +166,7 @@ describe('PublishStore', () => {
   it('promoting a revision leaves the slug mapping alone', async () => {
     const store = newStore();
     await store.claimSlug('acme', 'proj-1', 'user-1');
+    // Promoted, so there is a revision behind the name and it reads live.
     assert.equal(await store.promote('acme', randomUUID()), true);
     assert.deepEqual(await store.slugForProject('proj-1'), {
       slug: 'acme',
@@ -192,6 +199,70 @@ describe('what a slug keeps', () => {
       { path: 'index.html', content: `<h1>v${n}</h1>` },
     ]);
   }
+
+  it('leaves nothing behind when one file of a revision fails to write', async () => {
+    // The writes run together, so a rejection arrives while others are
+    // still in flight. Those that land afterwards belong to a revision that
+    // will never be promoted: not catalogued, so pruning does not see them,
+    // and not pointed at, so a takedown does not either.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const good = await version(store, 1);
+
+    const realPut = bucket.put.bind(bucket);
+    bucket.put = async (key: string, content: string) => {
+      if (key.endsWith('two.html')) throw new Error('R2 said no');
+      return realPut(key, content);
+    };
+
+    await assert.rejects(() =>
+      store.putFiles('acme', 'gen-doomed', [
+        { path: 'one.html', content: 'one' },
+        { path: 'two.html', content: 'two' },
+        { path: 'three.html', content: 'three' },
+      ]),
+    );
+
+    assert.deepEqual(
+      bucket.keys(),
+      [`published/acme/${good}/index.html`],
+      'a revision that never published left its files behind',
+    );
+  });
+
+  it('never serves a revision it has not catalogued', async () => {
+    // The pointer and the catalogue were two writes. A failure between them
+    // left a revision serving that `published_generations` did not list,
+    // and both retention and the owner's takedown enumerate only that
+    // table: the takedown would clear the pointer and leave the bytes in R2
+    // for ever, with nothing left that names them.
+    //
+    // The db here fails every batch. If either write happened outside one,
+    // this would see it.
+    const bucket = new InMemoryR2Bucket();
+    const real = new SqliteD1Database(SCHEMA);
+    const brittle = {
+      prepare: real.prepare.bind(real),
+      batch: async () => {
+        throw new Error('D1 fell over');
+      },
+    };
+    const store = new PublishStore(real, bucket);
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    const guarded = new PublishStore(brittle, bucket);
+
+    await guarded.putFiles('acme', 'gen-1', [
+      { path: 'index.html', content: '<h1>v1</h1>' },
+    ]);
+    await assert.rejects(() => guarded.promote('acme', 'gen-1'));
+
+    assert.equal(
+      await store.resolveSlug('acme'),
+      undefined,
+      'it served a revision nothing had catalogued',
+    );
+    assert.deepEqual(await store.revisions('acme'), []);
+  });
 
   it('serves the newest revision and keeps the ones before it', async () => {
     const { store } = stored();

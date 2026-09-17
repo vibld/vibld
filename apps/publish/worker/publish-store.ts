@@ -71,6 +71,29 @@ interface PublishedProjectRow {
  */
 export type PublishState = 'live' | 'down' | 'held';
 
+/**
+ * What a row means to whoever is asking about the site.
+ *
+ * One function because there were two copies of this and they drifted:
+ * `0021_publish_generations.sql` gave a row a way to have no revision
+ * behind it, and only the serving path was taught about it.
+ */
+function stateOf(
+  row: Pick<PublishedProjectRow, 'unpublished_at' | 'held_at' | 'generation'>,
+): PublishState {
+  // A hold outranks a takedown: an owner who took their own site down and
+  // was then held must be told the second thing, because it is the one
+  // publishing again will not clear.
+  if (row.held_at !== null) return 'held';
+  // Nothing promoted is nothing serving. A slug is claimed before its first
+  // files are written, and a first publish that failed, or lost the race to
+  // a hold, leaves the claim with no revision behind it. Calling that live
+  // sends the owner to an address that answers 404, and tells an operator
+  // who has just released a hold that the site is back when it never was.
+  if (row.generation === null) return 'down';
+  return row.unpublished_at === null ? 'live' : 'down';
+}
+
 export type ClaimResult =
   { claimed: true } | { claimed: false; reason: 'slug-taken' };
 
@@ -99,25 +122,17 @@ export class PublishStore {
   > {
     const row = await this.#db
       .prepare(
-        `SELECT slug, user_id, unpublished_at, held_at FROM published_projects WHERE project_id = ?1`,
+        `SELECT slug, user_id, unpublished_at, held_at, generation FROM published_projects WHERE project_id = ?1`,
       )
       .bind(projectId)
       .first<
         Pick<
           PublishedProjectRow,
-          'slug' | 'user_id' | 'unpublished_at' | 'held_at'
+          'slug' | 'user_id' | 'unpublished_at' | 'held_at' | 'generation'
         >
       >();
     if (!row) return undefined;
-    // A hold outranks a takedown: an owner who took their own site down and
-    // was then held must be told the second thing, because it is the one
-    // publishing again will not clear.
-    const state: PublishState =
-      row.held_at !== null
-        ? 'held'
-        : row.unpublished_at === null
-          ? 'live'
-          : 'down';
+    const state = stateOf(row);
     return {
       slug: row.slug,
       userId: row.user_id,
@@ -211,11 +226,28 @@ export class PublishStore {
     generation: string,
     files: ProjectFile[],
   ): Promise<void> {
-    await Promise.all(
+    // Settled rather than raced to the first rejection. `Promise.all`
+    // rejects as soon as one write fails while the others are still in
+    // flight, and those that land afterwards are objects under a revision
+    // that will never be promoted: not catalogued, so pruning does not see
+    // them, and not pointed at, so a takedown does not either. Storage
+    // nothing will ever come back for.
+    const writes = await Promise.allSettled(
       files.map((file) =>
         this.#bucket.put(objectKey(slug, generation, file.path), file.content),
       ),
     );
+    const failed = writes.find((write) => write.status === 'rejected');
+    if (failed === undefined) return;
+
+    // Clear up before reporting the failure, so the caller does not have to
+    // know that a half-written revision is a thing that can exist. The
+    // revision is this call's own and nothing points at it, so this cannot
+    // touch what is serving.
+    await this.discard(slug, generation);
+    throw failed.reason instanceof Error
+      ? failed.reason
+      : new Error('The files could not be written.');
   }
 
   /**
@@ -244,29 +276,39 @@ export class PublishStore {
     at = new Date(),
   ): Promise<boolean> {
     const now = at.toISOString();
-    const moved = await this.#db
-      .prepare(
-        `UPDATE published_projects
-         SET generation = ?1, unpublished_at = NULL, updated_at = ?2
-         WHERE slug = ?3 AND held_at IS NULL`,
-      )
-      .bind(generation, now, slug)
-      .run();
-    if (moved.meta.changes === 0) return false;
+    // One batch, so a revision cannot serve without being catalogued.
+    //
+    // These were two writes, with a comment claiming the cost of a failure
+    // between them was one wasted retention slot. That was wrong, and
+    // wrong in the direction that matters: `unpublish` and pruning both
+    // enumerate `published_generations`, so a live revision missing from it
+    // is one a later takedown clears the pointer to and never deletes. The
+    // owner asks for their work to be gone and its bytes stay in R2 for
+    // ever, with nothing left that names them.
+    //
+    // The insert runs even when the update matches nothing, because a batch
+    // cannot be conditional halfway through. That is the harmless
+    // direction: it catalogues a revision that is not serving, which is
+    // exactly what the caller's `discard` removes, and what pruning would
+    // remove if the caller never got that far.
+    const [moved] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE published_projects
+           SET generation = ?1, unpublished_at = NULL, updated_at = ?2
+           WHERE slug = ?3 AND held_at IS NULL`,
+        )
+        .bind(generation, now, slug),
+      this.#db
+        .prepare(
+          `INSERT INTO published_generations (slug, generation, created_at)
+           VALUES (?1, ?2, ?3)
+           ON CONFLICT(slug, generation) DO NOTHING`,
+        )
+        .bind(slug, generation, now),
+    ]);
+    if (moved?.meta.changes === 0) return false;
 
-    // After the pointer, not with it. A failure here leaves the live
-    // revision untracked, so retention counts one fewer and keeps one more
-    // than it meant to. The other order would leave a revision listed as
-    // kept that nothing points at, and pruning would work from a list that
-    // does not describe what is serving.
-    await this.#db
-      .prepare(
-        `INSERT INTO published_generations (slug, generation, created_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(slug, generation) DO NOTHING`,
-      )
-      .bind(slug, generation, now)
-      .run();
     await this.#prune(slug);
     return true;
   }
@@ -588,12 +630,7 @@ export class PublishStore {
         }
       >();
     if (!row) return undefined;
-    const state: PublishState =
-      row.held_at !== null
-        ? 'held'
-        : row.unpublished_at === null
-          ? 'live'
-          : 'down';
+    const state = stateOf(row);
     return {
       slug: row.slug,
       projectId: row.project_id,
