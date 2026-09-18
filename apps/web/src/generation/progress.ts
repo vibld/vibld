@@ -99,11 +99,26 @@ export function reassurance(progress: GenerationProgress): string | null {
   return 'Building a whole project takes several minutes. You can cancel at any time.';
 }
 
+/** How each stage opens the spoken announcement. */
+const STAGE_ANNOUNCEMENTS: Record<GenerationStage, string> = {
+  queued: 'Still waiting for a slot',
+  running: 'Still building your project',
+};
+
 /**
  * Text for the polite live region, or null before the first boundary.
  *
+ * Stage-aware, like the visible line and for the same reason (#188 review).
+ * This said "Still generating" whatever the run was doing, so somebody
+ * using a screen reader heard a claim that the run was under way while it
+ * sat in a queue, and heard it again for a state the Worker had
+ * deliberately declined to name. A meter that is careful on screen and
+ * careless out loud is not careful.
+ *
  * Bucketed to `ANNOUNCE_INTERVAL_MS` so the string is stable between
- * announcements -- see the constant.
+ * announcements -- see the constant. A change of stage does change the
+ * string mid-bucket, which is the one interruption worth making: it is
+ * news, not a counter ticking.
  */
 export function progressAnnouncement(
   progress: GenerationProgress | null,
@@ -115,5 +130,10 @@ export function progressAnnouncement(
       : 0;
   const buckets = Math.floor(elapsed / ANNOUNCE_INTERVAL_MS);
   if (buckets < 1) return null;
-  return `Still generating, ${formatElapsed(buckets * ANNOUNCE_INTERVAL_MS)} elapsed.`;
+  const lead = progress.stage
+    ? STAGE_ANNOUNCEMENTS[progress.stage]
+    : // No stage means the Worker has no honest word for the run's state.
+      // "Still working" claims only that it has not finished.
+      'Still working';
+  return `${lead}, ${formatElapsed(buckets * ANNOUNCE_INTERVAL_MS)} elapsed.`;
 }

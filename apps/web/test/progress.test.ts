@@ -94,21 +94,50 @@ describe('progressAnnouncement', () => {
     const first = progressAnnouncement({
       characters: 1_000,
       elapsedMs: ANNOUNCE_INTERVAL_MS,
+      stage: 'running',
     });
     const later = progressAnnouncement({
       characters: 8_000,
       elapsedMs: ANNOUNCE_INTERVAL_MS + ANNOUNCE_INTERVAL_MS - 1,
+      stage: 'running',
     });
     assert.equal(first, later);
-    assert.match(String(first), /Still generating/);
   });
 
   it('advances at the next boundary', () => {
     const second = progressAnnouncement({
       characters: 20_000,
       elapsedMs: ANNOUNCE_INTERVAL_MS * 2 + 500,
+      stage: 'running',
     });
-    assert.equal(second, 'Still generating, 1:00 elapsed.');
+    assert.equal(second, 'Still building your project, 1:00 elapsed.');
+  });
+
+  it('tells a queue apart from a run, out loud as well as on screen', () => {
+    // This said "Still generating" whatever the run was doing (#188
+    // review), so somebody using a screen reader was told the run was
+    // under way while it sat in a queue. A meter that is careful on
+    // screen and careless out loud is not careful.
+    const queued = String(
+      progressAnnouncement({
+        elapsedMs: ANNOUNCE_INTERVAL_MS,
+        stage: 'queued',
+      }),
+    );
+    assert.match(queued, /waiting for a slot/);
+    assert.doesNotMatch(queued, /building|generating/i);
+  });
+
+  it('claims no work it cannot see when there is no stage', () => {
+    const unnamed = String(
+      progressAnnouncement({ elapsedMs: ANNOUNCE_INTERVAL_MS }),
+    );
+    assert.match(unnamed, /0:30 elapsed/);
+    assert.doesNotMatch(
+      unnamed,
+      /building|generating|queue/i,
+      'a run in a state the Worker cannot name was announced as doing something specific',
+    );
   });
 });
 
