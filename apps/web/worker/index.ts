@@ -1,5 +1,5 @@
 import {
-  DEFAULT_MAX_TOKENS,
+  maxTokensFor,
   cacheRatesFor,
   configuredProviders,
   findModel,
@@ -970,7 +970,12 @@ async function handlePlan(
   );
   const worstCase = worstCaseMicroUsd(
     prices,
-    DEFAULT_MAX_TOKENS,
+    // The same ceiling the provider will actually ask this model for, not a
+    // flat constant. A reservation is a promise that the run cannot cost
+    // more than this, so the two numbers have to be one number: reserving
+    // for 64000 tokens while letting the model emit 384000 is a run that
+    // outspends its own reservation six times over.
+    maxTokensFor(effectiveModel),
     // Prompt plus the base project that goes with it. Both are what the
     // guard above has already refused to exceed.
     DEFAULT_LIMITS.maxPromptChars +

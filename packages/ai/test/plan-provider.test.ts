@@ -3,8 +3,11 @@ import { describe, it } from 'node:test';
 import {
   PlanProvider,
   DEFAULT_MAX_TOKENS,
+  RUN_OUTPUT_RESERVE_MICRO_USD,
   buildUserPrompt,
+  maxTokensFor,
 } from '../src/plan-provider.ts';
+import { MODEL_CATALOGUE } from '../src/model-catalogue.ts';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '../src/limits.ts';
 import { readStructuredOutput } from '../src/anthropic-client.ts';
 import {
@@ -444,5 +447,86 @@ describe('reference material', () => {
   it('is trusted at whatever length it arrives -- the fetcher already truncated it', () => {
     const long = 'z'.repeat(50_000);
     assert.doesNotThrow(() => buildUserPrompt(request, null, null, long));
+  });
+});
+
+/**
+ * What one run may ask the model for (#179).
+ *
+ * This was a flat 64000 tokens for every model. It was chosen against Claude
+ * Opus 5, where it reserves $1.60, and then the deployment moved to DeepSeek
+ * Flash at a twentieth of the price and the number stayed. A request for an
+ * ordinary multi-page site came back truncated while the run was reserving
+ * eight cents of a dollar it was allowed to spend.
+ *
+ * So the constant is the dollar reserve and the token count follows the
+ * model. The property worth pinning is not any one number: it is that
+ * changing providers cannot quietly re-introduce this, because nobody has to
+ * remember to edit anything.
+ */
+describe('the output ceiling a run asks for', () => {
+  it('leaves Claude Opus 5 exactly where it was', () => {
+    // The model the old flat number was chosen for. If this moves, the
+    // reserve was changed rather than the derivation, and every Anthropic
+    // deployment just had its per-run cost altered.
+    assert.equal(maxTokensFor('claude-opus-5'), 64000);
+  });
+
+  it('gives a cheaper model the room its price pays for', () => {
+    // DeepSeek Flash is what production actually runs. At 1.2 micro-USD a
+    // token the same $1.60 buys more than the model can produce, so it gets
+    // the model's own ceiling: six times the old flat number, reserving 46
+    // cents rather than the $1.60 an Opus run holds.
+    assert.equal(maxTokensFor('deepseek-flash'), 384_000);
+  });
+
+  it('never asks for more than the model will produce', () => {
+    // Past its own ceiling a request is rejected outright rather than
+    // truncated, which reads as an outage rather than as the wrong model.
+    // Haiku can afford far more than it can emit.
+    assert.equal(maxTokensFor('claude-haiku-4-5'), 64000);
+  });
+
+  it('holds every model inside the same dollar reserve', () => {
+    // The actual invariant, stated over the whole catalogue rather than the
+    // three models that happen to be interesting today. A model added later
+    // cannot make a run reserve more than this without the test saying so.
+    for (const model of MODEL_CATALOGUE) {
+      const reserved = maxTokensFor(model.id) * model.outputMicroUsd;
+      assert.ok(
+        reserved <= RUN_OUTPUT_RESERVE_MICRO_USD,
+        `${model.id} would reserve ${reserved} micro-USD, over the ceiling`,
+      );
+    }
+  });
+
+  it('falls back for a model the catalogue does not hold', () => {
+    // A test double, in practice. Nothing to price it from, so it keeps the
+    // old flat number rather than dividing by an undefined rate.
+    assert.equal(maxTokensFor('some-fake-model'), 64000);
+  });
+
+  it('is what a provider actually sends', () => {
+    // The derivation is worth nothing if the constructor ignores it.
+    const calls: number[] = [];
+    const client = {
+      id: 'deepseek',
+      async createPlan(request: { maxTokens: number }) {
+        calls.push(request.maxTokens);
+        throw new Error('stop here: the ceiling is what this is about');
+      },
+    };
+    const provider = new PlanProvider(
+      client as unknown as ConstructorParameters<typeof PlanProvider>[0],
+      { model: 'deepseek-flash' },
+    );
+    return provider
+      .generate({ prompt: 'a site' } as unknown as Parameters<
+        typeof provider.generate
+      >[0])
+      .then(
+        () => assert.fail('expected the fake client to throw'),
+        () => assert.deepEqual(calls, [384_000]),
+      );
   });
 });

@@ -11,7 +11,8 @@ import {
   worstCaseMicroUsd,
 } from '../worker/spend.ts';
 import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
-import { DEFAULT_MAX_TOKENS } from '@vibld/ai';
+import { DEFAULT_MAX_TOKENS, maxTokensFor } from '@vibld/ai';
+import { MODEL_CATALOGUE } from '@vibld/ai';
 import type { TokenPrices } from '../worker/spend.ts';
 
 /**
@@ -311,5 +312,46 @@ describe('the chosen model prices its own run', () => {
       parsePrices({}, 'deepseek', undefined),
       PROVIDER_PRICES.deepseek,
     );
+  });
+});
+
+/**
+ * The reservation and the request are one number (#179).
+ *
+ * A reservation is a promise that a run cannot cost more than it held back.
+ * That only holds while the token ceiling the budget prices and the token
+ * ceiling the provider asks the model for are the same number.
+ *
+ * They were not, for one commit. The provider learned to ask each model for
+ * what its price affords (384000 on DeepSeek Flash, where a flat 64000 was
+ * leaving five sixths of the reserve unspent and truncating real projects),
+ * and the worst case here still said 64000. Every Flash run would have been
+ * allowed to emit six times what it reserved.
+ *
+ * Pinned over the whole catalogue rather than one model, because the way
+ * this breaks is somebody changing the provider and not this file. That is
+ * the mistake that produced the truncation in the first place.
+ */
+describe('what a run reserves against what it may spend', () => {
+  it('prices the ceiling the provider will actually ask for', () => {
+    for (const model of MODEL_CATALOGUE) {
+      const ceiling = maxTokensFor(model.id);
+      const reserved = worstCaseMicroUsd(
+        {
+          inputMicroUsd: model.inputMicroUsd,
+          outputMicroUsd: model.outputMicroUsd,
+          cachedInputMicroUsd: model.inputMicroUsd,
+          cacheWriteMicroUsd: model.inputMicroUsd,
+        },
+        ceiling,
+        0,
+      );
+      // What the run could actually emit, at this model's own output rate.
+      const emitted = ceiling * model.outputMicroUsd;
+      assert.ok(
+        reserved >= emitted,
+        `${model.id}: reserves ${reserved} micro-USD but may emit ${emitted}`,
+      );
+    }
   });
 });
