@@ -14,6 +14,7 @@ export default [
   route('legal/cookies', 'routes/legal.cookies.tsx'),
   route('legal/refunds', 'routes/legal.refunds.tsx'),
   route('legal/licenses', 'routes/legal.licenses.tsx'),
+  route('styles', 'routes/styles.tsx'),
   route('docs', 'routes/docs.index.tsx'),
   route('docs/getting-started', 'routes/docs.getting-started.tsx'),
   route('docs/the-builder', 'routes/docs.the-builder.tsx'),
