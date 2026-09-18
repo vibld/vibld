@@ -28,7 +28,14 @@ async function mount() {
     root = createRoot(container);
     root.render(
       <SettingsMenu>
-        <section>A section that was mounted</section>
+        {(close) => (
+          <section>
+            A section that was mounted
+            <button type="button" onClick={close}>
+              Go somewhere
+            </button>
+          </section>
+        )}
       </SettingsMenu>,
     );
   });
@@ -48,6 +55,13 @@ async function mount() {
       await act(async () => {
         document.dispatchEvent(new window.KeyboardEvent('keydown', { key }));
       });
+    },
+    inside: (label: RegExp): HTMLButtonElement => {
+      const button = [...container.querySelectorAll('button')].find((each) =>
+        label.test(each.textContent ?? ''),
+      );
+      assert.ok(button, `no ${label} control in the panel`);
+      return button;
     },
     async clickOutside() {
       await act(async () => {
@@ -91,6 +105,27 @@ describe('the settings menu', () => {
     await view.key('Escape');
 
     assert.equal(view.gear().getAttribute('aria-expanded'), 'false');
+    view.unmount();
+  });
+
+  it('closes when a section takes the reader somewhere else', async () => {
+    // The admin link (#184) left the menu standing open over the page it
+    // had just opened: the outside-click handler ignores a mousedown that
+    // happened inside the panel, and an internal navigation changes
+    // nothing this component watches (#188 review). A section that moves
+    // the reader has to close the menu itself, so it is given the means to.
+    const view = await mount();
+    await view.press();
+    assert.equal(view.gear().getAttribute('aria-expanded'), 'true');
+
+    await act(async () => view.inside(/Go somewhere/).click());
+
+    assert.equal(
+      view.gear().getAttribute('aria-expanded'),
+      'false',
+      'the popover stayed open over whatever its own link had just opened',
+    );
+    assert.equal(view.panel()?.hasAttribute('hidden'), true);
     view.unmount();
   });
 

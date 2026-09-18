@@ -113,4 +113,30 @@ describe('where the admin tools are mounted', () => {
       );
     }
   });
+
+  it('shuts the settings popover on its way to the page', async () => {
+    // `settings-menu.test.tsx` proves the popover can be closed by what is
+    // inside it. This is the other half: that the one control which needs
+    // to actually does. Without it the admin page opened underneath a menu
+    // still standing over it (#188 review).
+    const app = await readFile(
+      new URL('../src/App.tsx', import.meta.url).pathname,
+      'utf8',
+    );
+    const at = app.indexOf('href={ADMIN_PATH}');
+    assert.ok(at >= 0, 'the settings link to the admin page is gone');
+    // As far as the end of the element that carries it.
+    const handler = app.slice(at, app.indexOf('</a>', at));
+
+    assert.match(
+      handler,
+      /navigate\(ADMIN_PATH\)/,
+      'the link no longer navigates',
+    );
+    assert.match(
+      handler,
+      /closeSettings\(\)/,
+      'the link navigates without closing the popover it sits in',
+    );
+  });
 });

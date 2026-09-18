@@ -75,61 +75,74 @@ function Builder() {
         <div className="shell__controls">
           <ThemeToggle />
           <SettingsMenu>
-            <section className="settings__section">
-              <h2 className="settings__heading">Plan and usage</h2>
-              <BillingStatusWidget />
-            </section>
-            <section className="settings__section">
-              <h2 className="settings__heading">GitHub</h2>
-              {/*
+            {(closeSettings) => (
+              <>
+                <section className="settings__section">
+                  <h2 className="settings__heading">Plan and usage</h2>
+                  <BillingStatusWidget />
+                </section>
+                <section className="settings__section">
+                  <h2 className="settings__heading">GitHub</h2>
+                  {/*
                 Still mounted on every page load, which is why the panel it
                 sits in is hidden rather than unmounted when the menu is
                 closed: the OAuth callback puts its code in the fragment and
                 redirects here, and whatever claims that has to be running.
               */}
-              <GitHubPanel />
-            </section>
-            {/*
+                  <GitHubPanel />
+                </section>
+                {/*
               The only way into the admin page, and it exists only for an
               admin. `isAdmin` is `null` until `/api/config` answers, so
               this is absent during the probe rather than briefly wrong in
               either direction. It is not a permission: `/api/admin/*`
               checks the caller itself (ADR-0006).
             */}
-            {state.isAdmin === true ? (
-              <section className="settings__section">
-                <h2 className="settings__heading">Platform admin</h2>
-                <a
-                  className="settings__link"
-                  href={ADMIN_PATH}
-                  onClick={(event) => {
-                    if (
-                      event.defaultPrevented ||
-                      event.metaKey ||
-                      event.ctrlKey ||
-                      event.shiftKey ||
-                      event.altKey ||
-                      event.button !== 0
-                    ) {
-                      return;
-                    }
-                    event.preventDefault();
-                    navigate(ADMIN_PATH);
-                  }}
-                >
-                  Credit, invites, payments and takedowns
-                </a>
-              </section>
-            ) : null}
-            <section className="settings__section">
-              <h2 className="settings__heading">This deployment</h2>
-              {/*
+                {state.isAdmin === true ? (
+                  <section className="settings__section">
+                    <h2 className="settings__heading">Platform admin</h2>
+                    <a
+                      className="settings__link"
+                      href={ADMIN_PATH}
+                      onClick={(event) => {
+                        if (
+                          event.defaultPrevented ||
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.altKey ||
+                          event.button !== 0
+                        ) {
+                          return;
+                        }
+                        event.preventDefault();
+                        // Closed as part of the same action. The popover's
+                        // outside-click handler deliberately ignores a
+                        // mousedown that happened inside the panel, and an
+                        // internal navigation changes nothing it watches, so
+                        // without this the admin page opened underneath a menu
+                        // still standing over it (#188 review).
+                        closeSettings();
+                        navigate(ADMIN_PATH);
+                      }}
+                    >
+                      Credit, invites, payments and takedowns
+                    </a>
+                  </section>
+                ) : null}
+                <section className="settings__section">
+                  <h2 className="settings__heading">This deployment</h2>
+                  {/*
                 Reports what actually served the last run, and claims nothing
                 before there has been one. It used to say the same thing
                 across the header on every screen.
               */}
-              <p className="settings__note">{describeMode(state.providerId)}</p>
-            </section>
+                  <p className="settings__note">
+                    {describeMode(state.providerId)}
+                  </p>
+                </section>
+              </>
+            )}
           </SettingsMenu>
           <AuthStatus />
         </div>
