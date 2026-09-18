@@ -30,6 +30,16 @@ function mockup(label: string) {
   };
 }
 
+/** A usage record that differs only in its output count, so a test can tell
+ * which attempt was reported. */
+function usageOf(outputTokens: number) {
+  return { ...USAGE, outputTokens };
+}
+
+const VALID_SET = {
+  mockups: [mockup('Quiet'), mockup('Loud'), mockup('Dense')],
+};
+
 function client(
   completion: Partial<PlanCompletion> = {},
 ): PlanClient & { readonly seen: PlanRequest[] } {
@@ -137,6 +147,59 @@ describe('asking for three directions', () => {
       );
       return true;
     });
+  });
+
+  it('retries an empty reply once, and does not bill the reader for it', async () => {
+    // DeepSeek's JSON mode documents that it may occasionally return empty
+    // content, and a real run did: 22,828 characters streamed, 24,322
+    // output tokens billed, and null where the object should have been
+    // (#190). The reader did not cause that, so they do not pay for it.
+    let call = 0;
+    const billed: number[] = [];
+    const absorbed: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return call === 1
+          ? { plan: null, stopReason: 'end_turn', usage: usageOf(9999) }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onUsage: (u) => billed.push(u.outputTokens),
+      onDiscarded: (u) => absorbed.push(u.outputTokens),
+    });
+    const set = await provider.generate({ prompt: 'a bakery' });
+
+    assert.equal(call, 2, 'the empty reply was not retried');
+    assert.equal(set.mockups.length, 3);
+    assert.deepEqual(billed, [11], 'the reader was billed for the empty reply');
+    assert.deepEqual(absorbed, [9999], 'the discarded attempt went unreported');
+  });
+
+  it('does not retry a reply that is merely the wrong shape', async () => {
+    // A disagreement about shape is one the model will most likely repeat,
+    // so retrying spends twice and fails anyway. Only "nothing came back"
+    // is worth a second attempt.
+    let call = 0;
+    const wrong = {
+      id: 'wrong',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: { mockups: 'not an array' },
+          stopReason: 'end_turn',
+          usage: usageOf(7),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(wrong, { model: 'deepseek-flash' });
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.equal(call, 1, 'a wrong shape was retried, doubling the bill');
   });
 
   it('names what it asked for when the shape is wrong', async () => {

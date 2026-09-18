@@ -124,7 +124,9 @@ describe('readCompletionStream', () => {
 
   it('reports progress as the text arrives', async () => {
     const seen: number[] = [];
-    await readCompletionStream(sse(contentFrames('abcd')), (n) => seen.push(n));
+    await readCompletionStream(sse(contentFrames('abcd')), (p) =>
+      seen.push(p.characters),
+    );
     assert.deepEqual(seen, [1, 2, 3, 4]);
   });
 
@@ -519,18 +521,24 @@ describe('what the stream does not show', () => {
     assert.equal(result.text, '{}');
   });
 
-  it('keeps reasoning out of the progress meter', async () => {
-    // `onProgress` means "how much of the answer exists so far". Folding
-    // thinking into it would make a different number wrong.
-    const seen: number[] = [];
+  it('keeps reasoning out of the answer count but still reports it', async () => {
+    // `characters` means "how much of the answer exists so far", so
+    // thinking must never inflate it. It is reported all the same, on its
+    // own field and as it arrives, because a run cancelled before the
+    // first content delta has streamed nothing else and would otherwise
+    // settle at zero output tokens (#190).
+    const seen: { characters: number; reasoningCharacters: number }[] = [];
     await readCompletionStream(
       stream([
         'data: {"choices":[{"delta":{"reasoning_content":"aaaaaaaaaa"}}]}\n',
         'data: {"choices":[{"delta":{"content":"12345"}}]}\n',
         'data: [DONE]\n',
       ]),
-      (characters) => seen.push(characters),
+      (progress) => seen.push(progress),
     );
-    assert.deepEqual(seen, [5]);
+    assert.deepEqual(seen, [
+      { characters: 0, reasoningCharacters: 10 },
+      { characters: 5, reasoningCharacters: 10 },
+    ]);
   });
 });

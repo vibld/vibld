@@ -108,7 +108,10 @@ interface StreamedChunk {
  */
 export async function readCompletionStream(
   body: ReadableStream<Uint8Array>,
-  onProgress?: (characters: number) => void,
+  onProgress?: (progress: {
+    characters: number;
+    reasoningCharacters: number;
+  }) => void,
 ): Promise<{
   text: string;
   finishReason: string | null;
@@ -156,7 +159,7 @@ export async function readCompletionStream(
         const delta = choice?.delta?.content;
         if (typeof delta === 'string') {
           text += delta;
-          onProgress?.(text.length);
+          onProgress?.({ characters: text.length, reasoningCharacters });
         }
         // Counted, not accumulated, and deliberately not reported through
         // `onProgress`: that meter means "how much of the answer exists so
@@ -165,6 +168,13 @@ export async function readCompletionStream(
         const reasoning = choice?.delta?.reasoning_content;
         if (typeof reasoning === 'string') {
           reasoningCharacters += reasoning.length;
+          // Reported as it arrives, not only alongside the answer. A
+          // reasoning model thinks first, so a run cancelled early has
+          // streamed nothing but this, and a caller told only about the
+          // answer would settle a minute of billed thinking at zero
+          // (#190). `characters` is unchanged here, so the meter still
+          // means what it meant.
+          onProgress?.({ characters: text.length, reasoningCharacters });
         }
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         // Usage arrives on its own final chunk, whose `choices` is empty.
@@ -269,7 +279,7 @@ export function createDeepseekPlanClient(
         await readCompletionStream(
           response.body,
           request.onProgress
-            ? (characters) => request.onProgress?.({ characters })
+            ? (progress) => request.onProgress?.(progress)
             : undefined,
         );
 

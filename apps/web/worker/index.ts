@@ -1550,6 +1550,11 @@ async function handleMockups(
     // measurement of a cancelled run there is, and without it settlement
     // falls back to the full reservation (#189 review).
     let streamedCharacters = 0;
+    // Counted beside it rather than added into it (#190). A reasoning model
+    // thinks before it writes, so a run stopped in its first seconds has
+    // streamed nothing but this, and settling on the answer alone priced a
+    // minute of billed thinking at zero.
+    let reasoningCharacters = 0;
     try {
       const provider = new MockupProvider(
         createPlanClient(env, effectiveModel),
@@ -1566,11 +1571,12 @@ async function handleMockups(
           // back to the Worker polling it (#183). Here the call is in this
           // scope, so the count the client streams is the count the reader
           // sees.
-          onProgress: ({ characters }) => {
+          onProgress: ({ characters, reasoningCharacters: reasoning }) => {
             // Recorded before the cancelled check, not after: the last
             // count is exactly the one a cancelled run has to be settled
             // from, and returning early would throw it away.
             streamedCharacters = characters;
+            if (reasoning !== undefined) reasoningCharacters = reasoning;
             if (cancelled) return;
             void write(
               encodeEvent('progress', {
@@ -1629,7 +1635,12 @@ async function handleMockups(
         const settled =
           usage ??
           (cancelled && providerRan
-            ? cancelledUsage(streamedCharacters, maxTokens, sentChars)
+            ? cancelledUsage(
+                streamedCharacters,
+                maxTokens,
+                sentChars,
+                reasoningCharacters,
+              )
             : undefined);
         const actual = await settleBudget(
           env.USER_BUDGET!,
@@ -1640,7 +1651,9 @@ async function handleMockups(
         console.log(
           JSON.stringify({
             event: 'mockups.settled',
-            ...(usage ? {} : { cancelled, streamedCharacters }),
+            ...(usage
+              ? {}
+              : { cancelled, streamedCharacters, reasoningCharacters }),
             userId: principal.userId,
             ...(principal.email ? { email: principal.email } : {}),
             model: effectiveModel,

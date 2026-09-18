@@ -431,3 +431,53 @@ describe('what a cancelled run is charged', () => {
     );
   });
 });
+
+describe('pricing a cancelled run that was still thinking', () => {
+  /**
+   * The case #190 measured: a reasoning model bills its thinking as output
+   * and thinks before it writes, so a run stopped in its first seconds has
+   * streamed no answer at all. Counting only the answer settled that at
+   * zero, for a minute of billed reasoning.
+   */
+  it('counts reasoning the reader never saw', () => {
+    const answerOnly = cancelledUsage(0, 64_000, 100);
+    assert.equal(answerOnly.outputTokens, 0, 'fixture assumption changed');
+
+    const withThinking = cancelledUsage(0, 64_000, 100, 51_263);
+    assert.equal(withThinking.outputTokens, Math.ceil(51_263 / 4));
+  });
+
+  it('adds the two rather than replacing one with the other', () => {
+    const both = cancelledUsage(22_828, 64_000, 100, 51_263);
+    assert.equal(both.outputTokens, Math.ceil((22_828 + 51_263) / 4));
+  });
+
+  it('still errs low against what the provider really charged', () => {
+    // The measured run: 22,828 answer characters, 51,263 of reasoning,
+    // billed 24,322 output tokens. Four characters a token under-counts
+    // that, which is the direction this function argues for -- but it is
+    // now the right order of magnitude rather than 77% short.
+    const settled = cancelledUsage(22_828, 64_000, 100, 51_263).outputTokens;
+    assert.ok(settled < 24_322, 'a cancelled run now over-charges');
+    assert.ok(
+      settled > 24_322 * 0.7,
+      `settled ${settled} against a real 24,322: still missing most of the bill`,
+    );
+  });
+
+  it('treats a provider that reports no reasoning as reporting none', () => {
+    // Anthropic and OpenAI do not stream it, so the count is absent rather
+    // than zero-because-measured. The honest reading is the same number.
+    assert.equal(
+      cancelledUsage(4_000, 64_000, 100).outputTokens,
+      cancelledUsage(4_000, 64_000, 100, 0).outputTokens,
+    );
+  });
+
+  it('never settles past the reservation it is closing', () => {
+    assert.equal(
+      cancelledUsage(10_000_000, 500, 100, 10_000_000).outputTokens,
+      500,
+    );
+  });
+});

@@ -168,15 +168,43 @@ describe('what a run is for decides what it may ask for', () => {
     );
   });
 
-  it('costs an order of magnitude less than a build', () => {
+  it('reserves markedly less than a build', () => {
     // The whole argument for offering this at all. If three mockups cost
     // what a build costs, nobody should be asked to spend a build on them.
+    //
+    // This compared ceilings at a factor of ten until #190, which measured
+    // what the two actually cost and made the comparison unsound in both
+    // directions. A look really is about a tenth of a build in money:
+    // $0.026 against $0.30 on the production model. But a ceiling is not a
+    // budget -- two thirds of a mockup run's tokens are reasoning, so the
+    // ceiling has to be several times what the documents suggest, and any
+    // guard with headroom over the measured 24,322 fails a factor of ten
+    // against flash's 252,000.
+    //
+    // So the property is stated where it holds. The ratio that is enforced
+    // is the one `mockupMaxTokensFor` guarantees for every model: a look
+    // may never reserve more than half a build. The cost claim lives in
+    // the measurement, not in an arithmetic proxy for it.
     const build = runCeilingFor(env, FLASH, 'build');
     const mockups = runCeilingFor(env, FLASH, 'mockups');
     assert.ok(
-      mockups.maxTokens * 10 < build.maxTokens,
-      `mockups (${mockups.maxTokens}) are not markedly cheaper than a build (${build.maxTokens})`,
+      mockups.maxTokens * 2 <= build.maxTokens,
+      `mockups (${mockups.maxTokens}) reserve more than half a build (${build.maxTokens})`,
     );
+  });
+
+  it('holds that ratio for every model, not just the production one', () => {
+    // The clamp exists because the flat guard alone does not hold it: on
+    // the smaller-ceilinged models a 64,000 look would have been allowed
+    // to reserve twice a whole build (#190).
+    for (const model of MODEL_CATALOGUE) {
+      const build = runCeilingFor(env, model.id, 'build');
+      const mockups = runCeilingFor(env, model.id, 'mockups');
+      assert.ok(
+        mockups.maxTokens * 2 <= build.maxTokens,
+        `${model.id}: mockups (${mockups.maxTokens}) reserve more than half a build (${build.maxTokens})`,
+      );
+    }
   });
 
   it('still builds when nothing says otherwise', () => {

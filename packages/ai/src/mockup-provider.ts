@@ -18,6 +18,7 @@ import type {
   PlanClient,
   PlanEffort,
   PlanProgress,
+  PlanCompletion,
   PlanDiagnostics,
   PlanUsage,
 } from './client.ts';
@@ -55,6 +56,16 @@ export interface MockupProviderOptions {
    * neither this nor anything else.
    */
   onDiagnostics?: (diagnostics: PlanDiagnostics) => void;
+  /**
+   * An attempt that was thrown away and not billed to the caller, so
+   * whoever runs this can see what it absorbed (#190).
+   *
+   * Without it the retry below hides real money: the provider charges for
+   * an empty reply, the reader is not charged, and nothing anywhere says
+   * how often that happens. Invisible spend is the failure this whole
+   * thread has been about.
+   */
+  onDiscarded?: (usage: PlanUsage) => void;
   signal?: AbortSignal;
   /**
    * Called as output arrives (#189 review). The claim that this route
@@ -87,6 +98,7 @@ export class MockupProvider {
   readonly #effort: PlanEffort;
   readonly #onUsage?: (usage: PlanUsage) => void;
   readonly #onDiagnostics?: (diagnostics: PlanDiagnostics) => void;
+  readonly #onDiscarded?: (usage: PlanUsage) => void;
   readonly #signal?: AbortSignal;
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #onPromptChars?: (characters: number) => void;
@@ -99,6 +111,7 @@ export class MockupProvider {
     this.#effort = options.effort ?? DEFAULT_EFFORT;
     this.#onUsage = options.onUsage;
     this.#onDiagnostics = options.onDiagnostics;
+    this.#onDiscarded = options.onDiscarded;
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style;
@@ -107,8 +120,54 @@ export class MockupProvider {
   }
 
   async generate(request: MockupRequest): Promise<ParsedMockupSet> {
+    const first = await this.#ask(request);
+
+    /*
+     * One retry, for an empty reply and nothing else (#190).
+     *
+     * DeepSeek's JSON mode documents that it "may occasionally return
+     * empty content", and a real run produced exactly that: 22,828
+     * characters streamed, 24,322 output tokens billed, and `null` where
+     * the object should have been. Not a truncation and not a wrong
+     * answer, so failing the reader on it is failing them for a provider
+     * defect.
+     *
+     * Narrow on purpose. A reply that is the wrong *shape* is a
+     * disagreement the model will most likely repeat, so retrying it just
+     * spends twice and fails anyway; only "nothing came back" is retried.
+     * A refusal and a truncation are answers, and are not retried either.
+     *
+     * The discarded attempt is not billed to the caller: they did not
+     * cause it, and one empty reply is about two and a half cents. It is
+     * reported through `onDiscarded` instead, so the cost is absorbed
+     * visibly rather than quietly.
+     */
+    let completion = first;
+    if (isEmptyReply(first)) {
+      this.#onDiscarded?.(first.usage);
+      completion = await this.#ask(request);
+    }
+
+    // Reported before anything can throw, for the same reason the build
+    // provider does it: a refusal or a truncation still spends tokens, and
+    // a ledger that counts only successes under-reports the bill.
+    this.#onUsage?.(completion.usage);
+    if (completion.diagnostics) this.#onDiagnostics?.(completion.diagnostics);
+
+    // Named, so a truncation talks about three directions rather than about
+    // a project nobody asked this route for (#190).
+    return readCompletion(
+      completion,
+      this.#maxTokens,
+      MockupSetSchema,
+      MOCKUP_SUBJECT,
+    );
+  }
+
+  /** One attempt, with nothing reported and nothing validated. */
+  async #ask(request: MockupRequest): Promise<PlanCompletion> {
     const direction = this.#style ? styleDirection(this.#style) : null;
-    const completion = await this.#client.createPlan({
+    return this.#client.createPlan({
       system: MOCKUP_SYSTEM_PROMPT,
       prompt: mockupUserPrompt(request.prompt, direction),
       model: this.#model,
@@ -128,22 +187,15 @@ export class MockupProvider {
       // (#189 review).
       ...(this.#onPromptChars ? { onPromptChars: this.#onPromptChars } : {}),
     });
-
-    // Reported before anything can throw, for the same reason the build
-    // provider does it: a refusal or a truncation still spends tokens, and
-    // a ledger that counts only successes under-reports the bill.
-    this.#onUsage?.(completion.usage);
-    if (completion.diagnostics) this.#onDiagnostics?.(completion.diagnostics);
-
-    // Named, so a truncation talks about three directions rather than about
-    // a project nobody asked this route for (#190). The first real run
-    // against a model hit the ceiling and told the reader to build their
-    // project a few pages at a time.
-    return readCompletion(
-      completion,
-      this.#maxTokens,
-      MockupSetSchema,
-      MOCKUP_SUBJECT,
-    );
   }
+}
+
+/**
+ * Nothing came back, as distinct from something wrong coming back.
+ *
+ * `readJsonPlan` yields null for an empty body, so this is the shape a
+ * documented DeepSeek JSON-mode hiccup takes by the time it reaches here.
+ */
+function isEmptyReply(completion: PlanCompletion): boolean {
+  return completion.plan === null || completion.plan === undefined;
 }

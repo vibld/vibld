@@ -106,12 +106,20 @@ export const MAX_MOCKUP_FIXED_PROMPT_CHARS = 2_500;
  * keeps having to remove. So the document itself travels, and the build is
  * asked to turn that page into the project.
  *
- * Where the figure came from: `MOCKUP_OUTPUT_TOKENS` buys three mockups, so
- * one of them is about a third of it, at roughly four characters a token --
- * 18,000 / 3 * 4. That is an origin story, not a derivation, and this
- * comment used to call it one (#189 review). Nothing makes a model split
- * its budget three ways, and nothing fixes four characters to a token, so a
- * run really can produce a direction larger than this.
+ * Where the figure came from: `MOCKUP_OUTPUT_TOKENS` was thought to buy
+ * three mockups, so one of them was about a third of it, at roughly four
+ * characters a token -- 18,000 / 3 * 4. That is an origin story, not a
+ * derivation, and this comment used to call it one (#189 review). Nothing
+ * makes a model split its budget three ways, and nothing fixes four
+ * characters to a token, so a run really can produce a direction larger
+ * than this.
+ *
+ * The premise under that story has since been measured false as well
+ * (#190): two thirds of a mockup run's output tokens are reasoning, so the
+ * ceiling never bought three documents' worth of documents, and it is no
+ * longer a budget at all. The arithmetic is kept here as history, because
+ * the number it produced is still the number, and the reason that is safe
+ * is below rather than above.
  *
  * What makes the number safe is therefore not the arithmetic above but
  * `MockupSchema`, which bounds every generated `html` at exactly this
