@@ -9,6 +9,7 @@ import {
   parseAdminTopupRequest,
   parseGenerationRequest,
   parseKnowledge,
+  parseMockupRequest,
   parseModel,
   parsePreviewRequest,
   parseReferenceUrl,
@@ -675,5 +676,55 @@ describe('parsePreviewRequest', () => {
       files: [{ path: 'src/components/Nav.tsx', content: 'x' }],
     });
     assert.equal(result.ok, true);
+  });
+});
+
+/**
+ * A request for three directions to choose between (#185).
+ *
+ * Almost nothing to check, which is the point: no base project, no files,
+ * no revision, because a mockup run is asked before there is a project.
+ * The whole class of size and staleness problems `parseGenerationRequest`
+ * exists for cannot arise here.
+ */
+describe('a request for mockups', () => {
+  it('needs a prompt and nothing else', () => {
+    const parsed = parseMockupRequest({ prompt: 'a bakery' });
+    assert.equal(parsed.ok, true);
+    assert.deepEqual(parsed.ok && parsed.value, { prompt: 'a bakery' });
+  });
+
+  it('refuses an empty prompt', () => {
+    for (const prompt of ['', '   ', undefined, 42]) {
+      const parsed = parseMockupRequest({ prompt });
+      assert.equal(parsed.ok, false, `accepted ${JSON.stringify(prompt)}`);
+    }
+  });
+
+  it('refuses a body that is not an object', () => {
+    for (const body of ['a bakery', 42, null, ['a bakery']]) {
+      assert.equal(parseMockupRequest(body).ok, false);
+    }
+  });
+
+  it('holds a prompt to the same cap a build does', () => {
+    // Same person, same kind of sentence. Sharing the number means a prompt
+    // accepted for a build is accepted for a look at it first.
+    const atCap = 'x'.repeat(DEFAULT_LIMITS.maxPromptChars);
+    assert.equal(parseMockupRequest({ prompt: atCap }).ok, true);
+    const over = parseMockupRequest({ prompt: `${atCap}x` });
+    assert.equal(over.ok, false);
+    assert.equal(over.ok === false && over.status, 413);
+  });
+
+  it('ignores a base a stale client still sends', () => {
+    // There is no project yet, so a base is meaningless rather than wrong.
+    // Dropping it beats refusing a request the reader could have had.
+    const parsed = parseMockupRequest({
+      prompt: 'a bakery',
+      base: { revision: 'r1' },
+    });
+    assert.equal(parsed.ok, true);
+    assert.deepEqual(parsed.ok && parsed.value, { prompt: 'a bakery' });
   });
 });

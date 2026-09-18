@@ -251,6 +251,45 @@ function parseProjectFiles(
  * prompt, no revision -- a preview is not a generation, only what already
  * got generated.
  */
+export interface ParsedMockupRequest {
+  prompt: string;
+}
+
+/**
+ * A request for three directions to choose between (#185).
+ *
+ * Almost nothing to check, which is the point: no base project, no files,
+ * no revision. A mockup run is asked before there is a project, so the
+ * whole class of size and staleness problems `parseGenerationRequest`
+ * exists for cannot arise here. The prompt cap is the same one, because it
+ * is the same person typing the same kind of sentence, and sharing the
+ * number means a prompt accepted for a build is accepted for a look at it
+ * first.
+ *
+ * Style, model and the rest are parsed by the same helpers a build uses
+ * (`parseStylePreset`, `parseModel`), rather than restated here.
+ */
+export function parseMockupRequest(
+  body: unknown,
+  limits: GuardLimits = DEFAULT_LIMITS,
+): GuardResult<ParsedMockupRequest> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+
+  const { prompt } = body as { prompt?: unknown };
+  if (typeof prompt !== 'string' || prompt.trim().length === 0) {
+    return fail(400, 'A non-empty "prompt" is required.');
+  }
+  if (prompt.length > limits.maxPromptChars) {
+    return fail(
+      413,
+      `Prompt must be ${limits.maxPromptChars} characters or fewer.`,
+    );
+  }
+  return { ok: true, value: { prompt } };
+}
+
 export function parsePreviewRequest(
   body: unknown,
   limits: GuardLimits = DEFAULT_LIMITS,
