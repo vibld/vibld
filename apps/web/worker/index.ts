@@ -1048,7 +1048,9 @@ async function handlePlan(
         projectId,
         runId,
         prompt: parsed.value.prompt,
-        base: parsed.value.base,
+        ...(parsed.value.baseRevision
+          ? { baseRevision: parsed.value.baseRevision }
+          : {}),
         ...(style.value ? { style: style.value } : {}),
         ...(Object.keys(styleDna.value).length > 0
           ? { styleDna: styleDna.value }

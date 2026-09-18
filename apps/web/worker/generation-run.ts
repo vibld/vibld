@@ -5,10 +5,10 @@ import {
   type GenerationRequest,
   type GenerationStore,
   type ModelProvider,
-  type ProjectSnapshot,
   type RunTrace,
 } from '@vibld/core';
 import { DEFAULT_MAX_TOKENS, ProviderError, findModel } from '@vibld/ai';
+import { MAX_BASE_CONTENT_CHARS } from '@vibld/ai/limits';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -38,7 +38,18 @@ export interface WorkflowParams {
   projectId: string;
   runId: string;
   prompt: string;
-  base?: ProjectSnapshot;
+  /**
+   * The revision the caller believed it was editing, or absent for a new
+   * project. Not the project itself (#181): the files are read from storage
+   * by `runGeneration` below, so a follow-up is no longer bounded by what a
+   * browser can upload or by a model's context window.
+   *
+   * Still carried, because dropping it would be a lost update. A second tab
+   * that promoted while this one sat open moves the accepted revision, and
+   * without this assertion the run would silently build on the newer project
+   * and the user would get an edit of something they never saw.
+   */
+  baseRevision?: string;
   style?: StylePresetId;
   /** Standing visual preferences, already sanitized against the catalogue. */
   styleDna?: StyleDna;
@@ -179,17 +190,70 @@ export class SanitizingModelProvider implements ModelProvider {
 export async function runGeneration(
   store: GenerationStore,
   provider: ModelProvider,
-  params: Pick<WorkflowParams, 'projectId' | 'runId' | 'prompt' | 'base'>,
+  params: Pick<
+    WorkflowParams,
+    'projectId' | 'runId' | 'prompt' | 'baseRevision'
+  >,
 ): Promise<GenerationOutcome> {
   const runner = new DurableGenerationRunner(store);
 
   try {
+    // The project, read here rather than received (#181). `loadAccepted`
+    // was already the runner's fallback; now it is the only path, so the
+    // files never make the round trip through the browser.
+    const base = params.baseRevision
+      ? await store.loadAccepted(params.projectId)
+      : undefined;
+
+    // The assertion the caller made, checked before a token is spent. The
+    // authoritative check is still the compare-and-set at promotion, which
+    // catches a base that moves *during* the run; this catches one that had
+    // already moved before it started, and refuses for free rather than
+    // after paying for a generation that cannot be promoted.
+    if (params.baseRevision && base?.revision !== params.baseRevision) {
+      return {
+        result: {
+          state: 'failed',
+          stop: 'conflict',
+          accepted: base,
+          errors: ['Accepted revision changed before promotion'],
+          conflict: true,
+        },
+        outcome: 'failed',
+      };
+    }
+
+    // The project still goes into the prompt, so it still has to fit a
+    // model's context. Reading it here rather than receiving it removed the
+    // upload, not that budget, and the provider would throw on an oversized
+    // base either way -- but by then the run is paid for. The guard used to
+    // refuse this for free and cannot any more, because it no longer sees
+    // the files. So the refusal moves here, and stays free.
+    const baseChars = (base?.files ?? []).reduce(
+      (sum, file) => sum + file.path.length + file.content.length,
+      0,
+    );
+    if (baseChars > MAX_BASE_CONTENT_CHARS) {
+      return {
+        result: {
+          state: 'failed',
+          stop: 'context-exceeded',
+          accepted: base,
+          errors: [
+            `This project is ${baseChars} characters and ${MAX_BASE_CONTENT_CHARS} is the most that can be sent with a follow-up. Ask for a smaller change on a smaller project, or start a new one.`,
+          ],
+          conflict: false,
+        },
+        outcome: 'failed',
+      };
+    }
+
     const result = await runner.run(
       {
         prompt: params.prompt,
         projectId: params.projectId,
         runId: params.runId,
-        base: params.base,
+        ...(base ? { base } : {}),
       },
       provider,
       createValidator(),

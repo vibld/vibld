@@ -176,7 +176,16 @@ export class RemoteModelProvider implements ModelProvider {
       },
       body: JSON.stringify({
         prompt: request.prompt,
-        base: request.base,
+        // The revision only, never the files (#181). The Worker reads the
+        // project from storage, so a follow-up on a large project is no
+        // longer an upload of the whole thing, and is no longer refused for
+        // exceeding a budget that describes a model's context window.
+        //
+        // Still sent, because it is what catches the project having moved:
+        // another tab that promoted while this one sat open changes the
+        // accepted revision, and a run that ignored that would return an
+        // edit of a project this user never saw.
+        ...(request.base ? { base: { revision: request.base.revision } } : {}),
         ...(this.#style ? { style: this.#style } : {}),
         ...(this.#styleDna && Object.keys(this.#styleDna).length > 0
           ? { styleDna: this.#styleDna }

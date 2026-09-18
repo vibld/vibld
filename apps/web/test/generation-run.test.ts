@@ -51,12 +51,12 @@ function validFiles(marker: string): ProjectFile[] {
 
 const BASE_PARAMS: Pick<
   WorkflowParams,
-  'projectId' | 'runId' | 'prompt' | 'base'
+  'projectId' | 'runId' | 'prompt' | 'baseRevision'
 > = {
   projectId: 'user_abc',
   runId: 'run-1',
   prompt: 'Build a landing page',
-  base: undefined,
+  baseRevision: undefined,
 };
 
 describe('SanitizingModelProvider', () => {
@@ -397,5 +397,155 @@ describe('the ceiling a run may ask for', () => {
       ceilingForRun(legacy) < derived,
       `a legacy run could ask for ${ceilingForRun(legacy)} against a 64000 reservation`,
     );
+  });
+});
+
+/**
+ * The project, read rather than received (#181).
+ *
+ * A follow-up used to upload the whole project and have it sent straight
+ * into the prompt, which capped what could be edited at a model's context
+ * window: a site could be generated and then never changed again. The files
+ * now come from storage, and what the caller sends is the revision it
+ * believes it is editing.
+ *
+ * That assertion is the part worth testing. Dropping it would be a lost
+ * update, and a silent one: a run would build on whatever happened to be
+ * accepted and hand back an edit of a project the user never saw.
+ */
+describe('which project a follow-up edits', () => {
+  async function seeded() {
+    const store = newStore();
+    const first = await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'First', files: validFiles('original') },
+      ]),
+      BASE_PARAMS,
+    );
+    const revision = first.result.accepted?.revision;
+    assert.ok(revision, 'the seed run did not promote');
+    return { store, revision };
+  }
+
+  it('edits the stored project without being sent it', async () => {
+    const { store, revision } = await seeded();
+
+    const { result, outcome } = await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Second', files: validFiles('edited') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-2', baseRevision: revision },
+    );
+
+    assert.equal(outcome, 'ok');
+    assert.equal(result.state, 'accepted');
+    assert.ok(
+      result.accepted?.files.some((file) => file.content.includes('edited')),
+      'the follow-up did not land',
+    );
+  });
+
+  it('refuses a revision that is no longer the accepted one', async () => {
+    // Two tabs. The other one promoted while this one sat open, so the
+    // revision this caller is holding is stale. Building on the newer
+    // project anyway would return an edit of something it never saw.
+    const { store, revision } = await seeded();
+    await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Other tab', files: validFiles('elsewhere') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-other', baseRevision: revision },
+    );
+
+    const { result, outcome } = await runGeneration(
+      store,
+      new FakeModelProvider([{ summary: 'Stale', files: validFiles('stale') }]),
+      { ...BASE_PARAMS, runId: 'run-3', baseRevision: revision },
+    );
+
+    assert.equal(outcome, 'failed');
+    assert.equal(result.stop, 'conflict');
+    assert.equal(result.conflict, true);
+  });
+
+  it('refuses an oversized project without calling the model', async () => {
+    // The guard used to catch this for free, and cannot any more: a
+    // generation request carries no files, so nothing at the edge knows how
+    // big the project is. The run loads it and has to refuse just as cheaply,
+    // because the provider's own check fires only after the run is paid for.
+    const store = newStore();
+    // A project the validator accepts, padded past the budget, so what is
+    // being tested is the size rather than the shape.
+    // Spread across several files: the validator caps one file at 128 KB,
+    // so a project past the budget is necessarily a few large files rather
+    // than one enormous one. That is also what a real large site looks like.
+    const huge = [
+      ...validFiles('big'),
+      ...Array.from({ length: 3 }, (_, n) => ({
+        path: `src/Bulk${n}.tsx`,
+        content: 'x'.repeat(60_000),
+      })),
+    ];
+    const seeded = await runGeneration(
+      store,
+      new FakeModelProvider([{ summary: 'Big', files: huge }]),
+      BASE_PARAMS,
+    );
+    const revision = seeded.result.accepted?.revision;
+    assert.ok(revision, 'the oversized seed did not promote');
+
+    let asked = false;
+    const provider: ModelProvider = {
+      id: 'counting',
+      generate: async () => {
+        asked = true;
+        throw new Error('the model should not have been asked');
+      },
+    };
+
+    const { result, outcome } = await runGeneration(store, provider, {
+      ...BASE_PARAMS,
+      runId: 'run-big',
+      baseRevision: revision,
+    });
+
+    assert.equal(outcome, 'failed');
+    assert.equal(result.stop, 'context-exceeded');
+    assert.equal(asked, false, 'a doomed run still spent a model call');
+  });
+
+  it('refuses a stale revision without calling the model at all', async () => {
+    // The point of checking up front: a run that cannot be promoted should
+    // not be paid for first. An empty provider throws if it is asked for a
+    // plan, so reaching the model fails this test rather than passing it.
+    const { store, revision } = await seeded();
+    await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Other tab', files: validFiles('elsewhere') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-other', baseRevision: revision },
+    );
+
+    let asked = false;
+    const provider: ModelProvider = {
+      id: 'counting',
+      generate: async () => {
+        asked = true;
+        throw new Error('the model should not have been asked');
+      },
+    };
+
+    const { outcome } = await runGeneration(store, provider, {
+      ...BASE_PARAMS,
+      runId: 'run-4',
+      baseRevision: revision,
+    });
+
+    assert.equal(outcome, 'failed');
+    assert.equal(asked, false, 'a doomed run still spent a model call');
   });
 });
