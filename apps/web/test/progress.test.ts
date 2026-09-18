@@ -111,3 +111,70 @@ describe('progressAnnouncement', () => {
     assert.equal(second, 'Still generating, 1:00 elapsed.');
   });
 });
+
+/**
+ * What the line says when the count is unavailable (#183).
+ *
+ * Generation moved into a durable Workflow, which has no live channel back
+ * to the Worker polling it, so the character count these helpers were built
+ * around usually is not there. The line has to stay useful without it, and
+ * must not substitute a zero: a counter sitting at 0 while a run works
+ * perfectly well is the frozen line this component exists to replace,
+ * wearing a number.
+ */
+describe('a run whose character count is unknown', () => {
+  it('carries the line on the clock alone', () => {
+    const line = describeProgress({ elapsedMs: 187_000 });
+    assert.equal(line, '3:07');
+    assert.doesNotMatch(line, /character/);
+    assert.doesNotMatch(line, /\b0\b/);
+  });
+
+  it('names the stage when there is one', () => {
+    assert.equal(
+      describeProgress({ elapsedMs: 9_000, stage: 'writing' }),
+      'Writing your project · 0:09',
+    );
+    assert.equal(
+      describeProgress({ elapsedMs: 4_000, stage: 'queued' }),
+      'Waiting for a slot · 0:04',
+    );
+  });
+
+  it('still shows a count when one is genuinely known', () => {
+    // The old path has to keep working: a provider that does report
+    // characters, or a later change that restores the live channel, should
+    // light this back up without touching the wording.
+    assert.equal(
+      describeProgress({ characters: 12_480, elapsedMs: 187_000 }),
+      '12,480 characters written · 3:07',
+    );
+    assert.equal(
+      describeProgress({
+        characters: 12_480,
+        elapsedMs: 187_000,
+        stage: 'writing',
+      }),
+      'Writing your project · 12,480 characters written · 3:07',
+    );
+  });
+
+  it('says nothing rather than zero for a count that has not moved', () => {
+    assert.equal(describeProgress({ characters: 0, elapsedMs: 2_000 }), '0:02');
+  });
+
+  it('explains a queue differently from a slow run', () => {
+    // Two different worries. "Writing takes several minutes" is the wrong
+    // answer while nothing is being written yet.
+    const queued = reassurance({ elapsedMs: 60_000, stage: 'queued' });
+    assert.match(queued ?? '', /queued behind other builds/);
+
+    const writing = reassurance({ elapsedMs: 60_000, stage: 'writing' });
+    assert.match(writing ?? '', /takes several minutes/);
+  });
+
+  it('stays quiet early, whatever the stage', () => {
+    assert.equal(reassurance({ elapsedMs: 1_000, stage: 'queued' }), null);
+    assert.equal(reassurance({ elapsedMs: 1_000, stage: 'writing' }), null);
+  });
+});

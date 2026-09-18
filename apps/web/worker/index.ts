@@ -1119,6 +1119,11 @@ async function handlePlan(
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
 
+  // When the caller started waiting, which is what a person means by "how
+  // long has this taken". It counts the queue as well as the run, because
+  // from the other side of the screen those are the same wait.
+  const waitingSince = Date.now();
+
   const run = (async () => {
     try {
       for (;;) {
@@ -1178,7 +1183,22 @@ async function handlePlan(
           return;
         }
 
-        // Still queued, running, paused or waiting: nothing new to report.
+        // Still going. There is no live channel from a Workflow step back
+        // to this loop (#183, and `generation-workflow.ts`'s own comment),
+        // so the character count the client can display is unavailable and
+        // is deliberately omitted rather than sent as a zero. What this
+        // loop does know is real: how long the caller has been waiting, and
+        // whether the run has started or is still queued behind others.
+        const stage = status.status === 'queued' ? 'queued' : 'writing';
+        if (!cancelled) {
+          await write(
+            encodeEvent('progress', {
+              elapsedMs: Date.now() - waitingSince,
+              stage,
+            }),
+          );
+        }
+
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       }
     } finally {

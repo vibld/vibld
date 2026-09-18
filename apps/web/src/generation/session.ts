@@ -118,9 +118,22 @@ export interface TranscriptTurn {
   providerId: string | null;
 }
 
+/** Where a run has got to, as coarsely as the Worker can actually tell. */
+export type GenerationStage = 'queued' | 'writing';
+
 export interface GenerationProgress {
-  characters: number;
+  /**
+   * Characters the model has produced, when that is known.
+   *
+   * Optional because since generation moved into a durable Workflow there is
+   * no live channel from the running step back to the Worker polling it, so
+   * the count is currently unavailable (#183). Absent means unknown, and the
+   * wording says nothing rather than saying zero: a counter frozen at 0 is
+   * the frozen line this whole component exists to replace.
+   */
+  characters?: number;
   elapsedMs: number;
+  stage?: GenerationStage;
 }
 
 export interface SessionOptions {

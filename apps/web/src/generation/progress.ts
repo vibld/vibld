@@ -9,7 +9,7 @@
  * wording and the arithmetic can be tested without a DOM.
  */
 
-import type { GenerationProgress } from './session.ts';
+import type { GenerationProgress, GenerationStage } from './session.ts';
 
 /**
  * How often assistive technology hears about a run that is still going.
@@ -41,9 +41,31 @@ export function formatCharacters(characters: number): string {
   return safe.toLocaleString('en-US');
 }
 
-/** The one-line summary shown beside the meter. */
+/** What each stage is called on screen. Plain words, not internal states. */
+const STAGE_WORDS: Record<GenerationStage, string> = {
+  queued: 'Waiting for a slot',
+  writing: 'Writing your project',
+};
+
+/**
+ * The one-line summary shown beside the meter.
+ *
+ * Built from whichever facts are actually known, rather than a fixed shape
+ * with holes in it. Since generation moved into a durable Workflow the
+ * character count is usually unavailable (#183), and printing "0 characters
+ * written" for a run that is working perfectly well would be worse than the
+ * frozen line this replaced: it would be a number that is both wrong and
+ * reassuringly precise. So an absent count contributes nothing, and the
+ * clock carries the line on its own.
+ */
 export function describeProgress(progress: GenerationProgress): string {
-  return `${formatCharacters(progress.characters)} characters written · ${formatElapsed(progress.elapsedMs)}`;
+  const parts: string[] = [];
+  if (progress.stage) parts.push(STAGE_WORDS[progress.stage]);
+  if (typeof progress.characters === 'number' && progress.characters > 0) {
+    parts.push(`${formatCharacters(progress.characters)} characters written`);
+  }
+  parts.push(formatElapsed(progress.elapsedMs));
+  return parts.join(' · ');
 }
 
 /**
@@ -51,6 +73,12 @@ export function describeProgress(progress: GenerationProgress): string {
  * first second would train people to ignore it.
  */
 export function reassurance(progress: GenerationProgress): string | null {
+  if (progress.stage === 'queued' && progress.elapsedMs >= REASSURE_AFTER_MS) {
+    // A different worry from a slow run, and a different answer. Saying
+    // "writing takes several minutes" while nothing is being written yet
+    // would explain the wrong thing.
+    return 'Your project is queued behind other builds. It will start shortly, and you can cancel at any time.';
+  }
   if (progress.elapsedMs < REASSURE_AFTER_MS) return null;
   return 'Writing a whole project takes several minutes. You can cancel at any time.';
 }
