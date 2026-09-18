@@ -217,13 +217,27 @@ export function PromptPanel({
           <button
             type="button"
             className="button"
-            onClick={() =>
+            onClick={(event) => {
+              // The browser's own check, not a second URL parser of mine
+              // (#189 review). This control is a `button`, so clicking it
+              // skips the native validation `Generate` gets for free, and
+              // a malformed reference then sailed past: the look is paid
+              // for, the bad value is kept in the mockup context, and the
+              // build that choosing a direction submits is refused on a
+              // field the reader could have been told about before
+              // spending anything.
+              //
+              // `reportValidity` rather than `checkValidity`, so the
+              // refusal is the message the field would have shown anyway
+              // rather than a click that silently does nothing.
+              const form = event.currentTarget.form;
+              if (form && !form.reportValidity()) return;
               onExplore(
                 prompt,
                 style,
                 referenceUrl.trim().length > 0 ? referenceUrl.trim() : null,
-              )
-            }
+              );
+            }}
             disabled={disabled || prompt.trim().length === 0}
             title="Three quick sketches to choose from, for about a tenth of a build"
           >

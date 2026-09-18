@@ -359,6 +359,35 @@ describe('asking for directions', () => {
     view.unmount();
   });
 
+  it('refuses to spend on a look with a malformed reference', async () => {
+    // The button is a `button`, so it skips the native validation the
+    // submit path gets for free (#189 review). Without this the look is
+    // paid for, the bad value is kept in the mockup context, and the build
+    // that choosing a direction submits is refused on a field the reader
+    // could have been told about before spending.
+    const view = await mount(builder());
+    await view.type('a bakery');
+    await view.reference_('not a url');
+    await act(async () => view.button(/Show me three directions/)?.click());
+
+    assert.deepEqual(view.explored, [], 'a malformed reference started a run');
+    view.unmount();
+  });
+
+  it('asks once the reference is valid again', async () => {
+    // The refusal must not be a dead end: correcting the field is enough.
+    const view = await mount(builder());
+    await view.type('a bakery');
+    await view.reference_('not a url');
+    await act(async () => view.button(/Show me three directions/)?.click());
+    await view.reference_('https://example.com/');
+    await act(async () => view.button(/Show me three directions/)?.click());
+
+    assert.equal(view.explored.length, 1);
+    assert.equal(view.explored[0]?.referenceUrl, 'https://example.com/');
+    view.unmount();
+  });
+
   it('does not offer it where there is no model to ask', async () => {
     // `explore` always calls the real `/api/mockups`, while a build in
     // `fake` mode is served by `FakeModelProvider` (#189 review). Offering
