@@ -354,9 +354,33 @@ export class BuilderSession {
     };
   };
 
+  /**
+   * Shut the session down and stop what it is paying for.
+   *
+   * The epoch and the listeners are about what gets *shown*; the
+   * controllers are about what gets *spent*, and this used to do only the
+   * first (#189 review). A non-React owner -- the documented consumer of
+   * this method -- could dispose a session mid-run and leave about a minute
+   * of billed model time going, with the answer thrown away.
+   *
+   * Both controllers, not only the look's. The finding named the look,
+   * because that is the one this PR added; the build's `#abort` was never
+   * cleared here either. That is the third time in this review I have fixed
+   * the case that was reported without asking which sibling had the same
+   * shape, so this one asks: `reset`, `cancel`, `cancelExplore` and this
+   * are the four places that end work, and all four now abort what they
+   * end.
+   *
+   * No state is written, unlike `cancel`. There is nobody left to show it
+   * to, and `#disposed` already refuses every later mutation.
+   */
   dispose(): void {
     this.#disposed = true;
     this.#epoch += 1;
+    this.#abort?.abort();
+    this.#abort = null;
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
     this.#listeners.clear();
   }
 

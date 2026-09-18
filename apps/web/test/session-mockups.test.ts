@@ -222,3 +222,67 @@ describe('resetting a session that is still looking', () => {
     await Promise.allSettled([abandoned, current]);
   });
 });
+
+/**
+ * Disposing a session that is still spending (#189 review).
+ *
+ * `dispose` is for a non-React owner, and it used to advance the epoch and
+ * clear the listeners and nothing else. That stops the answer being shown;
+ * it does not stop the run, which is about a minute of billed model time.
+ *
+ * Both controllers are checked here, not only the look's. The finding named
+ * the look because this PR added it, but the build's was never aborted on
+ * dispose either -- and "which sibling has the same shape" is the question
+ * this review kept catching me not asking.
+ */
+describe('disposing a session that is still working', () => {
+  it('aborts a look in flight', async () => {
+    const { impl, handle } = hangingLook();
+    const session = createSession({ requestMockupsImpl: impl as never });
+
+    const look = session.explore('a bakery');
+    await handle.started;
+    session.dispose();
+
+    const stopped = await Promise.race([
+      handle.aborted.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    assert.ok(stopped, 'disposing left a billed look running');
+    await Promise.allSettled([look]);
+  });
+
+  it('aborts a build in flight', async () => {
+    let aborted = false;
+    let announceStart!: () => void;
+    // Announced from inside `generate`, not from `resolveProvider`. The
+    // first version of this signalled before the abort listener existed, so
+    // disposing raced ahead of it and the promise never settled -- the test
+    // hung rather than failing, which reports nothing.
+    const running = new Promise<void>((resolve) => (announceStart = resolve));
+    const session = createSession({
+      resolveProvider: async (_plan, signal) => ({
+        id: 'hanging',
+        generate: () =>
+          new Promise<never>((_resolve, reject) => {
+            announceStart();
+            signal.addEventListener(
+              'abort',
+              () => {
+                aborted = true;
+                reject(new DOMException('Aborted', 'AbortError'));
+              },
+              { once: true },
+            );
+          }),
+      }),
+    });
+
+    const build = session.submit('a bakery');
+    await running;
+    session.dispose();
+    await Promise.allSettled([build]);
+
+    assert.ok(aborted, 'disposing left a billed build running');
+  });
+});
