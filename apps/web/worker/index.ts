@@ -25,6 +25,7 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
+import { stageFor } from './run-stage.ts';
 import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
@@ -795,6 +796,17 @@ async function handlePlan(
     return json({ error: 'Use POST.' }, 405);
   }
 
+  // When this caller started waiting. Read here, at the top, rather than
+  // where the poll loop begins: everything between the two is still wait
+  // the person is sitting through. A request naming a reference URL spends
+  // up to twelve seconds fetching that page and its stylesheets before a
+  // Workflow is even created, and authentication, accounting and creation
+  // each cost their own moment. A clock started after all that would open
+  // at 0:00 for somebody who had already waited a quarter of a minute, and
+  // would hold back the reassurance by exactly as long as the wait that
+  // earned it.
+  const waitingSince = Date.now();
+
   // Cheap rejections first, so a hostile request is refused before it costs
   // anything: shape, then size, then identity, then content.
   const origin = checkRequestOrigin(
@@ -1178,7 +1190,24 @@ async function handlePlan(
           return;
         }
 
-        // Still queued, running, paused or waiting: nothing new to report.
+        // Still going. There is no live channel from a Workflow step back
+        // to this loop (#183, and `generation-workflow.ts`'s own comment),
+        // so the character count the client can display is unavailable and
+        // is deliberately omitted rather than sent as a zero. What this
+        // loop does know is real: how long the caller has been waiting, and
+        // -- for the two states that have an honest name -- what the run is
+        // doing. `stageFor` returns nothing for the rest rather than
+        // guessing, and the line carries the clock alone.
+        const stage = stageFor(status.status);
+        if (!cancelled) {
+          await write(
+            encodeEvent('progress', {
+              elapsedMs: Date.now() - waitingSince,
+              ...(stage ? { stage } : {}),
+            }),
+          );
+        }
+
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       }
     } finally {

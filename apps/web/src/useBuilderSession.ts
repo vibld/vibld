@@ -7,7 +7,51 @@ import {
   detectDeploymentConfig,
   resetGenerationModeProbe,
 } from './generation/remote-provider.ts';
+import type { DeploymentConfig } from './generation/remote-provider.ts';
 import { onClerkSessionChange } from './auth/clerk-token.ts';
+
+/** The part of a session this file sets from the deployment probe. */
+export interface ConfigurableSession {
+  setModels(models: DeploymentConfig['models']): void;
+  setModel(model: string | null): void;
+  setIsAdmin(isAdmin: boolean | null): void;
+}
+
+/**
+ * Ask the deployment what it can serve, and settle the session either way.
+ *
+ * One function rather than the same four lines at both call sites, which is
+ * how the two came to differ in the first place, and the reason the bug
+ * below could exist in one place and not obviously in the other.
+ *
+ * A rejected probe still has to settle `isAdmin` (#188 review). It reads
+ * `null` for "nobody has answered yet", and the admin page renders that as
+ * a wait. `detectDeploymentConfig` rejects when the endpoint answers 401 or
+ * the Clerk token cannot be had, and both call sites used to swallow that,
+ * so `null` became permanent and the page checked access forever, offering
+ * neither the refusal nor the link back out of it.
+ *
+ * `false` and not a fourth state: the shell genuinely cannot offer admin
+ * tools after a probe it could not complete, and `/api/admin/*` is the
+ * authority regardless (ADR-0006). What the page owes the reader is a way
+ * onward, which the refusal has and the wait does not.
+ *
+ * The model list is left alone on rejection. An empty picker is already
+ * what "no answer" looks like there, and there is nothing to correct.
+ */
+export async function applyDeploymentConfig(
+  session: ConfigurableSession,
+  probe: () => Promise<DeploymentConfig> = () => detectDeploymentConfig(),
+): Promise<void> {
+  try {
+    const config = await probe();
+    session.setModels(config.models);
+    session.setModel(config.defaultModel);
+    session.setIsAdmin(config.isAdmin);
+  } catch {
+    session.setIsAdmin(false);
+  }
+}
 
 /**
  * Bind a `BuilderSession` to React.
@@ -33,13 +77,7 @@ export function useBuilderSession(): {
     // What this deployment can serve. The picker stays hidden until it
     // answers, which is correct: there is no choice to offer yet, and a
     // failed probe is not worth surfacing here -- the run itself reports it.
-    void detectDeploymentConfig()
-      .then((config) => {
-        created.setModels(config.models);
-        created.setModel(config.defaultModel);
-        created.setIsAdmin(config.isAdmin);
-      })
-      .catch(() => {});
+    void applyDeploymentConfig(created);
     return created;
   }, []);
 
@@ -58,13 +96,7 @@ export function useBuilderSession(): {
           return;
         }
         resetGenerationModeProbe();
-        void detectDeploymentConfig()
-          .then((config) => {
-            session.setModels(config.models);
-            session.setModel(config.defaultModel);
-            session.setIsAdmin(config.isAdmin);
-          })
-          .catch(() => {});
+        void applyDeploymentConfig(session);
       }),
     [session],
   );

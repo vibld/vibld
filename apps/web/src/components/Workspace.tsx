@@ -47,7 +47,20 @@ function sameFiles(listed: ProjectFile[], accepted: ProjectFile[]): boolean {
   );
 }
 
-export function Workspace({ state }: { state: BuilderState }) {
+export function Workspace({
+  state,
+  hidden = false,
+}: {
+  state: BuilderState;
+  /**
+   * Off screen without being taken apart. The preview sandbox, the chosen
+   * tab and the selected file are all live state this component owns, and
+   * a trip to the admin page (#184) should cost none of it. The stylesheet
+   * carries `[hidden] { display: none !important }`, which is what makes
+   * the attribute beat `.workspace`'s own layout rules.
+   */
+  hidden?: boolean;
+}) {
   const [activeTab, setActiveTab] = useState<TabId>('preview');
   const [requestedPath, setRequestedPath] = useState<string | null>(null);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -89,7 +102,7 @@ export function Workspace({ state }: { state: BuilderState }) {
   }
 
   return (
-    <section className="workspace" aria-label="Workspace">
+    <section className="workspace" aria-label="Workspace" hidden={hidden}>
       <div className="tabs" role="tablist" aria-label="Workspace views">
         {TABS.map((tab, index) => {
           const isActive = tab.id === activeTab;

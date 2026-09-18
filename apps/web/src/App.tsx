@@ -1,8 +1,9 @@
-import { AdminPanel } from './components/AdminPanel.tsx';
-import { InvitePanel } from './components/InvitePanel.tsx';
-import { ParkedQueuePanel } from './components/ParkedQueuePanel.tsx';
-import { SiteTakedown } from './components/SiteTakedown.tsx';
 import { AccessGate } from './components/AccessGate.tsx';
+import { AdminSettings } from './components/AdminSettings.tsx';
+import { ADMIN_PATH, isAdminPath } from './admin/route.ts';
+import { useRef } from 'react';
+import { navigate, usePathname } from './admin/use-pathname.ts';
+import { useFocusOnChange } from './admin/use-focus-on-change.ts';
 import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
@@ -46,6 +47,17 @@ export function App() {
 function Builder() {
   const { session, state } = useBuilderSession();
   const usage = state.budget.used;
+  // Which of the two views this is. The session above it stays mounted
+  // across the change, which is the whole reason this is a state and not a
+  // link to another document: a run takes minutes, and an admin who
+  // stepped into settings during one would otherwise come back to an empty
+  // shell (#184).
+  const pathname = usePathname();
+  const onAdminPage = isAdminPath(pathname);
+  // Where focus goes when the view changes under a reader who never left
+  // the document. See `useFocusOnChange`.
+  const body = useRef<HTMLElement | null>(null);
+  useFocusOnChange(pathname, body);
 
   return (
     <div className="shell">
@@ -70,36 +82,92 @@ function Builder() {
         <div className="shell__controls">
           <ThemeToggle />
           <SettingsMenu>
-            <section className="settings__section">
-              <h2 className="settings__heading">Plan and usage</h2>
-              <BillingStatusWidget />
-            </section>
-            <section className="settings__section">
-              <h2 className="settings__heading">GitHub</h2>
-              {/*
+            {(closeSettings) => (
+              <>
+                <section className="settings__section">
+                  <h2 className="settings__heading">Plan and usage</h2>
+                  <BillingStatusWidget />
+                </section>
+                <section className="settings__section">
+                  <h2 className="settings__heading">GitHub</h2>
+                  {/*
                 Still mounted on every page load, which is why the panel it
                 sits in is hidden rather than unmounted when the menu is
                 closed: the OAuth callback puts its code in the fragment and
                 redirects here, and whatever claims that has to be running.
               */}
-              <GitHubPanel />
-            </section>
-            <section className="settings__section">
-              <h2 className="settings__heading">This deployment</h2>
-              {/*
+                  <GitHubPanel />
+                </section>
+                {/*
+              The only way into the admin page, and it exists only for an
+              admin. `isAdmin` is `null` until `/api/config` answers, so
+              this is absent during the probe rather than briefly wrong in
+              either direction. It is not a permission: `/api/admin/*`
+              checks the caller itself (ADR-0006).
+            */}
+                {state.isAdmin === true ? (
+                  <section className="settings__section">
+                    <h2 className="settings__heading">Platform admin</h2>
+                    <a
+                      className="settings__link"
+                      href={ADMIN_PATH}
+                      onClick={(event) => {
+                        if (
+                          event.defaultPrevented ||
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.altKey ||
+                          event.button !== 0
+                        ) {
+                          return;
+                        }
+                        event.preventDefault();
+                        // Closed as part of the same action. The popover's
+                        // outside-click handler deliberately ignores a
+                        // mousedown that happened inside the panel, and an
+                        // internal navigation changes nothing it watches, so
+                        // without this the admin page opened underneath a menu
+                        // still standing over it (#188 review).
+                        closeSettings();
+                        navigate(ADMIN_PATH);
+                      }}
+                    >
+                      Credit, invites, payments and takedowns
+                    </a>
+                  </section>
+                ) : null}
+                <section className="settings__section">
+                  <h2 className="settings__heading">This deployment</h2>
+                  {/*
                 Reports what actually served the last run, and claims nothing
                 before there has been one. It used to say the same thing
                 across the header on every screen.
               */}
-              <p className="settings__note">{describeMode(state.providerId)}</p>
-            </section>
+                  <p className="settings__note">
+                    {describeMode(state.providerId)}
+                  </p>
+                </section>
+              </>
+            )}
           </SettingsMenu>
           <AuthStatus />
         </div>
       </header>
 
-      <main className="shell__body">
-        <section className="column column--left" aria-label="Conversation">
+      <main
+        className={
+          onAdminPage ? 'shell__body shell__body--page' : 'shell__body'
+        }
+        ref={body}
+        tabIndex={-1}
+      >
+        {onAdminPage ? <AdminSettings isAdmin={state.isAdmin} /> : null}
+        <section
+          className="column column--left"
+          aria-label="Conversation"
+          hidden={onAdminPage}
+        >
           <Conversation state={state} />
           <div className="composer">
             <LifecycleBar status={state.status} />
@@ -119,10 +187,6 @@ function Builder() {
                 saveStyleDna(value);
               }}
             />
-            {state.isAdmin ? <AdminPanel /> : null}
-            {state.isAdmin ? <InvitePanel /> : null}
-            {state.isAdmin ? <ParkedQueuePanel /> : null}
-            {state.isAdmin ? <SiteTakedown /> : null}
             <PromptPanel
               state={state}
               onSubmit={(prompt, mode, style, referenceUrl) => {
@@ -135,7 +199,15 @@ function Builder() {
           </div>
         </section>
 
-        <Workspace state={state} />
+        {/*
+          Hidden rather than unmounted, both of these. The preview iframe
+          and the workspace carry live state -- a sandbox that has loaded,
+          a scroll position, a file selection -- and a trip to settings
+          should cost none of it. `hidden` is also what tells assistive
+          technology the builder is not on screen; `hidden-attribute.test`
+          holds the stylesheet to honouring it.
+        */}
+        <Workspace state={state} hidden={onAdminPage} />
       </main>
 
       {/*

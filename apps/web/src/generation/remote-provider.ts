@@ -6,6 +6,7 @@ import type {
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import { getClerkToken } from '../auth/clerk-token.ts';
+import type { GenerationProgress } from './session.ts';
 
 /**
  * Calls the Worker's /api/plan endpoint.
@@ -102,7 +103,7 @@ export interface RemoteModelProviderOptions {
    * Called as the endpoint reports progress, so the shell can show that a
    * long generation is moving rather than stuck.
    */
-  onProgress?: (progress: { characters: number; elapsedMs: number }) => void;
+  onProgress?: (progress: GenerationProgress) => void;
   /**
    * Aborts the request when the user cancels. Aborting the fetch also drops
    * the connection, which is the signal the Worker uses to stop its own model
@@ -213,12 +214,22 @@ export class RemoteModelProvider implements ModelProvider {
 
     for await (const { event, data } of readPlanEvents(response.body)) {
       if (event === 'progress') {
-        const { characters, elapsedMs } = data as {
+        const { characters, elapsedMs, stage } = data as {
           characters?: number;
           elapsedMs?: number;
+          stage?: unknown;
         };
-        if (typeof characters === 'number' && typeof elapsedMs === 'number') {
-          this.#onProgress?.({ characters, elapsedMs });
+        // Only the clock is required. Requiring a character count too meant
+        // that once generation moved into a durable Workflow, which has no
+        // live channel to report one (#183), every progress event was
+        // dropped here and the meter never appeared -- the last cut link in
+        // a chain that was otherwise still whole.
+        if (typeof elapsedMs === 'number') {
+          this.#onProgress?.({
+            elapsedMs,
+            ...(typeof characters === 'number' ? { characters } : {}),
+            ...(stage === 'queued' || stage === 'running' ? { stage } : {}),
+          });
         }
         continue;
       }

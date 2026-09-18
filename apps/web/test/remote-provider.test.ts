@@ -6,6 +6,7 @@ import {
   readPlanEvents,
   resetGenerationModeProbe,
 } from '../src/generation/remote-provider.ts';
+import type { GenerationProgress } from '../src/generation/session.ts';
 
 const PLAN = { summary: 'ok', files: [{ path: 'src/App.tsx', content: 'x' }] };
 
@@ -250,8 +251,69 @@ describe('streamed progress', () => {
     return `event: progress\ndata: ${JSON.stringify({ characters, elapsedMs })}\n\n`;
   }
 
+  it('reports a clock-only event, which is all a Workflow run can send', async () => {
+    // The bug this closes. Generation runs inside a durable Workflow with no
+    // live channel back to the polling Worker (#183), so a progress event
+    // carries the elapsed time and no character count. Requiring both here
+    // dropped every one of them, and the meter never appeared for any real
+    // run -- a whole chain intact except for its last link.
+    const seen: GenerationProgress[] = [];
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 1_500, stage: 'queued' })}\n\n`,
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 9_000, stage: 'running' })}\n\n`,
+          PLAN_FRAME,
+        ])) as unknown as typeof fetch,
+      onProgress: (progress) => seen.push(progress),
+    });
+
+    await provider.generate({ prompt: 'a landing page' });
+
+    assert.deepEqual(seen, [
+      { elapsedMs: 1_500, stage: 'queued' },
+      { elapsedMs: 9_000, stage: 'running' },
+    ]);
+  });
+
+  it('ignores a stage it does not recognise rather than passing it on', async () => {
+    // The stage picks wording off a closed set. An unknown value reaching
+    // the view model would index it to undefined and print "undefined" at
+    // the user, so it is dropped at the boundary.
+    const seen: GenerationProgress[] = [];
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 10, stage: 'reticulating' })}\n\n`,
+          PLAN_FRAME,
+        ])) as unknown as typeof fetch,
+      onProgress: (progress) => seen.push(progress),
+    });
+
+    await provider.generate({ prompt: 'a landing page' });
+
+    assert.deepEqual(seen, [{ elapsedMs: 10 }]);
+  });
+
+  it('still drops an event with no clock at all', async () => {
+    // Elapsed time is the one thing the meter cannot render without.
+    const seen: GenerationProgress[] = [];
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([
+          `event: progress\ndata: ${JSON.stringify({ characters: 10 })}\n\n`,
+          PLAN_FRAME,
+        ])) as unknown as typeof fetch,
+      onProgress: (progress) => seen.push(progress),
+    });
+
+    await provider.generate({ prompt: 'a landing page' });
+
+    assert.deepEqual(seen, []);
+  });
+
   it('reports each progress event and still returns the plan', async () => {
-    const seen: { characters: number; elapsedMs: number }[] = [];
+    const seen: GenerationProgress[] = [];
     const provider = new RemoteModelProvider({
       fetchImpl: (async () =>
         sseResponse([
@@ -276,12 +338,17 @@ describe('streamed progress', () => {
   it('ignores a progress frame with missing or wrong-typed counters', async () => {
     // A malformed counter must not abort a run that is otherwise fine: the
     // plan is what the user is paying for, the meter is decoration.
+    //
+    // `{ elapsedMs: 10 }` used to be listed here as malformed and is not any
+    // more: a clock with no character count is what every Workflow run now
+    // sends (#183). Only the frames with no usable clock are dropped.
     const seen: unknown[] = [];
     const provider = new RemoteModelProvider({
       fetchImpl: (async () =>
         sseResponse([
           `event: progress\ndata: ${JSON.stringify({ characters: 'lots' })}\n\n`,
-          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 10 })}\n\n`,
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 'ages' })}\n\n`,
+          `event: progress\ndata: ${JSON.stringify({})}\n\n`,
           PLAN_FRAME,
         ])) as unknown as typeof fetch,
       onProgress: (progress) => seen.push(progress),

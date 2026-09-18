@@ -26,7 +26,22 @@ import { GearIcon } from './Icons.tsx';
  * a test that had to stand up a provider to press a button would be testing
  * Clerk.
  */
-export function SettingsMenu({ children }: { children: ReactNode }) {
+export function SettingsMenu({
+  children,
+}: {
+  /**
+   * Given a way to close the popover, because some of what lives in here
+   * takes the reader somewhere else. A link to the admin page (#184) left
+   * the menu standing open over the page it had just opened: the
+   * document-level handler below deliberately ignores a mousedown that
+   * happened inside the panel, and an internal navigation changes no state
+   * this component watches, so nothing closed it (#188 review).
+   *
+   * A function rather than a context or an imperative handle: there is one
+   * caller, and the closing is part of what that one control does.
+   */
+  children: (close: () => void) => ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const container = useRef<HTMLDivElement | null>(null);
@@ -82,7 +97,7 @@ export function SettingsMenu({ children }: { children: ReactNode }) {
         role="group"
         aria-label="Settings"
       >
-        {children}
+        {children(() => setOpen(false))}
       </div>
     </div>
   );

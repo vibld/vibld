@@ -6,6 +6,7 @@ import {
   formatCharacters,
   formatElapsed,
   progressAnnouncement,
+  REASSURE_AFTER_MS,
   reassurance,
 } from '../src/generation/progress.ts';
 
@@ -94,20 +95,150 @@ describe('progressAnnouncement', () => {
     const first = progressAnnouncement({
       characters: 1_000,
       elapsedMs: ANNOUNCE_INTERVAL_MS,
+      stage: 'running',
     });
     const later = progressAnnouncement({
       characters: 8_000,
       elapsedMs: ANNOUNCE_INTERVAL_MS + ANNOUNCE_INTERVAL_MS - 1,
+      stage: 'running',
     });
     assert.equal(first, later);
-    assert.match(String(first), /Still generating/);
   });
 
   it('advances at the next boundary', () => {
     const second = progressAnnouncement({
       characters: 20_000,
       elapsedMs: ANNOUNCE_INTERVAL_MS * 2 + 500,
+      stage: 'running',
     });
-    assert.equal(second, 'Still generating, 1:00 elapsed.');
+    assert.equal(second, 'Still building your project, 1:00 elapsed.');
+  });
+
+  it('tells a queue apart from a run, out loud as well as on screen', () => {
+    // This said "Still generating" whatever the run was doing (#188
+    // review), so somebody using a screen reader was told the run was
+    // under way while it sat in a queue. A meter that is careful on
+    // screen and careless out loud is not careful.
+    const queued = String(
+      progressAnnouncement({
+        elapsedMs: ANNOUNCE_INTERVAL_MS,
+        stage: 'queued',
+      }),
+    );
+    assert.match(queued, /waiting for a slot/);
+    assert.doesNotMatch(queued, /building|generating/i);
+  });
+
+  it('claims no work it cannot see when there is no stage', () => {
+    const unnamed = String(
+      progressAnnouncement({ elapsedMs: ANNOUNCE_INTERVAL_MS }),
+    );
+    assert.match(unnamed, /0:30 elapsed/);
+    assert.doesNotMatch(
+      unnamed,
+      /building|generating|working|queue/i,
+      'a run in a state the Worker cannot name was announced as doing something specific',
+    );
+  });
+
+  it('says the same thing out loud as on screen for an unnamed stage', () => {
+    // The two drifted once already: the announcement said "Still working"
+    // while the sentence beside it deliberately claimed nothing (#188
+    // review). They share one constant now, and this is what holds them to
+    // it -- matching strings written twice would drift again.
+    const spoken = String(
+      progressAnnouncement({ elapsedMs: ANNOUNCE_INTERVAL_MS }),
+    );
+    const onScreen = String(reassurance({ elapsedMs: REASSURE_AFTER_MS }));
+    const lead = spoken.slice(0, spoken.indexOf(','));
+    assert.ok(lead.length > 0, 'the announcement must open on something');
+    assert.ok(
+      onScreen.startsWith(lead),
+      `the live region says "${lead}" where the visible line says "${onScreen}"`,
+    );
+  });
+});
+
+/**
+ * What the line says when the count is unavailable (#183).
+ *
+ * Generation moved into a durable Workflow, which has no live channel back
+ * to the Worker polling it, so the character count these helpers were built
+ * around usually is not there. The line has to stay useful without it, and
+ * must not substitute a zero: a counter sitting at 0 while a run works
+ * perfectly well is the frozen line this component exists to replace,
+ * wearing a number.
+ */
+describe('a run whose character count is unknown', () => {
+  it('carries the line on the clock alone', () => {
+    const line = describeProgress({ elapsedMs: 187_000 });
+    assert.equal(line, '3:07');
+    assert.doesNotMatch(line, /character/);
+    assert.doesNotMatch(line, /\b0\b/);
+  });
+
+  it('names the stage when there is one', () => {
+    assert.equal(
+      describeProgress({ elapsedMs: 9_000, stage: 'running' }),
+      'Building your project · 0:09',
+    );
+    assert.equal(
+      describeProgress({ elapsedMs: 4_000, stage: 'queued' }),
+      'Waiting for a slot · 0:04',
+    );
+  });
+
+  it('still shows a count when one is genuinely known', () => {
+    // The old path has to keep working: a provider that does report
+    // characters, or a later change that restores the live channel, should
+    // light this back up without touching the wording.
+    assert.equal(
+      describeProgress({ characters: 12_480, elapsedMs: 187_000 }),
+      '12,480 characters written · 3:07',
+    );
+    assert.equal(
+      describeProgress({
+        characters: 12_480,
+        elapsedMs: 187_000,
+        stage: 'running',
+      }),
+      'Building your project · 12,480 characters written · 3:07',
+    );
+  });
+
+  it('says nothing rather than zero for a count that has not moved', () => {
+    assert.equal(describeProgress({ characters: 0, elapsedMs: 2_000 }), '0:02');
+  });
+
+  it('explains a queue differently from a slow run', () => {
+    // Two different worries. "Building takes several minutes" is the wrong
+    // answer while nothing has started yet.
+    const queued = reassurance({ elapsedMs: 60_000, stage: 'queued' });
+    assert.match(queued ?? '', /queued behind other builds/);
+
+    const running = reassurance({ elapsedMs: 60_000, stage: 'running' });
+    assert.match(running ?? '', /takes several minutes/);
+    assert.doesNotMatch(running ?? '', /queued/);
+  });
+
+  it('claims no work it cannot see when there is no stage', () => {
+    // Removing the stage word for a paused or waiting run and then
+    // explaining the wait in terms of the work being done would put the
+    // same claim back one line lower (#188 review). All that is known is
+    // that the run has not finished.
+    const unknown = reassurance({ elapsedMs: 60_000 }) ?? '';
+    assert.notEqual(unknown, '');
+    assert.doesNotMatch(
+      unknown,
+      /Building|Writing|queued/,
+      'a run in a state the Worker cannot name was described as doing something specific',
+    );
+    assert.match(unknown, /cancel at any time/);
+  });
+
+  it('stays quiet early, whatever the stage', () => {
+    assert.equal(reassurance({ elapsedMs: 1_000, stage: 'queued' }), null);
+    assert.equal(reassurance({ elapsedMs: 1_000, stage: 'running' }), null);
+    assert.equal(reassurance({ elapsedMs: 1_000 }), null);
   });
 });

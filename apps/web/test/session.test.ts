@@ -652,9 +652,30 @@ describe('what the deployment can serve survives a reset', () => {
 
   it('keeps isAdmin, the same probe-once reasoning', () => {
     const session = createSession();
-    assert.equal(session.getState().isAdmin, false);
     session.setIsAdmin(true);
     session.reset();
     assert.equal(session.getState().isAdmin, true);
+  });
+
+  it('starts not knowing, rather than starting at no', () => {
+    // Three states, not two (#184). The answer comes from the /api/config
+    // fetch, so every session begins before anyone has answered, and the
+    // admin page has to tell that silence apart from a refusal or it
+    // reports that an admin's own page does not exist for as long as a
+    // fetch takes.
+    const session = createSession();
+    assert.equal(
+      session.getState().isAdmin,
+      null,
+      'an unanswered probe was indistinguishable from a caller who is not an admin',
+    );
+  });
+
+  it('keeps not-knowing through a reset, rather than settling it', () => {
+    // Reset carries this field over precisely because it came from a probe
+    // that runs once. Carrying it must not quietly turn null into false.
+    const session = createSession();
+    session.reset();
+    assert.equal(session.getState().isAdmin, null);
   });
 });

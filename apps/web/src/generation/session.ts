@@ -96,10 +96,17 @@ export interface BuilderState {
   models: ModelOption[];
   /**
    * Whether the signed-in caller is a platform admin (docs/decisions.md
-   * L4) -- decides only whether `AdminPanel` renders. `false` until the
-   * `/api/config` probe answers, the same as `models` above.
+   * L4) -- decides only what the shell draws, never what it may do. Every
+   * `/api/admin/*` route checks the caller itself (ADR-0006).
+   *
+   * `null` until the `/api/config` probe answers, which `models` above
+   * expresses as an empty list because an empty picker is the right thing
+   * to show while nobody has answered. There is no such luck here: the
+   * admin page has to tell "not an admin" apart from "not asked yet", or
+   * it reports that an admin's own page does not exist for as long as a
+   * fetch takes, and then replaces it under them.
    */
-  isAdmin: boolean;
+  isAdmin: boolean | null;
 }
 
 /** One prompt and what became of it. */
@@ -118,9 +125,30 @@ export interface TranscriptTurn {
   providerId: string | null;
 }
 
+/**
+ * Where a run has got to, as coarsely as the Worker can actually tell.
+ *
+ * `running` and not `writing` (#188 review). A Workflow instance reports
+ * `running` for the whole of its work, and writing the project is only the
+ * first of its three steps: settling the budget and recording the trace
+ * follow, each with its own retries. A word that named the writing would go
+ * on claiming it for as long as those take.
+ */
+export type GenerationStage = 'queued' | 'running';
+
 export interface GenerationProgress {
-  characters: number;
+  /**
+   * Characters the model has produced, when that is known.
+   *
+   * Optional because since generation moved into a durable Workflow there is
+   * no live channel from the running step back to the Worker polling it, so
+   * the count is currently unavailable (#183). Absent means unknown, and the
+   * wording says nothing rather than saying zero: a counter frozen at 0 is
+   * the frozen line this whole component exists to replace.
+   */
+  characters?: number;
   elapsedMs: number;
+  stage?: GenerationStage;
 }
 
 export interface SessionOptions {
@@ -186,7 +214,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     styleDna: {},
     model: null,
     models: [],
-    isAdmin: false,
+    isAdmin: null,
   };
 }
 
@@ -312,7 +340,7 @@ export class BuilderSession {
   }
 
   /** Record whether the signed-in caller is a platform admin, once the probe answers. */
-  setIsAdmin(isAdmin: boolean): void {
+  setIsAdmin(isAdmin: boolean | null): void {
     if (this.#disposed || isAdmin === this.#state.isAdmin) return;
     this.#state = { ...this.#state, isAdmin };
     this.#emit();

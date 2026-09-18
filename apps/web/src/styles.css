@@ -1550,6 +1550,70 @@ body {
   color: var(--muted);
 }
 
+.settings__link {
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
+/* --- Platform admin page -------------------------------------------------
+ * A page, not a column (#184). The builder's body is a two-column grid; the
+ * admin page is one measure of prose and four tools, so the grid is dropped
+ * rather than fought with. The builder is still mounted beside it, carrying
+ * `hidden`, which the `[hidden]` rule at the top of this file makes stick.
+ *
+ * And it scrolls, which is not a refinement (#188 review). Above 68.01rem
+ * `.shell` is bounded to the viewport with `overflow: hidden`, so anything
+ * inside it that can grow must carry its own scroller or its lower half is
+ * unreachable: no scrollbar, no overflow, nothing to drag. That is the exact
+ * bug `builder-layout.test.ts` was written for, and it was these four tools
+ * that caused it in the composer. Moving them to a page that repeated the
+ * mistake would have moved the bug rather than fixed it. */
+/* Focused only to reposition a reader after a view switch that kept the
+   document (`use-focus-on-change.ts`). A ring around the whole view would
+   read as a selection nobody made; the view changing under them is the
+   indication, and every control inside keeps its own ring. */
+.shell__body:focus {
+  outline: none;
+}
+
+.shell__body--page {
+  display: block;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.adminpage {
+  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.adminpage__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+}
+
+.adminpage__title {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-lg);
+}
+
+.adminpage__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.adminpage__back {
+  font-size: var(--text-sm);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* --- Run stats -----------------------------------------------------------
  * Folded away: reference rather than news, and it was a permanent band
  * across the bottom of every screen. */

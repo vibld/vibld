@@ -9,7 +9,7 @@
  * wording and the arithmetic can be tested without a DOM.
  */
 
-import type { GenerationProgress } from './session.ts';
+import type { GenerationProgress, GenerationStage } from './session.ts';
 
 /**
  * How often assistive technology hears about a run that is still going.
@@ -41,9 +41,54 @@ export function formatCharacters(characters: number): string {
   return safe.toLocaleString('en-US');
 }
 
-/** The one-line summary shown beside the meter. */
+/**
+ * What a run is called when the Worker has no honest word for its state.
+ *
+ * One constant and not two matching strings, because the on-screen sentence
+ * and the spoken one had already drifted once: `d11a8a4` gave the live
+ * region "Still working", an active-work label for a run that may be paused
+ * or asleep between retries, while the visible line beside it claimed
+ * nothing of the kind (#188 review). Sharing the words is what stops the
+ * two disagreeing again.
+ *
+ * "Going" and not "working": what is known is that the run has not
+ * finished. Nothing here claims anything is happening this second.
+ */
+const STILL_GOING = 'Still going';
+
+/**
+ * What each stage is called on screen. Plain words, not internal states.
+ *
+ * "Building" rather than "Writing" (#188 review). The Worker can see that a
+ * run is under way; it cannot see which of the Workflow's three steps it is
+ * in, and the writing is only the first of them. A word naming the writing
+ * kept claiming it through settlement and the trace write, which is a
+ * confident wrong answer where a broader true one was available.
+ */
+const STAGE_WORDS: Record<GenerationStage, string> = {
+  queued: 'Waiting for a slot',
+  running: 'Building your project',
+};
+
+/**
+ * The one-line summary shown beside the meter.
+ *
+ * Built from whichever facts are actually known, rather than a fixed shape
+ * with holes in it. Since generation moved into a durable Workflow the
+ * character count is usually unavailable (#183), and printing "0 characters
+ * written" for a run that is working perfectly well would be worse than the
+ * frozen line this replaced: it would be a number that is both wrong and
+ * reassuringly precise. So an absent count contributes nothing, and the
+ * clock carries the line on its own.
+ */
 export function describeProgress(progress: GenerationProgress): string {
-  return `${formatCharacters(progress.characters)} characters written · ${formatElapsed(progress.elapsedMs)}`;
+  const parts: string[] = [];
+  if (progress.stage) parts.push(STAGE_WORDS[progress.stage]);
+  if (typeof progress.characters === 'number' && progress.characters > 0) {
+    parts.push(`${formatCharacters(progress.characters)} characters written`);
+  }
+  parts.push(formatElapsed(progress.elapsedMs));
+  return parts.join(' · ');
 }
 
 /**
@@ -52,14 +97,43 @@ export function describeProgress(progress: GenerationProgress): string {
  */
 export function reassurance(progress: GenerationProgress): string | null {
   if (progress.elapsedMs < REASSURE_AFTER_MS) return null;
-  return 'Writing a whole project takes several minutes. You can cancel at any time.';
+  if (progress.stage === 'queued') {
+    // A different worry from a slow run, and a different answer. Saying
+    // "building takes several minutes" while nothing has started yet would
+    // explain the wrong thing.
+    return 'Your project is queued behind other builds. It will start shortly, and you can cancel at any time.';
+  }
+  if (progress.stage === undefined) {
+    // No stage means the Workflow is in a state the Worker has no honest
+    // word for (`run-stage.ts`). Removing the stage word and then
+    // explaining the wait in terms of the work being done would put the
+    // same claim back a line lower (#188 review). All that is known here is
+    // that the run has not finished, so that is all this says.
+    return `${STILL_GOING}. It can take several minutes, and you can cancel at any time.`;
+  }
+  return 'Building a whole project takes several minutes. You can cancel at any time.';
 }
+
+/** How each stage opens the spoken announcement. */
+const STAGE_ANNOUNCEMENTS: Record<GenerationStage, string> = {
+  queued: 'Still waiting for a slot',
+  running: 'Still building your project',
+};
 
 /**
  * Text for the polite live region, or null before the first boundary.
  *
+ * Stage-aware, like the visible line and for the same reason (#188 review).
+ * This said "Still generating" whatever the run was doing, so somebody
+ * using a screen reader heard a claim that the run was under way while it
+ * sat in a queue, and heard it again for a state the Worker had
+ * deliberately declined to name. A meter that is careful on screen and
+ * careless out loud is not careful.
+ *
  * Bucketed to `ANNOUNCE_INTERVAL_MS` so the string is stable between
- * announcements -- see the constant.
+ * announcements -- see the constant. A change of stage does change the
+ * string mid-bucket, which is the one interruption worth making: it is
+ * news, not a counter ticking.
  */
 export function progressAnnouncement(
   progress: GenerationProgress | null,
@@ -71,5 +145,8 @@ export function progressAnnouncement(
       : 0;
   const buckets = Math.floor(elapsed / ANNOUNCE_INTERVAL_MS);
   if (buckets < 1) return null;
-  return `Still generating, ${formatElapsed(buckets * ANNOUNCE_INTERVAL_MS)} elapsed.`;
+  const lead = progress.stage
+    ? STAGE_ANNOUNCEMENTS[progress.stage]
+    : STILL_GOING;
+  return `${lead}, ${formatElapsed(buckets * ANNOUNCE_INTERVAL_MS)} elapsed.`;
 }
