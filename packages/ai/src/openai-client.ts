@@ -1,5 +1,5 @@
-import { z } from 'zod';
 import { GenerationPlanSchema } from './plan-schema.ts';
+import { jsonSchemaFor, outputFor } from './plan-output.ts';
 import { findModel } from './model-catalogue.ts';
 import type { PlanClient, PlanCompletion, PlanRequest } from './client.ts';
 
@@ -47,19 +47,7 @@ export const OPENAI_BASE_URL = 'https://api.openai.com/v1';
  * the tighter check still happens.
  */
 export function planJsonSchema(): Record<string, unknown> {
-  const strip = (node: unknown): unknown => {
-    if (Array.isArray(node)) return node.map(strip);
-    if (typeof node !== 'object' || node === null) return node;
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(node)) {
-      if (key === '$schema' || key === 'minLength' || key === 'minItems') {
-        continue;
-      }
-      out[key] = strip(value);
-    }
-    return out;
-  };
-  return strip(z.toJSONSchema(GenerationPlanSchema)) as Record<string, unknown>;
+  return jsonSchemaFor(GenerationPlanSchema);
 }
 
 interface OpenaiContentBlock {
@@ -232,6 +220,10 @@ export function createOpenaiPlanClient(
         ? Math.min(request.maxTokens, known.maxOutputTokens)
         : request.maxTokens;
 
+      // The schema travels in `text.format` rather than in the prompt, so
+      // what goes as prompt is exactly these two (#189 review).
+      request.onPromptChars?.(request.system.length + request.prompt.length);
+
       const response = await doFetch(`${baseUrl}/responses`, {
         method: 'POST',
         headers: {
@@ -258,8 +250,11 @@ export function createOpenaiPlanClient(
           text: {
             format: {
               type: 'json_schema',
-              name: 'generation_plan',
-              schema: planJsonSchema(),
+              // Named and shaped by the request (#189 review). This said
+              // `generation_plan` and `planJsonSchema()` whatever was
+              // asked for, so a mockup run was constrained to a plan.
+              name: outputFor(request).name,
+              schema: jsonSchemaFor(outputFor(request).schema),
               strict: true,
             },
           },

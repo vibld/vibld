@@ -59,3 +59,104 @@ export const MAX_KNOWLEDGE_CHARS = 2_000;
  * guess how much of it might arrive.
  */
 export const MAX_REFERENCE_CHARS = 6_000;
+
+/**
+ * The largest visual direction a mockup prompt may carry (#185).
+ *
+ * A mockup run sends the caller's prompt plus, when they have already chosen
+ * a preset, that preset's direction from `style-presets.ts`. Both go to the
+ * model, so both are input tokens the reservation has to have covered before
+ * the run starts.
+ *
+ * Like `MAX_REFERENCE_CHARS` above, this is really documentation of a
+ * contract: the directions are written here in this repository rather than
+ * supplied by a caller, so nothing truncates to it. What makes it true is
+ * `mockup-schema.test.ts`, which walks every preset and fails if one grows
+ * past it. Without that the number would be a guess that silently stopped
+ * being an upper bound the next time somebody wrote a longer description,
+ * and the worst case would quietly understate the bill.
+ */
+export const MAX_MOCKUP_DIRECTION_CHARS = 2_000;
+
+/**
+ * The fixed prompt text every mockup run sends, whoever is asking (#189
+ * review).
+ *
+ * `MOCKUP_SYSTEM_PROMPT` goes on every run and `MOCKUP_STYLE_PREAMBLE` on
+ * every styled one. Neither comes from the caller, which is exactly why the
+ * worst case forgot them: I bounded what a caller could send and then
+ * reserved as though that were the whole prompt. It is not, by about 1,600
+ * characters, and an account with precisely the computed reservation left
+ * was admitted for a run that settled past it.
+ *
+ * Documentation of a contract again, like the two bounds above, and pinned
+ * the same way: `mockup-schema.test.ts` measures the real text and fails if
+ * it grows past this. Without that walk the number would be a guess that
+ * stopped being an upper bound the next time somebody added a paragraph to
+ * the prompt, and the ceiling would quietly stop holding.
+ */
+export const MAX_MOCKUP_FIXED_PROMPT_CHARS = 2_500;
+
+/**
+ * The largest chosen mockup a build request may carry (#185).
+ *
+ * Picking a direction has to mean something. Seeding the next prompt with
+ * the direction's name would let the build ignore it and still look like it
+ * had obeyed, which is the kind of confident wrong answer this codebase
+ * keeps having to remove. So the document itself travels, and the build is
+ * asked to turn that page into the project.
+ *
+ * Where the figure came from: `MOCKUP_OUTPUT_TOKENS` buys three mockups, so
+ * one of them is about a third of it, at roughly four characters a token --
+ * 18,000 / 3 * 4. That is an origin story, not a derivation, and this
+ * comment used to call it one (#189 review). Nothing makes a model split
+ * its budget three ways, and nothing fixes four characters to a token, so a
+ * run really can produce a direction larger than this.
+ *
+ * What makes the number safe is therefore not the arithmetic above but
+ * `MockupSchema`, which bounds every generated `html` at exactly this
+ * figure. A direction too large for the build to accept back is refused
+ * where it is produced, rather than offered and then rejected after the run
+ * has been paid for and a choice made.
+ */
+export const MAX_CHOSEN_MOCKUP_CHARS = 24_000;
+
+/**
+ * The whole prompt section a chosen direction contributes, document and all
+ * (#189 review).
+ *
+ * The build's worst case counted `MAX_CHOSEN_MOCKUP_CHARS` and stopped,
+ * which is the document by itself. `chosenMockupSection` also sends the
+ * label through `JSON.stringify` -- so a 60-character label can serialise
+ * to more than 60 -- and about 470 characters of fixed framing that names
+ * the document as data rather than instruction. That framing is the part
+ * that keeps a mockup from becoming a second prompt, so it is not optional
+ * and it is not free.
+ *
+ * The same mistake as the mockup route's own reservation, mirrored: there I
+ * counted what a caller may send and forgot the system prompt; here I
+ * counted what a caller may send and forgot the wrapper. Pinned the same
+ * way, by `chosen-mockup-prompt.test.ts` building the largest section this
+ * can produce and measuring it.
+ */
+export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 25_000;
+
+/**
+ * The longest reference URL a request may carry (#189 review).
+ *
+ * Not `MAX_REFERENCE_CHARS` above, which bounds the text fetched *from* that
+ * address. This bounds the address itself: generous next to what a real
+ * address bar accepts, tight next to what a request could otherwise pad its
+ * body with.
+ *
+ * Here rather than as a literal in the Worker's guard because the form has
+ * to declare the same number. The field was a bare `type="url"`, so an
+ * over-long address was perfectly valid markup, passed the browser's check,
+ * paid for a look, was kept for the build that choosing a direction submits,
+ * and was refused there by the guard -- after the spending, on a bound the
+ * field could have carried from the start. `maxLength` in the markup means
+ * the value cannot be typed or pasted in at all, on the button and on
+ * `Generate` alike, and the guard still enforces it for anything that did
+ * not come through the form.
+ */
+export const MAX_REFERENCE_URL_CHARS = 2_048;

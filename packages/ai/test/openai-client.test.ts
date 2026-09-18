@@ -10,6 +10,7 @@ import {
   readResponseStream,
 } from '../src/openai-client.ts';
 import type { PlanRequest } from '../src/client.ts';
+import { MOCKUP_OUTPUT, jsonSchemaFor } from '../src/plan-output.ts';
 
 const REQUEST: PlanRequest = {
   system: 'system',
@@ -210,6 +211,50 @@ describe('createOpenaiPlanClient', () => {
     assert.equal(result.stopReason, 'end_turn');
   });
 
+  /**
+   * The schema is the caller's, not this client's (#189 review, P1).
+   *
+   * `text.format` was named `generation_plan` and carried
+   * `planJsonSchema()` whatever was asked for, so strict mode constrained a
+   * mockup run's reply to `{summary, files}`. The model complies with the
+   * API, `MockupSetSchema` rejects what arrives, and the caller pays for a
+   * refusal they did not cause.
+   */
+  it('posts the mockup schema when a mockup set was asked for', async () => {
+    const seen: Record<string, never>[] = [];
+    await clientWith(sse(completed()), seen).createPlan({
+      ...REQUEST,
+      output: MOCKUP_OUTPUT,
+    });
+    const format = (
+      seen[0] as unknown as { body: Record<string, Record<string, unknown>> }
+    ).body.text.format as Record<string, unknown>;
+    assert.equal(format.name, 'mockup_set');
+    const schema = JSON.stringify(format.schema);
+    assert.match(schema, /mockups/, 'the request did not ask for mockups');
+    assert.doesNotMatch(schema, /"files"/, 'it asked for a plan instead');
+  });
+
+  it('still posts the plan schema when nothing says otherwise', async () => {
+    const seen: Record<string, never>[] = [];
+    await clientWith(sse(completed()), seen).createPlan(REQUEST);
+    const format = (
+      seen[0] as unknown as { body: Record<string, Record<string, unknown>> }
+    ).body.text.format as Record<string, unknown>;
+    assert.equal(format.name, 'generation_plan');
+    assert.match(JSON.stringify(format.schema), /files/);
+  });
+
+  it('drops the bounds strict mode will not accept', async () => {
+    // The mockup schema carries maxLength and min/maxItems, which the plan's
+    // did not exercise. A keyword strict mode rejects fails every request,
+    // and the real Zod schema is re-run over the reply regardless.
+    const schema = JSON.stringify(jsonSchemaFor(MOCKUP_OUTPUT.schema));
+    for (const keyword of ['$schema', 'maxLength', 'minItems', 'maxItems']) {
+      assert.doesNotMatch(schema, new RegExp(keyword), `kept ${keyword}`);
+    }
+  });
+
   it('opts out of response storage', async () => {
     // The Responses API stores by default, and this request carries the whole
     // project. Picking an OpenAI model must not change where a user's code
@@ -314,6 +359,53 @@ describe('createOpenaiPlanClient', () => {
         assert.ok(!error.message.includes('super-secret-key'));
         return true;
       },
+    );
+  });
+});
+
+/**
+ * How large a prompt this client says it sent (#189 review).
+ *
+ * The schema goes in `text.format`, not in the prompt, so what this
+ * reports is the two strings it was handed. That is worth pinning rather
+ * than assuming: the figure settles a cancelled run, and the equivalent
+ * answer on DeepSeek is a different one.
+ */
+describe('what the OpenAI client reports sending', () => {
+  /** Its own, because `clientWith` belongs to the suite above. */
+  function client() {
+    return createOpenaiPlanClient({
+      apiKey: 'test-key',
+      fetchImpl: (async () =>
+        new Response(sse(completed()), {
+          status: 200,
+        })) as unknown as typeof fetch,
+    });
+  }
+
+  async function reportedFor(extra: Partial<PlanRequest> = {}) {
+    let reported = -1;
+    await client().createPlan({
+      ...REQUEST,
+      ...extra,
+      onPromptChars: (characters) => {
+        reported = characters;
+      },
+    });
+    return reported;
+  }
+
+  it('counts the system and user prompts it was given', async () => {
+    assert.equal(
+      await reportedFor(),
+      REQUEST.system.length + REQUEST.prompt.length,
+    );
+  });
+
+  it('does not count the schema, which does not travel as prompt', async () => {
+    assert.equal(
+      await reportedFor({ output: MOCKUP_OUTPUT }),
+      REQUEST.system.length + REQUEST.prompt.length,
     );
   });
 });

@@ -21,6 +21,8 @@ import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
 import { buildPlan } from './plan-builder.ts';
 import type { StyleDna } from '@vibld/ai/style-dna';
+import type { ParsedMockup } from '@vibld/ai/mockup-schema';
+import { requestMockups } from './mockups-client.ts';
 import { createValidator } from './validator.ts';
 import {
   ObservingGenerationStore,
@@ -31,6 +33,7 @@ import {
   RemoteModelProvider,
   detectGenerationMode,
 } from './remote-provider.ts';
+import type { GenerationMode } from './remote-provider.ts';
 
 export type BuilderStatus =
   | 'idle'
@@ -107,6 +110,30 @@ export interface BuilderState {
    * fetch takes, and then replaces it under them.
    */
   isAdmin: boolean | null;
+  /**
+   * What this deployment can actually generate with, from `/api/config`.
+   *
+   * Null until the probe answers. It decides one thing: whether to offer
+   * directions (#189 review). `explore` always calls the real
+   * `/api/mockups`, while a build in `fake` mode is served by
+   * `FakeModelProvider`, so the button was offering something that could
+   * only 503 in exactly the modes the fake exists to keep usable.
+   *
+   * Hidden rather than faked, and the reason is this feature's own
+   * argument. `defaultResolveProvider` already says the fake "has no visual
+   * vocabulary at all, so a preset cannot change what it produces. Nothing
+   * here pretends otherwise." Three invented pages would be precisely the
+   * promise the generator has not made that rendered-not-drawn exists to
+   * avoid: a reader would choose between sketches nothing built.
+   */
+  generation: GenerationMode | null;
+  /**
+   * Directions to choose between, when the caller asked to look before
+   * building (#185). Empty is the ordinary case: most runs never ask.
+   */
+  mockups: ParsedMockup[];
+  /** A mockup run is in flight. Separate from `running`, which is a build. */
+  exploring: boolean;
 }
 
 /** One prompt and what became of it. */
@@ -163,6 +190,8 @@ export interface SessionOptions {
    * Resolve the provider for a run. Defaults to asking the deployment: the
    * hosted Worker when it is configured, the deterministic fake otherwise.
    */
+  /** Ask for directions. Injectable so tests need no network. */
+  requestMockupsImpl?: typeof requestMockups;
   resolveProvider?: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -172,6 +201,11 @@ export interface SessionOptions {
     model?: string | null,
     referenceUrl?: string | null,
     styleDna?: StyleDna | null,
+    // Appended rather than placed beside the other request-shaped options,
+    // for the reason `buildUserPrompt` now carries in its own signature: a
+    // parameter added to the middle of a positional list silently re-points
+    // every existing caller at the wrong argument.
+    mockup?: { label: string; html: string } | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -215,6 +249,9 @@ function initialState(budget: RunUsageReport): BuilderState {
     model: null,
     models: [],
     isAdmin: null,
+    generation: null,
+    mockups: [],
+    exploring: false,
   };
 }
 
@@ -233,6 +270,7 @@ async function defaultResolveProvider(
   model?: string | null,
   referenceUrl?: string | null,
   styleDna?: StyleDna | null,
+  mockup?: { label: string; html: string } | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -244,6 +282,7 @@ async function defaultResolveProvider(
         ...(model ? { model } : {}),
         ...(referenceUrl ? { referenceUrl } : {}),
         ...(styleDna && Object.keys(styleDna).length > 0 ? { styleDna } : {}),
+        ...(mockup ? { mockup } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -285,6 +324,19 @@ export class BuilderSession {
   readonly #now: () => number;
   readonly #stageDelayMs: number;
   readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
+  readonly #requestMockups: typeof requestMockups;
+  #mockupContext: {
+    prompt: string;
+    style: StylePresetId | null;
+    referenceUrl: string | null;
+  } | null = null;
+  /**
+   * The look's own controller, separate from the build's `#abort` (#189
+   * review). A mockup run is about a minute and is billed; without this the
+   * only way to stop one was to leave the page, and it kept spending either
+   * way.
+   */
+  #exploreAbort: AbortController | null = null;
   readonly #resolveProvider: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -294,6 +346,7 @@ export class BuilderSession {
     model?: string | null,
     referenceUrl?: string | null,
     styleDna?: StyleDna | null,
+    mockup?: { label: string; html: string } | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -307,6 +360,7 @@ export class BuilderSession {
     this.#budgetLimits = options.budget ?? DEFAULT_BUDGET;
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
     this.#resolveProvider = options.resolveProvider ?? defaultResolveProvider;
+    this.#requestMockups = options.requestMockupsImpl ?? requestMockups;
     this.#state = initialState(this.#ledger.report());
   }
 
@@ -319,9 +373,33 @@ export class BuilderSession {
     };
   };
 
+  /**
+   * Shut the session down and stop what it is paying for.
+   *
+   * The epoch and the listeners are about what gets *shown*; the
+   * controllers are about what gets *spent*, and this used to do only the
+   * first (#189 review). A non-React owner -- the documented consumer of
+   * this method -- could dispose a session mid-run and leave about a minute
+   * of billed model time going, with the answer thrown away.
+   *
+   * Both controllers, not only the look's. The finding named the look,
+   * because that is the one this PR added; the build's `#abort` was never
+   * cleared here either. That is the third time in this review I have fixed
+   * the case that was reported without asking which sibling had the same
+   * shape, so this one asks: `reset`, `cancel`, `cancelExplore` and this
+   * are the four places that end work, and all four now abort what they
+   * end.
+   *
+   * No state is written, unlike `cancel`. There is nobody left to show it
+   * to, and `#disposed` already refuses every later mutation.
+   */
   dispose(): void {
     this.#disposed = true;
     this.#epoch += 1;
+    this.#abort?.abort();
+    this.#abort = null;
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
     this.#listeners.clear();
   }
 
@@ -340,6 +418,13 @@ export class BuilderSession {
   }
 
   /** Record whether the signed-in caller is a platform admin, once the probe answers. */
+  /** What the deployment can generate with, once the probe answers. */
+  setGeneration(generation: GenerationMode | null): void {
+    if (this.#disposed || generation === this.#state.generation) return;
+    this.#state = { ...this.#state, generation };
+    this.#emit();
+  }
+
   setIsAdmin(isAdmin: boolean | null): void {
     if (this.#disposed || isAdmin === this.#state.isAdmin) return;
     this.#state = { ...this.#state, isAdmin };
@@ -377,7 +462,7 @@ export class BuilderSession {
    */
   reset(): void {
     if (this.#disposed) return;
-    const { knowledge, model, models, isAdmin } = this.#state;
+    const { knowledge, model, models, isAdmin, generation } = this.#state;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
@@ -389,7 +474,163 @@ export class BuilderSession {
       model,
       models,
       isAdmin,
+      generation,
     };
+    // Directions are about a request, and "Start over" discards the
+    // request. Carrying them would leave three sketches of a project that
+    // no longer exists, with a Build button that would rebuild it.
+    //
+    // Aborted, not merely forgotten (#189 review). Clearing the context
+    // and bumping the epoch stops the result being *shown*; it does not
+    // stop the run, which is about a minute of billed model time whose
+    // answer is then thrown away. Start over is reachable while a look is
+    // in flight -- the same failed-first-build state that made the
+    // directions button visible again -- so this is a path a reader
+    // actually takes.
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
+    this.#mockupContext = null;
+    this.#emit();
+  }
+
+  /**
+   * Ask for three directions rather than a build (#185).
+   *
+   * Its own flag rather than reusing `running`: a build and a look are
+   * different spends, they read differently on screen, and a chooser that
+   * appeared because a build was in flight would be lying about what it
+   * was waiting for.
+   *
+   * The prompt and style that produced the set are kept, because choosing
+   * one has to submit the same request it was drawn from. Asking the reader
+   * to retype it would be asking them to remember what they already said.
+   */
+  async explore(
+    prompt: string,
+    style: StylePresetId | null = null,
+    // Kept so choosing can resubmit the request the set was drawn from
+    // (#189 review). Without it a reference page the reader had filled in
+    // was silently dropped on the build, while still sitting in the
+    // composer looking like it had been used.
+    referenceUrl: string | null = null,
+  ): Promise<void> {
+    const trimmed = prompt.trim();
+    if (
+      this.#disposed ||
+      this.#state.running ||
+      this.#state.exploring ||
+      trimmed.length === 0
+    ) {
+      return;
+    }
+    const epoch = this.#epoch;
+    const controller = new AbortController();
+    this.#exploreAbort = controller;
+    this.#mockupContext = { prompt: trimmed, style, referenceUrl };
+    this.#patch(epoch, (state) => ({
+      ...state,
+      exploring: true,
+      mockups: [],
+      progress: null,
+      problems: [],
+    }));
+
+    try {
+      const mockups = await this.#requestMockups({
+        prompt: trimmed,
+        style,
+        model: this.#state.model,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          this.#patch(epoch, (state) => ({ ...state, progress }));
+        },
+      });
+      this.#forgetExplore(controller);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        exploring: false,
+        progress: null,
+        mockups,
+      }));
+    } catch (error) {
+      this.#forgetExplore(controller);
+      // A run the reader stopped is not a run that failed. `cancelStop`
+      // has already put the session back; reporting the abort on top of
+      // that would show an error for something they chose.
+      if (controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        exploring: false,
+        progress: null,
+        mockups: [],
+        problems: [message],
+      }));
+    }
+  }
+
+  /**
+   * Drop the reference to a look that has finished, if it is still ours.
+   *
+   * The check is the point (#189 review). `explore` used to clear
+   * `#exploreAbort` unconditionally when its promise settled, so an
+   * abandoned run landing after Start over -- or after a second look had
+   * begun -- cleared the *new* run's controller. Nothing then held it, and
+   * Cancel had nothing left to abort: a billed run with no way to stop it,
+   * created by the code whose whole job is stopping runs.
+   */
+  #forgetExplore(controller: AbortController): void {
+    if (this.#exploreAbort === controller) this.#exploreAbort = null;
+  }
+
+  /**
+   * Stop a look that is still running (#189 review).
+   *
+   * Aborting the fetch drops the connection, which is what tells the
+   * endpoint to stop its own model call -- so this stops the spending
+   * rather than only the waiting, the same contract `cancel` has for a
+   * build.
+   */
+  cancelExplore(): void {
+    if (this.#disposed || !this.#state.exploring) return;
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
+    this.#state = {
+      ...this.#state,
+      exploring: false,
+      progress: null,
+      mockups: [],
+    };
+    this.#mockupContext = null;
+    this.#emit();
+  }
+
+  /**
+   * Build the direction that was picked, from the request it was drawn
+   * from. The set is cleared first: the other two are not alternatives any
+   * more, and leaving them on screen beside a running build would invite a
+   * second click that the run in flight would refuse anyway.
+   */
+  chooseMockup(mockup: ParsedMockup): void {
+    if (this.#disposed || this.#state.running) return;
+    const context = this.#mockupContext;
+    if (!context) return;
+    this.#state = { ...this.#state, mockups: [] };
+    this.#emit();
+    void this.submit(
+      context.prompt,
+      'succeed',
+      context.style,
+      context.referenceUrl,
+      { label: mockup.label, html: mockup.html },
+    );
+  }
+
+  /** None of them. Clears the set without spending anything further. */
+  discardMockups(): void {
+    if (this.#disposed || this.#state.mockups.length === 0) return;
+    this.#mockupContext = null;
+    this.#state = { ...this.#state, mockups: [] };
     this.#emit();
   }
 
@@ -398,9 +639,26 @@ export class BuilderSession {
     mode: PlanMode = 'succeed',
     style: StylePresetId | null = null,
     referenceUrl: string | null = null,
+    mockup: { label: string; html: string } | null = null,
   ): Promise<void> {
     const trimmed = prompt.trim();
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
+
+    // Any build invalidates the directions, not only choosing one
+    // (#189 review). Pressing Generate with a set on screen used to leave
+    // it there; once that build was accepted the chooser came back enabled,
+    // and clicking a tile then submitted its *pre-build* request against
+    // the project that had just been created -- a follow-up nobody asked
+    // for, at the price of a full build.
+    //
+    // Here rather than in the two callers, because the callers are the
+    // composer and `chooseMockup`, and the rule is about what a build does
+    // to a set, not about who started it. `chooseMockup` reads the context
+    // into locals before it calls this, so clearing it here is safe.
+    this.#mockupContext = null;
+    if (this.#state.mockups.length > 0) {
+      this.#state = { ...this.#state, mockups: [] };
+    }
 
     const epoch = this.#epoch;
     this.#runSeq += 1;
@@ -423,7 +681,12 @@ export class BuilderSession {
       estimateTokens(trimmed) +
       estimateTokensForChars(baseChars) +
       estimateTokensForChars(this.#state.knowledge.length) +
-      (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0);
+      (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0) +
+      // A chosen direction is sent with the request too (#185), so it is
+      // part of what this run spends. Counted from the document actually
+      // being sent rather than from its cap, because unlike a reference URL
+      // this content is already in hand.
+      (mockup ? estimateTokensForChars(mockup.html.length) : 0);
     let reservation;
     try {
       reservation = this.#ledger.reserve({
@@ -523,6 +786,7 @@ export class BuilderSession {
         this.#state.model,
         referenceUrl,
         this.#state.styleDna,
+        mockup,
       );
     } catch (error) {
       reservation.release();

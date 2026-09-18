@@ -197,6 +197,61 @@ export function worstCaseMicroUsd(
   );
 }
 
+/**
+ * What a run the caller stopped should be charged (#189 review).
+ *
+ * Aborting the model call makes it reject, so the provider never reports
+ * usage, and `settleBudget`'s middle case then charges the full worst-case
+ * reservation. For a build that is right: the run happened somewhere this
+ * Worker cannot see, and over-counting is the safe direction when the cause
+ * is unknown. For a cancellation it is not, because the cause is known and
+ * the number is wrong by an order of magnitude in the direction that
+ * punishes the reader: pressing Cancel one second into a mockup run would
+ * cost more than letting it finish, which makes the button a trap.
+ *
+ * So a stopped run is settled from what was actually measured. Two halves:
+ *
+ * - The input is the prompt that was really sent, measured by the caller
+ *   and passed in. An earlier version passed the reservation's *bound*
+ *   here, on the reasoning that "the input was sent in full before a token
+ *   came back" -- which is true, and does not make the bound the right
+ *   number (#189 review). The whole input being sent is not the whole
+ *   allowance being used: a ten-character unstyled prompt was settled as
+ *   though it were four thousand characters plus a style direction that
+ *   was never chosen, about five times over.
+ * - The output is estimated from the characters the model streamed, at the
+ *   four-characters-per-token figure `worstCaseMicroUsd` above already
+ *   uses. That is a rough number, and HTML can run denser than four, so it
+ *   can under-count.
+ *
+ * Under-counting a cancelled run is the direction to err in. The upstream
+ * cost stops when the connection drops, so the real bill is small; and a
+ * cancellation that over-charges deters the one behaviour that saves money.
+ * Clamped at `maxOutputTokens` regardless, so a settlement can never exceed
+ * the reservation it is closing.
+ */
+export function cancelledUsage(
+  streamedCharacters: number,
+  maxOutputTokens: number,
+  /** Characters the caller really sent, not the bound they were allowed. */
+  inputChars: number,
+): Required<TokenUsage> {
+  return {
+    inputTokens: Math.ceil(Math.max(0, inputChars) / 4),
+    outputTokens: Math.min(
+      maxOutputTokens,
+      Math.ceil(Math.max(0, streamedCharacters) / 4),
+    ),
+    // Explicit zeroes rather than omitted, and `Required` rather than
+    // `TokenUsage`, because this is handed to `settleBudget`, which takes
+    // the provider's own `PlanUsage` where both fields are mandatory. The
+    // value is honest either way: nothing reported cache activity, and
+    // `microUsdOf` prices a zero exactly as it prices an absence.
+    cacheReadInputTokens: 0,
+    cacheWriteInputTokens: 0,
+  };
+}
+
 export type SpendVerdict =
   | { allow: true }
   | { allow: false; reason: 'period-ceiling' | 'too-many-in-flight' };

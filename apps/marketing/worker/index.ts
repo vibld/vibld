@@ -5,6 +5,7 @@ import {
   pathOf,
   record,
 } from './analytics.ts';
+import { secured } from '@vibld/security-headers';
 import {
   isTurnstileVerified,
   parseWaitlistSubmission,
@@ -73,44 +74,57 @@ export interface Env {
  * with it is that `vibld.com` is the only hostname that ever answers 200.
  */
 export default {
+  /**
+   * One exit, so a route added later cannot forget the headers.
+   *
+   * `secured` is applied here rather than at each `return` below for the
+   * reason this site had no security headers at all: they were nobody's
+   * job at any particular return statement. A `_headers` file cannot help
+   * here, because Cloudflare never applies one to a response a Worker
+   * generated and this Worker generates every response on the site
+   * (`run_worker_first: true`, for the www redirect).
+   */
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    // First, before any route or asset. A redirect that runs after the thing
-    // it is redirecting away from has already answered is not a redirect.
-    const canonical = canonicalHost(url);
-    if (canonical) {
-      return new Response(null, {
-        // A 301 turns a POST into a GET in most clients, which for
-        // `/api/waitlist` would silently discard somebody's signup. 308 is
-        // the same permanent redirect with the method and body preserved, so
-        // the two are split by method rather than one being chosen for both.
-        // GET and HEAD keep 301 because it is the status every crawler and
-        // link checker already understands.
-        status:
-          request.method === 'GET' || request.method === 'HEAD' ? 301 : 308,
-        headers: { location: canonical },
-      });
-    }
-
-    if (url.pathname === '/api/waitlist' && request.method === 'POST') {
-      return handleWaitlist(request, env);
-    }
-    if (url.pathname === '/api/hit' && request.method === 'POST') {
-      return handleHit(request, env);
-    }
-
-    // Last, so an `/api/` route is never served as a page. `VIBLD_NOINDEX` is
-    // set on the preview deployment only, and keeps a byte-for-byte copy of
-    // this site out of the index; production serves the same bytes without
-    // that header.
-    if (env.ASSETS) {
-      const response = await env.ASSETS.fetch(request);
-      return env.VIBLD_NOINDEX === '1' ? noindex(response) : response;
-    }
-    return new Response('Not found', { status: 404 });
+    return secured(await route(request, env));
   },
 };
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+
+  // First, before any route or asset. A redirect that runs after the thing
+  // it is redirecting away from has already answered is not a redirect.
+  const canonical = canonicalHost(url);
+  if (canonical) {
+    return new Response(null, {
+      // A 301 turns a POST into a GET in most clients, which for
+      // `/api/waitlist` would silently discard somebody's signup. 308 is
+      // the same permanent redirect with the method and body preserved, so
+      // the two are split by method rather than one being chosen for both.
+      // GET and HEAD keep 301 because it is the status every crawler and
+      // link checker already understands.
+      status: request.method === 'GET' || request.method === 'HEAD' ? 301 : 308,
+      headers: { location: canonical },
+    });
+  }
+
+  if (url.pathname === '/api/waitlist' && request.method === 'POST') {
+    return handleWaitlist(request, env);
+  }
+  if (url.pathname === '/api/hit' && request.method === 'POST') {
+    return handleHit(request, env);
+  }
+
+  // Last, so an `/api/` route is never served as a page. `VIBLD_NOINDEX` is
+  // set on the preview deployment only, and keeps a byte-for-byte copy of
+  // this site out of the index; production serves the same bytes without
+  // that header.
+  if (env.ASSETS) {
+    const response = await env.ASSETS.fetch(request);
+    return env.VIBLD_NOINDEX === '1' ? noindex(response) : response;
+  }
+  return new Response('Not found', { status: 404 });
+}
 
 /**
  * Where this request should have gone, or null when it is already there.

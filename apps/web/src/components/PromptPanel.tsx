@@ -1,5 +1,6 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { FormEvent } from 'react';
+import { MAX_REFERENCE_URL_CHARS } from '@vibld/ai/limits';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { BuilderState } from '../generation/session.ts';
 import type { PlanMode } from '../generation/plan-builder.ts';
@@ -19,16 +20,33 @@ export interface PromptPanelProps {
     style: StylePresetId | null,
     referenceUrl: string | null,
   ) => void;
+  /**
+   * Ask for three directions instead of building (#185). Carries the same
+   * prompt and style the build would have used, because it is the same
+   * request asked a smaller way.
+   */
+  onExplore: (
+    prompt: string,
+    style: StylePresetId | null,
+    referenceUrl: string | null,
+  ) => void;
   onReset: () => void;
   onCancel: () => void;
+  /**
+   * Stop a look that is running (#189 review). Its own handler, because it
+   * stops a different run from `onCancel` and leaves the build untouched.
+   */
+  onCancelExplore: () => void;
   onModelChange: (model: string | null) => void;
 }
 
 export function PromptPanel({
   state,
   onSubmit,
+  onExplore,
   onReset,
   onCancel,
+  onCancelExplore,
   onModelChange,
 }: PromptPanelProps) {
   const [prompt, setPrompt] = useState('');
@@ -38,10 +56,58 @@ export function PromptPanel({
   const promptId = useId();
   const failId = useId();
   const referenceId = useId();
-  const disabled = state.running;
+  const disabled = state.running || state.exploring;
   // Once there is a conversation, the examples are noise: what to type next
   // comes from what was just built, not from a generic starting point.
   const started = state.transcript.length > 0;
+
+  /**
+   * Everything that belonged to the request that just started.
+   *
+   * One function because the rule is one rule, and it was written for one
+   * path (#189 review). Choosing a direction submits through the session
+   * rather than through this form, so the composer still held the original
+   * request and its reference page while the label above it asked "What
+   * should change?" -- and submitting that repeated the build and refetched
+   * the reference.
+   *
+   * - The prompt, because this is a composer, not a field that holds the
+   *   last thing submitted: leaving the sent message in it means the next
+   *   turn starts by editing the previous one.
+   * - The reference URL, which is scoped to the request it went with rather
+   *   than being a standing preference the way `knowledge` is, so a later
+   *   unrelated turn never refetches a page nobody meant it for.
+   * - "Force a validation failure", which costs the most: left ticked it
+   *   quietly spends every later run on a checkpoint designed to be
+   *   rejected, and the box is far enough up the form to be out of sight by
+   *   the time the failure arrives.
+   */
+  function clearPerRequestFields() {
+    setPrompt('');
+    setReferenceUrl('');
+    setFailNext(false);
+  }
+
+  // Fires for a run this form did not start, which is the case that was
+  // missing: `chooseMockup` goes straight to the session. Keyed on the run
+  // id rather than on `running`, so a run that finishes before this renders
+  // still clears, and so a re-render during a run does not wipe what
+  // somebody has begun typing for the turn after it.
+  //
+  // That last part is the dependency array's job and nothing else's. The
+  // first version also kept a ref of the last id it had cleared for, and a
+  // mutation showed the ref was unobservable: React re-runs this only when
+  // the id changes, run ids are monotonic, so there is no second path for
+  // the same id to arrive by. A guard no test can distinguish is a guard
+  // that is not carrying its weight, so it is gone.
+  useEffect(() => {
+    if (state.runId === null) return;
+    clearPerRequestFields();
+    // `clearPerRequestFields` only calls setters, which React guarantees are
+    // stable; listing it would mean re-running on every render rather than
+    // on every run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.runId]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,21 +119,11 @@ export function PromptPanel({
       style,
       trimmedReference.length > 0 ? trimmedReference : null,
     );
-    // Clear the box. It is a composer now, not a form field that holds the
-    // last thing submitted: leaving the sent message in it means the next
-    // turn starts by editing the previous one, which is not what anyone
-    // means by "what should change?".
-    setPrompt('');
-    // The reference URL is scoped to the request it was submitted with, not
-    // a standing preference the way `knowledge` is -- clearing it means a
-    // later, unrelated turn never re-fetches a page nobody meant it for.
-    setReferenceUrl('');
-    // Same rule, and it costs more here. "Force a validation failure" is a
-    // thing to do to one run, not a setting: left ticked it quietly spends
-    // every later run on a checkpoint that is designed to be rejected, and
-    // the box is far enough up the form to be out of sight by the time the
-    // failure arrives. A tester who wants a second one can tick it again.
-    setFailNext(false);
+    // Here as well as in the effect above, deliberately: the effect cannot
+    // run until the session has reported a new run, and a composer that
+    // still showed the sent message for that round trip would read as a
+    // click that did nothing.
+    clearPerRequestFields();
   }
 
   return (
@@ -108,6 +164,11 @@ export function PromptPanel({
         id={referenceId}
         type="url"
         className="prompt__input"
+        // The same bound the Worker's guard enforces, declared where the
+        // value is entered (#189 review). Without it an over-long address
+        // was valid markup that paid for a look and was refused only by the
+        // build that choosing a direction submits.
+        maxLength={MAX_REFERENCE_URL_CHARS}
         value={referenceUrl}
         placeholder="https://example.com -- a page to copy from or emulate"
         onChange={(event) => setReferenceUrl(event.target.value)}
@@ -145,6 +206,51 @@ export function PromptPanel({
           {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
         </button>
         {/*
+          Offered until a project exists (#185), which is not the same as
+          until an attempt was made (#189 review), and only where there is
+          a model to ask. `explore` always calls the real `/api/mockups`,
+          while a build in `fake` mode is served by `FakeModelProvider`, so
+          this was offering something that could only fail in exactly the
+          modes the fake exists to keep usable. Hidden rather than faked:
+          three invented pages would be the promise the generator has not
+          made that rendered-not-drawn exists to avoid. A failed or cancelled
+          first build still appends a transcript turn, so `started` was
+          true with nothing built -- and the feature meant for exactly that
+          moment had already hidden itself. `acceptedSnapshot` is the thing
+          that answers "is there a project", so it is the thing to ask.
+        */}
+        {state.acceptedSnapshot === null && state.generation === 'model' ? (
+          <button
+            type="button"
+            className="button"
+            onClick={(event) => {
+              // The browser's own check, not a second URL parser of mine
+              // (#189 review). This control is a `button`, so clicking it
+              // skips the native validation `Generate` gets for free, and
+              // a malformed reference then sailed past: the look is paid
+              // for, the bad value is kept in the mockup context, and the
+              // build that choosing a direction submits is refused on a
+              // field the reader could have been told about before
+              // spending anything.
+              //
+              // `reportValidity` rather than `checkValidity`, so the
+              // refusal is the message the field would have shown anyway
+              // rather than a click that silently does nothing.
+              const form = event.currentTarget.form;
+              if (form && !form.reportValidity()) return;
+              onExplore(
+                prompt,
+                style,
+                referenceUrl.trim().length > 0 ? referenceUrl.trim() : null,
+              );
+            }}
+            disabled={disabled || prompt.trim().length === 0}
+            title="Three quick sketches to choose from, for about a tenth of a build"
+          >
+            {state.exploring ? 'Sketching…' : 'Show me three directions'}
+          </button>
+        ) : null}
+        {/*
           A generation can run for a minute or more. Without this the only way
           out is to close the tab, and the run keeps spending either way --
           cancelling drops the connection, which is what tells the endpoint to
@@ -152,6 +258,16 @@ export function PromptPanel({
         */}
         {state.running ? (
           <button type="button" className="button" onClick={onCancel}>
+            Cancel
+          </button>
+        ) : null}
+        {/*
+          A look is about a minute and is billed for (#189 review). Without
+          this the only way out of one was to leave the page, and it kept
+          spending either way.
+        */}
+        {state.exploring ? (
+          <button type="button" className="button" onClick={onCancelExplore}>
             Cancel
           </button>
         ) : null}

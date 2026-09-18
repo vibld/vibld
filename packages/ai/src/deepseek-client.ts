@@ -1,4 +1,5 @@
 import type { PlanClient, PlanCompletion, PlanRequest } from './client.ts';
+import { PLAN_JSON_INSTRUCTION, outputFor } from './plan-output.ts';
 
 /**
  * A second real model provider, behind the same `PlanClient` seam.
@@ -37,18 +38,14 @@ export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
  * both are here rather than in the shared system prompt, which must stay
  * provider-neutral.
  */
-export const JSON_MODE_INSTRUCTION = `OUTPUT FORMAT
-Reply with a single json object and nothing else. No prose, no markdown, no
-code fence. It must match this shape exactly:
-
-{
-  "summary": "one sentence describing what you built",
-  "files": [
-    { "path": "package.json", "content": "<the complete file>" }
-  ]
-}
-
-"files" must contain every file of the project, each with its full content.`;
+/**
+ * Kept as an export because it is part of this module's public surface, but
+ * it is no longer this module's constant: the shape a reply must take
+ * belongs to the request now, not to the client (#189 review). This is the
+ * plan's spelling of it, which is what every caller that does not say
+ * otherwise still gets.
+ */
+export const JSON_MODE_INSTRUCTION = PLAN_JSON_INSTRUCTION;
 
 /** OpenAI-style finish reasons, mapped to the vocabulary Vibld reasons about. */
 export function mapFinishReason(
@@ -190,6 +187,13 @@ export function createDeepseekPlanClient(
         );
       }
 
+      // What this client really sends: the caller's system prompt with the
+      // output instruction appended, plus the user prompt. That appended
+      // paragraph is this client's alone, which is why measuring it here is
+      // the only way to be right (#189 review).
+      const systemSent = `${request.system}\n\n${outputFor(request).instruction}`;
+      request.onPromptChars?.(systemSent.length + request.prompt.length);
+
       const response = await doFetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -208,7 +212,10 @@ export function createDeepseekPlanClient(
           messages: [
             {
               role: 'system',
-              content: `${request.system}\n\n${JSON_MODE_INSTRUCTION}`,
+              // The shape the caller asked for (#189 review). This always
+              // described a generation plan, so a mockup prompt was
+              // followed by a paragraph contradicting it.
+              content: systemSent,
             },
             { role: 'user', content: request.prompt },
           ],
@@ -234,7 +241,16 @@ export function createDeepseekPlanClient(
           : undefined,
       );
 
-      const promptCharacters = request.system.length + request.prompt.length;
+      // `systemSent`, not `request.system`: the same figure `onPromptChars`
+      // reports, and for the same reason (#189 review). This estimate feeds
+      // the fallback usage when a stream ends without its terminal chunk,
+      // so leaving it on the un-appended system prompt under-reported a
+      // mockup run by the length of the output instruction.
+      //
+      // I fixed the report and not this, one round earlier, which is the
+      // fourth time this review has caught me repairing the case in front
+      // of me and not the one beside it. Both now read one variable.
+      const promptCharacters = systemSent.length + request.prompt.length;
 
       return {
         plan: readJsonPlan(text),

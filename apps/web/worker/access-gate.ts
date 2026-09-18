@@ -60,6 +60,10 @@ export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
 export const GATED_PATHS: readonly string[] = [
   // Spends model budget.
   '/api/plan',
+  // Spends model budget too, and less of it is not a different answer: the
+  // gate is about whether an uninvited account may spend this deployment's
+  // money at all, not about how much (#185).
+  '/api/mockups',
   // Writes into somebody's repository, and mints tokens to do it.
   '/api/github/connect',
   '/api/github/complete',

@@ -1,5 +1,6 @@
 import { AccessGate } from './components/AccessGate.tsx';
 import { AdminSettings } from './components/AdminSettings.tsx';
+import { MockupChooser } from './components/MockupChooser.tsx';
 import { ADMIN_PATH, isAdminPath } from './admin/route.ts';
 import { useRef } from 'react';
 import { navigate, usePathname } from './admin/use-pathname.ts';
@@ -187,13 +188,28 @@ function Builder() {
                 saveStyleDna(value);
               }}
             />
+            {/*
+              Above the composer, because it is what the next click is
+              about. Every mockup is model output and renders in a fully
+              restricted frame -- see `MockupChooser`.
+            */}
+            <MockupChooser
+              mockups={state.mockups}
+              onChoose={(mockup) => session.chooseMockup(mockup)}
+              onDiscard={() => session.discardMockups()}
+              disabled={state.running}
+            />
             <PromptPanel
               state={state}
               onSubmit={(prompt, mode, style, referenceUrl) => {
                 void session.submit(prompt, mode, style, referenceUrl);
               }}
+              onExplore={(prompt, style, referenceUrl) => {
+                void session.explore(prompt, style, referenceUrl);
+              }}
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}
+              onCancelExplore={() => session.cancelExplore()}
               onModelChange={(model) => session.setModel(model)}
             />
           </div>

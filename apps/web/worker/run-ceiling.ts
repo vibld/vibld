@@ -26,10 +26,19 @@ import {
   cacheRatesFor,
   findModel,
   maxTokensFor,
+  mockupMaxTokensFor,
   providerForRequest,
 } from '@vibld/ai';
 import type { ProviderEnv } from '@vibld/ai';
 
+import {
+  MAX_CHOSEN_MOCKUP_SECTION_CHARS,
+  MAX_MOCKUP_DIRECTION_CHARS,
+  MAX_MOCKUP_FIXED_PROMPT_CHARS,
+  MAX_REFERENCE_CHARS,
+} from '@vibld/ai/limits';
+
+import { DEFAULT_LIMITS } from './request-guard.ts';
 import { parsePrices } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 
@@ -45,7 +54,66 @@ export interface RunCeiling {
   maxTokens: number;
 }
 
-export function runCeilingFor(env: RunCeilingEnv, model: string): RunCeiling {
+/**
+ * What a run is for, which is what decides how much it may ask for.
+ *
+ * A build is as large as the project needs; three mockups are as large as
+ * three sketches (#185, `MOCKUP_OUTPUT_TOKENS`). The two answers differ by
+ * more than an order of magnitude, and the dispatch lives here rather than
+ * at the call sites for the reason this whole file exists: a second place
+ * that decides a ceiling is a second place that can disagree with the
+ * reservation.
+ */
+export type RunKind = 'build' | 'mockups';
+
+/**
+ * Every character a mockup run may send the model.
+ *
+ * Here rather than inline in the route for the reason this whole file
+ * exists: a second place that decides what a run costs is a second place
+ * that can disagree with the reservation. It was inline, and it was wrong
+ * (#189 review) -- it counted the caller's prompt and the style direction
+ * and stopped, while every run also sends `MOCKUP_SYSTEM_PROMPT` and a
+ * styled one sends the preamble too. About 1,600 characters reserved for
+ * nobody, so an account with exactly the computed reservation left was
+ * admitted for a run that settled past it.
+ *
+ * Three terms, and they are three different kinds of thing, which is how
+ * one came to be forgotten: what a caller may type, what this repository
+ * adds because they chose a preset, and what this repository adds
+ * regardless. `mockup-reservation.test.ts` measures the real artefacts and
+ * fails if their sum ever exceeds this.
+ */
+/**
+ * Every character a build may send the model.
+ *
+ * Extracted for the same reason `MOCKUP_INPUT_CHARS` below was, and after
+ * the same mutation result: the fix for the chosen-mockup term lived in
+ * `packages/ai`, so removing it from the Worker's own sum broke nothing
+ * (#189 review). A bound that no test can see the caller use is a bound
+ * that can be quietly dropped.
+ *
+ * Every term is something the request guard has already refused to exceed,
+ * except the last, which is what this repository wraps round a chosen
+ * direction: the label and the framing that names the document as data.
+ */
+export const BUILD_INPUT_CHARS =
+  DEFAULT_LIMITS.maxPromptChars +
+  DEFAULT_LIMITS.maxTotalContentChars +
+  DEFAULT_LIMITS.maxKnowledgeChars +
+  MAX_REFERENCE_CHARS +
+  MAX_CHOSEN_MOCKUP_SECTION_CHARS;
+
+export const MOCKUP_INPUT_CHARS =
+  DEFAULT_LIMITS.maxPromptChars +
+  MAX_MOCKUP_DIRECTION_CHARS +
+  MAX_MOCKUP_FIXED_PROMPT_CHARS;
+
+export function runCeilingFor(
+  env: RunCeilingEnv,
+  model: string,
+  kind: RunKind = 'build',
+): RunCeiling {
   const chosen = findModel(model);
   const prices = parsePrices(
     env,
@@ -62,5 +130,11 @@ export function runCeilingFor(env: RunCeilingEnv, model: string): RunCeiling {
         }
       : undefined,
   );
-  return { prices, maxTokens: maxTokensFor(model, prices.outputMicroUsd) };
+  return {
+    prices,
+    maxTokens:
+      kind === 'mockups'
+        ? mockupMaxTokensFor(model)
+        : maxTokensFor(model, prices.outputMicroUsd),
+  };
 }

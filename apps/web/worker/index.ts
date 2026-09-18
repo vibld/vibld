@@ -1,4 +1,10 @@
-import { configuredProviders, resolveModel } from '@vibld/ai';
+import {
+  MockupProvider,
+  configuredProviders,
+  createPlanClient,
+  resolveModel,
+} from '@vibld/ai';
+import type { PlanUsage } from '@vibld/ai';
 import type { RunRefusal } from '@vibld/core';
 
 import {
@@ -12,11 +18,12 @@ import { GenerationWorkflow } from './generation-workflow.ts';
 import { D1GenerationStore } from './generation-store.ts';
 import type { WorkflowParams } from './generation-workflow.ts';
 import {
-  DEFAULT_LIMITS,
   checkBodySize,
   checkRequestOrigin,
   parseGenerationRequest,
   parseKnowledge,
+  parseChosenMockup,
+  parseMockupRequest,
   parseModel,
   parsePreviewRequest,
   parseAdminTopupRequest,
@@ -25,8 +32,10 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
+import { spendableFor } from './spendable.ts';
+import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { stageFor } from './run-stage.ts';
-import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
+import { whenClientGone } from './client-gone.ts';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
   clerkLookupConfigured,
@@ -38,8 +47,17 @@ import {
   handleReferralClaim,
   handleReferralStatus,
 } from './referral-handlers.ts';
-import { ACCOUNT_BUDGET_KEY, dayKey, worstCaseMicroUsd } from './spend.ts';
-import { runCeilingFor } from './run-ceiling.ts';
+import {
+  ACCOUNT_BUDGET_KEY,
+  cancelledUsage,
+  dayKey,
+  worstCaseMicroUsd,
+} from './spend.ts';
+import {
+  BUILD_INPUT_CHARS,
+  MOCKUP_INPUT_CHARS,
+  runCeilingFor,
+} from './run-ceiling.ts';
 import type { SpendVerdict } from './spend.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
@@ -47,6 +65,7 @@ import {
   monthlyAllowanceMicroUsd,
   tierFor,
 } from './entitlement.ts';
+import { secured } from '@vibld/security-headers';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
@@ -910,6 +929,14 @@ async function handlePlan(
     referencePaletteMode = fetched.palette?.mode;
   }
 
+  // The direction the caller picked from a mockup run, if they ran one
+  // (#185). Carried as the document rather than its name: a build seeded
+  // with only a label can ignore the choice and still look like it obeyed.
+  const chosenMockup = parseChosenMockup(body);
+  if (!chosenMockup.ok) {
+    return refuse('request-invalid', chosenMockup.error, chosenMockup.status);
+  }
+
   const chosenModel = parseModel(body, configuredProviders(env));
   if (!chosenModel.ok) {
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
@@ -960,16 +987,7 @@ async function handlePlan(
   // tokens while letting the model emit 384000 is a run that outspends its
   // own reservation six times over.
   const { prices, maxTokens } = runCeilingFor(env, effectiveModel);
-  const worstCase = worstCaseMicroUsd(
-    prices,
-    maxTokens,
-    // Prompt plus the base project that goes with it. Both are what the
-    // guard above has already refused to exceed.
-    DEFAULT_LIMITS.maxPromptChars +
-      DEFAULT_LIMITS.maxTotalContentChars +
-      DEFAULT_LIMITS.maxKnowledgeChars +
-      MAX_REFERENCE_CHARS,
-  );
+  const worstCase = worstCaseMicroUsd(prices, maxTokens, BUILD_INPUT_CHARS);
 
   // Layer three: what the caller's own subscription actually buys them
   // (L35-L39) -- a monthly allowance by tier, plus whatever top-up credit
@@ -977,23 +995,9 @@ async function handlePlan(
   let reserved;
   try {
     const now = Date.now();
-    const billing = new BillingStore(env.DB!);
-    // Also here, and not only in handleBillingStatus: a client that never
-    // calls the status endpoint must not be refused its first generation for
-    // want of a credit it was promised. The deterministic id means whichever
-    // path arrives first wins and the other is a no-op.
-    await grantSignupCreditOnce(billing, principal, env);
-    const subscription = await billing.findActiveSubscription(principal.userId);
-    const tier = tierFor(subscription);
-    const freeAllowance = positiveInt(
-      env.VIBLD_FREE_MONTHLY_MICRO_USD,
-      DEFAULT_FREE_INCLUDED_MICRO_USD,
-    );
-    const monthlyAllowance = monthlyAllowanceMicroUsd(tier, freeAllowance);
-    // Stripe top-ups and admin-granted credit (L4) combined -- see
-    // `totalSpendableCreditMicroUsd`'s own comment.
-    const topupCeiling = await billing.totalSpendableCreditMicroUsd(
-      principal.userId,
+    const { monthlyAllowance, topupCeiling } = await spendableFor(
+      env,
+      principal,
     );
 
     reserved = await reserveBudget(
@@ -1052,6 +1056,66 @@ async function handlePlan(
   // own comment.
   const projectId = principal.userId;
 
+  /**
+   * Give a caller who left back what was reserved for them.
+   *
+   * One function because it is needed on both sides of `create()` and two
+   * copies of a settlement is two things that can come to disagree about
+   * what a cancelled run costs (#189 review).
+   *
+   * Settled through the ordinary path rather than a second one:
+   * `settleBudget`'s third case is "the provider was never asked", which is
+   * what this is.
+   */
+  const releaseWithoutCharging = () =>
+    settleBudget(
+      env.USER_BUDGET!,
+      {
+        userId: principal.userId,
+        reservationId: reservation.id,
+        reservationKey: reserved.layers.userReservationKey,
+        accountReservationId: reserved.layers.account.id,
+        worstCaseMicroUsd: worstCase,
+        prices,
+      },
+      undefined,
+      false,
+    ).catch((error) => {
+      // The reclaim is still the backstop, as it is for a Worker that dies
+      // here. Over-charging a caller who left is the wrong direction, but
+      // it is the safe one, and refusing to answer would not improve it.
+      console.error('failed to release a reservation for a gone caller', error);
+    });
+
+  /**
+   * Noticed before anything durable exists, and kept noticing across the
+   * call that makes something durable (#189 review).
+   *
+   * The previous round added the check below, which asks once whether the
+   * caller has already left. The round after it found what one check cannot
+   * cover: `create()` is an awaited RPC, so a Cancel arriving while it is
+   * in flight passes the check and is only seen afterwards. By then there
+   * is a Workflow, terminating one lands at its next step boundary so the
+   * model step may already be running, and a termination before
+   * `settle-budget` leaves the reservation to the abandoned-run reclaim,
+   * which closes it at the full worst case. The caller is billed for a
+   * generation they cancelled.
+   *
+   * A flag set by a listener registered here covers the whole of that
+   * window, because a listener does not care when the answer arrives.
+   */
+  let clientGone = false;
+  whenClientGone(request.signal, () => {
+    clientGone = true;
+  });
+
+  // Nothing durable exists yet, so there is nothing to terminate and
+  // nothing to reclaim: the cheap case, and the common one.
+  if (clientGone) {
+    await releaseWithoutCharging();
+    return new Response(null, { status: 499 });
+  }
+
   let instance;
   try {
     instance = await env.GENERATION_WORKFLOW!.create({
@@ -1068,6 +1132,7 @@ async function handlePlan(
           ? { styleDna: styleDna.value }
           : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+        ...(chosenMockup.value ? { chosenMockup: chosenMockup.value } : {}),
         ...(referenceContext ? { referenceContext } : {}),
         ...(referencePaletteSource ? { referencePaletteSource } : {}),
         ...(referencePaletteMode ? { referencePaletteMode } : {}),
@@ -1088,6 +1153,29 @@ async function handlePlan(
       { error: 'Generation could not be started. Try again shortly.' },
       503,
     );
+  }
+
+  // The other side of the window the flag above exists for (#189 review).
+  // The abort landed while `create()` was in flight, so there is now a
+  // Workflow to stop, and stopping it here rather than several statements
+  // later is the difference between the next step boundary and the one
+  // after the model call.
+  //
+  // Settled at zero rather than left to the reclaim, and that is a choice
+  // worth stating rather than burying. The reclaim closes an abandoned
+  // reservation at its full worst case, so leaving it there bills a caller
+  // a whole generation for cancelling before one could start. Against that,
+  // this settles at zero while the run has a narrow chance of having
+  // reached the provider in the milliseconds before the termination lands,
+  // which would mean Vibld pays for a call it does not bill on. The
+  // asymmetry is deliberate: the over-charge is certain and visible to the
+  // person it happens to, the under-charge is rare and ours. And it
+  // corrects itself where it matters, because a run that does get as far as
+  // `settle-budget` overwrites this row with what it really cost.
+  if (clientGone) {
+    ctx.waitUntil(instance.terminate().catch(() => {}));
+    await releaseWithoutCharging();
+    return new Response(null, { status: 499 });
   }
 
   // Stream rather than buffer. A buffered response sends nothing until the
@@ -1122,7 +1210,19 @@ async function handlePlan(
   // Two independent notices that the client is gone. The runtime aborts
   // `request.signal` on disconnect; a failed write catches the same thing at
   // the next keepalive, which is the backstop if the signal is unavailable.
-  request.signal?.addEventListener('abort', cancel);
+  //
+  // Through `whenClientGone`, because a caller who left during the identity
+  // check or the reservation above has already aborted by the time this
+  // runs, and an abort is not replayed to a listener added afterwards
+  // (#189 review). This route's version of that is the expensive one: a
+  // whole generation starts for somebody who is not there.
+  //
+  // The second registration in this route, and both are needed. The first
+  // one, above `create()`, can only set a flag: there is no `instance` to
+  // terminate and no keepalive to stop until the lines between them have
+  // run. This one is the one that actually cancels, and it exists from the
+  // first byte of the stream onwards.
+  whenClientGone(request.signal, cancel);
 
   const write = (chunk: string) =>
     writer.write(encoder.encode(chunk)).catch(cancel);
@@ -1212,6 +1312,356 @@ async function handlePlan(
       }
     } finally {
       stopKeepalive();
+      await writer.close().catch(() => {});
+    }
+  })();
+
+  ctx.waitUntil(run);
+
+  return new Response(readable, { status: 200, headers: STREAM_HEADERS });
+}
+
+/**
+ * Three directions to choose between, before a build is attempted (#185).
+ *
+ * The same shape as `handlePlan` and deliberately not the same code. It
+ * calls the same shared functions for every number that decides money --
+ * `runCeilingFor`, `worstCaseMicroUsd`, `spendableFor`, `reserveBudget`,
+ * `settleBudget` -- so nothing here re-derives a figure the build route
+ * derives elsewhere. What differs is only what this run is for.
+ *
+ * In the request rather than in a Workflow, which is the one structural
+ * choice worth arguing with. A build went durable because it takes fifteen
+ * minutes and a Worker request has no guarantee of outliving the client's
+ * connection (`generation-workflow.ts`). Three sketches take about a
+ * minute. The durable machinery costs a run id, a persisted payload and a
+ * poll loop, and buys back the ability to survive an eviction that is far
+ * less likely and far cheaper to repeat: two cents and a minute, against
+ * thirty cents and a quarter of an hour.
+ *
+ * Streamed anyway, for the reason `handlePlan` records: a buffered response
+ * sends nothing for the whole run, and the client gives up first. Being in
+ * the request has one payoff the build lost -- the model client streams, so
+ * `onProgress` reports a real character count here. `progress.characters`
+ * has a producer again, on this route only.
+ */
+async function handleMockups(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (request.method !== 'POST') {
+    return json({ error: 'Use POST.' }, 405);
+  }
+
+  // Read at the top, for the reason `handlePlan`'s is: everything between
+  // here and the first progress event is wait the person sits through.
+  const waitingSince = Date.now();
+
+  if (!isConfigured(env)) {
+    return json({ error: 'Generation is not configured.' }, 503);
+  }
+
+  const origin = checkRequestOrigin(
+    request.headers,
+    new URL(request.url).origin,
+  );
+  if (!origin.ok) {
+    return refuse('request-invalid', origin.error, origin.status);
+  }
+
+  const size = checkBodySize(request.headers);
+  if (!size.ok) return refuse('request-invalid', size.error, size.status);
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return refuse('request-invalid', 'Body must be valid JSON.', 400);
+  }
+
+  const parsed = parseMockupRequest(body);
+  if (!parsed.ok) {
+    return refuse('request-invalid', parsed.error, parsed.status);
+  }
+
+  const style = parseStylePreset(body);
+  if (!style.ok) {
+    return refuse('request-invalid', style.error, style.status);
+  }
+
+  const chosenModel = parseModel(body, configuredProviders(env));
+  if (!chosenModel.ok) {
+    return refuse('request-invalid', chosenModel.error, chosenModel.status);
+  }
+
+  const decision = decideModel(
+    env,
+    principal.policyIdentity,
+    chosenModel.value,
+    resolveModel(env),
+  );
+  if (!decision.ok) {
+    return refuse('model-not-allowed', decision.error, decision.status);
+  }
+  const effectiveModel = decision.model;
+
+  // Its own bucket, not the build's. A look before building is not a build,
+  // and sharing the counter would mean three sketches cost somebody the
+  // generation they were about to run.
+  try {
+    const key = `mockups:${principal.userId}`;
+    const gates = [env.PLAN_BURST, env.PLAN_SUSTAINED].filter(
+      (gate): gate is RateLimit => gate !== undefined,
+    );
+    const results = await Promise.all(gates.map((gate) => gate.limit({ key })));
+    if (results.some((result) => !result.success)) {
+      return refuse(
+        'rate-limited',
+        'Too many requests. Try again shortly.',
+        429,
+      );
+    }
+  } catch (error) {
+    console.error('rate limiter unavailable', error);
+  }
+
+  const { prices, maxTokens } = runCeilingFor(env, effectiveModel, 'mockups');
+  // The prompt, plus the one style direction that may go with it. No base
+  // project, no standing instructions, no reference page: a mockup run is
+  // asked before there is a project, so none of them exists to send.
+  //
+  // Named rather than inlined because the settlement of a cancelled run
+  // needs the same figure (#189 review), and a second spelling of it is a
+  // second chance for the two to disagree about what was reserved.
+  const inputChars = MOCKUP_INPUT_CHARS;
+  const worstCase = worstCaseMicroUsd(prices, maxTokens, inputChars);
+
+  let reserved;
+  try {
+    const now = Date.now();
+    const { monthlyAllowance, topupCeiling } = await spendableFor(
+      env,
+      principal,
+    );
+    reserved = await reserveBudget(
+      env,
+      principal.userId,
+      worstCase,
+      monthlyAllowance,
+      topupCeiling,
+      now,
+    );
+  } catch (error) {
+    console.error('budget unavailable', error);
+    return new Response(
+      JSON.stringify({
+        error: 'Usage accounting is unavailable; generation is paused.',
+        reason: 'accounting-unavailable' satisfies RunRefusal,
+      }),
+      { status: 503, headers: { ...JSON_HEADERS, 'retry-after': '30' } },
+    );
+  }
+
+  if (!reserved.ok) {
+    const ceiling = reserved.verdict.reason === 'period-ceiling';
+    return refuse(
+      ceiling ? 'account-ceiling' : 'already-running',
+      ceiling
+        ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
+        : 'A generation is already running. Wait for it to finish.',
+      429,
+    );
+  }
+
+  const settleParams = {
+    userId: principal.userId,
+    ...(principal.email ? { email: principal.email } : {}),
+    reservationId: reserved.layers.user.id,
+    reservationKey: reserved.layers.userReservationKey,
+    accountReservationId: reserved.layers.account.id,
+    worstCaseMicroUsd: worstCase,
+    prices,
+  };
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const keepaliveMs = parseKeepaliveMs(env.VIBLD_STREAM_KEEPALIVE_MS);
+
+  const abort = new AbortController();
+  let cancelled = false;
+  let keepalive: ReturnType<typeof setInterval> | undefined;
+  const stopKeepalive = () => {
+    if (keepalive !== undefined) {
+      clearInterval(keepalive);
+      keepalive = undefined;
+    }
+  };
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    stopKeepalive();
+    // Aborting really does stop the spending here, unlike a Workflow whose
+    // termination lands at the next step boundary: the model call is in
+    // this scope, so the signal reaches it.
+    //
+    // Stopping the provider is only half of it, which is what the first
+    // version of this got wrong (#189 review). The abort makes the call
+    // reject, so no usage is ever reported, and settlement's unknown-cost
+    // case charges the full reservation -- Cancel cost more than waiting.
+    // The `finally` below settles a stopped run from what was streamed.
+    abort.abort();
+  };
+  // Same reason as `handlePlan`'s: everything above this line is real work
+  // a caller can disconnect during, and an abort that landed then is not
+  // replayed to a listener added now (#189 review).
+  whenClientGone(request.signal, cancel);
+
+  const write = (chunk: string) =>
+    writer.write(encoder.encode(chunk)).catch(cancel);
+
+  void write(KEEPALIVE_COMMENT);
+  keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
+
+  // What this run really sends, reported by the client that sends it.
+  //
+  // Reconstructed here at first, from the system prompt and
+  // `mockupUserPrompt` (#189 review). That was right for two of the three
+  // clients and wrong for DeepSeek, which appends the output instruction to
+  // the system message -- so the figure was short by about 430 characters
+  // on the one provider production actually runs. The assembly is
+  // provider-specific, so no amount of care here could have kept up with
+  // it; the client is the only thing that knows.
+  //
+  // Zero until the client says otherwise, which is the honest starting
+  // value: nothing has been sent yet. A run cancelled before the request
+  // goes out settles at nothing anyway, because `providerRan` stays false.
+  let sentChars = 0;
+
+  const run = (async () => {
+    let usage: PlanUsage | undefined;
+    let providerRan = false;
+    // What the model had streamed when the reader stopped it. The only
+    // measurement of a cancelled run there is, and without it settlement
+    // falls back to the full reservation (#189 review).
+    let streamedCharacters = 0;
+    try {
+      const provider = new MockupProvider(
+        createPlanClient(env, effectiveModel),
+        {
+          model: effectiveModel,
+          maxTokens,
+          signal: abort.signal,
+          onUsage: (reported) => {
+            usage = reported;
+          },
+          // Forwarded as SSE, which is what makes the character count real
+          // on this route (#189 review). The build cannot do this: its
+          // model call happens inside a Workflow step with no live channel
+          // back to the Worker polling it (#183). Here the call is in this
+          // scope, so the count the client streams is the count the reader
+          // sees.
+          onProgress: ({ characters }) => {
+            // Recorded before the cancelled check, not after: the last
+            // count is exactly the one a cancelled run has to be settled
+            // from, and returning early would throw it away.
+            streamedCharacters = characters;
+            if (cancelled) return;
+            void write(
+              encodeEvent('progress', {
+                characters,
+                elapsedMs: Date.now() - waitingSince,
+                stage: 'running',
+              }),
+            );
+          },
+          onPromptChars: (characters) => {
+            sentChars = characters;
+          },
+          ...(style.value ? { style: style.value } : {}),
+        },
+      );
+
+      // Nothing has been asked for yet, so a caller who left before this
+      // line costs nothing (#189 review). Without the check, two fixes from
+      // earlier rounds met badly: `whenClientGone` aborts the controller for
+      // a caller who had already gone, and then this marked the provider as
+      // having run and called it with a pre-aborted signal -- so settlement
+      // saw `cancelled && providerRan` and charged the full input estimate
+      // for a request that never left the Worker.
+      //
+      // Returning leaves `providerRan` false, which is the case
+      // `settleBudget` already has for "never asked": settle nothing.
+      if (cancelled) return;
+
+      providerRan = true;
+      const set = await provider.generate({ prompt: parsed.value.prompt });
+      if (!cancelled) {
+        await write(
+          encodeEvent('mockups', {
+            providerId: effectiveModel,
+            mockups: set.mockups,
+          }),
+        );
+      }
+    } catch (error) {
+      if (!cancelled) {
+        const visible = sanitizedProviderFailure(
+          error,
+          'mockup generation failed',
+          'Could not produce mockups. Try again shortly.',
+        );
+        await write(encodeEvent('error', { error: visible.message }));
+      }
+    } finally {
+      stopKeepalive();
+      try {
+        // A run the reader stopped is not a run whose cost is unknown: the
+        // streamed count is a measurement of it, and settling it as
+        // unknown charges the whole reservation for pressing Cancel
+        // (#189 review). Only when the provider was actually asked --
+        // stopping before that still costs nothing.
+        const settled =
+          usage ??
+          (cancelled && providerRan
+            ? cancelledUsage(streamedCharacters, maxTokens, sentChars)
+            : undefined);
+        const actual = await settleBudget(
+          env.USER_BUDGET!,
+          settleParams,
+          settled,
+          providerRan,
+        );
+        console.log(
+          JSON.stringify({
+            event: 'mockups.settled',
+            ...(usage ? {} : { cancelled, streamedCharacters }),
+            userId: principal.userId,
+            ...(principal.email ? { email: principal.email } : {}),
+            model: effectiveModel,
+            // `settled`, not `usage`: a cancelled run's figures are an
+            // estimate, and a log that reported zero tokens beside a real
+            // charge would make the settlement look like the unknown-cost
+            // case it exists to stop being. `cancelled` above says which
+            // it is, so the numbers do not have to be read as measured.
+            inputTokens: settled?.inputTokens ?? 0,
+            outputTokens: settled?.outputTokens ?? 0,
+            microUsd: actual,
+            elapsedMs: Date.now() - waitingSince,
+          }),
+        );
+      } catch (error) {
+        // The reservation is not lost: `budget.ts`'s abandoned-reservation
+        // reclaim closes it at its worst case, which over-charges rather
+        // than under-charges and is the safe direction for a failure whose
+        // cause is unknown.
+        console.error('mockup settlement failed', error);
+      }
       await writer.close().catch(() => {});
     }
   })();
@@ -1558,238 +2008,22 @@ export interface ExecutionContext {
 }
 
 export default {
+  /**
+   * One exit, so a route added later cannot forget the headers.
+   *
+   * `secured` is applied here rather than inside each handler because that
+   * is exactly how this Worker came to send none of them: the headers were
+   * nobody's job at any particular `return`. The shell gets the same set
+   * from `public/_headers`, which Cloudflare applies to the asset store's
+   * responses and never to this script's (`run_worker_first` is `/api/*`
+   * here, so the two halves answer separately and both have to be covered).
+   */
   async fetch(
     request: Request,
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
-    const { pathname } = new URL(request.url);
-
-    /*
-     * The invite gate, before dispatch rather than inside each handler.
-     *
-     * Scattered checks fail silently: a new endpoint that spends money and
-     * forgets the call is open, and nothing says so. Here the route table
-     * (access-gate.ts) has to classify every path, and a test reads this
-     * file's own route literals and fails on any it does not cover.
-     *
-     * It runs after identity, never instead of it: an uninvited caller and an
-     * unauthenticated one get different answers, because they are different
-     * problems and only one of them is the caller's to fix.
-     */
-    if (isGated(pathname, request.method)) {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      const decision = await decideAccessFor(env, resolved.principal);
-      if (!decision.allowed) return refusal();
-    }
-
-    if (pathname === '/api/access/status') {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      return handleAccessStatus(request, env, resolved.principal);
-    }
-
-    // Lets the shell show which provider is actually in use instead of
-    // implying AI when it is running the deterministic fake.
-    if (pathname === '/api/config') {
-      // Identified before answered: the picker is per-person now, so this
-      // cannot be served to an anonymous caller without telling them what
-      // somebody else may use.
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      const { principal } = resolved;
-
-      // A deployment with no model generation is reported, not refused.
-      // This used to answer 403, and the shell reads any refusal as "nothing
-      // configured, and you are not an admin", which hid the invite panel on
-      // a deployment whose invite routes work perfectly: they need the admin
-      // list and D1, and neither is what generation is missing. This
-      // endpoint's job is to say what the deployment can do, and "it cannot
-      // generate" is an answer to that question rather than a reason to
-      // withhold one.
-      const configured = isConfigured(env);
-
-      // Two filters, in order. What the deployment can serve at all --
-      // offering a model whose provider has no key produces a run that fails
-      // after the user has waited for it. Then what this person is granted
-      // (by email, per L4 -- see the same note in handlePlan).
-      const models = configured
-        ? grantedFor(env, principal.policyIdentity)
-        : [];
-      // The deployment default is only offered if this person may use it.
-      const decided = configured
-        ? decideModel(env, principal.policyIdentity, null, resolveModel(env))
-        : { ok: false as const, error: 'not configured' };
-      return json({
-        generation: configured ? 'model' : 'fake',
-        models: models.map(({ id, label, note, provider }) => ({
-          id,
-          label,
-          note,
-          provider,
-        })),
-        defaultModel: decided.ok ? decided.model : null,
-        // So the shell knows whether to offer the admin credit tool at all --
-        // `/api/admin/*` itself re-checks this independently either way
-        // (ADR-0006), the same as every other grant this endpoint reports.
-        isAdmin: isPlatformAdmin(
-          { email: principal.email, emailVerified: principal.emailVerified },
-          parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
-        ),
-      });
-    }
-
-    if (pathname === '/api/plan') {
-      return handlePlan(request, env, ctx);
-    }
-
-    if (pathname === '/api/preview') {
-      return handlePreview(request, env);
-    }
-
-    if (pathname === '/api/preview/share') {
-      return handlePreviewShare(request, env);
-    }
-
-    if (pathname === '/api/publish') {
-      // Two verbs on one path, deliberately: POST puts a checkpoint on the
-      // web, DELETE takes it off. Both are the same resource, and DELETE is
-      // the method a link or a form cannot reach by accident (ADR-0013).
-      return request.method === 'DELETE'
-        ? handleUnpublish(request, env)
-        : handlePublish(request, env);
-    }
-
-    if (pathname === '/api/runs') {
-      return handleRuns(request, env);
-    }
-
-    if (pathname === '/api/billing/status') {
-      return handleBillingStatus(request, env);
-    }
-
-    if (pathname === '/api/billing/checkout') {
-      return handleBillingCheckout(request, env, new URL(request.url).origin);
-    }
-
-    if (pathname === '/api/billing/portal') {
-      return handleBillingPortal(request, env, new URL(request.url).origin);
-    }
-
-    if (pathname === '/api/stripe/webhook') {
-      return handleStripeWebhook(request, env);
-    }
-
-    if (pathname === '/api/github/connect') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubConnect(request, env, principal),
-      );
-    }
-
-    // Deliberately outside `handleGitHub`. GitHub returns here through a
-    // top-level browser navigation, which carries no Authorization header,
-    // so resolving a principal would reject every real callback with a 401.
-    // It does no work and holds no authority: it hands the code and state to
-    // the app, which completes the exchange on a request that can be
-    // authenticated.
-    if (pathname === '/api/github/callback') {
-      return handleGitHubCallback(request);
-    }
-
-    if (pathname === '/api/github/complete') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubComplete(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/bind') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubBind(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/disconnect') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubDisconnect(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/status') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubStatus(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/webhook') {
-      return handleGitHubWebhook(request, env);
-    }
-
-    if (pathname === '/api/github/diff') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubDiff(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/push') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubPush(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/referral/status') {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      return handleReferralStatus(request, env, resolved.principal);
-    }
-
-    if (pathname === '/api/referral/claim') {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      return handleReferralClaim(request, env, resolved.principal);
-    }
-
-    if (pathname === '/api/admin/user') {
-      return handleAdminUser(request, env);
-    }
-
-    if (pathname === '/api/admin/invites') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleInviteList(request, env);
-    }
-
-    if (pathname === '/api/admin/invite') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleInvite(request, env, guard.adminEmail);
-    }
-
-    if (pathname === '/api/admin/invite/revoke') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleInviteRevoke(request, env);
-    }
-
-    if (pathname === '/api/admin/unattributed') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleUnattributedQueue(request, env);
-    }
-
-    if (pathname === '/api/admin/topup') {
-      return handleAdminTopup(request, env);
-    }
-
-    if (pathname === '/api/admin/publish/hold') {
-      return handleAdminHold(request, env, false);
-    }
-
-    if (pathname === '/api/admin/publish/release') {
-      return handleAdminHold(request, env, true);
-    }
-
-    return json({ error: 'Not found.' }, 404);
+    return secured(await route(request, env, ctx));
   },
 
   /**
@@ -1981,3 +2215,239 @@ export default {
     );
   },
 };
+
+async function route(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const { pathname } = new URL(request.url);
+
+  /*
+   * The invite gate, before dispatch rather than inside each handler.
+   *
+   * Scattered checks fail silently: a new endpoint that spends money and
+   * forgets the call is open, and nothing says so. Here the route table
+   * (access-gate.ts) has to classify every path, and a test reads this
+   * file's own route literals and fails on any it does not cover.
+   *
+   * It runs after identity, never instead of it: an uninvited caller and an
+   * unauthenticated one get different answers, because they are different
+   * problems and only one of them is the caller's to fix.
+   */
+  if (isGated(pathname, request.method)) {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    const decision = await decideAccessFor(env, resolved.principal);
+    if (!decision.allowed) return refusal();
+  }
+
+  if (pathname === '/api/access/status') {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    return handleAccessStatus(request, env, resolved.principal);
+  }
+
+  // Lets the shell show which provider is actually in use instead of
+  // implying AI when it is running the deterministic fake.
+  if (pathname === '/api/config') {
+    // Identified before answered: the picker is per-person now, so this
+    // cannot be served to an anonymous caller without telling them what
+    // somebody else may use.
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    const { principal } = resolved;
+
+    // A deployment with no model generation is reported, not refused.
+    // This used to answer 403, and the shell reads any refusal as "nothing
+    // configured, and you are not an admin", which hid the invite panel on
+    // a deployment whose invite routes work perfectly: they need the admin
+    // list and D1, and neither is what generation is missing. This
+    // endpoint's job is to say what the deployment can do, and "it cannot
+    // generate" is an answer to that question rather than a reason to
+    // withhold one.
+    const configured = isConfigured(env);
+
+    // Two filters, in order. What the deployment can serve at all --
+    // offering a model whose provider has no key produces a run that fails
+    // after the user has waited for it. Then what this person is granted
+    // (by email, per L4 -- see the same note in handlePlan).
+    const models = configured ? grantedFor(env, principal.policyIdentity) : [];
+    // The deployment default is only offered if this person may use it.
+    const decided = configured
+      ? decideModel(env, principal.policyIdentity, null, resolveModel(env))
+      : { ok: false as const, error: 'not configured' };
+    return json({
+      generation: configured ? 'model' : 'fake',
+      models: models.map(({ id, label, note, provider }) => ({
+        id,
+        label,
+        note,
+        provider,
+      })),
+      defaultModel: decided.ok ? decided.model : null,
+      // So the shell knows whether to offer the admin credit tool at all --
+      // `/api/admin/*` itself re-checks this independently either way
+      // (ADR-0006), the same as every other grant this endpoint reports.
+      isAdmin: isPlatformAdmin(
+        { email: principal.email, emailVerified: principal.emailVerified },
+        parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+      ),
+    });
+  }
+
+  if (pathname === '/api/plan') {
+    return handlePlan(request, env, ctx);
+  }
+
+  if (pathname === '/api/mockups') {
+    return handleMockups(request, env, ctx);
+  }
+
+  if (pathname === '/api/preview') {
+    return handlePreview(request, env);
+  }
+
+  if (pathname === '/api/preview/share') {
+    return handlePreviewShare(request, env);
+  }
+
+  if (pathname === '/api/publish') {
+    // Two verbs on one path, deliberately: POST puts a checkpoint on the
+    // web, DELETE takes it off. Both are the same resource, and DELETE is
+    // the method a link or a form cannot reach by accident (ADR-0013).
+    return request.method === 'DELETE'
+      ? handleUnpublish(request, env)
+      : handlePublish(request, env);
+  }
+
+  if (pathname === '/api/runs') {
+    return handleRuns(request, env);
+  }
+
+  if (pathname === '/api/billing/status') {
+    return handleBillingStatus(request, env);
+  }
+
+  if (pathname === '/api/billing/checkout') {
+    return handleBillingCheckout(request, env, new URL(request.url).origin);
+  }
+
+  if (pathname === '/api/billing/portal') {
+    return handleBillingPortal(request, env, new URL(request.url).origin);
+  }
+
+  if (pathname === '/api/stripe/webhook') {
+    return handleStripeWebhook(request, env);
+  }
+
+  if (pathname === '/api/github/connect') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubConnect(request, env, principal),
+    );
+  }
+
+  // Deliberately outside `handleGitHub`. GitHub returns here through a
+  // top-level browser navigation, which carries no Authorization header,
+  // so resolving a principal would reject every real callback with a 401.
+  // It does no work and holds no authority: it hands the code and state to
+  // the app, which completes the exchange on a request that can be
+  // authenticated.
+  if (pathname === '/api/github/callback') {
+    return handleGitHubCallback(request);
+  }
+
+  if (pathname === '/api/github/complete') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubComplete(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/bind') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubBind(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/disconnect') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubDisconnect(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/status') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubStatus(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/webhook') {
+    return handleGitHubWebhook(request, env);
+  }
+
+  if (pathname === '/api/github/diff') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubDiff(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/push') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubPush(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/referral/status') {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    return handleReferralStatus(request, env, resolved.principal);
+  }
+
+  if (pathname === '/api/referral/claim') {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    return handleReferralClaim(request, env, resolved.principal);
+  }
+
+  if (pathname === '/api/admin/user') {
+    return handleAdminUser(request, env);
+  }
+
+  if (pathname === '/api/admin/invites') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleInviteList(request, env);
+  }
+
+  if (pathname === '/api/admin/invite') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleInvite(request, env, guard.adminEmail);
+  }
+
+  if (pathname === '/api/admin/invite/revoke') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleInviteRevoke(request, env);
+  }
+
+  if (pathname === '/api/admin/unattributed') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleUnattributedQueue(request, env);
+  }
+
+  if (pathname === '/api/admin/topup') {
+    return handleAdminTopup(request, env);
+  }
+
+  if (pathname === '/api/admin/publish/hold') {
+    return handleAdminHold(request, env, false);
+  }
+
+  if (pathname === '/api/admin/publish/release') {
+    return handleAdminHold(request, env, true);
+  }
+
+  return json({ error: 'Not found.' }, 404);
+}

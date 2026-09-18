@@ -15,6 +15,7 @@ export interface ConfigurableSession {
   setModels(models: DeploymentConfig['models']): void;
   setModel(model: string | null): void;
   setIsAdmin(isAdmin: boolean | null): void;
+  setGeneration(generation: DeploymentConfig['generation'] | null): void;
 }
 
 /**
@@ -47,8 +48,12 @@ export async function applyDeploymentConfig(
     const config = await probe();
     session.setModels(config.models);
     session.setModel(config.defaultModel);
+    session.setGeneration(config.generation);
     session.setIsAdmin(config.isAdmin);
   } catch {
+    // Left null rather than guessed at: an unanswered probe is not
+    // evidence of a fake deployment, and the one thing this decides is
+    // whether to offer a paid action.
     session.setIsAdmin(false);
   }
 }
@@ -91,6 +96,7 @@ export function useBuilderSession(): {
       onClerkSessionChange((signedIn) => {
         if (!signedIn) {
           session.setModels([]);
+          session.setGeneration(null);
           session.setModel(null);
           session.setIsAdmin(false);
           return;

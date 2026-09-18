@@ -298,6 +298,12 @@ export const ROUTES: SiteRoute[] = [
       'vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
   },
   {
+    path: '/styles',
+    title: `Styles | ${SITE.name}`,
+    description:
+      'Every visual direction vibld can build in, generated from the builder\u2019s own list: full colour systems where a direction has one, and surface treatments where it deliberately does not.',
+  },
+  {
     path: '/legal',
     title: `Legal | ${SITE.name}`,
     description: 'Every policy governing vibld and this site, in one place.',

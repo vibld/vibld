@@ -1,6 +1,15 @@
-import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
+import {
+  MAX_BASE_CONTENT_CHARS,
+  MAX_CHOSEN_MOCKUP_CHARS,
+  MAX_KNOWLEDGE_CHARS,
+  MAX_REFERENCE_URL_CHARS,
+} from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
+// The one bound, from the schema that produces the labels this guard reads
+// back, rather than a second copy of 60 with a comment asserting they
+// agree (#189 review).
+import { MAX_MOCKUP_LABEL_CHARS } from '@vibld/ai/mockup-schema';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
 import type { ProviderName } from '@vibld/ai/select-client';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -42,9 +51,9 @@ export const DEFAULT_LIMITS: GuardLimits = {
   // letting the provider throw after the request has been paid for.
   maxTotalContentChars: MAX_BASE_CONTENT_CHARS,
   maxKnowledgeChars: MAX_KNOWLEDGE_CHARS,
-  // A URL, not content -- generous next to a real address bar's limit, tight
-  // next to what a request could otherwise pad the body with.
-  maxReferenceUrlChars: 2048,
+  // The bound the form's own field declares, rather than a second copy of
+  // 2048 that could drift from it (#189 review).
+  maxReferenceUrlChars: MAX_REFERENCE_URL_CHARS,
 };
 
 /** A typo that adds an extra digit should not be able to grant $10,000. */
@@ -251,6 +260,93 @@ function parseProjectFiles(
  * prompt, no revision -- a preview is not a generation, only what already
  * got generated.
  */
+/**
+ * The direction the caller picked, carried into the build (#185).
+ *
+ * The document itself, not its name. Picking a direction has to mean
+ * something, and a build seeded with only a label can ignore it and still
+ * look like it obeyed.
+ *
+ * It is model output that went out to a browser and came back, so it is
+ * treated as what it is: untrusted text of a bounded size, which the build
+ * prompt carries as data rather than as instruction. `MAX_CHOSEN_MOCKUP_CHARS`
+ * is derived from the mockup budget, so this refuses nothing this system
+ * can itself produce.
+ */
+export function parseChosenMockup(
+  body: unknown,
+): GuardResult<{ label: string; html: string } | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { mockup } = body as { mockup?: unknown };
+  if (mockup === undefined || mockup === null) {
+    return { ok: true, value: null };
+  }
+  if (typeof mockup !== 'object' || Array.isArray(mockup)) {
+    return fail(400, '"mockup" must be an object.');
+  }
+  const { label, html } = mockup as { label?: unknown; html?: unknown };
+  if (typeof label !== 'string' || label.trim().length === 0) {
+    return fail(400, 'A chosen mockup needs a "label".');
+  }
+  if (typeof html !== 'string' || html.trim().length === 0) {
+    return fail(400, 'A chosen mockup needs its "html".');
+  }
+  if (label.length > MAX_MOCKUP_LABEL_CHARS) {
+    return fail(
+      413,
+      `A mockup label must be ${MAX_MOCKUP_LABEL_CHARS} characters or fewer.`,
+    );
+  }
+  if (html.length > MAX_CHOSEN_MOCKUP_CHARS) {
+    return fail(
+      413,
+      `A chosen mockup must be ${MAX_CHOSEN_MOCKUP_CHARS} characters or fewer.`,
+    );
+  }
+  return { ok: true, value: { label, html } };
+}
+
+export interface ParsedMockupRequest {
+  prompt: string;
+}
+
+/**
+ * A request for three directions to choose between (#185).
+ *
+ * Almost nothing to check, which is the point: no base project, no files,
+ * no revision. A mockup run is asked before there is a project, so the
+ * whole class of size and staleness problems `parseGenerationRequest`
+ * exists for cannot arise here. The prompt cap is the same one, because it
+ * is the same person typing the same kind of sentence, and sharing the
+ * number means a prompt accepted for a build is accepted for a look at it
+ * first.
+ *
+ * Style, model and the rest are parsed by the same helpers a build uses
+ * (`parseStylePreset`, `parseModel`), rather than restated here.
+ */
+export function parseMockupRequest(
+  body: unknown,
+  limits: GuardLimits = DEFAULT_LIMITS,
+): GuardResult<ParsedMockupRequest> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+
+  const { prompt } = body as { prompt?: unknown };
+  if (typeof prompt !== 'string' || prompt.trim().length === 0) {
+    return fail(400, 'A non-empty "prompt" is required.');
+  }
+  if (prompt.length > limits.maxPromptChars) {
+    return fail(
+      413,
+      `Prompt must be ${limits.maxPromptChars} characters or fewer.`,
+    );
+  }
+  return { ok: true, value: { prompt } };
+}
+
 export function parsePreviewRequest(
   body: unknown,
   limits: GuardLimits = DEFAULT_LIMITS,

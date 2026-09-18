@@ -15,7 +15,9 @@
   },
   "dependencies": {
     "@react-router/node": "8.3.1",
+    "@vibld/ai": "workspace:*",
     "@vibld/brand": "workspace:*",
+    "@vibld/security-headers": "workspace:*",
     "isbot": "5.1.36",
     "react": "19.2.8",
     "react-dom": "19.2.8",

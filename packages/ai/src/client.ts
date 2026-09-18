@@ -9,6 +9,8 @@
 
 export type PlanEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+import type { PlanOutput } from './plan-output.ts';
+
 export interface PlanRequest {
   system: string;
   prompt: string;
@@ -29,6 +31,31 @@ export interface PlanRequest {
    * one -- which is exactly how this looked before it worked.
    */
   onProgress?: (progress: PlanProgress) => void;
+  /**
+   * What shape the reply must take. Defaults to a generation plan.
+   *
+   * Part of the *request* rather than of the client, which is the whole of
+   * the P1 this fixed (#189 review): every client hard-coded the plan's
+   * schema, so a mockup run asked for one thing in its prompt and was
+   * constrained to another by the API.
+   */
+  output?: PlanOutput;
+  /**
+   * The size of the prompt this client actually sent, in characters,
+   * reported once just before the request goes out.
+   *
+   * Exists because only the client knows (#189 review). The route settling
+   * a cancelled run was reconstructing the figure from the system prompt
+   * and the user prompt, which is right for two of the three clients and
+   * wrong for DeepSeek, where the output instruction is appended to the
+   * system message. Reconstructing what somebody else assembled is the
+   * two-places-that-must-agree problem, and here the two were provider
+   * specific, so they could not have agreed for long.
+   *
+   * Characters rather than tokens: no client has a tokenizer, and the
+   * estimate that turns this into money lives in one place already.
+   */
+  onPromptChars?: (characters: number) => void;
 }
 
 export interface PlanProgress {

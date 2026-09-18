@@ -205,6 +205,36 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-18
+
+**Security response headers on both hostnames.** Checked against the live
+origins: `vibld.com` and `app.vibld.com` were sending none of HSTS,
+`X-Content-Type-Options`, `Referrer-Policy`, `frame-ancestors` or
+`Permissions-Policy`. Both now send one set, from `@vibld/security-headers`.
+
+Two mechanisms, because Cloudflare gives no choice: a `_headers` file applies
+only to responses the static asset store serves and never to a response a
+Worker generated. `app.vibld.com` runs its Worker first on `/api/*` alone, so
+its shell ships `apps/web/public/_headers` (generated from the same object,
+with a test that fails on drift) and its Worker wraps its own responses.
+`vibld.com` runs its Worker first on everything, for the www redirect
+(L21), so the file would cover nothing there and the Worker wraps all of it.
+
+Two deliberate omissions, each with a condition for revisiting:
+
+- **No `includeSubDomains` or `preload` on HSTS.** Both are close to
+  irreversible, and would be a promise made on behalf of subdomains nobody
+  has created yet. The two hostnames that exist each send the header for
+  themselves.
+- **No script-restricting CSP.** The policy carries `frame-ancestors 'none'`
+  and nothing more. The marketing build emits a per-page inline hydration
+  script, so `script-src` there needs a nonce or a per-build hash set, and a
+  wrong one is a blank site; the app shell loads Clerk, whose hosted
+  components inject at sign-in, so nothing short of a live sign-in shows
+  whether a policy holds. Shipping an unverified policy to the two production
+  hostnames risks a white screen nobody can reproduce. Revisit when a
+  browser that can drive a real sign-in is available to check it.
+
 ### Resolved 2026-09-17
 
 **L52 -- citeunseen.io: on by default, and said out loud.** The framing

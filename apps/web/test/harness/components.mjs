@@ -148,6 +148,13 @@ if (entry.endsWith('.test.tsx')) {
     'getComputedStyle',
     'requestAnimationFrame',
     'cancelAnimationFrame',
+    // `mockup-frame.ts` parses untrusted model HTML with this rather than
+    // matching it, after five review rounds in which a pattern was beaten
+    // by something the real tokenizer does. A component that renders a
+    // mockup therefore needs a parser here, and it has to be happy-dom's:
+    // node has no DOMParser of its own, and one that disagreed with the
+    // document those nodes belong to would be worse than none.
+    'DOMParser',
   ]) {
     if (window[name] === undefined) continue;
     // Defined rather than assigned: some of these are getter-only on node's

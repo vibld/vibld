@@ -10,6 +10,8 @@ import {
 } from '../src/deepseek-client.ts';
 import { ProviderShapeError, ProviderTruncationError } from '../src/errors.ts';
 import type { PlanUsage } from '../src/client.ts';
+import { MOCKUP_OUTPUT, PLAN_OUTPUT } from '../src/plan-output.ts';
+import type { PlanOutput } from '../src/plan-output.ts';
 
 const PLAN = {
   summary: 'A navy landing page.',
@@ -237,7 +239,20 @@ describe('createDeepseekPlanClient', () => {
       effort: 'high',
     });
     assert.equal(completion.usage.outputTokens, 100);
-    assert.equal(completion.usage.inputTokens, 100);
+    // 100 for the two 200-character strings, plus the output instruction
+    // this client appends to the system message. That used to read a flat
+    // 100, which under-reported every run by the length of the instruction
+    // (#189 review) -- the same figure `onPromptChars` reports, and now
+    // literally the same expression.
+    const appended = `${'a'.repeat(200)}\n\n${PLAN_OUTPUT.instruction}`;
+    assert.equal(
+      completion.usage.inputTokens,
+      Math.ceil((appended.length + 200) / 4),
+    );
+    assert.ok(
+      completion.usage.inputTokens > 100,
+      'the appended instruction is still uncounted',
+    );
   });
 
   it('refuses to call out without a key, rather than sending an empty header', async () => {
@@ -354,5 +369,109 @@ describe('the provider above, driven by DeepSeek', () => {
       ).generate({ prompt: 'x' }),
     );
     assert.equal(usage?.outputTokens, 64_000);
+  });
+});
+
+/**
+ * What shape the system prompt demands (#189 review, P1).
+ *
+ * This client has no way to enforce a schema, so the instruction appended
+ * to the system prompt *is* the constraint. It always described a
+ * generation plan, so a mockup run sent a prompt asking for three
+ * directions followed immediately by a paragraph demanding
+ * `{summary, files}`. Not structurally impossible the way the other two
+ * clients were, but two contradictory instructions in one message, and the
+ * production deployment runs on this path.
+ */
+describe('what the appended instruction asks for', () => {
+  async function systemSentFor(output?: PlanOutput): Promise<string> {
+    const { impl, calls } = fetchReturning(
+      sse(contentFrames(JSON.stringify(PLAN))),
+    );
+    await createDeepseekPlanClient({ apiKey: 'k', fetchImpl: impl }).createPlan(
+      {
+        system: 'SYSTEM',
+        prompt: 'a bakery',
+        model: 'deepseek-flash',
+        maxTokens: 18_000,
+        effort: 'high',
+        ...(output ? { output } : {}),
+      },
+    );
+    return String(JSON.parse(String(calls[0]!.body)).messages[0].content);
+  }
+
+  it('asks for mockups when a mockup set was asked for', async () => {
+    const system = await systemSentFor(MOCKUP_OUTPUT);
+    assert.match(system, /"mockups"/);
+    assert.doesNotMatch(
+      system,
+      /"files"/,
+      'the prompt still demanded a generation plan alongside the mockups',
+    );
+  });
+
+  it('still asks for a plan when nothing says otherwise', async () => {
+    const system = await systemSentFor();
+    assert.match(system, /"files"/);
+    assert.doesNotMatch(system, /"mockups"/);
+  });
+
+  it('keeps the caller system prompt ahead of the instruction', async () => {
+    // The instruction is appended, so it is the last word on shape. That is
+    // deliberate and worth pinning: the reverse order would let a system
+    // prompt be the thing that gets contradicted.
+    const system = await systemSentFor(MOCKUP_OUTPUT);
+    assert.ok(system.indexOf('SYSTEM') < system.indexOf('OUTPUT FORMAT'));
+  });
+});
+
+/**
+ * How large a prompt this client says it sent (#189 review).
+ *
+ * The route settling a cancelled run cannot work this out for itself: it
+ * knows the system prompt and the user prompt, and this client appends the
+ * output instruction to the first of them. That is 430-odd characters the
+ * caller was not being charged for, on the one provider production runs.
+ */
+describe('what this client reports sending', () => {
+  async function reportedFor(output?: PlanOutput): Promise<number> {
+    const { impl } = fetchReturning(sse(contentFrames(JSON.stringify(PLAN))));
+    let reported = -1;
+    await createDeepseekPlanClient({ apiKey: 'k', fetchImpl: impl }).createPlan(
+      {
+        system: 'SYSTEM',
+        prompt: 'a bakery',
+        model: 'deepseek-flash',
+        maxTokens: 18_000,
+        effort: 'high',
+        onPromptChars: (characters) => {
+          reported = characters;
+        },
+        ...(output ? { output } : {}),
+      },
+    );
+    return reported;
+  }
+
+  it('counts the instruction it appends, not only what it was given', async () => {
+    const reported = await reportedFor(MOCKUP_OUTPUT);
+    const naive = 'SYSTEM'.length + 'a bakery'.length;
+    assert.ok(
+      reported > naive + 400,
+      `reported ${reported}, which cannot include the appended instruction`,
+    );
+    assert.equal(
+      reported,
+      `SYSTEM\n\n${MOCKUP_OUTPUT.instruction}`.length + 'a bakery'.length,
+    );
+  });
+
+  it('counts the plan instruction when nothing says otherwise', async () => {
+    const reported = await reportedFor();
+    assert.equal(
+      reported,
+      `SYSTEM\n\n${PLAN_OUTPUT.instruction}`.length + 'a bakery'.length,
+    );
   });
 });

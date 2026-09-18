@@ -94,6 +94,12 @@ export interface WorkflowParams {
    */
   reservationKey?: string;
   accountReservationId?: number;
+  /**
+   * The direction the caller chose from a mockup run (#185), as the
+   * document rather than its name. Optional: most builds have never seen a
+   * mockup, and a payload persisted before this field existed has none.
+   */
+  chosenMockup?: { label: string; html: string };
   worstCaseMicroUsd: number;
   prices: TokenPrices;
   /**
@@ -166,14 +172,30 @@ export interface GenerationOutcome {
 }
 
 /**
- * Never let a raw exception from the model client reach the generation
- * result. `GenerationMachine.run()`'s own catch puts `error.message`
- * straight into `result.errors` with no filtering -- correct for a client
- * running its own request, wrong here, where that message could carry an
- * upstream response body. `handlePlan` used to sit between the two for
- * exactly this reason; now that the model call happens inside the run
- * instead of beside it, the sanitising has to move to the same place.
+ * Never let a raw exception from the model client reach a caller.
+ *
+ * `GenerationMachine.run()`'s own catch puts `error.message` straight into
+ * `result.errors` with no filtering -- correct for a client running its own
+ * request, wrong here, where that message could carry an upstream response
+ * body. A `ProviderError` is ours and says only what we wrote; anything
+ * else is replaced, and the original goes to the log where an operator can
+ * see it and a caller cannot.
+ *
+ * Shared by the build path and the mockup one (#185) rather than written
+ * twice. This is the rule that decides what a stranger is allowed to read
+ * when something breaks, and a second copy of it is how one of the two
+ * would come to leak what the other does not.
  */
+export function sanitizedProviderFailure(
+  error: unknown,
+  logLabel: string,
+  visible: string,
+): Error {
+  if (error instanceof ProviderError) return error;
+  console.error(logLabel, error);
+  return new Error(visible);
+}
+
 export class SanitizingModelProvider implements ModelProvider {
   readonly id: string;
   readonly #inner: ModelProvider;
@@ -187,9 +209,11 @@ export class SanitizingModelProvider implements ModelProvider {
     try {
       return await this.#inner.generate(request);
     } catch (error) {
-      if (error instanceof ProviderError) throw error;
-      console.error('plan generation failed', error);
-      throw new Error('Generation failed unexpectedly.');
+      throw sanitizedProviderFailure(
+        error,
+        'plan generation failed',
+        'Generation failed unexpectedly.',
+      );
     }
   }
 }
