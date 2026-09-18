@@ -1559,9 +1559,19 @@ body {
  * A page, not a column (#184). The builder's body is a two-column grid; the
  * admin page is one measure of prose and four tools, so the grid is dropped
  * rather than fought with. The builder is still mounted beside it, carrying
- * `hidden`, which the `[hidden]` rule at the top of this file makes stick. */
+ * `hidden`, which the `[hidden]` rule at the top of this file makes stick.
+ *
+ * And it scrolls, which is not a refinement (#188 review). Above 68.01rem
+ * `.shell` is bounded to the viewport with `overflow: hidden`, so anything
+ * inside it that can grow must carry its own scroller or its lower half is
+ * unreachable: no scrollbar, no overflow, nothing to drag. That is the exact
+ * bug `builder-layout.test.ts` was written for, and it was these four tools
+ * that caused it in the composer. Moving them to a page that repeated the
+ * mistake would have moved the bug rather than fixed it. */
 .shell__body--page {
   display: block;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .adminpage {

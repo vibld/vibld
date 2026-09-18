@@ -106,4 +106,26 @@ describe('the wide-screen builder layout', () => {
     // there is not.
     assert.match(composer, /max-height:\s*\d+%/);
   });
+
+  it('lets the admin page scroll, so its lower tools are reachable', async () => {
+    // The same rule, one page over (#184). These four tools are what grew
+    // the composer past the fold in the first place; a page that dropped
+    // the grid without taking a scroller would have moved the bug rather
+    // than fixed it, and an expanded panel's fields would sit below a page
+    // already told it may not move.
+    //
+    // Read from the whole stylesheet rather than the wide-screen block:
+    // the rule is unconditional, because a scroller on an unbounded page
+    // costs nothing and a rule that only exists above a breakpoint is one
+    // more thing that has to keep being true.
+    const css = await readFile(STYLES, 'utf8');
+    const at = css.indexOf('.shell__body--page {');
+    assert.ok(at >= 0, 'the admin page layout is gone');
+    const page = css.slice(css.indexOf('{', at) + 1, css.indexOf('}', at));
+
+    assert.match(page, /overflow-y:\s*auto/);
+    // Without this a flex child refuses to shrink below its content, and
+    // the scroller never engages.
+    assert.match(page, /min-height:\s*0/);
+  });
 });
