@@ -44,8 +44,16 @@ export function AdminSettings({ isAdmin }: { isAdmin: boolean | null }) {
     return (
       <section className="adminpage" aria-label="Platform admin">
         <h1 className="adminpage__title">Nothing here</h1>
+        {/*
+          Also where a caller lands whose `/api/config` probe rejected, so
+          the wording offers the reload that would settle it rather than
+          only asserting the account lacks the page (#188 review). A refusal
+          with a way onward beats a wait with none, which is what this
+          state replaced.
+        */}
         <p className="pane-note">
-          This page is not part of your account.{' '}
+          This page is not part of your account. If you think it should be,
+          reload to check again.{' '}
           <BackToBuilder label="Go back to the builder" />
         </p>
       </section>

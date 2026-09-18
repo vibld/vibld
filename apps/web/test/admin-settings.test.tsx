@@ -70,6 +70,11 @@ describe('the platform admin page', () => {
       'the admin tools were drawn for somebody the probe said is not an admin',
     );
     assert.match(page.text(), /Nothing here/);
+    // A refusal has to carry a way onward. This is also where a caller
+    // whose probe rejected lands (#188 review), and a page with neither a
+    // reload nor a link back would strand them.
+    assert.match(page.text(), /reload/i);
+    assert.match(page.text(), /back to the builder/i);
     page.unmount();
   });
 
