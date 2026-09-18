@@ -1055,6 +1055,41 @@ async function handlePlan(
   // own comment.
   const projectId = principal.userId;
 
+  // Before anything durable exists (#189 review). Last round taught
+  // `whenClientGone` to fire for a caller who had already left, and this is
+  // where that answer arrives too late: by the time the listener is
+  // registered the Workflow has been created, and terminating one lands at
+  // its next step boundary, so the model step may already be running.
+  // Worse, a termination before `settle-budget` leaves the reservation to
+  // the abandoned-run reclaim, which closes it at the full worst case.
+  //
+  // Asked here instead, where the answer is still cheap: nothing durable
+  // exists, so there is nothing to terminate and nothing to reclaim.
+  // Settled at zero through the ordinary path rather than a second one --
+  // `settleBudget`'s third case is "the provider was never asked", and that
+  // is exactly what happened.
+  if (request.signal?.aborted) {
+    await settleBudget(
+      env.USER_BUDGET!,
+      {
+        userId: principal.userId,
+        reservationId: reservation.id,
+        reservationKey: reserved.layers.userReservationKey,
+        accountReservationId: reserved.layers.account.id,
+        worstCaseMicroUsd: worstCase,
+        prices,
+      },
+      undefined,
+      false,
+    ).catch((error) => {
+      // The reclaim is still the backstop, as it is for a Worker that dies
+      // here. Over-charging a caller who left is the wrong direction, but
+      // it is the safe one, and refusing to answer would not improve it.
+      console.error('failed to release a reservation for a gone caller', error);
+    });
+    return new Response(null, { status: 499 });
+  }
+
   let instance;
   try {
     instance = await env.GENERATION_WORKFLOW!.create({
@@ -1478,6 +1513,18 @@ async function handleMockups(
           ...(style.value ? { style: style.value } : {}),
         },
       );
+
+      // Nothing has been asked for yet, so a caller who left before this
+      // line costs nothing (#189 review). Without the check, two fixes from
+      // earlier rounds met badly: `whenClientGone` aborts the controller for
+      // a caller who had already gone, and then this marked the provider as
+      // having run and called it with a pre-aborted signal -- so settlement
+      // saw `cancelled && providerRan` and charged the full input estimate
+      // for a request that never left the Worker.
+      //
+      // Returning leaves `providerRan` false, which is the case
+      // `settleBudget` already has for "never asked": settle nothing.
+      if (cancelled) return;
 
       providerRan = true;
       const set = await provider.generate({ prompt: parsed.value.prompt });

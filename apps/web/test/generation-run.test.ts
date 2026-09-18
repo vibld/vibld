@@ -669,6 +669,24 @@ describe('a run that predates the change', () => {
     );
   });
 
+  it('charges nothing when the provider was never asked', async () => {
+    // The case both routes now lean on to release a reservation for a
+    // caller who disconnected before anything was requested (#189 review):
+    // `handlePlan` settles this way instead of creating a Workflow it would
+    // then have to terminate, and `handleMockups` returns before marking the
+    // provider as having run. Neither had anything asserting the settlement
+    // itself was free.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(ledger, PRICE_PARAMS, undefined, false);
+
+    assert.equal(actual, 0, 'a run that never reached a model cost money');
+    assert.deepEqual(
+      calls.map((call) => call.actual),
+      [0, 0],
+      'both ledger layers must be released, not just the per-user one',
+    );
+  });
+
   it('charges a step result with no spend flag rather than zeroing it', async () => {
     // The opposite direction, and the expensive one. A `generate` step
     // cached before `providerRan` existed resumes without it. Reading that

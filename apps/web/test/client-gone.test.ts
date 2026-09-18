@@ -80,13 +80,16 @@ describe('noticing that the caller has gone', () => {
  * reads the router's, and fails on any abort listener registered without
  * `whenClientGone`. The next streaming route cannot copy the hole.
  */
+function workerSource(): string {
+  return join(
+    fileURLToPath(new URL('../worker/', import.meta.url)),
+    'index.ts',
+  );
+}
+
 describe('how a route learns the caller has gone', () => {
   it('registers no abort listener without the already-gone check', async () => {
-    const worker = join(
-      fileURLToPath(new URL('../worker/', import.meta.url)),
-      'index.ts',
-    );
-    const source = await readFile(worker, 'utf8');
+    const source = await readFile(workerSource(), 'utf8');
     const bare = source.match(/\.addEventListener\(\s*['"]abort['"]/g);
     assert.equal(
       bare,
@@ -95,12 +98,45 @@ describe('how a route learns the caller has gone', () => {
     );
   });
 
-  it('is what both streaming routes use', async () => {
-    const worker = join(
-      fileURLToPath(new URL('../worker/', import.meta.url)),
-      'index.ts',
+  /**
+   * Where the check happens, not only that it happens (#189 review).
+   *
+   * Source-level, and weaker than a behavioural test, which I would rather
+   * say than dress up: `handlePlan` and `handleMockups` need Clerk, D1,
+   * Durable Objects and a Workflow binding to exercise, and standing all of
+   * that up is its own change. What this does catch is the ordering, which
+   * is the whole of both findings -- a check after the Workflow exists is a
+   * check that can only terminate, and terminating lands at a step boundary
+   * with the reservation left to the reclaim.
+   */
+  it('asks whether the caller is gone before creating a workflow', async () => {
+    const source = await readFile(workerSource(), 'utf8');
+    const abortCheck = source.indexOf('if (request.signal?.aborted)');
+    const create = source.indexOf('GENERATION_WORKFLOW!.create(');
+    assert.ok(abortCheck > -1, 'no early check for a caller who already left');
+    assert.ok(create > -1, 'the test fixture lost the workflow creation');
+    assert.ok(
+      abortCheck < create,
+      'the check happens after the workflow exists, so it can only terminate one',
     );
-    const source = await readFile(worker, 'utf8');
+  });
+
+  it('skips the provider when cancellation already happened', async () => {
+    // The other half: `whenClientGone` aborts the controller for a caller
+    // who had already gone, and without this the run still marked the
+    // provider as having run and called it with a pre-aborted signal --
+    // so settlement charged the full input estimate for a request that
+    // never left the Worker.
+    const source = await readFile(workerSource(), 'utf8');
+    assert.match(
+      source,
+      /if \(cancelled\) return;\s+providerRan = true;/,
+      'the mockup run marks the provider as having run without checking whether the caller is still there',
+    );
+  });
+
+  it('is what both streaming routes use', async () => {
+    const source = await readFile(workerSource(), 'utf8');
     assert.equal(
       source.match(/whenClientGone\(/g)?.length,
       2,
