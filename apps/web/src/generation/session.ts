@@ -21,6 +21,8 @@ import { deriveBrief } from './brief.ts';
 import type { PlanMode } from './plan-builder.ts';
 import { buildPlan } from './plan-builder.ts';
 import type { StyleDna } from '@vibld/ai/style-dna';
+import type { ParsedMockup } from '@vibld/ai/mockup-schema';
+import { requestMockups } from './mockups-client.ts';
 import { createValidator } from './validator.ts';
 import {
   ObservingGenerationStore,
@@ -107,6 +109,13 @@ export interface BuilderState {
    * fetch takes, and then replaces it under them.
    */
   isAdmin: boolean | null;
+  /**
+   * Directions to choose between, when the caller asked to look before
+   * building (#185). Empty is the ordinary case: most runs never ask.
+   */
+  mockups: ParsedMockup[];
+  /** A mockup run is in flight. Separate from `running`, which is a build. */
+  exploring: boolean;
 }
 
 /** One prompt and what became of it. */
@@ -163,6 +172,8 @@ export interface SessionOptions {
    * Resolve the provider for a run. Defaults to asking the deployment: the
    * hosted Worker when it is configured, the deterministic fake otherwise.
    */
+  /** Ask for directions. Injectable so tests need no network. */
+  requestMockupsImpl?: typeof requestMockups;
   resolveProvider?: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -172,6 +183,11 @@ export interface SessionOptions {
     model?: string | null,
     referenceUrl?: string | null,
     styleDna?: StyleDna | null,
+    // Appended rather than placed beside the other request-shaped options,
+    // for the reason `buildUserPrompt` now carries in its own signature: a
+    // parameter added to the middle of a positional list silently re-points
+    // every existing caller at the wrong argument.
+    mockup?: { label: string; html: string } | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -215,6 +231,8 @@ function initialState(budget: RunUsageReport): BuilderState {
     model: null,
     models: [],
     isAdmin: null,
+    mockups: [],
+    exploring: false,
   };
 }
 
@@ -233,6 +251,7 @@ async function defaultResolveProvider(
   model?: string | null,
   referenceUrl?: string | null,
   styleDna?: StyleDna | null,
+  mockup?: { label: string; html: string } | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -244,6 +263,7 @@ async function defaultResolveProvider(
         ...(model ? { model } : {}),
         ...(referenceUrl ? { referenceUrl } : {}),
         ...(styleDna && Object.keys(styleDna).length > 0 ? { styleDna } : {}),
+        ...(mockup ? { mockup } : {}),
       })
     : // The deterministic fake has no visual vocabulary at all, so a preset
       // cannot change what it produces. Nothing here pretends otherwise.
@@ -285,6 +305,8 @@ export class BuilderSession {
   readonly #now: () => number;
   readonly #stageDelayMs: number;
   readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
+  readonly #requestMockups: typeof requestMockups;
+  #mockupContext: { prompt: string; style: StylePresetId | null } | null = null;
   readonly #resolveProvider: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -294,6 +316,7 @@ export class BuilderSession {
     model?: string | null,
     referenceUrl?: string | null,
     styleDna?: StyleDna | null,
+    mockup?: { label: string; html: string } | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -307,6 +330,7 @@ export class BuilderSession {
     this.#budgetLimits = options.budget ?? DEFAULT_BUDGET;
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
     this.#resolveProvider = options.resolveProvider ?? defaultResolveProvider;
+    this.#requestMockups = options.requestMockupsImpl ?? requestMockups;
     this.#state = initialState(this.#ledger.report());
   }
 
@@ -390,6 +414,98 @@ export class BuilderSession {
       models,
       isAdmin,
     };
+    // Directions are about a request, and "Start over" discards the
+    // request. Carrying them would leave three sketches of a project that
+    // no longer exists, with a Build button that would rebuild it.
+    this.#mockupContext = null;
+    this.#emit();
+  }
+
+  /**
+   * Ask for three directions rather than a build (#185).
+   *
+   * Its own flag rather than reusing `running`: a build and a look are
+   * different spends, they read differently on screen, and a chooser that
+   * appeared because a build was in flight would be lying about what it
+   * was waiting for.
+   *
+   * The prompt and style that produced the set are kept, because choosing
+   * one has to submit the same request it was drawn from. Asking the reader
+   * to retype it would be asking them to remember what they already said.
+   */
+  async explore(
+    prompt: string,
+    style: StylePresetId | null = null,
+  ): Promise<void> {
+    const trimmed = prompt.trim();
+    if (
+      this.#disposed ||
+      this.#state.running ||
+      this.#state.exploring ||
+      trimmed.length === 0
+    ) {
+      return;
+    }
+    const epoch = this.#epoch;
+    this.#mockupContext = { prompt: trimmed, style };
+    this.#patch(epoch, (state) => ({
+      ...state,
+      exploring: true,
+      mockups: [],
+      progress: null,
+      problems: [],
+    }));
+
+    try {
+      const mockups = await this.#requestMockups({
+        prompt: trimmed,
+        style,
+        model: this.#state.model,
+        onProgress: (progress) => {
+          this.#patch(epoch, (state) => ({ ...state, progress }));
+        },
+      });
+      this.#patch(epoch, (state) => ({
+        ...state,
+        exploring: false,
+        progress: null,
+        mockups,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        exploring: false,
+        progress: null,
+        mockups: [],
+        problems: [message],
+      }));
+    }
+  }
+
+  /**
+   * Build the direction that was picked, from the request it was drawn
+   * from. The set is cleared first: the other two are not alternatives any
+   * more, and leaving them on screen beside a running build would invite a
+   * second click that the run in flight would refuse anyway.
+   */
+  chooseMockup(mockup: ParsedMockup): void {
+    if (this.#disposed || this.#state.running) return;
+    const context = this.#mockupContext;
+    if (!context) return;
+    this.#state = { ...this.#state, mockups: [] };
+    this.#emit();
+    void this.submit(context.prompt, 'succeed', context.style, null, {
+      label: mockup.label,
+      html: mockup.html,
+    });
+  }
+
+  /** None of them. Clears the set without spending anything further. */
+  discardMockups(): void {
+    if (this.#disposed || this.#state.mockups.length === 0) return;
+    this.#mockupContext = null;
+    this.#state = { ...this.#state, mockups: [] };
     this.#emit();
   }
 
@@ -398,6 +514,7 @@ export class BuilderSession {
     mode: PlanMode = 'succeed',
     style: StylePresetId | null = null,
     referenceUrl: string | null = null,
+    mockup: { label: string; html: string } | null = null,
   ): Promise<void> {
     const trimmed = prompt.trim();
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
@@ -423,7 +540,12 @@ export class BuilderSession {
       estimateTokens(trimmed) +
       estimateTokensForChars(baseChars) +
       estimateTokensForChars(this.#state.knowledge.length) +
-      (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0);
+      (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0) +
+      // A chosen direction is sent with the request too (#185), so it is
+      // part of what this run spends. Counted from the document actually
+      // being sent rather than from its cap, because unlike a reference URL
+      // this content is already in hand.
+      (mockup ? estimateTokensForChars(mockup.html.length) : 0);
     let reservation;
     try {
       reservation = this.#ledger.reserve({
@@ -523,6 +645,7 @@ export class BuilderSession {
         this.#state.model,
         referenceUrl,
         this.#state.styleDna,
+        mockup,
       );
     } catch (error) {
       reservation.release();

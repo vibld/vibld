@@ -19,6 +19,12 @@ export interface PromptPanelProps {
     style: StylePresetId | null,
     referenceUrl: string | null,
   ) => void;
+  /**
+   * Ask for three directions instead of building (#185). Carries the same
+   * prompt and style the build would have used, because it is the same
+   * request asked a smaller way.
+   */
+  onExplore: (prompt: string, style: StylePresetId | null) => void;
   onReset: () => void;
   onCancel: () => void;
   onModelChange: (model: string | null) => void;
@@ -27,6 +33,7 @@ export interface PromptPanelProps {
 export function PromptPanel({
   state,
   onSubmit,
+  onExplore,
   onReset,
   onCancel,
   onModelChange,
@@ -38,7 +45,7 @@ export function PromptPanel({
   const promptId = useId();
   const failId = useId();
   const referenceId = useId();
-  const disabled = state.running;
+  const disabled = state.running || state.exploring;
   // Once there is a conversation, the examples are noise: what to type next
   // comes from what was just built, not from a generic starting point.
   const started = state.transcript.length > 0;
@@ -144,6 +151,23 @@ export function PromptPanel({
         >
           {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
         </button>
+        {/*
+          Offered only before there is a project (#185). Directions are for
+          deciding what to build; once something exists, the question is
+          what to change about it, and three fresh sketches answer a
+          question nobody asked.
+        */}
+        {!started ? (
+          <button
+            type="button"
+            className="button"
+            onClick={() => onExplore(prompt, style)}
+            disabled={disabled || prompt.trim().length === 0}
+            title="Three quick sketches to choose from, for about a tenth of a build"
+          >
+            {state.exploring ? 'Sketching…' : 'Show me three directions'}
+          </button>
+        ) : null}
         {/*
           A generation can run for a minute or more. Without this the only way
           out is to close the tab, and the run keeps spending either way --

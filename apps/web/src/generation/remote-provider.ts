@@ -133,6 +133,12 @@ export interface RemoteModelProviderOptions {
    */
   model?: string | null;
   /**
+   * The direction the caller picked from a mockup run (#185), as the
+   * document rather than its name. The Worker bounds it
+   * (`MAX_CHOSEN_MOCKUP_CHARS`) and the build's reservation covers it.
+   */
+  mockup?: { label: string; html: string } | null;
+  /**
    * Returns the caller's current Clerk session token, or `null` when signed
    * out. Injectable so tests do not need a real Clerk instance; defaults to
    * reading the live one via `window.Clerk`.
@@ -151,6 +157,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #knowledge: string | null;
   readonly #referenceUrl: string | null;
   readonly #model: string | null;
+  readonly #mockup: { label: string; html: string } | null;
   readonly #getToken: () => Promise<string | null>;
 
   constructor(options: RemoteModelProviderOptions = {}) {
@@ -164,6 +171,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#knowledge = options.knowledge ?? null;
     this.#referenceUrl = options.referenceUrl ?? null;
     this.#model = options.model ?? null;
+    this.#mockup = options.mockup ?? null;
     this.#getToken = options.getToken ?? getClerkToken;
   }
 
@@ -194,6 +202,7 @@ export class RemoteModelProvider implements ModelProvider {
         ...(this.#knowledge ? { knowledge: this.#knowledge } : {}),
         ...(this.#referenceUrl ? { referenceUrl: this.#referenceUrl } : {}),
         ...(this.#model ? { model: this.#model } : {}),
+        ...(this.#mockup ? { mockup: this.#mockup } : {}),
       }),
       signal: this.#signal,
     });

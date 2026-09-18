@@ -41,6 +41,7 @@ async function mount(state: BuilderState) {
   const sent: Sent[] = [];
   const resets: number[] = [];
   const cancels: number[] = [];
+  const explored: { prompt: string; style: string | null }[] = [];
   const container = document.createElement('div');
   document.body.appendChild(container);
   let root: Root;
@@ -52,6 +53,7 @@ async function mount(state: BuilderState) {
         onSubmit={(prompt, mode, style, referenceUrl) => {
           sent.push({ prompt, mode, style, referenceUrl });
         }}
+        onExplore={(prompt, style) => explored.push({ prompt, style })}
         onReset={() => resets.push(1)}
         onCancel={() => cancels.push(1)}
         onModelChange={() => {}}
@@ -87,6 +89,7 @@ async function mount(state: BuilderState) {
     sent,
     resets,
     cancels,
+    explored,
     async render(next: BuilderState) {
       await act(async () => {
         root.render(
@@ -95,6 +98,7 @@ async function mount(state: BuilderState) {
             onSubmit={(prompt, mode, style, referenceUrl) => {
               sent.push({ prompt, mode, style, referenceUrl });
             }}
+            onExplore={(prompt, style) => explored.push({ prompt, style })}
             onReset={() => resets.push(1)}
             onCancel={() => cancels.push(1)}
             onModelChange={() => {}}
@@ -257,5 +261,50 @@ describe('the composer, as it is actually wired', () => {
     await started.press(/Start over/);
     assert.equal(started.resets.length, 1);
     started.unmount();
+  });
+});
+
+/**
+ * Asking to look before building (#185).
+ *
+ * Offered only before there is a project: directions are for deciding what
+ * to build, and once something exists the question is what to change about
+ * it, which three fresh sketches do not answer.
+ */
+describe('asking for directions', () => {
+  it('offers it on a first request', async () => {
+    const view = await mount(builder());
+    assert.ok(view.button(/Show me three directions/));
+    view.unmount();
+  });
+
+  it('carries the prompt and style the build would have used', async () => {
+    const view = await mount(builder());
+    await view.type('a bakery');
+    await act(async () => view.button(/Show me three directions/)?.click());
+    assert.deepEqual(view.explored, [{ prompt: 'a bakery', style: null }]);
+    view.unmount();
+  });
+
+  it('will not ask with nothing typed', async () => {
+    const view = await mount(builder());
+    assert.equal(view.button(/Show me three directions/)?.disabled, true);
+    view.unmount();
+  });
+
+  it('stops offering it once there is a project to change', async () => {
+    const view = await mount(builder({ transcript: TURN }));
+    assert.equal(view.button(/Show me three directions/), undefined);
+    view.unmount();
+  });
+
+  it('says it is working, and refuses a second ask while it is', async () => {
+    const view = await mount(builder());
+    await view.type('a bakery');
+    await view.render(builder({ exploring: true }));
+    const working = view.button(/Sketching/);
+    assert.ok(working, 'the control does not say it is working');
+    assert.equal(working.disabled, true);
+    view.unmount();
   });
 });
