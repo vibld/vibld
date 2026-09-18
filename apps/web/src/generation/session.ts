@@ -118,8 +118,16 @@ export interface TranscriptTurn {
   providerId: string | null;
 }
 
-/** Where a run has got to, as coarsely as the Worker can actually tell. */
-export type GenerationStage = 'queued' | 'writing';
+/**
+ * Where a run has got to, as coarsely as the Worker can actually tell.
+ *
+ * `running` and not `writing` (#188 review). A Workflow instance reports
+ * `running` for the whole of its work, and writing the project is only the
+ * first of its three steps: settling the budget and recording the trace
+ * follow, each with its own retries. A word that named the writing would go
+ * on claiming it for as long as those take.
+ */
+export type GenerationStage = 'queued' | 'running';
 
 export interface GenerationProgress {
   /**

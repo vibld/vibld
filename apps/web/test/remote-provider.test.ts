@@ -262,7 +262,7 @@ describe('streamed progress', () => {
       fetchImpl: (async () =>
         sseResponse([
           `event: progress\ndata: ${JSON.stringify({ elapsedMs: 1_500, stage: 'queued' })}\n\n`,
-          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 9_000, stage: 'writing' })}\n\n`,
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 9_000, stage: 'running' })}\n\n`,
           PLAN_FRAME,
         ])) as unknown as typeof fetch,
       onProgress: (progress) => seen.push(progress),
@@ -272,7 +272,7 @@ describe('streamed progress', () => {
 
     assert.deepEqual(seen, [
       { elapsedMs: 1_500, stage: 'queued' },
-      { elapsedMs: 9_000, stage: 'writing' },
+      { elapsedMs: 9_000, stage: 'running' },
     ]);
   });
 

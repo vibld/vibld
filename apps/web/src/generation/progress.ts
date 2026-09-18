@@ -41,10 +41,18 @@ export function formatCharacters(characters: number): string {
   return safe.toLocaleString('en-US');
 }
 
-/** What each stage is called on screen. Plain words, not internal states. */
+/**
+ * What each stage is called on screen. Plain words, not internal states.
+ *
+ * "Building" rather than "Writing" (#188 review). The Worker can see that a
+ * run is under way; it cannot see which of the Workflow's three steps it is
+ * in, and the writing is only the first of them. A word naming the writing
+ * kept claiming it through settlement and the trace write, which is a
+ * confident wrong answer where a broader true one was available.
+ */
 const STAGE_WORDS: Record<GenerationStage, string> = {
   queued: 'Waiting for a slot',
-  writing: 'Writing your project',
+  running: 'Building your project',
 };
 
 /**
@@ -73,14 +81,22 @@ export function describeProgress(progress: GenerationProgress): string {
  * first second would train people to ignore it.
  */
 export function reassurance(progress: GenerationProgress): string | null {
-  if (progress.stage === 'queued' && progress.elapsedMs >= REASSURE_AFTER_MS) {
+  if (progress.elapsedMs < REASSURE_AFTER_MS) return null;
+  if (progress.stage === 'queued') {
     // A different worry from a slow run, and a different answer. Saying
-    // "writing takes several minutes" while nothing is being written yet
-    // would explain the wrong thing.
+    // "building takes several minutes" while nothing has started yet would
+    // explain the wrong thing.
     return 'Your project is queued behind other builds. It will start shortly, and you can cancel at any time.';
   }
-  if (progress.elapsedMs < REASSURE_AFTER_MS) return null;
-  return 'Writing a whole project takes several minutes. You can cancel at any time.';
+  if (progress.stage === undefined) {
+    // No stage means the Workflow is in a state the Worker has no honest
+    // word for (`run-stage.ts`). Removing the stage word and then
+    // explaining the wait in terms of the work being done would put the
+    // same claim back a line lower (#188 review). All that is known here is
+    // that the run has not finished, so that is all this says.
+    return 'This is still going. It can take several minutes, and you can cancel at any time.';
+  }
+  return 'Building a whole project takes several minutes. You can cancel at any time.';
 }
 
 /**

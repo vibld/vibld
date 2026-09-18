@@ -132,8 +132,8 @@ describe('a run whose character count is unknown', () => {
 
   it('names the stage when there is one', () => {
     assert.equal(
-      describeProgress({ elapsedMs: 9_000, stage: 'writing' }),
-      'Writing your project · 0:09',
+      describeProgress({ elapsedMs: 9_000, stage: 'running' }),
+      'Building your project · 0:09',
     );
     assert.equal(
       describeProgress({ elapsedMs: 4_000, stage: 'queued' }),
@@ -153,9 +153,9 @@ describe('a run whose character count is unknown', () => {
       describeProgress({
         characters: 12_480,
         elapsedMs: 187_000,
-        stage: 'writing',
+        stage: 'running',
       }),
-      'Writing your project · 12,480 characters written · 3:07',
+      'Building your project · 12,480 characters written · 3:07',
     );
   });
 
@@ -164,17 +164,34 @@ describe('a run whose character count is unknown', () => {
   });
 
   it('explains a queue differently from a slow run', () => {
-    // Two different worries. "Writing takes several minutes" is the wrong
-    // answer while nothing is being written yet.
+    // Two different worries. "Building takes several minutes" is the wrong
+    // answer while nothing has started yet.
     const queued = reassurance({ elapsedMs: 60_000, stage: 'queued' });
     assert.match(queued ?? '', /queued behind other builds/);
 
-    const writing = reassurance({ elapsedMs: 60_000, stage: 'writing' });
-    assert.match(writing ?? '', /takes several minutes/);
+    const running = reassurance({ elapsedMs: 60_000, stage: 'running' });
+    assert.match(running ?? '', /takes several minutes/);
+    assert.doesNotMatch(running ?? '', /queued/);
+  });
+
+  it('claims no work it cannot see when there is no stage', () => {
+    // Removing the stage word for a paused or waiting run and then
+    // explaining the wait in terms of the work being done would put the
+    // same claim back one line lower (#188 review). All that is known is
+    // that the run has not finished.
+    const unknown = reassurance({ elapsedMs: 60_000 }) ?? '';
+    assert.notEqual(unknown, '');
+    assert.doesNotMatch(
+      unknown,
+      /Building|Writing|queued/,
+      'a run in a state the Worker cannot name was described as doing something specific',
+    );
+    assert.match(unknown, /cancel at any time/);
   });
 
   it('stays quiet early, whatever the stage', () => {
     assert.equal(reassurance({ elapsedMs: 1_000, stage: 'queued' }), null);
-    assert.equal(reassurance({ elapsedMs: 1_000, stage: 'writing' }), null);
+    assert.equal(reassurance({ elapsedMs: 1_000, stage: 'running' }), null);
+    assert.equal(reassurance({ elapsedMs: 1_000 }), null);
   });
 });

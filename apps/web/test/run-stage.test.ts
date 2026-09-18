@@ -27,14 +27,14 @@ const STILL_GOING = [
 ];
 
 describe('what the meter calls a run in flight', () => {
-  it('says writing only while the run is actually running', () => {
-    assert.equal(stageFor('running'), 'writing');
+  it('says running only while the instance is running', () => {
+    assert.equal(stageFor('running'), 'running');
     for (const status of STILL_GOING) {
       if (status === 'running') continue;
       assert.notEqual(
         stageFor(status),
-        'writing',
-        `a ${status} run would be described as writing a project it is not writing`,
+        'running',
+        `a ${status} run would be described as under way when it is not`,
       );
     }
   });
