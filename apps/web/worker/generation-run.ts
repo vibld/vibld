@@ -148,6 +148,21 @@ export interface GenerationOutcome {
   result: DurableGenerationResult;
   /** For the settlement log line only -- not shown to any caller. */
   outcome: 'ok' | 'failed';
+  /**
+   * Whether the provider was actually asked for a plan.
+   *
+   * Settlement needs this because "no usage was reported" has two causes
+   * that cost opposite amounts. A run that called the model and could not
+   * measure what it spent must settle at its worst case, because failing
+   * safe means over-counting. A run refused before the model was called
+   * spent nothing, and charging it a worst case would bill a caller the
+   * price of a full generation for being told no.
+   *
+   * False only where that is certain: the two preflight refusals below.
+   * Everything else, including a store failure that could have happened on
+   * either side of the call, says true and settles the cautious way.
+   */
+  providerRan: boolean;
 }
 
 /**
@@ -220,6 +235,7 @@ export async function runGeneration(
           conflict: true,
         },
         outcome: 'failed',
+        providerRan: false,
       };
     }
 
@@ -245,6 +261,7 @@ export async function runGeneration(
           conflict: false,
         },
         outcome: 'failed',
+        providerRan: false,
       };
     }
 
@@ -258,7 +275,11 @@ export async function runGeneration(
       provider,
       createValidator(),
     );
-    return { result, outcome: result.state === 'accepted' ? 'ok' : 'failed' };
+    return {
+      result,
+      outcome: result.state === 'accepted' ? 'ok' : 'failed',
+      providerRan: true,
+    };
   } catch (error) {
     // Only D1/R2 can throw past this point -- `runner.run()` and
     // `GenerationMachine.run()` both already catch a provider failure and
@@ -275,6 +296,9 @@ export async function runGeneration(
         conflict: false,
       },
       outcome: 'failed',
+      // D1 or R2 failing says nothing about whether the model was already
+      // asked, so this settles the cautious way rather than the cheap one.
+      providerRan: true,
     };
   }
 }
@@ -325,6 +349,13 @@ export function traceOf(
  * `handlePlan` used to do in its own `finally` block. Returns the settled
  * amount so the caller can log it.
  */
+function usageOrWorstCase(
+  usage: PlanUsage | undefined,
+  params: Pick<WorkflowParams, 'worstCaseMicroUsd' | 'prices'>,
+): number {
+  return usage ? microUsdOf(usage, params.prices) : params.worstCaseMicroUsd;
+}
+
 export async function settleBudget(
   ledger: DurableObjectNamespace<Pick<UserBudget, 'settle'>>,
   params: Pick<
@@ -337,12 +368,20 @@ export async function settleBudget(
     | 'prices'
   >,
   usage: PlanUsage | undefined,
+  providerRan: boolean,
 ): Promise<number> {
-  // A run that never reported usage settles at the full reservation rather
-  // than at zero: failing safe means over-counting, not under.
-  const actual = usage
-    ? microUsdOf(usage, params.prices)
-    : params.worstCaseMicroUsd;
+  // Three cases, not two, and the third used to be charged as if it were
+  // the second.
+  //
+  // Usage reported: charge it. No usage but the model was asked: charge the
+  // worst case, because failing safe means over-counting and we cannot know
+  // what that call cost. No usage because the model was never asked: charge
+  // nothing, because nothing was spent and we know it.
+  //
+  // Folding the third into the second billed a caller a full generation for
+  // being told their revision was stale, which is the opposite of the
+  // refusal being free.
+  const actual = !usage && !providerRan ? 0 : usageOrWorstCase(usage, params);
 
   if (params.reservationId !== undefined) {
     // `reservationKey` is always set alongside `reservationId` by index.ts's

@@ -161,6 +161,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           this.env.USER_BUDGET,
           params,
           generation.usage,
+          generation.providerRan,
         );
         // Spend is recorded even when the run failed: a refusal or a
         // conflict still consumed tokens, and a record that counts only

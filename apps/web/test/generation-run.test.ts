@@ -169,42 +169,47 @@ describe('runGeneration', () => {
   });
 });
 
-describe('settleBudget', () => {
-  function fakeLedger() {
-    const calls: { name: string; id: number; actual: number }[] = [];
-    return {
-      ledger: {
-        getByName: (name: string) => ({
-          settle: async (id: number, actual: number) => {
-            calls.push({ name, id, actual });
-          },
-        }),
-      },
-      calls,
-    };
-  }
-
-  const PRICE_PARAMS = {
-    userId: 'user_abc',
-    reservationId: 11,
-    accountReservationId: 22,
-    worstCaseMicroUsd: 999_999,
-    prices: {
-      inputMicroUsd: 5,
-      outputMicroUsd: 25,
-      cachedInputMicroUsd: 0.5,
-      cacheWriteMicroUsd: 6.25,
+function fakeLedger() {
+  const calls: { name: string; id: number; actual: number }[] = [];
+  return {
+    ledger: {
+      getByName: (name: string) => ({
+        settle: async (id: number, actual: number) => {
+          calls.push({ name, id, actual });
+        },
+      }),
     },
+    calls,
   };
+}
 
+const PRICE_PARAMS = {
+  userId: 'user_abc',
+  reservationId: 11,
+  accountReservationId: 22,
+  worstCaseMicroUsd: 999_999,
+  prices: {
+    inputMicroUsd: 5,
+    outputMicroUsd: 25,
+    cachedInputMicroUsd: 0.5,
+    cacheWriteMicroUsd: 6.25,
+  },
+};
+
+describe('settleBudget', () => {
   it('settles both layers at the usage-derived cost', async () => {
     const { ledger, calls } = fakeLedger();
-    const actual = await settleBudget(ledger, PRICE_PARAMS, {
-      inputTokens: 100,
-      outputTokens: 200,
-      cacheReadInputTokens: 0,
-      cacheWriteInputTokens: 0,
-    });
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+    );
 
     assert.equal(actual, 100 * 5 + 200 * 25);
     assert.deepEqual(calls, [
@@ -213,12 +218,48 @@ describe('settleBudget', () => {
     ]);
   });
 
-  it('settles at the worst case when usage was never reported', async () => {
+  it('settles at the worst case when a run that happened could not be measured', async () => {
+    // The model was asked and what it cost is unknown, so failing safe means
+    // over-counting rather than under.
     const { ledger, calls } = fakeLedger();
-    const actual = await settleBudget(ledger, PRICE_PARAMS, undefined);
+    const actual = await settleBudget(ledger, PRICE_PARAMS, undefined, true);
 
     assert.equal(actual, PRICE_PARAMS.worstCaseMicroUsd);
     assert.equal(calls.length, 2);
+  });
+
+  it('settles at nothing when the model was never asked', async () => {
+    // The case that used to share the fallback above and should not: a run
+    // refused before the provider ran spent nothing, and we know it. Charging
+    // its worst case billed a caller a whole generation for being told no.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(ledger, PRICE_PARAMS, undefined, false);
+
+    assert.equal(actual, 0, 'a refusal that cost nothing was charged for');
+    assert.deepEqual(calls, [
+      { name: 'user_abc', id: 11, actual: 0 },
+      { name: '__account__', id: 22, actual: 0 },
+    ]);
+  });
+
+  it('still charges measured usage even if the flag says otherwise', async () => {
+    // Belt and braces: a measurement is evidence the model ran, so it wins
+    // over the flag rather than being discarded by it. A caller that got the
+    // flag wrong must not get a free generation out of it.
+    const { ledger } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      false,
+    );
+
+    assert.equal(actual, 10 * 5 + 10 * 25);
   });
 
   it('skips a layer whose reservation never got an id', async () => {
@@ -236,6 +277,7 @@ describe('settleBudget', () => {
         cacheReadInputTokens: 0,
         cacheWriteInputTokens: 0,
       },
+      true,
     );
 
     assert.deepEqual(calls, []);
@@ -469,6 +511,44 @@ describe('which project a follow-up edits', () => {
     assert.equal(outcome, 'failed');
     assert.equal(result.stop, 'conflict');
     assert.equal(result.conflict, true);
+  });
+
+  it('reports a preflight refusal as having spent nothing', async () => {
+    // The half of "free" that not calling the model does not prove. Usage
+    // is undefined either way, and `settleBudget` charges the worst case for
+    // undefined usage unless it is told the provider never ran. Asserting
+    // only that the model was not asked left that gap, and the gap billed a
+    // caller a whole generation for a stale revision.
+    const { store, revision } = await seeded();
+    await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Other tab', files: validFiles('elsewhere') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-other', baseRevision: revision },
+    );
+
+    const refused = await runGeneration(
+      store,
+      new FakeModelProvider([{ summary: 'Stale', files: validFiles('stale') }]),
+      { ...BASE_PARAMS, runId: 'run-5', baseRevision: revision },
+    );
+
+    assert.equal(refused.providerRan, false);
+
+    const { ledger, calls } = fakeLedger();
+    const charged = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      undefined,
+      refused.providerRan,
+    );
+    assert.equal(charged, 0, 'a refused run was billed');
+    assert.deepEqual(
+      calls.map((call) => call.actual),
+      [0, 0],
+      'a refused run drew down a ledger',
+    );
   });
 
   it('refuses an oversized project without calling the model', async () => {
