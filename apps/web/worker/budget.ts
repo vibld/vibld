@@ -149,11 +149,29 @@ export class UserBudget extends DurableObject {
     };
   }
 
-  /** Reconcile the pessimistic debit down to what the run actually cost. */
+  /**
+   * Reconcile the pessimistic debit down to what the run actually cost.
+   *
+   * Writes whatever the row's current state, including one the reclaim above
+   * has already closed at its worst case. That reclaim is a guess about a run
+   * nobody has heard from; this is a measurement of one that finished. A
+   * measurement outranks a guess whenever it arrives, and the two clocks
+   * involved make late arrival ordinary rather than exceptional: the reclaim
+   * counts from when the reservation was written, while the Workflow's step
+   * timeout counts from when the step began, and a durable Workflow can sit
+   * queued in between. No gap between the two constants can close that,
+   * because they do not start together.
+   *
+   * It stays idempotent without the `settled IS NULL` guard it used to
+   * carry: the settle step retries with the same id and the same figure, so
+   * a second write lands on the same values. What it must not do is put the
+   * run back in flight, and it does not -- `settled` is set either way, and
+   * the reclaim already released the slot.
+   */
   settle(id: number, actualMicroUsd: number): void {
     this.ctx.storage.sql.exec(
       `UPDATE runs SET settled = ?, actual = ?
-         WHERE id = ? AND settled IS NULL`,
+         WHERE id = ?`,
       Date.now(),
       actualMicroUsd,
       id,

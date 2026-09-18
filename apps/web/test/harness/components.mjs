@@ -32,6 +32,48 @@ import { registerHooks } from 'node:module';
  * assumption is load-bearing, but it cannot fail quietly, which is the
  * property worth having.
  */
+/**
+ * `cloudflare:workers`, resolvable.
+ *
+ * `UserBudget` is the spend ledger and extends `DurableObject` from this
+ * module, which node cannot resolve, so the one class that decides what a
+ * caller is charged was the one class no test could even import. That is
+ * not a gap worth keeping: #180 turned on whether a reclaimed reservation
+ * can be corrected, and answering that by reading the SQL is how the bug
+ * got there.
+ *
+ * Registered for every test rather than behind the `.test.tsx` check
+ * below, because a `.test.ts` is exactly what needs it. Deliberately not a
+ * simulation of the runtime: the base class only has to hold `ctx` and
+ * `env`, which is all the code under test reads from it. Anything that
+ * relied on real Durable Object behaviour -- the input gate above all --
+ * would be untested here and has to stay out of these tests, which is why
+ * `sqlite-do-storage.ts` says so in its own comment.
+ */
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === 'cloudflare:workers') {
+      return { url: 'vibld-harness:cloudflare-workers', shortCircuit: true };
+    }
+    return nextResolve(specifier, context);
+  },
+  load(url, context, nextLoad) {
+    if (url !== 'vibld-harness:cloudflare-workers') {
+      return nextLoad(url, context);
+    }
+    return {
+      format: 'module',
+      shortCircuit: true,
+      source: `export class DurableObject {
+        constructor(ctx, env) {
+          this.ctx = ctx;
+          this.env = env;
+        }
+      }`,
+    };
+  },
+});
+
 const entry = process.argv[1] ?? '';
 if (entry.endsWith('.test.tsx')) {
   const { transformSync } = await import('esbuild');

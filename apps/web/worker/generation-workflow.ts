@@ -146,9 +146,12 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
 
     const costMicroUsd = await step.do(
       'settle-budget',
-      // Idempotent: `UserBudget.settle` only writes a reservation that is
-      // still open (`WHERE settled IS NULL`), so retrying it after a
-      // transient Durable Object failure is safe.
+      // Idempotent: `UserBudget.settle` writes the same id and the same
+      // figure each time, so retrying it after a transient Durable Object
+      // failure lands on the same values. It no longer refuses a row the
+      // reclaim has already closed, which is deliberate -- see its own
+      // comment: a run that finishes after being presumed abandoned is
+      // charged what it measured rather than what it reserved.
       {
         retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
         timeout: '30 seconds',
