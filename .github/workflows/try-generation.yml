@@ -22,6 +22,21 @@ on:
           Leave blank for that provider's default.
         required: false
         default: ''
+      mockups:
+        description: >-
+          Ask for three directions instead of a build (#185). About a tenth of
+          the tokens, and the only way to exercise the mockup path against a
+          real model: everything else that touches it uses the fake client,
+          which is how a schema bug that made it impossible on two of three
+          providers survived five review rounds. Ignores the build option.
+        type: boolean
+        default: false
+      style:
+        description: >-
+          Optional style preset id for a mockup run, the way the builder sends
+          one once somebody has picked a direction. Ignored for a build.
+        required: false
+        default: ''
       build:
         description: Also install and build the generated project (proves portability)
         type: boolean
@@ -117,8 +132,62 @@ jobs:
           fi
           echo "Using $answering" >> "$GITHUB_STEP_SUMMARY"
 
+      # Three directions rather than a project (#185). Separate step rather
+      # than a branch inside the one below, so neither run has to carry the
+      # other's flags: this one has no --out project to build and no
+      # follow-up to iterate on.
+      - name: Ask for three directions
+        if: ${{ inputs.mockups }}
+        shell: bash
+        env:
+          # Dispatch input, so untrusted text. Passed through the environment
+          # and only ever referenced as "$PROMPT": interpolating
+          # ${{ inputs.prompt }} into this script would let a crafted prompt
+          # run shell commands in a step that holds the API key.
+          PROMPT: ${{ inputs.prompt }}
+          STYLE: ${{ inputs.style }}
+          VIBLD_PROVIDER: ${{ inputs.provider }}
+          VIBLD_MODEL: ${{ inputs.model }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Prompt'
+            echo
+            printf '> %s\n' "$PROMPT"
+            echo
+            echo '## Three directions'
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          args=("$PROMPT" --out "$RUNNER_TEMP/mockups")
+          if [ -n "${STYLE// /}" ]; then
+            args+=(--style "$STYLE")
+          fi
+          pnpm --filter @vibld/ai mockups "${args[@]}" \
+            2>&1 | tee "$RUNNER_TEMP/mockups.log"
+
+          {
+            cat "$RUNNER_TEMP/mockups.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Kept, so the three documents can be opened and looked at rather than
+      # judged from their character counts.
+      - name: Upload the directions
+        if: ${{ inputs.mockups }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mockups
+          path: ${{ runner.temp }}/mockups
+          if-no-files-found: error
+
       - name: Generate
         id: generate
+        if: ${{ !inputs.mockups }}
         shell: bash
         env:
           # The prompt is dispatch input, so it is untrusted text. It is passed
@@ -155,7 +224,7 @@ jobs:
       # the model returns, so a file left out is a file deleted. Skipped
       # unless a follow-up prompt was given, because it spends tokens.
       - name: Iterate on the generated project
-        if: ${{ inputs.follow_up != '' }}
+        if: ${{ inputs.follow_up != '' && !inputs.mockups }}
         shell: bash
         env:
           # Dispatch input, so untrusted text. Passed through the environment
@@ -193,7 +262,9 @@ jobs:
       # secrets -- every model key is scoped to the generation steps above.
       # The runner is ephemeral and GITHUB_TOKEN is read-only.
       - name: Build the generated project
-        if: ${{ inputs.build }}
+        # A mockup run produces three documents, not a project: there is
+        # nothing here to install or build.
+        if: ${{ inputs.build && !inputs.mockups }}
         shell: bash
         working-directory: ${{ runner.temp }}/generated
         run: |
@@ -227,7 +298,7 @@ jobs:
       # secret into these directories; the model keys are scoped to the
       # generation steps and never to a path under them.
       - name: Upload the generated project
-        if: always()
+        if: ${{ always() && !inputs.mockups }}
         uses: actions/upload-artifact@v4
         with:
           name: generated-project
@@ -236,7 +307,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload the iterated project
-        if: ${{ always() && inputs.follow_up != '' }}
+        if: ${{ always() && inputs.follow_up != '' && !inputs.mockups }}
         uses: actions/upload-artifact@v4
         with:
           name: iterated-project
