@@ -241,7 +241,16 @@ export function createDeepseekPlanClient(
           : undefined,
       );
 
-      const promptCharacters = request.system.length + request.prompt.length;
+      // `systemSent`, not `request.system`: the same figure `onPromptChars`
+      // reports, and for the same reason (#189 review). This estimate feeds
+      // the fallback usage when a stream ends without its terminal chunk,
+      // so leaving it on the un-appended system prompt under-reported a
+      // mockup run by the length of the output instruction.
+      //
+      // I fixed the report and not this, one round earlier, which is the
+      // fourth time this review has caught me repairing the case in front
+      // of me and not the one beside it. Both now read one variable.
+      const promptCharacters = systemSent.length + request.prompt.length;
 
       return {
         plan: readJsonPlan(text),

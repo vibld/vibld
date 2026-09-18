@@ -33,6 +33,7 @@ import {
   RemoteModelProvider,
   detectGenerationMode,
 } from './remote-provider.ts';
+import type { GenerationMode } from './remote-provider.ts';
 
 export type BuilderStatus =
   | 'idle'
@@ -109,6 +110,23 @@ export interface BuilderState {
    * fetch takes, and then replaces it under them.
    */
   isAdmin: boolean | null;
+  /**
+   * What this deployment can actually generate with, from `/api/config`.
+   *
+   * Null until the probe answers. It decides one thing: whether to offer
+   * directions (#189 review). `explore` always calls the real
+   * `/api/mockups`, while a build in `fake` mode is served by
+   * `FakeModelProvider`, so the button was offering something that could
+   * only 503 in exactly the modes the fake exists to keep usable.
+   *
+   * Hidden rather than faked, and the reason is this feature's own
+   * argument. `defaultResolveProvider` already says the fake "has no visual
+   * vocabulary at all, so a preset cannot change what it produces. Nothing
+   * here pretends otherwise." Three invented pages would be precisely the
+   * promise the generator has not made that rendered-not-drawn exists to
+   * avoid: a reader would choose between sketches nothing built.
+   */
+  generation: GenerationMode | null;
   /**
    * Directions to choose between, when the caller asked to look before
    * building (#185). Empty is the ordinary case: most runs never ask.
@@ -231,6 +249,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     model: null,
     models: [],
     isAdmin: null,
+    generation: null,
     mockups: [],
     exploring: false,
   };
@@ -399,6 +418,13 @@ export class BuilderSession {
   }
 
   /** Record whether the signed-in caller is a platform admin, once the probe answers. */
+  /** What the deployment can generate with, once the probe answers. */
+  setGeneration(generation: GenerationMode | null): void {
+    if (this.#disposed || generation === this.#state.generation) return;
+    this.#state = { ...this.#state, generation };
+    this.#emit();
+  }
+
   setIsAdmin(isAdmin: boolean | null): void {
     if (this.#disposed || isAdmin === this.#state.isAdmin) return;
     this.#state = { ...this.#state, isAdmin };
@@ -436,7 +462,7 @@ export class BuilderSession {
    */
   reset(): void {
     if (this.#disposed) return;
-    const { knowledge, model, models, isAdmin } = this.#state;
+    const { knowledge, model, models, isAdmin, generation } = this.#state;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
@@ -448,6 +474,7 @@ export class BuilderSession {
       model,
       models,
       isAdmin,
+      generation,
     };
     // Directions are about a request, and "Start over" discards the
     // request. Carrying them would leave three sketches of a project that

@@ -31,6 +31,11 @@ function builder(overrides: Partial<BuilderState> = {}): BuilderState {
     // Explicitly null, not absent: the composer asks whether a project
     // exists, and `undefined` is not an answer to that question.
     acceptedSnapshot: null,
+    // A deployment with a real model, which is the ordinary case. The
+    // composer only offers directions where there is a model to ask
+    // (#189 review), so leaving this absent hid the button from every
+    // test that expected it.
+    generation: 'model',
     ...overrides,
   } as BuilderState;
 }
@@ -351,6 +356,29 @@ describe('asking for directions', () => {
       } as Partial<BuilderState>),
     );
     assert.equal(view.button(/Show me three directions/), undefined);
+    view.unmount();
+  });
+
+  it('does not offer it where there is no model to ask', async () => {
+    // `explore` always calls the real `/api/mockups`, while a build in
+    // `fake` mode is served by `FakeModelProvider` (#189 review). Offering
+    // the action there offered something that could only fail, in exactly
+    // the modes the fake exists to keep usable.
+    //
+    // Hidden rather than faked: three invented pages would be the promise
+    // the generator has not made that rendered-not-drawn exists to avoid.
+    const view = await mount(builder({ generation: 'fake' }));
+    assert.equal(view.button(/Show me three directions/), undefined);
+    view.unmount();
+  });
+
+  it('does not offer it before the probe has answered', async () => {
+    // Null is "nobody has said yet", and a paid action must not be offered
+    // on a guess. It appears when the answer arrives.
+    const view = await mount(builder({ generation: null }));
+    assert.equal(view.button(/Show me three directions/), undefined);
+    await view.render(builder({ generation: 'model' }));
+    assert.ok(view.button(/Show me three directions/));
     view.unmount();
   });
 

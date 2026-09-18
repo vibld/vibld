@@ -201,13 +201,19 @@ export function PromptPanel({
         </button>
         {/*
           Offered until a project exists (#185), which is not the same as
-          until an attempt was made (#189 review). A failed or cancelled
+          until an attempt was made (#189 review), and only where there is
+          a model to ask. `explore` always calls the real `/api/mockups`,
+          while a build in `fake` mode is served by `FakeModelProvider`, so
+          this was offering something that could only fail in exactly the
+          modes the fake exists to keep usable. Hidden rather than faked:
+          three invented pages would be the promise the generator has not
+          made that rendered-not-drawn exists to avoid. A failed or cancelled
           first build still appends a transcript turn, so `started` was
           true with nothing built -- and the feature meant for exactly that
           moment had already hidden itself. `acceptedSnapshot` is the thing
           that answers "is there a project", so it is the thing to ask.
         */}
-        {state.acceptedSnapshot === null ? (
+        {state.acceptedSnapshot === null && state.generation === 'model' ? (
           <button
             type="button"
             className="button"

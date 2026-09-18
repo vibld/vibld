@@ -239,7 +239,20 @@ describe('createDeepseekPlanClient', () => {
       effort: 'high',
     });
     assert.equal(completion.usage.outputTokens, 100);
-    assert.equal(completion.usage.inputTokens, 100);
+    // 100 for the two 200-character strings, plus the output instruction
+    // this client appends to the system message. That used to read a flat
+    // 100, which under-reported every run by the length of the instruction
+    // (#189 review) -- the same figure `onPromptChars` reports, and now
+    // literally the same expression.
+    const appended = `${'a'.repeat(200)}\n\n${PLAN_OUTPUT.instruction}`;
+    assert.equal(
+      completion.usage.inputTokens,
+      Math.ceil((appended.length + 200) / 4),
+    );
+    assert.ok(
+      completion.usage.inputTokens > 100,
+      'the appended instruction is still uncounted',
+    );
   });
 
   it('refuses to call out without a key, rather than sending an empty header', async () => {

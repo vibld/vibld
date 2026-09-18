@@ -22,6 +22,8 @@ function recorder(): ConfigurableSession & { readonly seen: string[] } {
     setModels: (models) => seen.push(`models:${models.length}`),
     setModel: (model) => seen.push(`model:${model ?? 'none'}`),
     setIsAdmin: (isAdmin) => seen.push(`isAdmin:${String(isAdmin)}`),
+    setGeneration: (generation) =>
+      seen.push(`generation:${String(generation)}`),
   };
 }
 
@@ -39,6 +41,7 @@ describe('applying the deployment probe', () => {
     assert.deepEqual(session.seen, [
       'models:1',
       'model:deepseek-flash',
+      'generation:model',
       'isAdmin:true',
     ]);
   });
@@ -80,5 +83,42 @@ describe('applying the deployment probe', () => {
       throw new Error('401');
     });
     assert.ok(!session.seen.some((call) => call.startsWith('models:')));
+  });
+});
+
+/**
+ * What the deployment can generate with, which decides one thing (#189
+ * review): whether the composer offers directions at all.
+ *
+ * `explore` always calls the real `/api/mockups`, while a build in `fake`
+ * mode is served by `FakeModelProvider`. Offering the action there was
+ * offering something that could only fail, in exactly the modes the fake
+ * exists to keep usable.
+ */
+describe('what the deployment can generate with', () => {
+  it('records the mode the probe reported', async () => {
+    const session = recorder();
+    await applyDeploymentConfig(session, async () => ANSWER);
+    assert.ok(session.seen.includes('generation:model'));
+  });
+
+  it('records a fake deployment as fake', async () => {
+    const session = recorder();
+    await applyDeploymentConfig(session, async () => ({
+      ...ANSWER,
+      generation: 'fake',
+    }));
+    assert.ok(session.seen.includes('generation:fake'));
+  });
+
+  it('says nothing about the mode when the probe rejects', async () => {
+    // Null stays null. An unanswered probe is not evidence of a fake
+    // deployment, and the one thing this decides is whether to offer a
+    // paid action -- so "do not know" must not read as "yes".
+    const session = recorder();
+    await applyDeploymentConfig(session, async () => {
+      throw new Error('probe failed');
+    });
+    assert.ok(!session.seen.some((line) => line.startsWith('generation:')));
   });
 });
