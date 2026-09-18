@@ -25,6 +25,7 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
+import { stageFor } from './run-stage.ts';
 import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
@@ -1194,13 +1195,15 @@ async function handlePlan(
         // so the character count the client can display is unavailable and
         // is deliberately omitted rather than sent as a zero. What this
         // loop does know is real: how long the caller has been waiting, and
-        // whether the run has started or is still queued behind others.
-        const stage = status.status === 'queued' ? 'queued' : 'writing';
+        // -- for the two states that have an honest name -- what the run is
+        // doing. `stageFor` returns nothing for the rest rather than
+        // guessing, and the line carries the clock alone.
+        const stage = stageFor(status.status);
         if (!cancelled) {
           await write(
             encodeEvent('progress', {
               elapsedMs: Date.now() - waitingSince,
-              stage,
+              ...(stage ? { stage } : {}),
             }),
           );
         }
