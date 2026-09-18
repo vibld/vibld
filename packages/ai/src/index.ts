@@ -10,6 +10,9 @@ export {
   RUN_ABANDONED_AFTER_MS,
   MEASURED_OUTPUT_TOKENS_PER_SECOND,
   maxTokensFor,
+  readCompletion,
+  MOCKUP_OUTPUT_TOKENS,
+  mockupMaxTokensFor,
   DEFAULT_MODEL,
   buildUserPrompt,
 } from './plan-provider.ts';
@@ -36,6 +39,17 @@ export {
   ProjectFileSchema,
 } from './plan-schema.ts';
 export type { ParsedGenerationPlan } from './plan-schema.ts';
+export {
+  MOCKUP_SYSTEM_PROMPT,
+  MockupSchema,
+  MockupSetSchema,
+} from './mockup-schema.ts';
+export type { ParsedMockup, ParsedMockupSet } from './mockup-schema.ts';
+export { MockupProvider } from './mockup-provider.ts';
+export type {
+  MockupProviderOptions,
+  MockupRequest,
+} from './mockup-provider.ts';
 export {
   STYLE_PRESETS,
   findStylePreset,

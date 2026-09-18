@@ -5,6 +5,7 @@ import {
   MODEL_CATALOGUE,
   RUN_OUTPUT_RESERVE_MICRO_USD,
   maxTokensFor,
+  mockupMaxTokensFor,
 } from '@vibld/ai';
 
 import { runCeilingFor } from '../worker/run-ceiling.ts';
@@ -147,5 +148,50 @@ describe('what one run may ask for', () => {
         `${model.id}: the ceiling was not derived from the price returned with it`,
       );
     }
+  });
+});
+
+/**
+ * Looking before building is only worth offering if it is actually cheap
+ * (#185). The dispatch lives in `runCeilingFor` rather than at the call
+ * sites, for the same reason the rest of this file exists: a second place
+ * that decides a ceiling is a second place that can disagree with the
+ * reservation it is supposed to match.
+ */
+describe('what a run is for decides what it may ask for', () => {
+  const env = {} as Parameters<typeof runCeilingFor>[0];
+
+  it('asks for a sketch-sized ceiling when the run is mockups', () => {
+    assert.equal(
+      runCeilingFor(env, FLASH, 'mockups').maxTokens,
+      mockupMaxTokensFor(FLASH),
+    );
+  });
+
+  it('costs an order of magnitude less than a build', () => {
+    // The whole argument for offering this at all. If three mockups cost
+    // what a build costs, nobody should be asked to spend a build on them.
+    const build = runCeilingFor(env, FLASH, 'build');
+    const mockups = runCeilingFor(env, FLASH, 'mockups');
+    assert.ok(
+      mockups.maxTokens * 10 < build.maxTokens,
+      `mockups (${mockups.maxTokens}) are not markedly cheaper than a build (${build.maxTokens})`,
+    );
+  });
+
+  it('still builds when nothing says otherwise', () => {
+    // Every existing caller passes no kind, and a default that quietly
+    // made them cheap would truncate every project in production.
+    assert.equal(
+      runCeilingFor(env, FLASH).maxTokens,
+      runCeilingFor(env, FLASH, 'build').maxTokens,
+    );
+  });
+
+  it('prices both kinds the same way, because the model is the same', () => {
+    assert.deepEqual(
+      runCeilingFor(env, FLASH, 'mockups').prices,
+      runCeilingFor(env, FLASH, 'build').prices,
+    );
   });
 });

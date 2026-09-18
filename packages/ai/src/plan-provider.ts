@@ -3,8 +3,10 @@ import type {
   GenerationRequest,
   ModelProvider,
 } from '@vibld/core';
+import type { ZodType } from 'zod';
 import type {
   PlanClient,
+  PlanCompletion,
   PlanEffort,
   PlanProgress,
   PlanUsage,
@@ -30,6 +32,43 @@ import {
   ProviderShapeError,
   ProviderTruncationError,
 } from './errors.ts';
+
+/**
+ * The part of reading a completion that has nothing to do with what was
+ * asked for: why it stopped, and whether the JSON is the shape expected.
+ *
+ * Shared by the build provider and the mockup one (#185) rather than
+ * written twice. The two ask for entirely different things and agree on
+ * exactly this, and a second copy of it is how one of them would quietly
+ * stop reporting a refusal, or start reporting a truncation against the
+ * wrong ceiling.
+ */
+export function readCompletion<T>(
+  completion: PlanCompletion,
+  maxTokens: number,
+  schema: ZodType<T>,
+): T {
+  if (completion.stopReason === 'refusal') {
+    throw new ProviderRefusalError(
+      completion.refusal?.category ?? null,
+      completion.refusal?.explanation ?? null,
+    );
+  }
+
+  if (completion.stopReason === 'max_tokens') {
+    throw new ProviderTruncationError(maxTokens);
+  }
+
+  const parsed = schema.safeParse(completion.plan);
+  if (!parsed.success) {
+    throw new ProviderShapeError(
+      parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+        .join('; '),
+    );
+  }
+  return parsed.data;
+}
 
 export interface ModelProviderOptions {
   /**
@@ -219,6 +258,34 @@ export function maxTokensFor(model: string, outputMicroUsd?: number): number {
   );
   return Math.min(known.maxOutputTokens, affordable, reachable);
 }
+/**
+ * What three mockups may ask for, which is not what a build may ask for.
+ *
+ * A flat number, and the only ceiling in this file that is not derived. The
+ * build's is bounded by money and by the clock because a project is as
+ * large as it needs to be; three sketches are bounded by what three
+ * sketches are, and deriving that from a dollar reserve would let a cheap
+ * model produce a hundred thousand tokens of "mockup" because it could
+ * afford to.
+ *
+ * Eighteen thousand is three self-contained documents of roughly a page and
+ * a half each. At the measured rate that is about a minute, and on the
+ * production model about two cents against a build's thirty -- which is the
+ * whole argument for looking before building (#185).
+ */
+export const MOCKUP_OUTPUT_TOKENS = 18_000;
+
+/**
+ * The mockup ceiling for one model. Still clamped to what the model can
+ * emit, so a smaller model than any in the catalogue today cannot be asked
+ * for more than it can produce.
+ */
+export function mockupMaxTokensFor(model: string): number {
+  const known = findModel(model);
+  if (!known) return MOCKUP_OUTPUT_TOKENS;
+  return Math.min(known.maxOutputTokens, MOCKUP_OUTPUT_TOKENS);
+}
+
 export const DEFAULT_EFFORT: PlanEffort = 'high';
 
 /**
@@ -290,31 +357,15 @@ export class PlanProvider implements ModelProvider {
     // spends tokens, and a budget that only counts successes under-reports.
     this.#onUsage?.(completion.usage);
 
-    if (completion.stopReason === 'refusal') {
-      throw new ProviderRefusalError(
-        completion.refusal?.category ?? null,
-        completion.refusal?.explanation ?? null,
-      );
-    }
-
-    if (completion.stopReason === 'max_tokens') {
-      throw new ProviderTruncationError(this.#maxTokens);
-    }
-
-    const parsed = GenerationPlanSchema.safeParse(completion.plan);
-    if (!parsed.success) {
-      throw new ProviderShapeError(
-        parsed.error.issues
-          .map(
-            (issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`,
-          )
-          .join('; '),
-      );
-    }
+    const parsed = readCompletion(
+      completion,
+      this.#maxTokens,
+      GenerationPlanSchema,
+    );
 
     return {
-      summary: parsed.data.summary,
-      files: parsed.data.files.map((file) => ({
+      summary: parsed.summary,
+      files: parsed.files.map((file) => ({
         path: file.path,
         content: file.content,
       })),

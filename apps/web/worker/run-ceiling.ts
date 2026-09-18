@@ -26,6 +26,7 @@ import {
   cacheRatesFor,
   findModel,
   maxTokensFor,
+  mockupMaxTokensFor,
   providerForRequest,
 } from '@vibld/ai';
 import type { ProviderEnv } from '@vibld/ai';
@@ -45,7 +46,23 @@ export interface RunCeiling {
   maxTokens: number;
 }
 
-export function runCeilingFor(env: RunCeilingEnv, model: string): RunCeiling {
+/**
+ * What a run is for, which is what decides how much it may ask for.
+ *
+ * A build is as large as the project needs; three mockups are as large as
+ * three sketches (#185, `MOCKUP_OUTPUT_TOKENS`). The two answers differ by
+ * more than an order of magnitude, and the dispatch lives here rather than
+ * at the call sites for the reason this whole file exists: a second place
+ * that decides a ceiling is a second place that can disagree with the
+ * reservation.
+ */
+export type RunKind = 'build' | 'mockups';
+
+export function runCeilingFor(
+  env: RunCeilingEnv,
+  model: string,
+  kind: RunKind = 'build',
+): RunCeiling {
   const chosen = findModel(model);
   const prices = parsePrices(
     env,
@@ -62,5 +79,11 @@ export function runCeilingFor(env: RunCeilingEnv, model: string): RunCeiling {
         }
       : undefined,
   );
-  return { prices, maxTokens: maxTokensFor(model, prices.outputMicroUsd) };
+  return {
+    prices,
+    maxTokens:
+      kind === 'mockups'
+        ? mockupMaxTokensFor(model)
+        : maxTokensFor(model, prices.outputMicroUsd),
+  };
 }
