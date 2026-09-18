@@ -14,6 +14,7 @@ import {
 
 import {
   SanitizingModelProvider,
+  assertedBaseRevision,
   ceilingForRun,
   runGeneration,
   settleBudget,
@@ -51,12 +52,12 @@ function validFiles(marker: string): ProjectFile[] {
 
 const BASE_PARAMS: Pick<
   WorkflowParams,
-  'projectId' | 'runId' | 'prompt' | 'base'
+  'projectId' | 'runId' | 'prompt' | 'baseRevision'
 > = {
   projectId: 'user_abc',
   runId: 'run-1',
   prompt: 'Build a landing page',
-  base: undefined,
+  baseRevision: undefined,
 };
 
 describe('SanitizingModelProvider', () => {
@@ -169,42 +170,47 @@ describe('runGeneration', () => {
   });
 });
 
-describe('settleBudget', () => {
-  function fakeLedger() {
-    const calls: { name: string; id: number; actual: number }[] = [];
-    return {
-      ledger: {
-        getByName: (name: string) => ({
-          settle: async (id: number, actual: number) => {
-            calls.push({ name, id, actual });
-          },
-        }),
-      },
-      calls,
-    };
-  }
-
-  const PRICE_PARAMS = {
-    userId: 'user_abc',
-    reservationId: 11,
-    accountReservationId: 22,
-    worstCaseMicroUsd: 999_999,
-    prices: {
-      inputMicroUsd: 5,
-      outputMicroUsd: 25,
-      cachedInputMicroUsd: 0.5,
-      cacheWriteMicroUsd: 6.25,
+function fakeLedger() {
+  const calls: { name: string; id: number; actual: number }[] = [];
+  return {
+    ledger: {
+      getByName: (name: string) => ({
+        settle: async (id: number, actual: number) => {
+          calls.push({ name, id, actual });
+        },
+      }),
     },
+    calls,
   };
+}
 
+const PRICE_PARAMS = {
+  userId: 'user_abc',
+  reservationId: 11,
+  accountReservationId: 22,
+  worstCaseMicroUsd: 999_999,
+  prices: {
+    inputMicroUsd: 5,
+    outputMicroUsd: 25,
+    cachedInputMicroUsd: 0.5,
+    cacheWriteMicroUsd: 6.25,
+  },
+};
+
+describe('settleBudget', () => {
   it('settles both layers at the usage-derived cost', async () => {
     const { ledger, calls } = fakeLedger();
-    const actual = await settleBudget(ledger, PRICE_PARAMS, {
-      inputTokens: 100,
-      outputTokens: 200,
-      cacheReadInputTokens: 0,
-      cacheWriteInputTokens: 0,
-    });
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+    );
 
     assert.equal(actual, 100 * 5 + 200 * 25);
     assert.deepEqual(calls, [
@@ -213,12 +219,48 @@ describe('settleBudget', () => {
     ]);
   });
 
-  it('settles at the worst case when usage was never reported', async () => {
+  it('settles at the worst case when a run that happened could not be measured', async () => {
+    // The model was asked and what it cost is unknown, so failing safe means
+    // over-counting rather than under.
     const { ledger, calls } = fakeLedger();
-    const actual = await settleBudget(ledger, PRICE_PARAMS, undefined);
+    const actual = await settleBudget(ledger, PRICE_PARAMS, undefined, true);
 
     assert.equal(actual, PRICE_PARAMS.worstCaseMicroUsd);
     assert.equal(calls.length, 2);
+  });
+
+  it('settles at nothing when the model was never asked', async () => {
+    // The case that used to share the fallback above and should not: a run
+    // refused before the provider ran spent nothing, and we know it. Charging
+    // its worst case billed a caller a whole generation for being told no.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(ledger, PRICE_PARAMS, undefined, false);
+
+    assert.equal(actual, 0, 'a refusal that cost nothing was charged for');
+    assert.deepEqual(calls, [
+      { name: 'user_abc', id: 11, actual: 0 },
+      { name: '__account__', id: 22, actual: 0 },
+    ]);
+  });
+
+  it('still charges measured usage even if the flag says otherwise', async () => {
+    // Belt and braces: a measurement is evidence the model ran, so it wins
+    // over the flag rather than being discarded by it. A caller that got the
+    // flag wrong must not get a free generation out of it.
+    const { ledger } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      false,
+    );
+
+    assert.equal(actual, 10 * 5 + 10 * 25);
   });
 
   it('skips a layer whose reservation never got an id', async () => {
@@ -236,6 +278,7 @@ describe('settleBudget', () => {
         cacheReadInputTokens: 0,
         cacheWriteInputTokens: 0,
       },
+      true,
     );
 
     assert.deepEqual(calls, []);
@@ -396,6 +439,256 @@ describe('the ceiling a run may ask for', () => {
     assert.ok(
       ceilingForRun(legacy) < derived,
       `a legacy run could ask for ${ceilingForRun(legacy)} against a 64000 reservation`,
+    );
+  });
+});
+
+/**
+ * The project, read rather than received (#181).
+ *
+ * A follow-up used to upload the whole project and have it sent straight
+ * into the prompt, which capped what could be edited at a model's context
+ * window: a site could be generated and then never changed again. The files
+ * now come from storage, and what the caller sends is the revision it
+ * believes it is editing.
+ *
+ * That assertion is the part worth testing. Dropping it would be a lost
+ * update, and a silent one: a run would build on whatever happened to be
+ * accepted and hand back an edit of a project the user never saw.
+ */
+describe('which project a follow-up edits', () => {
+  async function seeded() {
+    const store = newStore();
+    const first = await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'First', files: validFiles('original') },
+      ]),
+      BASE_PARAMS,
+    );
+    const revision = first.result.accepted?.revision;
+    assert.ok(revision, 'the seed run did not promote');
+    return { store, revision };
+  }
+
+  it('edits the stored project without being sent it', async () => {
+    const { store, revision } = await seeded();
+
+    const { result, outcome } = await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Second', files: validFiles('edited') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-2', baseRevision: revision },
+    );
+
+    assert.equal(outcome, 'ok');
+    assert.equal(result.state, 'accepted');
+    assert.ok(
+      result.accepted?.files.some((file) => file.content.includes('edited')),
+      'the follow-up did not land',
+    );
+  });
+
+  it('refuses a revision that is no longer the accepted one', async () => {
+    // Two tabs. The other one promoted while this one sat open, so the
+    // revision this caller is holding is stale. Building on the newer
+    // project anyway would return an edit of something it never saw.
+    const { store, revision } = await seeded();
+    await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Other tab', files: validFiles('elsewhere') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-other', baseRevision: revision },
+    );
+
+    const { result, outcome } = await runGeneration(
+      store,
+      new FakeModelProvider([{ summary: 'Stale', files: validFiles('stale') }]),
+      { ...BASE_PARAMS, runId: 'run-3', baseRevision: revision },
+    );
+
+    assert.equal(outcome, 'failed');
+    assert.equal(result.stop, 'conflict');
+    assert.equal(result.conflict, true);
+  });
+
+  it('reports a preflight refusal as having spent nothing', async () => {
+    // The half of "free" that not calling the model does not prove. Usage
+    // is undefined either way, and `settleBudget` charges the worst case for
+    // undefined usage unless it is told the provider never ran. Asserting
+    // only that the model was not asked left that gap, and the gap billed a
+    // caller a whole generation for a stale revision.
+    const { store, revision } = await seeded();
+    await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Other tab', files: validFiles('elsewhere') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-other', baseRevision: revision },
+    );
+
+    const refused = await runGeneration(
+      store,
+      new FakeModelProvider([{ summary: 'Stale', files: validFiles('stale') }]),
+      { ...BASE_PARAMS, runId: 'run-5', baseRevision: revision },
+    );
+
+    assert.equal(refused.providerRan, false);
+
+    const { ledger, calls } = fakeLedger();
+    const charged = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      undefined,
+      refused.providerRan,
+    );
+    assert.equal(charged, 0, 'a refused run was billed');
+    assert.deepEqual(
+      calls.map((call) => call.actual),
+      [0, 0],
+      'a refused run drew down a ledger',
+    );
+  });
+
+  it('refuses an oversized project without calling the model', async () => {
+    // The guard used to catch this for free, and cannot any more: a
+    // generation request carries no files, so nothing at the edge knows how
+    // big the project is. The run loads it and has to refuse just as cheaply,
+    // because the provider's own check fires only after the run is paid for.
+    const store = newStore();
+    // A project the validator accepts, padded past the budget, so what is
+    // being tested is the size rather than the shape.
+    // Spread across several files: the validator caps one file at 128 KB,
+    // so a project past the budget is necessarily a few large files rather
+    // than one enormous one. That is also what a real large site looks like.
+    const huge = [
+      ...validFiles('big'),
+      ...Array.from({ length: 3 }, (_, n) => ({
+        path: `src/Bulk${n}.tsx`,
+        content: 'x'.repeat(60_000),
+      })),
+    ];
+    const seeded = await runGeneration(
+      store,
+      new FakeModelProvider([{ summary: 'Big', files: huge }]),
+      BASE_PARAMS,
+    );
+    const revision = seeded.result.accepted?.revision;
+    assert.ok(revision, 'the oversized seed did not promote');
+
+    let asked = false;
+    const provider: ModelProvider = {
+      id: 'counting',
+      generate: async () => {
+        asked = true;
+        throw new Error('the model should not have been asked');
+      },
+    };
+
+    const { result, outcome } = await runGeneration(store, provider, {
+      ...BASE_PARAMS,
+      runId: 'run-big',
+      baseRevision: revision,
+    });
+
+    assert.equal(outcome, 'failed');
+    assert.equal(result.stop, 'context-exceeded');
+    assert.equal(asked, false, 'a doomed run still spent a model call');
+  });
+
+  it('refuses a stale revision without calling the model at all', async () => {
+    // The point of checking up front: a run that cannot be promoted should
+    // not be paid for first. An empty provider throws if it is asked for a
+    // plan, so reaching the model fails this test rather than passing it.
+    const { store, revision } = await seeded();
+    await runGeneration(
+      store,
+      new FakeModelProvider([
+        { summary: 'Other tab', files: validFiles('elsewhere') },
+      ]),
+      { ...BASE_PARAMS, runId: 'run-other', baseRevision: revision },
+    );
+
+    let asked = false;
+    const provider: ModelProvider = {
+      id: 'counting',
+      generate: async () => {
+        asked = true;
+        throw new Error('the model should not have been asked');
+      },
+    };
+
+    const { outcome } = await runGeneration(store, provider, {
+      ...BASE_PARAMS,
+      runId: 'run-4',
+      baseRevision: revision,
+    });
+
+    assert.equal(outcome, 'failed');
+    assert.equal(asked, false, 'a doomed run still spent a model call');
+  });
+});
+
+/**
+ * What a run queued before #181 shipped still contains.
+ *
+ * A Workflow's params are persisted JSON, so an interface change does not
+ * reach the payloads already on disk. Both halves of this change had to be
+ * told that, and in opposite directions: the revision assertion has to be
+ * found in the old shape, and the spend flag has to be absent-means-charge.
+ * Getting either backwards costs somebody their work or their money.
+ */
+describe('a run that predates the change', () => {
+  it('finds the asserted revision in the old shape', () => {
+    // The old payload said the same thing in a different place. Reading only
+    // the new field would take it for a run asserting nothing, which is the
+    // lost update this change exists to prevent.
+    const legacy = { base: { revision: 'r-old', files: [] } } as unknown as {
+      baseRevision?: string;
+    };
+    assert.equal(assertedBaseRevision(legacy), 'r-old');
+  });
+
+  it('prefers the new field when both are present', () => {
+    const both = {
+      baseRevision: 'r-new',
+      base: { revision: 'r-old', files: [] },
+    } as unknown as { baseRevision?: string };
+    assert.equal(assertedBaseRevision(both), 'r-new');
+  });
+
+  it('asserts nothing for a genuinely new project', () => {
+    assert.equal(assertedBaseRevision({ baseRevision: undefined }), undefined);
+    assert.equal(
+      assertedBaseRevision({ base: {} } as unknown as {
+        baseRevision?: string;
+      }),
+      undefined,
+    );
+  });
+
+  it('charges a step result with no spend flag rather than zeroing it', async () => {
+    // The opposite direction, and the expensive one. A `generate` step
+    // cached before `providerRan` existed resumes without it. Reading that
+    // absence as "never ran" would settle a real generation at nothing.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      undefined,
+      undefined,
+    );
+
+    assert.equal(
+      actual,
+      PRICE_PARAMS.worstCaseMicroUsd,
+      'a legacy run settled free',
+    );
+    assert.deepEqual(
+      calls.map((call) => call.actual),
+      [PRICE_PARAMS.worstCaseMicroUsd, PRICE_PARAMS.worstCaseMicroUsd],
     );
   });
 });

@@ -5,10 +5,10 @@ import {
   type GenerationRequest,
   type GenerationStore,
   type ModelProvider,
-  type ProjectSnapshot,
   type RunTrace,
 } from '@vibld/core';
 import { DEFAULT_MAX_TOKENS, ProviderError, findModel } from '@vibld/ai';
+import { MAX_BASE_CONTENT_CHARS } from '@vibld/ai/limits';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -38,7 +38,18 @@ export interface WorkflowParams {
   projectId: string;
   runId: string;
   prompt: string;
-  base?: ProjectSnapshot;
+  /**
+   * The revision the caller believed it was editing, or absent for a new
+   * project. Not the project itself (#181): the files are read from storage
+   * by `runGeneration` below, so a follow-up is no longer bounded by what a
+   * browser can upload or by a model's context window.
+   *
+   * Still carried, because dropping it would be a lost update. A second tab
+   * that promoted while this one sat open moves the accepted revision, and
+   * without this assertion the run would silently build on the newer project
+   * and the user would get an edit of something they never saw.
+   */
+  baseRevision?: string;
   style?: StylePresetId;
   /** Standing visual preferences, already sanitized against the catalogue. */
   styleDna?: StyleDna;
@@ -137,6 +148,21 @@ export interface GenerationOutcome {
   result: DurableGenerationResult;
   /** For the settlement log line only -- not shown to any caller. */
   outcome: 'ok' | 'failed';
+  /**
+   * Whether the provider was actually asked for a plan.
+   *
+   * Settlement needs this because "no usage was reported" has two causes
+   * that cost opposite amounts. A run that called the model and could not
+   * measure what it spent must settle at its worst case, because failing
+   * safe means over-counting. A run refused before the model was called
+   * spent nothing, and charging it a worst case would bill a caller the
+   * price of a full generation for being told no.
+   *
+   * False only where that is certain: the two preflight refusals below.
+   * Everything else, including a store failure that could have happened on
+   * either side of the call, says true and settles the cautious way.
+   */
+  providerRan: boolean;
 }
 
 /**
@@ -176,25 +202,109 @@ export class SanitizingModelProvider implements ModelProvider {
  * (`generation-store.test.ts`'s `SqliteD1Database`/`InMemoryR2Bucket`) --
  * there is no need for a real `PlanProvider` to exercise it.
  */
+/**
+ * The revision a run asserts it is editing, whichever shape said so.
+ *
+ * A Workflow's params are persisted JSON and do not change shape when an
+ * interface does. One queued before #181 shipped carries the whole `base`
+ * snapshot and no `baseRevision`, and reading only the new field would take
+ * it for a run with nothing to assert -- which is precisely the lost update
+ * this change exists to prevent, reintroduced for the runs that were already
+ * in flight when it shipped. The old shape carried the same fact in
+ * `base.revision`, so it is read rather than dropped.
+ *
+ * Declared loosely on purpose: `WorkflowParams` describes what new code
+ * writes, and this function exists for what old payloads contain.
+ */
+export function assertedBaseRevision(
+  params: Pick<WorkflowParams, 'baseRevision'>,
+): string | undefined {
+  if (params.baseRevision) return params.baseRevision;
+  const legacy = (params as { base?: { revision?: unknown } }).base;
+  return typeof legacy?.revision === 'string' && legacy.revision.length > 0
+    ? legacy.revision
+    : undefined;
+}
+
 export async function runGeneration(
   store: GenerationStore,
   provider: ModelProvider,
-  params: Pick<WorkflowParams, 'projectId' | 'runId' | 'prompt' | 'base'>,
+  params: Pick<
+    WorkflowParams,
+    'projectId' | 'runId' | 'prompt' | 'baseRevision'
+  >,
 ): Promise<GenerationOutcome> {
   const runner = new DurableGenerationRunner(store);
 
   try {
+    // The project, read here rather than received (#181). `loadAccepted`
+    // was already the runner's fallback; now it is the only path, so the
+    // files never make the round trip through the browser.
+    const asserted = assertedBaseRevision(params);
+    const base = asserted
+      ? await store.loadAccepted(params.projectId)
+      : undefined;
+
+    // The assertion the caller made, checked before a token is spent. The
+    // authoritative check is still the compare-and-set at promotion, which
+    // catches a base that moves *during* the run; this catches one that had
+    // already moved before it started, and refuses for free rather than
+    // after paying for a generation that cannot be promoted.
+    if (asserted && base?.revision !== asserted) {
+      return {
+        result: {
+          state: 'failed',
+          stop: 'conflict',
+          accepted: base,
+          errors: ['Accepted revision changed before promotion'],
+          conflict: true,
+        },
+        outcome: 'failed',
+        providerRan: false,
+      };
+    }
+
+    // The project still goes into the prompt, so it still has to fit a
+    // model's context. Reading it here rather than receiving it removed the
+    // upload, not that budget, and the provider would throw on an oversized
+    // base either way -- but by then the run is paid for. The guard used to
+    // refuse this for free and cannot any more, because it no longer sees
+    // the files. So the refusal moves here, and stays free.
+    const baseChars = (base?.files ?? []).reduce(
+      (sum, file) => sum + file.path.length + file.content.length,
+      0,
+    );
+    if (baseChars > MAX_BASE_CONTENT_CHARS) {
+      return {
+        result: {
+          state: 'failed',
+          stop: 'context-exceeded',
+          accepted: base,
+          errors: [
+            `This project is ${baseChars} characters and ${MAX_BASE_CONTENT_CHARS} is the most that can be sent with a follow-up. Ask for a smaller change on a smaller project, or start a new one.`,
+          ],
+          conflict: false,
+        },
+        outcome: 'failed',
+        providerRan: false,
+      };
+    }
+
     const result = await runner.run(
       {
         prompt: params.prompt,
         projectId: params.projectId,
         runId: params.runId,
-        base: params.base,
+        ...(base ? { base } : {}),
       },
       provider,
       createValidator(),
     );
-    return { result, outcome: result.state === 'accepted' ? 'ok' : 'failed' };
+    return {
+      result,
+      outcome: result.state === 'accepted' ? 'ok' : 'failed',
+      providerRan: true,
+    };
   } catch (error) {
     // Only D1/R2 can throw past this point -- `runner.run()` and
     // `GenerationMachine.run()` both already catch a provider failure and
@@ -211,6 +321,9 @@ export async function runGeneration(
         conflict: false,
       },
       outcome: 'failed',
+      // D1 or R2 failing says nothing about whether the model was already
+      // asked, so this settles the cautious way rather than the cheap one.
+      providerRan: true,
     };
   }
 }
@@ -261,6 +374,13 @@ export function traceOf(
  * `handlePlan` used to do in its own `finally` block. Returns the settled
  * amount so the caller can log it.
  */
+function usageOrWorstCase(
+  usage: PlanUsage | undefined,
+  params: Pick<WorkflowParams, 'worstCaseMicroUsd' | 'prices'>,
+): number {
+  return usage ? microUsdOf(usage, params.prices) : params.worstCaseMicroUsd;
+}
+
 export async function settleBudget(
   ledger: DurableObjectNamespace<Pick<UserBudget, 'settle'>>,
   params: Pick<
@@ -273,12 +393,27 @@ export async function settleBudget(
     | 'prices'
   >,
   usage: PlanUsage | undefined,
+  // Not `boolean`: a durable step result cached before this field existed
+  // resumes without it, and the type would be lying about that. Only an
+  // explicit false is evidence.
+  providerRan: boolean | undefined,
 ): Promise<number> {
-  // A run that never reported usage settles at the full reservation rather
-  // than at zero: failing safe means over-counting, not under.
-  const actual = usage
-    ? microUsdOf(usage, params.prices)
-    : params.worstCaseMicroUsd;
+  // Three cases, not two, and the third used to be charged as if it were
+  // the second.
+  //
+  // Usage reported: charge it. No usage but the model was asked: charge the
+  // worst case, because failing safe means over-counting and we cannot know
+  // what that call cost. No usage because the model was never asked: charge
+  // nothing, because nothing was spent and we know it.
+  //
+  // Folding the third into the second billed a caller a full generation for
+  // being told their revision was stale, which is the opposite of the
+  // refusal being free.
+  // `=== false` rather than falsy: a step result persisted before this
+  // field existed arrives undefined, and reading that as "never ran" would
+  // settle a real generation at zero -- the fail-safe inverted.
+  const actual =
+    !usage && providerRan === false ? 0 : usageOrWorstCase(usage, params);
 
   if (params.reservationId !== undefined) {
     // `reservationKey` is always set alongside `reservationId` by index.ts's

@@ -130,6 +130,12 @@ describe('generation request validation', () => {
     if (!result.ok) assert.equal(result.status, 413);
   });
 
+  // These four are asked of `parsePreviewRequest` rather than
+  // `parseGenerationRequest`. Since #181 a generation request carries no
+  // files at all, so the rules that bound a file list are exercised where a
+  // file list still arrives: /api/preview and /api/publish. The rules
+  // themselves are unchanged, and `parseProjectFiles` is still the one
+  // implementation behind both.
   it('caps the file count', () => {
     const files = Array.from(
       { length: DEFAULT_LIMITS.maxFiles + 1 },
@@ -138,23 +144,16 @@ describe('generation request validation', () => {
         content: '',
       }),
     );
-    const result = parseGenerationRequest({
-      prompt: 'edit',
-      base: { revision: 'r1', files },
-    });
+    const result = parsePreviewRequest({ files });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.status, 413);
   });
 
   it('caps a single path length', () => {
-    const result = parseGenerationRequest({
-      prompt: 'edit',
-      base: {
-        revision: 'r1',
-        files: [
-          { path: 'a'.repeat(DEFAULT_LIMITS.maxPathChars + 1), content: '' },
-        ],
-      },
+    const result = parsePreviewRequest({
+      files: [
+        { path: 'a'.repeat(DEFAULT_LIMITS.maxPathChars + 1), content: '' },
+      ],
     });
     assert.equal(result.ok, false);
   });
@@ -166,10 +165,7 @@ describe('generation request validation', () => {
       path: `${String(index).padStart(3, '0')}/${'p'.repeat(250)}`,
       content: '',
     }));
-    const result = parseGenerationRequest({
-      prompt: 'edit',
-      base: { revision: 'r1', files },
-    });
+    const result = parsePreviewRequest({ files });
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /too many path characters/);
   });
@@ -182,23 +178,16 @@ describe('generation request validation', () => {
       [{ path: 1, content: 'x' }],
       ['a'],
     ]) {
-      const result = parseGenerationRequest({
-        prompt: 'edit',
-        base: { revision: 'r1', files },
-      });
+      const result = parsePreviewRequest({ files });
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.status, 400);
     }
   });
 
   it('rejects a malformed base snapshot', () => {
-    for (const base of [
-      {},
-      { revision: 1, files: [] },
-      { revision: 'r1' },
-      [],
-      'r1',
-    ]) {
+    // `{ revision: 'r1' }` is no longer among these: since #181 a base is
+    // exactly that, and carrying files is what stopped being required.
+    for (const base of [{}, { revision: 1 }, { revision: '' }, [], 'r1']) {
       assert.equal(parseGenerationRequest({ prompt: 'edit', base }).ok, false);
     }
   });
@@ -206,18 +195,60 @@ describe('generation request validation', () => {
   it('treats a null base as absent', () => {
     const result = parseGenerationRequest({ prompt: 'edit', base: null });
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.value.base, undefined);
+    if (result.ok) assert.equal(result.value.baseRevision, undefined);
   });
 
-  it('accepts a legitimate snapshot unchanged', () => {
-    const files = [{ path: 'src/App.tsx', content: 'export {}' }];
+  it('takes the revision a caller says it is editing', () => {
     const result = parseGenerationRequest({
       prompt: 'edit',
-      base: { revision: 'r1', files },
+      base: { revision: 'r1' },
     });
     assert.equal(result.ok, true);
-    if (result.ok)
-      assert.deepEqual(result.value.base, { revision: 'r1', files });
+    if (result.ok) assert.equal(result.value.baseRevision, 'r1');
+  });
+
+  it('drops files a caller still sends, rather than refusing them', () => {
+    // A tab opened before #181 shipped still uploads the project. Refusing
+    // would break a session someone is in the middle of, for no gain: the
+    // revision decides which project is used and it is still here. Dropping
+    // is also the safer reading -- nothing a caller supplies becomes the
+    // project of record.
+    const result = parseGenerationRequest({
+      prompt: 'edit',
+      base: {
+        revision: 'r1',
+        files: [{ path: 'src/App.tsx', content: 'export {}' }],
+      },
+    });
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.value.baseRevision, 'r1');
+      assert.equal(
+        'base' in result.value,
+        false,
+        'the uploaded project survived into the parsed request',
+      );
+    }
+  });
+
+  it('no longer refuses a follow-up for the size of its project', () => {
+    // The failure #181 was filed for: a project bigger than a model's
+    // context could be generated and then never edited again, because the
+    // whole thing had to come back up with the next request. It does not
+    // come back up any more, so the size of it cannot refuse anything.
+    const huge = Array.from({ length: 400 }, (_, n) => ({
+      path: `src/file-${n}.tsx`,
+      content: 'x'.repeat(2_000),
+    }));
+    const result = parseGenerationRequest({
+      prompt: 'change one word',
+      base: { revision: 'r1', files: huge },
+    });
+    assert.equal(
+      result.ok,
+      true,
+      'a follow-up was refused for the size of a project it no longer sends',
+    );
   });
 });
 
@@ -265,28 +296,27 @@ describe('parseStylePreset', () => {
   });
 });
 
-describe('the base project content budget', () => {
+describe('the project content budget on a route that takes files', () => {
+  // Asked of `parsePreviewRequest` since #181. A generation request carries
+  // no files, so this budget cannot be checked there any more; the run
+  // checks the project it loads instead, and `generation-run.test.ts` holds
+  // the case that it still refuses before paying. What is left here is the
+  // routes where a caller does still send a file list.
   function projectOf(chars: number) {
     return {
-      prompt: 'make the hero simpler',
-      base: {
-        revision: 'r1',
-        files: [{ path: 'a.txt', content: 'x'.repeat(chars - 'a.txt'.length) }],
-      },
+      files: [{ path: 'a.txt', content: 'x'.repeat(chars - 'a.txt'.length) }],
     };
   }
 
   it('accepts a project up to the budget', () => {
-    const result = parseGenerationRequest(
+    const result = parsePreviewRequest(
       projectOf(DEFAULT_LIMITS.maxTotalContentChars),
     );
     assert.equal(result.ok, true);
   });
 
-  it('refuses one past it, before a run is paid for', () => {
-    // The provider would throw on this too, but by then the request has been
-    // accepted and the spend reserved. Refusing here costs nothing.
-    const result = parseGenerationRequest(
+  it('refuses one past it', () => {
+    const result = parsePreviewRequest(
       projectOf(DEFAULT_LIMITS.maxTotalContentChars + 1),
     );
     assert.equal(result.ok, false);
@@ -298,16 +328,12 @@ describe('the base project content budget', () => {
 
   it('counts every file, not just the largest', () => {
     const each = Math.ceil(DEFAULT_LIMITS.maxTotalContentChars / 3);
-    const result = parseGenerationRequest({
-      prompt: 'x',
-      base: {
-        revision: 'r1',
-        files: [
-          { path: 'a.txt', content: 'x'.repeat(each) },
-          { path: 'b.txt', content: 'x'.repeat(each) },
-          { path: 'c.txt', content: 'x'.repeat(each) },
-        ],
-      },
+    const result = parsePreviewRequest({
+      files: [
+        { path: 'a.txt', content: 'x'.repeat(each) },
+        { path: 'b.txt', content: 'x'.repeat(each) },
+        { path: 'c.txt', content: 'x'.repeat(each) },
+      ],
     });
     assert.equal(result.ok, false);
   });

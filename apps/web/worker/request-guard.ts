@@ -1,4 +1,3 @@
-import type { GenerationRequest } from '@vibld/core';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
@@ -110,10 +109,24 @@ export function checkBodySize(
  * part of a caller's project would make the model edit a snapshot the caller
  * never sent.
  */
+/**
+ * What a generation request carries once validated.
+ *
+ * `baseRevision` rather than a snapshot: since #181 the caller says which
+ * revision it believes it is editing, and the run reads that revision's
+ * files from storage itself. The assertion is still load-bearing -- it is
+ * what catches a second tab having moved the project on -- but the payload
+ * is gone.
+ */
+export interface ParsedGenerationRequest {
+  prompt: string;
+  baseRevision?: string;
+}
+
 export function parseGenerationRequest(
   body: unknown,
   limits: GuardLimits = DEFAULT_LIMITS,
-): GuardResult<GenerationRequest> {
+): GuardResult<ParsedGenerationRequest> {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return fail(400, 'Body must be a JSON object.');
   }
@@ -133,22 +146,24 @@ export function parseGenerationRequest(
   }
 
   if (typeof base !== 'object' || Array.isArray(base)) {
-    return fail(400, '"base" must be a project snapshot.');
+    return fail(400, '"base" must name the revision being built on.');
   }
-  const snapshot = base as { revision?: unknown; files?: unknown };
-  if (typeof snapshot.revision !== 'string' || !Array.isArray(snapshot.files)) {
-    return fail(400, '"base" must be a project snapshot.');
+  const snapshot = base as { revision?: unknown };
+  if (typeof snapshot.revision !== 'string' || snapshot.revision.length === 0) {
+    return fail(400, '"base" must name the revision being built on.');
   }
-  const files = parseProjectFiles(snapshot.files, limits);
-  if (!files.ok) return files;
 
-  return {
-    ok: true,
-    value: {
-      prompt,
-      base: { revision: snapshot.revision, files: files.value },
-    },
-  };
+  // Only the revision. The project itself is read from storage by the run
+  // that needs it (#181), so a follow-up no longer carries the whole thing
+  // up from the browser and is no longer bounded by a model's context.
+  //
+  // `files` is not rejected if it arrives. A tab opened before this shipped
+  // still sends them, and refusing would break a session someone is in the
+  // middle of for no gain: the revision is what decides which project is
+  // used, and it is still here. They are dropped rather than trusted, which
+  // is also the safer reading -- a caller cannot hand us contents and have
+  // them treated as the project of record.
+  return { ok: true, value: { prompt, baseRevision: snapshot.revision } };
 }
 
 /**
