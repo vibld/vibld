@@ -28,6 +28,9 @@ function builder(overrides: Partial<BuilderState> = {}): BuilderState {
     transcript: [],
     models: [],
     model: null,
+    // Explicitly null, not absent: the composer asks whether a project
+    // exists, and `undefined` is not an answer to that question.
+    acceptedSnapshot: null,
     ...overrides,
   } as BuilderState;
 }
@@ -41,7 +44,11 @@ async function mount(state: BuilderState) {
   const sent: Sent[] = [];
   const resets: number[] = [];
   const cancels: number[] = [];
-  const explored: { prompt: string; style: string | null }[] = [];
+  const explored: {
+    prompt: string;
+    style: string | null;
+    referenceUrl: string | null;
+  }[] = [];
   const exploreCancels: number[] = [];
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -54,7 +61,9 @@ async function mount(state: BuilderState) {
         onSubmit={(prompt, mode, style, referenceUrl) => {
           sent.push({ prompt, mode, style, referenceUrl });
         }}
-        onExplore={(prompt, style) => explored.push({ prompt, style })}
+        onExplore={(prompt, style, referenceUrl) =>
+          explored.push({ prompt, style, referenceUrl })
+        }
         onReset={() => resets.push(1)}
         onCancel={() => cancels.push(1)}
         onCancelExplore={() => exploreCancels.push(1)}
@@ -101,7 +110,9 @@ async function mount(state: BuilderState) {
             onSubmit={(prompt, mode, style, referenceUrl) => {
               sent.push({ prompt, mode, style, referenceUrl });
             }}
-            onExplore={(prompt, style) => explored.push({ prompt, style })}
+            onExplore={(prompt, style, referenceUrl) =>
+              explored.push({ prompt, style, referenceUrl })
+            }
             onReset={() => resets.push(1)}
             onCancel={() => cancels.push(1)}
             onCancelExplore={() => exploreCancels.push(1)}
@@ -282,11 +293,17 @@ describe('asking for directions', () => {
     view.unmount();
   });
 
-  it('carries the prompt and style the build would have used', async () => {
+  it('carries the prompt, style and reference the build would have used', async () => {
+    // The reference page especially (#189 review): it was dropped on the
+    // way to a mockup run while still sitting in the composer, looking for
+    // all the world as though it had been used.
     const view = await mount(builder());
     await view.type('a bakery');
+    await view.reference_('https://example.com/');
     await act(async () => view.button(/Show me three directions/)?.click());
-    assert.deepEqual(view.explored, [{ prompt: 'a bakery', style: null }]);
+    assert.deepEqual(view.explored, [
+      { prompt: 'a bakery', style: null, referenceUrl: 'https://example.com/' },
+    ]);
     view.unmount();
   });
 
@@ -297,8 +314,26 @@ describe('asking for directions', () => {
   });
 
   it('stops offering it once there is a project to change', async () => {
-    const view = await mount(builder({ transcript: TURN }));
+    const view = await mount(
+      builder({
+        transcript: TURN,
+        acceptedSnapshot: { revision: 'r1', files: [] },
+      } as Partial<BuilderState>),
+    );
     assert.equal(view.button(/Show me three directions/), undefined);
+    view.unmount();
+  });
+
+  it('keeps offering it after a first attempt that built nothing', async () => {
+    // A failed or cancelled build still appends a transcript turn (#189
+    // review), so gating on "has anything been attempted" hid the feature
+    // at exactly the moment it is for: no project, and a reader deciding
+    // what to try next.
+    const view = await mount(builder({ transcript: TURN }));
+    assert.ok(
+      view.button(/Show me three directions/),
+      'a failed first build hid the way to ask for directions',
+    );
     view.unmount();
   });
 

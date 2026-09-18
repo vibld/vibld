@@ -84,6 +84,23 @@ describe('what a mockup set may be', () => {
     assert.equal(parsed.success, true);
   });
 
+  it('refuses a document that is only whitespace', () => {
+    // `.min(1)` counts spaces and `parseChosenMockup` does not (#189
+    // review). A whitespace document renders as a blank tile, reads as a
+    // direction that failed, and is then refused on the way back -- the
+    // paid-run-then-unbuildable failure again, in a different disguise.
+    for (const html of [' ', '\n\n', '\t  \n']) {
+      const parsed = MockupSetSchema.safeParse({
+        mockups: [mockup(), mockup(), mockup({ html })],
+      });
+      assert.equal(
+        parsed.success,
+        false,
+        `accepted a document of ${JSON.stringify(html)}`,
+      );
+    }
+  });
+
   it('refuses a mockup with no label to choose it by', () => {
     const parsed = MockupSetSchema.safeParse({
       mockups: [mockup(), mockup(), mockup({ label: '' })],

@@ -37,7 +37,17 @@ export const MockupSchema = z.object({
    * most of its budget on one of them. So the bound is enforced here rather
    * than inferred, and a direction too large to build is never offered.
    */
-  html: z.string().min(1).max(MAX_CHOSEN_MOCKUP_CHARS),
+  html: z
+    .string()
+    .max(MAX_CHOSEN_MOCKUP_CHARS)
+    // Trimmed before the non-empty check, because `.min(1)` counts spaces
+    // and `parseChosenMockup` does not (#189 review). A document of
+    // whitespace renders as a blank tile, reads as a direction that failed,
+    // and is then refused on the way back -- the same paid-run-then-
+    // unbuildable failure the bound above exists to prevent.
+    .refine((html) => html.trim().length > 0, {
+      message: 'A mockup needs a document, not whitespace.',
+    }),
 });
 
 /**

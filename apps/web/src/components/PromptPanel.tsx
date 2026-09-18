@@ -24,7 +24,11 @@ export interface PromptPanelProps {
    * prompt and style the build would have used, because it is the same
    * request asked a smaller way.
    */
-  onExplore: (prompt: string, style: StylePresetId | null) => void;
+  onExplore: (
+    prompt: string,
+    style: StylePresetId | null,
+    referenceUrl: string | null,
+  ) => void;
   onReset: () => void;
   onCancel: () => void;
   /**
@@ -158,16 +162,24 @@ export function PromptPanel({
           {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
         </button>
         {/*
-          Offered only before there is a project (#185). Directions are for
-          deciding what to build; once something exists, the question is
-          what to change about it, and three fresh sketches answer a
-          question nobody asked.
+          Offered until a project exists (#185), which is not the same as
+          until an attempt was made (#189 review). A failed or cancelled
+          first build still appends a transcript turn, so `started` was
+          true with nothing built -- and the feature meant for exactly that
+          moment had already hidden itself. `acceptedSnapshot` is the thing
+          that answers "is there a project", so it is the thing to ask.
         */}
-        {!started ? (
+        {state.acceptedSnapshot === null ? (
           <button
             type="button"
             className="button"
-            onClick={() => onExplore(prompt, style)}
+            onClick={() =>
+              onExplore(
+                prompt,
+                style,
+                referenceUrl.trim().length > 0 ? referenceUrl.trim() : null,
+              )
+            }
             disabled={disabled || prompt.trim().length === 0}
             title="Three quick sketches to choose from, for about a tenth of a build"
           >

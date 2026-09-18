@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   MOCKUP_FRAME_POLICY,
   mockupFrameDocument,
+  withoutSelfNavigation,
 } from '../src/generation/mockup-frame.ts';
 
 /**
@@ -99,5 +100,73 @@ describe('where the policy lands', () => {
     const framed = mockupFrameDocument(html);
     assert.match(framed, /<h1>Sourdough<\/h1>/);
     assert.match(framed, /^<!doctype html>/i);
+  });
+});
+
+/**
+ * Where the frame may go, which a content policy does not govern (#189
+ * review, second P1).
+ *
+ * `default-src 'none'` restricts what a document fetches. It says nothing
+ * about the document navigating itself, and `sandbox=""` only stops a frame
+ * navigating anything *else*. The directive that covered this was dropped
+ * from the spec, so the lever is the markup.
+ */
+describe('where a mockup frame may go', () => {
+  it('removes a refresh that would navigate with nobody touching it', () => {
+    // The one that matters: no click, so a mockup carrying one contacts the
+    // host the instant it renders.
+    const framed = mockupFrameDocument(
+      '<!doctype html><html><head><meta http-equiv="refresh" content="0;url=https://evil.example/"></head><body>x</body></html>',
+    );
+    assert.doesNotMatch(framed, /http-equiv="refresh"/i);
+    assert.doesNotMatch(framed, /evil\.example/);
+  });
+
+  it('removes a refresh however it is spelled', () => {
+    for (const markup of [
+      "<meta http-equiv='REFRESH' content='0;url=https://evil.example/'>",
+      '<META HTTP-EQUIV="Refresh" CONTENT="2">',
+      '<meta content="0;url=https://evil.example/" http-equiv=refresh>',
+    ]) {
+      assert.doesNotMatch(
+        withoutSelfNavigation(markup),
+        /refresh/i,
+        `survived: ${markup}`,
+      );
+    }
+  });
+
+  it('keeps the content policy, which is a different meta', () => {
+    // The strip must not take the protection out with the threat.
+    const framed = mockupFrameDocument(
+      '<!doctype html><html><head><meta http-equiv="refresh" content="0"></head><body>x</body></html>',
+    );
+    assert.match(framed, /Content-Security-Policy/);
+  });
+
+  it('points links at a context the sandbox will not open', () => {
+    const framed = mockupFrameDocument(
+      '<!doctype html><body><a href="https://x/">go</a></body>',
+    );
+    assert.match(framed, /<base target="_blank">/);
+  });
+
+  it('strips an explicit target that would defeat that', () => {
+    // `target="_self"` on an external link is the click-driven half: the
+    // frame replaces itself and the host learns the viewer's address.
+    const stripped = withoutSelfNavigation(
+      '<a href="https://evil.example/" target="_self">go</a>',
+    );
+    assert.doesNotMatch(stripped, /target/i);
+    assert.match(stripped, /href="https:\/\/evil\.example\/"/);
+  });
+
+  it('leaves the document otherwise as it was', () => {
+    const html =
+      '<!doctype html><html><body><h1>Sourdough</h1><p>Baked daily.</p></body></html>';
+    const framed = mockupFrameDocument(html);
+    assert.match(framed, /<h1>Sourdough<\/h1>/);
+    assert.match(framed, /Baked daily\./);
   });
 });

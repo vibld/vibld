@@ -306,7 +306,11 @@ export class BuilderSession {
   readonly #stageDelayMs: number;
   readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
   readonly #requestMockups: typeof requestMockups;
-  #mockupContext: { prompt: string; style: StylePresetId | null } | null = null;
+  #mockupContext: {
+    prompt: string;
+    style: StylePresetId | null;
+    referenceUrl: string | null;
+  } | null = null;
   /**
    * The look's own controller, separate from the build's `#abort` (#189
    * review). A mockup run is about a minute and is billed; without this the
@@ -443,6 +447,11 @@ export class BuilderSession {
   async explore(
     prompt: string,
     style: StylePresetId | null = null,
+    // Kept so choosing can resubmit the request the set was drawn from
+    // (#189 review). Without it a reference page the reader had filled in
+    // was silently dropped on the build, while still sitting in the
+    // composer looking like it had been used.
+    referenceUrl: string | null = null,
   ): Promise<void> {
     const trimmed = prompt.trim();
     if (
@@ -456,7 +465,7 @@ export class BuilderSession {
     const epoch = this.#epoch;
     const controller = new AbortController();
     this.#exploreAbort = controller;
-    this.#mockupContext = { prompt: trimmed, style };
+    this.#mockupContext = { prompt: trimmed, style, referenceUrl };
     this.#patch(epoch, (state) => ({
       ...state,
       exploring: true,
@@ -533,10 +542,13 @@ export class BuilderSession {
     if (!context) return;
     this.#state = { ...this.#state, mockups: [] };
     this.#emit();
-    void this.submit(context.prompt, 'succeed', context.style, null, {
-      label: mockup.label,
-      html: mockup.html,
-    });
+    void this.submit(
+      context.prompt,
+      'succeed',
+      context.style,
+      context.referenceUrl,
+      { label: mockup.label, html: mockup.html },
+    );
   }
 
   /** None of them. Clears the set without spending anything further. */

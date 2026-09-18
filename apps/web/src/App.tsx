@@ -204,8 +204,8 @@ function Builder() {
               onSubmit={(prompt, mode, style, referenceUrl) => {
                 void session.submit(prompt, mode, style, referenceUrl);
               }}
-              onExplore={(prompt, style) => {
-                void session.explore(prompt, style);
+              onExplore={(prompt, style, referenceUrl) => {
+                void session.explore(prompt, style, referenceUrl);
               }}
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}
