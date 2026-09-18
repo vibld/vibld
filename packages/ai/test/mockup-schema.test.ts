@@ -7,6 +7,8 @@ import {
   mockupMaxTokensFor,
 } from '../src/plan-provider.ts';
 import { MODEL_CATALOGUE } from '../src/model-catalogue.ts';
+import { MAX_MOCKUP_DIRECTION_CHARS } from '../src/limits.ts';
+import { STYLE_PRESETS, styleDirection } from '../src/style-presets.ts';
 import { maxTokensFor } from '../src/plan-provider.ts';
 
 /**
@@ -117,5 +119,23 @@ describe('what three mockups may cost', () => {
     // A test double, in practice. It still gets the sketch-sized ceiling
     // rather than a build's.
     assert.equal(mockupMaxTokensFor('not-a-real-model'), MOCKUP_OUTPUT_TOKENS);
+  });
+});
+
+describe('what a mockup prompt may carry', () => {
+  it('keeps every style direction inside the bound the reservation uses', () => {
+    // The worst-case cost of a mockup run adds this figure in before a
+    // token is spent. Nothing truncates to it -- the directions are written
+    // in this repository, not supplied by a caller -- so this walk is what
+    // makes it an upper bound rather than a guess that stopped being true
+    // the next time somebody wrote a longer description.
+    for (const preset of STYLE_PRESETS) {
+      const direction = styleDirection(preset.id);
+      assert.ok(direction, `${preset.id} has no direction to send`);
+      assert.ok(
+        direction.length <= MAX_MOCKUP_DIRECTION_CHARS,
+        `${preset.id}: ${direction.length} chars exceeds the ${MAX_MOCKUP_DIRECTION_CHARS} the reservation covers`,
+      );
+    }
   });
 });

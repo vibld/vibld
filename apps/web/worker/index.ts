@@ -1,4 +1,10 @@
-import { configuredProviders, resolveModel } from '@vibld/ai';
+import {
+  MockupProvider,
+  configuredProviders,
+  createPlanClient,
+  resolveModel,
+} from '@vibld/ai';
+import type { PlanUsage } from '@vibld/ai';
 import type { RunRefusal } from '@vibld/core';
 
 import {
@@ -17,6 +23,7 @@ import {
   checkRequestOrigin,
   parseGenerationRequest,
   parseKnowledge,
+  parseMockupRequest,
   parseModel,
   parsePreviewRequest,
   parseAdminTopupRequest,
@@ -26,8 +33,12 @@ import {
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
 import { spendableFor } from './spendable.ts';
+import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { stageFor } from './run-stage.ts';
-import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
+import {
+  MAX_MOCKUP_DIRECTION_CHARS,
+  MAX_REFERENCE_CHARS,
+} from '@vibld/ai/limits';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
   clerkLookupConfigured,
@@ -1209,6 +1220,276 @@ async function handlePlan(
 }
 
 /**
+ * Three directions to choose between, before a build is attempted (#185).
+ *
+ * The same shape as `handlePlan` and deliberately not the same code. It
+ * calls the same shared functions for every number that decides money --
+ * `runCeilingFor`, `worstCaseMicroUsd`, `spendableFor`, `reserveBudget`,
+ * `settleBudget` -- so nothing here re-derives a figure the build route
+ * derives elsewhere. What differs is only what this run is for.
+ *
+ * In the request rather than in a Workflow, which is the one structural
+ * choice worth arguing with. A build went durable because it takes fifteen
+ * minutes and a Worker request has no guarantee of outliving the client's
+ * connection (`generation-workflow.ts`). Three sketches take about a
+ * minute. The durable machinery costs a run id, a persisted payload and a
+ * poll loop, and buys back the ability to survive an eviction that is far
+ * less likely and far cheaper to repeat: two cents and a minute, against
+ * thirty cents and a quarter of an hour.
+ *
+ * Streamed anyway, for the reason `handlePlan` records: a buffered response
+ * sends nothing for the whole run, and the client gives up first. Being in
+ * the request has one payoff the build lost -- the model client streams, so
+ * `onProgress` reports a real character count here. `progress.characters`
+ * has a producer again, on this route only.
+ */
+async function handleMockups(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  if (request.method !== 'POST') {
+    return json({ error: 'Use POST.' }, 405);
+  }
+
+  // Read at the top, for the reason `handlePlan`'s is: everything between
+  // here and the first progress event is wait the person sits through.
+  const waitingSince = Date.now();
+
+  if (!isConfigured(env)) {
+    return json({ error: 'Generation is not configured.' }, 503);
+  }
+
+  const origin = checkRequestOrigin(
+    request.headers,
+    new URL(request.url).origin,
+  );
+  if (!origin.ok) {
+    return refuse('request-invalid', origin.error, origin.status);
+  }
+
+  const size = checkBodySize(request.headers);
+  if (!size.ok) return refuse('request-invalid', size.error, size.status);
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return refuse('request-invalid', 'Body must be valid JSON.', 400);
+  }
+
+  const parsed = parseMockupRequest(body);
+  if (!parsed.ok) {
+    return refuse('request-invalid', parsed.error, parsed.status);
+  }
+
+  const style = parseStylePreset(body);
+  if (!style.ok) {
+    return refuse('request-invalid', style.error, style.status);
+  }
+
+  const chosenModel = parseModel(body, configuredProviders(env));
+  if (!chosenModel.ok) {
+    return refuse('request-invalid', chosenModel.error, chosenModel.status);
+  }
+
+  const decision = decideModel(
+    env,
+    principal.policyIdentity,
+    chosenModel.value,
+    resolveModel(env),
+  );
+  if (!decision.ok) {
+    return refuse('model-not-allowed', decision.error, decision.status);
+  }
+  const effectiveModel = decision.model;
+
+  // Its own bucket, not the build's. A look before building is not a build,
+  // and sharing the counter would mean three sketches cost somebody the
+  // generation they were about to run.
+  try {
+    const key = `mockups:${principal.userId}`;
+    const gates = [env.PLAN_BURST, env.PLAN_SUSTAINED].filter(
+      (gate): gate is RateLimit => gate !== undefined,
+    );
+    const results = await Promise.all(gates.map((gate) => gate.limit({ key })));
+    if (results.some((result) => !result.success)) {
+      return refuse(
+        'rate-limited',
+        'Too many requests. Try again shortly.',
+        429,
+      );
+    }
+  } catch (error) {
+    console.error('rate limiter unavailable', error);
+  }
+
+  const { prices, maxTokens } = runCeilingFor(env, effectiveModel, 'mockups');
+  // The prompt, plus the one style direction that may go with it. No base
+  // project, no standing instructions, no reference page: a mockup run is
+  // asked before there is a project, so none of them exists to send.
+  const worstCase = worstCaseMicroUsd(
+    prices,
+    maxTokens,
+    DEFAULT_LIMITS.maxPromptChars + MAX_MOCKUP_DIRECTION_CHARS,
+  );
+
+  let reserved;
+  try {
+    const now = Date.now();
+    const { monthlyAllowance, topupCeiling } = await spendableFor(
+      env,
+      principal,
+    );
+    reserved = await reserveBudget(
+      env,
+      principal.userId,
+      worstCase,
+      monthlyAllowance,
+      topupCeiling,
+      now,
+    );
+  } catch (error) {
+    console.error('budget unavailable', error);
+    return new Response(
+      JSON.stringify({
+        error: 'Usage accounting is unavailable; generation is paused.',
+        reason: 'accounting-unavailable' satisfies RunRefusal,
+      }),
+      { status: 503, headers: { ...JSON_HEADERS, 'retry-after': '30' } },
+    );
+  }
+
+  if (!reserved.ok) {
+    const ceiling = reserved.verdict.reason === 'period-ceiling';
+    return refuse(
+      ceiling ? 'account-ceiling' : 'already-running',
+      ceiling
+        ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
+        : 'A generation is already running. Wait for it to finish.',
+      429,
+    );
+  }
+
+  const settleParams = {
+    userId: principal.userId,
+    ...(principal.email ? { email: principal.email } : {}),
+    reservationId: reserved.layers.user.id,
+    reservationKey: reserved.layers.userReservationKey,
+    accountReservationId: reserved.layers.account.id,
+    worstCaseMicroUsd: worstCase,
+    prices,
+  };
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const keepaliveMs = parseKeepaliveMs(env.VIBLD_STREAM_KEEPALIVE_MS);
+
+  const abort = new AbortController();
+  let cancelled = false;
+  let keepalive: ReturnType<typeof setInterval> | undefined;
+  const stopKeepalive = () => {
+    if (keepalive !== undefined) {
+      clearInterval(keepalive);
+      keepalive = undefined;
+    }
+  };
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    stopKeepalive();
+    // Aborting really does stop the spending here, unlike a Workflow whose
+    // termination lands at the next step boundary: the model call is in
+    // this scope, so the signal reaches it.
+    abort.abort();
+  };
+  request.signal?.addEventListener('abort', cancel);
+
+  const write = (chunk: string) =>
+    writer.write(encoder.encode(chunk)).catch(cancel);
+
+  void write(KEEPALIVE_COMMENT);
+  keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
+
+  const run = (async () => {
+    let usage: PlanUsage | undefined;
+    let providerRan = false;
+    try {
+      const provider = new MockupProvider(
+        createPlanClient(env, effectiveModel),
+        {
+          model: effectiveModel,
+          maxTokens,
+          signal: abort.signal,
+          onUsage: (reported) => {
+            usage = reported;
+          },
+          ...(style.value ? { style: style.value } : {}),
+        },
+      );
+
+      providerRan = true;
+      const set = await provider.generate({ prompt: parsed.value.prompt });
+      if (!cancelled) {
+        await write(
+          encodeEvent('mockups', {
+            providerId: effectiveModel,
+            mockups: set.mockups,
+          }),
+        );
+      }
+    } catch (error) {
+      if (!cancelled) {
+        const visible = sanitizedProviderFailure(
+          error,
+          'mockup generation failed',
+          'Could not produce mockups. Try again shortly.',
+        );
+        await write(encodeEvent('error', { error: visible.message }));
+      }
+    } finally {
+      stopKeepalive();
+      try {
+        const actual = await settleBudget(
+          env.USER_BUDGET!,
+          settleParams,
+          usage,
+          providerRan,
+        );
+        console.log(
+          JSON.stringify({
+            event: 'mockups.settled',
+            userId: principal.userId,
+            ...(principal.email ? { email: principal.email } : {}),
+            model: effectiveModel,
+            inputTokens: usage?.inputTokens ?? 0,
+            outputTokens: usage?.outputTokens ?? 0,
+            microUsd: actual,
+            elapsedMs: Date.now() - waitingSince,
+          }),
+        );
+      } catch (error) {
+        // The reservation is not lost: `budget.ts`'s abandoned-reservation
+        // reclaim closes it at its worst case, which over-charges rather
+        // than under-charges and is the safe direction for a failure whose
+        // cause is unknown.
+        console.error('mockup settlement failed', error);
+      }
+      await writer.close().catch(() => {});
+    }
+  })();
+
+  ctx.waitUntil(run);
+
+  return new Response(readable, { status: 200, headers: STREAM_HEADERS });
+}
+
+/**
  * Start, check on, or stop a live preview of the caller's own project
  * (docs/decisions.md L7-L11). Thin by design: every real decision --
  * concurrency, egress, lifetime -- is `@vibld/preview`'s; this only
@@ -1629,6 +1910,10 @@ export default {
 
     if (pathname === '/api/plan') {
       return handlePlan(request, env, ctx);
+    }
+
+    if (pathname === '/api/mockups') {
+      return handleMockups(request, env, ctx);
     }
 
     if (pathname === '/api/preview') {

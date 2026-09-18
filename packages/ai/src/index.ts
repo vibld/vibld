@@ -129,7 +129,11 @@ export type {
   StyleDna,
   StyleOption,
 } from './style-dna.ts';
-export { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
+export {
+  MAX_BASE_CONTENT_CHARS,
+  MAX_KNOWLEDGE_CHARS,
+  MAX_MOCKUP_DIRECTION_CHARS,
+} from './limits.ts';
 export {
   createDeepseekPlanClient,
   DEEPSEEK_BASE_URL,

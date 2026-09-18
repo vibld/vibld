@@ -59,3 +59,21 @@ export const MAX_KNOWLEDGE_CHARS = 2_000;
  * guess how much of it might arrive.
  */
 export const MAX_REFERENCE_CHARS = 6_000;
+
+/**
+ * The largest visual direction a mockup prompt may carry (#185).
+ *
+ * A mockup run sends the caller's prompt plus, when they have already chosen
+ * a preset, that preset's direction from `style-presets.ts`. Both go to the
+ * model, so both are input tokens the reservation has to have covered before
+ * the run starts.
+ *
+ * Like `MAX_REFERENCE_CHARS` above, this is really documentation of a
+ * contract: the directions are written here in this repository rather than
+ * supplied by a caller, so nothing truncates to it. What makes it true is
+ * `mockup-schema.test.ts`, which walks every preset and fails if one grows
+ * past it. Without that the number would be a guess that silently stopped
+ * being an upper bound the next time somebody wrote a longer description,
+ * and the worst case would quietly understate the bill.
+ */
+export const MAX_MOCKUP_DIRECTION_CHARS = 2_000;
