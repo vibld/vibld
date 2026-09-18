@@ -428,6 +428,16 @@ export class BuilderSession {
     // Directions are about a request, and "Start over" discards the
     // request. Carrying them would leave three sketches of a project that
     // no longer exists, with a Build button that would rebuild it.
+    //
+    // Aborted, not merely forgotten (#189 review). Clearing the context
+    // and bumping the epoch stops the result being *shown*; it does not
+    // stop the run, which is about a minute of billed model time whose
+    // answer is then thrown away. Start over is reachable while a look is
+    // in flight -- the same failed-first-build state that made the
+    // directions button visible again -- so this is a path a reader
+    // actually takes.
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
     this.#mockupContext = null;
     this.#emit();
   }
@@ -484,7 +494,7 @@ export class BuilderSession {
           this.#patch(epoch, (state) => ({ ...state, progress }));
         },
       });
-      this.#exploreAbort = null;
+      this.#forgetExplore(controller);
       this.#patch(epoch, (state) => ({
         ...state,
         exploring: false,
@@ -492,7 +502,7 @@ export class BuilderSession {
         mockups,
       }));
     } catch (error) {
-      this.#exploreAbort = null;
+      this.#forgetExplore(controller);
       // A run the reader stopped is not a run that failed. `cancelStop`
       // has already put the session back; reporting the abort on top of
       // that would show an error for something they chose.
@@ -506,6 +516,20 @@ export class BuilderSession {
         problems: [message],
       }));
     }
+  }
+
+  /**
+   * Drop the reference to a look that has finished, if it is still ours.
+   *
+   * The check is the point (#189 review). `explore` used to clear
+   * `#exploreAbort` unconditionally when its promise settled, so an
+   * abandoned run landing after Start over -- or after a second look had
+   * begun -- cleared the *new* run's controller. Nothing then held it, and
+   * Cancel had nothing left to abort: a billed run with no way to stop it,
+   * created by the code whose whole job is stopping runs.
+   */
+  #forgetExplore(controller: AbortController): void {
+    if (this.#exploreAbort === controller) this.#exploreAbort = null;
   }
 
   /**
@@ -568,6 +592,22 @@ export class BuilderSession {
   ): Promise<void> {
     const trimmed = prompt.trim();
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
+
+    // Any build invalidates the directions, not only choosing one
+    // (#189 review). Pressing Generate with a set on screen used to leave
+    // it there; once that build was accepted the chooser came back enabled,
+    // and clicking a tile then submitted its *pre-build* request against
+    // the project that had just been created -- a follow-up nobody asked
+    // for, at the price of a full build.
+    //
+    // Here rather than in the two callers, because the callers are the
+    // composer and `chooseMockup`, and the rule is about what a build does
+    // to a set, not about who started it. `chooseMockup` reads the context
+    // into locals before it calls this, so clearing it here is safe.
+    this.#mockupContext = null;
+    if (this.#state.mockups.length > 0) {
+      this.#state = { ...this.#state, mockups: [] };
+    }
 
     const epoch = this.#epoch;
     this.#runSeq += 1;

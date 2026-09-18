@@ -18,13 +18,22 @@
  * own and no response headers to set, and this travels inside the document
  * it governs.
  *
- * It is not the whole job, which is the third time this file's guarantee
- * has had to be narrowed (#189 review). A CSP governs what a document
+ * It is not the whole job, and this file's guarantee has now been narrowed
+ * four times over one review (#189). A CSP governs what a document
  * *fetches*; it does not govern where the document *goes*. A `<meta
  * http-equiv="refresh">` navigates the frame with nobody touching it, and
  * the directive that used to cover that was dropped from the spec. So
  * self-navigation is removed from the markup as well, and links are made
  * to want a popup the sandbox will not open.
+ *
+ * The fourth narrowing is the one worth learning from. Removing the
+ * refresh by matching `http-equiv="refresh"` was defeated by
+ * `http-equiv="ref&#x72;esh"`, because the parser decodes attribute values
+ * and a regex over the source does not. Every miss in this file has the
+ * same shape: I decided what the markup said instead of what the parser
+ * would say. So what is matched below is attribute *names*, which are not
+ * decoded, and what is removed is whole categories a sketch has no use for
+ * rather than the specific spellings that looked dangerous.
  *
  * What is left, stated rather than glossed: a reader can still be shown a
  * link, and clicking it does nothing. That is the honest end of this.
@@ -56,18 +65,41 @@ const BASE = '<base target="_blank">';
 const META = `<meta http-equiv="Content-Security-Policy" content="${MOCKUP_FRAME_POLICY}">${BASE}`;
 
 /**
- * Markup that navigates the frame on its own, with nobody touching it.
+ * Any `<meta>` that carries an `http-equiv`, whatever it claims to say.
  *
- * A meta refresh is the one that matters: it needs no click, so a mockup
- * carrying one contacts a host the model chose the instant it renders. The
- * policy above does not stop it, and neither does the sandbox.
+ * The first version of this matched the *value*, `http-equiv="refresh"`,
+ * and a reviewer broke it in one line: `http-equiv="ref&#x72;esh"`. The
+ * HTML parser decodes character references in attribute values, so it sees
+ * `refresh` and navigates; a regex reading the raw source sees a string
+ * that is not `refresh` and leaves the tag alone. Chasing that with a
+ * decoder means writing an entity table, and then being wrong about
+ * whatever the table missed.
  *
- * Removed rather than rewritten. A refresh in a sketch has no legitimate
- * job, so there is nothing to preserve, and a transform that tried to keep
- * it while making it safe would be a parser this file is not.
+ * Attribute *names* are not entity-decoded -- the tokenizer reads them
+ * literally -- so the name is the part that can be matched with certainty.
+ * Matching it is also a stronger rule than the one it replaces: a sketch
+ * has no legitimate use for any `http-equiv` at all, so there is nothing
+ * to weigh against removing every one of them.
+ *
+ * This is the fourth narrowing of this file (sandbox, then fetches, then
+ * navigation, now the spelling of it). Every one so far was a case where I
+ * decided what the document said instead of what the parser would say.
  */
-const SELF_NAVIGATION =
-  /<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>/gi;
+const HTTP_EQUIV_META = /<meta\b[^>]*\bhttp-equiv\b[^>]*>/gi;
+
+/**
+ * The document's own `<base>`, for the same reason.
+ *
+ * Ours leads the markup, and the first `<base target>` in tree order wins,
+ * so a mockup's own `target` could not override it. Its `href` is another
+ * matter: ours sets no href, so a later `<base href="https://evil/">` is
+ * the first with one and becomes the document base that every relative URL
+ * resolves against. Nothing can be fetched through it (`default-src
+ * 'none'`) and nothing can be navigated to (the sandbox denies the popup),
+ * so this is defence in depth rather than a hole being closed. It costs a
+ * sketch nothing: a one-document page has no use for a base.
+ */
+const DOCUMENT_BASE = /<base\b[^>]*>/gi;
 
 /**
  * An explicit target defeats the base above, so it does not get to stay.
@@ -75,12 +107,18 @@ const SELF_NAVIGATION =
  * `target="_self"` on an external link is the click-driven half of the same
  * problem: the frame replaces itself and the host learns the viewer's
  * address. Stripping the attribute puts the link back under the base.
+ *
+ * Matched on the name too, and for the same reason as `HTTP_EQUIV_META`:
+ * the value is decoded before the parser reads it, the name is not.
  */
 const EXPLICIT_TARGET = /\starget\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
 
 /** Everything a mockup may not do to its own browsing context. */
 export function withoutSelfNavigation(html: string): string {
-  return html.replace(SELF_NAVIGATION, '').replace(EXPLICIT_TARGET, '');
+  return html
+    .replace(HTTP_EQUIV_META, '')
+    .replace(DOCUMENT_BASE, '')
+    .replace(EXPLICIT_TARGET, '');
 }
 
 /**

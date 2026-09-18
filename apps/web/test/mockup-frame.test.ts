@@ -128,21 +128,54 @@ describe('where a mockup frame may go', () => {
       "<meta http-equiv='REFRESH' content='0;url=https://evil.example/'>",
       '<META HTTP-EQUIV="Refresh" CONTENT="2">',
       '<meta content="0;url=https://evil.example/" http-equiv=refresh>',
+      '<meta http-equiv = "refresh" content="0">',
     ]) {
       assert.doesNotMatch(
         withoutSelfNavigation(markup),
-        /refresh/i,
+        /http-equiv/i,
         `survived: ${markup}`,
       );
     }
   });
 
-  it('keeps the content policy, which is a different meta', () => {
-    // The strip must not take the protection out with the threat.
+  it('removes a refresh whose value never says refresh', () => {
+    // The reviewer's own bypass, verbatim (#189 review, third round).
+    // The parser decodes `&#x72;` to `r` and navigates; a regex reading the
+    // source sees a string that is not "refresh" and leaves the tag. Every
+    // encoding below is a different way to write the same word, and there
+    // are more of them than a table would hold -- which is why the match is
+    // on the attribute name, not on what the value claims to say.
+    for (const markup of [
+      '<meta http-equiv="ref&#x72;esh" content="0;url=https://evil.example/">',
+      '<meta http-equiv="&#114;efresh" content="0;url=https://evil.example/">',
+      '<meta http-equiv="refres&#104;" content="0">',
+    ]) {
+      const stripped = withoutSelfNavigation(markup);
+      assert.doesNotMatch(stripped, /http-equiv/i, `survived: ${markup}`);
+      assert.doesNotMatch(stripped, /evil\.example/, `survived: ${markup}`);
+    }
+  });
+
+  it('removes a base the document tries to set for itself', () => {
+    // Ours leads the markup and wins on `target`, but sets no `href` -- so
+    // a later `<base href>` would be the first with one and would become
+    // what every relative URL resolves against.
+    const stripped = withoutSelfNavigation(
+      '<base href="https://evil.example/"><a href="/go">x</a>',
+    );
+    assert.doesNotMatch(stripped, /evil\.example/);
+    assert.match(stripped, /href="\/go"/);
+  });
+
+  it('keeps the content policy, which is added after the strip', () => {
+    // The strip removes every `http-equiv`, ours included -- so the order
+    // is the whole of why ours survives. Reversing it would leave a frame
+    // with no policy at all and nothing saying so.
     const framed = mockupFrameDocument(
       '<!doctype html><html><head><meta http-equiv="refresh" content="0"></head><body>x</body></html>',
     );
     assert.match(framed, /Content-Security-Policy/);
+    assert.match(framed, /<base target="_blank">/);
   });
 
   it('points links at a context the sandbox will not open', () => {

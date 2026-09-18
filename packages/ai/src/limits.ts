@@ -87,10 +87,17 @@ export const MAX_MOCKUP_DIRECTION_CHARS = 2_000;
  * keeps having to remove. So the document itself travels, and the build is
  * asked to turn that page into the project.
  *
- * Derived rather than chosen. `MOCKUP_OUTPUT_TOKENS` buys three mockups, so
- * one of them is at most a third of it, and a token is about four
- * characters: 18,000 / 3 * 4. A cap picked by eye would either refuse a
- * mockup this system itself produced, or promise to carry one larger than
- * it can make.
+ * Where the figure came from: `MOCKUP_OUTPUT_TOKENS` buys three mockups, so
+ * one of them is about a third of it, at roughly four characters a token --
+ * 18,000 / 3 * 4. That is an origin story, not a derivation, and this
+ * comment used to call it one (#189 review). Nothing makes a model split
+ * its budget three ways, and nothing fixes four characters to a token, so a
+ * run really can produce a direction larger than this.
+ *
+ * What makes the number safe is therefore not the arithmetic above but
+ * `MockupSchema`, which bounds every generated `html` at exactly this
+ * figure. A direction too large for the build to accept back is refused
+ * where it is produced, rather than offered and then rejected after the run
+ * has been paid for and a choice made.
  */
 export const MAX_CHOSEN_MOCKUP_CHARS = 24_000;

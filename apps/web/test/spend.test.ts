@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_PRICES,
   PROVIDER_PRICES,
+  cancelledUsage,
   dayKey,
   decide,
   microUsdOf,
@@ -353,5 +354,67 @@ describe('what a run reserves against what it may spend', () => {
         `${model.id}: reserves ${reserved} micro-USD but may emit ${emitted}`,
       );
     }
+  });
+});
+
+/**
+ * What a run the reader stopped costs them (#189 review).
+ *
+ * The bug this replaces: aborting makes the model call reject, so no usage
+ * is ever reported, and `settleBudget`'s unknown-cost case charges the full
+ * reservation. Cancelling one second into a mockup run cost more than
+ * letting it finish, which turns the Cancel button into a trap.
+ */
+describe('what a cancelled run is charged', () => {
+  const MAX_TOKENS = 18_000;
+  const INPUT_CHARS = 8_000;
+
+  it('charges for what was streamed, not for the whole ceiling', () => {
+    const early = cancelledUsage(400, MAX_TOKENS, INPUT_CHARS);
+    assert.equal(early.outputTokens, 100);
+    assert.ok(
+      early.outputTokens < MAX_TOKENS,
+      'a run stopped early was charged the full output ceiling',
+    );
+  });
+
+  it('charges the input in full, because the input was sent in full', () => {
+    // Not an estimate of what happened: the prompt goes to the model before
+    // a single token comes back, so the reservation's own figure is right.
+    const usage = cancelledUsage(0, MAX_TOKENS, INPUT_CHARS);
+    assert.equal(usage.inputTokens, Math.ceil(INPUT_CHARS / 4));
+  });
+
+  it('never settles above the reservation it is closing', () => {
+    // HTML can run denser than four characters a token, so the estimate can
+    // exceed the ceiling. A settlement larger than the reservation would
+    // charge for output the run was never allowed to produce.
+    const absurd = cancelledUsage(MAX_TOKENS * 40, MAX_TOKENS, INPUT_CHARS);
+    assert.equal(absurd.outputTokens, MAX_TOKENS);
+  });
+
+  it('charges nothing for output when nothing was streamed', () => {
+    assert.equal(cancelledUsage(0, MAX_TOKENS, INPUT_CHARS).outputTokens, 0);
+    // A negative count is not a refund, the same rule `microUsdOf` applies
+    // to a provider reporting more cached tokens than input tokens.
+    assert.equal(cancelledUsage(-5, MAX_TOKENS, INPUT_CHARS).outputTokens, 0);
+  });
+
+  it('costs less than the worst case it replaces', () => {
+    const prices = {
+      inputMicroUsd: 0.3,
+      outputMicroUsd: 1.2,
+      cachedInputMicroUsd: 0.3,
+      cacheWriteMicroUsd: 0.3,
+    };
+    const stopped = microUsdOf(
+      cancelledUsage(2_000, MAX_TOKENS, INPUT_CHARS),
+      prices,
+    );
+    const whole = worstCaseMicroUsd(prices, MAX_TOKENS, INPUT_CHARS);
+    assert.ok(
+      stopped < whole,
+      `stopping cost ${stopped} against ${whole} for finishing`,
+    );
   });
 });

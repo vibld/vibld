@@ -52,7 +52,12 @@ import {
   handleReferralClaim,
   handleReferralStatus,
 } from './referral-handlers.ts';
-import { ACCOUNT_BUDGET_KEY, dayKey, worstCaseMicroUsd } from './spend.ts';
+import {
+  ACCOUNT_BUDGET_KEY,
+  cancelledUsage,
+  dayKey,
+  worstCaseMicroUsd,
+} from './spend.ts';
 import { runCeilingFor } from './run-ceiling.ts';
 import type { SpendVerdict } from './spend.ts';
 import {
@@ -1346,11 +1351,12 @@ async function handleMockups(
   // The prompt, plus the one style direction that may go with it. No base
   // project, no standing instructions, no reference page: a mockup run is
   // asked before there is a project, so none of them exists to send.
-  const worstCase = worstCaseMicroUsd(
-    prices,
-    maxTokens,
-    DEFAULT_LIMITS.maxPromptChars + MAX_MOCKUP_DIRECTION_CHARS,
-  );
+  //
+  // Named rather than inlined because the settlement of a cancelled run
+  // needs the same figure (#189 review), and a second spelling of it is a
+  // second chance for the two to disagree about what was reserved.
+  const inputChars = DEFAULT_LIMITS.maxPromptChars + MAX_MOCKUP_DIRECTION_CHARS;
+  const worstCase = worstCaseMicroUsd(prices, maxTokens, inputChars);
 
   let reserved;
   try {
@@ -1420,6 +1426,12 @@ async function handleMockups(
     // Aborting really does stop the spending here, unlike a Workflow whose
     // termination lands at the next step boundary: the model call is in
     // this scope, so the signal reaches it.
+    //
+    // Stopping the provider is only half of it, which is what the first
+    // version of this got wrong (#189 review). The abort makes the call
+    // reject, so no usage is ever reported, and settlement's unknown-cost
+    // case charges the full reservation -- Cancel cost more than waiting.
+    // The `finally` below settles a stopped run from what was streamed.
     abort.abort();
   };
   request.signal?.addEventListener('abort', cancel);
@@ -1433,6 +1445,10 @@ async function handleMockups(
   const run = (async () => {
     let usage: PlanUsage | undefined;
     let providerRan = false;
+    // What the model had streamed when the reader stopped it. The only
+    // measurement of a cancelled run there is, and without it settlement
+    // falls back to the full reservation (#189 review).
+    let streamedCharacters = 0;
     try {
       const provider = new MockupProvider(
         createPlanClient(env, effectiveModel),
@@ -1450,6 +1466,10 @@ async function handleMockups(
           // scope, so the count the client streams is the count the reader
           // sees.
           onProgress: ({ characters }) => {
+            // Recorded before the cancelled check, not after: the last
+            // count is exactly the one a cancelled run has to be settled
+            // from, and returning early would throw it away.
+            streamedCharacters = characters;
             if (cancelled) return;
             void write(
               encodeEvent('progress', {
@@ -1485,20 +1505,36 @@ async function handleMockups(
     } finally {
       stopKeepalive();
       try {
+        // A run the reader stopped is not a run whose cost is unknown: the
+        // streamed count is a measurement of it, and settling it as
+        // unknown charges the whole reservation for pressing Cancel
+        // (#189 review). Only when the provider was actually asked --
+        // stopping before that still costs nothing.
+        const settled =
+          usage ??
+          (cancelled && providerRan
+            ? cancelledUsage(streamedCharacters, maxTokens, inputChars)
+            : undefined);
         const actual = await settleBudget(
           env.USER_BUDGET!,
           settleParams,
-          usage,
+          settled,
           providerRan,
         );
         console.log(
           JSON.stringify({
             event: 'mockups.settled',
+            ...(usage ? {} : { cancelled, streamedCharacters }),
             userId: principal.userId,
             ...(principal.email ? { email: principal.email } : {}),
             model: effectiveModel,
-            inputTokens: usage?.inputTokens ?? 0,
-            outputTokens: usage?.outputTokens ?? 0,
+            // `settled`, not `usage`: a cancelled run's figures are an
+            // estimate, and a log that reported zero tokens beside a real
+            // charge would make the settlement look like the unknown-cost
+            // case it exists to stop being. `cancelled` above says which
+            // it is, so the numbers do not have to be read as measured.
+            inputTokens: settled?.inputTokens ?? 0,
+            outputTokens: settled?.outputTokens ?? 0,
             microUsd: actual,
             elapsedMs: Date.now() - waitingSince,
           }),
