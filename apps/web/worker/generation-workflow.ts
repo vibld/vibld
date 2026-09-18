@@ -3,9 +3,11 @@ import { WorkflowEntrypoint } from 'cloudflare:workers';
 import type { DurableGenerationResult } from '@vibld/core';
 import { PlanProvider, createPlanClient } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
+
 import { D1GenerationStore } from './generation-store.ts';
 import {
   SanitizingModelProvider,
+  ceilingForRun,
   runGeneration,
   settleBudget,
   traceOf,
@@ -102,6 +104,15 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         const provider = new SanitizingModelProvider(
           new PlanProvider(createPlanClient(this.env, params.model), {
             model: params.model,
+            // The ceiling `handlePlan` reserved against, carried in the
+            // params beside the prices settlement uses. Read rather than
+            // re-derived: this Workflow is durable and may start long after
+            // the reservation, so a fresh derivation here could price the
+            // request off a newer override than the run is holding. Through
+            // `ceilingForRun` because a payload persisted before that field
+            // existed has no ceiling to read, and must not inherit a derived
+            // one it was never funded for.
+            maxTokens: ceilingForRun(params),
             onUsage: (reported) => {
               usage = reported;
             },

@@ -10,6 +10,7 @@ import type {
   PlanUsage,
 } from './client.ts';
 import { GenerationPlanSchema, PLAN_SYSTEM_PROMPT } from './plan-schema.ts';
+import { findModel } from './model-catalogue.ts';
 import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from './limits.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
@@ -88,19 +89,69 @@ export interface ModelProviderOptions {
 
 export const DEFAULT_MODEL = 'claude-opus-5';
 /**
- * A whole multi-file project has to fit in one response.
+ * What one run may reserve for its output, in micro-USD.
  *
- * 16000 was the reason generation never once succeeded: a landing page with
- * several components ran past it, the structured output arrived cut off
- * mid-string, and the run died with an unreadable JSON parse error. Opus 5
- * accepts up to 128000; 64000 is the documented default for a response of
- * this shape and leaves real headroom.
+ * The ceiling that matters is money, not tokens. A run reserves its worst
+ * case up front, so the real question is how much of somebody's balance a
+ * single generation is allowed to hold, and the token number is whatever
+ * that buys from the model actually answering.
  *
- * This is the number the run budget prices its worst case from, so raising it
- * raises what a single run may cost. That is the trade being made: a ceiling
- * low enough to truncate is not cheaper, it just fails.
+ * $1.60 because that is what the previous flat 64000-token ceiling reserved
+ * on Claude Opus 5, the model it was chosen for. Keeping the dollar figure
+ * identical means Anthropic deployments get exactly the ceiling they had.
+ */
+export const RUN_OUTPUT_RESERVE_MICRO_USD = 1_600_000;
+
+/**
+ * Used only for a model the catalogue does not hold, which in practice means
+ * a test double. A real deployment is always priced from its own model.
  */
 export const DEFAULT_MAX_TOKENS = 64000;
+
+/**
+ * The output ceiling to ask a given model for.
+ *
+ * This was a flat 64000 for every model, and that is the bug. 64000 was
+ * chosen against Claude Opus 5 at 25 micro-USD a token, where it reserves
+ * $1.60. Production then moved to DeepSeek Flash at 1.2, where the same
+ * 64000 tokens reserve eight cents: the deployment was being twenty-one
+ * times more cautious than its own budget required, and paying for it by
+ * truncating real work. A request for an ordinary multi-page site came back
+ * cut off, which is the failure this exists to prevent.
+ *
+ * So the constant it derives from is the dollar reserve, and the token count
+ * follows the model. A cheaper model buys more room for the same money and
+ * an expensive one buys less, without anybody remembering to edit a number
+ * when `VIBLD_PROVIDER` changes. Forgetting exactly that is what produced
+ * the bug.
+ *
+ * Still clamped to what the model will actually produce: past its own
+ * ceiling a request is rejected outright rather than truncated, which reads
+ * as an outage rather than as the wrong model for the job.
+ *
+ * `outputMicroUsd` is the price actually in force, which is not always the
+ * catalogue's. An operator who sets `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN` to
+ * correct a stale rate moves what the reservation charges, and a ceiling
+ * derived from the catalogue behind their back reintroduces exactly the
+ * divergence this function exists to close: too high and the run reserves
+ * past $1.60 and is refused with allowance to spare, too low and it
+ * truncates while its budget goes unused. Omitted, or given a price that is
+ * not a usable one, it falls back to the catalogue -- the same direction
+ * `parsePrices` takes an unusable override, so the two never disagree about
+ * which number won.
+ */
+export function maxTokensFor(model: string, outputMicroUsd?: number): number {
+  const known = findModel(model);
+  if (!known) return DEFAULT_MAX_TOKENS;
+  const price =
+    outputMicroUsd !== undefined &&
+    Number.isFinite(outputMicroUsd) &&
+    outputMicroUsd > 0
+      ? outputMicroUsd
+      : known.outputMicroUsd;
+  const affordable = Math.floor(RUN_OUTPUT_RESERVE_MICRO_USD / price);
+  return Math.min(known.maxOutputTokens, affordable);
+}
 export const DEFAULT_EFFORT: PlanEffort = 'high';
 
 /**
@@ -137,7 +188,7 @@ export class PlanProvider implements ModelProvider {
   constructor(client: PlanClient, options: ModelProviderOptions = {}) {
     this.#client = client;
     this.#model = options.model ?? DEFAULT_MODEL;
-    this.#maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
+    this.#maxTokens = options.maxTokens ?? maxTokensFor(this.#model);
     this.#effort = options.effort ?? DEFAULT_EFFORT;
     this.#onUsage = options.onUsage;
     this.#signal = options.signal;

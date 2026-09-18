@@ -55,8 +55,8 @@ export class ProviderTruncationError extends ProviderError {
 
   constructor(maxTokens: number) {
     super(
-      `The model hit the ${maxTokens}-token output limit, so the generated project is incomplete. ` +
-        'Raise maxTokens or ask for a smaller project.',
+      `The model hit its ${maxTokens}-token output limit, so the generated project is incomplete. ` +
+        'Ask for a smaller project, or build it a few pages at a time.',
     );
     this.name = 'ProviderTruncationError';
   }

@@ -8,7 +8,7 @@ import {
   type ProjectSnapshot,
   type RunTrace,
 } from '@vibld/core';
-import { ProviderError, findModel } from '@vibld/ai';
+import { DEFAULT_MAX_TOKENS, ProviderError, findModel } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -85,6 +85,41 @@ export interface WorkflowParams {
   accountReservationId?: number;
   worstCaseMicroUsd: number;
   prices: TokenPrices;
+  /**
+   * The output ceiling this run's reservation was computed against, captured
+   * with the prices beside it rather than re-derived when the Workflow runs.
+   *
+   * A Workflow is durable: it can start minutes after `handlePlan` reserved
+   * for it, and `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN` can move in between.
+   * Deriving the ceiling again on arrival would price the request off a
+   * newer number than the one settlement still uses, which is the same
+   * reservation-and-request mismatch this field exists to prevent, only
+   * separated by time rather than by call site.
+   *
+   * Required, so the compiler refuses a params object that omits it. That
+   * covers new runs; it says nothing about payloads already persisted when
+   * this field shipped, which is what `ceilingForRun` exists to handle.
+   */
+  maxTokens: number;
+}
+
+/**
+ * The output ceiling a run may actually ask for.
+ *
+ * A Workflow's params are persisted JSON, so the type describes what new
+ * code must write and not what an in-flight payload contains. A run enqueued
+ * before `maxTokens` existed resumes without it, and the fallback is
+ * `DEFAULT_MAX_TOKENS` specifically, not the provider's own: that run's
+ * reservation was computed against the flat 64000 the old code used, so
+ * letting it reach a derived ceiling would let a queued DeepSeek Flash run
+ * emit 384000 tokens against a 64000 reservation and outspend it sixfold.
+ * The one case where the old constant is still the right answer is a run
+ * that was priced by the old constant.
+ */
+export function ceilingForRun(
+  params: Pick<WorkflowParams, 'maxTokens'>,
+): number {
+  return params.maxTokens ?? DEFAULT_MAX_TOKENS;
 }
 
 export interface GenerationWorkflowEnv {

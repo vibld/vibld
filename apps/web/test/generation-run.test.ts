@@ -5,10 +5,16 @@ import { describe, it } from 'node:test';
 
 import { FakeModelProvider } from '@vibld/core';
 import type { GenerationPlan, ModelProvider, ProjectFile } from '@vibld/core';
-import { ProviderError, ProviderRefusalError } from '@vibld/ai';
+import {
+  DEFAULT_MAX_TOKENS,
+  ProviderError,
+  ProviderRefusalError,
+  maxTokensFor,
+} from '@vibld/ai';
 
 import {
   SanitizingModelProvider,
+  ceilingForRun,
   runGeneration,
   settleBudget,
   traceOf,
@@ -351,5 +357,45 @@ describe('traceOf', () => {
 
     assert.equal(trace.elapsedMs, 8_000);
     assert.equal(trace.endedAt, '2026-03-04T05:06:07.000Z');
+  });
+});
+
+/**
+ * The ceiling a run may ask for, across a deploy boundary.
+ *
+ * A Workflow's params are persisted JSON, so the declared type describes
+ * what new code writes rather than what an in-flight payload holds. A run
+ * queued before `maxTokens` existed was funded against the flat 64000 the
+ * old code reserved with, and must not inherit the derived ceiling that
+ * replaced it.
+ */
+describe('the ceiling a run may ask for', () => {
+  it('uses the ceiling its reservation was computed against', () => {
+    assert.equal(ceilingForRun({ maxTokens: 384_000 }), 384_000);
+  });
+
+  it('holds a payload from before the field to the old flat ceiling', () => {
+    // The shape a Workflow queued by the previous deployment resumes with.
+    // JSON has no such field, so the cast is the honest description of it.
+    const legacy = {} as Pick<WorkflowParams, 'maxTokens'>;
+    assert.equal(ceilingForRun(legacy), DEFAULT_MAX_TOKENS);
+  });
+
+  it('does not let a legacy run reach a derived ceiling', () => {
+    // The failure this guards, named rather than implied: DeepSeek Flash
+    // derives 384000, and a run reserved at 64000 reaching it would emit six
+    // times what it is holding. Skipped if the two ever coincide, because
+    // then this asserts nothing.
+    const derived = maxTokensFor('deepseek-flash');
+    assert.notEqual(
+      derived,
+      DEFAULT_MAX_TOKENS,
+      'the derived and flat ceilings now match, so this test proves nothing',
+    );
+    const legacy = {} as Pick<WorkflowParams, 'maxTokens'>;
+    assert.ok(
+      ceilingForRun(legacy) < derived,
+      `a legacy run could ask for ${ceilingForRun(legacy)} against a 64000 reservation`,
+    );
   });
 });
