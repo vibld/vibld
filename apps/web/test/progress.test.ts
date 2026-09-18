@@ -6,6 +6,7 @@ import {
   formatCharacters,
   formatElapsed,
   progressAnnouncement,
+  REASSURE_AFTER_MS,
   reassurance,
 } from '../src/generation/progress.ts';
 
@@ -135,8 +136,25 @@ describe('progressAnnouncement', () => {
     assert.match(unnamed, /0:30 elapsed/);
     assert.doesNotMatch(
       unnamed,
-      /building|generating|queue/i,
+      /building|generating|working|queue/i,
       'a run in a state the Worker cannot name was announced as doing something specific',
+    );
+  });
+
+  it('says the same thing out loud as on screen for an unnamed stage', () => {
+    // The two drifted once already: the announcement said "Still working"
+    // while the sentence beside it deliberately claimed nothing (#188
+    // review). They share one constant now, and this is what holds them to
+    // it -- matching strings written twice would drift again.
+    const spoken = String(
+      progressAnnouncement({ elapsedMs: ANNOUNCE_INTERVAL_MS }),
+    );
+    const onScreen = String(reassurance({ elapsedMs: REASSURE_AFTER_MS }));
+    const lead = spoken.slice(0, spoken.indexOf(','));
+    assert.ok(lead.length > 0, 'the announcement must open on something');
+    assert.ok(
+      onScreen.startsWith(lead),
+      `the live region says "${lead}" where the visible line says "${onScreen}"`,
     );
   });
 });

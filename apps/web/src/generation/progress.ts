@@ -42,6 +42,21 @@ export function formatCharacters(characters: number): string {
 }
 
 /**
+ * What a run is called when the Worker has no honest word for its state.
+ *
+ * One constant and not two matching strings, because the on-screen sentence
+ * and the spoken one had already drifted once: `d11a8a4` gave the live
+ * region "Still working", an active-work label for a run that may be paused
+ * or asleep between retries, while the visible line beside it claimed
+ * nothing of the kind (#188 review). Sharing the words is what stops the
+ * two disagreeing again.
+ *
+ * "Going" and not "working": what is known is that the run has not
+ * finished. Nothing here claims anything is happening this second.
+ */
+const STILL_GOING = 'Still going';
+
+/**
  * What each stage is called on screen. Plain words, not internal states.
  *
  * "Building" rather than "Writing" (#188 review). The Worker can see that a
@@ -94,7 +109,7 @@ export function reassurance(progress: GenerationProgress): string | null {
     // explaining the wait in terms of the work being done would put the
     // same claim back a line lower (#188 review). All that is known here is
     // that the run has not finished, so that is all this says.
-    return 'This is still going. It can take several minutes, and you can cancel at any time.';
+    return `${STILL_GOING}. It can take several minutes, and you can cancel at any time.`;
   }
   return 'Building a whole project takes several minutes. You can cancel at any time.';
 }
@@ -132,8 +147,6 @@ export function progressAnnouncement(
   if (buckets < 1) return null;
   const lead = progress.stage
     ? STAGE_ANNOUNCEMENTS[progress.stage]
-    : // No stage means the Worker has no honest word for the run's state.
-      // "Still working" claims only that it has not finished.
-      'Still working';
+    : STILL_GOING;
   return `${lead}, ${formatElapsed(buckets * ANNOUNCE_INTERVAL_MS)} elapsed.`;
 }
