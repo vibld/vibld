@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { GenerationPlanSchema } from './plan-schema.ts';
+import { outputFor } from './plan-output.ts';
 import { findModel } from './model-catalogue.ts';
 import type {
   PlanClient,
@@ -157,7 +157,11 @@ export function createAnthropicPlanClient(
           ],
           output_config: {
             ...(effort ? { effort } : {}),
-            format: zodOutputFormat(GenerationPlanSchema),
+            // The schema the *caller* asked for, not this client's idea of
+            // one (#189 review). Hard-coding it here made a mockup run
+            // structurally impossible: the prompt asked for a set of
+            // directions and the API constrained the reply to a plan.
+            format: zodOutputFormat(outputFor(request).schema),
           },
           messages: [{ role: 'user', content: request.prompt }],
         },

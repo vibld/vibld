@@ -32,8 +32,10 @@ import {
 import type { ProviderEnv } from '@vibld/ai';
 
 import {
+  MAX_CHOSEN_MOCKUP_SECTION_CHARS,
   MAX_MOCKUP_DIRECTION_CHARS,
   MAX_MOCKUP_FIXED_PROMPT_CHARS,
+  MAX_REFERENCE_CHARS,
 } from '@vibld/ai/limits';
 
 import { DEFAULT_LIMITS } from './request-guard.ts';
@@ -82,6 +84,26 @@ export type RunKind = 'build' | 'mockups';
  * regardless. `mockup-reservation.test.ts` measures the real artefacts and
  * fails if their sum ever exceeds this.
  */
+/**
+ * Every character a build may send the model.
+ *
+ * Extracted for the same reason `MOCKUP_INPUT_CHARS` below was, and after
+ * the same mutation result: the fix for the chosen-mockup term lived in
+ * `packages/ai`, so removing it from the Worker's own sum broke nothing
+ * (#189 review). A bound that no test can see the caller use is a bound
+ * that can be quietly dropped.
+ *
+ * Every term is something the request guard has already refused to exceed,
+ * except the last, which is what this repository wraps round a chosen
+ * direction: the label and the framing that names the document as data.
+ */
+export const BUILD_INPUT_CHARS =
+  DEFAULT_LIMITS.maxPromptChars +
+  DEFAULT_LIMITS.maxTotalContentChars +
+  DEFAULT_LIMITS.maxKnowledgeChars +
+  MAX_REFERENCE_CHARS +
+  MAX_CHOSEN_MOCKUP_SECTION_CHARS;
+
 export const MOCKUP_INPUT_CHARS =
   DEFAULT_LIMITS.maxPromptChars +
   MAX_MOCKUP_DIRECTION_CHARS +

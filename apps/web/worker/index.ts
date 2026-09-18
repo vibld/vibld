@@ -18,7 +18,6 @@ import { GenerationWorkflow } from './generation-workflow.ts';
 import { D1GenerationStore } from './generation-store.ts';
 import type { WorkflowParams } from './generation-workflow.ts';
 import {
-  DEFAULT_LIMITS,
   checkBodySize,
   checkRequestOrigin,
   parseGenerationRequest,
@@ -36,7 +35,6 @@ import { fetchReferenceContext } from './reference-fetch.ts';
 import { spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { stageFor } from './run-stage.ts';
-import { MAX_CHOSEN_MOCKUP_CHARS, MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
   clerkLookupConfigured,
@@ -54,7 +52,11 @@ import {
   dayKey,
   worstCaseMicroUsd,
 } from './spend.ts';
-import { MOCKUP_INPUT_CHARS, runCeilingFor } from './run-ceiling.ts';
+import {
+  BUILD_INPUT_CHARS,
+  MOCKUP_INPUT_CHARS,
+  runCeilingFor,
+} from './run-ceiling.ts';
 import type { SpendVerdict } from './spend.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
@@ -983,19 +985,7 @@ async function handlePlan(
   // tokens while letting the model emit 384000 is a run that outspends its
   // own reservation six times over.
   const { prices, maxTokens } = runCeilingFor(env, effectiveModel);
-  const worstCase = worstCaseMicroUsd(
-    prices,
-    maxTokens,
-    // Prompt plus the base project that goes with it. Both are what the
-    // guard above has already refused to exceed.
-    DEFAULT_LIMITS.maxPromptChars +
-      DEFAULT_LIMITS.maxTotalContentChars +
-      DEFAULT_LIMITS.maxKnowledgeChars +
-      MAX_REFERENCE_CHARS +
-      // A chosen mockup travels in the prompt too, so the reservation has
-      // to have covered it before the run starts (#185).
-      MAX_CHOSEN_MOCKUP_CHARS,
-  );
+  const worstCase = worstCaseMicroUsd(prices, maxTokens, BUILD_INPUT_CHARS);
 
   // Layer three: what the caller's own subscription actually buys them
   // (L35-L39) -- a monthly allowance by tier, plus whatever top-up credit

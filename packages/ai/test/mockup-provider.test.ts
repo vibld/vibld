@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { MockupProvider } from '../src/mockup-provider.ts';
 import { mockupMaxTokensFor } from '../src/plan-provider.ts';
-import { MOCKUP_SYSTEM_PROMPT } from '../src/mockup-schema.ts';
+import { MOCKUP_SYSTEM_PROMPT, MockupSetSchema } from '../src/mockup-schema.ts';
 import {
   ProviderRefusalError,
   ProviderShapeError,
@@ -170,5 +170,50 @@ describe('reporting progress while sketching', () => {
     const fake = client();
     await new MockupProvider(fake).generate({ prompt: 'a bakery' });
     assert.equal(fake.seen[0]?.onProgress, undefined);
+  });
+});
+
+/**
+ * What this provider tells the client it wants back (#189 review, P1).
+ *
+ * The gap this closes is the reason that P1 shipped at all. Every test in
+ * this file uses a fake client, so the provider was exercised end to end
+ * while the one thing never asserted was whether it *asks* for a mockup
+ * set. It did not: the shape was hard-coded in each real client, so on
+ * Anthropic and OpenAI the API constrained the reply to a generation plan
+ * and on DeepSeek the appended instruction demanded one.
+ *
+ * A fake client can still check this, which is the point: the request is
+ * the contract, and it was never being read.
+ */
+describe('what the request asks the model for', () => {
+  it('tells the client it wants a mockup set, not a plan', async () => {
+    const fake = client();
+    await new MockupProvider(fake, {
+      model: 'deepseek-flash',
+      maxTokens: 18_000,
+      effort: 'high',
+    }).generate({ prompt: 'a bakery' });
+
+    const output = fake.seen[0]?.output;
+    assert.ok(output, 'the request said nothing about the shape it wants');
+    assert.equal(output.name, 'mockup_set');
+    assert.equal(output.schema, MockupSetSchema);
+  });
+
+  it('asks for the schema it is about to validate against', async () => {
+    // The two must be the same object, not merely similar. A provider that
+    // requested one shape and checked another is the bug, restated.
+    const fake = client();
+    await new MockupProvider(fake, {
+      model: 'deepseek-flash',
+      maxTokens: 18_000,
+      effort: 'high',
+    }).generate({ prompt: 'a bakery' });
+
+    const parsed = fake.seen[0]!.output!.schema.safeParse({
+      mockups: [mockup('Quiet'), mockup('Loud')],
+    });
+    assert.equal(parsed.success, true, 'the requested schema rejects mockups');
   });
 });

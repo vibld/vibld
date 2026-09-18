@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  MAX_CHOSEN_MOCKUP_CHARS,
+  MAX_MOCKUP_LABEL_CHARS,
   MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
   STYLE_PRESETS,
+  chosenMockupSection,
   styleDirection,
 } from '@vibld/ai';
-import { MOCKUP_INPUT_CHARS } from '../worker/run-ceiling.ts';
+import {
+  BUILD_INPUT_CHARS,
+  MOCKUP_INPUT_CHARS,
+} from '../worker/run-ceiling.ts';
+import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
 
 /**
@@ -61,6 +68,51 @@ describe('what a mockup run reserves', () => {
     assert.ok(
       MOCKUP_INPUT_CHARS <= longestRequestChars() * 2,
       'the bound has drifted far above what a run can send',
+    );
+  });
+});
+
+/**
+ * What a build reserves for a chosen direction (#189 review).
+ *
+ * Here rather than in `packages/ai` for the reason the suite above exists:
+ * a mutation dropped the whole-section term from the Worker's own sum and
+ * broke nothing, because the only assertion about it was on the constant.
+ */
+describe('what a build reserves for a chosen direction', () => {
+  /**
+   * Everything a build sends that is not the chosen direction.
+   *
+   * The reference budget belongs in here, and the first version of this
+   * test left it out (#189 review). That made the assertion pass with the
+   * bug reintroduced: `MAX_REFERENCE_CHARS` is 6,000, which is more than
+   * enough to absorb the 500-odd characters of label and framing the old
+   * sum was missing. A test that borrows another term's headroom is not
+   * measuring the term it names.
+   */
+  const OTHER_TERMS =
+    DEFAULT_LIMITS.maxPromptChars +
+    DEFAULT_LIMITS.maxTotalContentChars +
+    DEFAULT_LIMITS.maxKnowledgeChars +
+    MAX_REFERENCE_CHARS;
+
+  it('covers the whole section, not only the document', () => {
+    const section = chosenMockupSection(
+      'x'.repeat(MAX_MOCKUP_LABEL_CHARS),
+      'y'.repeat(MAX_CHOSEN_MOCKUP_CHARS),
+    ).length;
+    assert.ok(
+      BUILD_INPUT_CHARS - OTHER_TERMS >= section,
+      `only ${BUILD_INPUT_CHARS - OTHER_TERMS} characters are left for a ${section}-character section`,
+    );
+  });
+
+  it('reserves more than the document by itself', () => {
+    // The finding as an assertion: the old sum used MAX_CHOSEN_MOCKUP_CHARS
+    // here, so this difference was exactly zero.
+    assert.ok(
+      BUILD_INPUT_CHARS - OTHER_TERMS > MAX_CHOSEN_MOCKUP_CHARS,
+      'the build reserves nothing for the label or the framing',
     );
   });
 });

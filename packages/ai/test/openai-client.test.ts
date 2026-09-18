@@ -10,6 +10,7 @@ import {
   readResponseStream,
 } from '../src/openai-client.ts';
 import type { PlanRequest } from '../src/client.ts';
+import { MOCKUP_OUTPUT, jsonSchemaFor } from '../src/plan-output.ts';
 
 const REQUEST: PlanRequest = {
   system: 'system',
@@ -208,6 +209,50 @@ describe('createOpenaiPlanClient', () => {
     assert.equal((call.body as Record<string, unknown>).stream, true);
     assert.deepEqual(result.plan, PLAN);
     assert.equal(result.stopReason, 'end_turn');
+  });
+
+  /**
+   * The schema is the caller's, not this client's (#189 review, P1).
+   *
+   * `text.format` was named `generation_plan` and carried
+   * `planJsonSchema()` whatever was asked for, so strict mode constrained a
+   * mockup run's reply to `{summary, files}`. The model complies with the
+   * API, `MockupSetSchema` rejects what arrives, and the caller pays for a
+   * refusal they did not cause.
+   */
+  it('posts the mockup schema when a mockup set was asked for', async () => {
+    const seen: Record<string, never>[] = [];
+    await clientWith(sse(completed()), seen).createPlan({
+      ...REQUEST,
+      output: MOCKUP_OUTPUT,
+    });
+    const format = (
+      seen[0] as unknown as { body: Record<string, Record<string, unknown>> }
+    ).body.text.format as Record<string, unknown>;
+    assert.equal(format.name, 'mockup_set');
+    const schema = JSON.stringify(format.schema);
+    assert.match(schema, /mockups/, 'the request did not ask for mockups');
+    assert.doesNotMatch(schema, /"files"/, 'it asked for a plan instead');
+  });
+
+  it('still posts the plan schema when nothing says otherwise', async () => {
+    const seen: Record<string, never>[] = [];
+    await clientWith(sse(completed()), seen).createPlan(REQUEST);
+    const format = (
+      seen[0] as unknown as { body: Record<string, Record<string, unknown>> }
+    ).body.text.format as Record<string, unknown>;
+    assert.equal(format.name, 'generation_plan');
+    assert.match(JSON.stringify(format.schema), /files/);
+  });
+
+  it('drops the bounds strict mode will not accept', async () => {
+    // The mockup schema carries maxLength and min/maxItems, which the plan's
+    // did not exercise. A keyword strict mode rejects fails every request,
+    // and the real Zod schema is re-run over the reply regardless.
+    const schema = JSON.stringify(jsonSchemaFor(MOCKUP_OUTPUT.schema));
+    for (const keyword of ['$schema', 'maxLength', 'minItems', 'maxItems']) {
+      assert.doesNotMatch(schema, new RegExp(keyword), `kept ${keyword}`);
+    }
   });
 
   it('opts out of response storage', async () => {

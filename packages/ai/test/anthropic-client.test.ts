@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 import type Anthropic from '@anthropic-ai/sdk';
 
 import { createAnthropicPlanClient, usageOf } from '../src/anthropic-client.ts';
+import { MOCKUP_OUTPUT } from '../src/plan-output.ts';
+import type { PlanOutput } from '../src/plan-output.ts';
 
 /**
  * The one request shape that decides whether prompt caching happens at all.
@@ -18,6 +20,7 @@ interface Captured {
   system?: unknown;
   messages?: unknown;
   model?: string;
+  output_config?: unknown;
 }
 
 function fakeAnthropic(captured: Captured): Anthropic {
@@ -117,5 +120,55 @@ describe('reading Anthropic usage', () => {
       cacheReadInputTokens: 0,
       cacheWriteInputTokens: 0,
     });
+  });
+});
+
+/**
+ * The schema in the request is the caller's, not this client's (#189
+ * review, P1).
+ *
+ * `output_config.format` was `zodOutputFormat(GenerationPlanSchema)`
+ * whatever was asked for, so a mockup run was *structurally* prevented from
+ * succeeding: the prompt asked for a set of directions and the API
+ * constrained the reply to a generation plan. The model complies with the
+ * API, `MockupSetSchema` rejects what comes back, and the caller pays for a
+ * refusal they did not cause.
+ *
+ * Asserted against what was requested rather than against any particular
+ * schema, because the bug was a client that had an opinion about the shape
+ * at all.
+ */
+describe('the shape a request asks for', () => {
+  async function sendWith(output?: PlanOutput): Promise<Captured> {
+    const captured: Captured = {};
+    const client = createAnthropicPlanClient({
+      client: fakeAnthropic(captured),
+    });
+    await client.createPlan({
+      model: 'claude-haiku-4-5',
+      system: 'SYSTEM PROMPT',
+      prompt: 'Build a landing page',
+      maxTokens: 1000,
+      effort: 'high',
+      ...(output ? { output } : {}),
+    });
+    return captured;
+  }
+
+  it('sends the mockup schema when a mockup set was asked for', async () => {
+    const captured = await sendWith(MOCKUP_OUTPUT);
+    const format = JSON.stringify(
+      (captured.output_config as { format?: unknown })?.format,
+    );
+    assert.match(format, /mockups/, 'the request did not ask for mockups');
+    assert.doesNotMatch(format, /"files"/, 'it asked for a plan instead');
+  });
+
+  it('still asks for a plan when nothing says otherwise', async () => {
+    const captured = await sendWith();
+    const format = JSON.stringify(
+      (captured.output_config as { format?: unknown })?.format,
+    );
+    assert.match(format, /files/, 'the default stopped being a plan');
   });
 });

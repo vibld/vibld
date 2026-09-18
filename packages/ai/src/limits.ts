@@ -120,3 +120,23 @@ export const MAX_MOCKUP_FIXED_PROMPT_CHARS = 2_500;
  * has been paid for and a choice made.
  */
 export const MAX_CHOSEN_MOCKUP_CHARS = 24_000;
+
+/**
+ * The whole prompt section a chosen direction contributes, document and all
+ * (#189 review).
+ *
+ * The build's worst case counted `MAX_CHOSEN_MOCKUP_CHARS` and stopped,
+ * which is the document by itself. `chosenMockupSection` also sends the
+ * label through `JSON.stringify` -- so a 60-character label can serialise
+ * to more than 60 -- and about 470 characters of fixed framing that names
+ * the document as data rather than instruction. That framing is the part
+ * that keeps a mockup from becoming a second prompt, so it is not optional
+ * and it is not free.
+ *
+ * The same mistake as the mockup route's own reservation, mirrored: there I
+ * counted what a caller may send and forgot the system prompt; here I
+ * counted what a caller may send and forgot the wrapper. Pinned the same
+ * way, by `chosen-mockup-prompt.test.ts` building the largest section this
+ * can produce and measuring it.
+ */
+export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 25_000;

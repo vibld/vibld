@@ -9,6 +9,8 @@
 
 export type PlanEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+import type { PlanOutput } from './plan-output.ts';
+
 export interface PlanRequest {
   system: string;
   prompt: string;
@@ -29,6 +31,15 @@ export interface PlanRequest {
    * one -- which is exactly how this looked before it worked.
    */
   onProgress?: (progress: PlanProgress) => void;
+  /**
+   * What shape the reply must take. Defaults to a generation plan.
+   *
+   * Part of the *request* rather than of the client, which is the whole of
+   * the P1 this fixed (#189 review): every client hard-coded the plan's
+   * schema, so a mockup run asked for one thing in its prompt and was
+   * constrained to another by the API.
+   */
+  output?: PlanOutput;
 }
 
 export interface PlanProgress {

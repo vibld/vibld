@@ -3,6 +3,7 @@ import {
   MOCKUP_SYSTEM_PROMPT,
   MockupSetSchema,
 } from './mockup-schema.ts';
+import { MOCKUP_OUTPUT } from './plan-output.ts';
 import type { ParsedMockupSet } from './mockup-schema.ts';
 import {
   DEFAULT_EFFORT,
@@ -93,6 +94,12 @@ export class MockupProvider {
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,
+      // The shape this provider is about to validate, told to the client
+      // that is about to ask for it (#189 review). Without this the client
+      // constrained the reply to a generation plan while the system prompt
+      // above asked for a set of directions, so on Anthropic and OpenAI the
+      // run could not succeed and on DeepSeek it was being argued with.
+      output: MOCKUP_OUTPUT,
       ...(this.#signal ? { signal: this.#signal } : {}),
       ...(this.#onProgress ? { onProgress: this.#onProgress } : {}),
     });

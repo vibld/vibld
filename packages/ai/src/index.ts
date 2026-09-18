@@ -15,6 +15,7 @@ export {
   mockupMaxTokensFor,
   DEFAULT_MODEL,
   buildUserPrompt,
+  chosenMockupSection,
 } from './plan-provider.ts';
 export type { ModelProviderOptions } from './plan-provider.ts';
 export type {
@@ -47,6 +48,15 @@ export {
   MockupSetSchema,
 } from './mockup-schema.ts';
 export type { ParsedMockup, ParsedMockupSet } from './mockup-schema.ts';
+export {
+  MOCKUP_JSON_INSTRUCTION,
+  MOCKUP_OUTPUT,
+  PLAN_JSON_INSTRUCTION,
+  PLAN_OUTPUT,
+  jsonSchemaFor,
+  outputFor,
+} from './plan-output.ts';
+export type { PlanOutput } from './plan-output.ts';
 export { MockupProvider } from './mockup-provider.ts';
 export type {
   MockupProviderOptions,
@@ -135,6 +145,7 @@ export {
   MAX_BASE_CONTENT_CHARS,
   MAX_KNOWLEDGE_CHARS,
   MAX_CHOSEN_MOCKUP_CHARS,
+  MAX_CHOSEN_MOCKUP_SECTION_CHARS,
   MAX_MOCKUP_DIRECTION_CHARS,
   MAX_MOCKUP_FIXED_PROMPT_CHARS,
 } from './limits.ts';

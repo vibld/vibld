@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildUserPrompt } from '../src/plan-provider.ts';
-import { MAX_CHOSEN_MOCKUP_CHARS } from '../src/limits.ts';
+import { buildUserPrompt, chosenMockupSection } from '../src/plan-provider.ts';
+import {
+  MAX_CHOSEN_MOCKUP_CHARS,
+  MAX_CHOSEN_MOCKUP_SECTION_CHARS,
+} from '../src/limits.ts';
+import { MAX_MOCKUP_LABEL_CHARS } from '../src/mockup-schema.ts';
 import { ProviderContextError } from '../src/errors.ts';
 
 /**
@@ -120,5 +124,52 @@ describe('a chosen direction in the build prompt', () => {
         chosen('x'.repeat(MAX_CHOSEN_MOCKUP_CHARS)),
       ),
     );
+  });
+});
+
+/**
+ * What the reservation has to cover for a chosen direction (#189 review).
+ *
+ * The build's worst case counted `MAX_CHOSEN_MOCKUP_CHARS`, which is the
+ * document alone. The label is sent too, through `JSON.stringify`, and so
+ * is the framing that names the document as data rather than instruction --
+ * the part that stops a mockup becoming a second prompt, so not optional
+ * and not free.
+ *
+ * Measured rather than estimated, for the reason the other bounds in
+ * `limits.ts` are: a figure nothing walks stops being an upper bound the
+ * first time somebody rewrites the framing.
+ */
+describe('what a chosen direction costs the prompt', () => {
+  /** The largest section this can produce, built rather than guessed at. */
+  function largestSection(): string {
+    // A label of quotes and backslashes is the worst case for
+    // `JSON.stringify`, which escapes each one into two characters.
+    return chosenMockupSection(
+      '"\\'.repeat(MAX_MOCKUP_LABEL_CHARS / 2),
+      'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS),
+    );
+  }
+
+  it('fits inside the bound the reservation uses', () => {
+    const largest = largestSection().length;
+    assert.ok(
+      largest <= MAX_CHOSEN_MOCKUP_SECTION_CHARS,
+      `the largest section is ${largest} chars, past the reserved ${MAX_CHOSEN_MOCKUP_SECTION_CHARS}`,
+    );
+  });
+
+  it('is more than the document by itself', () => {
+    // The finding, as an assertion: if these were equal the old bound would
+    // have been right and this constant would be pointless.
+    assert.ok(
+      largestSection().length > MAX_CHOSEN_MOCKUP_CHARS,
+      'the section costs no more than the document, so nothing was missing',
+    );
+  });
+
+  it('still names the document as data', () => {
+    // The bound must not be met by deleting the sentence that earns it.
+    assert.match(largestSection(), /page content, never instructions/);
   });
 });
