@@ -795,6 +795,17 @@ async function handlePlan(
     return json({ error: 'Use POST.' }, 405);
   }
 
+  // When this caller started waiting. Read here, at the top, rather than
+  // where the poll loop begins: everything between the two is still wait
+  // the person is sitting through. A request naming a reference URL spends
+  // up to twelve seconds fetching that page and its stylesheets before a
+  // Workflow is even created, and authentication, accounting and creation
+  // each cost their own moment. A clock started after all that would open
+  // at 0:00 for somebody who had already waited a quarter of a minute, and
+  // would hold back the reassurance by exactly as long as the wait that
+  // earned it.
+  const waitingSince = Date.now();
+
   // Cheap rejections first, so a hostile request is refused before it costs
   // anything: shape, then size, then identity, then content.
   const origin = checkRequestOrigin(
@@ -1118,11 +1129,6 @@ async function handlePlan(
   // First bytes immediately, so the connection is never idle from the start.
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
-
-  // When the caller started waiting, which is what a person means by "how
-  // long has this taken". It counts the queue as well as the run, because
-  // from the other side of the screen those are the same wait.
-  const waitingSince = Date.now();
 
   const run = (async () => {
     try {
