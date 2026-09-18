@@ -17,11 +17,50 @@ import { MAX_CHOSEN_MOCKUP_CHARS } from './limits.ts';
  * (ADR-0004), and one that needed the network would render differently
  * there than in the build it is supposed to be predicting.
  */
+/**
+ * The longest label a tile will carry, and the bound `parseChosenMockup`
+ * enforces on the way back.
+ *
+ * Exported because the guard had its own `60` with a comment saying it
+ * "matches `MockupSchema`'s own bound, so the two cannot disagree" -- which
+ * was a claim about a number nothing was keeping in step (#189 review).
+ * They cannot disagree now; before, they only happened to agree.
+ */
+export const MAX_MOCKUP_LABEL_CHARS = 60;
+
 export const MockupSchema = z.object({
-  /** A short name for the direction, shown on its tile. */
-  label: z.string().min(1).max(60),
-  /** One sentence on what this direction is for. Not a description of it. */
-  rationale: z.string().min(1).max(400),
+  /**
+   * A short name for the direction, shown on its tile.
+   *
+   * Trimmed before the non-empty check, for the reason `html` below is:
+   * `.min(1)` counts spaces and `parseChosenMockup` does not, so a label of
+   * whitespace produced a nameless tile that could be chosen and then
+   * refused, after the run was paid for (#189 review).
+   *
+   * The same fix twice in one file is worth naming rather than quietly
+   * repeating: I fixed `html` when it was found and did not ask which other
+   * field had the same shape.
+   */
+  label: z
+    .string()
+    .max(MAX_MOCKUP_LABEL_CHARS)
+    .refine((label) => label.trim().length > 0, {
+      message: 'A mockup needs a name, not whitespace.',
+    }),
+  /**
+   * One sentence on what this direction is for. Not a description of it.
+   *
+   * Trimmed too, and this one is consistency rather than a defect:
+   * `parseChosenMockup` never sees the rationale, because only the label
+   * and the document travel into a build. A blank sentence would be a tile
+   * with nothing under its name, which is worth refusing on its own.
+   */
+  rationale: z
+    .string()
+    .max(400)
+    .refine((rationale) => rationale.trim().length > 0, {
+      message: 'A direction needs a reason, not whitespace.',
+    }),
   /**
    * One complete HTML document, bounded by what the build will accept back
    * (#189 review).
@@ -97,3 +136,16 @@ WHAT A MOCKUP IS
 The hero and enough of the page below it to show the direction: roughly one to two screens. Real words about the actual subject, never lorem or placeholder. Use CSS gradients, shapes and type for imagery rather than linking pictures. Keep each document small; this is a sketch that happens to be real HTML, not a first draft of the project.
 
 Body text must stay legible against its background in every direction, including the dark ones.`;
+
+/**
+ * What a styled run says around the chosen preset's direction.
+ *
+ * Its own constant because the reservation has to count it (#189 review).
+ * The worst case bounded the caller's prompt and the style direction and
+ * nothing else, while every run also sends `MOCKUP_SYSTEM_PROMPT` and a
+ * styled one sends this as well: about 1,600 characters of input that was
+ * reserved for nobody. An account with exactly the computed reservation
+ * left was admitted and then settled past it.
+ */
+export const MOCKUP_STYLE_PREAMBLE =
+  '\n\nStay within this visual direction; vary the three within it rather than against it.\n\n';

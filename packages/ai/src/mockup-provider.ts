@@ -1,4 +1,8 @@
-import { MOCKUP_SYSTEM_PROMPT, MockupSetSchema } from './mockup-schema.ts';
+import {
+  MOCKUP_STYLE_PREAMBLE,
+  MOCKUP_SYSTEM_PROMPT,
+  MockupSetSchema,
+} from './mockup-schema.ts';
 import type { ParsedMockupSet } from './mockup-schema.ts';
 import {
   DEFAULT_EFFORT,
@@ -84,7 +88,7 @@ export class MockupProvider {
     const completion = await this.#client.createPlan({
       system: MOCKUP_SYSTEM_PROMPT,
       prompt: direction
-        ? `${request.prompt}\n\nStay within this visual direction; vary the three within it rather than against it.\n\n${direction}`
+        ? `${request.prompt}${MOCKUP_STYLE_PREAMBLE}${direction}`
         : request.prompt,
       model: this.#model,
       maxTokens: this.#maxTokens,

@@ -172,6 +172,45 @@ describe('where a mockup frame may go', () => {
     }
   });
 
+  it('removes a nested document the query cannot see into', () => {
+    // The sixth finding, and the first that parsing alone did not close
+    // (#189 review). The refresh lives inside an *attribute value* until
+    // the browser makes a document of it, so a query over this document
+    // never visits it. The nested context inherits the CSP, which does not
+    // govern navigation, and the sandbox lets it replace itself.
+    const framed = mockupFrameDocument(
+      `<iframe srcdoc="<meta http-equiv=refresh content='0;url=https://evil.example'>"></iframe>`,
+    );
+    assert.doesNotMatch(framed, /evil\.example/);
+    assert.doesNotMatch(framed, /srcdoc/i);
+  });
+
+  it('removes every other way to open a nested context', () => {
+    for (const markup of [
+      '<object data="https://evil.example/x"></object>',
+      '<embed src="https://evil.example/x">',
+      '<frame src="https://evil.example/x">',
+    ]) {
+      assert.doesNotMatch(
+        mockupFrameDocument(markup),
+        /evil\.example/,
+        `survived: ${markup}`,
+      );
+    }
+  });
+
+  it('removes a template, whose content this query also cannot see', () => {
+    // Not a known live path: template content does not render, and it
+    // cannot be cloned without script, which the sandbox denies. It is
+    // removed because it is a second place the query is blind, and this
+    // file's record on places I could not see is five for five.
+    const framed = mockupFrameDocument(
+      '<template><meta http-equiv="refresh" content="0;url=https://evil.example"></template>',
+    );
+    assert.doesNotMatch(framed, /refresh/i);
+    assert.doesNotMatch(framed, /evil\.example/);
+  });
+
   it('removes a base the document tries to set for itself', () => {
     // Ours leads the head and wins on `target`, but sets no `href` -- so a
     // later `<base href>` would be the first with one, and would become

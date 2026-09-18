@@ -90,8 +90,31 @@ export const MOCKUP_FRAME_POLICY =
  * still decide what relative URLs resolve against even though ours wins on
  * target. Nothing can be fetched or navigated through it, so this is depth
  * rather than a hole -- and a one-document sketch has no use for a base.
+ *
+ * The nested browsing contexts are the sixth finding, and the first that
+ * parsing alone did not close (#189 review). A query over this document
+ * never visits `<iframe srcdoc="...">`, because that markup is an
+ * *attribute value* until the browser makes a document of it. The nested
+ * document inherits the CSP, which does not govern navigation, and the
+ * sandbox lets a nested context replace itself -- so a refresh hidden in
+ * there runs with nobody touching it, exactly as the outer one did.
+ *
+ * Removed rather than recursively sanitised. Recursion means a depth limit
+ * and the same question again for `src`, `data:` and whatever else, which
+ * is the guessing this file just stopped doing. And it costs a mockup
+ * nothing: `default-src 'none'` already denies every one of these a
+ * document to load, so the only embed that could ever have worked is a
+ * `srcdoc` one, which is a second page rather than content. A sketch is one
+ * page.
+ *
+ * `template` for the same reason rather than for a known path: its content
+ * is invisible to this query too, and survives serialisation intact. It
+ * cannot activate without script and script is denied, so this is closing a
+ * place the query cannot see rather than a hole anyone has shown me. Given
+ * how this file's five previous guarantees went, that is the trade I want.
  */
-const REMOVE_ENTIRELY = 'meta[http-equiv], base';
+const REMOVE_ENTIRELY =
+  'meta[http-equiv], base, iframe, frame, object, embed, template';
 
 /**
  * An explicit target defeats the base below, so it does not get to stay.

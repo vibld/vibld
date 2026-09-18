@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { MOCKUP_SYSTEM_PROMPT, MockupSetSchema } from '../src/mockup-schema.ts';
+import {
+  MAX_MOCKUP_LABEL_CHARS,
+  MOCKUP_STYLE_PREAMBLE,
+  MOCKUP_SYSTEM_PROMPT,
+  MockupSetSchema,
+} from '../src/mockup-schema.ts';
+import { MAX_MOCKUP_FIXED_PROMPT_CHARS } from '../src/limits.ts';
 import {
   MOCKUP_OUTPUT_TOKENS,
   mockupMaxTokensFor,
@@ -197,5 +203,74 @@ describe('carrying a chosen direction into the build', () => {
       MAX_CHOSEN_MOCKUP_CHARS >= largestOneMockup,
       `the cap (${MAX_CHOSEN_MOCKUP_CHARS}) refuses a mockup this system can produce (${largestOneMockup})`,
     );
+  });
+});
+
+/**
+ * What the reservation has to cover but the caller never sends (#189
+ * review).
+ *
+ * `MAX_MOCKUP_FIXED_PROMPT_CHARS` is documentation of a contract, like the
+ * direction bound above, and worth exactly as much as the walk that checks
+ * it. The worst case bounded what a caller could type and reserved as
+ * though that were the whole prompt; it is not, by about 1,600 characters
+ * of text written in this repository.
+ */
+describe('what every mockup run sends regardless of who asked', () => {
+  it('keeps the fixed prompt text inside the bound the reservation uses', () => {
+    const fixed = MOCKUP_SYSTEM_PROMPT.length + MOCKUP_STYLE_PREAMBLE.length;
+    assert.ok(
+      fixed <= MAX_MOCKUP_FIXED_PROMPT_CHARS,
+      `fixed prompt text is ${fixed} chars, past the reserved ${MAX_MOCKUP_FIXED_PROMPT_CHARS}`,
+    );
+  });
+
+  it('still says what it needs to say', () => {
+    // The bound must not be met by gutting the prompt: the preamble is what
+    // keeps a styled run varying within its direction rather than against
+    // it, and it is now counted rather than invisible.
+    assert.match(MOCKUP_STYLE_PREAMBLE, /within this visual direction/);
+  });
+});
+
+/**
+ * A label of whitespace, which is the `html` finding in a second field.
+ *
+ * `parseChosenMockup` requires `label.trim().length > 0`. I fixed `html`
+ * when it was found and did not ask which other field had the same shape,
+ * so the same paid-run-then-unbuildable failure was still reachable through
+ * a nameless tile (#189 review).
+ */
+describe('what a direction must be called', () => {
+  it('refuses a label that is only whitespace', () => {
+    for (const label of [' ', '\n', '\t  ']) {
+      const parsed = MockupSetSchema.safeParse({
+        mockups: [mockup(), mockup(), mockup({ label })],
+      });
+      assert.equal(
+        parsed.success,
+        false,
+        `accepted a label of ${JSON.stringify(label)}`,
+      );
+    }
+  });
+
+  it('refuses a rationale that is only whitespace', () => {
+    const parsed = MockupSetSchema.safeParse({
+      mockups: [mockup(), mockup(), mockup({ rationale: '   ' })],
+    });
+    assert.equal(parsed.success, false);
+  });
+
+  it('bounds the label at the figure the build reads back', () => {
+    // One constant now, rather than two that happened to agree.
+    const parsed = MockupSetSchema.safeParse({
+      mockups: [
+        mockup(),
+        mockup(),
+        mockup({ label: 'x'.repeat(MAX_MOCKUP_LABEL_CHARS + 1) }),
+      ],
+    });
+    assert.equal(parsed.success, false);
   });
 });

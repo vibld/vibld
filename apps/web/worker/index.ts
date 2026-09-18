@@ -36,11 +36,7 @@ import { fetchReferenceContext } from './reference-fetch.ts';
 import { spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { stageFor } from './run-stage.ts';
-import {
-  MAX_CHOSEN_MOCKUP_CHARS,
-  MAX_MOCKUP_DIRECTION_CHARS,
-  MAX_REFERENCE_CHARS,
-} from '@vibld/ai/limits';
+import { MAX_CHOSEN_MOCKUP_CHARS, MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
   clerkLookupConfigured,
@@ -58,7 +54,7 @@ import {
   dayKey,
   worstCaseMicroUsd,
 } from './spend.ts';
-import { runCeilingFor } from './run-ceiling.ts';
+import { MOCKUP_INPUT_CHARS, runCeilingFor } from './run-ceiling.ts';
 import type { SpendVerdict } from './spend.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
@@ -1355,7 +1351,7 @@ async function handleMockups(
   // Named rather than inlined because the settlement of a cancelled run
   // needs the same figure (#189 review), and a second spelling of it is a
   // second chance for the two to disagree about what was reserved.
-  const inputChars = DEFAULT_LIMITS.maxPromptChars + MAX_MOCKUP_DIRECTION_CHARS;
+  const inputChars = MOCKUP_INPUT_CHARS;
   const worstCase = worstCaseMicroUsd(prices, maxTokens, inputChars);
 
   let reserved;

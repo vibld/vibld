@@ -207,6 +207,36 @@ describe('the composer, as it is actually wired', () => {
     view.unmount();
   });
 
+  it('empties the composer for a run this form did not start', async () => {
+    // Choosing a direction submits through the session, not through this
+    // form, so its cleanup never ran (#189 review). The composer then asked
+    // "What should change?" over the original build request and its
+    // reference page, and submitting that repeated the build and refetched
+    // the reference.
+    const view = await mount(builder());
+    await view.type('A landing page');
+    await view.reference_('https://example.com');
+
+    // No submit here: a run simply appears, the way it does when the
+    // chooser starts one.
+    await view.render(builder({ runId: 'run-1', running: true }));
+
+    assert.equal(view.prompt().value, '');
+    assert.equal(view.reference().value, '');
+    view.unmount();
+  });
+
+  it('does not empty it again for the same run', async () => {
+    // Otherwise a re-render during a run would wipe what somebody had
+    // started typing for the turn after it.
+    const view = await mount(builder({ runId: 'run-1', running: true }));
+    await view.type('the next thing');
+    await view.render(builder({ runId: 'run-1', running: false }));
+
+    assert.equal(view.prompt().value, 'the next thing');
+    view.unmount();
+  });
+
   it('sends nothing for a prompt that is only whitespace', async () => {
     const view = await mount(builder());
     await view.type('   ');

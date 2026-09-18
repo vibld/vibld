@@ -31,6 +31,12 @@ import {
 } from '@vibld/ai';
 import type { ProviderEnv } from '@vibld/ai';
 
+import {
+  MAX_MOCKUP_DIRECTION_CHARS,
+  MAX_MOCKUP_FIXED_PROMPT_CHARS,
+} from '@vibld/ai/limits';
+
+import { DEFAULT_LIMITS } from './request-guard.ts';
 import { parsePrices } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 
@@ -57,6 +63,29 @@ export interface RunCeiling {
  * reservation.
  */
 export type RunKind = 'build' | 'mockups';
+
+/**
+ * Every character a mockup run may send the model.
+ *
+ * Here rather than inline in the route for the reason this whole file
+ * exists: a second place that decides what a run costs is a second place
+ * that can disagree with the reservation. It was inline, and it was wrong
+ * (#189 review) -- it counted the caller's prompt and the style direction
+ * and stopped, while every run also sends `MOCKUP_SYSTEM_PROMPT` and a
+ * styled one sends the preamble too. About 1,600 characters reserved for
+ * nobody, so an account with exactly the computed reservation left was
+ * admitted for a run that settled past it.
+ *
+ * Three terms, and they are three different kinds of thing, which is how
+ * one came to be forgotten: what a caller may type, what this repository
+ * adds because they chose a preset, and what this repository adds
+ * regardless. `mockup-reservation.test.ts` measures the real artefacts and
+ * fails if their sum ever exceeds this.
+ */
+export const MOCKUP_INPUT_CHARS =
+  DEFAULT_LIMITS.maxPromptChars +
+  MAX_MOCKUP_DIRECTION_CHARS +
+  MAX_MOCKUP_FIXED_PROMPT_CHARS;
 
 export function runCeilingFor(
   env: RunCeilingEnv,

@@ -40,6 +40,8 @@ export {
 } from './plan-schema.ts';
 export type { ParsedGenerationPlan } from './plan-schema.ts';
 export {
+  MAX_MOCKUP_LABEL_CHARS,
+  MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
   MockupSchema,
   MockupSetSchema,
@@ -134,6 +136,7 @@ export {
   MAX_KNOWLEDGE_CHARS,
   MAX_CHOSEN_MOCKUP_CHARS,
   MAX_MOCKUP_DIRECTION_CHARS,
+  MAX_MOCKUP_FIXED_PROMPT_CHARS,
 } from './limits.ts';
 export {
   createDeepseekPlanClient,

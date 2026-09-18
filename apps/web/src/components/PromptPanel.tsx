@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { BuilderState } from '../generation/session.ts';
@@ -60,6 +60,54 @@ export function PromptPanel({
   // comes from what was just built, not from a generic starting point.
   const started = state.transcript.length > 0;
 
+  /**
+   * Everything that belonged to the request that just started.
+   *
+   * One function because the rule is one rule, and it was written for one
+   * path (#189 review). Choosing a direction submits through the session
+   * rather than through this form, so the composer still held the original
+   * request and its reference page while the label above it asked "What
+   * should change?" -- and submitting that repeated the build and refetched
+   * the reference.
+   *
+   * - The prompt, because this is a composer, not a field that holds the
+   *   last thing submitted: leaving the sent message in it means the next
+   *   turn starts by editing the previous one.
+   * - The reference URL, which is scoped to the request it went with rather
+   *   than being a standing preference the way `knowledge` is, so a later
+   *   unrelated turn never refetches a page nobody meant it for.
+   * - "Force a validation failure", which costs the most: left ticked it
+   *   quietly spends every later run on a checkpoint designed to be
+   *   rejected, and the box is far enough up the form to be out of sight by
+   *   the time the failure arrives.
+   */
+  function clearPerRequestFields() {
+    setPrompt('');
+    setReferenceUrl('');
+    setFailNext(false);
+  }
+
+  // Fires for a run this form did not start, which is the case that was
+  // missing: `chooseMockup` goes straight to the session. Keyed on the run
+  // id rather than on `running`, so a run that finishes before this renders
+  // still clears, and so a re-render during a run does not wipe what
+  // somebody has begun typing for the turn after it.
+  //
+  // That last part is the dependency array's job and nothing else's. The
+  // first version also kept a ref of the last id it had cleared for, and a
+  // mutation showed the ref was unobservable: React re-runs this only when
+  // the id changes, run ids are monotonic, so there is no second path for
+  // the same id to arrive by. A guard no test can distinguish is a guard
+  // that is not carrying its weight, so it is gone.
+  useEffect(() => {
+    if (state.runId === null) return;
+    clearPerRequestFields();
+    // `clearPerRequestFields` only calls setters, which React guarantees are
+    // stable; listing it would mean re-running on every render rather than
+    // on every run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.runId]);
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled || prompt.trim().length === 0) return;
@@ -70,21 +118,11 @@ export function PromptPanel({
       style,
       trimmedReference.length > 0 ? trimmedReference : null,
     );
-    // Clear the box. It is a composer now, not a form field that holds the
-    // last thing submitted: leaving the sent message in it means the next
-    // turn starts by editing the previous one, which is not what anyone
-    // means by "what should change?".
-    setPrompt('');
-    // The reference URL is scoped to the request it was submitted with, not
-    // a standing preference the way `knowledge` is -- clearing it means a
-    // later, unrelated turn never re-fetches a page nobody meant it for.
-    setReferenceUrl('');
-    // Same rule, and it costs more here. "Force a validation failure" is a
-    // thing to do to one run, not a setting: left ticked it quietly spends
-    // every later run on a checkpoint that is designed to be rejected, and
-    // the box is far enough up the form to be out of sight by the time the
-    // failure arrives. A tester who wants a second one can tick it again.
-    setFailNext(false);
+    // Here as well as in the effect above, deliberately: the effect cannot
+    // run until the session has reported a new run, and a composer that
+    // still showed the sent message for that round trip would read as a
+    // click that did nothing.
+    clearPerRequestFields();
   }
 
   return (

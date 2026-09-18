@@ -79,6 +79,25 @@ export const MAX_REFERENCE_CHARS = 6_000;
 export const MAX_MOCKUP_DIRECTION_CHARS = 2_000;
 
 /**
+ * The fixed prompt text every mockup run sends, whoever is asking (#189
+ * review).
+ *
+ * `MOCKUP_SYSTEM_PROMPT` goes on every run and `MOCKUP_STYLE_PREAMBLE` on
+ * every styled one. Neither comes from the caller, which is exactly why the
+ * worst case forgot them: I bounded what a caller could send and then
+ * reserved as though that were the whole prompt. It is not, by about 1,600
+ * characters, and an account with precisely the computed reservation left
+ * was admitted for a run that settled past it.
+ *
+ * Documentation of a contract again, like the two bounds above, and pinned
+ * the same way: `mockup-schema.test.ts` measures the real text and fails if
+ * it grows past this. Without that walk the number would be a guess that
+ * stopped being an upper bound the next time somebody added a paragraph to
+ * the prompt, and the ceiling would quietly stop holding.
+ */
+export const MAX_MOCKUP_FIXED_PROMPT_CHARS = 2_500;
+
+/**
  * The largest chosen mockup a build request may carry (#185).
  *
  * Picking a direction has to mean something. Seeding the next prompt with

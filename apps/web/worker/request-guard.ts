@@ -5,6 +5,10 @@ import {
 } from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
+// The one bound, from the schema that produces the labels this guard reads
+// back, rather than a second copy of 60 with a comment asserting they
+// agree (#189 review).
+import { MAX_MOCKUP_LABEL_CHARS } from '@vibld/ai/mockup-schema';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
 import type { ProviderName } from '@vibld/ai/select-client';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -302,9 +306,6 @@ export function parseChosenMockup(
   }
   return { ok: true, value: { label, html } };
 }
-
-/** Matches `MockupSchema`'s own bound, so the two cannot disagree. */
-const MAX_MOCKUP_LABEL_CHARS = 60;
 
 export interface ParsedMockupRequest {
   prompt: string;
