@@ -8,7 +8,12 @@ import {
 } from './plan-provider.ts';
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
-import type { PlanClient, PlanEffort, PlanUsage } from './client.ts';
+import type {
+  PlanClient,
+  PlanEffort,
+  PlanProgress,
+  PlanUsage,
+} from './client.ts';
 
 /**
  * Three directions to choose between, before a build is attempted (#185).
@@ -37,6 +42,13 @@ export interface MockupProviderOptions {
   effort?: PlanEffort;
   onUsage?: (usage: PlanUsage) => void;
   signal?: AbortSignal;
+  /**
+   * Called as output arrives (#189 review). The claim that this route
+   * restores a real character count was written before the callback was
+   * threaded, so it was false: the provider never asked the client for
+   * progress, and the client never reported any.
+   */
+  onProgress?: (progress: PlanProgress) => void;
   style?: StylePresetId;
 }
 
@@ -52,6 +64,7 @@ export class MockupProvider {
   readonly #effort: PlanEffort;
   readonly #onUsage?: (usage: PlanUsage) => void;
   readonly #signal?: AbortSignal;
+  readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #style?: StylePresetId;
 
   constructor(client: PlanClient, options: MockupProviderOptions = {}) {
@@ -61,6 +74,7 @@ export class MockupProvider {
     this.#effort = options.effort ?? DEFAULT_EFFORT;
     this.#onUsage = options.onUsage;
     this.#signal = options.signal;
+    this.#onProgress = options.onProgress;
     this.#style = options.style;
     this.id = `${client.id}:${this.#model}`;
   }
@@ -76,6 +90,7 @@ export class MockupProvider {
       maxTokens: this.#maxTokens,
       effort: this.#effort,
       ...(this.#signal ? { signal: this.#signal } : {}),
+      ...(this.#onProgress ? { onProgress: this.#onProgress } : {}),
     });
 
     // Reported before anything can throw, for the same reason the build

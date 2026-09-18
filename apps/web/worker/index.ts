@@ -1443,6 +1443,22 @@ async function handleMockups(
           onUsage: (reported) => {
             usage = reported;
           },
+          // Forwarded as SSE, which is what makes the character count real
+          // on this route (#189 review). The build cannot do this: its
+          // model call happens inside a Workflow step with no live channel
+          // back to the Worker polling it (#183). Here the call is in this
+          // scope, so the count the client streams is the count the reader
+          // sees.
+          onProgress: ({ characters }) => {
+            if (cancelled) return;
+            void write(
+              encodeEvent('progress', {
+                characters,
+                elapsedMs: Date.now() - waitingSince,
+                stage: 'running',
+              }),
+            );
+          },
           ...(style.value ? { style: style.value } : {}),
         },
       );

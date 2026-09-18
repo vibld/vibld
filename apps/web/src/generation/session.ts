@@ -307,6 +307,13 @@ export class BuilderSession {
   readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
   readonly #requestMockups: typeof requestMockups;
   #mockupContext: { prompt: string; style: StylePresetId | null } | null = null;
+  /**
+   * The look's own controller, separate from the build's `#abort` (#189
+   * review). A mockup run is about a minute and is billed; without this the
+   * only way to stop one was to leave the page, and it kept spending either
+   * way.
+   */
+  #exploreAbort: AbortController | null = null;
   readonly #resolveProvider: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -447,6 +454,8 @@ export class BuilderSession {
       return;
     }
     const epoch = this.#epoch;
+    const controller = new AbortController();
+    this.#exploreAbort = controller;
     this.#mockupContext = { prompt: trimmed, style };
     this.#patch(epoch, (state) => ({
       ...state,
@@ -461,10 +470,12 @@ export class BuilderSession {
         prompt: trimmed,
         style,
         model: this.#state.model,
+        signal: controller.signal,
         onProgress: (progress) => {
           this.#patch(epoch, (state) => ({ ...state, progress }));
         },
       });
+      this.#exploreAbort = null;
       this.#patch(epoch, (state) => ({
         ...state,
         exploring: false,
@@ -472,6 +483,11 @@ export class BuilderSession {
         mockups,
       }));
     } catch (error) {
+      this.#exploreAbort = null;
+      // A run the reader stopped is not a run that failed. `cancelStop`
+      // has already put the session back; reporting the abort on top of
+      // that would show an error for something they chose.
+      if (controller.signal.aborted) return;
       const message = error instanceof Error ? error.message : String(error);
       this.#patch(epoch, (state) => ({
         ...state,
@@ -481,6 +497,28 @@ export class BuilderSession {
         problems: [message],
       }));
     }
+  }
+
+  /**
+   * Stop a look that is still running (#189 review).
+   *
+   * Aborting the fetch drops the connection, which is what tells the
+   * endpoint to stop its own model call -- so this stops the spending
+   * rather than only the waiting, the same contract `cancel` has for a
+   * build.
+   */
+  cancelExplore(): void {
+    if (this.#disposed || !this.#state.exploring) return;
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
+    this.#state = {
+      ...this.#state,
+      exploring: false,
+      progress: null,
+      mockups: [],
+    };
+    this.#mockupContext = null;
+    this.#emit();
   }
 
   /**

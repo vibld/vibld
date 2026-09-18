@@ -209,6 +209,7 @@ function Builder() {
               }}
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}
+              onCancelExplore={() => session.cancelExplore()}
               onModelChange={(model) => session.setModel(model)}
             />
           </div>

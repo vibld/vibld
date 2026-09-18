@@ -27,6 +27,11 @@ export interface PromptPanelProps {
   onExplore: (prompt: string, style: StylePresetId | null) => void;
   onReset: () => void;
   onCancel: () => void;
+  /**
+   * Stop a look that is running (#189 review). Its own handler, because it
+   * stops a different run from `onCancel` and leaves the build untouched.
+   */
+  onCancelExplore: () => void;
   onModelChange: (model: string | null) => void;
 }
 
@@ -36,6 +41,7 @@ export function PromptPanel({
   onExplore,
   onReset,
   onCancel,
+  onCancelExplore,
   onModelChange,
 }: PromptPanelProps) {
   const [prompt, setPrompt] = useState('');
@@ -176,6 +182,16 @@ export function PromptPanel({
         */}
         {state.running ? (
           <button type="button" className="button" onClick={onCancel}>
+            Cancel
+          </button>
+        ) : null}
+        {/*
+          A look is about a minute and is billed for (#189 review). Without
+          this the only way out of one was to leave the page, and it kept
+          spending either way.
+        */}
+        {state.exploring ? (
+          <button type="button" className="button" onClick={onCancelExplore}>
             Cancel
           </button>
         ) : null}

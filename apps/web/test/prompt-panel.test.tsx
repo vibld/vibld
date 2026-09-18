@@ -42,6 +42,7 @@ async function mount(state: BuilderState) {
   const resets: number[] = [];
   const cancels: number[] = [];
   const explored: { prompt: string; style: string | null }[] = [];
+  const exploreCancels: number[] = [];
   const container = document.createElement('div');
   document.body.appendChild(container);
   let root: Root;
@@ -56,6 +57,7 @@ async function mount(state: BuilderState) {
         onExplore={(prompt, style) => explored.push({ prompt, style })}
         onReset={() => resets.push(1)}
         onCancel={() => cancels.push(1)}
+        onCancelExplore={() => exploreCancels.push(1)}
         onModelChange={() => {}}
       />,
     );
@@ -90,6 +92,7 @@ async function mount(state: BuilderState) {
     resets,
     cancels,
     explored,
+    exploreCancels,
     async render(next: BuilderState) {
       await act(async () => {
         root.render(
@@ -101,6 +104,7 @@ async function mount(state: BuilderState) {
             onExplore={(prompt, style) => explored.push({ prompt, style })}
             onReset={() => resets.push(1)}
             onCancel={() => cancels.push(1)}
+            onCancelExplore={() => exploreCancels.push(1)}
             onModelChange={() => {}}
           />,
         );
@@ -295,6 +299,19 @@ describe('asking for directions', () => {
   it('stops offering it once there is a project to change', async () => {
     const view = await mount(builder({ transcript: TURN }));
     assert.equal(view.button(/Show me three directions/), undefined);
+    view.unmount();
+  });
+
+  it('offers a way to stop a look that is running', async () => {
+    // A look is about a minute and is billed for (#189 review). Without
+    // this the only way out was to leave the page, and it kept spending
+    // either way.
+    const view = await mount(builder({ exploring: true }));
+    const cancel = view.button(/^Cancel$/);
+    assert.ok(cancel, 'a running look offers no way to stop it');
+    await act(async () => cancel.click());
+    assert.deepEqual(view.exploreCancels, [1]);
+    assert.deepEqual(view.cancels, [], 'stopping a look cancelled a build');
     view.unmount();
   });
 

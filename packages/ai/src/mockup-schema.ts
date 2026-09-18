@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { MAX_CHOSEN_MOCKUP_CHARS } from './limits.ts';
+
 /**
  * Three directions to look at before committing to a build (#185).
  *
@@ -20,8 +22,22 @@ export const MockupSchema = z.object({
   label: z.string().min(1).max(60),
   /** One sentence on what this direction is for. Not a description of it. */
   rationale: z.string().min(1).max(400),
-  /** One complete HTML document. */
-  html: z.string().min(1),
+  /**
+   * One complete HTML document, bounded by what the build will accept back
+   * (#189 review).
+   *
+   * The two numbers have to agree and nothing was making them: this schema
+   * took any length, while `parseChosenMockup` refuses past
+   * MAX_CHOSEN_MOCKUP_CHARS. A run could therefore offer a direction its
+   * own build route would reject, after the person had paid for the run and
+   * chosen it -- the worst moment to find out.
+   *
+   * My derivation of that cap assumed three mockups split the budget evenly
+   * at four characters a token. Neither is guaranteed: a model can spend
+   * most of its budget on one of them. So the bound is enforced here rather
+   * than inferred, and a direction too large to build is never offered.
+   */
+  html: z.string().min(1).max(MAX_CHOSEN_MOCKUP_CHARS),
 });
 
 /**

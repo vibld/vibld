@@ -139,3 +139,36 @@ describe('asking for three directions', () => {
     });
   });
 });
+
+describe('reporting progress while sketching', () => {
+  it('asks the client for progress and passes it on', async () => {
+    // The claim that this route restores a real character count (#183) was
+    // written before the callback was threaded, so it was false: the
+    // provider never asked, and the client never reported (#189 review).
+    const seen: number[] = [];
+    const reporting: PlanClient = {
+      id: 'fake',
+      async createPlan(request: PlanRequest) {
+        request.onProgress?.({ characters: 120 });
+        request.onProgress?.({ characters: 400 });
+        return {
+          plan: { mockups: [mockup('A'), mockup('B'), mockup('C')] },
+          stopReason: 'end_turn',
+          usage: USAGE,
+        } as PlanCompletion;
+      },
+    };
+
+    await new MockupProvider(reporting, {
+      onProgress: ({ characters }) => seen.push(characters),
+    }).generate({ prompt: 'a bakery' });
+
+    assert.deepEqual(seen, [120, 400]);
+  });
+
+  it('asks for nothing when no caller wants it', async () => {
+    const fake = client();
+    await new MockupProvider(fake).generate({ prompt: 'a bakery' });
+    assert.equal(fake.seen[0]?.onProgress, undefined);
+  });
+});

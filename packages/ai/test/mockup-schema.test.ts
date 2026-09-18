@@ -59,6 +59,31 @@ describe('what a mockup set may be', () => {
     assert.equal(parsed.success, false);
   });
 
+  it('refuses a direction too large for the build to accept back', () => {
+    // The two numbers have to agree. A run that offers a direction its own
+    // build route would refuse spends the money and then takes the choice
+    // away, which is the worst moment to find out.
+    const parsed = MockupSetSchema.safeParse({
+      mockups: [
+        mockup(),
+        mockup(),
+        mockup({ html: 'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS + 1) }),
+      ],
+    });
+    assert.equal(parsed.success, false);
+  });
+
+  it("accepts one exactly at the build's limit", () => {
+    const parsed = MockupSetSchema.safeParse({
+      mockups: [
+        mockup(),
+        mockup(),
+        mockup({ html: 'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS) }),
+      ],
+    });
+    assert.equal(parsed.success, true);
+  });
+
   it('refuses a mockup with no label to choose it by', () => {
     const parsed = MockupSetSchema.safeParse({
       mockups: [mockup(), mockup(), mockup({ label: '' })],
