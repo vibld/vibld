@@ -30,11 +30,13 @@ import { parseMockupArgs } from '../src/cli-args.ts';
 import { STYLE_PRESETS, isStylePresetId } from '../src/style-presets.ts';
 import type { PlanUsage } from '../src/client.ts';
 
-const { prompt, out, style } = parseMockupArgs(process.argv.slice(2));
+const { prompt, out, style, maxTokens } = parseMockupArgs(
+  process.argv.slice(2),
+);
 
 if (!prompt) {
   console.error(
-    'Usage: pnpm --filter @vibld/ai mockups "<prompt>" [--out <dir>] [--style <preset>]',
+    'Usage: pnpm --filter @vibld/ai mockups "<prompt>" [--out <dir>] [--style <preset>] [--max-tokens <n>]',
   );
   process.exit(2);
 }
@@ -47,6 +49,14 @@ if (style !== undefined && !isStylePresetId(style)) {
   process.exit(2);
 }
 
+const ceiling = maxTokens === undefined ? undefined : Number(maxTokens);
+if (ceiling !== undefined && (!Number.isInteger(ceiling) || ceiling <= 0)) {
+  console.error(
+    `--max-tokens must be a positive whole number, not "${maxTokens}".`,
+  );
+  process.exit(2);
+}
+
 let usage: PlanUsage | undefined;
 let progressChars = 0;
 let sentChars: number | undefined;
@@ -54,6 +64,7 @@ let sentChars: number | undefined;
 const model = resolveModel(process.env);
 const provider = new MockupProvider(createPlanClient(process.env, model), {
   model,
+  ...(ceiling === undefined ? {} : { maxTokens: ceiling }),
   ...(style ? { style } : {}),
   onUsage: (reported) => {
     usage = reported;
@@ -80,22 +91,7 @@ try {
     console.log(`   ${mockup.html.length} characters of HTML`);
   }
 
-  // Reported rather than assumed, and each of these is a claim some earlier
-  // version of this feature made without the code behind it (#189 review).
-  if (sentChars !== undefined) {
-    console.log(`\nprompt actually sent: ${sentChars} characters`);
-  }
-  if (progressChars > 0) {
-    console.log(`progress reported: ${progressChars} characters streamed`);
-  }
-  if (usage) {
-    console.log(
-      `tokens: ${usage.inputTokens} in / ${usage.outputTokens} out` +
-        (usage.cacheReadInputTokens
-          ? ` (${usage.cacheReadInputTokens} cached)`
-          : ''),
-    );
-  }
+  report();
 
   if (out) {
     const root = resolve(out);
@@ -117,7 +113,39 @@ try {
 } catch (error) {
   if (error instanceof ProviderError) {
     console.error(`\n${error.name}: ${error.message}`);
+    // Reported on the way out too, which the first version did not do and
+    // should have (#190). A truncation is the case where these numbers
+    // matter most -- they are the difference between "the ceiling is a
+    // little low" and "this request was never going to fit" -- and printing
+    // them only on success meant the one real run that failed said nothing
+    // about how far over it went.
+    report();
     process.exit(1);
   }
   throw error;
+}
+
+/**
+ * What the run cost and what it was told, whether or not it succeeded.
+ *
+ * Each of these was a claim this feature made before the code behind it
+ * existed (#189 review): the progress callback was never threaded, and the
+ * sent size was being reconstructed by the route rather than reported by the
+ * client.
+ */
+function report(): void {
+  if (sentChars !== undefined) {
+    console.log(`\nprompt actually sent: ${sentChars} characters`);
+  }
+  if (progressChars > 0) {
+    console.log(`progress reported: ${progressChars} characters streamed`);
+  }
+  if (usage) {
+    console.log(
+      `tokens: ${usage.inputTokens} in / ${usage.outputTokens} out` +
+        (usage.cacheReadInputTokens
+          ? ` (${usage.cacheReadInputTokens} cached)`
+          : ''),
+    );
+  }
 }

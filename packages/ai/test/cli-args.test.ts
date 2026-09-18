@@ -84,6 +84,15 @@ describe('parseMockupArgs', () => {
     assert.equal('out' in args, false);
   });
 
+  it('reads the ceiling probe without it reaching the prompt', () => {
+    // The probe exists to measure what three documents really cost, so a
+    // value swallowed into the prompt would send the number to the model
+    // and leave the ceiling where it was (#190).
+    const args = parseMockupArgs(['a', 'bakery', '--max-tokens', '40000']);
+    assert.equal(args.prompt, 'a bakery');
+    assert.equal(args.maxTokens, '40000');
+  });
+
   it('does not read the flags that belong to the plan CLI', () => {
     // --base means something to a build and nothing to a look, so it stays
     // part of the prompt here rather than being silently accepted.

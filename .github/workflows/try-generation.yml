@@ -37,6 +37,15 @@ on:
           one once somebody has picked a direction. Ignored for a build.
         required: false
         default: ''
+      max_tokens:
+        description: >-
+          Override the mockup output ceiling for one run, to measure what
+          three documents really cost. MOCKUP_OUTPUT_TOKENS is 18,000, chosen
+          from a description of what three sketches ought to be rather than
+          from watching a model, and the first real run overran it. Leave
+          blank to use the shipped ceiling. Ignored for a build.
+        required: false
+        default: ''
       build:
         description: Also install and build the generated project (proves portability)
         type: boolean
@@ -146,6 +155,7 @@ jobs:
           # run shell commands in a step that holds the API key.
           PROMPT: ${{ inputs.prompt }}
           STYLE: ${{ inputs.style }}
+          MAX_TOKENS: ${{ inputs.max_tokens }}
           VIBLD_PROVIDER: ${{ inputs.provider }}
           VIBLD_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -166,6 +176,9 @@ jobs:
           args=("$PROMPT" --out "$RUNNER_TEMP/mockups")
           if [ -n "${STYLE// /}" ]; then
             args+=(--style "$STYLE")
+          fi
+          if [ -n "${MAX_TOKENS// /}" ]; then
+            args+=(--max-tokens "$MAX_TOKENS")
           fi
           pnpm --filter @vibld/ai mockups "${args[@]}" \
             2>&1 | tee "$RUNNER_TEMP/mockups.log"

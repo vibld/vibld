@@ -42,6 +42,34 @@ export class ProviderRefusalError extends ProviderError {
 }
 
 /**
+ * What was being asked for when a run hit its ceiling, so the advice can be
+ * about that thing.
+ *
+ * This exists because the message below was written for a build and then
+ * shown on a mockup run, which is a different request with different advice:
+ * somebody who asked for three sketches was told their *project* was
+ * incomplete and that they should build it a few pages at a time. The first
+ * real mockup run against a model produced exactly that (#190).
+ */
+export interface TruncatedSubject {
+  /** What is incomplete, as the reader would name it. */
+  what: string;
+  /** What they can do about it. */
+  advice: string;
+}
+
+export const TRUNCATED_PROJECT: TruncatedSubject = {
+  what: 'the generated project is incomplete',
+  advice: 'Ask for a smaller project, or build it a few pages at a time.',
+};
+
+export const TRUNCATED_MOCKUPS: TruncatedSubject = {
+  what: 'the last of the three directions is incomplete',
+  advice:
+    'Try a shorter description, or ask for the build directly and skip the sketches.',
+};
+
+/**
  * Generation stopped at the output ceiling, so the last file is almost
  * certainly cut off mid-token.
  *
@@ -53,10 +81,13 @@ export class ProviderRefusalError extends ProviderError {
 export class ProviderTruncationError extends ProviderError {
   override readonly stop: RunStop = 'model-truncated';
 
-  constructor(maxTokens: number) {
+  constructor(
+    maxTokens: number,
+    subject: TruncatedSubject = TRUNCATED_PROJECT,
+  ) {
     super(
-      `The model hit its ${maxTokens}-token output limit, so the generated project is incomplete. ` +
-        'Ask for a smaller project, or build it a few pages at a time.',
+      `The model hit its ${maxTokens}-token output limit, so ${subject.what}. ` +
+        subject.advice,
     );
     this.name = 'ProviderTruncationError';
   }

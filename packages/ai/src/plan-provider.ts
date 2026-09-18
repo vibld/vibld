@@ -35,7 +35,9 @@ import {
   ProviderRefusalError,
   ProviderShapeError,
   ProviderTruncationError,
+  TRUNCATED_PROJECT,
 } from './errors.ts';
+import type { TruncatedSubject } from './errors.ts';
 
 /**
  * The part of reading a completion that has nothing to do with what was
@@ -51,6 +53,9 @@ export function readCompletion<T>(
   completion: PlanCompletion,
   maxTokens: number,
   schema: ZodType<T>,
+  // Which request this was, so a truncation can say what is incomplete. The
+  // default keeps every existing caller reading as it did (#190).
+  truncated: TruncatedSubject = TRUNCATED_PROJECT,
 ): T {
   if (completion.stopReason === 'refusal') {
     throw new ProviderRefusalError(
@@ -60,7 +65,7 @@ export function readCompletion<T>(
   }
 
   if (completion.stopReason === 'max_tokens') {
-    throw new ProviderTruncationError(maxTokens);
+    throw new ProviderTruncationError(maxTokens, truncated);
   }
 
   const parsed = schema.safeParse(completion.plan);

@@ -5,6 +5,7 @@ import {
 } from './mockup-schema.ts';
 import { MOCKUP_OUTPUT } from './plan-output.ts';
 import type { ParsedMockupSet } from './mockup-schema.ts';
+import { TRUNCATED_MOCKUPS } from './errors.ts';
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -123,6 +124,15 @@ export class MockupProvider {
     // a ledger that counts only successes under-reports the bill.
     this.#onUsage?.(completion.usage);
 
-    return readCompletion(completion, this.#maxTokens, MockupSetSchema);
+    // Named, so a truncation talks about three directions rather than about
+    // a project nobody asked this route for (#190). The first real run
+    // against a model hit the ceiling and told the reader to build their
+    // project a few pages at a time.
+    return readCompletion(
+      completion,
+      this.#maxTokens,
+      MockupSetSchema,
+      TRUNCATED_MOCKUPS,
+    );
   }
 }
