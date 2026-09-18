@@ -42,6 +42,43 @@ export class ProviderRefusalError extends ProviderError {
 }
 
 /**
+ * What a run was asked to produce, so every failure can name it.
+ *
+ * This started as a truncation-only fix and was wrong for the same reason
+ * twice (#190). The truncation message was written for a build and shown on
+ * a mockup run, telling somebody who asked for three sketches that their
+ * *project* was incomplete. I gave truncation a vocabulary and stopped
+ * there, and the next real run failed on `ProviderShapeError`, which still
+ * said "the model returned a plan". Fixing the case in front of me and not
+ * the one beside it, one commit after writing that sentence in a commit
+ * message.
+ *
+ * So it covers every failure `readCompletion` can raise about the artefact,
+ * rather than the one that happened to be reported.
+ */
+export interface OutputSubject {
+  /** What was asked for: "a plan", "a set of three directions". */
+  noun: string;
+  /** What is incomplete when a run hits the ceiling. */
+  truncated: string;
+  /** What the reader can do about a truncation. */
+  advice: string;
+}
+
+export const PLAN_SUBJECT: OutputSubject = {
+  noun: 'a plan',
+  truncated: 'the generated project is incomplete',
+  advice: 'Ask for a smaller project, or build it a few pages at a time.',
+};
+
+export const MOCKUP_SUBJECT: OutputSubject = {
+  noun: 'a set of three directions',
+  truncated: 'the last of the three directions is incomplete',
+  advice:
+    'Try a shorter description, or ask for the build directly and skip the sketches.',
+};
+
+/**
  * Generation stopped at the output ceiling, so the last file is almost
  * certainly cut off mid-token.
  *
@@ -53,10 +90,10 @@ export class ProviderRefusalError extends ProviderError {
 export class ProviderTruncationError extends ProviderError {
   override readonly stop: RunStop = 'model-truncated';
 
-  constructor(maxTokens: number) {
+  constructor(maxTokens: number, subject: OutputSubject = PLAN_SUBJECT) {
     super(
-      `The model hit its ${maxTokens}-token output limit, so the generated project is incomplete. ` +
-        'Ask for a smaller project, or build it a few pages at a time.',
+      `The model hit its ${maxTokens}-token output limit, so ${subject.truncated}. ` +
+        subject.advice,
     );
     this.name = 'ProviderTruncationError';
   }
@@ -66,9 +103,9 @@ export class ProviderTruncationError extends ProviderError {
 export class ProviderShapeError extends ProviderError {
   override readonly stop: RunStop = 'model-shape';
 
-  constructor(detail: string) {
+  constructor(detail: string, subject: OutputSubject = PLAN_SUBJECT) {
     super(
-      `The model returned a plan that does not match the expected shape: ${detail}`,
+      `The model returned ${subject.noun} that does not match the expected shape: ${detail}`,
     );
     this.name = 'ProviderShapeError';
   }

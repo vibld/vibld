@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parsePlanArgs } from '../src/cli-args.ts';
+import { parseMockupArgs, parsePlanArgs } from '../src/cli-args.ts';
 
 describe('parsePlanArgs', () => {
   it('takes an unquoted prompt as the words before any flag', () => {
@@ -38,6 +38,67 @@ describe('parsePlanArgs', () => {
     assert.equal(
       parsePlanArgs(['make', 'it', 'dark', '--base', './generated']).prompt,
       'make it dark',
+    );
+  });
+});
+
+describe('parseMockupArgs', () => {
+  it('reads a style and an output directory in either order', () => {
+    const expected = { prompt: 'a bakery', out: 'o', style: 'quiet-editorial' };
+    assert.deepEqual(
+      parseMockupArgs([
+        'a',
+        'bakery',
+        '--style',
+        'quiet-editorial',
+        '--out',
+        'o',
+      ]),
+      expected,
+    );
+    assert.deepEqual(
+      parseMockupArgs([
+        'a',
+        'bakery',
+        '--out',
+        'o',
+        '--style',
+        'quiet-editorial',
+      ]),
+      expected,
+    );
+  });
+
+  it('does not let a style value leak into the prompt', () => {
+    // The prompt is what the model is paid to answer. A preset id carried
+    // into it asks for a bakery called "--style".
+    assert.equal(
+      parseMockupArgs(['a', 'bakery', '--style', 'bold-poster']).prompt,
+      'a bakery',
+    );
+  });
+
+  it('omits a flag that was not given', () => {
+    const args = parseMockupArgs(['a bakery']);
+    assert.equal('style' in args, false);
+    assert.equal('out' in args, false);
+  });
+
+  it('reads the ceiling probe without it reaching the prompt', () => {
+    // The probe exists to measure what three documents really cost, so a
+    // value swallowed into the prompt would send the number to the model
+    // and leave the ceiling where it was (#190).
+    const args = parseMockupArgs(['a', 'bakery', '--max-tokens', '40000']);
+    assert.equal(args.prompt, 'a bakery');
+    assert.equal(args.maxTokens, '40000');
+  });
+
+  it('does not read the flags that belong to the plan CLI', () => {
+    // --base means something to a build and nothing to a look, so it stays
+    // part of the prompt here rather than being silently accepted.
+    assert.equal(
+      parseMockupArgs(['a', 'bakery', '--base', './generated']).prompt,
+      'a bakery --base ./generated',
     );
   });
 });

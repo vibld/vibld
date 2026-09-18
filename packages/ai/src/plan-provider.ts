@@ -35,7 +35,9 @@ import {
   ProviderRefusalError,
   ProviderShapeError,
   ProviderTruncationError,
+  PLAN_SUBJECT,
 } from './errors.ts';
+import type { OutputSubject } from './errors.ts';
 
 /**
  * The part of reading a completion that has nothing to do with what was
@@ -51,6 +53,9 @@ export function readCompletion<T>(
   completion: PlanCompletion,
   maxTokens: number,
   schema: ZodType<T>,
+  // Which request this was, so every failure below can name what was asked
+  // for. The default keeps every existing caller reading as it did (#190).
+  subject: OutputSubject = PLAN_SUBJECT,
 ): T {
   if (completion.stopReason === 'refusal') {
     throw new ProviderRefusalError(
@@ -60,7 +65,7 @@ export function readCompletion<T>(
   }
 
   if (completion.stopReason === 'max_tokens') {
-    throw new ProviderTruncationError(maxTokens);
+    throw new ProviderTruncationError(maxTokens, subject);
   }
 
   const parsed = schema.safeParse(completion.plan);
@@ -69,6 +74,7 @@ export function readCompletion<T>(
       parsed.error.issues
         .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
         .join('; '),
+      subject,
     );
   }
   return parsed.data;

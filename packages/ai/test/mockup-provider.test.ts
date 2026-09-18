@@ -138,6 +138,42 @@ describe('asking for three directions', () => {
       return true;
     });
   });
+
+  it('names what it asked for when the shape is wrong', async () => {
+    // The sibling I missed. Truncation got a vocabulary one commit before a
+    // real run failed on this instead, still saying "the model returned a
+    // plan" to somebody who asked for three sketches (#190). DeepSeek's
+    // JSON mode documents that it may occasionally return empty content,
+    // so this is a path real runs take, not a theoretical one.
+    const provider = new MockupProvider(
+      client({ plan: null, stopReason: 'end_turn' }),
+      { model: 'deepseek-flash' },
+    );
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }), (error) => {
+      const message = String((error as Error).message);
+      assert.match(message, /set of three directions/);
+      assert.doesNotMatch(message, /returned a plan/);
+      return true;
+    });
+  });
+
+  it('says what is incomplete, which is not a project', async () => {
+    // The test above asserts the ceiling and passed while the message was
+    // the build's: somebody who asked for three sketches was told "the
+    // generated project is incomplete. Ask for a smaller project, or build
+    // it a few pages at a time." The first real run against a model
+    // produced exactly that (#190), which is how an assertion about a
+    // number and not about the words lets wrong advice ship.
+    const provider = new MockupProvider(client({ stopReason: 'max_tokens' }), {
+      model: 'deepseek-flash',
+    });
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }), (error) => {
+      const message = String((error as Error).message);
+      assert.match(message, /directions/);
+      assert.doesNotMatch(message, /project/);
+      return true;
+    });
+  });
 });
 
 describe('reporting progress while sketching', () => {
