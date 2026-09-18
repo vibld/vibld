@@ -2,6 +2,7 @@ import {
   MAX_BASE_CONTENT_CHARS,
   MAX_CHOSEN_MOCKUP_CHARS,
   MAX_KNOWLEDGE_CHARS,
+  MAX_REFERENCE_URL_CHARS,
 } from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
@@ -50,9 +51,9 @@ export const DEFAULT_LIMITS: GuardLimits = {
   // letting the provider throw after the request has been paid for.
   maxTotalContentChars: MAX_BASE_CONTENT_CHARS,
   maxKnowledgeChars: MAX_KNOWLEDGE_CHARS,
-  // A URL, not content -- generous next to a real address bar's limit, tight
-  // next to what a request could otherwise pad the body with.
-  maxReferenceUrlChars: 2048,
+  // The bound the form's own field declares, rather than a second copy of
+  // 2048 that could drift from it (#189 review).
+  maxReferenceUrlChars: MAX_REFERENCE_URL_CHARS,
 };
 
 /** A typo that adds an extra digit should not be able to grant $10,000. */

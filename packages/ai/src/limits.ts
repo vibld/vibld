@@ -140,3 +140,23 @@ export const MAX_CHOSEN_MOCKUP_CHARS = 24_000;
  * can produce and measuring it.
  */
 export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 25_000;
+
+/**
+ * The longest reference URL a request may carry (#189 review).
+ *
+ * Not `MAX_REFERENCE_CHARS` above, which bounds the text fetched *from* that
+ * address. This bounds the address itself: generous next to what a real
+ * address bar accepts, tight next to what a request could otherwise pad its
+ * body with.
+ *
+ * Here rather than as a literal in the Worker's guard because the form has
+ * to declare the same number. The field was a bare `type="url"`, so an
+ * over-long address was perfectly valid markup, passed the browser's check,
+ * paid for a look, was kept for the build that choosing a direction submits,
+ * and was refused there by the guard -- after the spending, on a bound the
+ * field could have carried from the start. `maxLength` in the markup means
+ * the value cannot be typed or pasted in at all, on the button and on
+ * `Generate` alike, and the guard still enforces it for anything that did
+ * not come through the form.
+ */
+export const MAX_REFERENCE_URL_CHARS = 2_048;

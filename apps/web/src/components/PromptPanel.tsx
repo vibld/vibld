@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import type { FormEvent } from 'react';
+import { MAX_REFERENCE_URL_CHARS } from '@vibld/ai/limits';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { BuilderState } from '../generation/session.ts';
 import type { PlanMode } from '../generation/plan-builder.ts';
@@ -163,6 +164,11 @@ export function PromptPanel({
         id={referenceId}
         type="url"
         className="prompt__input"
+        // The same bound the Worker's guard enforces, declared where the
+        // value is entered (#189 review). Without it an over-long address
+        // was valid markup that paid for a look and was refused only by the
+        // build that choosing a direction submits.
+        maxLength={MAX_REFERENCE_URL_CHARS}
         value={referenceUrl}
         placeholder="https://example.com -- a page to copy from or emulate"
         onChange={(event) => setReferenceUrl(event.target.value)}

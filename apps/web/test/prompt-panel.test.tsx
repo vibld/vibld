@@ -7,6 +7,7 @@ import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { BuilderState } from '../src/generation/session.ts';
 import type { PlanMode } from '../src/generation/plan-builder.ts';
 import { PromptPanel } from '../src/components/PromptPanel.tsx';
+import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
 
 /**
  * The composer, as it is actually wired.
@@ -371,6 +372,23 @@ describe('asking for directions', () => {
     await act(async () => view.button(/Show me three directions/)?.click());
 
     assert.deepEqual(view.explored, [], 'a malformed reference started a run');
+    view.unmount();
+  });
+
+  it('bounds the reference field at what the guard will accept', async () => {
+    // The other half of the same finding (#189 review), which
+    // `reportValidity` does not cover: a 3,000-character address is a
+    // perfectly valid `type="url"` value, so the browser's own check passes
+    // it, the look is paid for, and the guard refuses it on the build that
+    // choosing a direction submits. Declared in the markup, the value
+    // cannot be typed or pasted in at all -- on this button and on
+    // `Generate` alike, which is the sibling the button-only fix missed.
+    const view = await mount(builder());
+    assert.equal(
+      view.reference().maxLength,
+      DEFAULT_LIMITS.maxReferenceUrlChars,
+      'the field does not carry the bound the request guard enforces',
+    );
     view.unmount();
   });
 
