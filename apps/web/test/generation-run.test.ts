@@ -14,6 +14,7 @@ import {
 
 import {
   SanitizingModelProvider,
+  assertedBaseRevision,
   ceilingForRun,
   runGeneration,
   settleBudget,
@@ -627,5 +628,67 @@ describe('which project a follow-up edits', () => {
 
     assert.equal(outcome, 'failed');
     assert.equal(asked, false, 'a doomed run still spent a model call');
+  });
+});
+
+/**
+ * What a run queued before #181 shipped still contains.
+ *
+ * A Workflow's params are persisted JSON, so an interface change does not
+ * reach the payloads already on disk. Both halves of this change had to be
+ * told that, and in opposite directions: the revision assertion has to be
+ * found in the old shape, and the spend flag has to be absent-means-charge.
+ * Getting either backwards costs somebody their work or their money.
+ */
+describe('a run that predates the change', () => {
+  it('finds the asserted revision in the old shape', () => {
+    // The old payload said the same thing in a different place. Reading only
+    // the new field would take it for a run asserting nothing, which is the
+    // lost update this change exists to prevent.
+    const legacy = { base: { revision: 'r-old', files: [] } } as unknown as {
+      baseRevision?: string;
+    };
+    assert.equal(assertedBaseRevision(legacy), 'r-old');
+  });
+
+  it('prefers the new field when both are present', () => {
+    const both = {
+      baseRevision: 'r-new',
+      base: { revision: 'r-old', files: [] },
+    } as unknown as { baseRevision?: string };
+    assert.equal(assertedBaseRevision(both), 'r-new');
+  });
+
+  it('asserts nothing for a genuinely new project', () => {
+    assert.equal(assertedBaseRevision({ baseRevision: undefined }), undefined);
+    assert.equal(
+      assertedBaseRevision({ base: {} } as unknown as {
+        baseRevision?: string;
+      }),
+      undefined,
+    );
+  });
+
+  it('charges a step result with no spend flag rather than zeroing it', async () => {
+    // The opposite direction, and the expensive one. A `generate` step
+    // cached before `providerRan` existed resumes without it. Reading that
+    // absence as "never ran" would settle a real generation at nothing.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      undefined,
+      undefined,
+    );
+
+    assert.equal(
+      actual,
+      PRICE_PARAMS.worstCaseMicroUsd,
+      'a legacy run settled free',
+    );
+    assert.deepEqual(
+      calls.map((call) => call.actual),
+      [PRICE_PARAMS.worstCaseMicroUsd, PRICE_PARAMS.worstCaseMicroUsd],
+    );
   });
 });

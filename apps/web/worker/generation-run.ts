@@ -202,6 +202,30 @@ export class SanitizingModelProvider implements ModelProvider {
  * (`generation-store.test.ts`'s `SqliteD1Database`/`InMemoryR2Bucket`) --
  * there is no need for a real `PlanProvider` to exercise it.
  */
+/**
+ * The revision a run asserts it is editing, whichever shape said so.
+ *
+ * A Workflow's params are persisted JSON and do not change shape when an
+ * interface does. One queued before #181 shipped carries the whole `base`
+ * snapshot and no `baseRevision`, and reading only the new field would take
+ * it for a run with nothing to assert -- which is precisely the lost update
+ * this change exists to prevent, reintroduced for the runs that were already
+ * in flight when it shipped. The old shape carried the same fact in
+ * `base.revision`, so it is read rather than dropped.
+ *
+ * Declared loosely on purpose: `WorkflowParams` describes what new code
+ * writes, and this function exists for what old payloads contain.
+ */
+export function assertedBaseRevision(
+  params: Pick<WorkflowParams, 'baseRevision'>,
+): string | undefined {
+  if (params.baseRevision) return params.baseRevision;
+  const legacy = (params as { base?: { revision?: unknown } }).base;
+  return typeof legacy?.revision === 'string' && legacy.revision.length > 0
+    ? legacy.revision
+    : undefined;
+}
+
 export async function runGeneration(
   store: GenerationStore,
   provider: ModelProvider,
@@ -216,7 +240,8 @@ export async function runGeneration(
     // The project, read here rather than received (#181). `loadAccepted`
     // was already the runner's fallback; now it is the only path, so the
     // files never make the round trip through the browser.
-    const base = params.baseRevision
+    const asserted = assertedBaseRevision(params);
+    const base = asserted
       ? await store.loadAccepted(params.projectId)
       : undefined;
 
@@ -225,7 +250,7 @@ export async function runGeneration(
     // catches a base that moves *during* the run; this catches one that had
     // already moved before it started, and refuses for free rather than
     // after paying for a generation that cannot be promoted.
-    if (params.baseRevision && base?.revision !== params.baseRevision) {
+    if (asserted && base?.revision !== asserted) {
       return {
         result: {
           state: 'failed',
@@ -368,7 +393,10 @@ export async function settleBudget(
     | 'prices'
   >,
   usage: PlanUsage | undefined,
-  providerRan: boolean,
+  // Not `boolean`: a durable step result cached before this field existed
+  // resumes without it, and the type would be lying about that. Only an
+  // explicit false is evidence.
+  providerRan: boolean | undefined,
 ): Promise<number> {
   // Three cases, not two, and the third used to be charged as if it were
   // the second.
@@ -381,7 +409,11 @@ export async function settleBudget(
   // Folding the third into the second billed a caller a full generation for
   // being told their revision was stale, which is the opposite of the
   // refusal being free.
-  const actual = !usage && !providerRan ? 0 : usageOrWorstCase(usage, params);
+  // `=== false` rather than falsy: a step result persisted before this
+  // field existed arrives undefined, and reading that as "never ran" would
+  // settle a real generation at zero -- the fail-safe inverted.
+  const actual =
+    !usage && providerRan === false ? 0 : usageOrWorstCase(usage, params);
 
   if (params.reservationId !== undefined) {
     // `reservationKey` is always set alongside `reservationId` by index.ts's
