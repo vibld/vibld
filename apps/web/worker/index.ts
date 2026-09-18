@@ -35,6 +35,7 @@ import { fetchReferenceContext } from './reference-fetch.ts';
 import { spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { stageFor } from './run-stage.ts';
+import { whenClientGone } from './client-gone.ts';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
   clerkLookupConfigured,
@@ -1125,7 +1126,13 @@ async function handlePlan(
   // Two independent notices that the client is gone. The runtime aborts
   // `request.signal` on disconnect; a failed write catches the same thing at
   // the next keepalive, which is the backstop if the signal is unavailable.
-  request.signal?.addEventListener('abort', cancel);
+  //
+  // Through `whenClientGone`, because a caller who left during the identity
+  // check or the reservation above has already aborted by the time this
+  // runs, and an abort is not replayed to a listener added afterwards
+  // (#189 review). This route's version of that is the expensive one: a
+  // whole generation starts for somebody who is not there.
+  whenClientGone(request.signal, cancel);
 
   const write = (chunk: string) =>
     writer.write(encoder.encode(chunk)).catch(cancel);
@@ -1420,7 +1427,10 @@ async function handleMockups(
     // The `finally` below settles a stopped run from what was streamed.
     abort.abort();
   };
-  request.signal?.addEventListener('abort', cancel);
+  // Same reason as `handlePlan`'s: everything above this line is real work
+  // a caller can disconnect during, and an abort that landed then is not
+  // replayed to a listener added now (#189 review).
+  whenClientGone(request.signal, cancel);
 
   const write = (chunk: string) =>
     writer.write(encoder.encode(chunk)).catch(cancel);
