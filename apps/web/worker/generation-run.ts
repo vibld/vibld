@@ -8,7 +8,7 @@ import {
   type ProjectSnapshot,
   type RunTrace,
 } from '@vibld/core';
-import { ProviderError, findModel } from '@vibld/ai';
+import { DEFAULT_MAX_TOKENS, ProviderError, findModel } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
@@ -96,11 +96,30 @@ export interface WorkflowParams {
    * reservation-and-request mismatch this field exists to prevent, only
    * separated by time rather than by call site.
    *
-   * A run enqueued before this field existed resumes without it. That lands
-   * on the provider's own default, which is the ceiling its reservation was
-   * computed with under the old code, so those runs stay consistent too.
+   * Required, so the compiler refuses a params object that omits it. That
+   * covers new runs; it says nothing about payloads already persisted when
+   * this field shipped, which is what `ceilingForRun` exists to handle.
    */
   maxTokens: number;
+}
+
+/**
+ * The output ceiling a run may actually ask for.
+ *
+ * A Workflow's params are persisted JSON, so the type describes what new
+ * code must write and not what an in-flight payload contains. A run enqueued
+ * before `maxTokens` existed resumes without it, and the fallback is
+ * `DEFAULT_MAX_TOKENS` specifically, not the provider's own: that run's
+ * reservation was computed against the flat 64000 the old code used, so
+ * letting it reach a derived ceiling would let a queued DeepSeek Flash run
+ * emit 384000 tokens against a 64000 reservation and outspend it sixfold.
+ * The one case where the old constant is still the right answer is a run
+ * that was priced by the old constant.
+ */
+export function ceilingForRun(
+  params: Pick<WorkflowParams, 'maxTokens'>,
+): number {
+  return params.maxTokens ?? DEFAULT_MAX_TOKENS;
 }
 
 export interface GenerationWorkflowEnv {
