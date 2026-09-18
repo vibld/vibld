@@ -46,6 +46,7 @@ export {
   MOCKUP_SYSTEM_PROMPT,
   MockupSchema,
   MockupSetSchema,
+  mockupUserPrompt,
 } from './mockup-schema.ts';
 export type { ParsedMockup, ParsedMockupSet } from './mockup-schema.ts';
 export {

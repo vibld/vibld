@@ -147,5 +147,22 @@ Body text must stay legible against its background in every direction, including
  * reserved for nobody. An account with exactly the computed reservation
  * left was admitted and then settled past it.
  */
+/**
+ * The user prompt a mockup run actually sends.
+ *
+ * Exported so the route can measure what was sent without rebuilding it
+ * (#189 review). A cancelled run has to be settled from the real prompt,
+ * and the only alternative was a second copy of this concatenation in
+ * `handleMockups` -- which is the two-places-that-must-agree problem this
+ * PR has tripped over repeatedly, in a place where disagreeing means
+ * mischarging somebody.
+ */
+export function mockupUserPrompt(
+  prompt: string,
+  direction: string | null,
+): string {
+  return direction ? `${prompt}${MOCKUP_STYLE_PREAMBLE}${direction}` : prompt;
+}
+
 export const MOCKUP_STYLE_PREAMBLE =
   '\n\nStay within this visual direction; vary the three within it rather than against it.\n\n';

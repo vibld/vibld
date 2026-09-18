@@ -378,11 +378,24 @@ describe('what a cancelled run is charged', () => {
     );
   });
 
-  it('charges the input in full, because the input was sent in full', () => {
-    // Not an estimate of what happened: the prompt goes to the model before
-    // a single token comes back, so the reservation's own figure is right.
-    const usage = cancelledUsage(0, MAX_TOKENS, INPUT_CHARS);
-    assert.equal(usage.inputTokens, Math.ceil(INPUT_CHARS / 4));
+  it('charges the input that was sent, not the input that was allowed', () => {
+    // The whole input does go before a token comes back, and for a while I
+    // read that as licence to charge the reservation's bound (#189 review).
+    // It is not: the whole input being sent is not the whole allowance
+    // being used. A short unstyled prompt was billed as though it carried
+    // four thousand characters and a style direction nobody chose.
+    const short = cancelledUsage(0, MAX_TOKENS, 40);
+    assert.equal(short.inputTokens, 10);
+    assert.ok(
+      short.inputTokens < Math.ceil(INPUT_CHARS / 4),
+      'a short prompt was charged at the bound rather than at its length',
+    );
+  });
+
+  it('charges nothing for input when nothing was sent', () => {
+    assert.equal(cancelledUsage(0, MAX_TOKENS, 0).inputTokens, 0);
+    // A negative count is not a refund, the same rule the output side has.
+    assert.equal(cancelledUsage(0, MAX_TOKENS, -20).inputTokens, 0);
   });
 
   it('never settles above the reservation it is closing', () => {

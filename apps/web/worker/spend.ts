@@ -209,12 +209,16 @@ export function worstCaseMicroUsd(
  * punishes the reader: pressing Cancel one second into a mockup run would
  * cost more than letting it finish, which makes the button a trap.
  *
- * So a stopped run is settled from what was actually measured. Two halves,
- * and they are not equally certain, which is the thing to be honest about:
+ * So a stopped run is settled from what was actually measured. Two halves:
  *
- * - The input was sent in full before a token came back, so `maxInputChars`
- *   is not an estimate of it at all, it is the same bound the reservation
- *   already used. It errs high, as it should.
+ * - The input is the prompt that was really sent, measured by the caller
+ *   and passed in. An earlier version passed the reservation's *bound*
+ *   here, on the reasoning that "the input was sent in full before a token
+ *   came back" -- which is true, and does not make the bound the right
+ *   number (#189 review). The whole input being sent is not the whole
+ *   allowance being used: a ten-character unstyled prompt was settled as
+ *   though it were four thousand characters plus a style direction that
+ *   was never chosen, about five times over.
  * - The output is estimated from the characters the model streamed, at the
  *   four-characters-per-token figure `worstCaseMicroUsd` above already
  *   uses. That is a rough number, and HTML can run denser than four, so it
@@ -229,10 +233,11 @@ export function worstCaseMicroUsd(
 export function cancelledUsage(
   streamedCharacters: number,
   maxOutputTokens: number,
-  maxInputChars: number,
+  /** Characters the caller really sent, not the bound they were allowed. */
+  inputChars: number,
 ): Required<TokenUsage> {
   return {
-    inputTokens: Math.ceil(maxInputChars / 4),
+    inputTokens: Math.ceil(Math.max(0, inputChars) / 4),
     outputTokens: Math.min(
       maxOutputTokens,
       Math.ceil(Math.max(0, streamedCharacters) / 4),

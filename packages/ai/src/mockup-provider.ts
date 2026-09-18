@@ -1,7 +1,7 @@
 import {
-  MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
   MockupSetSchema,
+  mockupUserPrompt,
 } from './mockup-schema.ts';
 import { MOCKUP_OUTPUT } from './plan-output.ts';
 import type { ParsedMockupSet } from './mockup-schema.ts';
@@ -88,9 +88,7 @@ export class MockupProvider {
     const direction = this.#style ? styleDirection(this.#style) : null;
     const completion = await this.#client.createPlan({
       system: MOCKUP_SYSTEM_PROMPT,
-      prompt: direction
-        ? `${request.prompt}${MOCKUP_STYLE_PREAMBLE}${direction}`
-        : request.prompt,
+      prompt: mockupUserPrompt(request.prompt, direction),
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,

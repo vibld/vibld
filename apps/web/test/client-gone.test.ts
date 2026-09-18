@@ -135,6 +135,19 @@ describe('how a route learns the caller has gone', () => {
     );
   });
 
+  it('settles a cancelled run from what was sent, not from the bound', async () => {
+    // Source-level and weaker than a behavioural test, as above. The point
+    // is which figure reaches `cancelledUsage`: `inputChars` is the
+    // reservation's bound and `sentChars` is the prompt that really went
+    // (#189 review).
+    const source = await readFile(workerSource(), 'utf8');
+    assert.match(
+      source,
+      /cancelledUsage\(streamedCharacters, maxTokens, sentChars\)/,
+      'the cancellation settlement is reading the reservation bound again',
+    );
+  });
+
   it('is what both streaming routes use', async () => {
     const source = await readFile(workerSource(), 'utf8');
     assert.equal(

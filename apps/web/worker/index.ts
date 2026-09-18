@@ -1,8 +1,11 @@
 import {
+  MOCKUP_SYSTEM_PROMPT,
   MockupProvider,
   configuredProviders,
   createPlanClient,
+  mockupUserPrompt,
   resolveModel,
+  styleDirection,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 import type { RunRefusal } from '@vibld/core';
@@ -1473,6 +1476,17 @@ async function handleMockups(
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
 
+  // What this run really sends, as opposed to what its reservation covers.
+  // A cancelled run is settled from this (#189 review): charging the bound
+  // meant a ten-character unstyled prompt was billed as though it carried
+  // four thousand characters and a style direction nobody chose. Built from
+  // the same `mockupUserPrompt` the provider uses, so the two cannot come
+  // to disagree about what was sent.
+  const sentDirection = style.value ? styleDirection(style.value) : null;
+  const sentChars =
+    MOCKUP_SYSTEM_PROMPT.length +
+    mockupUserPrompt(parsed.value.prompt, sentDirection).length;
+
   const run = (async () => {
     let usage: PlanUsage | undefined;
     let providerRan = false;
@@ -1556,7 +1570,7 @@ async function handleMockups(
         const settled =
           usage ??
           (cancelled && providerRan
-            ? cancelledUsage(streamedCharacters, maxTokens, inputChars)
+            ? cancelledUsage(streamedCharacters, maxTokens, sentChars)
             : undefined);
         const actual = await settleBudget(
           env.USER_BUDGET!,

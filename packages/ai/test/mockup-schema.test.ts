@@ -6,6 +6,7 @@ import {
   MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
   MockupSetSchema,
+  mockupUserPrompt,
 } from '../src/mockup-schema.ts';
 import { MAX_MOCKUP_FIXED_PROMPT_CHARS } from '../src/limits.ts';
 import {
@@ -272,5 +273,34 @@ describe('what a direction must be called', () => {
       ],
     });
     assert.equal(parsed.success, false);
+  });
+});
+
+/**
+ * What a run really sends, assembled once (#189 review).
+ *
+ * The route has to measure this to settle a cancelled run honestly, and
+ * the provider has to send it. Two copies of the concatenation would be
+ * two places that can disagree about what was sent, in a place where
+ * disagreeing means mischarging somebody.
+ */
+describe('the prompt a mockup run sends', () => {
+  it('is the caller prompt alone when no preset was chosen', () => {
+    assert.equal(mockupUserPrompt('a bakery', null), 'a bakery');
+  });
+
+  it('wraps a chosen direction in the preamble that explains it', () => {
+    const sent = mockupUserPrompt('a bakery', 'Quiet editorial, serif.');
+    assert.ok(sent.startsWith('a bakery'));
+    assert.ok(sent.includes(MOCKUP_STYLE_PREAMBLE));
+    assert.ok(sent.endsWith('Quiet editorial, serif.'));
+  });
+
+  it('costs an unstyled run far less than a styled one', () => {
+    // The finding, as an assertion: these differ by well over a thousand
+    // characters, which is the gap the old settlement charged for anyway.
+    const bare = mockupUserPrompt('a bakery', null).length;
+    const styled = mockupUserPrompt('a bakery', 'x'.repeat(1_500)).length;
+    assert.ok(styled - bare > 1_000);
   });
 });
