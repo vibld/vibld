@@ -65,6 +65,7 @@ import {
   monthlyAllowanceMicroUsd,
   tierFor,
 } from './entitlement.ts';
+import { secured } from '@vibld/security-headers';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
@@ -1953,242 +1954,22 @@ export interface ExecutionContext {
 }
 
 export default {
+  /**
+   * One exit, so a route added later cannot forget the headers.
+   *
+   * `secured` is applied here rather than inside each handler because that
+   * is exactly how this Worker came to send none of them: the headers were
+   * nobody's job at any particular `return`. The shell gets the same set
+   * from `public/_headers`, which Cloudflare applies to the asset store's
+   * responses and never to this script's (`run_worker_first` is `/api/*`
+   * here, so the two halves answer separately and both have to be covered).
+   */
   async fetch(
     request: Request,
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
-    const { pathname } = new URL(request.url);
-
-    /*
-     * The invite gate, before dispatch rather than inside each handler.
-     *
-     * Scattered checks fail silently: a new endpoint that spends money and
-     * forgets the call is open, and nothing says so. Here the route table
-     * (access-gate.ts) has to classify every path, and a test reads this
-     * file's own route literals and fails on any it does not cover.
-     *
-     * It runs after identity, never instead of it: an uninvited caller and an
-     * unauthenticated one get different answers, because they are different
-     * problems and only one of them is the caller's to fix.
-     */
-    if (isGated(pathname, request.method)) {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      const decision = await decideAccessFor(env, resolved.principal);
-      if (!decision.allowed) return refusal();
-    }
-
-    if (pathname === '/api/access/status') {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      return handleAccessStatus(request, env, resolved.principal);
-    }
-
-    // Lets the shell show which provider is actually in use instead of
-    // implying AI when it is running the deterministic fake.
-    if (pathname === '/api/config') {
-      // Identified before answered: the picker is per-person now, so this
-      // cannot be served to an anonymous caller without telling them what
-      // somebody else may use.
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      const { principal } = resolved;
-
-      // A deployment with no model generation is reported, not refused.
-      // This used to answer 403, and the shell reads any refusal as "nothing
-      // configured, and you are not an admin", which hid the invite panel on
-      // a deployment whose invite routes work perfectly: they need the admin
-      // list and D1, and neither is what generation is missing. This
-      // endpoint's job is to say what the deployment can do, and "it cannot
-      // generate" is an answer to that question rather than a reason to
-      // withhold one.
-      const configured = isConfigured(env);
-
-      // Two filters, in order. What the deployment can serve at all --
-      // offering a model whose provider has no key produces a run that fails
-      // after the user has waited for it. Then what this person is granted
-      // (by email, per L4 -- see the same note in handlePlan).
-      const models = configured
-        ? grantedFor(env, principal.policyIdentity)
-        : [];
-      // The deployment default is only offered if this person may use it.
-      const decided = configured
-        ? decideModel(env, principal.policyIdentity, null, resolveModel(env))
-        : { ok: false as const, error: 'not configured' };
-      return json({
-        generation: configured ? 'model' : 'fake',
-        models: models.map(({ id, label, note, provider }) => ({
-          id,
-          label,
-          note,
-          provider,
-        })),
-        defaultModel: decided.ok ? decided.model : null,
-        // So the shell knows whether to offer the admin credit tool at all --
-        // `/api/admin/*` itself re-checks this independently either way
-        // (ADR-0006), the same as every other grant this endpoint reports.
-        isAdmin: isPlatformAdmin(
-          { email: principal.email, emailVerified: principal.emailVerified },
-          parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
-        ),
-      });
-    }
-
-    if (pathname === '/api/plan') {
-      return handlePlan(request, env, ctx);
-    }
-
-    if (pathname === '/api/mockups') {
-      return handleMockups(request, env, ctx);
-    }
-
-    if (pathname === '/api/preview') {
-      return handlePreview(request, env);
-    }
-
-    if (pathname === '/api/preview/share') {
-      return handlePreviewShare(request, env);
-    }
-
-    if (pathname === '/api/publish') {
-      // Two verbs on one path, deliberately: POST puts a checkpoint on the
-      // web, DELETE takes it off. Both are the same resource, and DELETE is
-      // the method a link or a form cannot reach by accident (ADR-0013).
-      return request.method === 'DELETE'
-        ? handleUnpublish(request, env)
-        : handlePublish(request, env);
-    }
-
-    if (pathname === '/api/runs') {
-      return handleRuns(request, env);
-    }
-
-    if (pathname === '/api/billing/status') {
-      return handleBillingStatus(request, env);
-    }
-
-    if (pathname === '/api/billing/checkout') {
-      return handleBillingCheckout(request, env, new URL(request.url).origin);
-    }
-
-    if (pathname === '/api/billing/portal') {
-      return handleBillingPortal(request, env, new URL(request.url).origin);
-    }
-
-    if (pathname === '/api/stripe/webhook') {
-      return handleStripeWebhook(request, env);
-    }
-
-    if (pathname === '/api/github/connect') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubConnect(request, env, principal),
-      );
-    }
-
-    // Deliberately outside `handleGitHub`. GitHub returns here through a
-    // top-level browser navigation, which carries no Authorization header,
-    // so resolving a principal would reject every real callback with a 401.
-    // It does no work and holds no authority: it hands the code and state to
-    // the app, which completes the exchange on a request that can be
-    // authenticated.
-    if (pathname === '/api/github/callback') {
-      return handleGitHubCallback(request);
-    }
-
-    if (pathname === '/api/github/complete') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubComplete(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/bind') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubBind(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/disconnect') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubDisconnect(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/status') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubStatus(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/webhook') {
-      return handleGitHubWebhook(request, env);
-    }
-
-    if (pathname === '/api/github/diff') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubDiff(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/github/push') {
-      return handleGitHub(request, env, (principal) =>
-        handleGitHubPush(request, env, principal),
-      );
-    }
-
-    if (pathname === '/api/referral/status') {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      return handleReferralStatus(request, env, resolved.principal);
-    }
-
-    if (pathname === '/api/referral/claim') {
-      const resolved = await resolvePrincipal(request, env);
-      if (resolved.denied) return resolved.denied;
-      return handleReferralClaim(request, env, resolved.principal);
-    }
-
-    if (pathname === '/api/admin/user') {
-      return handleAdminUser(request, env);
-    }
-
-    if (pathname === '/api/admin/invites') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleInviteList(request, env);
-    }
-
-    if (pathname === '/api/admin/invite') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleInvite(request, env, guard.adminEmail);
-    }
-
-    if (pathname === '/api/admin/invite/revoke') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleInviteRevoke(request, env);
-    }
-
-    if (pathname === '/api/admin/unattributed') {
-      const guard = await requireAdmin(request, env);
-      if (guard.denied) return guard.denied;
-      return handleUnattributedQueue(request, env);
-    }
-
-    if (pathname === '/api/admin/topup') {
-      return handleAdminTopup(request, env);
-    }
-
-    if (pathname === '/api/admin/publish/hold') {
-      return handleAdminHold(request, env, false);
-    }
-
-    if (pathname === '/api/admin/publish/release') {
-      return handleAdminHold(request, env, true);
-    }
-
-    return json({ error: 'Not found.' }, 404);
+    return secured(await route(request, env, ctx));
   },
 
   /**
@@ -2380,3 +2161,239 @@ export default {
     );
   },
 };
+
+async function route(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const { pathname } = new URL(request.url);
+
+  /*
+   * The invite gate, before dispatch rather than inside each handler.
+   *
+   * Scattered checks fail silently: a new endpoint that spends money and
+   * forgets the call is open, and nothing says so. Here the route table
+   * (access-gate.ts) has to classify every path, and a test reads this
+   * file's own route literals and fails on any it does not cover.
+   *
+   * It runs after identity, never instead of it: an uninvited caller and an
+   * unauthenticated one get different answers, because they are different
+   * problems and only one of them is the caller's to fix.
+   */
+  if (isGated(pathname, request.method)) {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    const decision = await decideAccessFor(env, resolved.principal);
+    if (!decision.allowed) return refusal();
+  }
+
+  if (pathname === '/api/access/status') {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    return handleAccessStatus(request, env, resolved.principal);
+  }
+
+  // Lets the shell show which provider is actually in use instead of
+  // implying AI when it is running the deterministic fake.
+  if (pathname === '/api/config') {
+    // Identified before answered: the picker is per-person now, so this
+    // cannot be served to an anonymous caller without telling them what
+    // somebody else may use.
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    const { principal } = resolved;
+
+    // A deployment with no model generation is reported, not refused.
+    // This used to answer 403, and the shell reads any refusal as "nothing
+    // configured, and you are not an admin", which hid the invite panel on
+    // a deployment whose invite routes work perfectly: they need the admin
+    // list and D1, and neither is what generation is missing. This
+    // endpoint's job is to say what the deployment can do, and "it cannot
+    // generate" is an answer to that question rather than a reason to
+    // withhold one.
+    const configured = isConfigured(env);
+
+    // Two filters, in order. What the deployment can serve at all --
+    // offering a model whose provider has no key produces a run that fails
+    // after the user has waited for it. Then what this person is granted
+    // (by email, per L4 -- see the same note in handlePlan).
+    const models = configured ? grantedFor(env, principal.policyIdentity) : [];
+    // The deployment default is only offered if this person may use it.
+    const decided = configured
+      ? decideModel(env, principal.policyIdentity, null, resolveModel(env))
+      : { ok: false as const, error: 'not configured' };
+    return json({
+      generation: configured ? 'model' : 'fake',
+      models: models.map(({ id, label, note, provider }) => ({
+        id,
+        label,
+        note,
+        provider,
+      })),
+      defaultModel: decided.ok ? decided.model : null,
+      // So the shell knows whether to offer the admin credit tool at all --
+      // `/api/admin/*` itself re-checks this independently either way
+      // (ADR-0006), the same as every other grant this endpoint reports.
+      isAdmin: isPlatformAdmin(
+        { email: principal.email, emailVerified: principal.emailVerified },
+        parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+      ),
+    });
+  }
+
+  if (pathname === '/api/plan') {
+    return handlePlan(request, env, ctx);
+  }
+
+  if (pathname === '/api/mockups') {
+    return handleMockups(request, env, ctx);
+  }
+
+  if (pathname === '/api/preview') {
+    return handlePreview(request, env);
+  }
+
+  if (pathname === '/api/preview/share') {
+    return handlePreviewShare(request, env);
+  }
+
+  if (pathname === '/api/publish') {
+    // Two verbs on one path, deliberately: POST puts a checkpoint on the
+    // web, DELETE takes it off. Both are the same resource, and DELETE is
+    // the method a link or a form cannot reach by accident (ADR-0013).
+    return request.method === 'DELETE'
+      ? handleUnpublish(request, env)
+      : handlePublish(request, env);
+  }
+
+  if (pathname === '/api/runs') {
+    return handleRuns(request, env);
+  }
+
+  if (pathname === '/api/billing/status') {
+    return handleBillingStatus(request, env);
+  }
+
+  if (pathname === '/api/billing/checkout') {
+    return handleBillingCheckout(request, env, new URL(request.url).origin);
+  }
+
+  if (pathname === '/api/billing/portal') {
+    return handleBillingPortal(request, env, new URL(request.url).origin);
+  }
+
+  if (pathname === '/api/stripe/webhook') {
+    return handleStripeWebhook(request, env);
+  }
+
+  if (pathname === '/api/github/connect') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubConnect(request, env, principal),
+    );
+  }
+
+  // Deliberately outside `handleGitHub`. GitHub returns here through a
+  // top-level browser navigation, which carries no Authorization header,
+  // so resolving a principal would reject every real callback with a 401.
+  // It does no work and holds no authority: it hands the code and state to
+  // the app, which completes the exchange on a request that can be
+  // authenticated.
+  if (pathname === '/api/github/callback') {
+    return handleGitHubCallback(request);
+  }
+
+  if (pathname === '/api/github/complete') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubComplete(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/bind') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubBind(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/disconnect') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubDisconnect(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/status') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubStatus(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/webhook') {
+    return handleGitHubWebhook(request, env);
+  }
+
+  if (pathname === '/api/github/diff') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubDiff(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/github/push') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubPush(request, env, principal),
+    );
+  }
+
+  if (pathname === '/api/referral/status') {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    return handleReferralStatus(request, env, resolved.principal);
+  }
+
+  if (pathname === '/api/referral/claim') {
+    const resolved = await resolvePrincipal(request, env);
+    if (resolved.denied) return resolved.denied;
+    return handleReferralClaim(request, env, resolved.principal);
+  }
+
+  if (pathname === '/api/admin/user') {
+    return handleAdminUser(request, env);
+  }
+
+  if (pathname === '/api/admin/invites') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleInviteList(request, env);
+  }
+
+  if (pathname === '/api/admin/invite') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleInvite(request, env, guard.adminEmail);
+  }
+
+  if (pathname === '/api/admin/invite/revoke') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleInviteRevoke(request, env);
+  }
+
+  if (pathname === '/api/admin/unattributed') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleUnattributedQueue(request, env);
+  }
+
+  if (pathname === '/api/admin/topup') {
+    return handleAdminTopup(request, env);
+  }
+
+  if (pathname === '/api/admin/publish/hold') {
+    return handleAdminHold(request, env, false);
+  }
+
+  if (pathname === '/api/admin/publish/release') {
+    return handleAdminHold(request, env, true);
+  }
+
+  return json({ error: 'Not found.' }, 404);
+}

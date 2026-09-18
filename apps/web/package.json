@@ -9,6 +9,7 @@
     "deploy": "pnpm run migrate && pnpm dlx wrangler@4.129.1 deploy",
     "deploy:preview": "pnpm run deploy",
     "dev": "vite",
+    "headers": "node --experimental-strip-types scripts/write-headers.ts",
     "migrate": "pnpm dlx wrangler@4.129.1 d1 migrations apply vibld-control-plane --remote",
     "preview": "vite preview",
     "test": "node --test --experimental-strip-types --import ./test/harness/components.mjs test/*.test.ts test/*.test.tsx",
@@ -19,6 +20,7 @@
     "@vibld/ai": "workspace:*",
     "@vibld/brand": "workspace:*",
     "@vibld/core": "workspace:*",
+    "@vibld/security-headers": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "stripe": "22.6.2"
