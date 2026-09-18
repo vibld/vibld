@@ -16,9 +16,24 @@
  * The largest base project that will be sent with a follow-up request.
  *
  * Generated projects are capped at 25 files by the system prompt and 50 by
- * the request guard, and the measured 24-file project was about 120 KB, so
- * this is headroom rather than a limit anyone should meet. It exists because
- * a budget nobody states is a budget nobody can check.
+ * the request guard, and the measured 24-file project was about 120 KB. It
+ * exists because a budget nobody states is a budget nobody can check.
+ *
+ * This used to say the figure was "headroom rather than a limit anyone
+ * should meet", and that is no longer true, so it is corrected here rather
+ * than left to mislead the next reader. A run may now emit up to
+ * `maxTokensFor(model)` tokens, which on the production model is 252000 and
+ * was 64000 before #179. Even the old ceiling could produce a project past
+ * this cap; the current one clears it several times over. What that should
+ * mean is open in #181, which also covers the separate problem that this
+ * constant is a model-context budget yet currently gates `/api/preview` and
+ * `/api/publish`, where nothing reaches a model.
+ *
+ * Until that is settled, treat this as a limit that is genuinely reachable:
+ * a project can be generated that a follow-up request cannot carry. The
+ * refusal is explicit on both sides (`request-guard.ts` returns 413,
+ * `plan-provider.ts` throws `ProviderContextError`) and neither truncates,
+ * so the failure costs a user their next edit, never their work.
  */
 export const MAX_BASE_CONTENT_CHARS = 160_000;
 
