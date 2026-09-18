@@ -128,13 +128,28 @@ export const DEFAULT_MAX_TOKENS = 64000;
  * Still clamped to what the model will actually produce: past its own
  * ceiling a request is rejected outright rather than truncated, which reads
  * as an outage rather than as the wrong model for the job.
+ *
+ * `outputMicroUsd` is the price actually in force, which is not always the
+ * catalogue's. An operator who sets `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN` to
+ * correct a stale rate moves what the reservation charges, and a ceiling
+ * derived from the catalogue behind their back reintroduces exactly the
+ * divergence this function exists to close: too high and the run reserves
+ * past $1.60 and is refused with allowance to spare, too low and it
+ * truncates while its budget goes unused. Omitted, or given a price that is
+ * not a usable one, it falls back to the catalogue -- the same direction
+ * `parsePrices` takes an unusable override, so the two never disagree about
+ * which number won.
  */
-export function maxTokensFor(model: string): number {
+export function maxTokensFor(model: string, outputMicroUsd?: number): number {
   const known = findModel(model);
   if (!known) return DEFAULT_MAX_TOKENS;
-  const affordable = Math.floor(
-    RUN_OUTPUT_RESERVE_MICRO_USD / known.outputMicroUsd,
-  );
+  const price =
+    outputMicroUsd !== undefined &&
+    Number.isFinite(outputMicroUsd) &&
+    outputMicroUsd > 0
+      ? outputMicroUsd
+      : known.outputMicroUsd;
+  const affordable = Math.floor(RUN_OUTPUT_RESERVE_MICRO_USD / price);
   return Math.min(known.maxOutputTokens, affordable);
 }
 export const DEFAULT_EFFORT: PlanEffort = 'high';

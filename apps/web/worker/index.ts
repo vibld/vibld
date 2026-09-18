@@ -1,11 +1,4 @@
-import {
-  maxTokensFor,
-  cacheRatesFor,
-  configuredProviders,
-  findModel,
-  providerForRequest,
-  resolveModel,
-} from '@vibld/ai';
+import { configuredProviders, resolveModel } from '@vibld/ai';
 import type { RunRefusal } from '@vibld/core';
 
 import {
@@ -44,12 +37,8 @@ import {
   handleReferralClaim,
   handleReferralStatus,
 } from './referral-handlers.ts';
-import {
-  ACCOUNT_BUDGET_KEY,
-  dayKey,
-  parsePrices,
-  worstCaseMicroUsd,
-} from './spend.ts';
+import { ACCOUNT_BUDGET_KEY, dayKey, worstCaseMicroUsd } from './spend.ts';
+import { runCeilingFor } from './run-ceiling.ts';
 import type { SpendVerdict } from './spend.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
@@ -952,30 +941,16 @@ async function handlePlan(
   // Layer two: the ceiling. The worst case is charged before the run, because
   // charging afterwards gives an accurate ledger and no limit -- concurrent
   // callers would all read the same balance and all find headroom.
-  const chosen = findModel(effectiveModel);
-  const prices = parsePrices(
-    env,
-    providerForRequest(env, effectiveModel),
-    chosen
-      ? {
-          inputMicroUsd: chosen.inputMicroUsd,
-          outputMicroUsd: chosen.outputMicroUsd,
-          // The cached rates follow the model rather than the provider
-          // default, for the same reason the input rate does: a run on Opus
-          // must not be priced at DeepSeek's rate because the deployment
-          // happens to default to DeepSeek.
-          ...cacheRatesFor(chosen),
-        }
-      : undefined,
-  );
+  // Priced and ceilinged in one call, so the reservation below and the
+  // request `GenerationWorkflow` will send are the same two numbers rather
+  // than two derivations that have to be kept in step. A reservation is a
+  // promise that the run cannot cost more than this: reserving for 64000
+  // tokens while letting the model emit 384000 is a run that outspends its
+  // own reservation six times over.
+  const { prices, maxTokens } = runCeilingFor(env, effectiveModel);
   const worstCase = worstCaseMicroUsd(
     prices,
-    // The same ceiling the provider will actually ask this model for, not a
-    // flat constant. A reservation is a promise that the run cannot cost
-    // more than this, so the two numbers have to be one number: reserving
-    // for 64000 tokens while letting the model emit 384000 is a run that
-    // outspends its own reservation six times over.
-    maxTokensFor(effectiveModel),
+    maxTokens,
     // Prompt plus the base project that goes with it. Both are what the
     // guard above has already refused to exceed.
     DEFAULT_LIMITS.maxPromptChars +

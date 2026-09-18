@@ -465,6 +465,33 @@ describe('reference material', () => {
  * remember to edit anything.
  */
 describe('the output ceiling a run asks for', () => {
+  it('prices the ceiling at the rate actually in force', () => {
+    // An operator correcting a stale catalogue rate moves what a run is
+    // charged, so it has to move what a run may ask for. Deriving from the
+    // catalogue while the reservation charges the override is the same
+    // mismatch this whole derivation exists to close.
+    const dearer = maxTokensFor('deepseek-flash', 100);
+    assert.equal(dearer, 16000, 'a 100 micro-USD token still bought the cap');
+    assert.ok(
+      dearer * 100 <= RUN_OUTPUT_RESERVE_MICRO_USD,
+      'the corrected price reserved past the ceiling',
+    );
+  });
+
+  it('will not take a number that is not a price', () => {
+    // Reachable because this is exported: the worker sanitises through
+    // `parsePrices` before it gets here, but the CLI and the eval harness
+    // call it directly. A zero divides to Infinity, and a ceiling of
+    // Infinity is a run with no ceiling at all.
+    for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.equal(
+        maxTokensFor('deepseek-flash', bad),
+        maxTokensFor('deepseek-flash'),
+        `${bad} was treated as a price`,
+      );
+    }
+  });
+
   it('leaves Claude Opus 5 exactly where it was', () => {
     // The model the old flat number was chosen for. If this moves, the
     // reserve was changed rather than the derivation, and every Anthropic

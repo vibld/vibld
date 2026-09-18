@@ -3,6 +3,8 @@ import { WorkflowEntrypoint } from 'cloudflare:workers';
 import type { DurableGenerationResult } from '@vibld/core';
 import { PlanProvider, createPlanClient } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
+
+import { runCeilingFor } from './run-ceiling.ts';
 import { D1GenerationStore } from './generation-store.ts';
 import {
   SanitizingModelProvider,
@@ -102,6 +104,12 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         const provider = new SanitizingModelProvider(
           new PlanProvider(createPlanClient(this.env, params.model), {
             model: params.model,
+            // The ceiling `handlePlan` already reserved against. Passed
+            // rather than left to the provider's own default so the request
+            // and the reservation are one number even when an operator has
+            // overridden the output price: a provider deriving its own from
+            // the catalogue would ask for more than the run is holding.
+            maxTokens: runCeilingFor(this.env, params.model).maxTokens,
             onUsage: (reported) => {
               usage = reported;
             },
