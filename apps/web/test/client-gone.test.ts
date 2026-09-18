@@ -109,15 +109,64 @@ describe('how a route learns the caller has gone', () => {
    * check that can only terminate, and terminating lands at a step boundary
    * with the reservation left to the reclaim.
    */
-  it('asks whether the caller is gone before creating a workflow', async () => {
+  it('is listening for the caller before it creates a workflow', async () => {
+    // This asserted a *check* before `create()` until the round after, which
+    // found what one check cannot cover: `create()` is an awaited RPC, so a
+    // Cancel arriving while it is in flight passes the check and is seen
+    // only afterwards, with a Workflow already running. A listener has no
+    // such window, so that is what is pinned now.
     const source = await readFile(workerSource(), 'utf8');
-    const abortCheck = source.indexOf('if (request.signal?.aborted)');
+    const listener = source.indexOf('clientGone = true;');
     const create = source.indexOf('GENERATION_WORKFLOW!.create(');
-    assert.ok(abortCheck > -1, 'no early check for a caller who already left');
+    assert.ok(listener > -1, 'nothing is listening for a caller who leaves');
     assert.ok(create > -1, 'the test fixture lost the workflow creation');
     assert.ok(
-      abortCheck < create,
-      'the check happens after the workflow exists, so it can only terminate one',
+      listener < create,
+      'the listener is registered after the workflow exists, so an abort during create() is seen too late',
+    );
+  });
+
+  it('acts on a caller who left while the workflow was being created', async () => {
+    // Noticing is half of it. The window closes only if the answer is used
+    // on the far side of `create()` as well: terminate what now exists, and
+    // settle rather than leave the reservation to the reclaim, which closes
+    // an abandoned one at the full worst case.
+    const source = await readFile(workerSource(), 'utf8');
+    const create = source.indexOf('GENERATION_WORKFLOW!.create(');
+    const acted = source.indexOf('if (clientGone) {', create);
+    const stream = source.indexOf('new TransformStream()');
+    assert.ok(acted > -1, 'nothing acts on an abort that landed during create');
+    assert.ok(
+      acted < stream,
+      'the run streams to a caller who is not there before anything stops it',
+    );
+    const block = source.slice(acted, stream);
+    assert.match(
+      block,
+      /instance\.terminate\(\)/,
+      'the workflow is left running',
+    );
+    assert.match(
+      block,
+      /releaseWithoutCharging\(\)/,
+      'the reservation is left to the reclaim, which closes it at the worst case',
+    );
+  });
+
+  it('settles a cancelled run in one place, not two', async () => {
+    // Both sides of `create()` give the reservation back, and two copies of
+    // a settlement is two things that can come to disagree about what a
+    // cancelled run costs -- which is a shape this review found four times
+    // in other files.
+    const source = await readFile(workerSource(), 'utf8');
+    const plan = source.indexOf('const releaseWithoutCharging =');
+    assert.ok(plan > -1, 'the shared settlement is gone');
+    assert.equal(
+      source
+        .slice(plan, source.indexOf('new TransformStream()'))
+        .match(/settleBudget\(/g)?.length,
+      1,
+      'a cancelled build settles its reservation in more than one place',
     );
   });
 
@@ -161,12 +210,17 @@ describe('how a route learns the caller has gone', () => {
     );
   });
 
-  it('is what both streaming routes use', async () => {
+  it('is what every route that can be abandoned uses', async () => {
+    // Three, not two: the build route registers twice on purpose. The first
+    // covers the window around `create()`, where there is nothing to cancel
+    // yet and the only useful answer is a flag; the second cancels the
+    // stream, which needs an `instance` and a keepalive that do not exist
+    // at the first. The mockup route is the third.
     const source = await readFile(workerSource(), 'utf8');
     assert.equal(
       source.match(/whenClientGone\(/g)?.length,
-      2,
-      'expected the build route and the mockup route to use it',
+      3,
+      'expected the build route (twice) and the mockup route to use it',
     );
   });
 });

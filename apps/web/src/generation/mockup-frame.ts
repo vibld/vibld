@@ -7,10 +7,10 @@
  * things are needed, and this file is where they live: a content policy the
  * document carries, and the removal of the markup that navigates.
  *
- * ## Five findings, one mistake
+ * ## Seven findings, one mistake
  *
- * This file was narrowed five times over one review, and it is worth
- * reading why rather than reading five fixes:
+ * This file was narrowed seven times over one review, and it is worth
+ * reading why rather than reading seven fixes:
  *
  * 1. `sandbox=""` was called a guarantee that "nothing can happen". True of
  *    capabilities, false of fetches: a remote image or web font is still
@@ -30,10 +30,19 @@
  *    before it: `<meta data-x=">" http-equiv="refresh" ...>`. The tokenizer
  *    keeps that `>` inside the attribute value and reads the whole tag;
  *    `[^>]*` stops dead at it and the tag survives untouched.
+ * 6. Parsing closed all of that, and then a query over the parsed document
+ *    was called complete. It never visits `<iframe srcdoc="...">`, because
+ *    that markup is an attribute value until the browser makes a document
+ *    of it (see `REMOVE_ENTIRELY` below).
+ * 7. A `<base target="_blank">` was then called the thing that makes every
+ *    link inert. Not every link: an `<a>` in the SVG namespace does not
+ *    take its target from an HTML base, so it behaves as `_self` and a
+ *    click replaces the frame with the model's chosen host.
  *
  * Every one of those is the same mistake: deciding what the markup says
- * instead of what the parser will do with it. A sixth regex would be the
- * sixth guess.
+ * instead of what the parser will do with it. The last two are that
+ * mistake in different clothes -- claims about what one element does to
+ * another, made without checking, and wrong for the same reason.
  *
  * ## So the parser decides
  *
@@ -56,7 +65,7 @@
  * ## What is left, stated rather than glossed
  *
  * A reader can still be shown a link, and clicking it does nothing. That is
- * the honest end of this, not a sixth claim that nothing can happen.
+ * the honest end of this, not an eighth claim that nothing can happen.
  *
  *   default-src 'none'   nothing loads unless named below
  *   style-src 'unsafe-inline'  the inline <style> and style= a mockup is made of
@@ -111,7 +120,7 @@ export const MOCKUP_FRAME_POLICY =
  * is invisible to this query too, and survives serialisation intact. It
  * cannot activate without script and script is denied, so this is closing a
  * place the query cannot see rather than a hole anyone has shown me. Given
- * how this file's five previous guarantees went, that is the trade I want.
+ * how this file's other guarantees went, that is the trade I want.
  */
 const REMOVE_ENTIRELY =
   'meta[http-equiv], base, iframe, frame, object, embed, template';
@@ -123,8 +132,19 @@ const REMOVE_ENTIRELY =
  * problem: the frame replaces itself and the host learns the viewer's
  * address. Dropping the attribute puts the link back under our base, which
  * aims it at a context the sandbox will not create.
+ *
+ * That is the whole answer for an HTML link and none of it for an SVG one,
+ * which is the seventh finding (#189 review). An `<a>` in the SVG namespace
+ * does not take its target from an HTML `<base>`: absent one of its own it
+ * behaves as `_self`, so stripping the attribute leaves it aimed at this
+ * frame rather than at the context the sandbox refuses to open. The link
+ * that was supposed to be inert replaces the sketch with the model's host,
+ * which is the IP disclosure the policy above exists to prevent.
  */
 const TARGETED = '[target]';
+
+/** The namespace the parser puts a foreign element in, not a name I match. */
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 /**
  * Rewrite a mockup into the document its frame should render.
@@ -141,6 +161,38 @@ export function mockupFrameDocument(html: string): string {
   }
   for (const node of Array.from(doc.querySelectorAll(TARGETED))) {
     node.removeAttribute('target');
+  }
+
+  // An SVG link is unwrapped rather than disarmed, and that is deliberate
+  // (#189 review). Removing its `href` would mean deciding which attribute
+  // is the href -- `href`, `xlink:href`, whatever a tokenizer folds those
+  // into -- and this file has lost that argument five times. Removing the
+  // element removes the question: there is no href to spell and no anchor
+  // for a SMIL `<animate>` to put one back on.
+  //
+  // Unwrapped rather than deleted so the drawing survives; the children
+  // stay in the SVG namespace where the parser put them. The cost is
+  // stated rather than hidden: a presentation attribute carried by the `<a>`
+  // itself (a `fill`, a `transform`) is lost with it, so a sketch that
+  // styled a link that way loses that styling. A cosmetic loss in a sketch
+  // against a navigation the sandbox cannot stop is not a close trade.
+
+  // An SVG link is unwrapped rather than disarmed, and that is deliberate
+  // (#189 review). Removing its `href` would mean deciding which attribute
+  // is the href -- `href`, `xlink:href`, whatever a tokenizer folds those
+  // into -- and this file has lost that argument five times. Removing the
+  // element removes the question: there is no href to spell and no anchor
+  // for a SMIL `<animate>` to put one back on.
+  //
+  // Unwrapped rather than deleted so the drawing survives; the children
+  // stay in the SVG namespace where the parser put them. The cost is
+  // stated rather than hidden: a presentation attribute carried by the `<a>`
+  // itself (a `fill`, a `transform`) is lost with it, so a sketch that
+  // styled a link that way loses that styling. A cosmetic loss in a sketch
+  // against a navigation the sandbox cannot stop is not a close trade.
+  for (const node of Array.from(doc.querySelectorAll('a'))) {
+    if (node.namespaceURI !== SVG_NAMESPACE) continue;
+    node.replaceWith(...Array.from(node.childNodes));
   }
 
   const policy = doc.createElement('meta');

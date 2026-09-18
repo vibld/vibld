@@ -252,6 +252,34 @@ describe('where a mockup frame may go', () => {
     assert.match(framed, /<base target="_blank">/);
   });
 
+  it('leaves an SVG link nothing to navigate with', () => {
+    // The seventh finding (#189 review). An `<a>` in the SVG namespace does
+    // not take its target from an HTML `<base>`, so stripping `target` and
+    // trusting the base left it behaving as `_self`: a click replaces the
+    // frame with the model's host, which is the disclosure the whole file
+    // exists to prevent. Both spellings of the attribute are in here
+    // because the point of unwrapping is that neither has to be named.
+    const framed = mockupFrameDocument(
+      '<svg><a href="https://evil.example/" xlink:href="https://also-evil.example/">' +
+        '<rect width="10" height="10"></rect></a></svg>',
+    );
+    assert.doesNotMatch(framed, /evil\.example/);
+    assert.doesNotMatch(framed, /also-evil\.example/);
+    // Unwrapped, not deleted: the drawing is still a drawing.
+    assert.match(framed, /<rect/);
+    assert.match(framed, /<svg/);
+  });
+
+  it('still shows an HTML link, which the base makes inert', () => {
+    // The asymmetry is deliberate and worth pinning: an HTML link keeps its
+    // href and is aimed by our base at a context the sandbox will not open,
+    // so it reads as a link and does nothing. Only SVG loses the element,
+    // because only SVG ignores the base.
+    const framed = mockupFrameDocument('<a href="https://ok.example/">go</a>');
+    assert.match(framed, /href="https:\/\/ok\.example\/"/);
+    assert.match(framed, /<base target="_blank">/);
+  });
+
   it('leaves the document otherwise as it was', () => {
     const framed = mockupFrameDocument(
       '<!doctype html><html><body><h1>Sourdough</h1><p>Baked daily.</p><img src="data:image/gif;base64,R0lGOD"></body></html>',

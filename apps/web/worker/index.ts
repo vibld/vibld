@@ -1056,21 +1056,19 @@ async function handlePlan(
   // own comment.
   const projectId = principal.userId;
 
-  // Before anything durable exists (#189 review). Last round taught
-  // `whenClientGone` to fire for a caller who had already left, and this is
-  // where that answer arrives too late: by the time the listener is
-  // registered the Workflow has been created, and terminating one lands at
-  // its next step boundary, so the model step may already be running.
-  // Worse, a termination before `settle-budget` leaves the reservation to
-  // the abandoned-run reclaim, which closes it at the full worst case.
-  //
-  // Asked here instead, where the answer is still cheap: nothing durable
-  // exists, so there is nothing to terminate and nothing to reclaim.
-  // Settled at zero through the ordinary path rather than a second one --
-  // `settleBudget`'s third case is "the provider was never asked", and that
-  // is exactly what happened.
-  if (request.signal?.aborted) {
-    await settleBudget(
+  /**
+   * Give a caller who left back what was reserved for them.
+   *
+   * One function because it is needed on both sides of `create()` and two
+   * copies of a settlement is two things that can come to disagree about
+   * what a cancelled run costs (#189 review).
+   *
+   * Settled through the ordinary path rather than a second one:
+   * `settleBudget`'s third case is "the provider was never asked", which is
+   * what this is.
+   */
+  const releaseWithoutCharging = () =>
+    settleBudget(
       env.USER_BUDGET!,
       {
         userId: principal.userId,
@@ -1088,6 +1086,33 @@ async function handlePlan(
       // it is the safe one, and refusing to answer would not improve it.
       console.error('failed to release a reservation for a gone caller', error);
     });
+
+  /**
+   * Noticed before anything durable exists, and kept noticing across the
+   * call that makes something durable (#189 review).
+   *
+   * The previous round added the check below, which asks once whether the
+   * caller has already left. The round after it found what one check cannot
+   * cover: `create()` is an awaited RPC, so a Cancel arriving while it is
+   * in flight passes the check and is only seen afterwards. By then there
+   * is a Workflow, terminating one lands at its next step boundary so the
+   * model step may already be running, and a termination before
+   * `settle-budget` leaves the reservation to the abandoned-run reclaim,
+   * which closes it at the full worst case. The caller is billed for a
+   * generation they cancelled.
+   *
+   * A flag set by a listener registered here covers the whole of that
+   * window, because a listener does not care when the answer arrives.
+   */
+  let clientGone = false;
+  whenClientGone(request.signal, () => {
+    clientGone = true;
+  });
+
+  // Nothing durable exists yet, so there is nothing to terminate and
+  // nothing to reclaim: the cheap case, and the common one.
+  if (clientGone) {
+    await releaseWithoutCharging();
     return new Response(null, { status: 499 });
   }
 
@@ -1130,6 +1155,29 @@ async function handlePlan(
     );
   }
 
+  // The other side of the window the flag above exists for (#189 review).
+  // The abort landed while `create()` was in flight, so there is now a
+  // Workflow to stop, and stopping it here rather than several statements
+  // later is the difference between the next step boundary and the one
+  // after the model call.
+  //
+  // Settled at zero rather than left to the reclaim, and that is a choice
+  // worth stating rather than burying. The reclaim closes an abandoned
+  // reservation at its full worst case, so leaving it there bills a caller
+  // a whole generation for cancelling before one could start. Against that,
+  // this settles at zero while the run has a narrow chance of having
+  // reached the provider in the milliseconds before the termination lands,
+  // which would mean Vibld pays for a call it does not bill on. The
+  // asymmetry is deliberate: the over-charge is certain and visible to the
+  // person it happens to, the under-charge is rare and ours. And it
+  // corrects itself where it matters, because a run that does get as far as
+  // `settle-budget` overwrites this row with what it really cost.
+  if (clientGone) {
+    ctx.waitUntil(instance.terminate().catch(() => {}));
+    await releaseWithoutCharging();
+    return new Response(null, { status: 499 });
+  }
+
   // Stream rather than buffer. A buffered response sends nothing until the
   // run finishes, and the client gives up first -- which surfaces as an
   // opaque network error, not a failed generation.
@@ -1168,6 +1216,12 @@ async function handlePlan(
   // runs, and an abort is not replayed to a listener added afterwards
   // (#189 review). This route's version of that is the expensive one: a
   // whole generation starts for somebody who is not there.
+  //
+  // The second registration in this route, and both are needed. The first
+  // one, above `create()`, can only set a flag: there is no `instance` to
+  // terminate and no keepalive to stop until the lines between them have
+  // run. This one is the one that actually cancels, and it exists from the
+  // first byte of the stream onwards.
   whenClientGone(request.signal, cancel);
 
   const write = (chunk: string) =>
