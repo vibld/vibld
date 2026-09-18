@@ -162,7 +162,12 @@ describe('asking for three directions', () => {
       async createPlan() {
         call += 1;
         return call === 1
-          ? { plan: null, stopReason: 'end_turn', usage: usageOf(9999) }
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
           : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
       },
     } as unknown as PlanClient;
@@ -200,6 +205,83 @@ describe('asking for three directions', () => {
     const provider = new MockupProvider(wrong, { model: 'deepseek-flash' });
     await assert.rejects(provider.generate({ prompt: 'a bakery' }));
     assert.equal(call, 1, 'a wrong shape was retried, doubling the bill');
+  });
+
+  it('does not retry a body it could not parse', async () => {
+    // The P1 the first version of this shipped (#191 review). A null plan
+    // is not the same fact as an empty body: `readJsonPlan` returns null
+    // for text it cannot parse as well, and that is a disagreement about
+    // shape wearing the same clothes. Only the client can tell the two
+    // apart, so only the client's word is taken.
+    let call = 0;
+    const garbled = {
+      id: 'garbled',
+      async createPlan() {
+        call += 1;
+        return { plan: null, stopReason: 'end_turn', usage: usageOf(7) };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(garbled, { model: 'deepseek-flash' });
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderShapeError,
+    );
+    assert.equal(call, 1, 'unparseable JSON was retried, doubling the bill');
+  });
+
+  it('does not retry a truncation that happened to arrive empty', async () => {
+    // A run that hit the ceiling has told us something, and the answer to
+    // it is a smaller ask rather than the same ask again (#191 review).
+    // Retrying charged a second full-price run to hear it twice, and the
+    // reader was then told about whichever attempt came back second.
+    let call = 0;
+    const cut = {
+      id: 'cut',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'max_tokens',
+          usage: usageOf(64_000),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(cut, { model: 'deepseek-flash' });
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderTruncationError,
+    );
+    assert.equal(call, 1, 'a truncation was retried at full price');
+  });
+
+  it('does not retry a refusal that arrived empty', async () => {
+    // The other stop reason that is an answer. A model that declined will
+    // decline again, and the person is owed the refusal rather than a
+    // second bill (#191 review).
+    let call = 0;
+    const declined = {
+      id: 'declined',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'refusal',
+          refusal: { category: 'other', explanation: 'no' },
+          usage: usageOf(12),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(declined, { model: 'deepseek-flash' });
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderRefusalError,
+    );
+    assert.equal(call, 1, 'a refusal was retried at full price');
   });
 
   it('names what it asked for when the shape is wrong', async () => {
@@ -265,10 +347,50 @@ describe('reporting progress while sketching', () => {
     assert.deepEqual(seen, [120, 400]);
   });
 
-  it('asks for nothing when no caller wants it', async () => {
-    const fake = client();
-    await new MockupProvider(fake).generate({ prompt: 'a bakery' });
-    assert.equal(fake.seen[0]?.onProgress, undefined);
+  it('puts the meter back to zero before retrying', async () => {
+    // What the caller holds is what the caller charges (#191 review). A
+    // reader who cancels during the retry, before it has streamed
+    // anything, would otherwise be settled from the first attempt's
+    // counts -- the very attempt `onDiscarded` had just declared absorbed.
+    //
+    // Reasoning is what makes this more than a rounding error: two thirds
+    // of a measured mockup run's output tokens were thinking (#190), and
+    // an empty reply spends the full run before returning nothing, so the
+    // stale figure being carried into the retry is close to a whole run.
+    const seen: Array<[number, number | undefined]> = [];
+    let call = 0;
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        call += 1;
+        if (call === 1) {
+          request.onProgress?.({
+            characters: 900,
+            reasoningCharacters: 15_000,
+          });
+          return {
+            plan: null,
+            emptyBody: true,
+            stopReason: 'end_turn',
+            usage: usageOf(9999),
+          };
+        }
+        return { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    await new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onProgress: ({ characters, reasoningCharacters }) =>
+        seen.push([characters, reasoningCharacters]),
+    }).generate({ prompt: 'a bakery' });
+
+    assert.equal(call, 2, 'the empty reply was not retried');
+    assert.deepEqual(
+      seen.at(-1),
+      [0, 0],
+      'the discarded attempt\u2019s counts were still standing when the retry began',
+    );
   });
 });
 

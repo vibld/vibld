@@ -146,6 +146,20 @@ export interface PlanCompletion {
   usage: PlanUsage;
   /** Provider-specific spend the usage figures do not explain. */
   diagnostics?: PlanDiagnostics;
+  /**
+   * The provider sent no body at all, as distinct from sending one that
+   * could not be parsed (#191 review).
+   *
+   * `plan` is null for both, and for a truncation and a refusal besides, so
+   * nothing above the client can tell those apart. That mattered as soon as
+   * something wanted to retry only the first: a predicate over `plan`
+   * retried truncations and refusals too, doubling the spend and hiding the
+   * answer the run had actually given.
+   *
+   * Set only by a client that can tell. Absent means "this client does not
+   * distinguish", which is not the same as false.
+   */
+  emptyBody?: boolean;
 }
 
 export interface PlanClient {

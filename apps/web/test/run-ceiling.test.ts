@@ -207,6 +207,31 @@ describe('what a run is for decides what it may ask for', () => {
     }
   });
 
+  it('holds that ratio under a price override too', () => {
+    // The P2 this file existed to prevent, in the one place it was not
+    // being derived (#191 review). The build ceiling has always been
+    // computed from the price actually in force; the mockup clamp was
+    // computed from the catalogue's, so an operator correcting the rate
+    // upward shrank a build and left a look at the flat guard -- inverting
+    // the promise the clamp is for.
+    const dear = `${flash().outputMicroUsd * 40}`;
+    const priced = {
+      VIBLD_PROVIDER: 'deepseek',
+      VIBLD_USD_MICRO_PER_OUTPUT_TOKEN: dear,
+    } as Parameters<typeof runCeilingFor>[0];
+
+    const build = runCeilingFor(priced, FLASH, 'build');
+    const mockups = runCeilingFor(priced, FLASH, 'mockups');
+    assert.ok(
+      build.maxTokens < runCeilingFor(env, FLASH, 'build').maxTokens,
+      'the override did not move the build ceiling, so this proves nothing',
+    );
+    assert.ok(
+      mockups.maxTokens * 2 <= build.maxTokens,
+      `mockups (${mockups.maxTokens}) reserve more than half a build (${build.maxTokens})`,
+    );
+  });
+
   it('still builds when nothing says otherwise', () => {
     // Every existing caller passes no kind, and a default that quietly
     // made them cheap would truncate every project in production.

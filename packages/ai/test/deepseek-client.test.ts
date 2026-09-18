@@ -542,3 +542,70 @@ describe('what the stream does not show', () => {
     ]);
   });
 });
+
+/**
+ * The one fact only this layer can state (#191 review).
+ *
+ * Above it, an empty body and JSON that would not parse are both a null
+ * plan, and the retry that could not tell them apart asked a model to
+ * repeat a disagreement about shape at full price. The client knows which
+ * it saw, so the client says so.
+ */
+describe('saying whether anything came back at all', () => {
+  it('marks a reply with no body as empty', async () => {
+    // DeepSeek's JSON mode documents that it may occasionally return empty
+    // content, and a real run did exactly that (#190).
+    const { impl } = fetchReturning(sse(contentFrames('')));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.plan, null);
+    assert.equal(completion.emptyBody, true);
+  });
+
+  it('does not call unparseable json an empty reply', async () => {
+    // The distinction the retry rests on. Both arrive as a null plan, and
+    // only one of them is worth asking again for.
+    const { impl } = fetchReturning(sse(contentFrames('{"mockups": [')));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.plan, null, 'that parsed, so it proves nothing');
+    assert.equal(completion.emptyBody, undefined);
+  });
+
+  it('does not call whitespace a body', async () => {
+    // A stream that produced only formatting has produced nothing, and
+    // charging a reader for it because it is not literally zero-length
+    // would be the same defect wearing a space.
+    const { impl } = fetchReturning(sse(contentFrames('  \n ')));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.emptyBody, true);
+  });
+});

@@ -145,6 +145,22 @@ export class MockupProvider {
     let completion = first;
     if (isEmptyReply(first)) {
       this.#onDiscarded?.(first.usage);
+      /*
+       * The meter goes back to zero before the second attempt starts
+       * (#191 review).
+       *
+       * A caller watching progress holds the last figure it was given, and
+       * settles a cancelled run from it. Without this the first attempt's
+       * counts are still sitting there while the retry runs, so a reader
+       * who cancels before the second attempt streams anything is charged
+       * for the attempt this branch just declared absorbed. That is the
+       * opposite of what `onDiscarded` above is for.
+       *
+       * Zero rather than an attempt-boundary event, because every consumer
+       * of `onProgress` already means "this is the total so far" by it, and
+       * for a run that is starting again the total so far is nothing.
+       */
+      this.#onProgress?.({ characters: 0, reasoningCharacters: 0 });
       completion = await this.#ask(request);
     }
 
@@ -191,11 +207,26 @@ export class MockupProvider {
 }
 
 /**
- * Nothing came back, as distinct from something wrong coming back.
+ * Nothing came back, as distinct from anything else that leaves a null plan.
  *
- * `readJsonPlan` yields null for an empty body, so this is the shape a
- * documented DeepSeek JSON-mode hiccup takes by the time it reaches here.
+ * The first version of this read `completion.plan === null`, and the commit
+ * message called it narrow. It was not (#191 review). `readJsonPlan`
+ * returns null for an empty body *and* for JSON it cannot parse, and a
+ * refusal and a truncation can both arrive with a null plan as well. So the
+ * predicate retried all four: a truncation and a refusal would each have
+ * been asked again at full price, and the answer the run had actually given
+ * would have been replaced by whatever came back second.
+ *
+ * Two conditions now, and both are facts rather than inferences. The client
+ * says whether the body was empty, because only it can tell. And a stop
+ * reason that is itself an answer is never retried, whatever the body was:
+ * a model that stopped at the ceiling or declined has told us something, and
+ * asking again spends twice to hear it again.
  */
 function isEmptyReply(completion: PlanCompletion): boolean {
-  return completion.plan === null || completion.plan === undefined;
+  if (completion.emptyBody !== true) return false;
+  return (
+    completion.stopReason !== 'refusal' &&
+    completion.stopReason !== 'max_tokens'
+  );
 }

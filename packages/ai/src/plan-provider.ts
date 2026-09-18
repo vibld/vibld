@@ -328,10 +328,27 @@ export const MOCKUP_OUTPUT_TOKENS = 64_000;
  * affected -- `deepseek-flash` allows 252,000 for a build, so the guard is
  * what binds there.
  */
-export function mockupMaxTokensFor(model: string): number {
+export function mockupMaxTokensFor(
+  model: string,
+  /**
+   * The rate this deployment will really be charged, where it overrides the
+   * catalogue's (#191 review).
+   *
+   * Without it the clamp was computed from the catalogue price while
+   * `runCeilingFor` computed the build ceiling from the effective one, so
+   * `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN` inverted the very bound this
+   * function had just promised: override flash to 50 and a build gets
+   * 32,000 while a look keeps 64,000. A ratio between two numbers has to
+   * be computed from the same inputs as both of them.
+   */
+  outputMicroUsd?: number,
+): number {
   const known = findModel(model);
   if (!known) return MOCKUP_OUTPUT_TOKENS;
-  return Math.min(MOCKUP_OUTPUT_TOKENS, Math.floor(maxTokensFor(model) / 2));
+  return Math.min(
+    MOCKUP_OUTPUT_TOKENS,
+    Math.floor(maxTokensFor(model, outputMicroUsd) / 2),
+  );
 }
 
 export const DEFAULT_EFFORT: PlanEffort = 'high';

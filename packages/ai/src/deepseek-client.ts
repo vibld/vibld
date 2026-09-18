@@ -296,6 +296,10 @@ export function createDeepseekPlanClient(
 
       return {
         plan: readJsonPlan(text),
+        // Said here because here is the only place that knows. Above this,
+        // an empty body and unparseable JSON are both a null plan (#191
+        // review).
+        ...(text.trim().length === 0 ? { emptyBody: true } : {}),
         stopReason: mapFinishReason(finishReason),
         ...(mapFinishReason(finishReason) === 'refusal'
           ? { refusal: { category: 'content_filter', explanation: null } }
