@@ -5,7 +5,7 @@ import {
 } from './mockup-schema.ts';
 import { MOCKUP_OUTPUT } from './plan-output.ts';
 import type { ParsedMockupSet } from './mockup-schema.ts';
-import { TRUNCATED_MOCKUPS } from './errors.ts';
+import { MOCKUP_SUBJECT } from './errors.ts';
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -143,7 +143,7 @@ export class MockupProvider {
       completion,
       this.#maxTokens,
       MockupSetSchema,
-      TRUNCATED_MOCKUPS,
+      MOCKUP_SUBJECT,
     );
   }
 }
