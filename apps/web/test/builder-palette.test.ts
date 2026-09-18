@@ -31,12 +31,13 @@ const STYLES = join(
 /**
  * Colour literals that are deliberately not theme tokens.
  *
- * `#ffffff` backs the preview iframe, which contains somebody else's project
- * rendering on its own page. Backing it with the builder's paper colour would
- * tint their work and make a light project look broken in dark mode.
+ * `#ffffff` backs the frames that hold somebody else's document rendering on
+ * its own page: the preview iframe, and each mockup tile in the chooser
+ * (#185). Backing either with the builder's paper colour would tint their
+ * work and make a light direction look broken in dark mode.
  */
 const ALLOWED = new Map<string, string>([
-  ['#ffffff', "the preview frame is a canvas for somebody else's project"],
+  ['#ffffff', "a frame is a canvas for somebody else's document"],
 ]);
 
 const LITERAL = /(#[0-9a-fA-F]{3,8}\b|\bhsl\([^)]*\)|\boklch\([^)]*\))/g;

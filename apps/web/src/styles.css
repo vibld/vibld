@@ -1555,6 +1555,72 @@ body {
   color: var(--accent);
 }
 
+/* --- Mockup chooser -------------------------------------------------------
+ * Three sketches side by side on a wide screen, stacked on a phone. Each
+ * frame is deliberately short: this is a decision between directions, not a
+ * reading of any one of them, and a tile tall enough to read is a tile you
+ * have to scroll past to compare. */
+.mockups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mockups__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.mockups__title {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-lg);
+}
+
+.mockups__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.mockups__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  min-width: 0;
+}
+
+.mockups__frame {
+  width: 100%;
+  height: 13rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  /* The same case as the preview frame, and allowlisted with it in
+     `builder-palette.test.ts`: a mockup is somebody else's document
+     rendering on its own page. Backing it with the builder's paper colour
+     would tint every light direction and none of the dark ones. */
+  background: #ffffff;
+}
+
+.mockups__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mockups__label {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
 /* --- Platform admin page -------------------------------------------------
  * A page, not a column (#184). The builder's body is a two-column grid; the
  * admin page is one measure of prose and four tools, so the grid is dropped
