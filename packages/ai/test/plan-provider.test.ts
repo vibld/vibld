@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 import {
   PlanProvider,
   DEFAULT_MAX_TOKENS,
+  MEASURED_OUTPUT_TOKENS_PER_SECOND,
   RUN_OUTPUT_RESERVE_MICRO_USD,
+  RUN_WALL_CLOCK_BUDGET_MS,
   buildUserPrompt,
   maxTokensFor,
 } from '../src/plan-provider.ts';
@@ -500,11 +502,18 @@ describe('the output ceiling a run asks for', () => {
   });
 
   it('gives a cheaper model the room its price pays for', () => {
-    // DeepSeek Flash is what production actually runs. At 1.2 micro-USD a
-    // token the same $1.60 buys more than the model can produce, so it gets
-    // the model's own ceiling: six times the old flat number, reserving 46
-    // cents rather than the $1.60 an Opus run holds.
-    assert.equal(maxTokensFor('deepseek-flash'), 384_000);
+    // DeepSeek Flash is what production actually runs, and at 1.2 micro-USD
+    // a token $1.60 buys far more than it can emit, so money stops binding
+    // and the clock takes over: the ceiling is what it can produce inside
+    // the wall-clock budget. Asserted as that derivation rather than as a
+    // literal, because a literal here is what went stale the first time.
+    assert.equal(
+      maxTokensFor('deepseek-flash'),
+      (RUN_WALL_CLOCK_BUDGET_MS / 1000) * MEASURED_OUTPUT_TOKENS_PER_SECOND,
+    );
+    // And the point of the whole change: still far more than the flat 64000
+    // that truncated a real site.
+    assert.ok(maxTokensFor('deepseek-flash') > 64000 * 3);
   });
 
   it('never asks for more than the model will produce', () => {
@@ -553,7 +562,7 @@ describe('the output ceiling a run asks for', () => {
       >[0])
       .then(
         () => assert.fail('expected the fake client to throw'),
-        () => assert.deepEqual(calls, [384_000]),
+        () => assert.deepEqual(calls, [maxTokensFor('deepseek-flash')]),
       );
   });
 });

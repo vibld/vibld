@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { RUN_ABANDONED_AFTER_MS } from '@vibld/ai';
 import type { SpendVerdict } from './spend.ts';
 import { decide } from './spend.ts';
 
@@ -30,8 +31,16 @@ import { decide } from './spend.ts';
  * Nothing here is provisioned. The object is created on first access.
  */
 
-/** A run whose Worker died mid-flight settles at its reservation. */
-const ABANDONED_AFTER_MS = 15 * 60_000;
+/**
+ * A run whose Worker died mid-flight settles at its reservation.
+ *
+ * Derived rather than chosen, because reclaiming a run that is merely slow
+ * bills its caller the whole worst case: `settle` writes only where
+ * `settled IS NULL`, so once this has fired the real figure is discarded.
+ * It must therefore outlast the point at which the Workflow itself gives
+ * up, which is what `RUN_ABANDONED_AFTER_MS` guarantees.
+ */
+const ABANDONED_AFTER_MS = RUN_ABANDONED_AFTER_MS;
 
 export interface Reservation {
   verdict: SpendVerdict;
