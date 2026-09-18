@@ -1,7 +1,7 @@
 import { derivePalette, seedFromHex } from '@vibld/ai';
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import type { DurableGenerationResult } from '@vibld/core';
-import { PlanProvider, createPlanClient } from '@vibld/ai';
+import { PlanProvider, RUN_STEP_TIMEOUT_MS, createPlanClient } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 
 import { D1GenerationStore } from './generation-store.ts';
@@ -67,7 +67,10 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         // write -- better to surface the one failure than to double-spend
         // chasing it.
         retries: { limit: 0, delay: '10 seconds' },
-        timeout: '10 minutes',
+        // Derived, not chosen: a ceiling is a time budget too, and 10
+        // minutes was calibrated when every run stopped at 64000 tokens.
+        // See RUN_WALL_CLOCK_BUDGET_MS for the ordering this belongs to.
+        timeout: RUN_STEP_TIMEOUT_MS,
       },
       async () => {
         const startedAt = Date.now();
@@ -143,9 +146,12 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
 
     const costMicroUsd = await step.do(
       'settle-budget',
-      // Idempotent: `UserBudget.settle` only writes a reservation that is
-      // still open (`WHERE settled IS NULL`), so retrying it after a
-      // transient Durable Object failure is safe.
+      // Idempotent: `UserBudget.settle` writes the same id and the same
+      // figure each time, so retrying it after a transient Durable Object
+      // failure lands on the same values. It no longer refuses a row the
+      // reclaim has already closed, which is deliberate -- see its own
+      // comment: a run that finishes after being presumed abandoned is
+      // charged what it measured rather than what it reserved.
       {
         retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
         timeout: '30 seconds',

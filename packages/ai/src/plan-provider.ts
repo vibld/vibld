@@ -109,6 +109,65 @@ export const RUN_OUTPUT_RESERVE_MICRO_USD = 1_600_000;
 export const DEFAULT_MAX_TOKENS = 64000;
 
 /**
+ * How long one run may take, and the three numbers that have to agree on it.
+ *
+ * A token ceiling is also a time budget, because tokens are produced at a
+ * rate. Raising the ceiling from a flat 64000 to a per-model figure raised
+ * the wall-clock cost of a run with it, and two constants elsewhere were
+ * calibrated for the old one:
+ *
+ * - the Workflow's `generate` step timeout, then 10 minutes;
+ * - `budget.ts`'s `ABANDONED_AFTER_MS`, then 15 minutes, after which a
+ *   reservation is reclaimed *at its full worst case* and the real
+ *   settlement becomes a no-op.
+ *
+ * At 64000 tokens a run finished in under four minutes and cleared both. At
+ * 384000 it would take twenty-three, so it would have been billed its whole
+ * reservation while still running, and then killed by a timeout it could
+ * never have met. A cheaper ceiling that overcharges is not cheaper.
+ *
+ * So the budget is the constant, and the rest derives from it. The ordering
+ * that has to hold, asserted in `apps/web/test/run-wall-clock.test.ts`:
+ *
+ *     BUDGET  <=  STEP_TIMEOUT  <  ABANDONED_AFTER
+ *
+ * A run sized to the budget finishes inside the timeout even when the model
+ * runs slower than measured, and is never reclaimed while it is alive.
+ */
+export const RUN_WALL_CLOCK_BUDGET_MS = 15 * 60_000;
+
+/**
+ * Output tokens a second, measured rather than assumed.
+ *
+ * From the one production trace that exists (`generation_run_traces`, run of
+ * 2026-09-18T01:58:47Z): `deepseek-flash` emitted 64002 tokens in 227589ms,
+ * which is 281.2 a second. Rounded down, and deliberately not padded with a
+ * safety factor: the padding belongs in the timeout below, where being wrong
+ * costs nothing, rather than in the ceiling, where it would silently cut
+ * work short. Re-measure when the catalogue or the provider changes; one
+ * sample is one sample.
+ */
+export const MEASURED_OUTPUT_TOKENS_PER_SECOND = 280;
+
+/**
+ * What the `generate` step is given before the run is considered hung.
+ *
+ * Longer than the budget, because the budget sizes the ceiling against a
+ * measured rate and a real run may be slower. A run at half the measured
+ * rate still finishes; below that it is not slow, it is stuck.
+ */
+export const RUN_STEP_TIMEOUT_MS = RUN_WALL_CLOCK_BUDGET_MS * 2;
+
+/**
+ * When an unsettled reservation is presumed dead and charged in full.
+ *
+ * Strictly greater than the step timeout: a run that the timeout has not yet
+ * given up on is still alive, and reclaiming it bills the caller a worst
+ * case they did not spend.
+ */
+export const RUN_ABANDONED_AFTER_MS = RUN_STEP_TIMEOUT_MS + 5 * 60_000;
+
+/**
  * The output ceiling to ask a given model for.
  *
  * This was a flat 64000 for every model, and that is the bug. 64000 was
@@ -150,7 +209,15 @@ export function maxTokensFor(model: string, outputMicroUsd?: number): number {
       ? outputMicroUsd
       : known.outputMicroUsd;
   const affordable = Math.floor(RUN_OUTPUT_RESERVE_MICRO_USD / price);
-  return Math.min(known.maxOutputTokens, affordable);
+  // What the model can actually produce inside the wall-clock budget. The
+  // cheap models are fast but not infinitely fast, and a ceiling nobody can
+  // reach in the time allowed is not a ceiling, it is a timeout waiting to
+  // happen. Binds only where money does not: Opus and Astra are stopped by
+  // the dollar reserve long before the clock.
+  const reachable = Math.floor(
+    (RUN_WALL_CLOCK_BUDGET_MS / 1000) * MEASURED_OUTPUT_TOKENS_PER_SECOND,
+  );
+  return Math.min(known.maxOutputTokens, affordable, reachable);
 }
 export const DEFAULT_EFFORT: PlanEffort = 'high';
 
