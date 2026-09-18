@@ -36,6 +36,10 @@
     "PUBLISH_HOSTNAME": "published.vibld-preview.dev",
   },
 
+  // The orphan sweep (#177), nightly. Offset from apps/web's own 09:17 run
+  // so the two are not drawing on the same D1 database at the same minute.
+  "triggers": { "crons": ["43 9 * * *"] },
+
   // PUBLISH_INTERNAL_SECRET is a Worker secret, set out of band -- see
   // internal-auth.ts / README.md.
 }

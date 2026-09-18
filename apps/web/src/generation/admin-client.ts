@@ -1,4 +1,8 @@
 import { getClerkToken } from '../auth/clerk-token.ts';
+import type {
+  ParkedPayment,
+  ParkedQueue,
+} from '../components/parked-queue-view.ts';
 
 /**
  * Calls the Worker's `/api/admin/*` (docs/decisions.md L4).
@@ -186,6 +190,94 @@ export async function grantAdminCredit(
     return {
       ok: false,
       error: 'The admin service returned an unreadable response.',
+    };
+  }
+}
+
+/**
+ * A parked payment as the route sends it, or null when it is not one this
+ * can show.
+ *
+ * The same discipline the rest of this file follows, and it matters more
+ * here than usual: every field on the wire came out of a stored Stripe event
+ * rather than out of this deployment's own tables, so "the route sent it"
+ * is not the same as "we wrote it".
+ */
+function readParked(value: unknown): ParkedPayment | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as Record<string, unknown>;
+  if (
+    typeof row.stripeEventId !== 'string' ||
+    typeof row.type !== 'string' ||
+    typeof row.created !== 'number' ||
+    typeof row.firstSeenAt !== 'string' ||
+    typeof row.attempts !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    stripeEventId: row.stripeEventId,
+    type: row.type,
+    created: row.created,
+    firstSeenAt: row.firstSeenAt,
+    attempts: row.attempts,
+    ...(typeof row.customerId === 'string'
+      ? { customerId: row.customerId }
+      : {}),
+    ...(typeof row.amountCents === 'number'
+      ? { amountCents: row.amountCents }
+      : {}),
+    ...(typeof row.currency === 'string' ? { currency: row.currency } : {}),
+  };
+}
+
+export type ParkedQueueResult =
+  { ok: true; queue: ParkedQueue } | { ok: false; error: string };
+
+/**
+ * Payments Stripe says moved that this deployment cannot yet name (#46).
+ *
+ * Read-only: the nightly retry is what resolves these. This exists so that
+ * it stopping resolving them is something somebody can see.
+ */
+export async function fetchParkedQueue(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<ParkedQueueResult> {
+  const response = await fetchImpl('/api/admin/unattributed', {
+    headers: await authHeaders(getToken),
+  });
+  if (!response.ok) return { ok: false, error: await errorMessage(response) };
+  try {
+    const body = ((await response.json()) ?? {}) as Record<string, unknown>;
+    if (typeof body.parked !== 'number') {
+      return {
+        ok: false,
+        error: 'The admin service returned an unexpected response.',
+      };
+    }
+    const events = Array.isArray(body.events)
+      ? body.events
+          .map(readParked)
+          .filter((row): row is ParkedPayment => row !== null)
+      : [];
+    return {
+      ok: true,
+      queue: {
+        parked: body.parked,
+        oldestFirstSeenAt:
+          typeof body.oldestFirstSeenAt === 'string'
+            ? body.oldestFirstSeenAt
+            : null,
+        oldestCreated:
+          typeof body.oldestCreated === 'number' ? body.oldestCreated : null,
+        events,
+      },
+    };
+  } catch {
+    return {
+      ok: false,
+      error: 'The admin service returned an unexpected response.',
     };
   }
 }

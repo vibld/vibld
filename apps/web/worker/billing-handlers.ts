@@ -647,3 +647,120 @@ async function discoverSubscriptionIds(
 
   return { ids: [...ids], discovered, truncated: false };
 }
+
+/**
+ * What a parked event can say to a browser.
+ *
+ * Deliberately not the stored payload. `billing_unattributed_events.payload`
+ * is the whole Stripe event, kept so the retry never depends on Stripe still
+ * having it (0010_unattributed_events.sql), and an admin panel needs none of
+ * that: it needs to know how much is stuck, how old it is, and enough per row
+ * to recognise one. Shipping the payload would put a growing, unversioned
+ * third-party object on a page, and every field Stripe adds to an event
+ * would arrive in the browser without anybody deciding it should.
+ *
+ * So the fields are named one at a time. Anything Stripe sends that is not
+ * on this list does not leave the Worker.
+ */
+export interface ParkedPayment {
+  stripeEventId: string;
+  type: string;
+  /** Stripe's own creation second: when the money moved. */
+  created: number;
+  /** When this deployment took custody, which is what "ignored for N days" measures. */
+  firstSeenAt: string;
+  attempts: number;
+  /** Present when the event carries one. Enough to find the payment in Stripe. */
+  customerId?: string;
+  amountCents?: number;
+  currency?: string;
+}
+
+/** The two fields worth showing, dug out of whichever object the event carries. */
+function moneyFrom(event: Stripe.Event): {
+  customerId?: string;
+  amountCents?: number;
+  currency?: string;
+} {
+  const object = event.data?.object as
+    | {
+        customer?: unknown;
+        amount_paid?: unknown;
+        amount_total?: unknown;
+        amount?: unknown;
+        currency?: unknown;
+      }
+    | undefined;
+  if (!object) return {};
+  // Invoices carry `amount_paid`, Checkout sessions `amount_total`, charges
+  // and refunds a bare `amount`. Taking the first that is a number rather
+  // than switching on the event type, because the list of types that park is
+  // whatever could not be attributed, not a fixed set.
+  const amount = [object.amount_paid, object.amount_total, object.amount].find(
+    (value) => typeof value === 'number',
+  );
+  return {
+    ...(typeof object.customer === 'string'
+      ? { customerId: object.customer }
+      : {}),
+    ...(typeof amount === 'number' ? { amountCents: amount } : {}),
+    ...(typeof object.currency === 'string'
+      ? { currency: object.currency }
+      : {}),
+  };
+}
+
+/** One parked row, reduced to what a person reading a queue needs. */
+export function parkedPaymentOf(row: {
+  stripeEventId: string;
+  type: string;
+  created: number;
+  payload: string;
+  attempts: number;
+  firstSeenAt: string;
+}): ParkedPayment {
+  let money: ReturnType<typeof moneyFrom> = {};
+  try {
+    money = moneyFrom(JSON.parse(row.payload) as Stripe.Event);
+  } catch {
+    // A payload that will not parse is a row the retry cannot apply either.
+    // It still belongs in the list: an operator seeing it is the only way it
+    // gets noticed, and hiding it would make the count disagree with the rows.
+  }
+  return {
+    stripeEventId: row.stripeEventId,
+    type: row.type,
+    created: row.created,
+    firstSeenAt: row.firstSeenAt,
+    attempts: row.attempts,
+    ...money,
+  };
+}
+
+/**
+ * The parked queue, for an admin to look at (#46).
+ *
+ * Read-only on purpose. The nightly retry is what resolves these, and it
+ * already runs; what was missing is anybody being able to see that it has
+ * stopped resolving them. A route that could also attribute a payment by
+ * hand is a route that credits money on an operator's say-so, which wants
+ * its own confirmation and its own audit record, and is not this.
+ *
+ * Assumes the admin check already ran, like the other `/api/admin/*`
+ * handlers in this repository.
+ */
+export async function handleUnattributedQueue(
+  request: Request,
+  env: BillingEnv,
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+  if (!env.DB) return json({ error: 'Billing is not configured here.' }, 503);
+  const store = new BillingStore(env.DB);
+  // The summary is counted in the database and the rows are a capped page of
+  // it, so `parked` can exceed `events.length` and that is the honest answer
+  // rather than a discrepancy: the panel says how many there are and shows
+  // the ones most worth looking at.
+  const summary = await store.unattributedSummary();
+  const events = await store.listUnattributedEvents(50);
+  return json({ ...summary, events: events.map(parkedPaymentOf) });
+}

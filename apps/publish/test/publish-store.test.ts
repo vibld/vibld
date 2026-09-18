@@ -454,6 +454,147 @@ describe('what a slug keeps', () => {
     );
   });
 
+  it('sweeps up an object no catalogue row names', async () => {
+    // The interleaving #177 describes, played out: a takedown collects a
+    // revision while one of its uploads is still in the air, and the write
+    // lands afterwards under a prefix nothing points at any more.
+    //
+    // Unreachable rather than wrong (serving resolves through the pointer,
+    // and a collected revision has no row to point at), so what it costs is
+    // storage for ever. No condition closes it, because one side of the
+    // race is in R2 and a listing is a round trip. Coming back afterwards
+    // does.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    await version(store, 1);
+
+    const lost = randomUUID();
+    await bucket.put(`published/acme/${lost}/late.html`, 'the late write');
+    assert.ok(bucket.keys().some((key) => key.includes(lost)));
+
+    const { collected } = await store.sweepOrphans();
+    assert.deepEqual(collected, [`acme/${lost}`]);
+    assert.ok(
+      !bucket.keys().some((key) => key.includes(lost)),
+      'an object with nothing naming it survived the sweep',
+    );
+  });
+
+  it('leaves alone every revision something still owns', async () => {
+    // The whole risk of a sweep. A row of any kind means somebody owns
+    // those bytes: one being uploaded, one serving, one part way through
+    // being collected. Only the complete absence of a row makes them
+    // nobody's, and getting that wrong deletes a live site.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+
+    const live = await version(store, 1);
+    // Catalogued and still uploading: `putFiles` writes the row first, so
+    // this is what an in-flight publish looks like from the outside.
+    const uploading = randomUUID();
+    await store.putFiles('acme', uploading, [
+      { path: 'index.html', content: '<h1>still going</h1>' },
+    ]);
+
+    const before = bucket.keys();
+    const { collected } = await store.sweepOrphans();
+
+    assert.deepEqual(collected, [], 'the sweep collected something owned');
+    assert.deepEqual(bucket.keys(), before);
+    assert.ok(bucket.keys().some((key) => key.includes(live)));
+    assert.ok(bucket.keys().some((key) => key.includes(uploading)));
+    assert.deepEqual(await served(store, 'acme', 'index.html'), {
+      content: '<h1>v1</h1>',
+    });
+  });
+
+  it('stops at the bound it was given rather than running as long as it likes', async () => {
+    // Bounded for the reason the nightly pass in apps/web is: a sweep that
+    // cannot finish is one that dies partway and leaves the same mess.
+    const { store, bucket } = stored();
+    await store.claimSlug('acme', 'proj-1', 'user-1');
+    for (let n = 0; n < 6; n += 1) {
+      await bucket.put(`published/acme/${randomUUID()}/index.html`, `${n}`);
+    }
+
+    // One, deliberately, and the bucket pages two at a time: the bound has
+    // to hold *within* a page, not merely stop the loop fetching another.
+    // Checking it at the page boundary was checking nothing, because the
+    // loop condition stops there anyway.
+    const { examined, collected } = await store.sweepOrphans(1);
+    assert.equal(examined, 1);
+    assert.equal(collected.length, 1);
+    assert.equal(
+      bucket.keys().length,
+      5,
+      'the bound did not hold inside a page',
+    );
+  });
+
+  it('reaches an orphan sitting behind more revisions than its bound', async () => {
+    // The blind spot a bound without a resume point creates, and the reason
+    // "orphans are rare" was the wrong thing to reason about. Rarity says
+    // how often one exists; it says nothing about whether the sweep can
+    // ever get to one.
+    //
+    // R2 lists in key order, so catalogued revisions sorting ahead of an
+    // orphan eat the whole allowance. Starting from the top every night,
+    // the sweep would run, report honestly, and never collect this object
+    // again for the life of the deployment.
+    const { store, bucket } = stored();
+    await store.claimSlug('aaa', 'proj-1', 'user-1');
+    // Six catalogued revisions under a slug that sorts first, and a bound
+    // of two: three runs' worth of ground before the orphan.
+    for (let n = 0; n < 6; n += 1) {
+      await store.putFiles('aaa', `gen-${n}`, [
+        { path: 'index.html', content: `${n}` },
+      ]);
+    }
+    await bucket.put('published/zzz/gen-orphan/late.html', 'the late write');
+
+    const collected: string[] = [];
+    // Each run is bounded to two revisions, so it takes several to walk
+    // past the catalogued ones. Every one of them is a separate nightly
+    // invocation as far as the store is concerned.
+    for (let run = 0; run < 5; run += 1) {
+      const result = await store.sweepOrphans(2);
+      collected.push(...result.collected);
+    }
+
+    assert.deepEqual(collected, ['zzz/gen-orphan']);
+    assert.ok(
+      !bucket.keys().some((key) => key.includes('gen-orphan')),
+      'the sweep never reached past its first bound',
+    );
+    // And the catalogued revisions it walked over are all still there.
+    assert.equal(
+      bucket.keys().filter((key) => key.startsWith('published/aaa/')).length,
+      6,
+    );
+  });
+
+  it('laps, so an orphan created behind the walk is still collected', async () => {
+    // Reaching the end has to clear the mark. Left pointing at the last key,
+    // the sweep would stop at the end of the bucket and never come back to
+    // anything written before that point.
+    const { store, bucket } = stored();
+    await store.claimSlug('zzz', 'proj-1', 'user-1');
+    await publish(store, 'zzz', [{ path: 'index.html', content: 'z' }]);
+
+    // A full pass that reaches the end and finds nothing.
+    assert.deepEqual((await store.sweepOrphans()).collected, []);
+
+    // Now an orphan appears behind where that walk finished.
+    await bucket.put('published/aaa/gen-orphan/late.html', 'late');
+
+    const { collected } = await store.sweepOrphans();
+    assert.deepEqual(
+      collected,
+      ['aaa/gen-orphan'],
+      'the walk stopped at the end instead of lapping',
+    );
+  });
+
   it('refuses to collect the revision that is serving', async () => {
     // The other direction of the same race. Promotion committing first has
     // to beat a collection that is about to start, not only the reverse,

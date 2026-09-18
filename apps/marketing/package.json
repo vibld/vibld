@@ -11,7 +11,6 @@
     "dev": "react-router dev",
     "preview": "vite preview --outDir build/client",
     "typecheck": "react-router typegen && tsc",
-    "lint": "tsc --noEmit",
     "test": "node --test --experimental-strip-types test/*.test.ts"
   },
   "dependencies": {

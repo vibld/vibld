@@ -89,6 +89,7 @@ import {
   handleBillingCheckout,
   handleBillingPortal,
   handleStripeWebhook,
+  handleUnattributedQueue,
   reconcileSubscriptions,
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
@@ -1756,6 +1757,12 @@ export default {
       const guard = await requireAdmin(request, env);
       if (guard.denied) return guard.denied;
       return handleInviteRevoke(request, env);
+    }
+
+    if (pathname === '/api/admin/unattributed') {
+      const guard = await requireAdmin(request, env);
+      if (guard.denied) return guard.denied;
+      return handleUnattributedQueue(request, env);
     }
 
     if (pathname === '/api/admin/topup') {

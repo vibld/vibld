@@ -1,5 +1,6 @@
 import { AdminPanel } from './components/AdminPanel.tsx';
 import { InvitePanel } from './components/InvitePanel.tsx';
+import { ParkedQueuePanel } from './components/ParkedQueuePanel.tsx';
 import { SiteTakedown } from './components/SiteTakedown.tsx';
 import { AccessGate } from './components/AccessGate.tsx';
 import { Mark, WORDMARK } from './components/Mark.tsx';
@@ -120,6 +121,7 @@ function Builder() {
             />
             {state.isAdmin ? <AdminPanel /> : null}
             {state.isAdmin ? <InvitePanel /> : null}
+            {state.isAdmin ? <ParkedQueuePanel /> : null}
             {state.isAdmin ? <SiteTakedown /> : null}
             <PromptPanel
               state={state}

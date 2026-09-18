@@ -1000,6 +1000,44 @@ export class BillingStore {
     }));
   }
 
+  /**
+   * How much is parked, and how long the oldest has been waiting.
+   *
+   * Counted in the database rather than by measuring a list, because
+   * `listUnattributedEvents` takes a limit and a length that has hit its
+   * limit is not a count: a queue of a thousand would report two hundred
+   * and look survivable. What this is for is telling somebody how bad it
+   * is, so it has to be able to say a number that alarms them.
+   *
+   * `first_seen_at` is when this deployment took custody, which is the age
+   * that matters for "how long has this been ignored". Stripe's own
+   * `created` is kept alongside it because a payment that moved long before
+   * we ever saw the event is a different kind of old.
+   */
+  async unattributedSummary(): Promise<{
+    parked: number;
+    oldestFirstSeenAt: string | null;
+    oldestCreated: number | null;
+  }> {
+    const row = await this.#db
+      .prepare(
+        `SELECT COUNT(*) AS parked,
+                MIN(first_seen_at) AS oldest_first_seen_at,
+                MIN(created) AS oldest_created
+           FROM billing_unattributed_events`,
+      )
+      .first<{
+        parked: number;
+        oldest_first_seen_at: string | null;
+        oldest_created: number | null;
+      }>();
+    return {
+      parked: row?.parked ?? 0,
+      oldestFirstSeenAt: row?.oldest_first_seen_at ?? null,
+      oldestCreated: row?.oldest_created ?? null,
+    };
+  }
+
   /** Drop a parked event, once it has actually been applied. */
   async dropUnattributedEvent(stripeEventId: string): Promise<void> {
     await this.#db

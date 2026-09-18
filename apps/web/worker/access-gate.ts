@@ -152,6 +152,7 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // not confer and which an admin passes without one.
   '/api/admin/user': 'behind the platform-admin check instead',
   '/api/admin/topup': 'behind the platform-admin check instead',
+  '/api/admin/unattributed': 'behind the platform-admin check instead',
   '/api/admin/invites': 'behind the platform-admin check instead',
   '/api/admin/invite': 'behind the platform-admin check instead',
   '/api/admin/invite/revoke': 'behind the platform-admin check instead',

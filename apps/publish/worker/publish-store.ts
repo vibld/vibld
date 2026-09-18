@@ -51,6 +51,14 @@ function generationPrefix(slug: string, generation: string): string {
  */
 export const REVISIONS_KEPT = 3;
 
+/**
+ * What the sweep cursor row is keyed by (0026_publish_sweep_cursor.sql).
+ *
+ * Named rather than implicit, so a second sweep over some other prefix
+ * later needs no migration and cannot silently share this one's place.
+ */
+const SWEEP_CURSOR = 'published';
+
 interface PublishedProjectRow {
   slug: string;
   project_id: string;
@@ -531,6 +539,123 @@ export class PublishStore {
       )
       .bind(slug, generation)
       .run();
+  }
+
+  /**
+   * Collect objects that no catalogue row names (#177).
+   *
+   * Everything else in this file keeps D1 ahead of R2 so that bytes are
+   * never unreachable: `putFiles` catalogues a revision before writing one,
+   * and every collector marks the row before deleting anything. That holds
+   * against every race where both sides are D1 writes, because D1
+   * serialises them. It does not hold against the one where a side is in
+   * R2: a listing is a round trip, and no condition on a row can tell a
+   * collector that a write it cannot see is still in the air.
+   *
+   * So a publish whose upload runs long can have its revision collected
+   * underneath it and then land one more object, under a prefix nothing
+   * names any more. That object is unreachable rather than wrong: serving
+   * resolves through `published_projects.generation`, and a collected
+   * revision has no row to point at. What it costs is storage, for ever.
+   *
+   * This is the other half of that: rather than coordinating the writer and
+   * the collector, which needs a handshake across two stores that cannot
+   * share a write, it comes back afterwards and asks the only question that
+   * settles it. Is there a row for these bytes. No row means nothing can
+   * ever promote them and nothing will ever come back for them.
+   *
+   * Deriving the prefixes from object keys rather than listing with a
+   * delimiter, so this needs nothing of `PublishR2Bucket` that the rest of
+   * the file does not already use.
+   *
+   * Bounded, like the nightly work in apps/web, and it resumes, for the
+   * reason 0026_publish_sweep_cursor.sql gives at length. A bound without a
+   * resume point is not a bound, it is a blind spot: R2 lists in key order,
+   * so once enough catalogued revisions sort ahead of an orphan, a sweep
+   * that always starts from the top spends its whole allowance on them and
+   * stops short of the orphan every night, for ever. Three revisions a slug
+   * means seven published slugs is enough to hide everything after them.
+   *
+   * So a run records the last key it examined, the next starts after it,
+   * and reaching the end clears the mark so the walk laps.
+   */
+  async sweepOrphans(
+    maxGenerations = 20,
+    at = new Date(),
+  ): Promise<{ examined: number; collected: string[] }> {
+    const mark = await this.#db
+      .prepare(`SELECT after_key FROM publish_sweep_cursor WHERE id = ?1`)
+      .bind(SWEEP_CURSOR)
+      .first<{ after_key: string | null }>();
+    const startAfter = mark?.after_key ?? undefined;
+
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    /** The last key actually examined, which is where the next run resumes. */
+    let stoppedAt: string | undefined;
+    let reachedEnd = false;
+    do {
+      const page = await this.#bucket.list({
+        prefix: 'published/',
+        // `startAfter` opens the walk; `cursor` continues it. Sending both
+        // would be asking R2 two different questions about where to begin.
+        ...(cursor === undefined
+          ? startAfter === undefined
+            ? {}
+            : { startAfter }
+          : { cursor }),
+      });
+      for (const object of page.objects) {
+        // published / <slug> / <generation> / <path...>
+        const parts = object.key.split('/');
+        stoppedAt = object.key;
+        if (parts.length < 4) continue;
+        const [, slug, generation] = parts;
+        if (slug === undefined || generation === undefined) continue;
+        seen.add(`${slug}/${generation}`);
+        if (seen.size >= maxGenerations) break;
+      }
+      reachedEnd = !page.truncated;
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor !== undefined && seen.size < maxGenerations);
+
+    // Cleared at the end of the listing rather than left pointing at the
+    // last key, so the next run starts from the top. That is what makes
+    // this a lap instead of a walk that stops at the end and never returns
+    // to an orphan created behind it.
+    const resumeAt =
+      reachedEnd && seen.size < maxGenerations ? null : stoppedAt;
+    await this.#db
+      .prepare(
+        `INSERT INTO publish_sweep_cursor (id, after_key, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+           after_key = excluded.after_key,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(SWEEP_CURSOR, resumeAt ?? null, at.toISOString())
+      .run();
+
+    const collected: string[] = [];
+    for (const pair of seen) {
+      const slash = pair.indexOf('/');
+      const slug = pair.slice(0, slash);
+      const generation = pair.slice(slash + 1);
+      const row = await this.#db
+        .prepare(
+          `SELECT 1 FROM published_generations
+           WHERE slug = ?1 AND generation = ?2`,
+        )
+        .bind(slug, generation)
+        .first<{ 1: number }>();
+      // A row, of any kind, means somebody still owns these bytes: a
+      // revision being uploaded, one serving, one part way through being
+      // collected. Only the complete absence of one makes them nobody's.
+      if (row !== null) continue;
+      await this.discard(slug, generation);
+      collected.push(pair);
+    }
+    return { examined: seen.size, collected };
   }
 
   /**

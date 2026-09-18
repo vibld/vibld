@@ -376,6 +376,43 @@ function slugFromHost(
 }
 
 export default {
+  /**
+   * Nightly, and the only thing this Worker does without a request (#177).
+   *
+   * Everything else here keeps D1 ahead of R2 so no byte is ever
+   * unreachable, and that holds against every race whose two sides are D1
+   * writes. The one it cannot hold against has a side in R2: an upload
+   * still in the air when its revision is collected lands one more object
+   * under a prefix nothing names any more. Closing that at the moment it
+   * happens needs the writer and the collector to hand off across two
+   * stores with no write between them. Coming back afterwards and asking
+   * whether a row exists needs nothing.
+   *
+   * Bounded, and it throws nothing back: a sweep is housekeeping, and a
+   * scheduled handler that throws is one whose failure is a line in a log
+   * nobody reads. What it does report, it reports there deliberately.
+   */
+  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+    if (!env.DB || !env.PROJECT_CONTENT) return;
+    try {
+      const { examined, collected } = await new PublishStore(
+        env.DB,
+        env.PROJECT_CONTENT,
+      ).sweepOrphans();
+      if (collected.length > 0) {
+        // Worth saying out loud rather than counting silently: every one of
+        // these is a publish and a takedown that overlapped, and a rate that
+        // stops being near zero is the interesting signal.
+        console.log(
+          `publish: swept ${collected.length} orphaned revision(s) of ${examined} examined:`,
+          collected.join(', '),
+        );
+      }
+    } catch (error) {
+      console.error('publish: the orphan sweep failed', error);
+    }
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/internal/')) {

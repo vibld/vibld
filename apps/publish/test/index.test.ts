@@ -233,6 +233,55 @@ describe('apps/publish Worker: internal API', () => {
   });
 });
 
+describe('apps/publish Worker: the nightly sweep', () => {
+  const fire = async (env: Env) =>
+    worker.scheduled?.({} as ScheduledController, env);
+
+  it('collects an object no catalogue row names', async () => {
+    const env = newEnv();
+    await worker.fetch(
+      internalRequest('internal/publish', {
+        userId: 'u1',
+        projectId: 'p1',
+        slug: 'acme',
+        files: [{ path: 'index.html', content: '<h1>acme</h1>' }],
+      }),
+      env,
+    );
+    const bucket = env.PROJECT_CONTENT as InMemoryR2Bucket;
+    await bucket.put('published/acme/gen-lost/late.html', 'the late write');
+
+    await fire(env);
+
+    assert.ok(
+      !bucket.keys().some((key) => key.includes('gen-lost')),
+      'the sweep did not run, or did not collect the orphan',
+    );
+    // And the live site is untouched, which is the half that matters.
+    const site = await worker.fetch(
+      publicRequest('acme.published.vibld-preview.dev'),
+      env,
+    );
+    assert.equal(site.status, 200);
+  });
+
+  it('does nothing at all when the bindings are missing', async () => {
+    // A scheduled handler that throws is one whose failure is a line in a
+    // log nobody reads, and a Worker deployed without its bindings is
+    // exactly when this would fire.
+    await assert.doesNotReject(() => fire({} as Env));
+  });
+
+  it('survives a bucket that throws rather than failing the run', async () => {
+    const env = newEnv();
+    const bucket = env.PROJECT_CONTENT as InMemoryR2Bucket;
+    bucket.list = async () => {
+      throw new Error('R2 is having a day');
+    };
+    await assert.doesNotReject(() => fire(env));
+  });
+});
+
 describe('apps/publish Worker: public serving', () => {
   async function publishedEnv(): Promise<Env> {
     const env = newEnv();
