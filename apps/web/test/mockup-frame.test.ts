@@ -44,9 +44,7 @@ describe('the policy a mockup frame carries', () => {
 });
 
 describe('where the policy lands', () => {
-  it('goes inside the head, ahead of what the head contains', () => {
-    // A meta policy governs only what the parser meets after it, so being
-    // second is the same as being absent.
+  it('leads the document, so nothing it governs is parsed first', () => {
     const framed = mockupFrameDocument(
       '<!doctype html><html><head><style>body{color:red}</style></head><body>hi</body></html>',
     );
@@ -54,28 +52,42 @@ describe('where the policy lands', () => {
       framed.indexOf('Content-Security-Policy') < framed.indexOf('<style>'),
       'the policy sits after content it is supposed to govern',
     );
-    assert.match(framed, /<head><meta http-equiv="Content-Security-Policy"/);
   });
 
-  it('leads the document when there is no head to put it in', () => {
+  it('keeps the doctype first, so the frame stays out of quirks mode', () => {
+    const framed = mockupFrameDocument(
+      '<!doctype html><html><body>x</body></html>',
+    );
+    assert.match(
+      framed,
+      /^<!doctype html><meta http-equiv="Content-Security-Policy"/i,
+    );
+  });
+
+  it('leads a document that has no doctype at all', () => {
     const framed = mockupFrameDocument(
       '<body><img src="https://x/y.png"></body>',
     );
-    assert.ok(
-      framed.startsWith('<meta http-equiv="Content-Security-Policy"'),
-      'a headless document got no policy in front of it',
-    );
+    assert.ok(framed.startsWith('<meta http-equiv="Content-Security-Policy"'));
     assert.ok(
       framed.indexOf('img') > framed.indexOf('Content-Security-Policy'),
     );
   });
 
-  it('handles a head with attributes on it', () => {
+  it('does not trust a head that is not where it claims to be', () => {
+    // The reason placement moved off `<head>` (#189 review follow-up).
+    // Searching for the head means trusting the document to be well
+    // formed, and this function exists because it cannot be trusted. A
+    // `<head` in a comment used to take the policy with it.
     const framed = mockupFrameDocument(
-      '<html><head lang="en"><title>x</title></head><body>y</body></html>',
+      '<!doctype html><!-- <head> --><html><head><style>body{color:red}</style></head><body>x</body></html>',
     );
     assert.ok(
-      framed.indexOf('Content-Security-Policy') < framed.indexOf('<title>'),
+      framed.indexOf('Content-Security-Policy') < framed.indexOf('<!--'),
+      'a commented-out head moved the policy behind real content',
+    );
+    assert.ok(
+      framed.indexOf('Content-Security-Policy') < framed.indexOf('<style>'),
     );
   });
 
@@ -86,6 +98,6 @@ describe('where the policy lands', () => {
       '<!doctype html><html><head></head><body><h1>Sourdough</h1></body></html>';
     const framed = mockupFrameDocument(html);
     assert.match(framed, /<h1>Sourdough<\/h1>/);
-    assert.match(framed, /^<!doctype html>/);
+    assert.match(framed, /^<!doctype html>/i);
   });
 });

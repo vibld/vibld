@@ -34,15 +34,26 @@ const META = `<meta http-equiv="Content-Security-Policy" content="${MOCKUP_FRAME
  * Put the policy in front of everything the document might fetch.
  *
  * A meta CSP governs only what the parser meets after it, so placement is
- * the whole job. Immediately after `<head>` when there is one, and at the
- * very front otherwise -- a document with no head still gets one
- * synthesised around whatever leads it, so a meta that leads the string
- * lands in that head ahead of the rest.
+ * the whole job -- being second is the same as being absent.
+ *
+ * Placed by the doctype rather than by finding `<head>`, which is what
+ * this did first. Searching for the head means trusting the document to be
+ * well formed: a `<head` inside a comment, or a stray one in text, and the
+ * policy lands somewhere harmless and governs nothing. That is a bypass of
+ * the protection, in a function whose entire reason for existing is that
+ * the document cannot be trusted.
+ *
+ * A `<meta>` before `<html>` is not misplaced, it is hoisted: the parser
+ * meets it in "before head", creates the head, and makes the meta its
+ * first child. So leading the markup puts the policy first in the head of
+ * every document, including one that has no head of its own and one whose
+ * head is not where it claims. After the doctype, because a doctype that
+ * is no longer first stops being one and the frame drops into quirks mode.
  */
 export function mockupFrameDocument(html: string): string {
-  const head = /<head[^>]*>/i.exec(html);
-  if (head) {
-    const at = head.index + head[0].length;
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  if (doctype) {
+    const at = doctype[0].length;
     return `${html.slice(0, at)}${META}${html.slice(at)}`;
   }
   return `${META}${html}`;
