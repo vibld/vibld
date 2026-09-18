@@ -7,7 +7,10 @@ import {
   mockupMaxTokensFor,
 } from '../src/plan-provider.ts';
 import { MODEL_CATALOGUE } from '../src/model-catalogue.ts';
-import { MAX_MOCKUP_DIRECTION_CHARS } from '../src/limits.ts';
+import {
+  MAX_CHOSEN_MOCKUP_CHARS,
+  MAX_MOCKUP_DIRECTION_CHARS,
+} from '../src/limits.ts';
 import { STYLE_PRESETS, styleDirection } from '../src/style-presets.ts';
 import { maxTokensFor } from '../src/plan-provider.ts';
 
@@ -137,5 +140,20 @@ describe('what a mockup prompt may carry', () => {
         `${preset.id}: ${direction.length} chars exceeds the ${MAX_MOCKUP_DIRECTION_CHARS} the reservation covers`,
       );
     }
+  });
+});
+
+describe('carrying a chosen direction into the build', () => {
+  it('can carry a mockup as large as this system can produce', () => {
+    // The cap is derived from the mockup budget rather than picked: three
+    // mockups share MOCKUP_OUTPUT_TOKENS, so one is at most a third of it,
+    // at roughly four characters a token. A number chosen by eye would
+    // either refuse a mockup this system itself produced, or promise to
+    // carry one larger than it can make.
+    const largestOneMockup = Math.floor((MOCKUP_OUTPUT_TOKENS / 3) * 4);
+    assert.ok(
+      MAX_CHOSEN_MOCKUP_CHARS >= largestOneMockup,
+      `the cap (${MAX_CHOSEN_MOCKUP_CHARS}) refuses a mockup this system can produce (${largestOneMockup})`,
+    );
   });
 });

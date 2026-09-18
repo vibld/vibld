@@ -77,3 +77,20 @@ export const MAX_REFERENCE_CHARS = 6_000;
  * and the worst case would quietly understate the bill.
  */
 export const MAX_MOCKUP_DIRECTION_CHARS = 2_000;
+
+/**
+ * The largest chosen mockup a build request may carry (#185).
+ *
+ * Picking a direction has to mean something. Seeding the next prompt with
+ * the direction's name would let the build ignore it and still look like it
+ * had obeyed, which is the kind of confident wrong answer this codebase
+ * keeps having to remove. So the document itself travels, and the build is
+ * asked to turn that page into the project.
+ *
+ * Derived rather than chosen. `MOCKUP_OUTPUT_TOKENS` buys three mockups, so
+ * one of them is at most a third of it, and a token is about four
+ * characters: 18,000 / 3 * 4. A cap picked by eye would either refuse a
+ * mockup this system itself produced, or promise to carry one larger than
+ * it can make.
+ */
+export const MAX_CHOSEN_MOCKUP_CHARS = 24_000;

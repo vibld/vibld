@@ -94,6 +94,12 @@ export interface WorkflowParams {
    */
   reservationKey?: string;
   accountReservationId?: number;
+  /**
+   * The direction the caller chose from a mockup run (#185), as the
+   * document rather than its name. Optional: most builds have never seen a
+   * mockup, and a payload persisted before this field existed has none.
+   */
+  chosenMockup?: { label: string; html: string };
   worstCaseMicroUsd: number;
   prices: TokenPrices;
   /**

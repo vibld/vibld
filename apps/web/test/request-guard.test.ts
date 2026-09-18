@@ -8,6 +8,7 @@ import {
   checkRequestOrigin,
   parseAdminTopupRequest,
   parseGenerationRequest,
+  parseChosenMockup,
   parseKnowledge,
   parseMockupRequest,
   parseModel,
@@ -15,6 +16,7 @@ import {
   parseReferenceUrl,
   parseStylePreset,
 } from '../worker/request-guard.ts';
+import { MAX_CHOSEN_MOCKUP_CHARS } from '@vibld/ai/limits';
 
 const SELF = 'https://vibld-web-preview.example.workers.dev';
 
@@ -726,5 +728,73 @@ describe('a request for mockups', () => {
     });
     assert.equal(parsed.ok, true);
     assert.deepEqual(parsed.ok && parsed.value, { prompt: 'a bakery' });
+  });
+});
+
+/**
+ * The direction a caller picked, coming back in on a build (#185).
+ *
+ * Model output that went out to a browser and returned, so it is bounded
+ * and shape-checked like anything else crossing this boundary.
+ */
+describe('a chosen mockup on a build request', () => {
+  const html = '<!doctype html><body>x</body>';
+
+  it('accepts a direction with a label and a document', () => {
+    const parsed = parseChosenMockup({ mockup: { label: 'Quiet', html } });
+    assert.equal(parsed.ok, true);
+    assert.deepEqual(parsed.ok && parsed.value, { label: 'Quiet', html });
+  });
+
+  it('treats an absent mockup as the ordinary case', () => {
+    // Which it is: almost every build has never seen one.
+    for (const body of [{}, { mockup: null }, { mockup: undefined }]) {
+      const parsed = parseChosenMockup(body);
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.ok && parsed.value, null);
+    }
+  });
+
+  it('refuses one with no document to build from', () => {
+    for (const mockup of [
+      { label: 'Quiet' },
+      { label: 'Quiet', html: '' },
+      { label: 'Quiet', html: '   ' },
+      { label: 'Quiet', html: 42 },
+    ]) {
+      assert.equal(
+        parseChosenMockup({ mockup }).ok,
+        false,
+        `accepted ${JSON.stringify(mockup)}`,
+      );
+    }
+  });
+
+  it('refuses one with no label to name the direction', () => {
+    for (const mockup of [{ html }, { label: '', html }, { label: 7, html }]) {
+      assert.equal(parseChosenMockup({ mockup }).ok, false);
+    }
+  });
+
+  it('refuses a document larger than the reservation covers', () => {
+    // The build's worst case adds MAX_CHOSEN_MOCKUP_CHARS in before a token
+    // is spent. Accepting more here would let a caller push input past what
+    // was reserved for it.
+    const over = parseChosenMockup({
+      mockup: { label: 'Quiet', html: 'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS + 1) },
+    });
+    assert.equal(over.ok, false);
+    assert.equal(over.ok === false && over.status, 413);
+
+    const at = parseChosenMockup({
+      mockup: { label: 'Quiet', html: 'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS) },
+    });
+    assert.equal(at.ok, true);
+  });
+
+  it('refuses a mockup that is not an object', () => {
+    for (const mockup of ['<html>', 42, ['a']]) {
+      assert.equal(parseChosenMockup({ mockup }).ok, false);
+    }
   });
 });

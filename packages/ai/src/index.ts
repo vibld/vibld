@@ -132,6 +132,7 @@ export type {
 export {
   MAX_BASE_CONTENT_CHARS,
   MAX_KNOWLEDGE_CHARS,
+  MAX_CHOSEN_MOCKUP_CHARS,
   MAX_MOCKUP_DIRECTION_CHARS,
 } from './limits.ts';
 export {

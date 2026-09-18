@@ -1,4 +1,8 @@
-import { MAX_BASE_CONTENT_CHARS, MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
+import {
+  MAX_BASE_CONTENT_CHARS,
+  MAX_CHOSEN_MOCKUP_CHARS,
+  MAX_KNOWLEDGE_CHARS,
+} from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
@@ -251,6 +255,57 @@ function parseProjectFiles(
  * prompt, no revision -- a preview is not a generation, only what already
  * got generated.
  */
+/**
+ * The direction the caller picked, carried into the build (#185).
+ *
+ * The document itself, not its name. Picking a direction has to mean
+ * something, and a build seeded with only a label can ignore it and still
+ * look like it obeyed.
+ *
+ * It is model output that went out to a browser and came back, so it is
+ * treated as what it is: untrusted text of a bounded size, which the build
+ * prompt carries as data rather than as instruction. `MAX_CHOSEN_MOCKUP_CHARS`
+ * is derived from the mockup budget, so this refuses nothing this system
+ * can itself produce.
+ */
+export function parseChosenMockup(
+  body: unknown,
+): GuardResult<{ label: string; html: string } | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { mockup } = body as { mockup?: unknown };
+  if (mockup === undefined || mockup === null) {
+    return { ok: true, value: null };
+  }
+  if (typeof mockup !== 'object' || Array.isArray(mockup)) {
+    return fail(400, '"mockup" must be an object.');
+  }
+  const { label, html } = mockup as { label?: unknown; html?: unknown };
+  if (typeof label !== 'string' || label.trim().length === 0) {
+    return fail(400, 'A chosen mockup needs a "label".');
+  }
+  if (typeof html !== 'string' || html.trim().length === 0) {
+    return fail(400, 'A chosen mockup needs its "html".');
+  }
+  if (label.length > MAX_MOCKUP_LABEL_CHARS) {
+    return fail(
+      413,
+      `A mockup label must be ${MAX_MOCKUP_LABEL_CHARS} characters or fewer.`,
+    );
+  }
+  if (html.length > MAX_CHOSEN_MOCKUP_CHARS) {
+    return fail(
+      413,
+      `A chosen mockup must be ${MAX_CHOSEN_MOCKUP_CHARS} characters or fewer.`,
+    );
+  }
+  return { ok: true, value: { label, html } };
+}
+
+/** Matches `MockupSchema`'s own bound, so the two cannot disagree. */
+const MAX_MOCKUP_LABEL_CHARS = 60;
+
 export interface ParsedMockupRequest {
   prompt: string;
 }

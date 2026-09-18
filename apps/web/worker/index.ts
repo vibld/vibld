@@ -23,6 +23,7 @@ import {
   checkRequestOrigin,
   parseGenerationRequest,
   parseKnowledge,
+  parseChosenMockup,
   parseMockupRequest,
   parseModel,
   parsePreviewRequest,
@@ -36,6 +37,7 @@ import { spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { stageFor } from './run-stage.ts';
 import {
+  MAX_CHOSEN_MOCKUP_CHARS,
   MAX_MOCKUP_DIRECTION_CHARS,
   MAX_REFERENCE_CHARS,
 } from '@vibld/ai/limits';
@@ -922,6 +924,14 @@ async function handlePlan(
     referencePaletteMode = fetched.palette?.mode;
   }
 
+  // The direction the caller picked from a mockup run, if they ran one
+  // (#185). Carried as the document rather than its name: a build seeded
+  // with only a label can ignore the choice and still look like it obeyed.
+  const chosenMockup = parseChosenMockup(body);
+  if (!chosenMockup.ok) {
+    return refuse('request-invalid', chosenMockup.error, chosenMockup.status);
+  }
+
   const chosenModel = parseModel(body, configuredProviders(env));
   if (!chosenModel.ok) {
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
@@ -980,7 +990,10 @@ async function handlePlan(
     DEFAULT_LIMITS.maxPromptChars +
       DEFAULT_LIMITS.maxTotalContentChars +
       DEFAULT_LIMITS.maxKnowledgeChars +
-      MAX_REFERENCE_CHARS,
+      MAX_REFERENCE_CHARS +
+      // A chosen mockup travels in the prompt too, so the reservation has
+      // to have covered it before the run starts (#185).
+      MAX_CHOSEN_MOCKUP_CHARS,
   );
 
   // Layer three: what the caller's own subscription actually buys them
@@ -1066,6 +1079,7 @@ async function handlePlan(
           ? { styleDna: styleDna.value }
           : {}),
         ...(knowledge.value ? { knowledge: knowledge.value } : {}),
+        ...(chosenMockup.value ? { chosenMockup: chosenMockup.value } : {}),
         ...(referenceContext ? { referenceContext } : {}),
         ...(referencePaletteSource ? { referencePaletteSource } : {}),
         ...(referencePaletteMode ? { referencePaletteMode } : {}),

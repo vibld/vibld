@@ -124,6 +124,9 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
               ? { styleDna: params.styleDna }
               : {}),
             ...(params.knowledge ? { knowledge: params.knowledge } : {}),
+            ...(params.chosenMockup
+              ? { chosenMockup: params.chosenMockup }
+              : {}),
             ...(params.referenceContext
               ? { referenceContext: params.referenceContext }
               : {}),
