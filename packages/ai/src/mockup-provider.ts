@@ -64,8 +64,21 @@ export interface MockupProviderOptions {
    * an empty reply, the reader is not charged, and nothing anywhere says
    * how often that happens. Invisible spend is the failure this whole
    * thread has been about.
+   *
+   * It is also where the retry is permitted, because this is the only
+   * moment at which a caller knows what the absorbed attempt cost and the
+   * second one has not yet been sent (#191 review). Returning false
+   * refuses it, and the run then fails on the empty reply it already has
+   * rather than spending again. The Worker refuses when the account-wide
+   * daily ceiling cannot cover another attempt: absorbing a provider
+   * defect is a decision about who pays, never a way to spend past a
+   * ceiling.
+   *
+   * Only an explicit false refuses. A caller that reports and returns
+   * nothing is permitting, which is what every existing caller meant when
+   * this reported and nothing else.
    */
-  onDiscarded?: (usage: PlanUsage) => void;
+  onDiscarded?: (usage: PlanUsage) => boolean | void | Promise<boolean | void>;
   signal?: AbortSignal;
   /**
    * Called as output arrives (#189 review). The claim that this route
@@ -98,7 +111,7 @@ export class MockupProvider {
   readonly #effort: PlanEffort;
   readonly #onUsage?: (usage: PlanUsage) => void;
   readonly #onDiagnostics?: (diagnostics: PlanDiagnostics) => void;
-  readonly #onDiscarded?: (usage: PlanUsage) => void;
+  readonly #onDiscarded?: MockupProviderOptions['onDiscarded'];
   readonly #signal?: AbortSignal;
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #onPromptChars?: (characters: number) => void;
@@ -141,10 +154,19 @@ export class MockupProvider {
      * cause it, and one empty reply is about two and a half cents. It is
      * reported through `onDiscarded` instead, so the cost is absorbed
      * visibly rather than quietly.
+     *
+     * And absorbed is not the same as unaccounted, which is what the
+     * first version of this confused (#191 review). `onDiscarded` is
+     * awaited and may refuse, so a caller that answers to a spend ceiling
+     * can record the attempt and decline the second one. Deciding not to
+     * charge a reader is ours to make; spending past a ceiling because
+     * nobody was charged is not.
      */
     let completion = first;
-    if (isEmptyReply(first)) {
-      this.#onDiscarded?.(first.usage);
+    if (
+      isEmptyReply(first) &&
+      (await this.#onDiscarded?.(first.usage)) !== false
+    ) {
       /*
        * The meter goes back to zero before the second attempt starts
        * (#191 review).

@@ -257,6 +257,55 @@ describe('createDeepseekPlanClient', () => {
     );
   });
 
+  it('counts reasoning in the estimate, because the provider bills it', async () => {
+    // The omission #191's review found, and the same one as pricing a
+    // cancelled run on the answer alone: two thirds of a measured mockup
+    // run's output tokens were thinking (#190), so a stream that ended
+    // without its usage chunk settled a reasoning-heavy reply at a third
+    // of what it cost.
+    const reasoning = `data: ${JSON.stringify({
+      choices: [{ delta: { reasoning_content: 'r'.repeat(800) } }],
+    })}\n`;
+    const { impl } = fetchReturning(
+      sse([reasoning, ...contentFrames('x'.repeat(400))]),
+    );
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.usage.outputTokens, (400 + 800) / 4);
+  });
+
+  it('settles a reasoning-only reply at what the thinking cost', async () => {
+    // The worst case of the same defect, and the one this commit's retry
+    // makes routine: an empty reply that spent a minute thinking used to
+    // estimate at zero output tokens.
+    const reasoning = `data: ${JSON.stringify({
+      choices: [{ delta: { reasoning_content: 'r'.repeat(2_000) } }],
+    })}\n`;
+    const { impl } = fetchReturning(sse([reasoning, ...contentFrames('')]));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.emptyBody, true);
+    assert.equal(completion.usage.outputTokens, 500);
+  });
+
   it('refuses to call out without a key, rather than sending an empty header', async () => {
     let called = false;
     const impl = (async () => {

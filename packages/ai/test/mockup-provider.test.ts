@@ -175,7 +175,9 @@ describe('asking for three directions', () => {
     const provider = new MockupProvider(flaky, {
       model: 'deepseek-flash',
       onUsage: (u) => billed.push(u.outputTokens),
-      onDiscarded: (u) => absorbed.push(u.outputTokens),
+      onDiscarded: (u) => {
+        absorbed.push(u.outputTokens);
+      },
     });
     const set = await provider.generate({ prompt: 'a bakery' });
 
@@ -205,6 +207,83 @@ describe('asking for three directions', () => {
     const provider = new MockupProvider(wrong, { model: 'deepseek-flash' });
     await assert.rejects(provider.generate({ prompt: 'a bakery' }));
     assert.equal(call, 1, 'a wrong shape was retried, doubling the bill');
+  });
+
+  it('does not retry when the caller refuses the second attempt', async () => {
+    // Absorbing a provider defect decides who pays for it. It is not a way
+    // to spend past a ceiling, which is what the first version of this
+    // amounted to: the Worker reserved for one run, the retry sent a
+    // second, and the account-wide ledger was told about neither (#191
+    // review). The caller now answers before the second attempt goes out.
+    let call = 0;
+    const absorbed: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return call === 1
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onDiscarded: (u) => {
+        absorbed.push(u.outputTokens);
+        return false;
+      },
+    });
+
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderShapeError,
+    );
+    assert.equal(call, 1, 'a refused retry was sent anyway');
+    assert.deepEqual(
+      absorbed,
+      [9999],
+      'the attempt was not reported before being refused',
+    );
+  });
+
+  it('waits for the answer before asking again', async () => {
+    // The point of awaiting it. A caller that has to reach a ledger before
+    // it can answer would otherwise be raced by the request it was being
+    // asked about, and the ceiling would be checked after the money was
+    // spent.
+    const order: string[] = [];
+    let call = 0;
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        order.push(`ask ${call}`);
+        return call === 1
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    await new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onDiscarded: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        order.push('permitted');
+      },
+    }).generate({ prompt: 'a bakery' });
+
+    assert.deepEqual(order, ['ask 1', 'permitted', 'ask 2']);
   });
 
   it('does not retry a body it could not parse', async () => {

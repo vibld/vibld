@@ -51,6 +51,7 @@ import {
   ACCOUNT_BUDGET_KEY,
   cancelledUsage,
   dayKey,
+  microUsdOf,
   worstCaseMicroUsd,
 } from './spend.ts';
 import {
@@ -434,6 +435,31 @@ function topupKeyFor(userId: string): string {
 }
 
 /**
+ * The account-wide daily ceiling, held for one run's worst case.
+ *
+ * Its own function because a second caller appeared (#191 review): a
+ * mockup run that retries an empty reply asks for this again before the
+ * second attempt goes out, and a reservation the Worker spells twice is a
+ * ceiling that can be enforced two different ways.
+ *
+ * Unbounded in-flight on purpose: concurrency is the per-user layer's job.
+ * This layer enforces spend only.
+ */
+async function reserveAccount(
+  env: Env,
+  worstCase: number,
+  now: number,
+): Promise<Reservation> {
+  const accountCeiling = positiveInt(
+    env.VIBLD_ACCOUNT_DAILY_MICRO_USD,
+    DEFAULT_ACCOUNT_DAILY_MICRO_USD,
+  );
+  return env
+    .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
+    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
+}
+
+/**
  * Reserves against every ceiling before a run may start: the account-wide
  * one first (cheaper to check, and failing it means nothing else needs
  * touching), then the caller's own monthly tier allowance (L35-L39), then --
@@ -458,15 +484,7 @@ async function reserveBudget(
   { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
 > {
   const ledger = env.USER_BUDGET!;
-  const accountCeiling = positiveInt(
-    env.VIBLD_ACCOUNT_DAILY_MICRO_USD,
-    DEFAULT_ACCOUNT_DAILY_MICRO_USD,
-  );
-  // Unbounded in-flight on purpose: concurrency is the per-user layer's job
-  // below. This layer enforces spend only.
-  const account = await ledger
-    .getByName(ACCOUNT_BUDGET_KEY)
-    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
+  const account = await reserveAccount(env, worstCase, now);
   if (!account.verdict.allow) {
     return { ok: false, verdict: account.verdict };
   }
@@ -1555,6 +1573,21 @@ async function handleMockups(
     // streamed nothing but this, and settling on the answer alone priced a
     // minute of billed thinking at zero.
     let reasoningCharacters = 0;
+    /*
+     * What the retry spent that this reader is not being charged for
+     * (#191 review).
+     *
+     * The provider absorbs one empty reply on the reader's behalf, and
+     * the first version of that let the money vanish: settlement saw only
+     * the second attempt, so the account-wide daily ceiling never learned
+     * that the first had happened. One admitted request could spend twice
+     * what it reserved, and every empty reply moved the ledger further
+     * from what the day had really cost.
+     */
+    let absorbedMicroUsd = 0;
+    // The hold taken for the second attempt, so the ceiling is enforced
+    // before it is sent rather than only reported after.
+    let retryHold: Reservation | undefined;
     try {
       const provider = new MockupProvider(
         createPlanClient(env, effectiveModel),
@@ -1588,6 +1621,35 @@ async function handleMockups(
           },
           onPromptChars: (characters) => {
             sentChars = characters;
+          },
+          /*
+           * The absorbed attempt, recorded and then permitted or refused
+           * (#191 review).
+           *
+           * Recorded first, because it has already happened: the money is
+           * spent whatever is decided next, and the account ledger is
+           * where this deployment's day is counted.
+           *
+           * Then the ceiling is asked about the second attempt before it
+           * goes out. Refusing costs this reader only the free retry --
+           * they were going to be told the run failed either way, since
+           * the first attempt came back empty. Spending past the ceiling
+           * because nobody was being billed would cost the deployment
+           * money it had decided not to spend.
+           *
+           * A ledger that throws refuses too. This path exists to bound
+           * spend, and "the ceiling cannot be read" is not a reason to
+           * spend again.
+           */
+          onDiscarded: async (spent) => {
+            absorbedMicroUsd += microUsdOf(spent, prices);
+            try {
+              retryHold = await reserveAccount(env, worstCase, Date.now());
+            } catch (error) {
+              console.error('mockup retry hold failed', error);
+              return false;
+            }
+            return retryHold.verdict.allow;
           },
           ...(style.value ? { style: style.value } : {}),
         },
@@ -1647,7 +1709,18 @@ async function handleMockups(
           settleParams,
           settled,
           providerRan,
+          absorbedMicroUsd,
         );
+        // The hold taken for the retry settles at nothing, because the
+        // whole run's real cost -- both attempts -- went onto the original
+        // account reservation just above. It was a hold against the
+        // ceiling while the second attempt was in flight, never a second
+        // charge.
+        if (retryHold?.id !== undefined) {
+          await env
+            .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
+            .settle(retryHold.id, 0);
+        }
         console.log(
           JSON.stringify({
             event: 'mockups.settled',
@@ -1665,6 +1738,9 @@ async function handleMockups(
             inputTokens: settled?.inputTokens ?? 0,
             outputTokens: settled?.outputTokens ?? 0,
             microUsd: actual,
+            // Only when there was one, so the ordinary line stays the
+            // ordinary line and a discarded attempt is findable.
+            ...(absorbedMicroUsd > 0 ? { absorbedMicroUsd } : {}),
             elapsedMs: Date.now() - waitingSince,
           }),
         );

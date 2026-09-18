@@ -263,6 +263,55 @@ describe('settleBudget', () => {
     assert.equal(actual, 10 * 5 + 10 * 25);
   });
 
+  it('charges the account layer for spend the caller was spared', async () => {
+    // The two layers answer different questions, and #191's review found
+    // the one place they have to differ. A mockup run absorbs a discarded
+    // empty reply so the reader does not pay for a provider defect; the
+    // account-wide daily ceiling still has to know the money left, or it
+    // drifts by one whole attempt every time the defect fires.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+      7_500,
+    );
+
+    assert.equal(actual, 100 * 5 + 200 * 25, 'the reader was billed for it');
+    assert.deepEqual(calls, [
+      { name: 'user_abc', id: 11, actual },
+      { name: '__account__', id: 22, actual: actual + 7_500 },
+    ]);
+  });
+
+  it('leaves the two layers equal when nothing was absorbed', async () => {
+    // The ordinary run, stated so the parameter above cannot quietly
+    // become a surcharge on every settlement.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+    );
+
+    assert.deepEqual(calls, [
+      { name: 'user_abc', id: 11, actual },
+      { name: '__account__', id: 22, actual },
+    ]);
+  });
+
   it('skips a layer whose reservation never got an id', async () => {
     const { ledger, calls } = fakeLedger();
     await settleBudget(

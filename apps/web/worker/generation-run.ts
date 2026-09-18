@@ -421,6 +421,18 @@ export async function settleBudget(
   // resumes without it, and the type would be lying about that. Only an
   // explicit false is evidence.
   providerRan: boolean | undefined,
+  /**
+   * Provider spend this run really caused that the caller is not being
+   * charged for (#191 review).
+   *
+   * Today that is a mockup run's discarded empty reply, absorbed on
+   * purpose so a reader does not pay for a provider defect. Absorbing it
+   * decides who pays; it does not decide whether it happened. The
+   * account-wide ledger exists to bound what this deployment spends in a
+   * day, so the money has to reach it whoever was billed, or the ceiling
+   * drifts from reality by one whole attempt every time the defect fires.
+   */
+  absorbedMicroUsd = 0,
 ): Promise<number> {
   // Three cases, not two, and the third used to be charged as if it were
   // the second.
@@ -450,10 +462,17 @@ export async function settleBudget(
   // Both layers were reserved together (index.ts's `reserveBudget`), so both
   // settle together -- the account-wide ledger must reflect the same run at
   // the same cost, or its ceiling stops meaning what it says.
+  //
+  // The same cost, plus whatever the run spent and nobody was charged for.
+  // That is the one figure the two layers are allowed to differ by, and
+  // the difference is the point: the caller's allowance is what they owe,
+  // the account ceiling is what this deployment spent.
   if (params.accountReservationId !== undefined) {
     await ledger
       .getByName(ACCOUNT_BUDGET_KEY)
-      .settle(params.accountReservationId, actual);
+      .settle(params.accountReservationId, actual + absorbedMicroUsd);
   }
+  // The caller's figure, which is what every caller logs and shows. The
+  // absorbed part is deliberately not in it: it is not theirs.
   return actual;
 }

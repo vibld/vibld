@@ -308,7 +308,21 @@ export function createDeepseekPlanClient(
           // Estimated only when the stream omitted usage. Over-reporting is
           // the safe direction for a budget; under-reporting is not.
           inputTokens: usage?.prompt_tokens ?? estimateTokens(promptCharacters),
-          outputTokens: usage?.completion_tokens ?? estimateTokens(text.length),
+          // Reasoning counted in, because DeepSeek bills it as output
+          // (#191 review). This estimate is reached only when a stream ends
+          // without its terminal usage chunk, and on that path the answer's
+          // length alone is not the run: two thirds of a measured mockup
+          // run's output tokens were thinking (#190), so a reasoning-heavy
+          // reply settled at a third of its cost, and the empty reply this
+          // same commit retries settled at nothing at all.
+          //
+          // The stream already counts these characters for the progress
+          // meter. Not counting them here was the same omission as pricing
+          // a cancelled run on `characters` alone, in the one place that
+          // had not been corrected yet.
+          outputTokens:
+            usage?.completion_tokens ??
+            estimateTokens(text.length + reasoningCharacters),
           cacheReadInputTokens: usage?.prompt_cache_hit_tokens ?? 0,
           // Same as OpenAI: caching is automatic, the write is not charged,
           // and `prompt_tokens` above already includes the hit tokens.
