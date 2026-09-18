@@ -101,6 +101,27 @@ export interface PlanRefusal {
   explanation: string | null;
 }
 
+/**
+ * What a run spent that the caller cannot otherwise see.
+ *
+ * A reasoning model bills its thinking as output tokens and counts it
+ * against `max_tokens`, but never streams it as content, so a caller
+ * watching characters is watching the wrong number. That is not a
+ * hypothetical: the first real mockup run truncated at an 18,000-token
+ * ceiling having streamed 19,203 characters, which is 0.9 characters per
+ * output token where this codebase assumes four (#190).
+ *
+ * Optional because it is provider-specific. A client that has nothing to
+ * report leaves it unset rather than reporting zero, so "this provider does
+ * not say" and "this provider says none" stay different answers.
+ */
+export interface PlanDiagnostics {
+  /** Characters of reasoning streamed, where the provider streams it. */
+  reasoningCharacters?: number;
+  /** Reasoning tokens the provider itself reported, where it reports them. */
+  reasoningTokens?: number;
+}
+
 export interface PlanCompletion {
   /** Parsed structured output, still unvalidated. The provider checks it. */
   plan: unknown;
@@ -108,6 +129,8 @@ export interface PlanCompletion {
   stopReason: string | null;
   refusal?: PlanRefusal;
   usage: PlanUsage;
+  /** Provider-specific spend the usage figures do not explain. */
+  diagnostics?: PlanDiagnostics;
 }
 
 export interface PlanClient {

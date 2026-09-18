@@ -28,7 +28,7 @@ import { createPlanClient, resolveModel } from '../src/select-client.ts';
 import { ProviderError } from '../src/errors.ts';
 import { parseMockupArgs } from '../src/cli-args.ts';
 import { STYLE_PRESETS, isStylePresetId } from '../src/style-presets.ts';
-import type { PlanUsage } from '../src/client.ts';
+import type { PlanDiagnostics, PlanUsage } from '../src/client.ts';
 
 const { prompt, out, style, maxTokens } = parseMockupArgs(
   process.argv.slice(2),
@@ -58,6 +58,7 @@ if (ceiling !== undefined && (!Number.isInteger(ceiling) || ceiling <= 0)) {
 }
 
 let usage: PlanUsage | undefined;
+let diagnostics: PlanDiagnostics | undefined;
 let progressChars = 0;
 let sentChars: number | undefined;
 
@@ -68,6 +69,9 @@ const provider = new MockupProvider(createPlanClient(process.env, model), {
   ...(style ? { style } : {}),
   onUsage: (reported) => {
     usage = reported;
+  },
+  onDiagnostics: (reported) => {
+    diagnostics = reported;
   },
   onProgress: ({ characters }) => {
     progressChars = characters;
@@ -147,5 +151,19 @@ function report(): void {
           ? ` (${usage.cacheReadInputTokens} cached)`
           : ''),
     );
+  }
+  // The question this was built to answer: where the output tokens went
+  // that the streamed characters do not account for (#190). Silence here
+  // means the provider said nothing, which is itself the answer.
+  if (diagnostics?.reasoningCharacters !== undefined) {
+    console.log(
+      `reasoning streamed: ${diagnostics.reasoningCharacters} characters`,
+    );
+  }
+  if (diagnostics?.reasoningTokens !== undefined) {
+    console.log(`reasoning tokens reported: ${diagnostics.reasoningTokens}`);
+  }
+  if (!diagnostics) {
+    console.log('reasoning: the provider reported none');
   }
 }

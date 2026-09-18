@@ -18,6 +18,7 @@ import type {
   PlanClient,
   PlanEffort,
   PlanProgress,
+  PlanDiagnostics,
   PlanUsage,
 } from './client.ts';
 
@@ -47,6 +48,13 @@ export interface MockupProviderOptions {
   maxTokens?: number;
   effort?: PlanEffort;
   onUsage?: (usage: PlanUsage) => void;
+  /**
+   * What the run spent that the usage figures do not explain, where the
+   * client reports it (#190). Separate from `onUsage` because it is
+   * provider-specific and optional: a client with nothing to say calls
+   * neither this nor anything else.
+   */
+  onDiagnostics?: (diagnostics: PlanDiagnostics) => void;
   signal?: AbortSignal;
   /**
    * Called as output arrives (#189 review). The claim that this route
@@ -78,6 +86,7 @@ export class MockupProvider {
   readonly #maxTokens: number;
   readonly #effort: PlanEffort;
   readonly #onUsage?: (usage: PlanUsage) => void;
+  readonly #onDiagnostics?: (diagnostics: PlanDiagnostics) => void;
   readonly #signal?: AbortSignal;
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #onPromptChars?: (characters: number) => void;
@@ -89,6 +98,7 @@ export class MockupProvider {
     this.#maxTokens = options.maxTokens ?? mockupMaxTokensFor(this.#model);
     this.#effort = options.effort ?? DEFAULT_EFFORT;
     this.#onUsage = options.onUsage;
+    this.#onDiagnostics = options.onDiagnostics;
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style;
@@ -123,6 +133,7 @@ export class MockupProvider {
     // provider does it: a refusal or a truncation still spends tokens, and
     // a ledger that counts only successes under-reports the bill.
     this.#onUsage?.(completion.usage);
+    if (completion.diagnostics) this.#onDiagnostics?.(completion.diagnostics);
 
     // Named, so a truncation talks about three directions rather than about
     // a project nobody asked this route for (#190). The first real run

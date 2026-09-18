@@ -475,3 +475,62 @@ describe('what this client reports sending', () => {
     );
   });
 });
+
+describe('what the stream does not show', () => {
+  /**
+   * The gap #190 measured: 19,203 characters streamed against 21,224 output
+   * tokens on a real run, which is 0.9 characters per token where this
+   * codebase assumes four. Reasoning is billed as output and counted
+   * against `max_tokens`, and until now the reader dropped it silently, so
+   * a ceiling was being reasoned about from the answer's size alone.
+   */
+  function stream(chunks: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+  }
+
+  it('counts reasoning without letting it reach the answer', async () => {
+    const result = await readCompletionStream(
+      stream([
+        'data: {"choices":[{"delta":{"reasoning_content":"thinking hard"}}]}\n',
+        'data: {"choices":[{"delta":{"content":"{\\"mockups\\":[]}"}}]}\n',
+        'data: [DONE]\n',
+      ]),
+    );
+    // Not in the text: it is not part of the JSON the schema parses, and
+    // appending it would corrupt every reply from a reasoning model.
+    assert.equal(result.text, '{"mockups":[]}');
+    assert.equal(result.reasoningCharacters, 'thinking hard'.length);
+  });
+
+  it('reports none rather than zero when the provider streams none', async () => {
+    const result = await readCompletionStream(
+      stream([
+        'data: {"choices":[{"delta":{"content":"{}"}}]}\n',
+        'data: [DONE]\n',
+      ]),
+    );
+    assert.equal(result.reasoningCharacters, 0);
+    assert.equal(result.text, '{}');
+  });
+
+  it('keeps reasoning out of the progress meter', async () => {
+    // `onProgress` means "how much of the answer exists so far". Folding
+    // thinking into it would make a different number wrong.
+    const seen: number[] = [];
+    await readCompletionStream(
+      stream([
+        'data: {"choices":[{"delta":{"reasoning_content":"aaaaaaaaaa"}}]}\n',
+        'data: {"choices":[{"delta":{"content":"12345"}}]}\n',
+        'data: [DONE]\n',
+      ]),
+      (characters) => seen.push(characters),
+    );
+    assert.deepEqual(seen, [5]);
+  });
+});

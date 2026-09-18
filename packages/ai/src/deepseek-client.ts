@@ -69,7 +69,16 @@ export function mapFinishReason(
 }
 
 interface StreamedChoice {
-  delta?: { content?: string | null };
+  delta?: {
+    content?: string | null;
+    /**
+     * A reasoning model's thinking, streamed beside the answer. Billed as
+     * output and counted against `max_tokens`, and deliberately not
+     * appended to `text`: it is not part of the JSON the schema parses
+     * (#190).
+     */
+    reasoning_content?: string | null;
+  };
   finish_reason?: string | null;
 }
 
@@ -77,6 +86,12 @@ interface StreamedUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   prompt_cache_hit_tokens?: number;
+  /**
+   * Where a reasoning model reports its thinking separately. Already inside
+   * `completion_tokens`, so this explains that figure rather than adding to
+   * it (#190).
+   */
+  completion_tokens_details?: { reasoning_tokens?: number };
 }
 
 interface StreamedChunk {
@@ -98,6 +113,13 @@ export async function readCompletionStream(
   text: string;
   finishReason: string | null;
   usage?: StreamedUsage;
+  /**
+   * Characters of reasoning seen, counted rather than kept. Nothing needs
+   * the text; what was missing was any sign that it existed at all, which
+   * is how a ceiling came to be reasoned about from the answer's size
+   * alone (#190).
+   */
+  reasoningCharacters: number;
 }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -105,6 +127,7 @@ export async function readCompletionStream(
   let text = '';
   let finishReason: string | null = null;
   let usage: StreamedUsage | undefined;
+  let reasoningCharacters = 0;
 
   try {
     for (;;) {
@@ -135,6 +158,14 @@ export async function readCompletionStream(
           text += delta;
           onProgress?.(text.length);
         }
+        // Counted, not accumulated, and deliberately not reported through
+        // `onProgress`: that meter means "how much of the answer exists so
+        // far", and folding thinking into it would make a different number
+        // wrong (#190).
+        const reasoning = choice?.delta?.reasoning_content;
+        if (typeof reasoning === 'string') {
+          reasoningCharacters += reasoning.length;
+        }
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         // Usage arrives on its own final chunk, whose `choices` is empty.
         if (chunk.usage) usage = chunk.usage;
@@ -144,7 +175,7 @@ export async function readCompletionStream(
     reader.releaseLock();
   }
 
-  return { text, finishReason, usage };
+  return { text, finishReason, usage, reasoningCharacters };
 }
 
 /** Parse the reply without throwing, exactly as the Anthropic client does. */
@@ -234,12 +265,13 @@ export function createDeepseekPlanClient(
         throw new Error('DeepSeek returned an empty response.');
       }
 
-      const { text, finishReason, usage } = await readCompletionStream(
-        response.body,
-        request.onProgress
-          ? (characters) => request.onProgress?.({ characters })
-          : undefined,
-      );
+      const { text, finishReason, usage, reasoningCharacters } =
+        await readCompletionStream(
+          response.body,
+          request.onProgress
+            ? (characters) => request.onProgress?.({ characters })
+            : undefined,
+        );
 
       // `systemSent`, not `request.system`: the same figure `onPromptChars`
       // reports, and for the same reason (#189 review). This estimate feeds
@@ -268,6 +300,23 @@ export function createDeepseekPlanClient(
           // and `prompt_tokens` above already includes the hit tokens.
           cacheWriteInputTokens: 0,
         },
+        // Reported only where there is something to report, so "this
+        // provider does not say" stays distinguishable from "none" (#190).
+        ...(reasoningCharacters > 0 ||
+        usage?.completion_tokens_details?.reasoning_tokens !== undefined
+          ? {
+              diagnostics: {
+                ...(reasoningCharacters > 0 ? { reasoningCharacters } : {}),
+                ...(usage?.completion_tokens_details?.reasoning_tokens !==
+                undefined
+                  ? {
+                      reasoningTokens:
+                        usage.completion_tokens_details.reasoning_tokens,
+                    }
+                  : {}),
+              },
+            }
+          : {}),
       };
     },
   };
