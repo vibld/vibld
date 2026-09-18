@@ -25,6 +25,7 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
+import { spendableFor } from './spendable.ts';
 import { stageFor } from './run-stage.ts';
 import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
@@ -977,23 +978,9 @@ async function handlePlan(
   let reserved;
   try {
     const now = Date.now();
-    const billing = new BillingStore(env.DB!);
-    // Also here, and not only in handleBillingStatus: a client that never
-    // calls the status endpoint must not be refused its first generation for
-    // want of a credit it was promised. The deterministic id means whichever
-    // path arrives first wins and the other is a no-op.
-    await grantSignupCreditOnce(billing, principal, env);
-    const subscription = await billing.findActiveSubscription(principal.userId);
-    const tier = tierFor(subscription);
-    const freeAllowance = positiveInt(
-      env.VIBLD_FREE_MONTHLY_MICRO_USD,
-      DEFAULT_FREE_INCLUDED_MICRO_USD,
-    );
-    const monthlyAllowance = monthlyAllowanceMicroUsd(tier, freeAllowance);
-    // Stripe top-ups and admin-granted credit (L4) combined -- see
-    // `totalSpendableCreditMicroUsd`'s own comment.
-    const topupCeiling = await billing.totalSpendableCreditMicroUsd(
-      principal.userId,
+    const { monthlyAllowance, topupCeiling } = await spendableFor(
+      env,
+      principal,
     );
 
     reserved = await reserveBudget(
