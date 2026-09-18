@@ -1065,6 +1065,7 @@ async function handlePlan(
         accountReservationId: reserved.layers.account.id,
         worstCaseMicroUsd: worstCase,
         prices,
+        maxTokens,
       },
     });
   } catch (error) {

@@ -85,6 +85,22 @@ export interface WorkflowParams {
   accountReservationId?: number;
   worstCaseMicroUsd: number;
   prices: TokenPrices;
+  /**
+   * The output ceiling this run's reservation was computed against, captured
+   * with the prices beside it rather than re-derived when the Workflow runs.
+   *
+   * A Workflow is durable: it can start minutes after `handlePlan` reserved
+   * for it, and `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN` can move in between.
+   * Deriving the ceiling again on arrival would price the request off a
+   * newer number than the one settlement still uses, which is the same
+   * reservation-and-request mismatch this field exists to prevent, only
+   * separated by time rather than by call site.
+   *
+   * A run enqueued before this field existed resumes without it. That lands
+   * on the provider's own default, which is the ceiling its reservation was
+   * computed with under the old code, so those runs stay consistent too.
+   */
+  maxTokens: number;
 }
 
 export interface GenerationWorkflowEnv {

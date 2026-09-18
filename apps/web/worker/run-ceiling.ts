@@ -3,13 +3,18 @@
  * of it.
  *
  * These are one question, and the bug this file exists to prevent is asking
- * it twice. The reservation (`handlePlan`) and the request itself
- * (`GenerationWorkflow`) each need a token ceiling and each need a price, and
- * for a while they derived them separately: the reservation priced a flat
- * 64000 while the provider was free to emit whatever its own constant said,
- * which is a run permitted to outspend its own reservation. Deriving both
- * from one call means a caller cannot take one without the other, so they
- * cannot drift apart again.
+ * it twice. For a while the reservation priced a flat 64000 while the
+ * provider was free to emit whatever its own constant said, which is a run
+ * permitted to outspend its own reservation. Deriving both from one call
+ * means a caller cannot take one without the other.
+ *
+ * Asked once per run, by `handlePlan`, and the answer travels with the run:
+ * both numbers go into `WorkflowParams`, and `GenerationWorkflow` reads the
+ * ceiling from there rather than calling this again. That is deliberate. A
+ * Workflow is durable and may start long after the reservation, so a second
+ * call there would answer from a newer environment than the one settlement
+ * is still using, which is the same drift measured in time instead of in
+ * call sites.
  *
  * The price is the one actually in force, not the catalogue's. An operator
  * may correct a stale rate with `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN`, and a
