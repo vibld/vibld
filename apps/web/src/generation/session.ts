@@ -96,10 +96,17 @@ export interface BuilderState {
   models: ModelOption[];
   /**
    * Whether the signed-in caller is a platform admin (docs/decisions.md
-   * L4) -- decides only whether `AdminPanel` renders. `false` until the
-   * `/api/config` probe answers, the same as `models` above.
+   * L4) -- decides only what the shell draws, never what it may do. Every
+   * `/api/admin/*` route checks the caller itself (ADR-0006).
+   *
+   * `null` until the `/api/config` probe answers, which `models` above
+   * expresses as an empty list because an empty picker is the right thing
+   * to show while nobody has answered. There is no such luck here: the
+   * admin page has to tell "not an admin" apart from "not asked yet", or
+   * it reports that an admin's own page does not exist for as long as a
+   * fetch takes, and then replaces it under them.
    */
-  isAdmin: boolean;
+  isAdmin: boolean | null;
 }
 
 /** One prompt and what became of it. */
@@ -207,7 +214,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     styleDna: {},
     model: null,
     models: [],
-    isAdmin: false,
+    isAdmin: null,
   };
 }
 
@@ -333,7 +340,7 @@ export class BuilderSession {
   }
 
   /** Record whether the signed-in caller is a platform admin, once the probe answers. */
-  setIsAdmin(isAdmin: boolean): void {
+  setIsAdmin(isAdmin: boolean | null): void {
     if (this.#disposed || isAdmin === this.#state.isAdmin) return;
     this.#state = { ...this.#state, isAdmin };
     this.#emit();

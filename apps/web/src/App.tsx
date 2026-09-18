@@ -1,8 +1,7 @@
-import { AdminPanel } from './components/AdminPanel.tsx';
-import { InvitePanel } from './components/InvitePanel.tsx';
-import { ParkedQueuePanel } from './components/ParkedQueuePanel.tsx';
-import { SiteTakedown } from './components/SiteTakedown.tsx';
 import { AccessGate } from './components/AccessGate.tsx';
+import { AdminSettings } from './components/AdminSettings.tsx';
+import { ADMIN_PATH, isAdminPath } from './admin/route.ts';
+import { navigate, usePathname } from './admin/use-pathname.ts';
 import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
@@ -46,6 +45,12 @@ export function App() {
 function Builder() {
   const { session, state } = useBuilderSession();
   const usage = state.budget.used;
+  // Which of the two views this is. The session above it stays mounted
+  // across the change, which is the whole reason this is a state and not a
+  // link to another document: a run takes minutes, and an admin who
+  // stepped into settings during one would otherwise come back to an empty
+  // shell (#184).
+  const onAdminPage = isAdminPath(usePathname());
 
   return (
     <div className="shell">
@@ -84,6 +89,38 @@ function Builder() {
               */}
               <GitHubPanel />
             </section>
+            {/*
+              The only way into the admin page, and it exists only for an
+              admin. `isAdmin` is `null` until `/api/config` answers, so
+              this is absent during the probe rather than briefly wrong in
+              either direction. It is not a permission: `/api/admin/*`
+              checks the caller itself (ADR-0006).
+            */}
+            {state.isAdmin === true ? (
+              <section className="settings__section">
+                <h2 className="settings__heading">Platform admin</h2>
+                <a
+                  className="settings__link"
+                  href={ADMIN_PATH}
+                  onClick={(event) => {
+                    if (
+                      event.defaultPrevented ||
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey ||
+                      event.button !== 0
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    navigate(ADMIN_PATH);
+                  }}
+                >
+                  Credit, invites, payments and takedowns
+                </a>
+              </section>
+            ) : null}
             <section className="settings__section">
               <h2 className="settings__heading">This deployment</h2>
               {/*
@@ -98,8 +135,17 @@ function Builder() {
         </div>
       </header>
 
-      <main className="shell__body">
-        <section className="column column--left" aria-label="Conversation">
+      <main
+        className={
+          onAdminPage ? 'shell__body shell__body--page' : 'shell__body'
+        }
+      >
+        {onAdminPage ? <AdminSettings isAdmin={state.isAdmin} /> : null}
+        <section
+          className="column column--left"
+          aria-label="Conversation"
+          hidden={onAdminPage}
+        >
           <Conversation state={state} />
           <div className="composer">
             <LifecycleBar status={state.status} />
@@ -119,10 +165,6 @@ function Builder() {
                 saveStyleDna(value);
               }}
             />
-            {state.isAdmin ? <AdminPanel /> : null}
-            {state.isAdmin ? <InvitePanel /> : null}
-            {state.isAdmin ? <ParkedQueuePanel /> : null}
-            {state.isAdmin ? <SiteTakedown /> : null}
             <PromptPanel
               state={state}
               onSubmit={(prompt, mode, style, referenceUrl) => {
@@ -135,7 +177,15 @@ function Builder() {
           </div>
         </section>
 
-        <Workspace state={state} />
+        {/*
+          Hidden rather than unmounted, both of these. The preview iframe
+          and the workspace carry live state -- a sandbox that has loaded,
+          a scroll position, a file selection -- and a trip to settings
+          should cost none of it. `hidden` is also what tells assistive
+          technology the builder is not on screen; `hidden-attribute.test`
+          holds the stylesheet to honouring it.
+        */}
+        <Workspace state={state} hidden={onAdminPage} />
       </main>
 
       {/*

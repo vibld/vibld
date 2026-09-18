@@ -1550,6 +1550,52 @@ body {
   color: var(--muted);
 }
 
+.settings__link {
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
+/* --- Platform admin page -------------------------------------------------
+ * A page, not a column (#184). The builder's body is a two-column grid; the
+ * admin page is one measure of prose and four tools, so the grid is dropped
+ * rather than fought with. The builder is still mounted beside it, carrying
+ * `hidden`, which the `[hidden]` rule at the top of this file makes stick. */
+.shell__body--page {
+  display: block;
+}
+
+.adminpage {
+  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.adminpage__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+}
+
+.adminpage__title {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-lg);
+}
+
+.adminpage__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.adminpage__back {
+  font-size: var(--text-sm);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* --- Run stats -----------------------------------------------------------
  * Folded away: reference rather than news, and it was a permanent band
  * across the bottom of every screen. */
