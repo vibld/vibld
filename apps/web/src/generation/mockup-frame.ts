@@ -1,42 +1,62 @@
 /**
- * The document a mockup frame actually renders (#189 review, P1).
+ * The document a mockup frame actually renders (#189 review).
  *
  * `sandbox=""` is the deny-everything list for *capabilities*: no scripts,
- * no same-origin, no forms, no navigation. It is not a network policy. An
- * `<img src="https://...">`, a `<link rel=stylesheet>`, a web font or a CSS
- * `url()` is still fetched from inside a fully sandboxed frame, which
- * discloses the viewer's IP address to a host the model chose and confirms
- * to that host that the page was rendered.
+ * no same-origin, no forms, no navigating anything else. It is not a
+ * network policy and it does not stop the frame replacing itself. Two more
+ * things are needed, and this file is where they live: a content policy the
+ * document carries, and the removal of the markup that navigates.
  *
- * The mockup prompt forbids all of those. That is a request, and the whole
- * argument for the sandbox was that a request is not a guarantee -- so
- * leaving the network on the prompt's good behaviour was the same mistake
- * one layer down. I had written that these frames "cannot do anything",
- * which was not true of the network.
+ * ## Five findings, one mistake
  *
- * A meta CSP is the enforcement that fits: the frame has no origin of its
- * own and no response headers to set, and this travels inside the document
- * it governs.
+ * This file was narrowed five times over one review, and it is worth
+ * reading why rather than reading five fixes:
  *
- * It is not the whole job, and this file's guarantee has now been narrowed
- * four times over one review (#189). A CSP governs what a document
- * *fetches*; it does not govern where the document *goes*. A `<meta
- * http-equiv="refresh">` navigates the frame with nobody touching it, and
- * the directive that used to cover that was dropped from the spec. So
- * self-navigation is removed from the markup as well, and links are made
- * to want a popup the sandbox will not open.
+ * 1. `sandbox=""` was called a guarantee that "nothing can happen". True of
+ *    capabilities, false of fetches: a remote image or web font is still
+ *    requested, which hands the viewer's IP to a host the model chose.
+ * 2. A meta CSP was added, and inserted after the first `<head>` found by
+ *    string search. A `<head` in a comment put the policy somewhere
+ *    harmless, governing nothing.
+ * 3. The CSP was said to cover navigation. It does not: `default-src`
+ *    governs subresource fetches, and `navigate-to` was dropped from the
+ *    spec. A `<meta http-equiv="refresh">` navigates with nobody touching
+ *    it.
+ * 4. That meta was removed by matching `http-equiv="refresh"`. Defeated by
+ *    `http-equiv="ref&#x72;esh"`: attribute values are entity-decoded
+ *    before the parser compares them.
+ * 5. So the match moved to the attribute *name*, which is not decoded, via
+ *    `/<meta\b[^>]*http-equiv[^>]*>/`. Defeated by a quoted `>` placed
+ *    before it: `<meta data-x=">" http-equiv="refresh" ...>`. The tokenizer
+ *    keeps that `>` inside the attribute value and reads the whole tag;
+ *    `[^>]*` stops dead at it and the tag survives untouched.
  *
- * The fourth narrowing is the one worth learning from. Removing the
- * refresh by matching `http-equiv="refresh"` was defeated by
- * `http-equiv="ref&#x72;esh"`, because the parser decodes attribute values
- * and a regex over the source does not. Every miss in this file has the
- * same shape: I decided what the markup said instead of what the parser
- * would say. So what is matched below is attribute *names*, which are not
- * decoded, and what is removed is whole categories a sketch has no use for
- * rather than the specific spellings that looked dangerous.
+ * Every one of those is the same mistake: deciding what the markup says
+ * instead of what the parser will do with it. A sixth regex would be the
+ * sixth guess.
  *
- * What is left, stated rather than glossed: a reader can still be shown a
- * link, and clicking it does nothing. That is the honest end of this.
+ * ## So the parser decides
+ *
+ * The document is parsed with `DOMParser`, the dangerous nodes are removed
+ * from the tree, and the result is serialised. What counts as an
+ * `http-equiv` attribute is now decided by the same implementation that
+ * will act on it, so quoting, entity encoding, case, whitespace and
+ * whatever else I have not thought of are the tokenizer's answer rather
+ * than my prediction of it. Findings 4 and 5 both close here, and they
+ * close because the parsing does it, not because the selector below is
+ * cleverer than the regexes were. `parseFromString` builds an inert document: it
+ * runs no script and fetches nothing.
+ *
+ * Two smaller things fall out. Placement stops being surgery -- the policy
+ * is prepended to a `<head>` the parser guarantees exists, in a document
+ * that has one even when the input did not. And the doctype is emitted
+ * rather than preserved, so the frame cannot land in quirks mode because
+ * the input's doctype was malformed or missing.
+ *
+ * ## What is left, stated rather than glossed
+ *
+ * A reader can still be shown a link, and clicking it does nothing. That is
+ * the honest end of this, not a sixth claim that nothing can happen.
  *
  *   default-src 'none'   nothing loads unless named below
  *   style-src 'unsafe-inline'  the inline <style> and style= a mockup is made of
@@ -49,104 +69,76 @@ export const MOCKUP_FRAME_POLICY =
   "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
 /**
- * Links open in a new context the sandbox then refuses to create.
+ * Everything removed from a mockup before it is framed, as one selector.
  *
- * `sandbox=""` blocks a frame navigating anything but itself, and a CSP
- * cannot stop self-navigation: `default-src` governs subresource fetches,
- * and the directive that governed navigation (`navigate-to`) was dropped
- * from the spec and never shipped. So the lever is the markup.
+ * `meta[http-equiv]` rather than `meta[http-equiv="refresh"]`, and the
+ * reason is narrower than it was before parsing. A value selector now sees
+ * the *decoded* value, so `ref&#x72;esh` and the quoted-`>` tag would both
+ * be caught by one -- those bypasses are closed by parsing, not by matching
+ * the name, and saying otherwise would be exactly the sort of claim this
+ * file keeps having to retract.
  *
- * Without `allow-popups`, a click targeted at a new context does nothing
- * at all. Making that the default turns every ordinary link in a mockup
- * into the inert thing a sketch's links should be.
+ * What the name still buys: CSS value matching is case-sensitive, so
+ * `http-equiv="REFRESH"` slips a value selector; and matching the name at
+ * all means no judgement is made about which values are dangerous. A sketch
+ * has no legitimate use for any `http-equiv`, so there is nothing to weigh
+ * against removing the lot. Ours is added afterwards, which is what lets
+ * this be that blunt.
+ *
+ * `base` because ours sets `target` and no `href`. The first `<base>` with
+ * an href in tree order becomes the document base, so a mockup's own could
+ * still decide what relative URLs resolve against even though ours wins on
+ * target. Nothing can be fetched or navigated through it, so this is depth
+ * rather than a hole -- and a one-document sketch has no use for a base.
  */
-const BASE = '<base target="_blank">';
-
-const META = `<meta http-equiv="Content-Security-Policy" content="${MOCKUP_FRAME_POLICY}">${BASE}`;
+const REMOVE_ENTIRELY = 'meta[http-equiv], base';
 
 /**
- * Any `<meta>` that carries an `http-equiv`, whatever it claims to say.
+ * An explicit target defeats the base below, so it does not get to stay.
  *
- * The first version of this matched the *value*, `http-equiv="refresh"`,
- * and a reviewer broke it in one line: `http-equiv="ref&#x72;esh"`. The
- * HTML parser decodes character references in attribute values, so it sees
- * `refresh` and navigates; a regex reading the raw source sees a string
- * that is not `refresh` and leaves the tag alone. Chasing that with a
- * decoder means writing an entity table, and then being wrong about
- * whatever the table missed.
- *
- * Attribute *names* are not entity-decoded -- the tokenizer reads them
- * literally -- so the name is the part that can be matched with certainty.
- * Matching it is also a stronger rule than the one it replaces: a sketch
- * has no legitimate use for any `http-equiv` at all, so there is nothing
- * to weigh against removing every one of them.
- *
- * This is the fourth narrowing of this file (sandbox, then fetches, then
- * navigation, now the spelling of it). Every one so far was a case where I
- * decided what the document said instead of what the parser would say.
- */
-const HTTP_EQUIV_META = /<meta\b[^>]*\bhttp-equiv\b[^>]*>/gi;
-
-/**
- * The document's own `<base>`, for the same reason.
- *
- * Ours leads the markup, and the first `<base target>` in tree order wins,
- * so a mockup's own `target` could not override it. Its `href` is another
- * matter: ours sets no href, so a later `<base href="https://evil/">` is
- * the first with one and becomes the document base that every relative URL
- * resolves against. Nothing can be fetched through it (`default-src
- * 'none'`) and nothing can be navigated to (the sandbox denies the popup),
- * so this is defence in depth rather than a hole being closed. It costs a
- * sketch nothing: a one-document page has no use for a base.
- */
-const DOCUMENT_BASE = /<base\b[^>]*>/gi;
-
-/**
- * An explicit target defeats the base above, so it does not get to stay.
- *
- * `target="_self"` on an external link is the click-driven half of the same
+ * `target="_self"` on an external link is the click-driven half of the
  * problem: the frame replaces itself and the host learns the viewer's
- * address. Stripping the attribute puts the link back under the base.
- *
- * Matched on the name too, and for the same reason as `HTTP_EQUIV_META`:
- * the value is decoded before the parser reads it, the name is not.
+ * address. Dropping the attribute puts the link back under our base, which
+ * aims it at a context the sandbox will not create.
  */
-const EXPLICIT_TARGET = /\starget\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
-
-/** Everything a mockup may not do to its own browsing context. */
-export function withoutSelfNavigation(html: string): string {
-  return html
-    .replace(HTTP_EQUIV_META, '')
-    .replace(DOCUMENT_BASE, '')
-    .replace(EXPLICIT_TARGET, '');
-}
+const TARGETED = '[target]';
 
 /**
- * Put the policy in front of everything the document might fetch.
+ * Rewrite a mockup into the document its frame should render.
  *
- * A meta CSP governs only what the parser meets after it, so placement is
- * the whole job -- being second is the same as being absent.
- *
- * Placed by the doctype rather than by finding `<head>`, which is what
- * this did first. Searching for the head means trusting the document to be
- * well formed: a `<head` inside a comment, or a stray one in text, and the
- * policy lands somewhere harmless and governs nothing. That is a bypass of
- * the protection, in a function whose entire reason for existing is that
- * the document cannot be trusted.
- *
- * A `<meta>` before `<html>` is not misplaced, it is hoisted: the parser
- * meets it in "before head", creates the head, and makes the meta its
- * first child. So leading the markup puts the policy first in the head of
- * every document, including one that has no head of its own and one whose
- * head is not where it claims. After the doctype, because a doctype that
- * is no longer first stops being one and the frame drops into quirks mode.
+ * Parse, remove, prepend, serialise. The order matters in one place: our
+ * own policy is an `http-equiv` meta, so it is added *after* the removal
+ * pass rather than before it.
  */
 export function mockupFrameDocument(html: string): string {
-  const safe = withoutSelfNavigation(html);
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(safe);
-  if (doctype) {
-    const at = doctype[0].length;
-    return `${safe.slice(0, at)}${META}${safe.slice(at)}`;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  for (const node of Array.from(doc.querySelectorAll(REMOVE_ENTIRELY))) {
+    node.remove();
   }
-  return `${META}${safe}`;
+  for (const node of Array.from(doc.querySelectorAll(TARGETED))) {
+    node.removeAttribute('target');
+  }
+
+  const policy = doc.createElement('meta');
+  policy.setAttribute('http-equiv', 'Content-Security-Policy');
+  policy.setAttribute('content', MOCKUP_FRAME_POLICY);
+
+  // Without `allow-popups` on the frame, a click aimed at a new context
+  // does nothing at all. Making that every link's default turns an external
+  // link in a sketch into the inert thing it should be.
+  const base = doc.createElement('base');
+  base.setAttribute('target', '_blank');
+
+  // A meta CSP governs what the parser meets after it, so first in the head
+  // is the whole job. Prepending in this order leaves the policy ahead of
+  // the base too, which costs nothing and keeps the rule simple: the policy
+  // is the first thing in the document that is not the doctype.
+  doc.head.prepend(base);
+  doc.head.prepend(policy);
+
+  // Emitted rather than carried over. A doctype that is not first stops
+  // being one, and a document with none renders in quirks mode -- and this
+  // is a document we built, so neither has to be true of the input.
+  return `<!doctype html>${doc.documentElement.outerHTML}`;
 }

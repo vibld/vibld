@@ -1,116 +1,120 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-
-import {
-  MOCKUP_FRAME_POLICY,
-  mockupFrameDocument,
-  withoutSelfNavigation,
-} from '../src/generation/mockup-frame.ts';
+import { before, describe, it } from 'node:test';
+import { Window } from 'happy-dom';
 
 /**
- * The network policy `sandbox=""` does not provide (#189 review, P1).
+ * The frame a mockup renders in, and what it is not allowed to do.
  *
- * A fully sandboxed frame still fetches a remote image, stylesheet or font,
- * which discloses the viewer's IP to a host the model chose. The prompt
- * forbids those, and the whole argument for the sandbox was that a request
- * is not a guarantee, so the network could not be left on the prompt's good
- * behaviour either.
+ * Mockup HTML is model output. `sandbox=""` denies capabilities, the meta
+ * policy below denies fetches, and the removal pass denies navigation.
+ * Every one of those three was claimed before it was true, which is what
+ * the module's own header is about.
  *
- * What these can assert is that the policy is present, correct and ahead of
- * everything it governs. Enforcement is the browser's.
+ * ## Why this test builds a DOM
+ *
+ * `mockup-frame.ts` parses with `DOMParser` rather than matching markup,
+ * after five rounds in which a regex was defeated by something the real
+ * tokenizer does and I did not predict: a `<head` in a comment, an
+ * entity-encoded attribute value, a quoted `>` before the attribute. The
+ * point of the module is that the parser decides, so the point of this
+ * file is to check it against a parser rather than against my reading.
+ *
+ * Installed here instead of by `test/harness/components.mjs`, which only
+ * fires for `*.test.tsx`. That rule is deliberate and worth keeping: it is
+ * what stops Worker code reaching for a browser global and passing here.
+ * This file is one process, this global is its own, and the module under
+ * test genuinely is browser-only -- it is called from `MockupChooser`.
+ *
+ * happy-dom was checked against all three bypasses before being trusted
+ * with them: it keeps a quoted `>` inside the attribute value, decodes
+ * `&#x72;` to `r`, and reports `http-equiv="refresh"` in each case, which
+ * is what a browser does.
  */
+before(() => {
+  const window = new Window({ url: 'https://app.vibld.test/' });
+  Object.defineProperty(globalThis, 'DOMParser', {
+    configurable: true,
+    value: window.DOMParser,
+  });
+});
 
-describe('the policy a mockup frame carries', () => {
+const { MOCKUP_FRAME_POLICY, mockupFrameDocument } =
+  await import('../src/generation/mockup-frame.ts');
+
+describe('what a mockup frame is allowed to load', () => {
   it('forbids everything by default', () => {
     assert.match(MOCKUP_FRAME_POLICY, /default-src 'none'/);
   });
 
   it('allows the inline style a mockup is made of', () => {
-    // Without this every direction renders as unstyled text, which is not a
-    // direction at all.
     assert.match(MOCKUP_FRAME_POLICY, /style-src 'unsafe-inline'/);
   });
 
   it('allows an embedded image but not a fetched one', () => {
-    // A data: image is self-contained and discloses nothing. A remote one
-    // is a request to somebody else's server.
     assert.match(MOCKUP_FRAME_POLICY, /img-src data:/);
     assert.doesNotMatch(MOCKUP_FRAME_POLICY, /img-src[^;]*https?:/);
     assert.doesNotMatch(MOCKUP_FRAME_POLICY, /\*/);
   });
 
-  it('names no remote host at all', () => {
+  it('names no host at all', () => {
     assert.doesNotMatch(MOCKUP_FRAME_POLICY, /https?:/);
   });
 });
 
 describe('where the policy lands', () => {
-  it('leads the document, so nothing it governs is parsed first', () => {
+  it('leads the head, ahead of anything the head contains', () => {
+    // A meta CSP governs only what the parser meets after it, so being
+    // second is the same as being absent.
     const framed = mockupFrameDocument(
-      '<!doctype html><html><head><style>body{color:red}</style></head><body>hi</body></html>',
+      '<!doctype html><html><head><link rel="stylesheet" href="https://evil.example/x.css"></head><body>x</body></html>',
     );
-    assert.ok(
-      framed.indexOf('Content-Security-Policy') < framed.indexOf('<style>'),
-      'the policy sits after content it is supposed to govern',
-    );
+    const policyAt = framed.indexOf('Content-Security-Policy');
+    const linkAt = framed.indexOf('stylesheet');
+    assert.ok(policyAt > -1, 'no policy in the framed document');
+    assert.ok(linkAt > -1, 'the test fixture lost its link');
+    assert.ok(policyAt < linkAt, 'the policy landed after what it governs');
   });
 
-  it('keeps the doctype first, so the frame stays out of quirks mode', () => {
-    const framed = mockupFrameDocument(
-      '<!doctype html><html><body>x</body></html>',
-    );
-    assert.match(
-      framed,
-      /^<!doctype html><meta http-equiv="Content-Security-Policy"/i,
-    );
-  });
-
-  it('leads a document that has no doctype at all', () => {
-    const framed = mockupFrameDocument(
-      '<body><img src="https://x/y.png"></body>',
-    );
-    assert.ok(framed.startsWith('<meta http-equiv="Content-Security-Policy"'));
-    assert.ok(
-      framed.indexOf('img') > framed.indexOf('Content-Security-Policy'),
-    );
+  it('gives a document with no head of its own a head with the policy in it', () => {
+    const framed = mockupFrameDocument('<p>just a fragment</p>');
+    assert.match(framed, /Content-Security-Policy/);
+    assert.match(framed, /just a fragment/);
   });
 
   it('does not trust a head that is not where it claims to be', () => {
-    // The reason placement moved off `<head>` (#189 review follow-up).
-    // Searching for the head means trusting the document to be well
-    // formed, and this function exists because it cannot be trusted. A
-    // `<head` in a comment used to take the policy with it.
+    // The finding against the first fix: searching for `<head` means
+    // trusting the document to be well formed, in a function that exists
+    // because it is not.
     const framed = mockupFrameDocument(
-      '<!doctype html><!-- <head> --><html><head><style>body{color:red}</style></head><body>x</body></html>',
+      '<!doctype html><!-- <head> --><html><head><link rel="stylesheet" href="https://evil.example/x.css"></head><body>x</body></html>',
     );
-    assert.ok(
-      framed.indexOf('Content-Security-Policy') < framed.indexOf('<!--'),
-      'a commented-out head moved the policy behind real content',
-    );
-    assert.ok(
-      framed.indexOf('Content-Security-Policy') < framed.indexOf('<style>'),
-    );
+    const policyAt = framed.indexOf('Content-Security-Policy');
+    const linkAt = framed.indexOf('stylesheet');
+    assert.ok(policyAt < linkAt, 'a commented head moved the policy');
   });
 
-  it('keeps the document it was given', () => {
-    // The mockup is what the person chose. This adds a policy; it must not
-    // quietly become a different page.
-    const html =
-      '<!doctype html><html><head></head><body><h1>Sourdough</h1></body></html>';
-    const framed = mockupFrameDocument(html);
-    assert.match(framed, /<h1>Sourdough<\/h1>/);
-    assert.match(framed, /^<!doctype html>/i);
+  it('keeps the doctype first, so the frame stays out of quirks mode', () => {
+    assert.match(mockupFrameDocument('<p>x</p>'), /^<!doctype html>/i);
+    assert.match(
+      mockupFrameDocument('<!doctype html><p>x</p>'),
+      /^<!doctype html>/i,
+    );
+    // A document whose own doctype was malformed still gets a real one,
+    // because this emits one rather than preserving whatever was there.
+    assert.match(
+      mockupFrameDocument('<!docstype htm><p>x</p>'),
+      /^<!doctype html>/i,
+    );
   });
 });
 
 /**
- * Where the frame may go, which a content policy does not govern (#189
- * review, second P1).
+ * Where the frame may go, which neither the sandbox nor the policy governs.
  *
- * `default-src 'none'` restricts what a document fetches. It says nothing
- * about the document navigating itself, and `sandbox=""` only stops a frame
- * navigating anything *else*. The directive that covered this was dropped
- * from the spec, so the lever is the markup.
+ * `default-src 'none'` restricts what a document fetches. `sandbox=""`
+ * stops a frame navigating anything *else*. Neither stops it replacing
+ * itself, and `navigate-to` was dropped from the spec, so the lever is the
+ * markup -- and the markup has to be read by a parser, not a pattern.
  */
 describe('where a mockup frame may go', () => {
   it('removes a refresh that would navigate with nobody touching it', () => {
@@ -119,7 +123,7 @@ describe('where a mockup frame may go', () => {
     const framed = mockupFrameDocument(
       '<!doctype html><html><head><meta http-equiv="refresh" content="0;url=https://evil.example/"></head><body>x</body></html>',
     );
-    assert.doesNotMatch(framed, /http-equiv="refresh"/i);
+    assert.doesNotMatch(framed, /refresh/i);
     assert.doesNotMatch(framed, /evil\.example/);
   });
 
@@ -131,51 +135,52 @@ describe('where a mockup frame may go', () => {
       '<meta http-equiv = "refresh" content="0">',
     ]) {
       assert.doesNotMatch(
-        withoutSelfNavigation(markup),
-        /http-equiv/i,
+        mockupFrameDocument(markup),
+        /refresh/i,
         `survived: ${markup}`,
       );
     }
   });
 
   it('removes a refresh whose value never says refresh', () => {
-    // The reviewer's own bypass, verbatim (#189 review, third round).
-    // The parser decodes `&#x72;` to `r` and navigates; a regex reading the
-    // source sees a string that is not "refresh" and leaves the tag. Every
-    // encoding below is a different way to write the same word, and there
-    // are more of them than a table would hold -- which is why the match is
-    // on the attribute name, not on what the value claims to say.
+    // Round four's bypass. The parser decodes `&#x72;` to `r` and
+    // navigates; a pattern reading the source compares against a string the
+    // browser never sees.
     for (const markup of [
       '<meta http-equiv="ref&#x72;esh" content="0;url=https://evil.example/">',
       '<meta http-equiv="&#114;efresh" content="0;url=https://evil.example/">',
       '<meta http-equiv="refres&#104;" content="0">',
     ]) {
-      const stripped = withoutSelfNavigation(markup);
-      assert.doesNotMatch(stripped, /http-equiv/i, `survived: ${markup}`);
-      assert.doesNotMatch(stripped, /evil\.example/, `survived: ${markup}`);
+      const framed = mockupFrameDocument(markup);
+      assert.doesNotMatch(framed, /refresh/i, `survived: ${markup}`);
+      assert.doesNotMatch(framed, /evil\.example/, `survived: ${markup}`);
+    }
+  });
+
+  it('removes a refresh hidden behind a quoted angle bracket', () => {
+    // Round five's bypass, and the one that ended the pattern-matching
+    // approach. The tokenizer keeps that `>` inside `data-x` and reads the
+    // whole tag; `[^>]*` stopped at it and the tag survived untouched.
+    for (const markup of [
+      '<meta data-x=">" http-equiv="refresh" content="0;url=https://evil.example">',
+      "<meta data-x='>>>' http-equiv=refresh content='0;url=https://evil.example'>",
+      '<meta data-x="a>b" data-y=">" http-equiv="refresh" content="0">',
+    ]) {
+      const framed = mockupFrameDocument(markup);
+      assert.doesNotMatch(framed, /refresh/i, `survived: ${markup}`);
+      assert.doesNotMatch(framed, /evil\.example/, `survived: ${markup}`);
     }
   });
 
   it('removes a base the document tries to set for itself', () => {
-    // Ours leads the markup and wins on `target`, but sets no `href` -- so
-    // a later `<base href>` would be the first with one and would become
+    // Ours leads the head and wins on `target`, but sets no `href` -- so a
+    // later `<base href>` would be the first with one, and would become
     // what every relative URL resolves against.
-    const stripped = withoutSelfNavigation(
+    const framed = mockupFrameDocument(
       '<base href="https://evil.example/"><a href="/go">x</a>',
     );
-    assert.doesNotMatch(stripped, /evil\.example/);
-    assert.match(stripped, /href="\/go"/);
-  });
-
-  it('keeps the content policy, which is added after the strip', () => {
-    // The strip removes every `http-equiv`, ours included -- so the order
-    // is the whole of why ours survives. Reversing it would leave a frame
-    // with no policy at all and nothing saying so.
-    const framed = mockupFrameDocument(
-      '<!doctype html><html><head><meta http-equiv="refresh" content="0"></head><body>x</body></html>',
-    );
-    assert.match(framed, /Content-Security-Policy/);
-    assert.match(framed, /<base target="_blank">/);
+    assert.doesNotMatch(framed, /evil\.example/);
+    assert.match(framed, /href="\/go"/);
   });
 
   it('points links at a context the sandbox will not open', () => {
@@ -188,18 +193,32 @@ describe('where a mockup frame may go', () => {
   it('strips an explicit target that would defeat that', () => {
     // `target="_self"` on an external link is the click-driven half: the
     // frame replaces itself and the host learns the viewer's address.
-    const stripped = withoutSelfNavigation(
+    const framed = mockupFrameDocument(
       '<a href="https://evil.example/" target="_self">go</a>',
     );
-    assert.doesNotMatch(stripped, /target/i);
-    assert.match(stripped, /href="https:\/\/evil\.example\/"/);
+    assert.doesNotMatch(framed, /target="_self"/i);
+    assert.match(framed, /href="https:\/\/evil\.example\/"/);
+    // Ours is the only target left standing.
+    assert.equal(framed.match(/target=/g)?.length, 1);
+  });
+
+  it('keeps the content policy, which is added after the removal pass', () => {
+    // Ours is an `http-equiv` meta too, so the order is the whole of why it
+    // survives. Reversing it would leave a frame with no policy at all and
+    // nothing saying so.
+    const framed = mockupFrameDocument(
+      '<!doctype html><html><head><meta http-equiv="refresh" content="0"></head><body>x</body></html>',
+    );
+    assert.match(framed, /Content-Security-Policy/);
+    assert.match(framed, /<base target="_blank">/);
   });
 
   it('leaves the document otherwise as it was', () => {
-    const html =
-      '<!doctype html><html><body><h1>Sourdough</h1><p>Baked daily.</p></body></html>';
-    const framed = mockupFrameDocument(html);
+    const framed = mockupFrameDocument(
+      '<!doctype html><html><body><h1>Sourdough</h1><p>Baked daily.</p><img src="data:image/gif;base64,R0lGOD"></body></html>',
+    );
     assert.match(framed, /<h1>Sourdough<\/h1>/);
     assert.match(framed, /Baked daily\./);
+    assert.match(framed, /data:image\/gif/);
   });
 });
