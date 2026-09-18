@@ -1568,6 +1568,14 @@ body {
  * bug `builder-layout.test.ts` was written for, and it was these four tools
  * that caused it in the composer. Moving them to a page that repeated the
  * mistake would have moved the bug rather than fixed it. */
+/* Focused only to reposition a reader after a view switch that kept the
+   document (`use-focus-on-change.ts`). A ring around the whole view would
+   read as a selection nobody made; the view changing under them is the
+   indication, and every control inside keeps its own ring. */
+.shell__body:focus {
+  outline: none;
+}
+
 .shell__body--page {
   display: block;
   min-height: 0;

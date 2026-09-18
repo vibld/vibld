@@ -1,7 +1,9 @@
 import { AccessGate } from './components/AccessGate.tsx';
 import { AdminSettings } from './components/AdminSettings.tsx';
 import { ADMIN_PATH, isAdminPath } from './admin/route.ts';
+import { useRef } from 'react';
 import { navigate, usePathname } from './admin/use-pathname.ts';
+import { useFocusOnChange } from './admin/use-focus-on-change.ts';
 import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { KnowledgePanel } from './components/KnowledgePanel.tsx';
@@ -50,7 +52,12 @@ function Builder() {
   // link to another document: a run takes minutes, and an admin who
   // stepped into settings during one would otherwise come back to an empty
   // shell (#184).
-  const onAdminPage = isAdminPath(usePathname());
+  const pathname = usePathname();
+  const onAdminPage = isAdminPath(pathname);
+  // Where focus goes when the view changes under a reader who never left
+  // the document. See `useFocusOnChange`.
+  const body = useRef<HTMLElement | null>(null);
+  useFocusOnChange(pathname, body);
 
   return (
     <div className="shell">
@@ -152,6 +159,8 @@ function Builder() {
         className={
           onAdminPage ? 'shell__body shell__body--page' : 'shell__body'
         }
+        ref={body}
+        tabIndex={-1}
       >
         {onAdminPage ? <AdminSettings isAdmin={state.isAdmin} /> : null}
         <section
