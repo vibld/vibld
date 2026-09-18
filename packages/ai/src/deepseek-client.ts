@@ -187,6 +187,13 @@ export function createDeepseekPlanClient(
         );
       }
 
+      // What this client really sends: the caller's system prompt with the
+      // output instruction appended, plus the user prompt. That appended
+      // paragraph is this client's alone, which is why measuring it here is
+      // the only way to be right (#189 review).
+      const systemSent = `${request.system}\n\n${outputFor(request).instruction}`;
+      request.onPromptChars?.(systemSent.length + request.prompt.length);
+
       const response = await doFetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -208,7 +215,7 @@ export function createDeepseekPlanClient(
               // The shape the caller asked for (#189 review). This always
               // described a generation plan, so a mockup prompt was
               // followed by a paragraph contradicting it.
-              content: `${request.system}\n\n${outputFor(request).instruction}`,
+              content: systemSent,
             },
             { role: 'user', content: request.prompt },
           ],

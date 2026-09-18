@@ -220,6 +220,10 @@ export function createOpenaiPlanClient(
         ? Math.min(request.maxTokens, known.maxOutputTokens)
         : request.maxTokens;
 
+      // The schema travels in `text.format` rather than in the prompt, so
+      // what goes as prompt is exactly these two (#189 review).
+      request.onPromptChars?.(request.system.length + request.prompt.length);
+
       const response = await doFetch(`${baseUrl}/responses`, {
         method: 'POST',
         headers: {

@@ -172,3 +172,33 @@ describe('the shape a request asks for', () => {
     assert.match(format, /files/, 'the default stopped being a plan');
   });
 });
+
+/**
+ * How large a prompt this client says it sent (#189 review).
+ *
+ * As with OpenAI, the schema travels in a structured field rather than in
+ * the prompt, so this reports the two strings it was handed. Pinned because
+ * the figure settles a cancelled run and DeepSeek's answer differs.
+ */
+describe('what the Anthropic client reports sending', () => {
+  it('counts the system and user prompts it was given', async () => {
+    const captured: Captured = {};
+    let reported = -1;
+    await createAnthropicPlanClient({
+      client: fakeAnthropic(captured),
+    }).createPlan({
+      model: 'claude-haiku-4-5',
+      system: 'SYSTEM PROMPT',
+      prompt: 'Build a landing page',
+      maxTokens: 1000,
+      effort: 'high',
+      onPromptChars: (characters) => {
+        reported = characters;
+      },
+    });
+    assert.equal(
+      reported,
+      'SYSTEM PROMPT'.length + 'Build a landing page'.length,
+    );
+  });
+});

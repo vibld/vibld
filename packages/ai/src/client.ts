@@ -40,6 +40,22 @@ export interface PlanRequest {
    * constrained to another by the API.
    */
   output?: PlanOutput;
+  /**
+   * The size of the prompt this client actually sent, in characters,
+   * reported once just before the request goes out.
+   *
+   * Exists because only the client knows (#189 review). The route settling
+   * a cancelled run was reconstructing the figure from the system prompt
+   * and the user prompt, which is right for two of the three clients and
+   * wrong for DeepSeek, where the output instruction is appended to the
+   * system message. Reconstructing what somebody else assembled is the
+   * two-places-that-must-agree problem, and here the two were provider
+   * specific, so they could not have agreed for long.
+   *
+   * Characters rather than tokens: no client has a tokenizer, and the
+   * estimate that turns this into money lives in one place already.
+   */
+  onPromptChars?: (characters: number) => void;
 }
 
 export interface PlanProgress {

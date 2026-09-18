@@ -148,6 +148,19 @@ describe('how a route learns the caller has gone', () => {
     );
   });
 
+  it('takes the sent size from the client rather than rebuilding it', async () => {
+    // The route cannot work this out for itself: DeepSeek appends the
+    // output instruction to the system message and the other two clients
+    // carry the schema structurally (#189 review). Reconstructing it here
+    // was short by 430-odd characters on the provider production runs.
+    const source = await readFile(workerSource(), 'utf8');
+    assert.match(
+      source,
+      /onPromptChars: \(characters\) => \{\s*sentChars = characters;/,
+      'the route is rebuilding the prompt size instead of being told it',
+    );
+  });
+
   it('is what both streaming routes use', async () => {
     const source = await readFile(workerSource(), 'utf8');
     assert.equal(

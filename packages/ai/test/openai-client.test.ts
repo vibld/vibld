@@ -362,3 +362,50 @@ describe('createOpenaiPlanClient', () => {
     );
   });
 });
+
+/**
+ * How large a prompt this client says it sent (#189 review).
+ *
+ * The schema goes in `text.format`, not in the prompt, so what this
+ * reports is the two strings it was handed. That is worth pinning rather
+ * than assuming: the figure settles a cancelled run, and the equivalent
+ * answer on DeepSeek is a different one.
+ */
+describe('what the OpenAI client reports sending', () => {
+  /** Its own, because `clientWith` belongs to the suite above. */
+  function client() {
+    return createOpenaiPlanClient({
+      apiKey: 'test-key',
+      fetchImpl: (async () =>
+        new Response(sse(completed()), {
+          status: 200,
+        })) as unknown as typeof fetch,
+    });
+  }
+
+  async function reportedFor(extra: Partial<PlanRequest> = {}) {
+    let reported = -1;
+    await client().createPlan({
+      ...REQUEST,
+      ...extra,
+      onPromptChars: (characters) => {
+        reported = characters;
+      },
+    });
+    return reported;
+  }
+
+  it('counts the system and user prompts it was given', async () => {
+    assert.equal(
+      await reportedFor(),
+      REQUEST.system.length + REQUEST.prompt.length,
+    );
+  });
+
+  it('does not count the schema, which does not travel as prompt', async () => {
+    assert.equal(
+      await reportedFor({ output: MOCKUP_OUTPUT }),
+      REQUEST.system.length + REQUEST.prompt.length,
+    );
+  });
+});

@@ -10,7 +10,7 @@ import {
 } from '../src/deepseek-client.ts';
 import { ProviderShapeError, ProviderTruncationError } from '../src/errors.ts';
 import type { PlanUsage } from '../src/client.ts';
-import { MOCKUP_OUTPUT } from '../src/plan-output.ts';
+import { MOCKUP_OUTPUT, PLAN_OUTPUT } from '../src/plan-output.ts';
 import type { PlanOutput } from '../src/plan-output.ts';
 
 const PLAN = {
@@ -410,5 +410,55 @@ describe('what the appended instruction asks for', () => {
     // prompt be the thing that gets contradicted.
     const system = await systemSentFor(MOCKUP_OUTPUT);
     assert.ok(system.indexOf('SYSTEM') < system.indexOf('OUTPUT FORMAT'));
+  });
+});
+
+/**
+ * How large a prompt this client says it sent (#189 review).
+ *
+ * The route settling a cancelled run cannot work this out for itself: it
+ * knows the system prompt and the user prompt, and this client appends the
+ * output instruction to the first of them. That is 430-odd characters the
+ * caller was not being charged for, on the one provider production runs.
+ */
+describe('what this client reports sending', () => {
+  async function reportedFor(output?: PlanOutput): Promise<number> {
+    const { impl } = fetchReturning(sse(contentFrames(JSON.stringify(PLAN))));
+    let reported = -1;
+    await createDeepseekPlanClient({ apiKey: 'k', fetchImpl: impl }).createPlan(
+      {
+        system: 'SYSTEM',
+        prompt: 'a bakery',
+        model: 'deepseek-flash',
+        maxTokens: 18_000,
+        effort: 'high',
+        onPromptChars: (characters) => {
+          reported = characters;
+        },
+        ...(output ? { output } : {}),
+      },
+    );
+    return reported;
+  }
+
+  it('counts the instruction it appends, not only what it was given', async () => {
+    const reported = await reportedFor(MOCKUP_OUTPUT);
+    const naive = 'SYSTEM'.length + 'a bakery'.length;
+    assert.ok(
+      reported > naive + 400,
+      `reported ${reported}, which cannot include the appended instruction`,
+    );
+    assert.equal(
+      reported,
+      `SYSTEM\n\n${MOCKUP_OUTPUT.instruction}`.length + 'a bakery'.length,
+    );
+  });
+
+  it('counts the plan instruction when nothing says otherwise', async () => {
+    const reported = await reportedFor();
+    assert.equal(
+      reported,
+      `SYSTEM\n\n${PLAN_OUTPUT.instruction}`.length + 'a bakery'.length,
+    );
   });
 });

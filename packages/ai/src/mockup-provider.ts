@@ -54,6 +54,15 @@ export interface MockupProviderOptions {
    * progress, and the client never reported any.
    */
   onProgress?: (progress: PlanProgress) => void;
+  /**
+   * How large a prompt the client actually sent, reported once.
+   *
+   * Forwarded rather than reconstructed, because the assembly is
+   * provider-specific: DeepSeek appends the output instruction to the
+   * system message, Anthropic and OpenAI carry the schema structurally
+   * instead (#189 review).
+   */
+  onPromptChars?: (characters: number) => void;
   style?: StylePresetId;
 }
 
@@ -70,6 +79,7 @@ export class MockupProvider {
   readonly #onUsage?: (usage: PlanUsage) => void;
   readonly #signal?: AbortSignal;
   readonly #onProgress?: (progress: PlanProgress) => void;
+  readonly #onPromptChars?: (characters: number) => void;
   readonly #style?: StylePresetId;
 
   constructor(client: PlanClient, options: MockupProviderOptions = {}) {
@@ -81,6 +91,7 @@ export class MockupProvider {
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#style = options.style;
+    this.#onPromptChars = options.onPromptChars;
     this.id = `${client.id}:${this.#model}`;
   }
 
@@ -100,6 +111,11 @@ export class MockupProvider {
       output: MOCKUP_OUTPUT,
       ...(this.#signal ? { signal: this.#signal } : {}),
       ...(this.#onProgress ? { onProgress: this.#onProgress } : {}),
+      // Forwarded so the caller can settle a cancelled run from what was
+      // really sent. Only the client knows: DeepSeek appends the output
+      // instruction to the system message and the other two do not
+      // (#189 review).
+      ...(this.#onPromptChars ? { onPromptChars: this.#onPromptChars } : {}),
     });
 
     // Reported before anything can throw, for the same reason the build

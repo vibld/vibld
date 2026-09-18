@@ -1,11 +1,8 @@
 import {
-  MOCKUP_SYSTEM_PROMPT,
   MockupProvider,
   configuredProviders,
   createPlanClient,
-  mockupUserPrompt,
   resolveModel,
-  styleDirection,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 import type { RunRefusal } from '@vibld/core';
@@ -1476,16 +1473,20 @@ async function handleMockups(
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
 
-  // What this run really sends, as opposed to what its reservation covers.
-  // A cancelled run is settled from this (#189 review): charging the bound
-  // meant a ten-character unstyled prompt was billed as though it carried
-  // four thousand characters and a style direction nobody chose. Built from
-  // the same `mockupUserPrompt` the provider uses, so the two cannot come
-  // to disagree about what was sent.
-  const sentDirection = style.value ? styleDirection(style.value) : null;
-  const sentChars =
-    MOCKUP_SYSTEM_PROMPT.length +
-    mockupUserPrompt(parsed.value.prompt, sentDirection).length;
+  // What this run really sends, reported by the client that sends it.
+  //
+  // Reconstructed here at first, from the system prompt and
+  // `mockupUserPrompt` (#189 review). That was right for two of the three
+  // clients and wrong for DeepSeek, which appends the output instruction to
+  // the system message -- so the figure was short by about 430 characters
+  // on the one provider production actually runs. The assembly is
+  // provider-specific, so no amount of care here could have kept up with
+  // it; the client is the only thing that knows.
+  //
+  // Zero until the client says otherwise, which is the honest starting
+  // value: nothing has been sent yet. A run cancelled before the request
+  // goes out settles at nothing anyway, because `providerRan` stays false.
+  let sentChars = 0;
 
   const run = (async () => {
     let usage: PlanUsage | undefined;
@@ -1523,6 +1524,9 @@ async function handleMockups(
                 stage: 'running',
               }),
             );
+          },
+          onPromptChars: (characters) => {
+            sentChars = characters;
           },
           ...(style.value ? { style: style.value } : {}),
         },
