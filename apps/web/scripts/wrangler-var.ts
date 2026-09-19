@@ -18,6 +18,8 @@ import { join } from 'node:path';
 export function readConfig(raw: string): {
   vars?: Record<string, string>;
   ratelimits?: { name: string; namespace_id: string }[];
+  durable_objects?: { bindings?: { name: string; class_name: string }[] };
+  migrations?: { tag: string; new_sqlite_classes?: string[] }[];
 } {
   const stripped = raw
     .replace(/^\s*\/\/.*$/gm, '')

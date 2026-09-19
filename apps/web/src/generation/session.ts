@@ -161,17 +161,18 @@ export interface TranscriptTurn {
  * follow, each with its own retries. A word that named the writing would go
  * on claiming it for as long as those take.
  */
-export type GenerationStage = 'queued' | 'running';
+export type GenerationStage = 'queued' | 'running' | 'thinking';
 
 export interface GenerationProgress {
   /**
    * Characters the model has produced, when that is known.
    *
-   * Optional because since generation moved into a durable Workflow there is
-   * no live channel from the running step back to the Worker polling it, so
-   * the count is currently unavailable (#183). Absent means unknown, and the
-   * wording says nothing rather than saying zero: a counter frozen at 0 is
-   * the frozen line this whole component exists to replace.
+   * Optional, and absent means unknown rather than none. The Worker reports
+   * a count only once a run has produced one (#183): before the first
+   * report, and on a reasoning model for as long as it is still thinking,
+   * there is no honest number to send. The wording says nothing rather than
+   * saying zero, because a counter frozen at 0 is the frozen line this whole
+   * component exists to replace.
    */
   characters?: number;
   elapsedMs: number;

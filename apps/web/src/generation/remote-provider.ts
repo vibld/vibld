@@ -237,7 +237,11 @@ export class RemoteModelProvider implements ModelProvider {
           this.#onProgress?.({
             elapsedMs,
             ...(typeof characters === 'number' ? { characters } : {}),
-            ...(stage === 'queued' || stage === 'running' ? { stage } : {}),
+            ...(stage === 'queued' ||
+            stage === 'running' ||
+            stage === 'thinking'
+              ? { stage }
+              : {}),
           });
         }
         continue;

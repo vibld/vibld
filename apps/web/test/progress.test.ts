@@ -75,6 +75,47 @@ describe('reassurance', () => {
     assert.match(note, /minutes/);
     assert.match(note, /cancel/i);
   });
+
+  it('explains a still counter rather than leaving it unexplained', () => {
+    // The worst-looking state the meter can show, and the one the progress
+    // channel made visible (#183): a reasoning model has written nothing,
+    // so the clock moves and nothing else does. "Building a whole project
+    // takes several minutes" would be answering a question nobody asked,
+    // because on screen nothing is being built.
+    const note = reassurance({ elapsedMs: 120_000, stage: 'thinking' });
+    assert.ok(note);
+    assert.match(note, /before it writes/);
+    assert.match(note, /cancel/i);
+    assert.equal(
+      /building/i.test(note),
+      false,
+      'a run that has written nothing was described as building',
+    );
+  });
+});
+
+describe('what the meter says while a model is thinking', () => {
+  it('names the stage rather than showing a clock alone', () => {
+    // Without a word for it this read as "4:00" and nothing else, which is
+    // the frozen line the whole component exists to replace.
+    assert.equal(
+      describeProgress({ elapsedMs: 240_000, stage: 'thinking' }),
+      'Thinking it through · 4:00',
+    );
+  });
+
+  it('is spoken as well as shown', () => {
+    // A meter careful on screen and careless out loud is not careful
+    // (#188 review). A new stage that only half of the two knows about is
+    // exactly the drift that finding was about.
+    assert.equal(
+      progressAnnouncement({
+        elapsedMs: ANNOUNCE_INTERVAL_MS,
+        stage: 'thinking',
+      }),
+      'Still thinking it through, 0:30 elapsed.',
+    );
+  });
 });
 
 describe('progressAnnouncement', () => {

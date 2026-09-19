@@ -47,6 +47,50 @@ describe('what the meter calls a run in flight', () => {
     }
   });
 
+  it('says thinking while a reasoning model has written nothing', () => {
+    // The state the Workflow cannot report, because `status` is `running`
+    // for all of it (#183). On the production provider this is between 57%
+    // and 68% of a run's output tokens, so a meter without it spends most
+    // of its time claiming a project is being built while the character
+    // count beside it sits at zero.
+    assert.equal(
+      stageFor('running', { characters: 0, reasoningCharacters: 4_120 }),
+      'thinking',
+    );
+  });
+
+  it('stops saying thinking the moment the answer starts', () => {
+    // Nothing decides that thinking is over: the condition is that no
+    // answer exists yet, so one character ends it.
+    assert.equal(
+      stageFor('running', { characters: 1, reasoningCharacters: 4_120 }),
+      'running',
+    );
+  });
+
+  it('does not call a run thinking on a provider that never says', () => {
+    // A provider that streams no reasoning reports zero, not absence
+    // (`throttleProgress` normalises it). Zero and zero is a run that has
+    // produced nothing yet, which is ordinary at the start of every run and
+    // is not evidence of thinking.
+    assert.equal(
+      stageFor('running', { characters: 0, reasoningCharacters: 0 }),
+      'running',
+    );
+    assert.equal(stageFor('running'), 'running');
+  });
+
+  it('never calls a queued or unnameable run thinking', () => {
+    // A report outlives the state it was made in: the object holds the last
+    // one, and a run can be re-read while the instance is paused between
+    // retries. The thinking word must come from a running instance only.
+    const thinking = { characters: 0, reasoningCharacters: 4_120 };
+    assert.equal(stageFor('queued', thinking), 'queued');
+    for (const status of ['paused', 'waiting', 'waitingForPause', 'unknown']) {
+      assert.equal(stageFor(status, thinking), undefined, status);
+    }
+  });
+
   it('returns nothing for a state it has no honest word for', () => {
     // Not a fallback word, and not an invented one: `undefined` is a shape
     // the client already renders, as a line carrying only the clock.

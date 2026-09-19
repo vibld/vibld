@@ -10,6 +10,7 @@ import {
   ceilingForRun,
   runGeneration,
   settleBudget,
+  throttleProgress,
   traceOf,
 } from './generation-run.ts';
 import type {
@@ -33,11 +34,11 @@ export type { WorkflowParams } from './generation-run.ts';
  * client contract `remote-provider.ts` has always seen.
  *
  * Two client-visible things this move costs, both accepted deliberately:
- *  - Character-by-character progress (`onProgress` in the old in-request
- *    call) has no equivalent yet -- there is no live channel between a
- *    Workflow step and the Worker polling it, only the step's return value
- *    once it finishes. The poll loop still emits keepalives, so a long run
- *    reads as "still going", just not as "how far along".
+ *  - Character-by-character progress used to be lost here, and is not any
+ *    more (#183). A Workflow step still has no channel of its own -- its
+ *    return value arrives once, at the end -- so the generate step reports
+ *    through a named Durable Object (`run-progress.ts`) that the poll loop
+ *    reads, throttled to about a report a second and never awaited.
  *  - Cancelling now means `WorkflowInstance.terminate()`, not dropping a
  *    fetch. `index.ts` calls it on disconnect, but termination lands at the
  *    next step boundary, not mid-step -- a cancel that arrives while the
@@ -104,6 +105,30 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             })()
           : null;
 
+        // The live channel #183 was missing. The provider has always called
+        // back on every delta; what there was no way to do was say so
+        // outside this step, which returns once and at the end.
+        // `throttleProgress` turns the per-delta callback into about one
+        // report a second and drops a report that would repeat the last.
+        //
+        // Built before the provider and only where the binding exists, so a
+        // deployment without it passes no callback at all rather than
+        // throwing from inside the stream. The report is not awaited: a
+        // channel that is slow or gone must cost the reader a stale number,
+        // never the run.
+        const progress = this.env.RUN_PROGRESS;
+        const channel = progress
+          ? throttleProgress((report) => {
+              void progress
+                .getByName(params.runId)
+                .report(report)
+                .catch(() => {
+                  // A run that cannot describe itself still finishes, and
+                  // the meter falls back to the clock alone.
+                });
+            })
+          : undefined;
+
         const provider = new SanitizingModelProvider(
           new PlanProvider(createPlanClient(this.env, params.model), {
             model: params.model,
@@ -119,6 +144,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             onUsage: (reported) => {
               usage = reported;
             },
+            ...(channel ? { onProgress: channel } : {}),
             ...(params.style ? { style: params.style } : {}),
             ...(params.styleDna && Object.keys(params.styleDna).length > 0
               ? { styleDna: params.styleDna }

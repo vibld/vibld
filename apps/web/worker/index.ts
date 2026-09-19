@@ -34,7 +34,8 @@ import {
 import { fetchReferenceContext } from './reference-fetch.ts';
 import { spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
-import { stageFor } from './run-stage.ts';
+import { POLL_INTERVAL_MS, stageFor } from './run-stage.ts';
+import { RunProgress } from './run-progress.ts';
 import { whenClientGone } from './client-gone.ts';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
@@ -171,6 +172,16 @@ export interface Env {
   VIBLD_STREAM_KEEPALIVE_MS?: string;
   /** Per-user spend ledger. Without it the ceiling cannot be enforced. */
   USER_BUDGET?: DurableObjectNamespace<UserBudget>;
+  /**
+   * The live progress channel a running generation reports through (#183),
+   * read by the poll loop and written by the Workflow step.
+   *
+   * Optional, unlike the ledger, because what it carries is decoration
+   * rather than a control: an absent count is an absent count, and the
+   * meter shows the clock alone, which is what it showed before this
+   * existed.
+   */
+  RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'read'>>;
   /**
    * Burst gates. Optional: they are per-location and documented as permissive,
    * so they are a speed bump in front of the ledger rather than the limit.
@@ -356,12 +367,10 @@ export interface Env {
 }
 
 /** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
-export { UserBudget, GenerationWorkflow };
+export { UserBudget, GenerationWorkflow, RunProgress };
 
 const DEFAULT_MAX_IN_FLIGHT = 2;
 const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
-/** How often `handlePlan` checks its Workflow instance for a result. */
-const POLL_INTERVAL_MS = 1500;
 
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number(raw);
@@ -1309,20 +1318,30 @@ async function handlePlan(
           return;
         }
 
-        // Still going. There is no live channel from a Workflow step back
-        // to this loop (#183, and `generation-workflow.ts`'s own comment),
-        // so the character count the client can display is unavailable and
-        // is deliberately omitted rather than sent as a zero. What this
-        // loop does know is real: how long the caller has been waiting, and
-        // -- for the two states that have an honest name -- what the run is
-        // doing. `stageFor` returns nothing for the rest rather than
-        // guessing, and the line carries the clock alone.
-        const stage = stageFor(status.status);
+        // Still going. The generate step reports what it has produced
+        // through a named Durable Object (#183, `run-progress.ts`), which
+        // is read here and nowhere else. A read that fails, or a run that
+        // has not reported yet, leaves the count absent rather than zero:
+        // "unknown" and "none written" are different, and the client's
+        // wording already distinguishes them.
+        //
+        // The rest of what this loop knows is unchanged and still real: how
+        // long the caller has been waiting, and -- for the states that have
+        // an honest name -- what the run is doing. `stageFor` returns
+        // nothing for the rest rather than guessing, and the line carries
+        // the clock alone.
+        const report = await (env.RUN_PROGRESS?.getByName(runId)
+          .read()
+          .catch(() => undefined) ?? undefined);
+        const stage = stageFor(status.status, report);
         if (!cancelled) {
           await write(
             encodeEvent('progress', {
               elapsedMs: Date.now() - waitingSince,
               ...(stage ? { stage } : {}),
+              ...(report && report.characters > 0
+                ? { characters: report.characters }
+                : {}),
             }),
           );
         }
