@@ -46,23 +46,30 @@ const INTERNAL_ORIGIN = 'https://internal.invalid';
 /**
  * Why a build produced nothing, carried across the service boundary.
  *
- * A copy of `@vibld/preview`'s own union rather than an import: the two
+ * A copy of `@vibld/preview`'s own list rather than an import: the two
  * Workers are separate deployments that talk over a service binding and
  * share no build, the same reason `ServiceBinding` is declared here rather
- * than imported. `parseBuildResult` checks the wire value against this list,
- * so the copy cannot silently drift into accepting something the other side
- * never sends.
+ * than imported. `parseBuildResult` checks the wire value against it, so
+ * the copy cannot drift into accepting something the other side never
+ * sends, and `build-reasons.test.ts` compares the two lists, so it cannot
+ * drift into rejecting something the other side does.
+ *
+ * The list is the source and the type is derived from it (#196 review).
+ * Written the other way round, as a union with a `readonly
+ * BuildFailureReason[]` beside it, a member added to the union and
+ * forgotten in the list compiled perfectly: the wire value would then be
+ * discarded as unrecognised, and a failure the other side had named
+ * exactly would reach `worthRepairing` as no evidence at all.
  */
-export type BuildFailureReason =
-  'busy' | 'install' | 'build' | 'output' | 'sandbox';
-
-const BUILD_FAILURE_REASONS: readonly BuildFailureReason[] = [
+export const BUILD_FAILURE_REASONS = [
   'busy',
   'install',
   'build',
   'output',
   'sandbox',
-];
+] as const;
+
+export type BuildFailureReason = (typeof BUILD_FAILURE_REASONS)[number];
 
 export type BuildResult =
   | { ok: true; files: ProjectFile[]; skipped: string[] }

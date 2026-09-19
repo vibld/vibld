@@ -24,7 +24,7 @@ import type { TokenPrices } from './spend.ts';
 import type { UserBudget } from './budget.ts';
 import type { RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
-import type { buildProject } from './publish-client.ts';
+import type { BuildFailureReason, buildProject } from './publish-client.ts';
 import type { reserveBudget } from './reserve.ts';
 import { retrying } from '@vibld/core';
 
@@ -285,32 +285,67 @@ export function throttleProgress(
 }
 
 /**
+ * Which failures are statements about the project, one decision for both
+ * questions this file asks about a build (#196 review).
+ *
+ * A record over the whole union rather than a pair of comparisons, because
+ * a comparison does not notice a reason that did not exist when it was
+ * written. `worthRepairing` and `judgedTheProject` both used
+ * `reason === 'install' || reason === 'build'` against a `string`, so a
+ * sixth reason added to `publish-client.ts` would have been classified by
+ * both of them, silently, as not the project's. That is the safe direction
+ * and it is still a decision nobody took: the new reason might be exactly
+ * the evidence a repair turn acts on, and the feature would simply not fire
+ * for it.
+ *
+ * Typed as `Record<BuildFailureReason, boolean>`, so adding a member to
+ * that union and not classifying it here does not compile.
+ *
+ * `install` is usually a package the model invented or misspelled and
+ * `build` is the compiler refusing what it was given. The rest are the
+ * build service talking about itself: `busy` is a refusal issued before the
+ * build starts, so the code was never looked at, `sandbox` is the container,
+ * and `output` is a build that succeeded and could not be read back.
+ */
+const ABOUT_THE_PROJECT: Record<BuildFailureReason, boolean> = {
+  install: true,
+  build: true,
+  busy: false,
+  sandbox: false,
+  output: false,
+};
+
+/**
+ * The same question asked of a result rather than of a reason: `ok` is a
+ * statement about the project too, and an absent reason is not.
+ *
+ * An absent reason is deliberately not one. `publish-client.ts` leaves it
+ * absent when the build service sends something it does not recognise, and
+ * "I could not read why this failed" is not evidence about the project.
+ */
+function aboutTheProject(reason: BuildFailureReason | undefined): boolean {
+  return reason !== undefined && ABOUT_THE_PROJECT[reason];
+}
+
+/**
  * Whether a failed build is worth spending a second model call on (#194).
  *
  * Two questions, and they are separate on purpose. The first is whether the
- * failure says anything about the project: `install` is usually a package
- * the model invented, `build` is the compiler refusing what it was given,
- * and the other reasons are this deployment having a bad day. A `busy`
- * refusal in particular is issued before the build starts, so the code was
- * never even looked at.
+ * failure says anything about the project, which is `ABOUT_THE_PROJECT`
+ * above and is asked the same way by both builds in this file.
  *
  * The second is whether the run can pay for it. A payload persisted before
  * `monthlyAllowance` existed cannot say what its caller may spend, and a run
  * that cannot say that must not guess: no repair, and the reader keeps what
  * the first attempt produced, which is what every run did before this
  * shipped.
- *
- * An absent reason is deliberately not repairable. `publish-client.ts`
- * leaves it absent when the build service sends something it does not
- * recognise, and "I could not read why this failed" is not evidence that
- * the project is broken.
  */
 export function worthRepairing(
-  build: { ok: boolean; reason?: string },
+  build: { ok: boolean; reason?: BuildFailureReason },
   params: Pick<WorkflowParams, 'monthlyAllowance' | 'topupCeiling'>,
 ): boolean {
   if (build.ok) return false;
-  if (build.reason !== 'install' && build.reason !== 'build') return false;
+  if (!aboutTheProject(build.reason)) return false;
   return (
     typeof params.monthlyAllowance === 'number' &&
     typeof params.topupCeiling === 'number'
@@ -792,17 +827,17 @@ async function settleRepairHold(
  * Whether a build result is a statement about the project, or about the
  * service that was asked (#196 review).
  *
- * `ok` and the two failures that name the project's own tooling are the
- * former. `busy` (another build holds the workspace), `sandbox` (the
- * container itself) and `output` (a build that succeeded and could not be
- * read back) are the latter, and so is a reason this side does not
- * recognise. Both builds in this file ask the same question of their own
+ * `ok` is one, and so is a failure `ABOUT_THE_PROJECT` names as the
+ * project's. Both builds in this file ask the same question of their own
  * result, so they ask it the same way: one of them used to answer `false`
  * where the other answered "unknown", which is the difference between
  * "this does not compile" and "nobody compiled it".
  */
-function judgedTheProject(result: { ok: boolean; reason?: string }): boolean {
-  return result.ok || result.reason === 'install' || result.reason === 'build';
+function judgedTheProject(result: {
+  ok: boolean;
+  reason?: BuildFailureReason;
+}): boolean {
+  return result.ok || aboutTheProject(result.reason);
 }
 
 export async function verifyAndRepair(
@@ -848,7 +883,9 @@ export async function verifyAndRepair(
   const build = async (
     files: ProjectFile[],
   ): Promise<
-    { ok: true } | { ok: false; error: string; reason?: string } | undefined
+    | { ok: true }
+    | { ok: false; error: string; reason?: BuildFailureReason }
+    | undefined
   > => {
     try {
       return await deps.build(

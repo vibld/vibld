@@ -60,3 +60,41 @@ export const NETWORK_FAILURE_CODES = [
 export function networkFailure(said: string): boolean {
   return NETWORK_FAILURE_CODES.some((code) => said.includes(code));
 }
+
+/**
+ * Every reason a build can give for producing nothing, as values rather
+ * than as prose.
+ *
+ * The message alone was enough while the only caller was publish, which
+ * shows it to a person and stops. #194 added a caller that has to *decide*
+ * from it: a generation that builds its own output and, when the build
+ * fails, spends a second model call trying to repair the project. Deciding
+ * that from a string means matching on wording, and wording changes.
+ *
+ * The list is the source and the type is derived from it, rather than the
+ * two being written out beside each other (#196 review). `apps/web` keeps
+ * its own copy, deliberately: the two Workers are separate deployments that
+ * talk over a service binding and share no build. A copy is only safe while
+ * it can be checked against this one, and it cannot be checked against a
+ * type, which is erased. `apps/web/test/build-reasons.test.ts` compares the
+ * two lists.
+ *
+ * It lives here rather than in `preview-sandbox.ts` for the same reason
+ * `networkFailure` does: that file imports `@cloudflare/sandbox` and cannot
+ * be loaded under `node --test`, so nothing in it can be compared with
+ * anything.
+ */
+export const BUILD_FAILURE_REASONS = [
+  // The project's own: these are evidence a repair turn can act on.
+  'install',
+  'build',
+  // This service having a bad day. `busy` is a refusal issued before the
+  // build starts, so the code was never looked at; `sandbox` is the
+  // container; `output` is a build that succeeded and could not be read
+  // back.
+  'busy',
+  'sandbox',
+  'output',
+] as const;
+
+export type BuildFailureReason = (typeof BUILD_FAILURE_REASONS)[number];

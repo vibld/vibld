@@ -1,6 +1,7 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
+import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
 import { HARD_LIFETIME_MS } from './fleet.ts';
@@ -93,27 +94,10 @@ type Phase = 'queued' | 'installing' | 'starting' | 'ready' | 'failed';
 
 /**
  * Why a build did not produce output, as a value rather than as prose.
- *
- * The message alone was enough while the only caller was publish, which
- * shows it to a person and stops. #194 added a caller that has to *decide*
- * from it: a generation that builds its own output and, when the build
- * fails, spends a second model call trying to repair the project. Deciding
- * that from a string means matching on wording, and wording changes.
- *
- * Only two of these are evidence about the project the model wrote:
- *
- *  - `install`: a dependency that does not resolve, which is usually a
- *    package the model invented or misspelled.
- *  - `build`: the compiler or bundler refused what it was given.
- *
- * The rest are about this service having a bad day, and none of them says
- * anything is wrong with the code. `busy` in particular is a refusal before
- * any work happens: a preview is already running for the project, so the
- * build never started. Repairing on any of these would spend somebody's
- * money to fix a problem they do not have.
+ * Declared in `build-failure.ts`, beside the list it is derived from, and
+ * re-exported here because this is the module callers of the build have.
  */
-export type BuildFailureReason =
-  'busy' | 'install' | 'build' | 'output' | 'sandbox';
+export type { BuildFailureReason } from './build-failure.ts';
 
 export type BuildOutcome =
   | { files: ProjectFile[]; skipped: string[] }

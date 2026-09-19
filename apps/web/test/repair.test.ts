@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { repairPromptFor, worthRepairing } from '../worker/generation-run.ts';
+import type { BuildFailureReason } from '../worker/publish-client.ts';
 
 /**
  * When a project that will not build is worth a second model call (#194).
@@ -19,7 +20,7 @@ const FUNDED = { monthlyAllowance: 1_000_000, topupCeiling: 0 };
 
 describe('whether a failed build buys a repair', () => {
   it('repairs what the compiler and the installer refused', () => {
-    for (const reason of ['install', 'build']) {
+    for (const reason of ['install', 'build'] as const) {
       assert.equal(worthRepairing({ ok: false, reason }, FUNDED), true, reason);
     }
   });
@@ -33,7 +34,7 @@ describe('whether a failed build buys a repair', () => {
   });
 
   it('never repairs this deployment having a bad day', () => {
-    for (const reason of ['output', 'sandbox']) {
+    for (const reason of ['output', 'sandbox'] as const) {
       assert.equal(
         worthRepairing({ ok: false, reason }, FUNDED),
         false,
@@ -47,8 +48,22 @@ describe('whether a failed build buys a repair', () => {
     // guessing. "I could not read why this failed" must not become "the
     // project is broken, spend a generation on it".
     assert.equal(worthRepairing({ ok: false }, FUNDED), false);
+  });
+
+  it('treats a reason from the future as no evidence either', () => {
+    // The cast is the point rather than a way around the type (#196
+    // review). Since the reason became `BuildFailureReason` this argument
+    // cannot be written without one, which is the improvement: the value
+    // is parsed at the service boundary and an unrecognised one is already
+    // dropped there. What the cast pins is the second line of defence, for
+    // a value that reaches here another way -- `ABOUT_THE_PROJECT` is a
+    // lookup, and a lookup on a key it does not have answers `undefined`,
+    // which must read as "not the project" rather than as a repair.
     assert.equal(
-      worthRepairing({ ok: false, reason: 'something-new' }, FUNDED),
+      worthRepairing(
+        { ok: false, reason: 'something-new' as BuildFailureReason },
+        FUNDED,
+      ),
       false,
     );
   });
