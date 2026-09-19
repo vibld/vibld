@@ -1101,6 +1101,33 @@ export async function verifyAndRepair(
     // deliberate fail-closed into a routine way to lose somebody's work.
     if (!(error instanceof Error) || error.message !== OUT_OF_TIME) throw error;
     abandoned = true;
+    // What giving up does not do, written here because "we looked at this
+    // and accepted it" is worth nothing if the reasoning lives in a
+    // resolved review thread (#196 review).
+    //
+    // The call is not cancelled; nothing here can cancel it. So a provider
+    // that answers after the deadline runs on inside `runGeneration`, and
+    // if the accepted revision has not moved in the meantime its promotion
+    // succeeds. The caller then holds the project this function returned
+    // while the store holds a repair they never saw.
+    //
+    // The cost of that is one refused request, not lost work or a wrong
+    // charge. `runGeneration` checks the asserted base revision before it
+    // spends anything, so the caller's next edit is refused for free with
+    // "The project moved on before this could apply", and reloading the
+    // project recovers it with the repair in hand.
+    //
+    // Every fix I can reach is worse than that. There is no cancellation to
+    // call. Promoting something of our own to invalidate the late one hands
+    // the caller a revision they did not ask for, to fix a revision they
+    // did not ask for. Moving promotion out of `runGeneration` and into
+    // this function would close it properly and is a change to the path
+    // every generation takes, which is not a thing to do at the end of a
+    // review of something else. Recorded as its own issue instead.
+    //
+    // What would change this: promotion becoming this function's act, or
+    // the provider client gaining a cancel. Either makes the residual go
+    // away rather than shrink.
   } finally {
     // In a `finally`, because a repair that threw still asked the model and
     // still holds a reservation. Leaving it open is the one outcome that
