@@ -402,6 +402,19 @@ export interface RepairOutcome {
   built?: boolean;
   /** Set only when a repair was actually asked for and paid for. */
   repaired?: boolean;
+  /**
+   * The repaired project, when there is one, for the caller to return in
+   * place of the attempt that did not build.
+   *
+   * Without this the repair was invisible where it mattered most: it
+   * promotes a new accepted revision into the store, and the Workflow went
+   * on returning the first attempt's files, so the reader was shown the
+   * broken project while the store held the fixed one. Present only when
+   * the repair was accepted -- a repair that itself failed leaves the
+   * original result alone, because a project that does not build is still
+   * more than an error message.
+   */
+  result?: DurableGenerationResult;
   /** Why no repair was attempted, when a failing build did not buy one. */
   skipped?: 'not-configured' | 'not-the-project' | 'no-budget';
   /** The repair's own reservation, settled by this step and not the run's. */
@@ -728,7 +741,11 @@ export async function verifyAndRepair(
 
   const repaired =
     outcome?.result.state === 'accepted' && Boolean(outcome.result.accepted);
-  return { built: false, repaired };
+  return {
+    built: false,
+    repaired,
+    ...(repaired && outcome ? { result: outcome.result } : {}),
+  };
 }
 
 /**

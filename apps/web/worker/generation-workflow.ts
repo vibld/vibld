@@ -320,6 +320,9 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
       },
     );
 
-    return generation.result;
+    // The repaired project where there is one. The repair promoted its own
+    // accepted revision, so returning the first attempt here would show the
+    // reader the broken files while the store held the fixed ones (#194).
+    return repair.result ?? generation.result;
   }
 }

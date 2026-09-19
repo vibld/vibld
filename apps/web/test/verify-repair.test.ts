@@ -164,7 +164,8 @@ describe('buying one repair', () => {
       error: 'src/App.tsx(3,10): error TS1484',
     });
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
-    assert.deepEqual(outcome, { built: false, repaired: true });
+    assert.equal(outcome.built, false);
+    assert.equal(outcome.repaired, true);
     assert.equal(spy.generates.length, 1);
     assert.equal(spy.generates[0]!.runId, 'run_1:repair');
     assert.equal(spy.generates[0]!.baseRevision, 'rev-1');
@@ -231,6 +232,58 @@ describe('buying one repair', () => {
       { accepted: false },
     );
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
-    assert.deepEqual(outcome, { built: false, repaired: false });
+    assert.equal(outcome.built, false);
+    assert.equal(outcome.repaired, false);
+    // Asserted field by field rather than with `deepEqual`: its type
+    // parameter is inferred from the expected literal, which narrows
+    // `outcome` to that shape and makes reading `result` a compile error
+    // even though the value is there.
+    assert.equal(
+      outcome.result,
+      undefined,
+      'a failed repair replaced a project that at least existed',
+    );
+  });
+
+  it('hands back the repaired project, not the one that would not build', async () => {
+    // The bug this exists to stop, found by re-reading the diff rather
+    // than by a test failing. The repair promotes its own accepted
+    // revision into the store; returning the first attempt would show the
+    // reader the broken files while the store held the fixed ones, and the
+    // two would disagree with nothing to say which was right.
+    const { deps: d } = deps({
+      ok: false,
+      reason: 'build',
+      error: 'src/App.tsx(3,10): error TS1484',
+    });
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.ok(outcome.result, 'the repaired project was thrown away');
+    assert.equal(outcome.result.state, 'accepted');
+  });
+});
+
+/**
+ * That the Workflow hands the repaired project back to the caller.
+ *
+ * `generation-workflow.ts` imports `cloudflare:workers` and cannot be
+ * loaded under `node --test`, so its one line is read as source. The line
+ * matters more than most: `verifyAndRepair` can return the repaired project
+ * perfectly well and the Workflow can still return the broken one, and
+ * nothing above would notice, because the store would hold the fixed files
+ * either way.
+ */
+describe('what the run finally answers with', () => {
+  it('prefers the repaired project over the attempt that failed', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const source = await readFile(
+      join(import.meta.dirname, '..', 'worker', 'generation-workflow.ts'),
+      'utf8',
+    );
+    assert.match(
+      source,
+      /return repair\.result \?\? generation\.result;/,
+      'the Workflow returns the first attempt, so a repaired run shows the reader the broken files',
+    );
   });
 });
