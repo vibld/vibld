@@ -10,6 +10,7 @@ import {
   BUILD_COMPILE_TIMEOUT_MS,
   BUILD_INSTALL_TIMEOUT_MS,
   BUILD_LOCK_TTL_MS,
+  BUILD_WALL_CLOCK_MS,
   LOCK_RENEWAL_INTERVAL_MS,
   MAX_DESTROY_WAIT_MS,
 } from './build-limits.ts';
@@ -389,6 +390,30 @@ export class PreviewSandbox extends Sandbox<Env> {
      */
     let started = false;
 
+    /**
+     * Whether this build is still entitled to the workspace: inside its
+     * wall clock, and still the owner of the lock (#196 review).
+     *
+     * Both halves stop the work rather than only failing to extend it.
+     * Renewing was conditional on ownership already, so a superseded build
+     * used to renew nothing, learn nothing, and carry on writing into a
+     * workspace its successor had emptied. And a build that has run out of
+     * time is not entitled to it either: without a bound of its own the
+     * lock's TTL and the fleet's hard lifetime were both things a slow
+     * build could outlive, which is what made every protection around it a
+     * heartbeat that had to cover every single `await`.
+     */
+    const deadline = Date.now() + BUILD_WALL_CLOCK_MS;
+    const keepAlive = async (): Promise<boolean> =>
+      Date.now() < deadline && (await this.renewLock(token));
+
+    /** What a build that was stopped says: nothing about the project. */
+    const stopped: BuildOutcome = {
+      reason: 'sandbox',
+      error:
+        'The build was stopped before it finished, so nothing was measured about this project.',
+    };
+
     try {
       slot = await this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
         `build:${this.ctx.id.toString()}`,
@@ -433,8 +458,8 @@ export class PreviewSandbox extends Sandbox<Env> {
       // this stretch as well as after it: writing the project in is one or
       // two RPCs per file, and a big enough project outran the lock while
       // the renewal sat waiting for the loop to finish (#196 review).
-      await this.writeProject(files, () => this.renewLock(token));
-      await this.renewLock(token);
+      if (!(await this.writeProject(files, keepAlive))) return stopped;
+      if (!(await keepAlive())) return stopped;
 
       const installStartedAt = Date.now();
       const install = await this.exec('npm install --no-audit --no-fund', {
@@ -474,7 +499,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         };
       }
 
-      await this.renewLock(token);
+      if (!(await keepAlive())) return stopped;
       const buildStartedAt = Date.now();
       const build = await this.exec('npm run build', {
         cwd: '/workspace',
@@ -502,7 +527,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         };
       }
 
-      await this.renewLock(token);
+      if (!(await keepAlive())) return stopped;
       const outputDir = `/workspace/${BUILD_OUTPUT_DIR}`;
       const listing = await this.listFiles(outputDir, { recursive: true });
       if (!listing.success) {
@@ -513,16 +538,19 @@ export class PreviewSandbox extends Sandbox<Env> {
       }
 
       // One RPC per output file, so the longest unbounded stretch here and
-      // the one most likely to outrun a TTL. It lives in `build-output.ts`
+      // the one most likely to outrun a TTL. It lives in `build-files.ts`
       // so it can be called with fakes rather than read with regexes
       // (#196 review): the renewal used to count the files it kept rather
       // than the files it read, and nothing that reads this file as source
       // was ever going to notice.
-      const { output, skipped } = await collectOutput(
+      const { output, skipped, complete } = await collectOutput(
         listing.files,
         (relativePath) => this.readFile(`${outputDir}/${relativePath}`),
-        () => this.renewLock(token),
+        keepAlive,
       );
+      // Half an output tree is not this project's output, and publishing
+      // or verifying against it would be a claim about files nobody read.
+      if (!complete) return stopped;
       if (output.length === 0) {
         return {
           reason: 'output',
@@ -790,10 +818,11 @@ export class PreviewSandbox extends Sandbox<Env> {
     fleetTicketId: number,
   ): Promise<void> {
     try {
-      // Nothing to renew: a preview holds no build lock. Its own claim on
-      // this sandbox is the fleet ticket, which has a hard lifetime rather
-      // than a heartbeat, and is `reclaimStale`'s business.
-      await this.writeProject(files, async () => {});
+      // Always alive: a preview holds no build lock, so there is nothing
+      // to renew and nothing that can take the workspace from it. Its own
+      // claim on this sandbox is the fleet ticket, which has a hard
+      // lifetime rather than a heartbeat and is `reclaimStale`'s business.
+      await this.writeProject(files, async () => true);
       await this.writeState({ phase: 'starting', startedAt, fleetTicketId });
 
       const install = await this.exec('npm install --no-audit --no-fund', {
@@ -988,13 +1017,24 @@ export class PreviewSandbox extends Sandbox<Env> {
     return false;
   }
 
-  private async renewLock(token: string): Promise<void> {
+  /**
+   * Push the lock forward, and say whether it was still ours to push
+   * (#196 review).
+   *
+   * The answer is the half that was missing. Renewing has always been
+   * conditional on ownership, so a build that had already been superseded
+   * called this, wrote nothing, and carried on working in a workspace that
+   * now belonged to somebody else. Returning the answer lets the loops
+   * stop, which is the only response that is actually safe.
+   */
+  private async renewLock(token: string): Promise<boolean> {
     const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
-    if (mine?.token !== token) return;
+    if (mine?.token !== token) return false;
     await this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
       startedAt: Date.now(),
       token,
     });
+    return true;
   }
 
   /**
@@ -1005,8 +1045,8 @@ export class PreviewSandbox extends Sandbox<Env> {
    */
   private writeProject(
     files: ProjectFile[],
-    renew: () => Promise<void>,
-  ): Promise<void> {
+    keepAlive: () => Promise<boolean>,
+  ): Promise<boolean> {
     return writeFiles(
       files,
       async (file) => {
@@ -1017,7 +1057,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         }
         await this.writeFile(path, file.content);
       },
-      renew,
+      keepAlive,
     );
   }
 

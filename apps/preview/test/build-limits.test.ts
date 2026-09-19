@@ -5,9 +5,11 @@ import {
   BUILD_COMPILE_TIMEOUT_MS,
   BUILD_INSTALL_TIMEOUT_MS,
   BUILD_LOCK_TTL_MS,
+  BUILD_WALL_CLOCK_MS,
   LOCK_RENEWAL_INTERVAL_MS,
   MAX_DESTROY_WAIT_MS,
 } from '../worker/build-limits.ts';
+import { HARD_LIFETIME_MS } from '../worker/fleet.ts';
 
 /**
  * That a build cannot outlive its own lock (#196 review).
@@ -84,5 +86,52 @@ describe('holding the lock while a container is torn down', () => {
     // Shorter than a renewal interval would mean never renewing, which is
     // the behaviour this replaced.
     assert.ok(MAX_DESTROY_WAIT_MS > LOCK_RENEWAL_INTERVAL_MS);
+  });
+
+  /**
+   * That a build has a maximum duration at all, and that everything
+   * protecting it outlasts that maximum (#196 review).
+   *
+   * Three review rounds each found another place a heartbeat did not
+   * reach, which is what an unbounded thing does to the protections around
+   * it: the write loop had none, and then the fleet ticket, which has a
+   * hard lifetime rather than a heartbeat, turned out to be reclaimable
+   * underneath a build that was still running. A bound is what turns those
+   * from hopes into arithmetic, and this is the arithmetic.
+   */
+  it('gives a build a maximum duration', () => {
+    assert.ok(BUILD_WALL_CLOCK_MS > 0, 'a build may still run forever');
+  });
+
+  it('ends a build before its own lock could expire', () => {
+    assert.ok(
+      BUILD_WALL_CLOCK_MS < BUILD_LOCK_TTL_MS,
+      `a build may take ${BUILD_WALL_CLOCK_MS}ms and its lock expires after ${BUILD_LOCK_TTL_MS}ms`,
+    );
+  });
+
+  it('gives back its fleet ticket before the fleet reclaims it', () => {
+    // The ticket is held until the teardown finishes, so the sum is what
+    // has to fit. `reclaimStale` releasing a live build's ticket lets the
+    // fleet authorise a container the platform has no room for, which is
+    // the over-admission that counter exists to prevent.
+    assert.ok(
+      BUILD_WALL_CLOCK_MS + MAX_DESTROY_WAIT_MS < HARD_LIFETIME_MS,
+      `a build holds its ticket for up to ${BUILD_WALL_CLOCK_MS + MAX_DESTROY_WAIT_MS}ms ` +
+        `and the fleet reclaims after ${HARD_LIFETIME_MS}ms`,
+    );
+  });
+
+  it('leaves the per-file loops room above the two commands', () => {
+    // A wall clock that only covered the timed commands would stop builds
+    // that were working perfectly well, and report it as a fault of this
+    // service, which is the expensive direction.
+    assert.ok(
+      BUILD_WALL_CLOCK_MS -
+        BUILD_INSTALL_TIMEOUT_MS -
+        BUILD_COMPILE_TIMEOUT_MS >=
+        60_000,
+      'a build that spends both command bounds has no time left to read its own output',
+    );
   });
 });

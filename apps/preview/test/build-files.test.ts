@@ -43,6 +43,7 @@ describe('what reading a build output costs the lock', () => {
       async (path: string) => (path.endsWith('.png') ? BINARY : TEXT),
       async () => {
         renewals += 1;
+        return true;
       },
     );
     assert.equal(read.output.length, 1);
@@ -66,6 +67,7 @@ describe('what reading a build output costs the lock', () => {
       },
       async () => {
         seen.push('renew');
+        return true;
       },
     );
     assert.deepEqual(seen, ['renew', 'read:asset-0.png']);
@@ -84,6 +86,7 @@ describe('what reading a build output costs the lock', () => {
       async () => TEXT,
       async () => {
         renewals += 1;
+        return true;
       },
     );
     assert.equal(renewals, 0, 'a listing of directories renewed the lock');
@@ -96,7 +99,7 @@ describe('what reading a build output costs the lock', () => {
         { type: 'file', relativePath: 'logo.png' },
       ],
       async (path: string) => (path.endsWith('.png') ? BINARY : TEXT),
-      async () => {},
+      async () => true,
     );
     assert.deepEqual(read.output, [{ path: 'index.html', content: 'hello' }]);
     assert.deepEqual(read.skipped, ['logo.png']);
@@ -110,7 +113,7 @@ describe('what reading a build output costs the lock', () => {
         asked.push(path);
         return TEXT;
       },
-      async () => {},
+      async () => true,
     );
     assert.equal(asked.length, LOCK_RENEWAL_EVERY + 3);
     assert.equal(new Set(asked).size, asked.length, 'a file was read twice');
@@ -137,6 +140,7 @@ describe('what writing a project in costs the lock', () => {
       async () => {},
       async () => {
         renewals += 1;
+        return true;
       },
     );
     assert.equal(renewals, 4, 'the lock is only pushed forward at the ends');
@@ -151,6 +155,7 @@ describe('what writing a project in costs the lock', () => {
       },
       async () => {
         seen.push('renew');
+        return true;
       },
     );
     assert.deepEqual(seen, ['renew', 'write:src/file-0.tsx']);
@@ -163,7 +168,7 @@ describe('what writing a project in costs the lock', () => {
       async (file) => {
         written.push(file.path);
       },
-      async () => {},
+      async () => true,
     );
     assert.equal(written.length, LOCK_RENEWAL_EVERY + 3);
     assert.equal(
@@ -181,8 +186,101 @@ describe('what writing a project in costs the lock', () => {
       async () => {},
       async () => {
         renewals += 1;
+        return true;
       },
     );
     assert.equal(renewals, 0);
+  });
+});
+
+/**
+ * That a loop which has lost the workspace stops using it (#196 review).
+ *
+ * The half renewing could never do. `renewLock` has always been
+ * conditional on still owning the lock, so a build that had been
+ * superseded renewed nothing, learned nothing, and carried on writing into
+ * the workspace its successor had just emptied. Answering the heartbeat is
+ * only useful if a "no" stops the work.
+ */
+describe('a build that is no longer entitled to the workspace', () => {
+  const files = (count: number) =>
+    Array.from({ length: count }, (_, at) => ({
+      path: `src/file-${at}.tsx`,
+      content: 'x',
+    }));
+
+  it('writes nothing once it has been told to stop', async () => {
+    const written: string[] = [];
+    const complete = await writeFiles(
+      files(200),
+      async (file) => {
+        written.push(file.path);
+      },
+      async () => written.length < LOCK_RENEWAL_EVERY,
+    );
+    assert.equal(complete, false, 'a stopped write reported success');
+    assert.equal(
+      written.length,
+      LOCK_RENEWAL_EVERY,
+      'the loop kept writing after it had been told to stop',
+    );
+  });
+
+  it('says so rather than reporting a short project as a whole one', async () => {
+    // The return value is the whole point. A caller that cannot tell a
+    // finished write from an abandoned one goes on to install and compile
+    // whatever happens to be on disk, and reports the result as a verdict
+    // on the project.
+    assert.equal(
+      await writeFiles(
+        files(1),
+        async () => {},
+        async () => false,
+      ),
+      false,
+    );
+    assert.equal(
+      await writeFiles(
+        files(1),
+        async () => {},
+        async () => true,
+      ),
+      true,
+    );
+  });
+
+  it('reads nothing once it has been told to stop, and says the tree is partial', async () => {
+    const asked: string[] = [];
+    const read = await collectOutput(
+      Array.from({ length: 200 }, (_, at) => ({
+        type: 'file',
+        relativePath: `page-${at}.html`,
+      })),
+      async (path: string) => {
+        asked.push(path);
+        return TEXT;
+      },
+      async () => asked.length < LOCK_RENEWAL_EVERY,
+    );
+    assert.equal(read.complete, false, 'a stopped read reported a whole tree');
+    assert.equal(
+      asked.length,
+      LOCK_RENEWAL_EVERY,
+      'the loop kept reading after it had been told to stop',
+    );
+    assert.equal(
+      read.output.length,
+      LOCK_RENEWAL_EVERY,
+      'what it did read before stopping was thrown away',
+    );
+  });
+
+  it('reports a whole tree as whole', async () => {
+    const read = await collectOutput(
+      [{ type: 'file', relativePath: 'index.html' }],
+      async () => TEXT,
+      async () => true,
+    );
+    assert.equal(read.complete, true);
   });
 });

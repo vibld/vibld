@@ -41,6 +41,39 @@ export const BUILD_COMPILE_TIMEOUT_MS = 5 * 60_000;
 export const BUILD_LOCK_TTL_MS = 15 * 60_000;
 
 /**
+ * How long a whole build may take before it gives up.
+ *
+ * The thing that was missing, and the reason three rounds of review each
+ * found another place a heartbeat did not reach (#196 review). Install and
+ * compile were bounded; writing the project in, reading the output back and
+ * tearing the container down were not, so a build had no maximum duration
+ * at all. Every protection around it was a heartbeat, and a heartbeat has
+ * to cover every `await` or it proves nothing: the twenty-second round
+ * found the write loop unprotected, and the twenty-third found that the
+ * fleet ticket, which has a hard lifetime rather than a heartbeat, could be
+ * reclaimed underneath a build that was still running.
+ *
+ * A bound is what makes the other numbers provable instead of hopeful:
+ *
+ *  - It is under `BUILD_LOCK_TTL_MS`, so a build that is still running
+ *    cannot have its lock expire. The TTL then means what it was always
+ *    supposed to mean, which is "the build holding this is gone", rather
+ *    than "the build holding this is slow".
+ *  - Added to `MAX_DESTROY_WAIT_MS` it stays under the fleet's
+ *    `HARD_LIFETIME_MS`, so `reclaimStale` cannot release the ticket of a
+ *    build whose container is still up. That was the over-admission the
+ *    fleet counter exists to prevent, arriving through the one door nobody
+ *    had a heartbeat on.
+ *  - It leaves room above the two command bounds for the per-file loops.
+ *
+ * `build-limits.test.ts` asserts all three, on the real values.
+ *
+ * Reaching it is reported as `sandbox`, never as a verdict on the project:
+ * a build that was stopped measured nothing.
+ */
+export const BUILD_WALL_CLOCK_MS = 12 * 60_000;
+
+/**
  * How often the lock is pushed forward while a teardown is in flight, and
  * how long that may go on.
  *

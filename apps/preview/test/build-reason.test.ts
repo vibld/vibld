@@ -396,43 +396,79 @@ describe('what a build leaves behind', () => {
  * using, because its own ownership answer predated the destroy it awaited.
  */
 describe('keeping the lock alive while the build is', () => {
-  it('pushes it forward around every unbounded stretch', () => {
+  it('asks at every boundary between bounded and unbounded work', () => {
     const body = buildProjectCode();
-    const renewals = body.match(/renewLock\(token\)/g)?.length ?? 0;
+    const asked = body.match(/keepAlive\(\)/g)?.length ?? 0;
     assert.ok(
-      renewals >= 4,
-      `only ${renewals} renewals: the TTL still measures project size`,
+      asked >= 3,
+      `only ${asked} checks: the TTL still measures project size`,
     );
     assert.ok(
-      body.indexOf('renewLock(token)') < body.indexOf('npm install'),
-      'the first renewal comes after the project has been written in',
+      body.indexOf('keepAlive') < body.indexOf('npm install'),
+      'the first check comes after the project has been written in',
     );
   });
 
-  it('hands its renewal to the loop that writes the project in', () => {
-    // The other end of the same hazard, and the one that had no renewal at
-    // all until the twenty-second review round: the loop is one or two RPCs
-    // per file and the renewal sat after it, so a big enough project outran
-    // the lock while holding it. `build-files.test.ts` counts the renewals
-    // by calling the loop; what a source read can say is that this build
-    // gives it a renewal rather than the no-op a preview passes.
+  it('is built from the clock as well as the lock', () => {
+    // Two different ways to stop being entitled to the workspace, and the
+    // second one is what three rounds of heartbeats kept missing: a build
+    // with no bound of its own can outlive the lock's TTL and the fleet's
+    // hard lifetime, so every protection around it had to cover every
+    // single await. `build-limits.test.ts` holds the arithmetic.
+    const body = buildProjectCode();
+    const built = body.slice(body.indexOf('const keepAlive'));
+    const definition = built.slice(0, built.indexOf(';'));
+    assert.match(definition, /deadline/, 'a slow build never runs out of time');
+    assert.match(
+      definition,
+      /renewLock\(token\)/,
+      'a superseded build never finds out it was superseded',
+    );
+  });
+
+  it('stops rather than carrying on when the answer is no', () => {
+    // The half that renewing alone could never do. `renewLock` was already
+    // conditional on ownership, so a superseded build renewed nothing,
+    // learned nothing, and went on writing into the workspace its
+    // successor had just emptied. Every check must act on the answer, so
+    // this counts the checks that are acted on against the checks there
+    // are, rather than trusting that they look the same.
+    const body = buildProjectCode();
+    const guarded =
+      body.match(
+        /if \(!\(await (this\.)?(writeProject|keepAlive)\([^)]*\)\)\)\s*return/g,
+      )?.length ?? 0;
+    const asked = body.match(/await keepAlive\(\)/g)?.length ?? 0;
+    assert.ok(asked > 0, 'nothing checks whether the build may carry on');
+    assert.equal(
+      guarded,
+      asked + 1,
+      'a check happens and its answer is thrown away, or the write loop no longer reports',
+    );
+  });
+
+  it('hands the heartbeat to the loop that writes the project in', () => {
+    // The other end of the same hazard, and the one that had no protection
+    // at all until the twenty-second review round: the loop is one or two
+    // RPCs per file and the renewal sat after it, so a big enough project
+    // outran the lock while holding it. `build-files.test.ts` counts the
+    // heartbeats by calling the loop; what a source read can say is that
+    // this build gives it a real one rather than the preview's always-true.
     const body = buildProjectCode();
     const call = body.slice(body.indexOf('writeProject('));
     assert.ok(call.length > 0, 'the project is no longer written by that loop');
     assert.match(
       call.slice(0, call.indexOf(');')),
-      /renewLock\(token\)/,
-      'the write loop is given no way to push the lock forward',
+      /keepAlive/,
+      'the write loop is given no way to find out it should stop',
     );
   });
 
-  it('hands its renewal to the loop that reads the output back', () => {
+  it('hands the heartbeat to the loop that reads the output back', () => {
     // The longest unbounded stretch a build has, and the one most likely to
     // outrun a TTL on a project with many files. It lives in
-    // `build-output.ts` now, where `build-output.test.ts` calls it with
-    // fakes and counts the renewals directly (#196 review), so what is left
-    // to assert here is the wiring: that this build gives it a renewal of
-    // its own lock to call.
+    // `build-files.ts` now, where `build-files.test.ts` calls it with fakes
+    // (#196 review), so what is left to assert here is the wiring.
     //
     // Which is the whole argument for the extraction. The defect that
     // prompted it was a renewal counting the files the loop kept rather
@@ -443,8 +479,20 @@ describe('keeping the lock alive while the build is', () => {
     assert.ok(call.length > 0, 'the output is no longer read by that loop');
     assert.match(
       call.slice(0, call.indexOf(');')),
-      /renewLock\(token\)/,
-      'the read loop is given no way to push the lock forward',
+      /keepAlive/,
+      'the read loop is given no way to find out it should stop',
+    );
+  });
+
+  it('refuses a half-read output tree rather than reporting it', () => {
+    // A loop that stopped has read some of the files and not others, and
+    // publishing or verifying against that would be a claim about files
+    // nobody read.
+    const body = buildProjectCode();
+    assert.match(
+      body,
+      /if \(!complete\) return/,
+      'a build that was stopped mid-read hands back what it happened to get',
     );
   });
 
