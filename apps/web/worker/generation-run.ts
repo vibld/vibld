@@ -7,7 +7,12 @@ import {
   type ModelProvider,
   type RunTrace,
 } from '@vibld/core';
-import { DEFAULT_MAX_TOKENS, ProviderError, findModel } from '@vibld/ai';
+import {
+  DEFAULT_MAX_TOKENS,
+  ProviderError,
+  RUN_STEP_TIMEOUT_MS,
+  findModel,
+} from '@vibld/ai';
 import { MAX_BASE_CONTENT_CHARS } from '@vibld/ai/limits';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
@@ -17,6 +22,9 @@ import { ACCOUNT_BUDGET_KEY, microUsdOf } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 import type { UserBudget } from './budget.ts';
 import type { RunProgress } from './run-progress.ts';
+import type { ServiceBinding } from './publish-client.ts';
+import type { buildProject } from './publish-client.ts';
+import type { reserveBudget } from './reserve.ts';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -318,6 +326,19 @@ export function worthRepairing(
  * "fix the build" will happily rewrite the project, and the reader asked for
  * the project, not for a second draft of it.
  */
+/**
+ * What the verify-and-repair step is given before it is considered hung.
+ *
+ * A build, a model call and a second build, so it is sized as the generate
+ * step's own timeout plus room for two builds rather than picked. It is
+ * deliberately *not* added to anything the reclaim compares against: this
+ * step runs after settlement, so the only reservation alive while it works
+ * is the one it makes and closes itself (#194).
+ */
+export const REPAIR_BUILD_ALLOWANCE_MS = 10 * 60_000;
+export const REPAIR_STEP_TIMEOUT_MS =
+  RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS;
+
 export function repairPromptFor(error: string): string {
   return `The project you just wrote does not build. This is the exact output:
 
@@ -332,7 +353,14 @@ it should now be.`;
 export interface GenerationWorkflowEnv {
   DB: D1Database;
   PROJECT_CONTENT: R2Bucket;
-  USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'settle'>>;
+  /**
+   * `reserve` as well as `settle` since #194: the verify-and-repair step
+   * holds a reservation of its own for the second model call.
+   */
+  USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'reserve' | 'settle'>>;
+  /** Read by `reserveBudget` when the repair holds its own reservation. */
+  VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
+  VIBLD_MAX_IN_FLIGHT?: string;
   /**
    * The live progress channel (#183). Typed by the one method used rather
    * than by the class, the way `USER_BUDGET` is: the Workflow only reports
@@ -344,11 +372,40 @@ export interface GenerationWorkflowEnv {
    * this channel existed.
    */
   RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'report' | 'finish'>>;
+  /**
+   * `@vibld/preview`, for building the project the run just produced (#194).
+   *
+   * Only the build half of what `publish-client.ts` calls: publishing needs
+   * `PUBLISH` too, and a deployment that can build but not publish must
+   * still check its own output. Optional, and absent means the run finishes
+   * unchecked, which is what every run did before this.
+   */
+  PREVIEW?: ServiceBinding;
+  PREVIEW_INTERNAL_SECRET?: string;
   ANTHROPIC_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;
   VIBLD_PROVIDER?: string;
   VIBLD_MODEL?: string;
+}
+
+/**
+ * What the verify-and-repair step is given to work with, and gives back.
+ *
+ * `built` is the question the step exists to answer, and it is deliberately
+ * three-valued. True and false are a build that ran; `undefined` is a build
+ * that never happened, because the binding is absent or the run produced no
+ * files to build, and reporting that as false would say a project failed a
+ * check nothing performed.
+ */
+export interface RepairOutcome {
+  built?: boolean;
+  /** Set only when a repair was actually asked for and paid for. */
+  repaired?: boolean;
+  /** Why no repair was attempted, when a failing build did not buy one. */
+  skipped?: 'not-configured' | 'not-the-project' | 'no-budget';
+  /** The repair's own reservation, settled by this step and not the run's. */
+  repairCostMicroUsd?: number;
 }
 
 export interface GenerationOutcome {
@@ -551,6 +608,127 @@ export async function runGeneration(
       providerRan: true,
     };
   }
+}
+
+/**
+ * Build what the run produced, and buy one repair if it does not build.
+ *
+ * #194: two of six real generations against the production provider
+ * produced a project that fails `npm run build`, for two unrelated reasons,
+ * with the same prompt passing on one run and failing on another. Publish
+ * was the only gate on that, and it is the last of three exits.
+ *
+ * Everything this decides is decided elsewhere and tested there:
+ * `worthRepairing` says whether a failure is the project's and whether the
+ * run can pay, `repairPromptFor` says what to ask. What is here is the
+ * order, the reservation, and the settlement of that reservation.
+ *
+ * The repair is a second run in its own right, under its own run id, so it
+ * promotes its own revision rather than overwriting the stage record and
+ * promotion the first one already wrote. It settles its own reservation
+ * before returning, whatever happened: a hold this function makes and does
+ * not close is one the reclaim charges in full thirty-five minutes later.
+ */
+export async function verifyAndRepair(
+  env: GenerationWorkflowEnv,
+  params: WorkflowParams,
+  result: DurableGenerationResult,
+  deps: {
+    build: typeof buildProject;
+    reserve: typeof reserveBudget;
+    settle: typeof settleBudget;
+    generate: (
+      provider: ModelProvider,
+      request: Pick<
+        WorkflowParams,
+        'projectId' | 'runId' | 'prompt' | 'baseRevision'
+      >,
+    ) => Promise<GenerationOutcome>;
+    providerFor: (onUsage: (usage: PlanUsage) => void) => ModelProvider;
+    now?: () => number;
+  },
+): Promise<RepairOutcome> {
+  // Nothing to build. A refused or failed run has no files, and a build
+  // that never happened must not be reported as one that failed.
+  if (result.state !== 'accepted' || !result.accepted) return {};
+  if (!env.PREVIEW || !env.PREVIEW_INTERNAL_SECRET) {
+    return { skipped: 'not-configured' };
+  }
+
+  const first = await deps.build(
+    {
+      PREVIEW: env.PREVIEW,
+      PREVIEW_INTERNAL_SECRET: env.PREVIEW_INTERNAL_SECRET,
+    },
+    params.userId,
+    result.accepted.files,
+  );
+  if (first.ok) return { built: true };
+  if (!worthRepairing(first, params)) {
+    return {
+      built: false,
+      skipped:
+        first.reason === 'install' || first.reason === 'build'
+          ? 'no-budget'
+          : 'not-the-project',
+    };
+  }
+
+  const now = deps.now ?? Date.now;
+  const held = await deps.reserve(
+    env,
+    params.userId,
+    params.worstCaseMicroUsd,
+    params.monthlyAllowance!,
+    params.topupCeiling!,
+    now(),
+  );
+  // Out of budget is not a failure of this step. The reader keeps the
+  // project the first attempt produced, which is what they would have had
+  // before any of this existed.
+  if (!held.ok) return { built: false, skipped: 'no-budget' };
+
+  let usage: PlanUsage | undefined;
+  let outcome: GenerationOutcome | undefined;
+  try {
+    outcome = await deps.generate(
+      deps.providerFor((reported) => {
+        usage = reported;
+      }),
+      {
+        projectId: params.projectId,
+        // Its own id. `promote` and `saveStage` are both keyed on it, so
+        // reusing the run's would overwrite the record of the attempt this
+        // one is repairing.
+        runId: `${params.runId}:repair`,
+        prompt: repairPromptFor(first.error),
+        baseRevision: result.accepted.revision,
+      },
+    );
+  } finally {
+    // In a `finally`, because a repair that threw still asked the model and
+    // still holds a reservation. Leaving it open is the one outcome that
+    // costs the caller their worst case rather than what they spent.
+    await deps.settle(
+      env.USER_BUDGET,
+      {
+        userId: params.userId,
+        reservationId: held.ok ? held.layers.user.id : undefined,
+        reservationKey: held.ok ? held.layers.userReservationKey : undefined,
+        accountReservationId: held.ok ? held.layers.account.id : undefined,
+        worstCaseMicroUsd: params.worstCaseMicroUsd,
+        prices: params.prices,
+      },
+      usage,
+      // The model was asked the moment `generate` was entered, so a throw
+      // from inside it settles at the worst case rather than at nothing.
+      true,
+    );
+  }
+
+  const repaired =
+    outcome?.result.state === 'accepted' && Boolean(outcome.result.accepted);
+  return { built: false, repaired };
 }
 
 /**
