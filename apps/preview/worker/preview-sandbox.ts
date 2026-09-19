@@ -3,6 +3,7 @@ import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
 import {
   OUT_OF_TIME,
+  admit,
   budgeted,
   collectOutput,
   withinDeadline,
@@ -468,19 +469,15 @@ export class PreviewSandbox extends Sandbox<Env> {
       // it sounds: `reclaimStale` only reclaims rows it has activated, so
       // an abandoned queued row is never reclaimed at all. So whatever it
       // hands back after we have stopped waiting is given back.
-      const admission = this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
-        `build:${this.ctx.id.toString()}`,
-        BUILD_CONTAINER_HEADROOM,
-      );
-      let waiting = true;
-      this.ctx.waitUntil(
-        admission.then(
-          (late) => (waiting ? this.releaseTicket(late.id) : undefined),
-          () => undefined,
+      slot = await admit(
+        this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
+          `build:${this.ctx.id.toString()}`,
+          BUILD_CONTAINER_HEADROOM,
         ),
+        bounded,
+        (ticket) => this.releaseTicket(ticket),
+        (work) => this.ctx.waitUntil(work),
       );
-      slot = await bounded(admission);
-      waiting = false;
       if (!slot.active) {
         return {
           reason: 'busy',

@@ -119,6 +119,53 @@ export function budgeted(cap: number, msLeft: number): number {
 }
 
 /**
+ * Waiting for a fleet ticket, and giving back one that arrives too late
+ * (#196 review).
+ *
+ * Here rather than inline because the inline version was wrong in a way no
+ * source read could see. It kept a `waiting` flag, set false after the
+ * `await`, and a handler registered on the admission promise before it:
+ *
+ * ```
+ * admission.then((late) => (waiting ? release(late.id) : undefined));
+ * slot = await bounded(admission);
+ * waiting = false;
+ * ```
+ *
+ * Reactions run in registration order, so on the ordinary fast path the
+ * handler ran *first*, saw `waiting` still true, and released the ticket of
+ * the build that was about to use it. The build then ran holding no slot at
+ * all, which is the twenty-five container partition defeated on every
+ * build rather than in some rare race.
+ *
+ * There is no flag now. The late release is attached only on the path where
+ * the wait actually gave up, which is a fact rather than a guess about
+ * ordering. `admission-late.test.ts` calls this both ways.
+ */
+export async function admit<T extends { id: number }>(
+  admission: Promise<T>,
+  bounded: (work: Promise<T>) => Promise<T>,
+  release: (id: number) => Promise<void>,
+  keep: (work: Promise<unknown>) => void,
+): Promise<T> {
+  try {
+    return await bounded(admission);
+  } catch (error) {
+    // Whatever it hands back now belongs to nobody: `reclaimStale` only
+    // reclaims rows it has activated, so an abandoned queued row never
+    // expires. An admission that rejected has no ticket to give back, which
+    // is why the rejection arm answers nothing rather than releasing.
+    keep(
+      admission.then(
+        (late) => release(late.id),
+        () => undefined,
+      ),
+    );
+    throw error;
+  }
+}
+
+/**
  * Writing the caller's project into the container, one file at a time.
  *
  * `write` is the caller's, because creating directories and writing bytes

@@ -341,27 +341,22 @@ describe('counting the builds too', () => {
     // alive past its own deadline: the lock expired, a successor took the
     // sandbox, and when this finally returned the next thing it did was
     // empty that successor's workspace.
+    //
+    // Asserted as "the admission goes through `admit`, and `admit` is
+    // given the deadline and the release", because what `admit` then does
+    // with them is `admission-late.test.ts`'s business, called rather than
+    // read. The first version of this test matched the shape of the inline
+    // code and passed against an implementation that released the ticket
+    // of every build on the ordinary path.
+    const call = code.slice(code.indexOf('slot = await admit('));
+    assert.ok(call.length > 0, 'the admission no longer goes through admit');
+    const args = call.slice(0, call.indexOf('\n      );'));
+    assert.match(args, /\.enqueue\(/, 'admit is not given the admission');
+    assert.match(args, /bounded/, 'the wait for a slot is unbounded');
     assert.match(
-      code,
-      /slot = await bounded\(/,
-      'a build can wait for admission for longer than it may exist',
-    );
-  });
-
-  it('gives back a ticket that arrives after it stopped waiting', () => {
-    // The cost of bounding the admission, and it is not a small one:
-    // `reclaimStale` only reclaims rows it has activated, so a queued row
-    // nobody holds is never reclaimed at all. A build that gave up waiting
-    // has to give back whatever the call eventually hands it.
-    assert.match(
-      code,
-      /admission\.then\([\s\S]{0,200}?releaseTicket\(/,
+      args,
+      /releaseTicket\(/,
       'a ticket that lands after the build gave up is held for good',
-    );
-    assert.match(
-      code,
-      /waiting \? this\.releaseTicket|waiting\s*\?/,
-      'the late release fires even for the ticket the build actually used',
     );
   });
 
