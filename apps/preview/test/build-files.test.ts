@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { LOCK_RENEWAL_EVERY, collectOutput } from '../worker/build-output.ts';
-import type { OutputEntry, ReadFileResult } from '../worker/build-output.ts';
+import {
+  LOCK_RENEWAL_EVERY,
+  collectOutput,
+  writeFiles,
+} from '../worker/build-files.ts';
+import type { OutputEntry, ReadFileResult } from '../worker/build-files.ts';
 
 /**
- * Reading a build's output back, tested by calling it (#196 review).
+ * The two per-file loops a build runs, tested by calling them
+ * (#196 review).
  *
  * This loop lived inside `buildProject`, which cannot be loaded under
  * `node --test`, so everything ever asserted about it was a regex over
@@ -35,7 +40,7 @@ describe('what reading a build output costs the lock', () => {
     let renewals = 0;
     const read = await collectOutput(
       [{ type: 'file', relativePath: 'index.html' }, ...entries(99)],
-      async (path) => (path.endsWith('.png') ? BINARY : TEXT),
+      async (path: string) => (path.endsWith('.png') ? BINARY : TEXT),
       async () => {
         renewals += 1;
       },
@@ -55,7 +60,7 @@ describe('what reading a build output costs the lock', () => {
     const seen: string[] = [];
     await collectOutput(
       entries(1),
-      async (path) => {
+      async (path: string) => {
         seen.push(`read:${path}`);
         return BINARY;
       },
@@ -90,7 +95,7 @@ describe('what reading a build output costs the lock', () => {
         { type: 'file', relativePath: 'index.html' },
         { type: 'file', relativePath: 'logo.png' },
       ],
-      async (path) => (path.endsWith('.png') ? BINARY : TEXT),
+      async (path: string) => (path.endsWith('.png') ? BINARY : TEXT),
       async () => {},
     );
     assert.deepEqual(read.output, [{ path: 'index.html', content: 'hello' }]);
@@ -101,7 +106,7 @@ describe('what reading a build output costs the lock', () => {
     const asked: string[] = [];
     await collectOutput(
       entries(LOCK_RENEWAL_EVERY + 3),
-      async (path) => {
+      async (path: string) => {
         asked.push(path);
         return TEXT;
       },
@@ -110,5 +115,74 @@ describe('what reading a build output costs the lock', () => {
     assert.equal(asked.length, LOCK_RENEWAL_EVERY + 3);
     assert.equal(new Set(asked).size, asked.length, 'a file was read twice');
     assert.equal(asked[0], 'asset-0.png');
+  });
+});
+
+describe('what writing a project in costs the lock', () => {
+  const files = (count: number) =>
+    Array.from({ length: count }, (_, at) => ({
+      path: `src/file-${at}.tsx`,
+      content: 'x',
+    }));
+
+  it('renews as it writes, not only once it has finished', async () => {
+    // The same hazard as the read loop and, until this, without the same
+    // protection: one or two RPCs per file, no bound of its own, and a lock
+    // with a fifteen-minute TTL. The renewal sat *after* the loop, so a big
+    // enough project outran its own claim on the workspace while holding
+    // it, and a later build could clear `/workspace` underneath this one.
+    let renewals = 0;
+    await writeFiles(
+      files(100),
+      async () => {},
+      async () => {
+        renewals += 1;
+      },
+    );
+    assert.equal(renewals, 4, 'the lock is only pushed forward at the ends');
+  });
+
+  it('renews once before it writes anything at all', async () => {
+    const seen: string[] = [];
+    await writeFiles(
+      files(1),
+      async (file) => {
+        seen.push(`write:${file.path}`);
+      },
+      async () => {
+        seen.push('renew');
+      },
+    );
+    assert.deepEqual(seen, ['renew', 'write:src/file-0.tsx']);
+  });
+
+  it('writes every file once, in the order it was given', async () => {
+    const written: string[] = [];
+    await writeFiles(
+      files(LOCK_RENEWAL_EVERY + 3),
+      async (file) => {
+        written.push(file.path);
+      },
+      async () => {},
+    );
+    assert.equal(written.length, LOCK_RENEWAL_EVERY + 3);
+    assert.equal(
+      new Set(written).size,
+      written.length,
+      'a file was written twice',
+    );
+    assert.equal(written[0], 'src/file-0.tsx');
+  });
+
+  it('renews nothing for a project with no files', async () => {
+    let renewals = 0;
+    await writeFiles(
+      [],
+      async () => {},
+      async () => {
+        renewals += 1;
+      },
+    );
+    assert.equal(renewals, 0);
   });
 });

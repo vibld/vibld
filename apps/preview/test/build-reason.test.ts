@@ -409,6 +409,23 @@ describe('keeping the lock alive while the build is', () => {
     );
   });
 
+  it('hands its renewal to the loop that writes the project in', () => {
+    // The other end of the same hazard, and the one that had no renewal at
+    // all until the twenty-second review round: the loop is one or two RPCs
+    // per file and the renewal sat after it, so a big enough project outran
+    // the lock while holding it. `build-files.test.ts` counts the renewals
+    // by calling the loop; what a source read can say is that this build
+    // gives it a renewal rather than the no-op a preview passes.
+    const body = buildProjectCode();
+    const call = body.slice(body.indexOf('writeProject('));
+    assert.ok(call.length > 0, 'the project is no longer written by that loop');
+    assert.match(
+      call.slice(0, call.indexOf(');')),
+      /renewLock\(token\)/,
+      'the write loop is given no way to push the lock forward',
+    );
+  });
+
   it('hands its renewal to the loop that reads the output back', () => {
     // The longest unbounded stretch a build has, and the one most likely to
     // outrun a TTL on a project with many files. It lives in

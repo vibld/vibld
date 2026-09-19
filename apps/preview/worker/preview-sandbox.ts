@@ -1,7 +1,7 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
-import { collectOutput } from './build-output.ts';
+import { collectOutput, writeFiles } from './build-files.ts';
 import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
@@ -428,10 +428,12 @@ export class PreviewSandbox extends Sandbox<Env> {
       }
       await this.mkdir('/workspace', { recursive: true });
 
-      await this.writeProject(files);
       // Renewed at every boundary between bounded and unbounded work, so
-      // the TTL is measuring silence rather than project size. Writing the
-      // project in is one RPC per file and is the first such stretch.
+      // the TTL is measuring silence rather than project size, and inside
+      // this stretch as well as after it: writing the project in is one or
+      // two RPCs per file, and a big enough project outran the lock while
+      // the renewal sat waiting for the loop to finish (#196 review).
+      await this.writeProject(files, () => this.renewLock(token));
       await this.renewLock(token);
 
       const installStartedAt = Date.now();
@@ -788,7 +790,10 @@ export class PreviewSandbox extends Sandbox<Env> {
     fleetTicketId: number,
   ): Promise<void> {
     try {
-      await this.writeProject(files);
+      // Nothing to renew: a preview holds no build lock. Its own claim on
+      // this sandbox is the fleet ticket, which has a hard lifetime rather
+      // than a heartbeat, and is `reclaimStale`'s business.
+      await this.writeProject(files, async () => {});
       await this.writeState({ phase: 'starting', startedAt, fleetTicketId });
 
       const install = await this.exec('npm install --no-audit --no-fund', {
@@ -992,15 +997,28 @@ export class PreviewSandbox extends Sandbox<Env> {
     });
   }
 
-  private async writeProject(files: ProjectFile[]): Promise<void> {
-    for (const file of files) {
-      const path = `/workspace/${file.path}`;
-      const dir = path.slice(0, path.lastIndexOf('/'));
-      if (dir && dir !== '/workspace') {
-        await this.mkdir(dir, { recursive: true });
-      }
-      await this.writeFile(path, file.content);
-    }
+  /**
+   * One or two RPCs per file and no bound of its own, which makes it the
+   * other end of the same hazard as reading the output back (#196 review).
+   * A build holds a lock while this runs, so `renew` pushes it forward as
+   * the loop goes; a preview holds none and says so at its call site.
+   */
+  private writeProject(
+    files: ProjectFile[],
+    renew: () => Promise<void>,
+  ): Promise<void> {
+    return writeFiles(
+      files,
+      async (file) => {
+        const path = `/workspace/${file.path}`;
+        const dir = path.slice(0, path.lastIndexOf('/'));
+        if (dir && dir !== '/workspace') {
+          await this.mkdir(dir, { recursive: true });
+        }
+        await this.writeFile(path, file.content);
+      },
+      renew,
+    );
   }
 
   private isExpired(state: PreviewState): boolean {

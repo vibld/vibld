@@ -1,9 +1,18 @@
 import type { ProjectFile } from '@vibld/core';
 
 /**
- * Reading a finished build's output back, one file at a time.
+ * The two per-file loops a build runs: writing the project in, and reading
+ * its output back.
  *
- * Its own module so it can be called rather than read (#196 review).
+ * They live together because they are the same shape and the same hazard,
+ * and keeping them apart is how one of them ended up without the other's
+ * protection. A build holds a lock with a fifteen-minute TTL, both loops are
+ * one or two RPCs per file with no bound of their own, and each has to push
+ * that lock forward as it goes or a large project can outlive its own claim
+ * on the workspace. The read loop was given renewals; the write loop was
+ * not, and nothing about either file said the pair existed (#196 review).
+ *
+ * Its own module so they can be called rather than read (#196 review).
  * `preview-sandbox.ts` imports `@cloudflare/sandbox` and cannot be loaded
  * under `node --test`, so every assertion about this loop has been a regex
  * over source, and the defect that prompted the extraction is exactly the
@@ -51,6 +60,32 @@ export const LOCK_RENEWAL_EVERY = 25;
  * A skipped asset costs exactly the same RPC as a kept one, which is the
  * whole reason the renewal exists.
  */
+/**
+ * Writing the caller's project into the container, one file at a time.
+ *
+ * `write` is the caller's, because creating directories and writing bytes
+ * is the sandbox's API and not this function's business. What is this
+ * function's business is the loop and the renewal.
+ *
+ * `renew` is required rather than defaulted. A default would be a no-op
+ * that a later caller under a lock forgets to replace, and it would fail
+ * exactly the way this loop already failed: silently, on a big project,
+ * with nothing to say so. A caller holding no lock passes one that does
+ * nothing and says why.
+ */
+export async function writeFiles<T>(
+  files: T[],
+  write: (file: T) => Promise<void>,
+  renew: () => Promise<void>,
+): Promise<void> {
+  let asked = 0;
+  for (const file of files) {
+    if (asked % LOCK_RENEWAL_EVERY === 0) await renew();
+    asked += 1;
+    await write(file);
+  }
+}
+
 export async function collectOutput(
   entries: OutputEntry[],
   read: (relativePath: string) => Promise<ReadFileResult>,
