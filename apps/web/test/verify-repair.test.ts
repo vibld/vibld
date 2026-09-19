@@ -568,6 +568,26 @@ describe('what the second build is allowed to claim', () => {
     assert.equal(outcome.unverified, 'sandbox');
   });
 
+  it('gives the model call a bound of its own', async () => {
+    // #196 review, and a source read because the bound is thirty minutes
+    // and no test is going to wait for it. What can be checked here is
+    // that the call goes through one: `repair-timeout.test.ts` holds the
+    // arithmetic that makes the number the right one.
+    const source = await workflowSource('generation-run.ts');
+    const at = source.indexOf('outcome = await');
+    assert.ok(at > 0, 'the repair no longer calls the model here');
+    assert.match(
+      source.slice(at, at + 200),
+      /withinDeadline\(/,
+      'a stalled provider holds the repair reservation past the reclaim',
+    );
+    assert.match(
+      source.slice(at, source.indexOf('} finally {', at)),
+      /RUN_STEP_TIMEOUT_MS,/,
+      'the model call is bounded by something other than the run step',
+    );
+  });
+
   it('still says false when the rebuild did judge the project', async () => {
     // The distinction has to cut both ways or it is just a way of never
     // reporting a failure.
@@ -580,13 +600,12 @@ describe('what the second build is allowed to claim', () => {
   });
 });
 
-async function workflowSource(): Promise<string> {
+async function workflowSource(
+  file = 'generation-workflow.ts',
+): Promise<string> {
   const { readFile } = await import('node:fs/promises');
   const { join } = await import('node:path');
-  return readFile(
-    join(import.meta.dirname, '..', 'worker', 'generation-workflow.ts'),
-    'utf8',
-  );
+  return readFile(join(import.meta.dirname, '..', 'worker', file), 'utf8');
 }
 
 describe('settling the repair, and what it costs to fail at it', () => {

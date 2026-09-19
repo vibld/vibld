@@ -26,7 +26,7 @@ import type { RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
 import type { BuildFailureReason, buildProject } from './publish-client.ts';
 import type { reserveBudget } from './reserve.ts';
-import { retrying, sleep } from '@vibld/core';
+import { retrying, sleep, withinDeadline } from '@vibld/core';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -1029,19 +1029,39 @@ export async function verifyAndRepair(
   let outcome: GenerationOutcome | undefined;
   let settlement: SettlementOutcome | undefined;
   try {
-    outcome = await deps.generate(
-      deps.providerFor((reported) => {
-        usage = reported;
-      }),
-      {
-        projectId: params.projectId,
-        // Its own id. `promote` and `saveStage` are both keyed on it, so
-        // reusing the run's would overwrite the record of the attempt this
-        // one is repairing.
-        runId: `${params.runId}:repair`,
-        prompt: repairPromptFor(first.error),
-        baseRevision: result.accepted.revision,
-      },
+    // Bounded on its own, not only by the step around it (#196 review).
+    //
+    // The hold this call sits inside is settled immediately after it, so
+    // the hold's life *is* this call, and `UserBudget.reserve` reclaims any
+    // hold older than `RUN_ABANDONED_AFTER_MS` and charges it at its full
+    // worst case. The enclosing step is `REPAIR_STEP_TIMEOUT_MS`, which is
+    // longer than that on purpose, because it also has to cover two builds.
+    // So a provider that stalled could hold this open past the reclaim and
+    // the caller would be billed a worst case they never spent, which is
+    // the exact failure that decided where this step sits in the workflow.
+    // I wrote that invariant into the module comment above and then left
+    // the one call it depends on unbounded.
+    //
+    // Giving up does not stop the provider, and `settleRepairHold` in the
+    // `finally` below already handles a call that threw: it settles with
+    // whatever usage was reported before the deadline, which is the honest
+    // figure rather than a worst case nobody spent.
+    outcome = await withinDeadline(
+      deps.generate(
+        deps.providerFor((reported) => {
+          usage = reported;
+        }),
+        {
+          projectId: params.projectId,
+          // Its own id. `promote` and `saveStage` are both keyed on it, so
+          // reusing the run's would overwrite the record of the attempt
+          // this one is repairing.
+          runId: `${params.runId}:repair`,
+          prompt: repairPromptFor(first.error),
+          baseRevision: result.accepted.revision,
+        },
+      ),
+      RUN_STEP_TIMEOUT_MS,
     );
   } finally {
     // In a `finally`, because a repair that threw still asked the model and

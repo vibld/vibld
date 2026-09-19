@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { RUN_STEP_TIMEOUT_MS } from '@vibld/ai';
+import { RUN_ABANDONED_AFTER_MS, RUN_STEP_TIMEOUT_MS } from '@vibld/ai';
 import {
   REBUILD_WAIT_BUDGET_MS,
   REPAIR_BUILD_ALLOWANCE_MS,
@@ -71,5 +71,26 @@ describe('how long a repair is allowed to take', () => {
       REPAIR_STEP_TIMEOUT_MS,
       RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS,
     );
+  });
+
+  it('bounds the model call below the reclaim that would charge its hold', () => {
+    // The invariant the whole step's position rests on, asserted rather
+    // than described (#196 review). The repair's hold is settled
+    // immediately after the model call, so the hold's life is that call,
+    // and `UserBudget.reserve` charges any hold older than
+    // `RUN_ABANDONED_AFTER_MS` at its full worst case. The step around it
+    // is deliberately longer than the reclaim, because it also covers two
+    // builds, so the call has to carry a bound of its own.
+    assert.ok(
+      RUN_STEP_TIMEOUT_MS < RUN_ABANDONED_AFTER_MS,
+      `a repair's model call may take ${RUN_STEP_TIMEOUT_MS}ms and its hold is reclaimed after ${RUN_ABANDONED_AFTER_MS}ms`,
+    );
+  });
+
+  it('is the step, not the model call, that is allowed to outlast the reclaim', () => {
+    // Stated so the pair reads as a decision rather than an accident: the
+    // step may run longer than the reclaim because by then the hold is
+    // already settled and only the builds are left.
+    assert.ok(REPAIR_STEP_TIMEOUT_MS > RUN_ABANDONED_AFTER_MS);
   });
 });

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { OUT_OF_TIME, admit } from '../worker/build-files.ts';
+import { OUT_OF_TIME } from '@vibld/core';
+import { admit } from '../worker/build-files.ts';
 
 /**
  * That a build gives back a ticket it abandoned, and keeps one it did not

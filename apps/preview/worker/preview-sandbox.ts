@@ -1,14 +1,8 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
-import {
-  OUT_OF_TIME,
-  admit,
-  budgeted,
-  collectOutput,
-  withinDeadline,
-  writeFiles,
-} from './build-files.ts';
+import { OUT_OF_TIME, withinDeadline } from '@vibld/core';
+import { admit, budgeted, collectOutput, writeFiles } from './build-files.ts';
 import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
