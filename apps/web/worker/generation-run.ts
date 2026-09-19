@@ -26,7 +26,7 @@ import type { RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
 import type { buildProject } from './publish-client.ts';
 import type { reserveBudget } from './reserve.ts';
-import { retrying } from './retry.ts';
+import { retrying } from '@vibld/core';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):

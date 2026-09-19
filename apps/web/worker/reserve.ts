@@ -2,7 +2,7 @@ import { ACCOUNT_BUDGET_KEY, dayKey } from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
 import { allowancePeriodKey } from './entitlement.ts';
 import type { Reservation, UserBudget } from './budget.ts';
-import { retrying, sleep } from './retry.ts';
+import { retrying, sleep } from '@vibld/core';
 
 /**
  * Holding a run's worst case against every ceiling, in one place.
