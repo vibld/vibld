@@ -39,3 +39,22 @@ export const BUILD_COMPILE_TIMEOUT_MS = 5 * 60_000;
  * being raised with it.
  */
 export const BUILD_LOCK_TTL_MS = 15 * 60_000;
+
+/**
+ * How often the lock is pushed forward while a teardown is in flight, and
+ * how long that may go on.
+ *
+ * `destroy()` has no deadline of its own, and the renewals around the build
+ * stopped at the edge of teardown, so a destroy that blocked past the TTL
+ * let another build take the lock and start in the same sandbox -- which
+ * the first destroy then killed (#196 review). The lock is held for the
+ * whole teardown now, which needs these two.
+ *
+ * Both sit inside `BUILD_LOCK_TTL_MS`: the interval so a renewal always
+ * lands before the lock could expire, and the cap so a destroy that never
+ * settles stops renewing rather than blocking this user's builds for good.
+ * `build-limits.test.ts` asserts both, because a comment saying "inside" is
+ * how the other three numbers here came to disagree.
+ */
+export const LOCK_RENEWAL_INTERVAL_MS = 60_000;
+export const MAX_DESTROY_WAIT_MS = 10 * 60_000;

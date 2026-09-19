@@ -219,8 +219,21 @@ describe('counting the builds too', () => {
     const at = tail.indexOf('const gone =');
     assert.ok(at > 0, 'nothing works out whether the container went away');
     const computed = tail.slice(at, tail.indexOf(';', at));
+    // The two arms moved into `destroyHoldingLock`, which is where the
+    // destroy now lives; what the teardown reads is its answer.
     assert.match(
       computed,
+      /destroyHoldingLock\(token\)/,
+      'the teardown no longer asks whether the container went away',
+    );
+    const source = read(
+      join(import.meta.dirname, '..', 'worker', 'preview-sandbox.ts'),
+      'utf8',
+    );
+    const helperAt = source.indexOf('private async destroyHoldingLock(');
+    assert.ok(helperAt > 0, 'destroyHoldingLock is not where this expected it');
+    assert.match(
+      source.slice(helperAt, source.indexOf('\n  private ', helperAt + 10)),
       /destroy\(\)[\s\S]*?\(\) => true,[\s\S]*?\(\) => false,/,
       'a destroy that rejected is not treated as a container that went away',
     );
@@ -272,7 +285,7 @@ describe('counting the builds too', () => {
     // over-admission the counter was added to prevent, moved from previews
     // to builds.
     const tail = body.slice(body.lastIndexOf('} finally {'));
-    const destroyed = tail.indexOf('this.destroy()');
+    const destroyed = tail.indexOf('destroyHoldingLock(token)');
     const released = releaseAt(tail);
     assert.ok(destroyed > 0, 'the finally no longer destroys the container');
     assert.ok(

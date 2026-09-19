@@ -40,6 +40,41 @@ describe('whether a failed install was the project or the registry', () => {
     );
   });
 
+  it('reads a registry that answers badly as an outage', () => {
+    // #196 review. The first version of this list covered only failures to
+    // reach the registry, which is the smaller half of "npm is having a bad
+    // day". A registry up enough to answer 503 is still an outage, and it
+    // was being billed to the project.
+    for (const code of ['E500', 'E502', 'E503', 'E504']) {
+      assert.equal(
+        networkFailure(
+          `npm error code ${code}\nnpm error 503 Service Unavailable`,
+        ),
+        true,
+        code,
+      );
+    }
+  });
+
+  it('reads being rate limited as not the project either', () => {
+    // The same request later succeeds, which is the definition of not the
+    // project's fault.
+    assert.equal(networkFailure('npm error code E429\nnpm error 429'), true);
+  });
+
+  it('still blames the project for what the project may not have', () => {
+    // A private package this project has no right to is a fact about the
+    // project, not about npm, so it stays repairable. The same reasoning as
+    // E404, and the reason this is a list rather than a pattern over E4xx.
+    for (const code of ['E401', 'E403']) {
+      assert.equal(
+        networkFailure(`npm error code ${code}\nnpm error 403 Forbidden`),
+        false,
+        code,
+      );
+    }
+  });
+
   it('still blames the project for a peer or version conflict', () => {
     assert.equal(
       networkFailure(

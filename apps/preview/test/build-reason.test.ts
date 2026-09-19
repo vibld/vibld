@@ -312,7 +312,7 @@ describe('what a build leaves behind', () => {
     const body = buildProjectCode();
     assert.match(
       body,
-      /this\.destroy\(\)/,
+      /destroyHoldingLock\(token\)/,
       'a finished build holds its container until sleepAfter',
     );
   });
@@ -323,7 +323,7 @@ describe('what a build leaves behind', () => {
     // destroying it there would kill their build rather than free a slot.
     const body = buildProjectCode();
     const owned = body.indexOf('token === token');
-    const destroyed = body.indexOf('this.destroy()');
+    const destroyed = body.indexOf('destroyHoldingLock(token)');
     assert.ok(owned > 0 && destroyed > owned, 'the destroy is unguarded');
   });
 });
@@ -361,6 +361,32 @@ describe('keeping the lock alive while the build is', () => {
     assert.match(loop, /renewLock\(token\)/, 'the read loop never renews');
   });
 
+  it('keeps renewing while the container is being torn down', () => {
+    // The renewals around the build stopped at the edge of teardown, and
+    // `destroy()` has no deadline of its own: one that blocked past the TTL
+    // let another build take the lock and start in this same sandbox, which
+    // the first destroy then killed. Holding the lock across the destroy is
+    // the fix, and the renewal inside that wait is the whole of it -- a
+    // mutation that removed it survived every other test here, because they
+    // all count renewals in `buildProject` and this one is a method along.
+    const source = readFileSync(
+      join(import.meta.dirname, '..', 'worker', 'preview-sandbox.ts'),
+      'utf8',
+    );
+    const at = source.indexOf('private async destroyHoldingLock(');
+    assert.ok(at > 0, 'destroyHoldingLock is not where this expected it');
+    const method = source.slice(at, source.indexOf('\n  private ', at + 10));
+    assert.match(
+      method,
+      /renewLock\(token\)/,
+      'the teardown waits out the destroy without holding the lock',
+    );
+    assert.ok(
+      method.indexOf('renewLock(token)') > method.indexOf('Promise.race'),
+      'the renewal does not happen inside the wait it is renewing through',
+    );
+  });
+
   it('renews only while the lock is still its own', () => {
     // An unconditional renew would let a build that had already been
     // superseded take its lock back, which starts the same problem from
@@ -385,7 +411,7 @@ describe('keeping the lock alive while the build is', () => {
     // during that await.
     const body = buildProjectCode();
     const tail = body.slice(body.lastIndexOf('} finally {'));
-    const destroyed = tail.indexOf('this.destroy()');
+    const destroyed = tail.indexOf('destroyHoldingLock(token)');
     const reread = tail.indexOf('storage.get<BuildLock>', destroyed);
     const deleted = tail.indexOf('storage.delete(BUILD_LOCK_KEY)');
     assert.ok(destroyed > 0 && deleted > 0, 'the teardown lost a step');

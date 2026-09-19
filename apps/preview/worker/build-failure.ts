@@ -15,11 +15,15 @@
  * what npm prints, they are stable, and each names a failure of the
  * connection rather than of the manifest.
  *
- * `E404` is deliberately absent. A package that does not exist is the
- * project's own mistake and is exactly what a repair turn can fix, which
- * is the one case this must not swallow.
+ * `E404` is deliberately absent, and is the reason this is a list rather
+ * than a pattern over `E4xx`/`E5xx`: a package that does not exist is the
+ * project's own mistake and is exactly what a repair turn can fix, which is
+ * the one case this must not swallow. `E403` and `E401` are absent for the
+ * same reason -- a private package the project has no right to is a fact
+ * about the project.
  */
 export const NETWORK_FAILURE_CODES = [
+  // Could not reach the registry at all.
   'ENOTFOUND',
   'EAI_AGAIN',
   'ECONNREFUSED',
@@ -28,6 +32,19 @@ export const NETWORK_FAILURE_CODES = [
   'ERR_SOCKET_TIMEOUT',
   'EPROTO',
   'ENETUNREACH',
+  // Reached it and it was not well (#196 review). The first list covered
+  // only the case where the connection fails, which is the smaller half of
+  // "npm is having a bad day": a registry that answers 503 is squarely an
+  // outage, and npm reports it as `E503`. Leaving these out meant the
+  // classifier missed the outage it was written for whenever the registry
+  // was up enough to say no.
+  'E500',
+  'E502',
+  'E503',
+  'E504',
+  // Not an outage, and not the project either: npm is refusing to serve
+  // this caller for now, and the same request later succeeds.
+  'E429',
 ] as const;
 
 /**

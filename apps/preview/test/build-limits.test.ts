@@ -5,6 +5,8 @@ import {
   BUILD_COMPILE_TIMEOUT_MS,
   BUILD_INSTALL_TIMEOUT_MS,
   BUILD_LOCK_TTL_MS,
+  LOCK_RENEWAL_INTERVAL_MS,
+  MAX_DESTROY_WAIT_MS,
 } from '../worker/build-limits.ts';
 
 /**
@@ -45,5 +47,42 @@ describe('how long a build may take against how long its lock lasts', () => {
       slack >= 60_000,
       `only ${slack}ms between the bounded work and the lock expiring`,
     );
+  });
+});
+
+/**
+ * That holding the lock through teardown cannot itself lose the lock
+ * (#196 review).
+ *
+ * The renewals around the build stopped at the edge of teardown, and
+ * `destroy()` has no deadline. A destroy that blocked past the TTL let
+ * another build take the lock and start in the same sandbox, which the
+ * first destroy then killed. Holding the lock across the destroy fixes
+ * that, and these are the numbers that make the holding work.
+ */
+describe('holding the lock while a container is torn down', () => {
+  it('renews well inside the window it is renewing against', () => {
+    // A renewal that landed at the TTL would be a renewal that landed too
+    // late at least sometimes.
+    assert.ok(
+      LOCK_RENEWAL_INTERVAL_MS * 2 < BUILD_LOCK_TTL_MS,
+      `renewing every ${LOCK_RENEWAL_INTERVAL_MS}ms against a ${BUILD_LOCK_TTL_MS}ms lock`,
+    );
+  });
+
+  it('gives up waiting before it has held the lock all day', () => {
+    // A destroy that never settles must stop renewing rather than block
+    // this user's builds for good. Bounded below the TTL so the lock then
+    // ages out promptly rather than after another full window.
+    assert.ok(
+      MAX_DESTROY_WAIT_MS < BUILD_LOCK_TTL_MS,
+      'a stuck destroy can renew the lock for longer than the lock lasts',
+    );
+  });
+
+  it('waits long enough to be worth doing at all', () => {
+    // Shorter than a renewal interval would mean never renewing, which is
+    // the behaviour this replaced.
+    assert.ok(MAX_DESTROY_WAIT_MS > LOCK_RENEWAL_INTERVAL_MS);
   });
 });

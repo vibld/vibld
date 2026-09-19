@@ -8,6 +8,8 @@ import {
   BUILD_COMPILE_TIMEOUT_MS,
   BUILD_INSTALL_TIMEOUT_MS,
   BUILD_LOCK_TTL_MS,
+  LOCK_RENEWAL_INTERVAL_MS,
+  MAX_DESTROY_WAIT_MS,
 } from './build-limits.ts';
 // L9's account-wide preview cap, which is no longer the whole container
 // budget: see `capacity.ts` for what builds take out of it.
@@ -593,10 +595,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       const gone = !started
         ? true
         : ours
-          ? await this.destroy().then(
-              () => true,
-              () => false,
-            )
+          ? await this.destroyHoldingLock(token)
           : false;
 
       // After the container is gone, never before it: a lock given back
@@ -944,6 +943,46 @@ export class PreviewSandbox extends Sandbox<Env> {
    * unconditional renew would let a build that *had* been superseded take
    * its lock back and start the whole problem again from the other side.
    */
+  /**
+   * Destroy this build's container while keeping its lock alive.
+   *
+   * The renewals around the build stopped at the edge of teardown, and
+   * `destroy()` has no deadline of its own (#196 review). A destroy that
+   * blocked past the TTL let another build take the lock and start in this
+   * same named sandbox, and then the first destroy killed *their*
+   * container. Re-reading the token before deleting protects the newer
+   * lock; it cannot protect the newer container, because by then the
+   * destroy is already in flight and cannot be called back.
+   *
+   * So the lock is held for the whole teardown rather than up to it. The
+   * destroy races a renewal timer: whichever settles first decides, and a
+   * timer win renews and waits again.
+   *
+   * Bounded, because a destroy that never settles must not renew forever
+   * and block this user's builds for good. Giving up answers "not gone",
+   * which is the branch that keeps both the lock and the slot -- correct
+   * for a container in an unknown state, and self-limiting, because the
+   * lock then ages out on its own.
+   */
+  private async destroyHoldingLock(token: string): Promise<boolean> {
+    const destroyed = this.destroy().then(
+      () => true,
+      () => false,
+    );
+    const until = Date.now() + MAX_DESTROY_WAIT_MS;
+    while (Date.now() < until) {
+      const settled = await Promise.race([
+        destroyed,
+        new Promise<undefined>((resolve) => {
+          setTimeout(() => resolve(undefined), LOCK_RENEWAL_INTERVAL_MS);
+        }),
+      ]);
+      if (settled !== undefined) return settled;
+      await this.renewLock(token);
+    }
+    return false;
+  }
+
   private async renewLock(token: string): Promise<void> {
     const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
     if (mine?.token !== token) return;
