@@ -68,6 +68,12 @@ function deps(
     rebuild?: { ok: boolean; error?: string; reason?: string };
     /** Which call throws, counting from one. */
     buildThrowsOn?: number;
+    /** The reservation could not be asked for at all, as against refused. */
+    reserveThrows?: boolean;
+    /** How many settlement attempts reject before one is allowed through. */
+    settleRejects?: number;
+    /** What a settlement that succeeds says the repair cost. */
+    settleCost?: number;
   } = {},
 ) {
   const spy: Spy = { builds: 0, reserves: 0, settles: [], generates: [] };
@@ -83,6 +89,9 @@ function deps(
       }) as never,
       reserve: (async () => {
         spy.reserves += 1;
+        if (options.reserveThrows) {
+          throw new Error('the budget object is unreachable');
+        }
         return options.reserveOk === false
           ? { ok: false, verdict: { allow: false, reason: 'period-ceiling' } }
           : {
@@ -101,7 +110,10 @@ function deps(
         providerRan: boolean | undefined,
       ) => {
         spy.settles.push({ usage, providerRan });
-        return 0;
+        if (spy.settles.length <= (options.settleRejects ?? 0)) {
+          throw new Error('the budget object is unreachable');
+        }
+        return options.settleCost ?? 0;
       }) as never,
       generate: (async (
         _provider: unknown,
@@ -125,6 +137,8 @@ function deps(
       }) as never,
       providerFor: (() => ({}) as never) as never,
       now: () => Date.UTC(2026, 8, 19, 5, 0, 0),
+      // So the settlement retries do not spend their real delay here.
+      wait: async () => {},
     },
   };
 }
@@ -313,6 +327,101 @@ describe('buying one repair', () => {
   });
 });
 
+async function workflowSource(): Promise<string> {
+  const { readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  return readFile(
+    join(import.meta.dirname, '..', 'worker', 'generation-workflow.ts'),
+    'utf8',
+  );
+}
+
+describe('settling the repair, and what it costs to fail at it', () => {
+  it('keeps the project when the ledger cannot be asked for a hold', async () => {
+    // #196 review, P2. `reserve` rejects, rather than denying, when the
+    // budget Durable Object is unreachable. The project has already been
+    // accepted, promoted and settled by then, so letting that rejection
+    // out of a step with no retries sends the caller an error instead of
+    // the files they paid for. A ledger that could not be asked has not
+    // said no; it has said nothing.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { reserveThrows: true },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.deepEqual(outcome, { built: false, skipped: 'unavailable' });
+    assert.equal(spy.generates.length, 0, 'the model was asked without a hold');
+    assert.equal(spy.settles.length, 0, 'a hold that was never taken settled');
+  });
+
+  it('retries a settlement that rejects rather than losing the repair', async () => {
+    // #196 review, P1. A Durable Object that blinks is over in seconds,
+    // and the enclosing step has no retries of its own -- so a bare await
+    // here put the ledger's transient failure in front of a repair that
+    // had already been promoted.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true }, settleRejects: 1, settleCost: 4_200 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.settles.length, 2, 'the settlement was not retried');
+    assert.equal(outcome.repaired, true);
+    assert.equal(
+      outcome.settled,
+      undefined,
+      'a settled hold was reported open',
+    );
+    assert.equal(outcome.repairCostMicroUsd, 4_200);
+  });
+
+  it('hands back the repair even when nothing can settle its hold', async () => {
+    // Throwing does not close the hold either, so it would have cost the
+    // caller both the files and the money. Recorded as unsettled instead,
+    // and priced at what the reclaim will actually charge.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true }, settleRejects: 99 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.settles.length, 3, 'the settlement gave up too early');
+    assert.equal(outcome.repaired, true, 'the repair was lost with the hold');
+    assert.equal(outcome.settled, false);
+    assert.equal(
+      outcome.repairCostMicroUsd,
+      PARAMS.worstCaseMicroUsd,
+      'an unsettled hold is reclaimed at its worst case, and must be recorded at it',
+    );
+  });
+
+  it('records the repair as its own run, with its own tokens', async () => {
+    // #196 review, P2. The repair is settled against the same ledger, so a
+    // record that counts only the first call reports a lower cost than
+    // billing charged. Its own row rather than a larger number on the
+    // run's: the repair has its own tokens, and one row cannot honestly
+    // carry two calls' cost against one call's counts.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true }, settleCost: 9_100 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.ok(outcome.trace, 'the repair was charged for and never recorded');
+    assert.equal(outcome.trace.runId, 'run_1:repair');
+    assert.equal(outcome.trace.projectId, 'proj_1');
+    assert.equal(outcome.trace.costMicroUsd, 9_100);
+  });
+
+  it('records nothing for a repair whose model call never returned', async () => {
+    // There is no stop, no usage and no result to describe. A row of zeroes
+    // would read as a run that cost nothing rather than one that is not
+    // known to have happened.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'boom' },
+      { generateThrows: true },
+    );
+    await assert.rejects(() => verifyAndRepair(ENV, PARAMS, ACCEPTED, d));
+  });
+});
+
 /**
  * That the Workflow hands the repaired project back to the caller.
  *
@@ -325,16 +434,40 @@ describe('buying one repair', () => {
  */
 describe('what the run finally answers with', () => {
   it('prefers the repaired project over the attempt that failed', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const source = await readFile(
-      join(import.meta.dirname, '..', 'worker', 'generation-workflow.ts'),
-      'utf8',
-    );
+    const source = await workflowSource();
     assert.match(
       source,
       /return repair\.result \?\? generation\.result;/,
       'the Workflow returns the first attempt, so a repaired run shows the reader the broken files',
+    );
+  });
+
+  it('keeps the whole project out of the log line', async () => {
+    // #196 review, P1. `RepairOutcome.result` carries every generated file.
+    // Spreading the outcome into `generation.verified` wrote a tenant's own
+    // project, and whatever knowledge was incorporated into it, into the
+    // Worker log on each successful repair -- outside every access and
+    // retention boundary the storage path has.
+    const source = await workflowSource();
+    const log = source.slice(
+      source.indexOf("event: 'generation.verified'"),
+      source.indexOf("await step.do(\n      'record-trace'"),
+    );
+    assert.ok(log.length > 0, 'the verified log line moved');
+    assert.doesNotMatch(
+      log,
+      /\.\.\.repair\b/,
+      'the whole repair outcome, project files and all, is spread into the log',
+    );
+    assert.doesNotMatch(log, /\brepair\.result\b/);
+  });
+
+  it('records the repair against the run it repaired', async () => {
+    const source = await workflowSource();
+    assert.match(
+      source,
+      /if \(repair\.trace\) await store\.saveTrace\(repair\.trace\);/,
+      'the repair was billed for and never written to the run record',
     );
   });
 });

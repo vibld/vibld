@@ -285,12 +285,25 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         }),
     );
 
+    // Field by field, never a spread of `repair` (#196 review). That object
+    // carries `result`, and `result.accepted.files` is the whole project:
+    // spreading it wrote every generated file into the Worker log on each
+    // successful repair, which puts a tenant's own copy, and whatever
+    // knowledge was incorporated into it, in front of every log reader and
+    // outside the access and retention boundaries the storage path has.
+    // Only the scalars that say what happened belong here.
     console.log(
       JSON.stringify({
         event: 'generation.verified',
         userId: params.userId,
         runId: params.runId,
-        ...repair,
+        ...(repair.built === undefined ? {} : { built: repair.built }),
+        ...(repair.repaired === undefined ? {} : { repaired: repair.repaired }),
+        ...(repair.skipped ? { skipped: repair.skipped } : {}),
+        ...(repair.repairCostMicroUsd === undefined
+          ? {}
+          : { repairMicroUsd: repair.repairCostMicroUsd }),
+        ...(repair.settled === false ? { settled: false } : {}),
       }),
     );
 
@@ -317,6 +330,16 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             endedAt: generation.endedAt,
           }),
         );
+        // The repair's own row, under its own run id (#196 review). Without
+        // it the Runs view reported the first call's cost as what the run
+        // cost, while billing had charged for two. Its own row rather than a
+        // larger number on this one: the repair has its own tokens, and a
+        // row whose cost counts two calls and whose token counts describe
+        // one is a row that misreads either way you read it.
+        //
+        // In the same step, and after: `saveTrace` keeps the first row for a
+        // run id, so a retry of this step writes neither twice.
+        if (repair.trace) await store.saveTrace(repair.trace);
       },
     );
 

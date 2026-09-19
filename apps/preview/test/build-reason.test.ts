@@ -14,8 +14,12 @@ import { describe, it } from 'node:test';
  *
  * Only `install` and `build` are evidence about the project the model
  * wrote. `busy` is the one that would have cost real money for nothing: it
- * is a refusal issued before any work happens, because a preview is already
- * running for that project, and nothing about the code is implicated.
+ * is a refusal issued before any work happens, because another build is
+ * already running for that project, and nothing about the code is
+ * implicated. Since #196 that is all it means -- it used to fire whenever a
+ * preview was live, which is most of the time, so the caller read
+ * "nothing to do with the project" on the ordinary follow-up edit and the
+ * verification never ran (see `build-sandbox.test.ts`).
  *
  * `preview-sandbox.ts` imports `@cloudflare/sandbox` and cannot be loaded
  * under `node --test`, so this reads it as source. Same reasoning as
@@ -76,5 +80,50 @@ describe('what a failed build says about itself', () => {
     for (const reason of ['busy', 'install', 'build']) {
       assert.match(body, new RegExp(`reason: '${reason}'`), reason);
     }
+  });
+});
+
+/**
+ * That two builds for the same user cannot write into one /workspace at
+ * once (#196 review).
+ *
+ * This is what the old refusal was really protecting, and moving builds
+ * into their own instance did not remove it: a repair's verification build
+ * and an auto-publish are both builds, and they can overlap. What changed
+ * is what it excludes -- another build, rather than the preview that now
+ * lives somewhere else entirely.
+ */
+describe('one build at a time', () => {
+  it('refuses while another build holds the lock', () => {
+    const body = buildProjectBody();
+    assert.match(body, /BUILD_LOCK_KEY/, 'nothing excludes a second build');
+    assert.ok(
+      body.indexOf('BUILD_LOCK_KEY') < body.indexOf('npm install'),
+      'the lock is taken after the work it is meant to exclude',
+    );
+  });
+
+  it('does not refuse on account of a running preview', () => {
+    // The whole point of the move. A build that still consulted the
+    // preview's state would be back to skipping verification for anyone
+    // with a preview open, however it was named.
+    const body = buildProjectBody();
+    assert.doesNotMatch(
+      body,
+      /readState\(\)/,
+      'the build still reads the preview state it no longer shares',
+    );
+  });
+
+  it('gives the lock back on every path out', () => {
+    // Including the refusals that return from inside the `try`. A lock
+    // taken and not returned blocks this user's next build until it ages
+    // out, which is fifteen minutes of a feature silently not running.
+    const body = buildProjectBody();
+    assert.match(
+      body,
+      /finally \{[\s\S]*?storage\.delete\(BUILD_LOCK_KEY\)/,
+      'the build lock is released on some paths and not others',
+    );
   });
 });

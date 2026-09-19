@@ -118,6 +118,26 @@ interface PreviewState {
 
 const STORAGE_KEY = 'vibld:preview';
 
+/**
+ * When the build running in this instance started, while one is.
+ *
+ * Its own key rather than the preview's state: since #196 a build runs in
+ * an instance named for building, where `STORAGE_KEY` is never written at
+ * all, and what it needs to exclude is another build rather than a preview.
+ */
+const BUILD_LOCK_KEY = 'vibld:build';
+
+/**
+ * How long a build lock is believed before the build holding it is treated
+ * as gone.
+ *
+ * Longer than any build should take (`npm install` and `npm run build` over
+ * a generated project) and shorter than a person's patience, because the
+ * only thing this bounds is how long a build that died mid-flight blocks
+ * the next one.
+ */
+const BUILD_LOCK_TTL_MS = 15 * 60_000;
+
 export interface PreviewStatus {
   status: Phase | 'ready-to-start';
   position?: number;
@@ -280,14 +300,26 @@ export class PreviewSandbox extends Sandbox<Env> {
   /**
    * A one-shot production build of `files` (ADR-0010's Cloudflare
    * auto-publish primary path: apps/web calls this, then hands the result
-   * straight to apps/publish's `/internal/publish`). Unlike `startPreview`,
-   * this never touches `PreviewFleet` -- a build finishes within one
-   * request's lifetime, holding no exposed port and no long-lived dev
-   * server, so L9's "1 concurrent preview per user" accounting (which
-   * exists to bound exactly those two things) does not apply to it. It does
-   * still run inside this same per-user sandbox instance, under the same
-   * L11 egress restrictions as a preview's own `npm install` -- untrusted
-   * code is untrusted whether or not anything is ever exposed.
+   * straight to apps/publish's `/internal/publish`; since #194 the
+   * generation workflow calls it too, to find out whether what it just
+   * produced compiles). Unlike `startPreview`, this never touches
+   * `PreviewFleet` -- a build finishes within one request's lifetime,
+   * holding no exposed port and no long-lived dev server, so L9's "1
+   * concurrent preview per user" accounting (which exists to bound exactly
+   * those two things) does not apply to it.
+   *
+   * It runs in an instance of its own, named for building rather than for
+   * the user's preview (`worker/index.ts`'s `buildSandboxName`), under the
+   * same L11 egress restrictions -- untrusted code is untrusted whether or
+   * not anything is ever exposed. It used to share the preview's instance
+   * and refuse whenever a preview was live, which was correct about the
+   * filesystem race and wrong about how often that happens (#196 review):
+   * the Workspace keeps a preview running across submissions and nothing
+   * stops it on submit, so the ordinary follow-up edit found the sandbox
+   * busy, and the verification this exists for was skipped exactly when a
+   * reader was iterating hardest. Two instances cost a second container and
+   * buy back both the verification and the ability to publish without
+   * stopping the preview first.
    *
    * Only text output is returned. A build that emits binary assets (images,
    * fonts) skips them and reports which paths were skipped, rather than
@@ -297,19 +329,29 @@ export class PreviewSandbox extends Sandbox<Env> {
    * bytes yet.
    */
   async buildProject(files: ProjectFile[]): Promise<BuildOutcome> {
-    // A running preview's dev server and this build would both write into
-    // the same /workspace at once -- not a security boundary (both are the
-    // same user's own untrusted code either way), but a real race on the
-    // filesystem a dev server may be watching. Refuse rather than risk a
-    // build that reads a half-written tree, or a preview restart mid-build.
-    const existing = await this.readState();
-    if (existing && !this.isExpired(existing) && existing.phase !== 'failed') {
+    // Two builds for the same user would still write into the same
+    // /workspace at once, which is the filesystem race the old refusal was
+    // really about -- a repair's verification build and an auto-publish can
+    // overlap. Not a security boundary (both are the same user's own
+    // untrusted code either way): a build that read a half-written tree
+    // would simply be measuring the wrong project.
+    //
+    // The lock expires rather than being trusted forever. A build whose
+    // container died between taking it and releasing it must not wedge
+    // every later build for this user, and nothing else here would ever
+    // clear it.
+    const startedAt = await this.ctx.storage.get<number>(BUILD_LOCK_KEY);
+    if (
+      typeof startedAt === 'number' &&
+      Date.now() - startedAt < BUILD_LOCK_TTL_MS
+    ) {
       return {
         reason: 'busy',
         error:
-          'A preview is currently running for this project. Stop it before publishing.',
+          'Another build is already running for this project. Try again once it has finished.',
       };
     }
+    await this.ctx.storage.put(BUILD_LOCK_KEY, Date.now());
 
     try {
       await this.writeProject(files);
@@ -373,6 +415,11 @@ export class PreviewSandbox extends Sandbox<Env> {
         reason: 'sandbox',
         error: error instanceof Error ? error.message : 'Build failed.',
       };
+    } finally {
+      // Released on every path, including the refusals above that return
+      // from inside the `try`. A lock this method takes and does not give
+      // back is one that blocks this user's next build until it ages out.
+      await this.ctx.storage.delete(BUILD_LOCK_KEY);
     }
   }
 

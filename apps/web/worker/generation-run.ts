@@ -431,10 +431,39 @@ export interface RepairOutcome {
    * more than an error message.
    */
   result?: DurableGenerationResult;
-  /** Why no repair was attempted, when a failing build did not buy one. */
+  /**
+   * Why no repair was attempted, when a failing build did not buy one.
+   *
+   * `unavailable` covers both services this step needs and says nothing
+   * about the project itself. `built` tells the two apart: absent means the
+   * build service could not be reached and nothing is known, false means the
+   * project was built and does not build, and the ledger could not be asked
+   * to pay for a repair.
+   */
   skipped?: 'not-configured' | 'not-the-project' | 'no-budget' | 'unavailable';
   /** The repair's own reservation, settled by this step and not the run's. */
   repairCostMicroUsd?: number;
+  /**
+   * Whether that reservation was actually closed.
+   *
+   * Present and false only where every settlement attempt failed, which
+   * leaves a hold open for `UserBudget`'s reclaim to charge at its full
+   * worst case thirty-five minutes later. It is worth a field rather than a
+   * silent catch: it is the one outcome here that costs the caller money
+   * nobody measured, and the log line is where an operator would see it.
+   */
+  settled?: boolean;
+  /**
+   * The repair's own row in the run record (#196 review).
+   *
+   * Its own row rather than an addition to the run's, because the repair is
+   * its own run: its own id, its own model call, its own tokens. Folding
+   * only its cost into the parent trace would have left that row's cost
+   * describing two calls while its token counts described one, and
+   * `contextPressure` and `cacheHitRate` read those counts. The run cost
+   * the sum of the two rows, and both rows say what they are.
+   */
+  trace?: RunTrace;
 }
 
 export interface GenerationOutcome {
@@ -640,6 +669,83 @@ export async function runGeneration(
 }
 
 /**
+ * How many times the repair's settlement is asked for before it is given up
+ * on, and how long between asks.
+ *
+ * Three rather than one because the failure this covers is a Durable Object
+ * that is restarting, which is over in seconds; an immediate single retry
+ * would land inside the same restart it was retrying. Three rather than
+ * more because the enclosing step has a timeout, and a hold left open is
+ * charged at its worst case by the reclaim either way: at some point the
+ * honest thing is to record that it was not closed and hand the caller
+ * their files.
+ */
+const SETTLE_ATTEMPTS = 3;
+const SETTLE_RETRY_DELAY_MS = 1_000;
+
+interface SettlementOutcome {
+  /** What was settled, absent when nothing was. */
+  cost?: number;
+  settled: boolean;
+}
+
+/**
+ * Close the repair's own reservation, and never fail the run doing it.
+ *
+ * The distinction this keeps is between money and files. The reservation is
+ * this step's to close and closing it matters, but the caller's project
+ * exists whether or not the ledger answered, and it is already promoted by
+ * the time this runs. So settlement is retried while there is reason to
+ * think it might work, and then recorded as not having happened rather than
+ * thrown (#196 review).
+ */
+async function settleRepairHold(
+  deps: {
+    settle: typeof settleBudget;
+    wait?: (ms: number) => Promise<void>;
+  },
+  env: GenerationWorkflowEnv,
+  params: WorkflowParams,
+  held: Awaited<ReturnType<typeof reserveBudget>>,
+  usage: PlanUsage | undefined,
+): Promise<SettlementOutcome> {
+  const wait =
+    deps.wait ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 1; attempt <= SETTLE_ATTEMPTS; attempt += 1) {
+    try {
+      const cost = await deps.settle(
+        env.USER_BUDGET,
+        {
+          userId: params.userId,
+          reservationId: held.ok ? held.layers.user.id : undefined,
+          reservationKey: held.ok ? held.layers.userReservationKey : undefined,
+          accountReservationId: held.ok ? held.layers.account.id : undefined,
+          worstCaseMicroUsd: params.worstCaseMicroUsd,
+          prices: params.prices,
+        },
+        usage,
+        // The model was asked the moment `generate` was entered, so a throw
+        // from inside it settles at the worst case rather than at nothing.
+        true,
+      );
+      return { cost, settled: true };
+    } catch (error) {
+      if (attempt === SETTLE_ATTEMPTS) {
+        // Worth a line of its own: this is a hold the reclaim will charge
+        // at full worst case, and nothing else in the system will say so
+        // until that happens.
+        console.error('repair settlement failed', error);
+        return { settled: false };
+      }
+      await wait(SETTLE_RETRY_DELAY_MS * attempt);
+    }
+  }
+  /* c8 ignore next */
+  return { settled: false };
+}
+
+/**
  * Build what the run produced, and buy one repair if it does not build.
  *
  * #194: two of six real generations against the production provider
@@ -675,6 +781,8 @@ export async function verifyAndRepair(
     ) => Promise<GenerationOutcome>;
     providerFor: (onUsage: (usage: PlanUsage) => void) => ModelProvider;
     now?: () => number;
+    /** Only so a test does not spend the settlement retry delay. */
+    wait?: (ms: number) => Promise<void>;
   },
 ): Promise<RepairOutcome> {
   // Nothing to build. A refused or failed run has no files, and a build
@@ -731,21 +839,34 @@ export async function verifyAndRepair(
   }
 
   const now = deps.now ?? Date.now;
-  const held = await deps.reserve(
-    env,
-    params.userId,
-    params.worstCaseMicroUsd,
-    params.monthlyAllowance!,
-    params.topupCeiling!,
-    now(),
-  );
+  // Asked for in a `try` for the same reason the build is (#196 review).
+  // `reserve` rejects, rather than denying, when the budget Durable Object
+  // is unreachable, and that rejection would escape a step with no retries
+  // and fail the Workflow after the project had been accepted, promoted and
+  // settled. A ledger that cannot be asked has not said no; it has said
+  // nothing, and nothing is not a reason to throw away the caller's files.
+  let held: Awaited<ReturnType<typeof reserveBudget>>;
+  try {
+    held = await deps.reserve(
+      env,
+      params.userId,
+      params.worstCaseMicroUsd,
+      params.monthlyAllowance!,
+      params.topupCeiling!,
+      now(),
+    );
+  } catch {
+    return { built: false, skipped: 'unavailable' };
+  }
   // Out of budget is not a failure of this step. The reader keeps the
   // project the first attempt produced, which is what they would have had
   // before any of this existed.
   if (!held.ok) return { built: false, skipped: 'no-budget' };
 
+  const startedAt = now();
   let usage: PlanUsage | undefined;
   let outcome: GenerationOutcome | undefined;
+  let settlement: SettlementOutcome | undefined;
   try {
     outcome = await deps.generate(
       deps.providerFor((reported) => {
@@ -765,22 +886,41 @@ export async function verifyAndRepair(
     // In a `finally`, because a repair that threw still asked the model and
     // still holds a reservation. Leaving it open is the one outcome that
     // costs the caller their worst case rather than what they spent.
-    await deps.settle(
-      env.USER_BUDGET,
-      {
-        userId: params.userId,
-        reservationId: held.ok ? held.layers.user.id : undefined,
-        reservationKey: held.ok ? held.layers.userReservationKey : undefined,
-        accountReservationId: held.ok ? held.layers.account.id : undefined,
-        worstCaseMicroUsd: params.worstCaseMicroUsd,
-        prices: params.prices,
-      },
-      usage,
-      // The model was asked the moment `generate` was entered, so a throw
-      // from inside it settles at the worst case rather than at nothing.
-      true,
-    );
+    //
+    // Retried and then swallowed rather than awaited bare (#196 review). A
+    // bare await put the settlement's own rejection in the way of
+    // everything after it: the enclosing step has no retries, so a Durable
+    // Object that blinked would have failed the Workflow and sent an error
+    // to a caller whose repair had already been promoted. Throwing does not
+    // close the hold either, so it loses the files and leaves the money.
+    settlement = await settleRepairHold(deps, env, params, held, usage);
   }
+
+  const settled = settlement?.settled !== false;
+  // What the ledger will charge, which is not always what was measured. A
+  // hold nothing could close is charged at its worst case by the reclaim,
+  // so that is the figure the record carries rather than a zero that would
+  // under-report a bill the caller is about to see.
+  const repairCostMicroUsd =
+    settlement?.cost ?? (settled ? undefined : params.worstCaseMicroUsd);
+  const money = {
+    ...(repairCostMicroUsd === undefined ? {} : { repairCostMicroUsd }),
+    ...(settled ? {} : { settled: false }),
+    ...(outcome
+      ? {
+          trace: traceOf(
+            { ...params, runId: `${params.runId}:repair` },
+            outcome.result,
+            usage,
+            {
+              costMicroUsd: repairCostMicroUsd ?? 0,
+              elapsedMs: now() - startedAt,
+              endedAt: new Date(now()).toISOString(),
+            },
+          ),
+        }
+      : {}),
+  };
 
   // Accepted is not built (#196 review). The validator says the files are
   // well formed and inside the project root; it says nothing about whether
@@ -791,12 +931,13 @@ export async function verifyAndRepair(
   const promoted =
     outcome?.result.state === 'accepted' && Boolean(outcome.result.accepted);
   if (!promoted || !outcome?.result.accepted) {
-    return { built: false, repaired: false };
+    return { built: false, repaired: false, ...money };
   }
 
   const second = await build(outcome.result.accepted.files);
   return {
     built: false,
+    ...money,
     // Undefined rather than false when the second build could not run: a
     // repair whose result is unknown is not a repair that failed.
     ...(second ? { repaired: second.ok } : {}),
