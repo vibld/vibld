@@ -30,6 +30,16 @@ function mockup(label: string) {
   };
 }
 
+/** A usage record that differs only in its output count, so a test can tell
+ * which attempt was reported. */
+function usageOf(outputTokens: number) {
+  return { ...USAGE, outputTokens };
+}
+
+const VALID_SET = {
+  mockups: [mockup('Quiet'), mockup('Loud'), mockup('Dense')],
+};
+
 function client(
   completion: Partial<PlanCompletion> = {},
 ): PlanClient & { readonly seen: PlanRequest[] } {
@@ -139,6 +149,465 @@ describe('asking for three directions', () => {
     });
   });
 
+  it('retries an empty reply once, and does not bill the reader for it', async () => {
+    // DeepSeek's JSON mode documents that it may occasionally return empty
+    // content, and a real run did: 22,828 characters streamed, 24,322
+    // output tokens billed, and null where the object should have been
+    // (#190). The reader did not cause that, so they do not pay for it.
+    let call = 0;
+    const billed: number[] = [];
+    const absorbed: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return call === 1
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onUsage: (u) => billed.push(u.outputTokens),
+      onDiscarded: (u) => {
+        absorbed.push(u.outputTokens);
+      },
+    });
+    const set = await provider.generate({ prompt: 'a bakery' });
+
+    assert.equal(call, 2, 'the empty reply was not retried');
+    assert.equal(set.mockups.length, 3);
+    assert.deepEqual(billed, [11], 'the reader was billed for the empty reply');
+    assert.deepEqual(absorbed, [9999], 'the discarded attempt went unreported');
+  });
+
+  it('does not retry a reply that is merely the wrong shape', async () => {
+    // A disagreement about shape is one the model will most likely repeat,
+    // so retrying spends twice and fails anyway. Only "nothing came back"
+    // is worth a second attempt.
+    let call = 0;
+    const wrong = {
+      id: 'wrong',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: { mockups: 'not an array' },
+          stopReason: 'end_turn',
+          usage: usageOf(7),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(wrong, { model: 'deepseek-flash' });
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.equal(call, 1, 'a wrong shape was retried, doubling the bill');
+  });
+
+  it('does not retry when the caller refuses the second attempt', async () => {
+    // Absorbing a provider defect decides who pays for it. It is not a way
+    // to spend past a ceiling, which is what the first version of this
+    // amounted to: the Worker reserved for one run, the retry sent a
+    // second, and the account-wide ledger was told about neither (#191
+    // review). The caller now answers before the second attempt goes out.
+    let call = 0;
+    const absorbed: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return call === 1
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onDiscarded: (u) => {
+        absorbed.push(u.outputTokens);
+        return false;
+      },
+    });
+
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderShapeError,
+    );
+    assert.equal(call, 1, 'a refused retry was sent anyway');
+    assert.deepEqual(
+      absorbed,
+      [9999],
+      'the attempt was not reported before being refused',
+    );
+  });
+
+  it('does not bill the reader for an attempt it refused to replace', async () => {
+    // The fix's own bug (#191 review). Refusing the retry left the
+    // absorbed attempt as the completion, and it was then reported
+    // through `onUsage` as well -- so the reader paid for exactly the
+    // defect the absorption exists to spare them, and a caller that had
+    // already recorded it as absorbed counted it twice.
+    const billed: number[] = [];
+    const absorbed: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onUsage: (u) => billed.push(u.outputTokens),
+      onDiscarded: (u) => {
+        absorbed.push(u.outputTokens);
+        return false;
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.deepEqual(absorbed, [9999]);
+    assert.deepEqual(
+      billed,
+      [],
+      'the absorbed attempt was billed to the reader as well',
+    );
+  });
+
+  it('does not send a retry to a reader who has gone', async () => {
+    // The route checks this before the first attempt and cannot check it
+    // here, because the awaiting happens inside `generate` (#191 review).
+    // A reader who disconnects while the caller reaches a ledger would
+    // otherwise have a second request built and sent on an already-aborted
+    // signal, which rejects without reporting usage -- and settlement then
+    // prices a request that never left the Worker.
+    const abort = new AbortController();
+    let call = 0;
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      signal: abort.signal,
+      onDiscarded: async () => {
+        // The window the finding is about: the caller is reaching a
+        // ledger, and the reader leaves while it does.
+        abort.abort();
+        await Promise.resolve();
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.equal(call, 1, 'a retry was sent to a reader who had gone');
+  });
+
+  it('sees a cancellation the reset itself provoked', async () => {
+    // The Worker forwards progress by writing to the reader's stream, and
+    // a broken stream rejects that write and cancels the run from a later
+    // microtask. So the reset can be the very call that discovers the
+    // reader has gone, and a signal check placed after it with nothing
+    // awaited in between is looking before the news arrives (#191
+    // review). Reporting the reset before the hook gives that
+    // cancellation the hook's own round trip to land in.
+    let call = 0;
+    const abort = new AbortController();
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      signal: abort.signal,
+      // Exactly the Worker's shape: the write is not awaited, so the
+      // cancellation it causes is queued rather than immediate.
+      onProgress: () => {
+        void Promise.reject(new Error('stream closed')).catch(() =>
+          abort.abort(),
+        );
+      },
+      onDiscarded: async () => {
+        // Stands in for the account reservation, which is a Durable
+        // Object round trip in production.
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.equal(call, 1, 'a retry was sent after the stream had closed');
+  });
+
+  it('zeroes the meters before reporting the discarded attempt', async () => {
+    // The ordering the test above rests on, stated on its own so it
+    // cannot be undone by a tidy-looking move.
+    const order: string[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        request.onPromptChars?.(2_400);
+        order.push('ask');
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    await assert.rejects(
+      new MockupProvider(flaky, {
+        model: 'deepseek-flash',
+        onProgress: () => order.push('progress reset'),
+        onPromptChars: (characters) =>
+          order.push(
+            characters === 0 ? 'prompt reset' : `prompt ${characters}`,
+          ),
+        onDiscarded: () => {
+          order.push('discarded');
+          return false;
+        },
+      }).generate({ prompt: 'a bakery' }),
+    );
+
+    assert.deepEqual(order, [
+      'prompt 2400',
+      'ask',
+      'progress reset',
+      'prompt reset',
+      'discarded',
+    ]);
+  });
+
+  it('puts the prompt size back to zero at the attempt boundary', async () => {
+    // The other half, and the one that decides the money. A client reports
+    // what it sent before it sends, so a pre-aborted retry still set the
+    // figure a cancelled run is priced from. Zeroed here, it restores
+    // itself the moment a retry really goes out, and stays zero when none
+    // does.
+    const abort = new AbortController();
+    const sent: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        request.onPromptChars?.(2_400);
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      signal: abort.signal,
+      onPromptChars: (characters) => sent.push(characters),
+      onDiscarded: async () => {
+        abort.abort();
+        await Promise.resolve();
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.deepEqual(
+      sent,
+      [2_400, 0],
+      'a cancelled run is still priced from the absorbed attempt\u2019s prompt',
+    );
+  });
+
+  it('lets the retry report its own prompt size', async () => {
+    // Zeroing the figure must not leave a real retry settling at nothing:
+    // the client reports it again before it sends, which is the whole
+    // reason zero is safe here.
+    let call = 0;
+    const sent: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        call += 1;
+        request.onPromptChars?.(2_400);
+        return call === 1
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    await new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onPromptChars: (characters) => sent.push(characters),
+    }).generate({ prompt: 'a bakery' });
+
+    assert.deepEqual(sent, [2_400, 0, 2_400]);
+  });
+
+  it('still names the failure when the retry is refused', async () => {
+    // Leaving by one door is not leaving silently: the reader is owed the
+    // same message they would have got had the empty reply been the end
+    // of it.
+    const provider = new MockupProvider(
+      client({ plan: null, emptyBody: true, stopReason: 'end_turn' }),
+      { model: 'deepseek-flash', onDiscarded: () => false },
+    );
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }), (error) => {
+      assert.ok(error instanceof ProviderShapeError);
+      assert.match(String(error.message), /set of three directions/);
+      return true;
+    });
+  });
+
+  it('waits for the answer before asking again', async () => {
+    // The point of awaiting it. A caller that has to reach a ledger before
+    // it can answer would otherwise be raced by the request it was being
+    // asked about, and the ceiling would be checked after the money was
+    // spent.
+    const order: string[] = [];
+    let call = 0;
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        order.push(`ask ${call}`);
+        return call === 1
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    await new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onDiscarded: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        order.push('permitted');
+      },
+    }).generate({ prompt: 'a bakery' });
+
+    assert.deepEqual(order, ['ask 1', 'permitted', 'ask 2']);
+  });
+
+  it('does not retry a body it could not parse', async () => {
+    // The P1 the first version of this shipped (#191 review). A null plan
+    // is not the same fact as an empty body: `readJsonPlan` returns null
+    // for text it cannot parse as well, and that is a disagreement about
+    // shape wearing the same clothes. Only the client can tell the two
+    // apart, so only the client's word is taken.
+    let call = 0;
+    const garbled = {
+      id: 'garbled',
+      async createPlan() {
+        call += 1;
+        return { plan: null, stopReason: 'end_turn', usage: usageOf(7) };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(garbled, { model: 'deepseek-flash' });
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderShapeError,
+    );
+    assert.equal(call, 1, 'unparseable JSON was retried, doubling the bill');
+  });
+
+  it('does not retry a truncation that happened to arrive empty', async () => {
+    // A run that hit the ceiling has told us something, and the answer to
+    // it is a smaller ask rather than the same ask again (#191 review).
+    // Retrying charged a second full-price run to hear it twice, and the
+    // reader was then told about whichever attempt came back second.
+    let call = 0;
+    const cut = {
+      id: 'cut',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'max_tokens',
+          usage: usageOf(64_000),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(cut, { model: 'deepseek-flash' });
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderTruncationError,
+    );
+    assert.equal(call, 1, 'a truncation was retried at full price');
+  });
+
+  it('does not retry a refusal that arrived empty', async () => {
+    // The other stop reason that is an answer. A model that declined will
+    // decline again, and the person is owed the refusal rather than a
+    // second bill (#191 review).
+    let call = 0;
+    const declined = {
+      id: 'declined',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'refusal',
+          refusal: { category: 'other', explanation: 'no' },
+          usage: usageOf(12),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(declined, { model: 'deepseek-flash' });
+    await assert.rejects(
+      provider.generate({ prompt: 'a bakery' }),
+      ProviderRefusalError,
+    );
+    assert.equal(call, 1, 'a refusal was retried at full price');
+  });
+
   it('names what it asked for when the shape is wrong', async () => {
     // The sibling I missed. Truncation got a vocabulary one commit before a
     // real run failed on this instead, still saying "the model returned a
@@ -202,10 +671,50 @@ describe('reporting progress while sketching', () => {
     assert.deepEqual(seen, [120, 400]);
   });
 
-  it('asks for nothing when no caller wants it', async () => {
-    const fake = client();
-    await new MockupProvider(fake).generate({ prompt: 'a bakery' });
-    assert.equal(fake.seen[0]?.onProgress, undefined);
+  it('puts the meter back to zero before retrying', async () => {
+    // What the caller holds is what the caller charges (#191 review). A
+    // reader who cancels during the retry, before it has streamed
+    // anything, would otherwise be settled from the first attempt's
+    // counts -- the very attempt `onDiscarded` had just declared absorbed.
+    //
+    // Reasoning is what makes this more than a rounding error: two thirds
+    // of a measured mockup run's output tokens were thinking (#190), and
+    // an empty reply spends the full run before returning nothing, so the
+    // stale figure being carried into the retry is close to a whole run.
+    const seen: Array<[number, number | undefined]> = [];
+    let call = 0;
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        call += 1;
+        if (call === 1) {
+          request.onProgress?.({
+            characters: 900,
+            reasoningCharacters: 15_000,
+          });
+          return {
+            plan: null,
+            emptyBody: true,
+            stopReason: 'end_turn',
+            usage: usageOf(9999),
+          };
+        }
+        return { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    await new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onProgress: ({ characters, reasoningCharacters }) =>
+        seen.push([characters, reasoningCharacters]),
+    }).generate({ prompt: 'a bakery' });
+
+    assert.equal(call, 2, 'the empty reply was not retried');
+    assert.deepEqual(
+      seen.at(-1),
+      [0, 0],
+      'the discarded attempt\u2019s counts were still standing when the retry began',
+    );
   });
 });
 

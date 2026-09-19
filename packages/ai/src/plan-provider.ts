@@ -279,31 +279,76 @@ export function maxTokensFor(model: string, outputMicroUsd?: number): number {
   return Math.min(known.maxOutputTokens, affordable, reachable);
 }
 /**
- * What three mockups may ask for, which is not what a build may ask for.
+ * A runaway guard on a mockup run, and deliberately not a budget.
  *
- * A flat number, and the only ceiling in this file that is not derived. The
- * build's is bounded by money and by the clock because a project is as
- * large as it needs to be; three sketches are bounded by what three
- * sketches are, and deriving that from a dollar reserve would let a cheap
- * model produce a hundred thousand tokens of "mockup" because it could
- * afford to.
+ * It used to be eighteen thousand, described as "three self-contained
+ * documents of roughly a page and a half each". That reading was wrong in a
+ * way no amount of care about document sizes could have fixed, and the
+ * first real run against a model showed it (#190): an ordinary bakery
+ * prompt, no style preset, no reference page, spent **16,395 tokens
+ * thinking** and 7,927 writing. Two thirds of the budget went somewhere the
+ * description never mentioned, so a ceiling derived from how big three
+ * sketches ought to be was never going to fit, at any value.
  *
- * Eighteen thousand is three self-contained documents of roughly a page and
- * a half each. At the measured rate that is about a minute, and on the
- * production model about two cents against a build's thirty -- which is the
- * whole argument for looking before building (#185).
+ * So this is no longer an estimate of anything. It is the point past which
+ * a run has clearly gone wrong and should be stopped, and it is set high
+ * and left alone on purpose.
+ *
+ * What that does and does not cost, since the two are easy to confuse.
+ * `max_tokens` is a ceiling, not a charge: a successful run still costs the
+ * tokens it used, so raising this does not make a look more expensive. What
+ * it does raise is the *reservation* held against a caller's allowance
+ * while the run is in flight, which matters to somebody near their limit
+ * and to nobody else.
+ *
+ * The figures the feature was justified with still hold, measured rather
+ * than asserted: about 69 seconds and about $0.026 on the production model,
+ * against a build's thirty cents (#185, #190).
  */
-export const MOCKUP_OUTPUT_TOKENS = 18_000;
+export const MOCKUP_OUTPUT_TOKENS = 64_000;
 
 /**
- * The mockup ceiling for one model. Still clamped to what the model can
- * emit, so a smaller model than any in the catalogue today cannot be asked
- * for more than it can produce.
+ * The mockup ceiling for one model: the flat guard, or half a build's
+ * budget, whichever is smaller.
+ *
+ * The flat guard alone is not enough, and raising it to 64,000 is what
+ * showed that (#190). A build's ceiling is derived per model, and on the
+ * smaller ones it lands near or below the guard: `claude-fable-5-1` and
+ * `gpt-6-astra` both allow 32,000 for a whole project. A look permitted
+ * 64,000 there would be allowed to cost *twice* a build, which inverts the
+ * only thing this feature is for.
+ *
+ * Half, rather than a hair under, so the promise has room to stay true
+ * rather than being technically satisfied.
+ *
+ * The cost of that is worth stating rather than burying: on a
+ * small-ceilinged model a look is bounded tightly enough that it may
+ * truncate, because two thirds of a mockup run's tokens are reasoning
+ * (#190). It fails clearly when it does. The production model is not
+ * affected -- `deepseek-flash` allows 252,000 for a build, so the guard is
+ * what binds there.
  */
-export function mockupMaxTokensFor(model: string): number {
+export function mockupMaxTokensFor(
+  model: string,
+  /**
+   * The rate this deployment will really be charged, where it overrides the
+   * catalogue's (#191 review).
+   *
+   * Without it the clamp was computed from the catalogue price while
+   * `runCeilingFor` computed the build ceiling from the effective one, so
+   * `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN` inverted the very bound this
+   * function had just promised: override flash to 50 and a build gets
+   * 32,000 while a look keeps 64,000. A ratio between two numbers has to
+   * be computed from the same inputs as both of them.
+   */
+  outputMicroUsd?: number,
+): number {
   const known = findModel(model);
   if (!known) return MOCKUP_OUTPUT_TOKENS;
-  return Math.min(known.maxOutputTokens, MOCKUP_OUTPUT_TOKENS);
+  return Math.min(
+    MOCKUP_OUTPUT_TOKENS,
+    Math.floor(maxTokensFor(model, outputMicroUsd) / 2),
+  );
 }
 
 export const DEFAULT_EFFORT: PlanEffort = 'high';

@@ -124,7 +124,9 @@ describe('readCompletionStream', () => {
 
   it('reports progress as the text arrives', async () => {
     const seen: number[] = [];
-    await readCompletionStream(sse(contentFrames('abcd')), (n) => seen.push(n));
+    await readCompletionStream(sse(contentFrames('abcd')), (p) =>
+      seen.push(p.characters),
+    );
     assert.deepEqual(seen, [1, 2, 3, 4]);
   });
 
@@ -253,6 +255,55 @@ describe('createDeepseekPlanClient', () => {
       completion.usage.inputTokens > 100,
       'the appended instruction is still uncounted',
     );
+  });
+
+  it('counts reasoning in the estimate, because the provider bills it', async () => {
+    // The omission #191's review found, and the same one as pricing a
+    // cancelled run on the answer alone: two thirds of a measured mockup
+    // run's output tokens were thinking (#190), so a stream that ended
+    // without its usage chunk settled a reasoning-heavy reply at a third
+    // of what it cost.
+    const reasoning = `data: ${JSON.stringify({
+      choices: [{ delta: { reasoning_content: 'r'.repeat(800) } }],
+    })}\n`;
+    const { impl } = fetchReturning(
+      sse([reasoning, ...contentFrames('x'.repeat(400))]),
+    );
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.usage.outputTokens, (400 + 800) / 4);
+  });
+
+  it('settles a reasoning-only reply at what the thinking cost', async () => {
+    // The worst case of the same defect, and the one this commit's retry
+    // makes routine: an empty reply that spent a minute thinking used to
+    // estimate at zero output tokens.
+    const reasoning = `data: ${JSON.stringify({
+      choices: [{ delta: { reasoning_content: 'r'.repeat(2_000) } }],
+    })}\n`;
+    const { impl } = fetchReturning(sse([reasoning, ...contentFrames('')]));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.emptyBody, true);
+    assert.equal(completion.usage.outputTokens, 500);
   });
 
   it('refuses to call out without a key, rather than sending an empty header', async () => {
@@ -519,18 +570,91 @@ describe('what the stream does not show', () => {
     assert.equal(result.text, '{}');
   });
 
-  it('keeps reasoning out of the progress meter', async () => {
-    // `onProgress` means "how much of the answer exists so far". Folding
-    // thinking into it would make a different number wrong.
-    const seen: number[] = [];
+  it('keeps reasoning out of the answer count but still reports it', async () => {
+    // `characters` means "how much of the answer exists so far", so
+    // thinking must never inflate it. It is reported all the same, on its
+    // own field and as it arrives, because a run cancelled before the
+    // first content delta has streamed nothing else and would otherwise
+    // settle at zero output tokens (#190).
+    const seen: { characters: number; reasoningCharacters: number }[] = [];
     await readCompletionStream(
       stream([
         'data: {"choices":[{"delta":{"reasoning_content":"aaaaaaaaaa"}}]}\n',
         'data: {"choices":[{"delta":{"content":"12345"}}]}\n',
         'data: [DONE]\n',
       ]),
-      (characters) => seen.push(characters),
+      (progress) => seen.push(progress),
     );
-    assert.deepEqual(seen, [5]);
+    assert.deepEqual(seen, [
+      { characters: 0, reasoningCharacters: 10 },
+      { characters: 5, reasoningCharacters: 10 },
+    ]);
+  });
+});
+
+/**
+ * The one fact only this layer can state (#191 review).
+ *
+ * Above it, an empty body and JSON that would not parse are both a null
+ * plan, and the retry that could not tell them apart asked a model to
+ * repeat a disagreement about shape at full price. The client knows which
+ * it saw, so the client says so.
+ */
+describe('saying whether anything came back at all', () => {
+  it('marks a reply with no body as empty', async () => {
+    // DeepSeek's JSON mode documents that it may occasionally return empty
+    // content, and a real run did exactly that (#190).
+    const { impl } = fetchReturning(sse(contentFrames('')));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.plan, null);
+    assert.equal(completion.emptyBody, true);
+  });
+
+  it('does not call unparseable json an empty reply', async () => {
+    // The distinction the retry rests on. Both arrive as a null plan, and
+    // only one of them is worth asking again for.
+    const { impl } = fetchReturning(sse(contentFrames('{"mockups": [')));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.plan, null, 'that parsed, so it proves nothing');
+    assert.equal(completion.emptyBody, undefined);
+  });
+
+  it('does not call whitespace a body', async () => {
+    // A stream that produced only formatting has produced nothing, and
+    // charging a reader for it because it is not literally zero-length
+    // would be the same defect wearing a space.
+    const { impl } = fetchReturning(sse(contentFrames('  \n ')));
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+
+    assert.equal(completion.emptyBody, true);
   });
 });

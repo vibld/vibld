@@ -61,6 +61,21 @@ export interface PlanRequest {
 export interface PlanProgress {
   /** Characters of the plan written so far. Not tokens; no tokenizer here. */
   characters: number;
+  /**
+   * Characters of reasoning streamed so far, where the provider streams it.
+   *
+   * Separate from `characters`, which means "how much of the answer
+   * exists": a meter that folded thinking in would report progress towards
+   * a document that has not been started. But a caller settling a
+   * cancelled run needs both, because reasoning is billed and was two
+   * thirds of a measured run's output tokens (#190).
+   *
+   * The case that makes this matter: a reasoning model thinks before it
+   * writes, so a run cancelled early has streamed reasoning and no answer
+   * at all. Priced on `characters` alone that settles at zero output
+   * tokens, for a minute of billed thinking.
+   */
+  reasoningCharacters?: number;
 }
 
 /**
@@ -131,6 +146,20 @@ export interface PlanCompletion {
   usage: PlanUsage;
   /** Provider-specific spend the usage figures do not explain. */
   diagnostics?: PlanDiagnostics;
+  /**
+   * The provider sent no body at all, as distinct from sending one that
+   * could not be parsed (#191 review).
+   *
+   * `plan` is null for both, and for a truncation and a refusal besides, so
+   * nothing above the client can tell those apart. That mattered as soon as
+   * something wanted to retry only the first: a predicate over `plan`
+   * retried truncations and refusals too, doubling the spend and hiding the
+   * answer the run had actually given.
+   *
+   * Set only by a client that can tell. Absent means "this client does not
+   * distinguish", which is not the same as false.
+   */
+  emptyBody?: boolean;
 }
 
 export interface PlanClient {

@@ -421,6 +421,25 @@ export async function settleBudget(
   // resumes without it, and the type would be lying about that. Only an
   // explicit false is evidence.
   providerRan: boolean | undefined,
+  /**
+   * What the account-wide reservation settles at, where that is not what
+   * the caller is charged (#191 review).
+   *
+   * The two layers answer different questions, and a mockup run that
+   * absorbs a discarded empty reply is where they part company. The
+   * caller pays for the attempt they got. The account ledger bounds what
+   * this deployment spends in a day, so it must hold the attempt that was
+   * absorbed too, or the ceiling drifts by one whole attempt every time
+   * the provider defect fires.
+   *
+   * What this reservation covers, rather than the run's whole cost, and
+   * the difference is not pedantry. A caller holding a second reservation
+   * for a retry settles that one itself, and an empty reply whose retry
+   * crosses UTC midnight puts the two on different days: each has to
+   * carry the attempt it actually admitted, or one day's ledger forgets a
+   * real request while another is pushed past a ceiling it never spent.
+   */
+  accountMicroUsd?: number,
 ): Promise<number> {
   // Three cases, not two, and the third used to be charged as if it were
   // the second.
@@ -450,10 +469,16 @@ export async function settleBudget(
   // Both layers were reserved together (index.ts's `reserveBudget`), so both
   // settle together -- the account-wide ledger must reflect the same run at
   // the same cost, or its ceiling stops meaning what it says.
+  //
+  // The same cost unless the caller says otherwise, which is the one way
+  // the two layers may differ: the caller's allowance is what they owe,
+  // the account ceiling is what this deployment spent.
   if (params.accountReservationId !== undefined) {
     await ledger
       .getByName(ACCOUNT_BUDGET_KEY)
-      .settle(params.accountReservationId, actual);
+      .settle(params.accountReservationId, accountMicroUsd ?? actual);
   }
+  // The caller's figure, which is what every caller logs and shows. The
+  // absorbed part is deliberately not in it: it is not theirs.
   return actual;
 }

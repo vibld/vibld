@@ -193,16 +193,37 @@ describe('what a mockup prompt may carry', () => {
 });
 
 describe('carrying a chosen direction into the build', () => {
-  it('can carry a mockup as large as this system can produce', () => {
-    // The cap is derived from the mockup budget rather than picked: three
-    // mockups share MOCKUP_OUTPUT_TOKENS, so one is at most a third of it,
-    // at roughly four characters a token. A number chosen by eye would
-    // either refuse a mockup this system itself produced, or promise to
-    // carry one larger than it can make.
-    const largestOneMockup = Math.floor((MOCKUP_OUTPUT_TOKENS / 3) * 4);
-    assert.ok(
-      MAX_CHOSEN_MOCKUP_CHARS >= largestOneMockup,
-      `the cap (${MAX_CHOSEN_MOCKUP_CHARS}) refuses a mockup this system can produce (${largestOneMockup})`,
+  it('can carry any mockup the schema lets through', () => {
+    // This used to derive the cap from the token budget: three mockups
+    // share MOCKUP_OUTPUT_TOKENS, so one is a third of it at four
+    // characters a token. Both halves of that are now measured false
+    // (#190). Two thirds of a mockup run's tokens are reasoning, so the
+    // documents never had the budget the arithmetic assigned them, and the
+    // ceiling is a runaway guard rather than a budget at all.
+    //
+    // What actually guarantees the build can carry a chosen direction is
+    // the schema: it refuses a document larger than this where the
+    // document is produced, rather than accepting one and failing later
+    // after somebody has paid for the run and chosen from it. So that is
+    // what this asserts, and it holds whatever the ceiling is set to.
+    const oversize = mockup({
+      html: 'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS + 1),
+    });
+    assert.equal(
+      MockupSetSchema.safeParse({ mockups: [oversize, oversize, oversize] })
+        .success,
+      false,
+      'the schema would hand the build a document it has agreed to carry',
+    );
+    const atTheLimit = mockup({
+      html: 'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS),
+    });
+    assert.equal(
+      MockupSetSchema.safeParse({
+        mockups: [atTheLimit, atTheLimit, atTheLimit],
+      }).success,
+      true,
+      'the schema refuses a document the build would have accepted',
     );
   });
 });

@@ -134,7 +134,7 @@ export function runCeilingFor(
     prices,
     maxTokens:
       kind === 'mockups'
-        ? mockupMaxTokensFor(model)
+        ? mockupMaxTokensFor(model, prices.outputMicroUsd)
         : maxTokensFor(model, prices.outputMicroUsd),
   };
 }

@@ -188,11 +188,13 @@ describe('how a route learns the caller has gone', () => {
     // Source-level and weaker than a behavioural test, as above. The point
     // is which figure reaches `cancelledUsage`: `inputChars` is the
     // reservation's bound and `sentChars` is the prompt that really went
-    // (#189 review).
+    // (#189 review). The reasoning count joined it in #190, because a run
+    // stopped before the first content delta had streamed nothing else and
+    // settled at zero output tokens.
     const source = await readFile(workerSource(), 'utf8');
     assert.match(
       source,
-      /cancelledUsage\(streamedCharacters, maxTokens, sentChars\)/,
+      /cancelledUsage\(\s*streamedCharacters,\s*maxTokens,\s*sentChars,\s*reasoningCharacters,\s*\)/,
       'the cancellation settlement is reading the reservation bound again',
     );
   });

@@ -108,7 +108,10 @@ interface StreamedChunk {
  */
 export async function readCompletionStream(
   body: ReadableStream<Uint8Array>,
-  onProgress?: (characters: number) => void,
+  onProgress?: (progress: {
+    characters: number;
+    reasoningCharacters: number;
+  }) => void,
 ): Promise<{
   text: string;
   finishReason: string | null;
@@ -156,7 +159,7 @@ export async function readCompletionStream(
         const delta = choice?.delta?.content;
         if (typeof delta === 'string') {
           text += delta;
-          onProgress?.(text.length);
+          onProgress?.({ characters: text.length, reasoningCharacters });
         }
         // Counted, not accumulated, and deliberately not reported through
         // `onProgress`: that meter means "how much of the answer exists so
@@ -165,6 +168,13 @@ export async function readCompletionStream(
         const reasoning = choice?.delta?.reasoning_content;
         if (typeof reasoning === 'string') {
           reasoningCharacters += reasoning.length;
+          // Reported as it arrives, not only alongside the answer. A
+          // reasoning model thinks first, so a run cancelled early has
+          // streamed nothing but this, and a caller told only about the
+          // answer would settle a minute of billed thinking at zero
+          // (#190). `characters` is unchanged here, so the meter still
+          // means what it meant.
+          onProgress?.({ characters: text.length, reasoningCharacters });
         }
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         // Usage arrives on its own final chunk, whose `choices` is empty.
@@ -269,7 +279,7 @@ export function createDeepseekPlanClient(
         await readCompletionStream(
           response.body,
           request.onProgress
-            ? (characters) => request.onProgress?.({ characters })
+            ? (progress) => request.onProgress?.(progress)
             : undefined,
         );
 
@@ -286,6 +296,10 @@ export function createDeepseekPlanClient(
 
       return {
         plan: readJsonPlan(text),
+        // Said here because here is the only place that knows. Above this,
+        // an empty body and unparseable JSON are both a null plan (#191
+        // review).
+        ...(text.trim().length === 0 ? { emptyBody: true } : {}),
         stopReason: mapFinishReason(finishReason),
         ...(mapFinishReason(finishReason) === 'refusal'
           ? { refusal: { category: 'content_filter', explanation: null } }
@@ -294,7 +308,21 @@ export function createDeepseekPlanClient(
           // Estimated only when the stream omitted usage. Over-reporting is
           // the safe direction for a budget; under-reporting is not.
           inputTokens: usage?.prompt_tokens ?? estimateTokens(promptCharacters),
-          outputTokens: usage?.completion_tokens ?? estimateTokens(text.length),
+          // Reasoning counted in, because DeepSeek bills it as output
+          // (#191 review). This estimate is reached only when a stream ends
+          // without its terminal usage chunk, and on that path the answer's
+          // length alone is not the run: two thirds of a measured mockup
+          // run's output tokens were thinking (#190), so a reasoning-heavy
+          // reply settled at a third of its cost, and the empty reply this
+          // same commit retries settled at nothing at all.
+          //
+          // The stream already counts these characters for the progress
+          // meter. Not counting them here was the same omission as pricing
+          // a cancelled run on `characters` alone, in the one place that
+          // had not been corrected yet.
+          outputTokens:
+            usage?.completion_tokens ??
+            estimateTokens(text.length + reasoningCharacters),
           cacheReadInputTokens: usage?.prompt_cache_hit_tokens ?? 0,
           // Same as OpenAI: caching is automatic, the write is not charged,
           // and `prompt_tokens` above already includes the hit tokens.

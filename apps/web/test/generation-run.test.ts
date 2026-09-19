@@ -263,6 +263,83 @@ describe('settleBudget', () => {
     assert.equal(actual, 10 * 5 + 10 * 25);
   });
 
+  it('settles the account layer at what its own reservation covered', async () => {
+    // The two layers answer different questions, and #191's review found
+    // where they part company. A mockup run absorbs a discarded empty
+    // reply so the reader does not pay for a provider defect; the account
+    // reservation taken at admission covered that attempt, so that
+    // attempt's cost is what it settles at. The retry has a reservation
+    // of its own, and the route settles that one with the reader's
+    // figure.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+      7_500,
+    );
+
+    assert.equal(actual, 100 * 5 + 200 * 25, 'the reader was billed for it');
+    assert.notEqual(
+      actual,
+      7_500,
+      'the two figures are the same, so this proves nothing',
+    );
+    assert.deepEqual(calls, [
+      { name: 'user_abc', id: 11, actual },
+      { name: '__account__', id: 22, actual: 7_500 },
+    ]);
+  });
+
+  it('leaves the two layers equal when the caller says nothing', async () => {
+    // The ordinary run, stated so the parameter above cannot quietly
+    // change what every other settlement charges the account ledger.
+    const { ledger, calls } = fakeLedger();
+    const actual = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+    );
+
+    assert.deepEqual(calls, [
+      { name: 'user_abc', id: 11, actual },
+      { name: '__account__', id: 22, actual },
+    ]);
+  });
+
+  it('honours a zero the caller asked for', async () => {
+    // Not `|| actual`: an account reservation whose attempt really cost
+    // nothing has to settle at nothing, and a falsy check would quietly
+    // charge it the reader's figure instead.
+    const { ledger, calls } = fakeLedger();
+    await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+      0,
+    );
+
+    assert.equal(calls[1]?.actual, 0);
+  });
+
   it('skips a layer whose reservation never got an id', async () => {
     const { ledger, calls } = fakeLedger();
     await settleBudget(

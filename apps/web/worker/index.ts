@@ -49,8 +49,10 @@ import {
 } from './referral-handlers.ts';
 import {
   ACCOUNT_BUDGET_KEY,
+  NOTHING_TO_BILL,
   cancelledUsage,
   dayKey,
+  microUsdOf,
   worstCaseMicroUsd,
 } from './spend.ts';
 import {
@@ -434,6 +436,31 @@ function topupKeyFor(userId: string): string {
 }
 
 /**
+ * The account-wide daily ceiling, held for one run's worst case.
+ *
+ * Its own function because a second caller appeared (#191 review): a
+ * mockup run that retries an empty reply asks for this again before the
+ * second attempt goes out, and a reservation the Worker spells twice is a
+ * ceiling that can be enforced two different ways.
+ *
+ * Unbounded in-flight on purpose: concurrency is the per-user layer's job.
+ * This layer enforces spend only.
+ */
+async function reserveAccount(
+  env: Env,
+  worstCase: number,
+  now: number,
+): Promise<Reservation> {
+  const accountCeiling = positiveInt(
+    env.VIBLD_ACCOUNT_DAILY_MICRO_USD,
+    DEFAULT_ACCOUNT_DAILY_MICRO_USD,
+  );
+  return env
+    .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
+    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
+}
+
+/**
  * Reserves against every ceiling before a run may start: the account-wide
  * one first (cheaper to check, and failing it means nothing else needs
  * touching), then the caller's own monthly tier allowance (L35-L39), then --
@@ -458,15 +485,7 @@ async function reserveBudget(
   { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
 > {
   const ledger = env.USER_BUDGET!;
-  const accountCeiling = positiveInt(
-    env.VIBLD_ACCOUNT_DAILY_MICRO_USD,
-    DEFAULT_ACCOUNT_DAILY_MICRO_USD,
-  );
-  // Unbounded in-flight on purpose: concurrency is the per-user layer's job
-  // below. This layer enforces spend only.
-  const account = await ledger
-    .getByName(ACCOUNT_BUDGET_KEY)
-    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
+  const account = await reserveAccount(env, worstCase, now);
   if (!account.verdict.allow) {
     return { ok: false, verdict: account.verdict };
   }
@@ -1550,6 +1569,46 @@ async function handleMockups(
     // measurement of a cancelled run there is, and without it settlement
     // falls back to the full reservation (#189 review).
     let streamedCharacters = 0;
+    // Counted beside it rather than added into it (#190). A reasoning model
+    // thinks before it writes, so a run stopped in its first seconds has
+    // streamed nothing but this, and settling on the answer alone priced a
+    // minute of billed thinking at zero.
+    let reasoningCharacters = 0;
+    /*
+     * What the retry spent that this reader is not being charged for
+     * (#191 review).
+     *
+     * The provider absorbs one empty reply on the reader's behalf, and
+     * the first version of that let the money vanish: settlement saw only
+     * the second attempt, so the account-wide daily ceiling never learned
+     * that the first had happened. One admitted request could spend twice
+     * what it reserved, and every empty reply moved the ledger further
+     * from what the day had really cost.
+     */
+    /*
+     * Undefined until an attempt is absorbed, and a number after, even
+     * when that number is zero (#191 review).
+     *
+     * Not a count that starts at zero, because zero and "there was no
+     * discarded attempt" then look identical, and they settle
+     * differently: one says this reservation covered an attempt that cost
+     * nothing, the other says it covered the run the reader is being
+     * charged for. Collapsing them charged the retry to both
+     * reservations.
+     *
+     * Which is the falsy trap `settleBudget` was just taught to avoid,
+     * moved to its call site. Keeping the presence of the attempt and its
+     * price in one variable is what makes it unrepresentable rather than
+     * merely avoided.
+     */
+    let absorbedMicroUsd: number | undefined;
+    // The hold taken for the second attempt, so the ceiling is enforced
+    // before it is sent rather than only reported after.
+    let retryHold: Reservation | undefined;
+    // Whether that hold was refused, which decides what the reader owes:
+    // the run then consists of one attempt, and that attempt is the one
+    // being absorbed (#191 review).
+    let retryRefused = false;
     try {
       const provider = new MockupProvider(
         createPlanClient(env, effectiveModel),
@@ -1566,11 +1625,12 @@ async function handleMockups(
           // back to the Worker polling it (#183). Here the call is in this
           // scope, so the count the client streams is the count the reader
           // sees.
-          onProgress: ({ characters }) => {
+          onProgress: ({ characters, reasoningCharacters: reasoning }) => {
             // Recorded before the cancelled check, not after: the last
             // count is exactly the one a cancelled run has to be settled
             // from, and returning early would throw it away.
             streamedCharacters = characters;
+            if (reasoning !== undefined) reasoningCharacters = reasoning;
             if (cancelled) return;
             void write(
               encodeEvent('progress', {
@@ -1582,6 +1642,66 @@ async function handleMockups(
           },
           onPromptChars: (characters) => {
             sentChars = characters;
+          },
+          /*
+           * The absorbed attempt, recorded and then permitted or refused
+           * (#191 review).
+           *
+           * Recorded first, because it has already happened: the money is
+           * spent whatever is decided next, and the account ledger is
+           * where this deployment's day is counted.
+           *
+           * Then the ceiling is asked about the second attempt before it
+           * goes out. Refusing costs this reader only the free retry --
+           * they were going to be told the run failed either way, since
+           * the first attempt came back empty. Spending past the ceiling
+           * because nobody was being billed would cost the deployment
+           * money it had decided not to spend.
+           *
+           * A ledger that throws refuses too. This path exists to bound
+           * spend, and "the ceiling cannot be read" is not a reason to
+           * spend again.
+           */
+          onDiscarded: async (spent) => {
+            absorbedMicroUsd =
+              (absorbedMicroUsd ?? 0) + microUsdOf(spent, prices);
+            try {
+              /*
+               * Reconcile the attempt that is over before asking to
+               * hold for the next one (#191 review).
+               *
+               * An unsettled reservation counts at its worst case, so
+               * without this the day sees two whole worst cases for a
+               * run that will spend one and a bit: a 100 ceiling, a 60
+               * worst case and a first attempt that really cost 10
+               * refuses a retry whose true maximum is 70. That refusal
+               * is safe in the direction of money and wrong in the
+               * direction of the reader, who is failed for a provider
+               * defect while their deployment had room.
+               *
+               * The figure is not a guess. This attempt is finished and
+               * priced, which is exactly the condition `settle` exists
+               * for, and settling it again at the end with the same
+               * figure is a no-op: `UserBudget.settle` writes whatever
+               * the row's state, and the two writes carry the same
+               * value.
+               */
+              if (settleParams.accountReservationId !== undefined) {
+                await env
+                  .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
+                  .settle(settleParams.accountReservationId, absorbedMicroUsd);
+              }
+              retryHold = await reserveAccount(env, worstCase, Date.now());
+            } catch (error) {
+              // Either half failing refuses the retry: an unreconciled
+              // reservation and an unread ceiling are both "the ledger
+              // did not answer", and neither is a reason to spend again.
+              console.error('mockup retry hold failed', error);
+              retryRefused = true;
+              return false;
+            }
+            retryRefused = !retryHold.verdict.allow;
+            return retryHold.verdict.allow;
           },
           ...(style.value ? { style: style.value } : {}),
         },
@@ -1626,21 +1746,62 @@ async function handleMockups(
         // unknown charges the whole reservation for pressing Cancel
         // (#189 review). Only when the provider was actually asked --
         // stopping before that still costs nothing.
-        const settled =
-          usage ??
-          (cancelled && providerRan
-            ? cancelledUsage(streamedCharacters, maxTokens, sentChars)
-            : undefined);
+        // Ahead of the cancelled branch on purpose (#191 review). A
+        // refused retry never reaches the progress reset, so the streamed
+        // counts still belong to the absorbed attempt, and settling from
+        // them would bill the reader for it by the other door.
+        const settled = usage
+          ? usage
+          : retryRefused
+            ? NOTHING_TO_BILL
+            : cancelled && providerRan
+              ? cancelledUsage(
+                  streamedCharacters,
+                  maxTokens,
+                  sentChars,
+                  reasoningCharacters,
+                )
+              : undefined;
         const actual = await settleBudget(
           env.USER_BUDGET!,
           settleParams,
           settled,
           providerRan,
+          // Each account reservation carries the attempt it admitted
+          // (#191 review). The first one covers the first attempt, so
+          // when that attempt was absorbed, its cost is what this
+          // reservation settles at rather than the reader's charge.
+          // Undefined when nothing was absorbed, which is every ordinary
+          // run: the two layers then settle at the same figure, as they
+          // always have. Passed straight through, zero included, because
+          // the variable already says which case this is.
+          absorbedMicroUsd,
         );
+        // And the hold taken for the retry carries the retry, which is
+        // exactly what the reader was charged for.
+        //
+        // Settling it at nothing and adding both attempts to the first
+        // reservation was the earlier shape, and it broke at midnight: a
+        // run whose retry crosses into the next day holds that day's
+        // ceiling, so a zero there forgets a real request while the day
+        // before is pushed past a ceiling it never spent. Each
+        // reservation is settled on the day it was taken.
+        if (retryHold?.id !== undefined) {
+          await env
+            .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
+            .settle(retryHold.id, actual);
+        }
         console.log(
           JSON.stringify({
             event: 'mockups.settled',
-            ...(usage ? {} : { cancelled, streamedCharacters }),
+            ...(usage
+              ? {}
+              : {
+                  cancelled,
+                  retryRefused,
+                  streamedCharacters,
+                  reasoningCharacters,
+                }),
             userId: principal.userId,
             ...(principal.email ? { email: principal.email } : {}),
             model: effectiveModel,
@@ -1652,6 +1813,11 @@ async function handleMockups(
             inputTokens: settled?.inputTokens ?? 0,
             outputTokens: settled?.outputTokens ?? 0,
             microUsd: actual,
+            // Only when there was one, so the ordinary line stays the
+            // ordinary line and a discarded attempt is findable -- which
+            // includes one that priced at nothing, since how often the
+            // defect fires is the reason this field exists.
+            ...(absorbedMicroUsd !== undefined ? { absorbedMicroUsd } : {}),
             elapsedMs: Date.now() - waitingSince,
           }),
         );

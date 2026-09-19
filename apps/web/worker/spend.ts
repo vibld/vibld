@@ -198,6 +198,29 @@ export function worstCaseMicroUsd(
 }
 
 /**
+ * A run whose whole cost somebody else is carrying (#191 review).
+ *
+ * `settleBudget` charges the full worst case for a run that happened and
+ * reported no usage, which is right when the cost is unknown and wrong
+ * here, where it is known and has already been counted somewhere else. A
+ * mockup run whose retry was refused spent exactly one attempt, that
+ * attempt was absorbed, and the account ledger was told about it at the
+ * moment it was absorbed. Billing the reader the worst case on top would
+ * charge them a whole generation for a provider defect they were
+ * explicitly being spared.
+ *
+ * Zero tokens rather than no usage at all, because the difference between
+ * them is the difference between "cost nothing the caller owes" and "cost
+ * something nobody measured".
+ */
+export const NOTHING_TO_BILL = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheWriteInputTokens: 0,
+} as const;
+
+/**
  * What a run the caller stopped should be charged (#189 review).
  *
  * Aborting the model call makes it reject, so the provider never reports
@@ -224,24 +247,44 @@ export function worstCaseMicroUsd(
  *   uses. That is a rough number, and HTML can run denser than four, so it
  *   can under-count.
  *
- * Under-counting a cancelled run is the direction to err in. The upstream
- * cost stops when the connection drops, so the real bill is small; and a
- * cancellation that over-charges deters the one behaviour that saves money.
- * Clamped at `maxOutputTokens` regardless, so a settlement can never exceed
- * the reservation it is closing.
+ * That second half counted only the *answer* until #190, which made it
+ * wrong by far more than density. A reasoning model bills its thinking as
+ * output and thinks before it writes: a measured run spent 16,395 tokens
+ * reasoning and 7,927 writing, two thirds of the bill in a place no
+ * character count was looking. So a run cancelled in its first seconds --
+ * the common case, and the one the button exists for -- had streamed no
+ * answer at all and settled at **zero output tokens**, for a minute of
+ * billed thinking.
+ *
+ * Both are counted now, because the client measures both. Reasoning is
+ * passed separately rather than folded into `streamedCharacters` by the
+ * caller, so the meter the reader watches keeps meaning "how much of the
+ * answer exists".
+ *
+ * Under-counting a cancelled run is still the direction to err in, and
+ * four characters a token still errs that way: the measured run ran nearer
+ * three. The upstream cost stops when the connection drops, so the real
+ * bill is small; and a cancellation that over-charges deters the one
+ * behaviour that saves money. Clamped at `maxOutputTokens` regardless, so a
+ * settlement can never exceed the reservation it is closing.
  */
 export function cancelledUsage(
   streamedCharacters: number,
   maxOutputTokens: number,
   /** Characters the caller really sent, not the bound they were allowed. */
   inputChars: number,
+  /**
+   * Characters of reasoning the provider streamed, where it streams any.
+   * Zero for a provider that reports none, which is not the same as a
+   * provider that did none -- but it is the only honest number available.
+   */
+  reasoningCharacters = 0,
 ): Required<TokenUsage> {
+  const output =
+    Math.max(0, streamedCharacters) + Math.max(0, reasoningCharacters);
   return {
     inputTokens: Math.ceil(Math.max(0, inputChars) / 4),
-    outputTokens: Math.min(
-      maxOutputTokens,
-      Math.ceil(Math.max(0, streamedCharacters) / 4),
-    ),
+    outputTokens: Math.min(maxOutputTokens, Math.ceil(output / 4)),
     // Explicit zeroes rather than omitted, and `Required` rather than
     // `TokenUsage`, because this is handed to `settleBudget`, which takes
     // the provider's own `PlanUsage` where both fields are mandatory. The
