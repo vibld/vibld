@@ -5,6 +5,7 @@
  * knows the shape of either internal API for auto-publish.
  */
 
+import { budgeted, withinDeadline } from '@vibld/core';
 import type { ProjectFile } from '@vibld/core';
 
 /** The slice of a Workers service binding this file calls. Same shape preview-client.ts already declares. */
@@ -338,4 +339,93 @@ export function releaseProject(
   by: string,
 ): Promise<HoldResult> {
   return holdCall(env, '/internal/release', { slug, by });
+}
+
+/**
+ * How long one call to the build service may stay pending (#196 review).
+ *
+ * `build` catches a rejection and reports `unavailable`, which claims
+ * nothing about the project. A call that never rejects never reaches that
+ * catch: the Durable Object or its storage stalls, the await sits there,
+ * and the enclosing step eventually times out, which fails a Workflow whose
+ * project was already accepted, promoted, settled and billed. The caller
+ * loses the run over a build they never asked for. The catch was the right
+ * answer to the wrong half of the problem.
+ *
+ * Longer than a build's own wall clock in `apps/preview`, deliberately: the
+ * service bounds its whole build and answers within that, so anything
+ * beyond it is the service not answering rather than a build still working.
+ * Cutting off a build that was about to reply would turn a real verdict
+ * into `unavailable` and lose the repair this feature exists to buy.
+ *
+ * `repair-timeout.test.ts` checks that against `apps/preview`'s real
+ * number, and checks that two of these plus the rebuild wait still fit
+ * inside `REPAIR_BUILD_ALLOWANCE_MS`.
+ */
+export const BUILD_CALL_TIMEOUT_MS = 13 * 60_000;
+
+export const REBUILD_WAIT_INTERVAL_MS = 5_000;
+export const REBUILD_WAIT_ATTEMPTS = 6;
+export const REBUILD_WAIT_BUDGET_MS =
+  REBUILD_WAIT_INTERVAL_MS * REBUILD_WAIT_ATTEMPTS;
+
+/**
+ * One call to the build service, bounded, where no answer and a rejection
+ * are the same fact (#196 review).
+ *
+ * A pending promise reaches no catch, so the deadline is what turns a
+ * build service that will not answer into one that says nothing about the
+ * project, which is what a service that rejects already said. Both land
+ * on `undefined`, and the caller reports `unavailable` rather than failing
+ * a Workflow whose project was accepted, promoted, settled and billed.
+ *
+ * `within` is how much of a caller's budget is left, and the smaller of
+ * the two bounds wins. Separated from the step so a test can hand it a
+ * call that never answers and watch it give up: inside the step it closed
+ * over a service binding, and nothing could reach it.
+ */
+export async function buildWithin<T>(
+  run: () => Promise<T>,
+  within: number,
+): Promise<T | undefined> {
+  try {
+    return await withinDeadline(run(), budgeted(BUILD_CALL_TIMEOUT_MS, within));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Asking a busy workspace again, out of one budget for the asking
+ * (#196 review).
+ *
+ * A function rather than a loop inside the step, for the reason four other
+ * findings on this pull request ended the same way: a test that cannot
+ * call the thing ends up measuring the text around it. The build it asks
+ * with is unreachable from a test (it holds a service binding), so the
+ * budget arithmetic had nothing exercising it and the fake could not even
+ * observe the cap each call was given. Here `ask` is a parameter and the
+ * cap is its argument.
+ *
+ * The count bounds the sleeping, the clock bounds the rest, and the last
+ * check is why both are needed: nothing is started that the budget cannot
+ * also finish, because sleeping out the last of it and asking again spends
+ * the wait to get `unavailable` for it, which is a worse answer than the
+ * refusal already in hand.
+ */
+export async function askWhileBusy<T>(
+  ask: (within: number) => Promise<T>,
+  busy: (answer: T) => boolean,
+  clock: { wait: (ms: number) => Promise<void>; now: () => number },
+): Promise<T> {
+  const deadline = clock.now() + BUILD_CALL_TIMEOUT_MS + REBUILD_WAIT_BUDGET_MS;
+  const left = () => deadline - clock.now();
+  let answer = await ask(left());
+  for (let asked = 0; asked < REBUILD_WAIT_ATTEMPTS; asked += 1) {
+    if (!busy(answer)) break;
+    if (left() <= REBUILD_WAIT_INTERVAL_MS) break;
+    await clock.wait(REBUILD_WAIT_INTERVAL_MS);
+    answer = await ask(left());
+  }
+  return answer;
 }

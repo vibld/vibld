@@ -3,9 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
   PartialSettlement,
-  REBUILD_WAIT_ATTEMPTS,
   verifyAndRepair,
 } from '../worker/generation-run.ts';
+import { REBUILD_WAIT_ATTEMPTS } from '../worker/publish-client.ts';
 import type {
   GenerationWorkflowEnv,
   WorkflowParams,

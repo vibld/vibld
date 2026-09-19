@@ -8,7 +8,7 @@ import {
   REBUILD_WAIT_ATTEMPTS,
   REBUILD_WAIT_BUDGET_MS,
   REBUILD_WAIT_INTERVAL_MS,
-} from '../worker/generation-run.ts';
+} from '../worker/publish-client.ts';
 
 /**
  * That asking a busy workspace again is bounded as a sequence, not only

@@ -5,6 +5,7 @@ import {
   resolveModel,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
+import { sleep } from '@vibld/core';
 import type { RunRefusal } from '@vibld/core';
 
 import {
@@ -92,8 +93,10 @@ import {
 } from './preview-client.ts';
 import type { ServiceBinding } from './preview-client.ts';
 import {
+  askWhileBusy,
   autoPublishConfigured,
   buildProject,
+  buildWithin,
   publishProject,
   publishServiceConfigured,
   holdProject,
@@ -1891,7 +1894,34 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     return json({ error: '"slug" must be a non-empty string.' }, 400);
   }
 
-  const built = await buildProject(env, principal.userId, parsed.value);
+  // Asked again while the workspace is busy, on the same budget the
+  // repair's rebuild uses (#196 review). A verification build returns as
+  // soon as it has an answer and tears its container down afterwards, on
+  // `ctx.waitUntil`, holding that user's build lock for as long as the
+  // destroy takes. Publishing straight after a generation therefore met a
+  // `busy` refusal from a build that was already finished, and this route
+  // turned it into a 422 that reads as "your project does not build".
+  //
+  // Bounded per call as well as in total, because a sequence of bounded
+  // calls is not a bounded sequence: `buildWithin` gives each attempt what
+  // is left of the budget rather than its own full thirteen minutes.
+  const built = await askWhileBusy(
+    (within) =>
+      buildWithin(
+        () => buildProject(env, principal.userId, parsed.value),
+        within,
+      ),
+    (answer) => Boolean(answer && !answer.ok && answer.reason === 'busy'),
+    { wait: sleep, now: Date.now },
+  );
+  // A build service that never answered says nothing about the project, so
+  // it is not a 422. Same reading the repair step takes of the same fact.
+  if (!built) {
+    return json(
+      { error: 'The build service is unavailable. Try again shortly.' },
+      503,
+    );
+  }
   if (!built.ok) return json({ error: built.error }, 422);
 
   // One project per Clerk user, same convention `handlePlan` already uses --
