@@ -336,6 +336,35 @@ describe('counting the builds too', () => {
     );
   });
 
+  it('waits for a slot no longer than the build itself may take', () => {
+    // #196 review. Awaited directly, a stalled `enqueue` kept the build
+    // alive past its own deadline: the lock expired, a successor took the
+    // sandbox, and when this finally returned the next thing it did was
+    // empty that successor's workspace.
+    assert.match(
+      code,
+      /slot = await bounded\(/,
+      'a build can wait for admission for longer than it may exist',
+    );
+  });
+
+  it('gives back a ticket that arrives after it stopped waiting', () => {
+    // The cost of bounding the admission, and it is not a small one:
+    // `reclaimStale` only reclaims rows it has activated, so a queued row
+    // nobody holds is never reclaimed at all. A build that gave up waiting
+    // has to give back whatever the call eventually hands it.
+    assert.match(
+      code,
+      /admission\.then\([\s\S]{0,200}?releaseTicket\(/,
+      'a ticket that lands after the build gave up is held for good',
+    );
+    assert.match(
+      code,
+      /waiting \? this\.releaseTicket|waiting\s*\?/,
+      'the late release fires even for the ticket the build actually used',
+    );
+  });
+
   it('takes the slot where the cleanup can still reach it', () => {
     // `enqueue` is a call to another Durable Object and can reject. Outside
     // the try that rejection skipped every piece of cleanup and left the

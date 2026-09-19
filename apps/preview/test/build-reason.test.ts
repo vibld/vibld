@@ -509,6 +509,19 @@ describe('keeping the lock alive while the build is', () => {
     }
   });
 
+  it('knows the lock is still its own before it empties the workspace', () => {
+    // #196 review. The clear is the first destructive thing a build does
+    // and everything before it can take time, the fleet admission most of
+    // all. Checking only between the steps that follow it let a build that
+    // had already been superseded empty its successor's workspace.
+    const body = buildProjectCode();
+    const check = body.lastIndexOf('keepAlive()', body.indexOf('rm -rf'));
+    assert.ok(
+      check > 0 && check < body.indexOf('rm -rf'),
+      'the workspace is emptied without knowing whose it is',
+    );
+  });
+
   it('cuts each command cap down to what is left of the build', () => {
     // A wall clock that the two slowest things in the build ignore is not
     // a wall clock. `build-files.test.ts` proves the arithmetic by calling

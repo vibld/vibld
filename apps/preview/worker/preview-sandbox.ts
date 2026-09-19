@@ -458,10 +458,29 @@ export class PreviewSandbox extends Sandbox<Env> {
     };
 
     try {
-      slot = await this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
+      // Bounded like every other cross-object call here (#196 review).
+      // Awaited directly, a stalled `enqueue` kept the build alive past its
+      // own deadline: the lock expired, a successor took the sandbox, and
+      // when this finally returned the very next thing it did was empty
+      // that successor's workspace.
+      //
+      // Giving up on it leaves a ticket nobody holds, which is worse than
+      // it sounds: `reclaimStale` only reclaims rows it has activated, so
+      // an abandoned queued row is never reclaimed at all. So whatever it
+      // hands back after we have stopped waiting is given back.
+      const admission = this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
         `build:${this.ctx.id.toString()}`,
         BUILD_CONTAINER_HEADROOM,
       );
+      let waiting = true;
+      this.ctx.waitUntil(
+        admission.then(
+          (late) => (waiting ? this.releaseTicket(late.id) : undefined),
+          () => undefined,
+        ),
+      );
+      slot = await bounded(admission);
+      waiting = false;
       if (!slot.active) {
         return {
           reason: 'busy',
@@ -486,6 +505,14 @@ export class PreviewSandbox extends Sandbox<Env> {
       // from its own package.json would build here and fail anywhere else.
       // That is one of the two production failures behind #194: this check
       // is worth having only if it measures what a clean environment sees.
+      // Asked before the first thing that touches the container, not
+      // only between the steps that follow it (#196 review). Everything
+      // above this point can take time -- the admission most of all -- and
+      // the clear is destructive: starting it without knowing the lock is
+      // still ours is how a build that had been superseded emptied its
+      // successor's workspace.
+      if (!(await keepAlive())) return stopped;
+
       started = true;
       // Bounded like every other call here. Left direct, this one could
       // stall past the deadline without ever reaching the teardown, and a
@@ -704,15 +731,27 @@ export class PreviewSandbox extends Sandbox<Env> {
     //
     // Retried before it is given up on: `reclaimStale` only reclaims rows
     // it has activated, so an abandoned queued ticket never expires at all.
-    if (slot && (!ours || gone)) {
-      const ticket = slot.id;
-      await retrying(() =>
-        this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
-          ticket,
-          BUILD_CONTAINER_HEADROOM,
-        ),
-      );
-    }
+    if (slot && (!ours || gone)) await this.releaseTicket(slot.id);
+  }
+
+  /**
+   * Give one build ticket back.
+   *
+   * Retried before it is given up on: `reclaimStale` only reclaims rows it
+   * has activated, so an abandoned queued ticket never expires at all.
+   *
+   * Its own method because the teardown is no longer the only caller
+   * (#196 review): a build that gave up waiting for `enqueue` has to give
+   * back whatever that call eventually hands it, and it is the same
+   * release for the same reason.
+   */
+  private async releaseTicket(ticket: number): Promise<void> {
+    await retrying(() =>
+      this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
+        ticket,
+        BUILD_CONTAINER_HEADROOM,
+      ),
+    );
   }
 
   /**
