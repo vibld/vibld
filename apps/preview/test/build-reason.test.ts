@@ -290,9 +290,14 @@ describe('whose lock a build releases', () => {
     // teardown was restructured, while the property it was about never
     // changed -- which is a test measuring the wrong thing, again.
     const teardown = releaseBuildCode();
+    // That an ownership answer exists, not how it is arrived at. This
+    // matched `mine?.token === token` until that read became a renewal,
+    // and broke while the property it is about never moved -- which is the
+    // same mistake its own comment above describes, made again. How
+    // ownership is established is the next test.
     assert.match(
       teardown,
-      /const ours = mine\?\.token === token;/,
+      /const ours = /,
       "nothing works out whether the lock is still this build's",
     );
     for (const at of [
@@ -305,6 +310,33 @@ describe('whose lock a build releases', () => {
         'a delete of the build lock is not guarded by owning it',
       );
     }
+  });
+
+  it('confirms ownership by renewing it, right before the destroy', () => {
+    // #196 review. A read answers "is it ours" and leaves the lock as old
+    // as it already was, and `destroyWithin` does not renew until a whole
+    // interval after the destroy is in flight. The build's last renewal,
+    // plus this teardown's own storage read, plus that interval comes to
+    // about eighteen minutes against a fifteen minute TTL: a successor
+    // finds the lock stale, takes it, starts in this same container, and
+    // the destroy already running kills their build.
+    //
+    // A renewal answers the same question and leaves a full TTL behind it,
+    // so the first interval cannot run out. Both halves asserted, because
+    // either alone passes on the wrong code: renewing somewhere in the
+    // teardown is not renewing before the destroy.
+    const teardown = releaseBuildCode();
+    assert.match(
+      teardown,
+      /const ours = await this\.renewLock\(/,
+      'ownership is read rather than renewed, so the lock keeps its age',
+    );
+    const confirmed = teardown.indexOf('const ours = await this.renewLock(');
+    const destroyed = teardown.indexOf('destroyHoldingLock(');
+    assert.ok(
+      confirmed > 0 && destroyed > confirmed,
+      'the destroy starts before the lock it relies on is pushed forward',
+    );
   });
 
   it('stops a command that reached its bound from reading as a project failure', () => {

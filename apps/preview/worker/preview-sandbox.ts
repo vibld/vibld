@@ -743,8 +743,25 @@ export class PreviewSandbox extends Sandbox<Env> {
       return;
     }
 
-    const mine = await bounded(this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY));
-    const ours = mine?.token === token;
+    // Confirmed and pushed forward in one go, immediately before the
+    // destroy (#196 review).
+    //
+    // Reading ownership answered the question and left the lock as old as
+    // it already was, and `destroyWithin` does not renew until a whole
+    // interval after the destroy is already in flight. The gap that opens
+    // is the build's last renewal, plus this teardown's own storage read,
+    // plus that interval: about eighteen minutes against a fifteen minute
+    // TTL. A successor then finds the lock stale, takes it, starts in this
+    // same container, and the destroy already running kills their build.
+    // That is the cascade the ownership token was added to stop, arriving
+    // from the one direction the token cannot see.
+    //
+    // A renewal answers both: false means the lock is no longer ours, and
+    // true leaves it with a full TTL at the moment the destroy starts, so
+    // the first interval cannot run it out. It rejects rather than
+    // answering when storage will not say, which holds the ticket, and the
+    // fleet reclaims an activated row.
+    const ours = await this.renewLock(token, deadline);
 
     // Only ours is ours to destroy. A build that overran has had its lock
     // taken and is running in this very container, so destroying it would
