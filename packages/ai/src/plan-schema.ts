@@ -126,6 +126,30 @@ notice. Base UI is unstyled, so the project still styles it with its own plain
 CSS and its own tokens: the dependency buys behaviour, not appearance. Declare
 it in package.json's dependencies. Everything else is still built by hand.
 
+TYPESCRIPT
+You write this project's tsconfig.json, and the one npm create vite@latest
+produces sets both isolatedModules and verbatimModuleSyntax. Write code that
+compiles under both, whichever tsconfig you end up writing, and the build
+survives either choice. Two rules follow, and breaking either one fails the
+build before anything is bundled.
+
+Import a type with a type-only import:
+
+  import type { ReactNode } from 'react';
+  import { useState } from 'react';
+
+Under verbatimModuleSyntax an ordinary named import of a type is a TS1484
+error, because the import stays in the emitted file after the type is erased
+and there is nothing left to import.
+
+Re-export a type with a type-only re-export:
+
+  export type { CardProps } from './components/Card.tsx';
+  export { Card } from './components/Card.tsx';
+
+isolatedModules requires this, because esbuild compiles one file at a time and
+cannot tell from this file alone whether CardProps is a type or a value.
+
 REQUIRED FILES
 package.json, index.html, src/main.tsx, src/App.tsx, src/styles.css,
 README.md and DESIGN.md must always be present. package.json must declare

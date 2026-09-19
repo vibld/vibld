@@ -68,18 +68,25 @@ const STILL_GOING = 'Still going';
 const STAGE_WORDS: Record<GenerationStage, string> = {
   queued: 'Waiting for a slot',
   running: 'Building your project',
+  // Not a Workflow state: it is what the progress channel reports when a
+  // reasoning model has streamed thinking and none of the answer
+  // (`run-stage.ts`). Worth its own word because it is most of the wait on
+  // the production provider, and because it is the honest explanation for a
+  // character count that is not moving.
+  thinking: 'Thinking it through',
 };
 
 /**
  * The one-line summary shown beside the meter.
  *
  * Built from whichever facts are actually known, rather than a fixed shape
- * with holes in it. Since generation moved into a durable Workflow the
- * character count is usually unavailable (#183), and printing "0 characters
- * written" for a run that is working perfectly well would be worse than the
- * frozen line this replaced: it would be a number that is both wrong and
- * reassuringly precise. So an absent count contributes nothing, and the
- * clock carries the line on its own.
+ * with holes in it. The character count is live again (#183), but it is
+ * still often absent: before the first report, on a provider that streams
+ * nothing, and for as long as a reasoning model is thinking rather than
+ * writing. Printing "0 characters written" for a run that is working
+ * perfectly well would be worse than the frozen line this replaced -- a
+ * number both wrong and reassuringly precise -- so an absent count
+ * contributes nothing and the clock carries the line on its own.
  */
 export function describeProgress(progress: GenerationProgress): string {
   const parts: string[] = [];
@@ -103,6 +110,14 @@ export function reassurance(progress: GenerationProgress): string | null {
     // explain the wrong thing.
     return 'Your project is queued behind other builds. It will start shortly, and you can cancel at any time.';
   }
+  if (progress.stage === 'thinking') {
+    // A different worry again, and the one most likely to read as a hang:
+    // nothing is being written, so nothing on screen is counting up. Saying
+    // that a project is being built would explain the wrong thing, and
+    // saying it takes several minutes without saying why would leave the
+    // stillness unexplained.
+    return 'The model is working the design out before it writes any code. Nothing is stuck, and you can cancel at any time.';
+  }
   if (progress.stage === undefined) {
     // No stage means the Workflow is in a state the Worker has no honest
     // word for (`run-stage.ts`). Removing the stage word and then
@@ -118,6 +133,7 @@ export function reassurance(progress: GenerationProgress): string | null {
 const STAGE_ANNOUNCEMENTS: Record<GenerationStage, string> = {
   queued: 'Still waiting for a slot',
   running: 'Still building your project',
+  thinking: 'Still thinking it through',
 };
 
 /**

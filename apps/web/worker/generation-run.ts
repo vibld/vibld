@@ -16,6 +16,7 @@ import { createValidator } from '../src/generation/validator.ts';
 import { ACCOUNT_BUDGET_KEY, microUsdOf } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 import type { UserBudget } from './budget.ts';
+import type { RunProgress } from './run-progress.ts';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -139,10 +140,129 @@ export function ceilingForRun(
   return params.maxTokens ?? DEFAULT_MAX_TOKENS;
 }
 
+/**
+ * What a run has produced so far, as the model streams it.
+ *
+ * Two counts rather than one, because the production provider is a reasoning
+ * model and they answer different questions. `characters` is the answer:
+ * what `onProgress` has always meant, and what the meter displays.
+ * `reasoningCharacters` is the thinking that precedes it, billed as output
+ * and deliberately kept out of the meter (#190) -- but it is the difference
+ * between "nothing has happened" and "the model has not started writing
+ * yet", and on a measured mockup run it was between 57% and 68% of the
+ * output tokens. A meter fed only by the answer would sit at zero for most
+ * of the wait it exists to explain.
+ */
+export interface ProgressReport {
+  characters: number;
+  reasoningCharacters: number;
+}
+
+/**
+ * What the channel answers, which is more than the last report.
+ *
+ * A report is evidence of what a run produced, never of when. The model
+ * call ends and the Workflow keeps reporting `running` through settlement
+ * and the trace write, retries included, so the last report outlives the
+ * work it described by up to a minute (#193 review, P2). Read on its own it
+ * would say a model that had stopped was still thinking.
+ *
+ * So the step says when it is done, and the channel carries that beside the
+ * numbers. Monotonic: a report that lands after the finish still lands, and
+ * still does not make the run unfinished again.
+ */
+export interface RunProgressState {
+  report?: ProgressReport;
+  /** True once the generate step has left, however it left. */
+  finished: boolean;
+}
+
+/**
+ * The floor on how often a run reports, in milliseconds.
+ *
+ * A stream calls back on every delta, several times a second; the poll loop
+ * reads every 1.5 seconds (`POLL_INTERVAL_MS`). Reporting faster than it is
+ * read spends requests to produce numbers nobody sees, so this is set just
+ * under the read interval: fast enough that a poll rarely finds a stale
+ * report, slow enough that most deltas cost nothing.
+ */
+export const PROGRESS_REPORT_INTERVAL_MS = 1_000;
+
+/**
+ * Wrap a reporter so a per-delta callback becomes an occasional one.
+ *
+ * Two things are dropped, and they are different. A report inside the
+ * interval is dropped because it would arrive before anybody reads;
+ * a report identical to the last is dropped whenever it arrives, because
+ * sending it again cannot change what the reader sees. The second matters
+ * most in the case the meter exists for: a model that thinks for minutes
+ * streams nothing at all, and a reporter without that check would keep
+ * paying for a request a second to say so.
+ *
+ * The first report is never dropped. A run that thinks before it writes has
+ * no second delta for a while, so waiting out an interval would hold back
+ * the one piece of news there is.
+ *
+ * `send` is called rather than awaited, so a slow or failed channel cannot
+ * hold up the stream it is describing -- losing a progress report costs the
+ * reader a stale number for a second, and blocking the model call to deliver
+ * one would cost them the run.
+ *
+ * What makes the interval work at all is not visible from here. A Worker's
+ * clock advances only when the Worker performs I/O, so a throttle measured
+ * with `Date.now()` in a loop of pure computation would read the same
+ * instant forever and let exactly one report through. This one is driven by
+ * `readCompletionStream`, which awaits a read from the response body for
+ * every chunk, so the clock moves between deltas. Anything that ever calls
+ * this from a loop that does no I/O has to pass its own `now`.
+ */
+export function throttleProgress(
+  send: (report: ProgressReport) => void,
+  intervalMs: number = PROGRESS_REPORT_INTERVAL_MS,
+  now: () => number = Date.now,
+): (progress: { characters: number; reasoningCharacters?: number }) => void {
+  let sentAt = 0;
+  let sent: ProgressReport | undefined;
+  return (progress) => {
+    // Normalised here rather than passed through. A provider that does not
+    // stream reasoning omits the field, and "this provider does not say" is
+    // a distinction the client keeps on purpose (#190) -- but the channel
+    // reports a count, and a channel whose number is sometimes absent would
+    // make the reader distinguish it from zero for no reason.
+    const report: ProgressReport = {
+      characters: progress.characters,
+      reasoningCharacters: progress.reasoningCharacters ?? 0,
+    };
+    if (
+      sent !== undefined &&
+      sent.characters === report.characters &&
+      sent.reasoningCharacters === report.reasoningCharacters
+    ) {
+      return;
+    }
+    const at = now();
+    if (sent !== undefined && at - sentAt < intervalMs) return;
+    sentAt = at;
+    sent = report;
+    send(report);
+  };
+}
+
 export interface GenerationWorkflowEnv {
   DB: D1Database;
   PROJECT_CONTENT: R2Bucket;
   USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'settle'>>;
+  /**
+   * The live progress channel (#183). Typed by the one method used rather
+   * than by the class, the way `USER_BUDGET` is: the Workflow only reports
+   * and the poll loop only reads.
+   *
+   * Optional, and the run does not report when it is absent. Progress is
+   * decoration: a deployment missing the binding must still generate, and
+   * the meter falls back to the clock alone, which is what it showed before
+   * this channel existed.
+   */
+  RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'report' | 'finish'>>;
   ANTHROPIC_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;

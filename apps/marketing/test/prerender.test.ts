@@ -113,6 +113,23 @@ describe('page metadata', () => {
     }
   });
 
+  it('gives every page a way to see what the product makes', () => {
+    // The same gap one page along. /styles was prerendered, in the sitemap,
+    // and linked only from the builder's style legend, which is behind the
+    // sign-in the catalogue exists to precede: a crawler could find the
+    // answer to "what does this actually do" and a visitor could not.
+    //
+    // On the built HTML for the same reason as above. A header link is
+    // exactly the kind of thing that quietly stops being rendered.
+    for (const route of ROUTES) {
+      if (route.path === '/styles') continue;
+      assert.ok(
+        read(route.path).includes('href="/styles"'),
+        `${route.path} has no link to the style catalogue`,
+      );
+    }
+  });
+
   it('names the site in every title, with nothing dangling', () => {
     // The check that was missing. An em-dash sweep rewrote
     // `X -- ${SITE.name}` as `X | `, which removed the site name from all

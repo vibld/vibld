@@ -155,10 +155,21 @@
   // access. SQLite storage is required rather than preferred -- it is the only
   // backend available on the Workers Free plan, and the only one whose storage
   // is not billed there.
+  //
+  // RUN_PROGRESS is the live channel between a running Workflow step and the
+  // poll loop that serves /api/plan's SSE stream (#183, worker/run-progress
+  // .ts). Named per run, holds nothing in storage, and is created on first
+  // access like the ledger above.
   "durable_objects": {
-    "bindings": [{ "name": "USER_BUDGET", "class_name": "UserBudget" }],
+    "bindings": [
+      { "name": "USER_BUDGET", "class_name": "UserBudget" },
+      { "name": "RUN_PROGRESS", "class_name": "RunProgress" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserBudget"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["UserBudget"] },
+    { "tag": "v2", "new_sqlite_classes": ["RunProgress"] },
+  ],
 
   // Durable generation (docs/decisions.md L26). A Workflow binding is
   // declared independently of durable_objects above -- Workflows are built
