@@ -76,6 +76,40 @@ describe('what a preview finds out about the project it is running', () => {
     );
   });
 
+  it('bounds how long it may take', () => {
+    // #195 review. The prompt requires a "typecheck" script to exist and
+    // cannot require it to exit, so a manifest declaring `tsc --watch
+    // --noEmit` would never return: the preview would sit in `starting`
+    // until its hard lifetime reclaimed it, holding one of the
+    // twenty-five account-wide fleet slots for a diagnostic nobody asked
+    // for. A diagnostic that can stop a preview is worse than none.
+    const method = bodyOf(
+      'private async typecheck(',
+      'private async writeProject(',
+    );
+    assert.match(
+      method,
+      /timeout: TYPECHECK_TIMEOUT_MS/,
+      'the typecheck runs unbounded, so a --watch script holds a fleet slot until the hard lifetime',
+    );
+  });
+
+  it('does not report being stopped as something the project did', () => {
+    // A run that reached the bound was stopped, and being stopped is not
+    // evidence about the code. Asserted separately from the bound itself
+    // because the two fail independently: the timeout could be set and the
+    // result still read as a finding.
+    const method = bodyOf(
+      'private async typecheck(',
+      'private async writeProject(',
+    );
+    assert.match(
+      method,
+      /Date\.now\(\) - startedAt >= TYPECHECK_TIMEOUT_MS\) return undefined/,
+      'a typecheck that was cut off would be shown to the reader as a failure of theirs',
+    );
+  });
+
   it('never lets the typecheck fail the preview', () => {
     // The dev server starts either way and Vite does not typecheck, so the
     // preview really does run. This is a finding about the project, which

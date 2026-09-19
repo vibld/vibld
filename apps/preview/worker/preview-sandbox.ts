@@ -53,6 +53,20 @@ const ACCOUNT_MAX_IN_FLIGHT = 25;
 const DEV_PORT = 5173;
 
 /**
+ * How long the pre-preview typecheck may take before it is abandoned.
+ *
+ * Generous against what it measures and strict against what it can cost.
+ * `tsc --noEmit` over a generated project is seconds on a container that
+ * has just finished `npm install`, so ninety seconds is not a budget
+ * anything real is expected to approach. It is a bound on the case where
+ * the script does not terminate at all (#195 review): the prompt requires
+ * a "typecheck" script to exist and cannot require it to exit, and a
+ * `--watch` variant would otherwise hold a fleet slot until the preview's
+ * hard lifetime ran out.
+ */
+const TYPECHECK_TIMEOUT_MS = 90_000;
+
+/**
  * Where `npm run build` writes its output, for the one template this
  * codebase generates today (`templates/marketing`'s `react-router.config.ts`
  * sets `ssr: false`, so `react-router build` emits plain static files here).
@@ -567,16 +581,33 @@ export class PreviewSandbox extends Sandbox<Env> {
    * can act on, and the same correction applies to `buildProject` below,
    * where it was the whole of what a blocked publish reported.
    *
-   * Never throws. A typecheck that cannot run is not evidence about the
-   * project, and turning it into one would fail previews over this
-   * function's own problems.
+   * Bounded, and that bound is not a safety margin (#195 review). The
+   * prompt requires a "typecheck" script to exist and does not require it
+   * to terminate, so a manifest declaring `tsc --watch --noEmit` would
+   * never return here: the preview would sit in `starting` until its hard
+   * lifetime reclaimed it, holding one of the twenty-five account-wide
+   * fleet slots the whole time, for a diagnostic nobody asked for. A
+   * diagnostic that can stop a preview is worse than no diagnostic.
+   *
+   * Never throws, and a timeout is not a finding. A typecheck that cannot
+   * run, or does not finish, is not evidence about the project, and turning
+   * either into one would fail previews over this function's own problems.
    */
   private async typecheck(): Promise<string | undefined> {
+    const startedAt = Date.now();
     try {
       const result = await this.exec('npm run typecheck --if-present', {
         cwd: '/workspace',
+        timeout: TYPECHECK_TIMEOUT_MS,
       });
       if (result.success) return undefined;
+      // A run that reached the bound is a run that was stopped, and being
+      // stopped says nothing about the project. Checked here as well as
+      // caught below because whether the SDK surfaces its own timeout as a
+      // rejection or as an unsuccessful result is its business, and a
+      // "finding" that turned out to be `tsc --watch` still running would
+      // be this function inventing one.
+      if (Date.now() - startedAt >= TYPECHECK_TIMEOUT_MS) return undefined;
       const said = [result.stdout, result.stderr]
         .map((stream) => stream.trim())
         .filter((stream) => stream.length > 0)
