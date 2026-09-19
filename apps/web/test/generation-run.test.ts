@@ -263,12 +263,14 @@ describe('settleBudget', () => {
     assert.equal(actual, 10 * 5 + 10 * 25);
   });
 
-  it('charges the account layer for spend the caller was spared', async () => {
+  it('settles the account layer at what its own reservation covered', async () => {
     // The two layers answer different questions, and #191's review found
-    // the one place they have to differ. A mockup run absorbs a discarded
-    // empty reply so the reader does not pay for a provider defect; the
-    // account-wide daily ceiling still has to know the money left, or it
-    // drifts by one whole attempt every time the defect fires.
+    // where they part company. A mockup run absorbs a discarded empty
+    // reply so the reader does not pay for a provider defect; the account
+    // reservation taken at admission covered that attempt, so that
+    // attempt's cost is what it settles at. The retry has a reservation
+    // of its own, and the route settles that one with the reader's
+    // figure.
     const { ledger, calls } = fakeLedger();
     const actual = await settleBudget(
       ledger,
@@ -284,15 +286,20 @@ describe('settleBudget', () => {
     );
 
     assert.equal(actual, 100 * 5 + 200 * 25, 'the reader was billed for it');
+    assert.notEqual(
+      actual,
+      7_500,
+      'the two figures are the same, so this proves nothing',
+    );
     assert.deepEqual(calls, [
       { name: 'user_abc', id: 11, actual },
-      { name: '__account__', id: 22, actual: actual + 7_500 },
+      { name: '__account__', id: 22, actual: 7_500 },
     ]);
   });
 
-  it('leaves the two layers equal when nothing was absorbed', async () => {
+  it('leaves the two layers equal when the caller says nothing', async () => {
     // The ordinary run, stated so the parameter above cannot quietly
-    // become a surcharge on every settlement.
+    // change what every other settlement charges the account ledger.
     const { ledger, calls } = fakeLedger();
     const actual = await settleBudget(
       ledger,
@@ -310,6 +317,27 @@ describe('settleBudget', () => {
       { name: 'user_abc', id: 11, actual },
       { name: '__account__', id: 22, actual },
     ]);
+  });
+
+  it('honours a zero the caller asked for', async () => {
+    // Not `|| actual`: an account reservation whose attempt really cost
+    // nothing has to settle at nothing, and a falsy check would quietly
+    // charge it the reader's figure instead.
+    const { ledger, calls } = fakeLedger();
+    await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 10,
+        outputTokens: 10,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+      0,
+    );
+
+    assert.equal(calls[1]?.actual, 0);
   });
 
   it('skips a layer whose reservation never got an id', async () => {

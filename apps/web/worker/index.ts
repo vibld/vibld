@@ -1722,17 +1722,28 @@ async function handleMockups(
           settleParams,
           settled,
           providerRan,
-          absorbedMicroUsd,
+          // Each account reservation carries the attempt it admitted
+          // (#191 review). The first one covers the first attempt, so
+          // when that attempt was absorbed, its cost is what this
+          // reservation settles at rather than the reader's charge.
+          // Undefined when nothing was absorbed, which is every ordinary
+          // run: the two layers then settle at the same figure, as they
+          // always have.
+          absorbedMicroUsd > 0 ? absorbedMicroUsd : undefined,
         );
-        // The hold taken for the retry settles at nothing, because the
-        // whole run's real cost -- both attempts -- went onto the original
-        // account reservation just above. It was a hold against the
-        // ceiling while the second attempt was in flight, never a second
-        // charge.
+        // And the hold taken for the retry carries the retry, which is
+        // exactly what the reader was charged for.
+        //
+        // Settling it at nothing and adding both attempts to the first
+        // reservation was the earlier shape, and it broke at midnight: a
+        // run whose retry crosses into the next day holds that day's
+        // ceiling, so a zero there forgets a real request while the day
+        // before is pushed past a ceiling it never spent. Each
+        // reservation is settled on the day it was taken.
         if (retryHold?.id !== undefined) {
           await env
             .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
-            .settle(retryHold.id, 0);
+            .settle(retryHold.id, actual);
         }
         console.log(
           JSON.stringify({

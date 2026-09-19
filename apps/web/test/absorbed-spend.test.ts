@@ -126,19 +126,25 @@ describe('accounting for an attempt nobody was billed for', () => {
     const source = await readFile(workerSource(), 'utf8');
     assert.match(
       source,
-      /settleBudget\(\s*env\.USER_BUDGET!,\s*settleParams,\s*settled,\s*providerRan,\s*absorbedMicroUsd,\s*\)/,
+      /settleBudget\([\s\S]*?absorbedMicroUsd > 0 \? absorbedMicroUsd : undefined,\s*\)/,
       'the mockup settlement drops the absorbed spend on the floor',
     );
   });
 
-  it('closes the retry hold rather than leaving it to the reclaim', async () => {
-    // An unsettled reservation is closed at its full worst case fifteen
-    // minutes later, which would charge the day for a second whole run.
+  it('settles each reservation with the attempt it admitted', async () => {
+    // The midnight case (#191 review). An empty reply whose retry crosses
+    // into the next UTC day holds that day's ceiling, so settling the
+    // hold at nothing and putting both attempts on the first reservation
+    // makes one day forget a real request while the day before is pushed
+    // past a ceiling it never spent.
+    //
+    // An unsettled hold is worse than either: the reclaim closes it at
+    // its full worst case fifteen minutes later.
     const source = await readFile(workerSource(), 'utf8');
     assert.match(
       source,
-      /if \(retryHold\?\.id !== undefined\) \{[\s\S]*?\.settle\(retryHold\.id, 0\)/,
-      'the retry hold is left open, and the reclaim will charge it in full',
+      /if \(retryHold\?\.id !== undefined\) \{[\s\S]*?\.settle\(retryHold\.id, actual\)/,
+      'the retry hold is left open or settled at a figure that is not the retry',
     );
   });
 
