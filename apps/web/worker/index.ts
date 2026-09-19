@@ -1666,8 +1666,36 @@ async function handleMockups(
             absorbedMicroUsd =
               (absorbedMicroUsd ?? 0) + microUsdOf(spent, prices);
             try {
+              /*
+               * Reconcile the attempt that is over before asking to
+               * hold for the next one (#191 review).
+               *
+               * An unsettled reservation counts at its worst case, so
+               * without this the day sees two whole worst cases for a
+               * run that will spend one and a bit: a 100 ceiling, a 60
+               * worst case and a first attempt that really cost 10
+               * refuses a retry whose true maximum is 70. That refusal
+               * is safe in the direction of money and wrong in the
+               * direction of the reader, who is failed for a provider
+               * defect while their deployment had room.
+               *
+               * The figure is not a guess. This attempt is finished and
+               * priced, which is exactly the condition `settle` exists
+               * for, and settling it again at the end with the same
+               * figure is a no-op: `UserBudget.settle` writes whatever
+               * the row's state, and the two writes carry the same
+               * value.
+               */
+              if (settleParams.accountReservationId !== undefined) {
+                await env
+                  .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
+                  .settle(settleParams.accountReservationId, absorbedMicroUsd);
+              }
               retryHold = await reserveAccount(env, worstCase, Date.now());
             } catch (error) {
+              // Either half failing refuses the retry: an unreconciled
+              // reservation and an unread ceiling are both "the ledger
+              // did not answer", and neither is a reason to spend again.
               console.error('mockup retry hold failed', error);
               retryRefused = true;
               return false;

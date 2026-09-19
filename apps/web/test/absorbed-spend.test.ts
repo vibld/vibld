@@ -70,6 +70,41 @@ describe('accounting for an attempt nobody was billed for', () => {
     );
   });
 
+  it('reconciles the finished attempt before holding for the next', async () => {
+    // An unsettled reservation counts at its worst case, so asking for a
+    // second hold beside the first makes the day see two whole worst
+    // cases for a run that will spend one and a bit (#191 review). That
+    // refuses retries the budget could actually cover, which fails a
+    // reader for a provider defect while their deployment had room.
+    //
+    // The order is the whole fix: settle, then reserve.
+    const source = await readFile(workerSource(), 'utf8');
+    const hook = source.indexOf('onDiscarded: async (spent) => {');
+    assert.ok(hook > -1, 'the absorbed attempt is not reported at all');
+    const block = source.slice(hook, source.indexOf('},', hook));
+    const settled = block.indexOf(
+      '.settle(settleParams.accountReservationId, absorbedMicroUsd)',
+    );
+    const reserved = block.indexOf('reserveAccount(env, worstCase');
+    assert.ok(
+      settled > -1,
+      'the finished attempt is left at its worst case while the retry asks for another',
+    );
+    assert.ok(
+      reserved > settled,
+      'the retry hold is taken before the attempt it follows is reconciled',
+    );
+    // And inside the try, because a reconciliation that throws is the
+    // same fact as a ceiling that cannot be read: the ledger did not
+    // answer, so the retry is refused rather than allowed to escape as
+    // an exception that never sets the flag settlement reads.
+    assert.match(
+      block,
+      /try \{[\s\S]*?\.settle\(settleParams\.accountReservationId, absorbedMicroUsd\)[\s\S]*?\} catch/,
+      'the reconciliation sits outside the try, so a ledger failure skips the refusal',
+    );
+  });
+
   it('refuses the retry when the ledger cannot be reached', async () => {
     // This path exists to bound spend, and "the ceiling could not be read"
     // is not a reason to spend again.
