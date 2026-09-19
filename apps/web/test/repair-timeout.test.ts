@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { RUN_ABANDONED_AFTER_MS, RUN_STEP_TIMEOUT_MS } from '@vibld/ai';
 import {
+  BUILD_CALL_TIMEOUT_MS,
   REBUILD_WAIT_BUDGET_MS,
   REPAIR_BUILD_ALLOWANCE_MS,
   REPAIR_STEP_TIMEOUT_MS,
@@ -10,6 +11,7 @@ import {
 import {
   BUILD_COMPILE_TIMEOUT_MS,
   BUILD_INSTALL_TIMEOUT_MS,
+  BUILD_WALL_CLOCK_MS,
 } from '../../preview/worker/build-limits.ts';
 
 /**
@@ -28,12 +30,40 @@ import {
  * numbers with no runtime behind them.
  */
 describe('how long a repair is allowed to take', () => {
-  const oneBuild = BUILD_INSTALL_TIMEOUT_MS + BUILD_COMPILE_TIMEOUT_MS;
+  // What one call to the build service can cost this step, which is not
+  // the same as what the two commands inside it can cost (#196 review).
+  // The earlier version of this file added up the command bounds, and a
+  // build is more than its commands: it writes the project in, reads the
+  // output back, and waits for a fleet slot, all inside its own wall
+  // clock. Measuring the commands understated a build by two minutes and
+  // the allowance was sized against the understatement.
+  const oneBuild = BUILD_CALL_TIMEOUT_MS;
 
   it('funds both builds, not one', () => {
     assert.ok(
       REPAIR_BUILD_ALLOWANCE_MS >= oneBuild * 2,
       `two builds may take ${oneBuild * 2}ms and the allowance is ${REPAIR_BUILD_ALLOWANCE_MS}ms`,
+    );
+  });
+
+  it('waits for a build longer than a build may take', () => {
+    // Both directions matter. Too short cuts off a build that was about to
+    // answer and turns a real verdict into `unavailable`, losing the
+    // repair this feature exists to buy. Too long is the enclosing step
+    // timing out, which fails a run that was already billed.
+    assert.ok(
+      BUILD_CALL_TIMEOUT_MS > BUILD_WALL_CLOCK_MS,
+      `a build may take ${BUILD_WALL_CLOCK_MS}ms and its caller gives up after ${BUILD_CALL_TIMEOUT_MS}ms`,
+    );
+  });
+
+  it('still covers the commands inside a build', () => {
+    // The wall clock is the service's promise and these are what it has to
+    // hold; asserted here as well so a change to either side of the
+    // deployment boundary has to keep both true.
+    assert.ok(
+      BUILD_CALL_TIMEOUT_MS >
+        BUILD_INSTALL_TIMEOUT_MS + BUILD_COMPILE_TIMEOUT_MS,
     );
   });
 

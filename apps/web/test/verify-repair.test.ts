@@ -89,6 +89,8 @@ function deps(
     buildThrowsOn?: number;
     /** The model call never answers, so its deadline gives up on it. */
     generateStalls?: boolean;
+    /** The build service never answers, as against rejecting. */
+    buildStallsOn?: number;
     /** The reservation could not be asked for at all, as against refused. */
     reserveThrows?: boolean;
     /** How many settlement attempts reject before one is allowed through. */
@@ -115,6 +117,12 @@ function deps(
         spy.builds += 1;
         if (spy.builds === options.buildThrowsOn) {
           throw new Error('the preview service is gone');
+        }
+        if (spy.builds === options.buildStallsOn) {
+          // What `withinDeadline` does to a call that never answers. The
+          // real bound is thirteen minutes, so the fake throws what the
+          // deadline throws rather than making the test wait for one.
+          throw new Error(OUT_OF_TIME);
         }
         if (spy.builds === 1) return build;
         if (spy.builds - 1 <= (options.busyRebuilds ?? 0)) {
@@ -619,6 +627,50 @@ describe('what the second build is allowed to claim', () => {
     );
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.equal(outcome.repaired, false);
+  });
+});
+
+describe('a build service that never answers', () => {
+  it('reads as unavailable, exactly like one that rejects', async () => {
+    // #196 review. The catch was the right answer to the wrong half: a
+    // call that rejects reaches it, a call that stays pending does not.
+    // The enclosing step then times out and fails a run that was already
+    // accepted, promoted, settled and billed, over a build nobody asked
+    // for.
+    const { spy, deps: d } = deps({ ok: true }, { buildStallsOn: 1 });
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.deepEqual(outcome, { skipped: 'unavailable' });
+    assert.equal(spy.reserves, 0, 'a stalled build service bought a repair');
+  });
+
+  it('gives every build call a bound of its own', async () => {
+    // The half the fake above cannot reach. It throws what the deadline
+    // throws, so it proves the catch maps that to `unavailable` and says
+    // nothing about whether a bound exists: a mutation that removed
+    // `withinDeadline` entirely passed it. The bound is thirteen minutes
+    // and no test is going to wait for one, so this reads the wiring and
+    // `repair-timeout.test.ts` holds the arithmetic.
+    const source = await workflowSource('generation-run.ts');
+    const at = source.indexOf('const build = async (');
+    assert.ok(at > 0, 'the build wrapper is no longer where this expected it');
+    const wrapper = source.slice(at, source.indexOf('\n  };', at));
+    assert.match(
+      wrapper,
+      /withinDeadline\(\s*deps\.build\(/,
+      'a build service that never answers is waited on until the step dies',
+    );
+    assert.match(wrapper, /BUILD_CALL_TIMEOUT_MS,/);
+  });
+
+  it('claims nothing about the project when the rebuild stalls', async () => {
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { buildStallsOn: 2 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(outcome.repaired, undefined);
+    assert.equal(outcome.unverified, 'unavailable');
+    assert.ok(outcome.result, 'the promoted repair was thrown away');
   });
 });
 

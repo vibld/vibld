@@ -386,7 +386,7 @@ export function worthRepairing(
  * the second build, so its life is the model call rather than the step.
  * RUN_ABANDONED_AFTER_MS bounds the hold, not the step (#194).
  */
-export const REPAIR_BUILD_ALLOWANCE_MS = 25 * 60_000;
+export const REPAIR_BUILD_ALLOWANCE_MS = 28 * 60_000;
 export const REPAIR_STEP_TIMEOUT_MS =
   RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS;
 
@@ -421,6 +421,29 @@ export const REPAIR_STEP_TIMEOUT_MS =
  * first version of this hung the test suite, because the fake clock these
  * tests inject is a constant.
  */
+/**
+ * How long one call to the build service may stay pending (#196 review).
+ *
+ * `build` catches a rejection and reports `unavailable`, which claims
+ * nothing about the project. A call that never rejects never reaches that
+ * catch: the Durable Object or its storage stalls, the await sits there,
+ * and the enclosing step eventually times out, which fails a Workflow whose
+ * project was already accepted, promoted, settled and billed. The caller
+ * loses the run over a build they never asked for. The catch was the right
+ * answer to the wrong half of the problem.
+ *
+ * Longer than a build's own wall clock in `apps/preview`, deliberately: the
+ * service bounds its whole build and answers within that, so anything
+ * beyond it is the service not answering rather than a build still working.
+ * Cutting off a build that was about to reply would turn a real verdict
+ * into `unavailable` and lose the repair this feature exists to buy.
+ *
+ * `repair-timeout.test.ts` checks that against `apps/preview`'s real
+ * number, and checks that two of these plus the rebuild wait still fit
+ * inside `REPAIR_BUILD_ALLOWANCE_MS`.
+ */
+export const BUILD_CALL_TIMEOUT_MS = 13 * 60_000;
+
 export const REBUILD_WAIT_INTERVAL_MS = 5_000;
 export const REBUILD_WAIT_ATTEMPTS = 6;
 export const REBUILD_WAIT_BUDGET_MS =
@@ -962,15 +985,21 @@ export async function verifyAndRepair(
     | undefined
   > => {
     try {
-      return await deps.build(
-        {
-          PREVIEW: env.PREVIEW,
-          PREVIEW_INTERNAL_SECRET: env.PREVIEW_INTERNAL_SECRET,
-        },
-        params.userId,
-        files,
+      return await withinDeadline(
+        deps.build(
+          {
+            PREVIEW: env.PREVIEW,
+            PREVIEW_INTERNAL_SECRET: env.PREVIEW_INTERNAL_SECRET,
+          },
+          params.userId,
+          files,
+        ),
+        BUILD_CALL_TIMEOUT_MS,
       );
     } catch {
+      // Including the deadline, which lands here on purpose: a build
+      // service that will not answer says exactly as much about the
+      // project as one that rejects, which is nothing (#196 review).
       return undefined;
     }
   };
