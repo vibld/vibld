@@ -325,6 +325,26 @@ export class PreviewSandbox extends Sandbox<Env> {
    * bytes yet.
    */
   async buildProject(files: ProjectFile[]): Promise<BuildOutcome> {
+    // Started before anything is awaited, including the lock (#196 review).
+    //
+    // It used to start after the lock had been read and written, on the
+    // reasoning that those are this object's own storage. Local is not the
+    // same as bounded, and it is certainly not the same as inside the
+    // bound: a storage call that stalled left `buildProject` with no
+    // deadline running at all, so the whole-build guarantee this method
+    // advertises did not cover its own first two lines. The caller in
+    // `apps/web` stops waiting after its own bound and `/api/publish` has
+    // none, so if storage then resumed, the abandoned invocation would
+    // take a fleet ticket and run a twelve-minute build for nobody.
+    //
+    // The round that enumerated every await here classified those two as
+    // "this object's own storage" and moved on. That was the wrong
+    // question: what matters is not where a call goes but whether the
+    // clock is already running when it is made.
+    const deadline = Date.now() + BUILD_WALL_CLOCK_MS;
+    const bounded = <T>(work: Promise<T>): Promise<T> =>
+      withinDeadline(work, deadline - Date.now());
+
     // Two builds for the same user would still write into the same
     // /workspace at once, which is the filesystem race the old refusal was
     // really about -- a repair's verification build and an auto-publish can
@@ -336,7 +356,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     // container died between taking it and releasing it must not wedge
     // every later build for this user, and nothing else here would ever
     // clear it.
-    const held = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+    const held = await bounded(this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY));
     if (held && Date.now() - held.startedAt < BUILD_LOCK_TTL_MS) {
       return {
         reason: 'busy',
@@ -351,10 +371,17 @@ export class PreviewSandbox extends Sandbox<Env> {
     // would then walk into the second's workspace. Ownership is what makes
     // release mean "give back mine" rather than "clear whatever is there".
     const token = crypto.randomUUID();
-    await this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
-      startedAt: Date.now(),
-      token,
-    });
+    // A lock written after this gave up ages out on its own after
+    // BUILD_LOCK_TTL_MS, which refuses that user's builds as `busy` in the
+    // meantime and claims nothing about any project. Bounded and
+    // self-healing, unlike a fleet ticket, which is why this one needs no
+    // late cleanup of its own.
+    await bounded(
+      this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
+        startedAt: Date.now(),
+        token,
+      }),
+    );
 
     // The build half of the container split, actually enforced (#196
     // review). Subtracting the headroom from the preview cap only made the
@@ -404,33 +431,8 @@ export class PreviewSandbox extends Sandbox<Env> {
      * build could outlive, which is what made every protection around it a
      * heartbeat that had to cover every single `await`.
      */
-    const deadline = Date.now() + BUILD_WALL_CLOCK_MS;
     const keepAlive = async (): Promise<boolean> =>
       Date.now() < deadline && (await this.renewLock(token));
-
-    /**
-     * The deadline applied to one RPC rather than between two of them
-     * (#196 review).
-     *
-     * Checking the clock between operations bounds a build made of many
-     * quick calls and does nothing about a build stuck in one slow call.
-     * A single `writeFile` that hung past the deadline left everything the
-     * bound was for: the lock expired at its TTL, a second build took the
-     * workspace, the fleet reclaimed the ticket of a container still
-     * running, and when the stalled call finally landed it wrote into
-     * somebody else's tree. I claimed the ownership check on resume
-     * covered that. It does not: the write happens first and the check
-     * happens after.
-     *
-     * The losing call is not cancelled, because none of these can be. What
-     * this buys is that the *build* ends on time, so the teardown starts on
-     * time and destroys the container, and destroying the container is what
-     * actually stops an orphaned RPC. That is the same reasoning as
-     * `destroyHoldingLock`'s cap: bound what can be bounded, and let the
-     * container's death end what cannot.
-     */
-    const bounded = <T>(work: Promise<T>): Promise<T> =>
-      withinDeadline(work, deadline - Date.now());
 
     /**
      * A command's own cap, cut down to what is left (#196 review).

@@ -406,6 +406,32 @@ describe('keeping the lock alive while the build is', () => {
     );
   });
 
+  it('starts its clock before it awaits anything, including the lock', () => {
+    // #196 review. The deadline used to be created after the lock had been
+    // read and written, on the reasoning that those are this object's own
+    // storage. Local is not the same as inside the bound: a storage call
+    // that stalled left the method with no deadline running at all, so the
+    // whole-build guarantee did not cover its own first two lines, and an
+    // invocation whose caller had long given up could still take a ticket
+    // and run a full build for nobody.
+    const body = buildProjectCode();
+    const clock = body.indexOf('const deadline =');
+    assert.ok(clock > 0, 'the build has no wall clock');
+    for (const first of ['storage.get<BuildLock>', 'storage.put<BuildLock>']) {
+      const at = body.indexOf(first);
+      assert.ok(at > 0, `${first} is no longer where this expected it`);
+      assert.ok(
+        clock < at,
+        `${first} is awaited before the build's clock starts`,
+      );
+      assert.match(
+        body.slice(Math.max(0, at - 120), at),
+        /bounded\(\s*$|bounded\([^)]*$/,
+        `${first} can outlast the whole build's budget`,
+      );
+    }
+  });
+
   it('is built from the clock as well as the lock', () => {
     // Two different ways to stop being entitled to the workspace, and the
     // second one is what three rounds of heartbeats kept missing: a build
