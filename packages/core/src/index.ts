@@ -69,3 +69,12 @@ export type {
   ValidationResult,
   Validator,
 } from './types.ts';
+export {
+  RETRY_ATTEMPTS,
+  RETRY_DELAY_MS,
+  retrying,
+  retryingWithin,
+  sleep,
+} from './retry.ts';
+export { budgeted, OUT_OF_TIME, withinDeadline } from './deadline.ts';
+export type { Attempted } from './retry.ts';

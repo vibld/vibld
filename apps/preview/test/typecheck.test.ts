@@ -27,13 +27,40 @@ const source = readFileSync(
 );
 
 describe('what a preview finds out about the project it is running', () => {
-  /** The body of one method, from its signature to the next one's. */
+  /**
+   * The body of one method, from its signature to the next one's, with its
+   * prose removed.
+   *
+   * Both halves matter and both were learned the hard way. Naming the next
+   * method explicitly, because a slice that runs to some later landmark
+   * swallows whatever is added in between: this one ran from `typecheck` to
+   * `writeProject` and quietly grew to include two methods added between
+   * them. And stripping comments, because the assertions here are about
+   * what the code does -- `doesNotMatch(/throw/)` failed the moment a
+   * comment elsewhere in the slice used the word "throws".
+   *
+   * That is the sixth test on this file to measure the text around a
+   * property rather than the property. It is a bad instrument, and the
+   * standing fix is to extract these methods so they can be called; until
+   * then the instrument is at least honest about what it reads.
+   */
   function bodyOf(signature: string, next: string): string {
     const at = source.indexOf(signature);
     assert.ok(at > 0, `${signature} is not where this expected it`);
     const end = source.indexOf(next, at);
     assert.ok(end > at, `${next} is not where this expected it`);
-    return source.slice(at, end);
+    return source
+      .slice(at, end)
+      .split('\n')
+      .filter((line) => {
+        const trimmed = line.trim();
+        return (
+          !trimmed.startsWith('//') &&
+          !trimmed.startsWith('*') &&
+          !trimmed.startsWith('/*')
+        );
+      })
+      .join('\n');
   }
 
   it('typechecks the installed project', () => {
@@ -85,7 +112,7 @@ describe('what a preview finds out about the project it is running', () => {
     // for. A diagnostic that can stop a preview is worse than none.
     const method = bodyOf(
       'private async typecheck(',
-      'private async writeProject(',
+      'private async destroyHoldingLock(',
     );
     assert.match(
       method,
@@ -101,7 +128,7 @@ describe('what a preview finds out about the project it is running', () => {
     // result still read as a finding.
     const method = bodyOf(
       'private async typecheck(',
-      'private async writeProject(',
+      'private async destroyHoldingLock(',
     );
     assert.match(
       method,
@@ -117,7 +144,7 @@ describe('what a preview finds out about the project it is running', () => {
     // a working sandbox over something the reader can fix in place.
     const method = bodyOf(
       'private async typecheck(',
-      'private async writeProject(',
+      'private async destroyHoldingLock(',
     );
     assert.match(method, /catch \{\s*return undefined;/);
     assert.doesNotMatch(method, /throw/);
@@ -128,13 +155,23 @@ describe('what a preview finds out about the project it is running', () => {
     // npm's own wrapper, so a report built from stderr alone told somebody
     // whose publish was blocked by a type error that npm had exited 2, and
     // nothing else. Both paths that report a failed compile read both.
-    for (const method of ['typecheck(', 'buildProject(']) {
-      const at = source.indexOf(`async ${method}`);
-      assert.ok(at > 0, `${method} is not where this expected it`);
+    // Bounded by the method that follows each, not by a character count,
+    // and by the one that really does follow it: this ran to `createShare`
+    // and went on passing when the teardown was lifted out into
+    // `releaseBuild` between the two.
+    // The fixed 3000-character window this used to take was measuring
+    // nothing in particular: adding anything above the assertion inside
+    // `buildProject` pushed the line it looks for out of the window, and
+    // the test failed for a reason that had nothing to do with streams.
+    const methods: [string, string][] = [
+      ['private async typecheck(', 'private async destroyHoldingLock('],
+      ['async buildProject(', 'private async releaseBuild('],
+    ];
+    for (const [signature, next] of methods) {
       assert.match(
-        source.slice(at, at + 3_000),
+        bodyOf(signature, next),
         /\.stdout,\s*\w+\.stderr\]/,
-        `${method} reports one stream, and not the one tsc writes to`,
+        `${signature} reports one stream, and not the one tsc writes to`,
       );
     }
   });

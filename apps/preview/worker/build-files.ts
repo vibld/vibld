@@ -1,0 +1,177 @@
+import type { ProjectFile } from '@vibld/core';
+
+/**
+ * The two per-file loops a build runs: writing the project in, and reading
+ * its output back.
+ *
+ * They live together because they are the same shape and the same hazard,
+ * and keeping them apart is how one of them ended up without the other's
+ * protection. A build holds a lock with a fifteen-minute TTL and both loops
+ * are one or two RPCs per file, so each has to push that lock forward as it
+ * goes. The read loop was given renewals; the write loop was not, and
+ * nothing about either file said the pair existed (#196 review).
+ *
+ * `keepAlive` says whether to carry on, rather than only pushing the lock
+ * forward (#196 review). Renewing was never enough by itself: the renewal
+ * is conditional on still owning the lock, so a build that had already been
+ * superseded renewed nothing, learned nothing, and went on writing into the
+ * workspace its successor had just emptied. Losing the lock has to stop the
+ * work rather than merely fail to extend it, and running out of time is the
+ * same fact arriving the other way.
+ *
+ * Its own module so they can be called rather than read (#196 review).
+ * `preview-sandbox.ts` imports `@cloudflare/sandbox` and cannot be loaded
+ * under `node --test`, so every assertion about this loop has been a regex
+ * over source, and the defect that prompted the extraction is exactly the
+ * kind a regex does not see: the renewal counted the files it kept rather
+ * than the files it read, so a build whose output was mostly binary did one
+ * RPC per asset and renewed the lock either never or on every single one,
+ * depending on where the text-file count happened to stop. Both are wrong
+ * for the same reason, and a test that calls this with a hundred skipped
+ * entries sees it at once.
+ *
+ * The same reasoning as `build-failure.ts` beside it, and the standing
+ * answer to seven tests on that file that measured the text around a
+ * property instead of the property.
+ */
+
+/** What `listFiles` gives back, narrowed to what this needs. */
+export interface OutputEntry {
+  type: string;
+  relativePath: string;
+}
+
+/** What `readFile` gives back, likewise. */
+export interface ReadFileResult {
+  encoding?: string;
+  content: string;
+}
+
+/**
+ * How often the loop pushes the lock forward.
+ *
+ * Every file would be an extra storage write per file for no more safety;
+ * never would leave the longest unbounded stretch in a build measured
+ * against a TTL it can outrun.
+ */
+export const LOCK_RENEWAL_EVERY = 25;
+
+/**
+ * Waiting for a fleet ticket, and giving back one that arrives too late
+ * (#196 review).
+ *
+ * Here rather than inline because the inline version was wrong in a way no
+ * source read could see. It kept a `waiting` flag, set false after the
+ * `await`, and a handler registered on the admission promise before it:
+ *
+ * ```
+ * admission.then((late) => (waiting ? release(late.id) : undefined));
+ * slot = await bounded(admission);
+ * waiting = false;
+ * ```
+ *
+ * Reactions run in registration order, so on the ordinary fast path the
+ * handler ran *first*, saw `waiting` still true, and released the ticket of
+ * the build that was about to use it. The build then ran holding no slot at
+ * all, which is the twenty-five container partition defeated on every
+ * build rather than in some rare race.
+ *
+ * There is no flag now. The late release is attached only on the path where
+ * the wait actually gave up, which is a fact rather than a guess about
+ * ordering. `admission-late.test.ts` calls this both ways.
+ */
+export async function admit<T extends { id: number }>(
+  admission: Promise<T>,
+  bounded: (work: Promise<T>) => Promise<T>,
+  release: (id: number) => Promise<void>,
+  keep: (work: Promise<unknown>) => void,
+): Promise<T> {
+  try {
+    return await bounded(admission);
+  } catch (error) {
+    // Whatever it hands back now belongs to nobody: `reclaimStale` only
+    // reclaims rows it has activated, so an abandoned queued row never
+    // expires. An admission that rejected has no ticket to give back, which
+    // is why the rejection arm answers nothing rather than releasing.
+    keep(
+      admission.then(
+        (late) => release(late.id),
+        () => undefined,
+      ),
+    );
+    throw error;
+  }
+}
+
+/**
+ * Writing the caller's project into the container, one file at a time.
+ *
+ * `write` is the caller's, because creating directories and writing bytes
+ * is the sandbox's API and not this function's business. What is this
+ * function's business is the loop, the heartbeat, and stopping.
+ *
+ * `keepAlive` is required rather than defaulted. A default would be
+ * something a later caller under a lock forgets to replace, and it would
+ * fail exactly the way this loop already failed: silently, on a big
+ * project, with nothing to say so. A caller holding no lock passes one
+ * that answers true and says why.
+ *
+ * Returns whether every file was written. False means the build stopped
+ * being entitled to this workspace part way through, which its caller has
+ * to report as a fault of the service rather than a verdict on the
+ * project: half a tree measures nothing.
+ */
+export async function writeFiles<T>(
+  files: T[],
+  write: (file: T) => Promise<void>,
+  keepAlive: () => Promise<boolean>,
+): Promise<boolean> {
+  let asked = 0;
+  for (const file of files) {
+    if (asked % LOCK_RENEWAL_EVERY === 0 && !(await keepAlive())) return false;
+    asked += 1;
+    await write(file);
+  }
+  return true;
+}
+
+/**
+ * Reading a finished build's output back, one file at a time.
+ *
+ * Only text output is returned. A build that emits binary assets (images,
+ * fonts) names them in `skipped` rather than mangling them: apps/publish's
+ * own R2 usage is text-only today, so there is nowhere correct to put
+ * binary bytes yet.
+ *
+ * `keepAlive` is asked before the first read and every `LOCK_RENEWAL_EVERY`
+ * reads after it, counted by what this does rather than by what it keeps.
+ * A skipped asset costs exactly the same RPC as a kept one, which is the
+ * whole reason the heartbeat exists.
+ *
+ * `complete` is false when it said to stop. Whatever had been read by then
+ * comes back rather than being thrown away, but a caller must not report a
+ * partial tree as the build's output.
+ */
+export async function collectOutput(
+  entries: OutputEntry[],
+  read: (relativePath: string) => Promise<ReadFileResult>,
+  keepAlive: () => Promise<boolean>,
+): Promise<{ output: ProjectFile[]; skipped: string[]; complete: boolean }> {
+  const output: ProjectFile[] = [];
+  const skipped: string[] = [];
+  let asked = 0;
+  for (const entry of entries) {
+    if (entry.type !== 'file') continue;
+    if (asked % LOCK_RENEWAL_EVERY === 0 && !(await keepAlive())) {
+      return { output, skipped, complete: false };
+    }
+    asked += 1;
+    const file = await read(entry.relativePath);
+    if (file.encoding === 'base64') {
+      skipped.push(entry.relativePath);
+      continue;
+    }
+    output.push({ path: entry.relativePath, content: file.content });
+  }
+  return { output, skipped, complete: true };
+}

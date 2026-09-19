@@ -5,13 +5,17 @@ import { PlanProvider, RUN_STEP_TIMEOUT_MS, createPlanClient } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
 
 import { D1GenerationStore } from './generation-store.ts';
+import { buildProject } from './publish-client.ts';
+import { reserveBudget } from './reserve.ts';
 import {
+  REPAIR_STEP_TIMEOUT_MS,
   SanitizingModelProvider,
   ceilingForRun,
   runGeneration,
   settleBudget,
   throttleProgress,
   traceOf,
+  verifyAndRepair,
 } from './generation-run.ts';
 import type {
   GenerationWorkflowEnv,
@@ -226,6 +230,84 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
       },
     );
 
+    // After settlement, and that ordering is the whole reason this is safe
+    // rather than a convenience (#194).
+    //
+    // `UserBudget.reserve` reclaims every unsettled reservation older than
+    // RUN_ABANDONED_AFTER_MS before it does anything else, charging each one
+    // at its full worst case, and `settle` writes only where `settled IS
+    // NULL`. A repair reserves against the same caller's ledger. Put this
+    // step before settlement and a run that had been going long enough
+    // would have had its own in-flight reservation reclaimed by the repair
+    // it was about to ask for, billing the caller a worst case they never
+    // spent and discarding the figure actually measured. Settling first
+    // means the only reservation this step can touch is the one it makes.
+    //
+    // The generate step's own timeout is what keeps the first reservation
+    // inside that window; nothing here may be allowed to grow it.
+    const repair = await step.do(
+      'verify-and-repair',
+      {
+        // Paid and not idempotent, exactly like `generate`: a retried step
+        // would ask the model a second time for the same repair.
+        retries: { limit: 0, delay: '10 seconds' },
+        // A build, a model call and a second build. Its own budget rather
+        // than the generate step's, because the reservation this step makes
+        // is its own and is settled inside it.
+        timeout: REPAIR_STEP_TIMEOUT_MS,
+      },
+      () =>
+        verifyAndRepair(this.env, params, generation.result, {
+          build: buildProject,
+          reserve: reserveBudget,
+          settle: settleBudget,
+          generate: (provider, request) =>
+            runGeneration(
+              new D1GenerationStore(this.env.DB, this.env.PROJECT_CONTENT),
+              provider,
+              request,
+            ),
+          // A provider of its own, with its own usage capture: the run's
+          // was closed over by the generate step and settled with it.
+          // No progress channel, deliberately. The meter's clock stopped
+          // when the generate step finished, and reopening it here would
+          // show a run that had already reported its result still writing.
+          providerFor: (onUsage) =>
+            new SanitizingModelProvider(
+              new PlanProvider(createPlanClient(this.env, params.model), {
+                model: params.model,
+                maxTokens: ceilingForRun(params),
+                onUsage,
+                ...(params.style ? { style: params.style } : {}),
+                ...(params.knowledge ? { knowledge: params.knowledge } : {}),
+              }),
+            ),
+        }),
+    );
+
+    // Field by field, never a spread of `repair` (#196 review). That object
+    // carries `result`, and `result.accepted.files` is the whole project:
+    // spreading it wrote every generated file into the Worker log on each
+    // successful repair, which puts a tenant's own copy, and whatever
+    // knowledge was incorporated into it, in front of every log reader and
+    // outside the access and retention boundaries the storage path has.
+    // Only the scalars that say what happened belong here.
+    console.log(
+      JSON.stringify({
+        event: 'generation.verified',
+        userId: params.userId,
+        runId: params.runId,
+        ...(repair.built === undefined ? {} : { built: repair.built }),
+        ...(repair.repaired === undefined ? {} : { repaired: repair.repaired }),
+        ...(repair.skipped ? { skipped: repair.skipped } : {}),
+        ...(repair.unverified ? { unverified: repair.unverified } : {}),
+        ...(repair.repairCostMicroUsd === undefined
+          ? {}
+          : { repairMicroUsd: repair.repairCostMicroUsd }),
+        ...(repair.settled === false ? { settled: false } : {}),
+      }),
+    );
+
     await step.do(
       'record-trace',
       // Its own step rather than a tail on settlement: a trace that fails to
@@ -249,9 +331,22 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             endedAt: generation.endedAt,
           }),
         );
+        // The repair's own row, under its own run id (#196 review). Without
+        // it the Runs view reported the first call's cost as what the run
+        // cost, while billing had charged for two. Its own row rather than a
+        // larger number on this one: the repair has its own tokens, and a
+        // row whose cost counts two calls and whose token counts describe
+        // one is a row that misreads either way you read it.
+        //
+        // In the same step, and after: `saveTrace` keeps the first row for a
+        // run id, so a retry of this step writes neither twice.
+        if (repair.trace) await store.saveTrace(repair.trace);
       },
     );
 
-    return generation.result;
+    // The repaired project where there is one. The repair promoted its own
+    // accepted revision, so returning the first attempt here would show the
+    // reader the broken files while the store held the fixed ones (#194).
+    return repair.result ?? generation.result;
   }
 }

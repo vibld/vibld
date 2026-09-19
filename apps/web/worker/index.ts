@@ -5,6 +5,7 @@ import {
   resolveModel,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
+import { sleep } from '@vibld/core';
 import type { RunRefusal } from '@vibld/core';
 
 import {
@@ -36,6 +37,12 @@ import { spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { POLL_INTERVAL_MS, stageFor } from './run-stage.ts';
 import { RunProgress } from './run-progress.ts';
+import {
+  positiveInt,
+  reserveAccount,
+  reserveBudget,
+  topupKeyFor,
+} from './reserve.ts';
 import { whenClientGone } from './client-gone.ts';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
@@ -52,7 +59,6 @@ import {
   ACCOUNT_BUDGET_KEY,
   NOTHING_TO_BILL,
   cancelledUsage,
-  dayKey,
   microUsdOf,
   worstCaseMicroUsd,
 } from './spend.ts';
@@ -61,7 +67,6 @@ import {
   MOCKUP_INPUT_CHARS,
   runCeilingFor,
 } from './run-ceiling.ts';
-import type { SpendVerdict } from './spend.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
   allowancePeriodKey,
@@ -88,8 +93,10 @@ import {
 } from './preview-client.ts';
 import type { ServiceBinding } from './preview-client.ts';
 import {
+  askWhileBusy,
   autoPublishConfigured,
   buildProject,
+  buildWithin,
   publishProject,
   publishServiceConfigured,
   holdProject,
@@ -369,14 +376,6 @@ export interface Env {
 /** Re-exported so Wrangler can find the classes from the Worker's entrypoint. */
 export { UserBudget, GenerationWorkflow, RunProgress };
 
-const DEFAULT_MAX_IN_FLIGHT = 2;
-const DEFAULT_ACCOUNT_DAILY_MICRO_USD = 80_000_000;
-
-function positiveInt(raw: string | undefined, fallback: number): number {
-  const value = Number(raw);
-  return Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
 function json(body: unknown, status = 200): Response {
@@ -422,132 +421,6 @@ function isConfigured(env: Env): boolean {
     env.DB &&
     env.PROJECT_CONTENT,
   );
-}
-
-interface BudgetLayers {
-  account: Reservation;
-  user: Reservation;
-  /**
-   * Which `USER_BUDGET` instance `user.id` was actually reserved against:
-   * `userId` for the caller's own monthly tier allowance, or
-   * `"<userId>:topup"` if that allowance was already exhausted and the
-   * reservation was drawn from top-up credit instead. Threaded through
-   * `WorkflowParams.reservationKey` so settlement targets the same instance.
-   */
-  userReservationKey: string;
-}
-
-/** Only ever constructed from a verdict already known to deny the run. */
-type DeniedVerdict = Extract<SpendVerdict, { allow: false }>;
-
-function topupKeyFor(userId: string): string {
-  return `${userId}:topup`;
-}
-
-/**
- * The account-wide daily ceiling, held for one run's worst case.
- *
- * Its own function because a second caller appeared (#191 review): a
- * mockup run that retries an empty reply asks for this again before the
- * second attempt goes out, and a reservation the Worker spells twice is a
- * ceiling that can be enforced two different ways.
- *
- * Unbounded in-flight on purpose: concurrency is the per-user layer's job.
- * This layer enforces spend only.
- */
-async function reserveAccount(
-  env: Env,
-  worstCase: number,
-  now: number,
-): Promise<Reservation> {
-  const accountCeiling = positiveInt(
-    env.VIBLD_ACCOUNT_DAILY_MICRO_USD,
-    DEFAULT_ACCOUNT_DAILY_MICRO_USD,
-  );
-  return env
-    .USER_BUDGET!.getByName(ACCOUNT_BUDGET_KEY)
-    .reserve(worstCase, accountCeiling, Number.MAX_SAFE_INTEGER, dayKey(now));
-}
-
-/**
- * Reserves against every ceiling before a run may start: the account-wide
- * one first (cheaper to check, and failing it means nothing else needs
- * touching), then the caller's own monthly tier allowance (L35-L39), then --
- * only if that allowance is exhausted, not merely low -- their top-up
- * credit balance (L37). If an earlier layer allows but a later one refuses,
- * the earlier hold is released at once: a run that never starts must never
- * leave a phantom charge sitting against a ceiling for up to fifteen
- * minutes waiting on the abandoned-reservation reclaim.
- *
- * `monthlyAllowance` and `topupCeiling` are the caller's to compute
- * (`handlePlan` reads them from `BillingStore`) -- this function only knows
- * how to spend them, not where they come from.
- */
-async function reserveBudget(
-  env: Env,
-  userId: string,
-  worstCase: number,
-  monthlyAllowance: number,
-  topupCeiling: number,
-  now: number,
-): Promise<
-  { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
-> {
-  const ledger = env.USER_BUDGET!;
-  const account = await reserveAccount(env, worstCase, now);
-  if (!account.verdict.allow) {
-    return { ok: false, verdict: account.verdict };
-  }
-
-  const releaseAccount = async () => {
-    if (account.id !== undefined) {
-      await ledger.getByName(ACCOUNT_BUDGET_KEY).settle(account.id, 0);
-    }
-  };
-
-  const maxInFlight = positiveInt(
-    env.VIBLD_MAX_IN_FLIGHT,
-    DEFAULT_MAX_IN_FLIGHT,
-  );
-  const primary = await ledger
-    .getByName(userId)
-    .reserve(worstCase, monthlyAllowance, maxInFlight, allowancePeriodKey(now));
-  if (primary.verdict.allow) {
-    return {
-      ok: true,
-      layers: { account, user: primary, userReservationKey: userId },
-    };
-  }
-
-  // A top-up buys more spend, not more in-flight runs: concurrency is only
-  // ever gated by the primary bucket, so this denial is final regardless of
-  // top-up balance.
-  if (primary.verdict.reason === 'too-many-in-flight' || topupCeiling <= 0) {
-    await releaseAccount();
-    return { ok: false, verdict: primary.verdict };
-  }
-
-  // The monthly allowance is exhausted -- try the caller's top-up balance
-  // next, automatically. "lifetime" as the period key on purpose: unlike the
-  // allowance above, a top-up does not reset month to month, it is drawn
-  // down until spent (or, approximately, until it is 12 months old -- see
-  // `BillingStore.totalTopupCreditMicroUsd`).
-  const topupKey = topupKeyFor(userId);
-  const topup = await ledger
-    .getByName(topupKey)
-    .reserve(worstCase, topupCeiling, Number.MAX_SAFE_INTEGER, 'lifetime');
-  if (topup.verdict.allow) {
-    return {
-      ok: true,
-      layers: { account, user: topup, userReservationKey: topupKey },
-    };
-  }
-
-  await releaseAccount();
-  // The monthly-allowance denial is the one worth reporting: it is what a
-  // top-up would have fixed, whereas the top-up bucket's own denial is just
-  // "also not enough" and says nothing new.
-  return { ok: false, verdict: primary.verdict };
 }
 
 /**
@@ -1021,12 +894,14 @@ async function handlePlan(
   // (L35-L39) -- a monthly allowance by tier, plus whatever top-up credit
   // they have left.
   let reserved;
+  // Declared out here because the Workflow is given them too: a repair turn
+  // holds its own reservation and must do it against the figures this run
+  // was admitted on, not ones it re-derives minutes later (#194).
+  let monthlyAllowance: number;
+  let topupCeiling: number;
   try {
     const now = Date.now();
-    const { monthlyAllowance, topupCeiling } = await spendableFor(
-      env,
-      principal,
-    );
+    ({ monthlyAllowance, topupCeiling } = await spendableFor(env, principal));
 
     reserved = await reserveBudget(
       env,
@@ -1173,6 +1048,11 @@ async function handlePlan(
         worstCaseMicroUsd: worstCase,
         prices,
         maxTokens,
+        // The figures this run was admitted on, carried so a repair turn
+        // can hold its own reservation without reconstructing a Principal
+        // inside the Workflow (#194).
+        monthlyAllowance,
+        topupCeiling,
       },
     });
   } catch (error) {
@@ -2014,7 +1894,34 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     return json({ error: '"slug" must be a non-empty string.' }, 400);
   }
 
-  const built = await buildProject(env, principal.userId, parsed.value);
+  // Asked again while the workspace is busy, on the same budget the
+  // repair's rebuild uses (#196 review). A verification build returns as
+  // soon as it has an answer and tears its container down afterwards, on
+  // `ctx.waitUntil`, holding that user's build lock for as long as the
+  // destroy takes. Publishing straight after a generation therefore met a
+  // `busy` refusal from a build that was already finished, and this route
+  // turned it into a 422 that reads as "your project does not build".
+  //
+  // Bounded per call as well as in total, because a sequence of bounded
+  // calls is not a bounded sequence: `buildWithin` gives each attempt what
+  // is left of the budget rather than its own full thirteen minutes.
+  const built = await askWhileBusy(
+    (within) =>
+      buildWithin(
+        () => buildProject(env, principal.userId, parsed.value),
+        within,
+      ),
+    (answer) => Boolean(answer && !answer.ok && answer.reason === 'busy'),
+    { wait: sleep, now: Date.now },
+  );
+  // A build service that never answered says nothing about the project, so
+  // it is not a 422. Same reading the repair step takes of the same fact.
+  if (!built) {
+    return json(
+      { error: 'The build service is unavailable. Try again shortly.' },
+      503,
+    );
+  }
   if (!built.ok) return json({ error: built.error }, 422);
 
   // One project per Clerk user, same convention `handlePlan` already uses --

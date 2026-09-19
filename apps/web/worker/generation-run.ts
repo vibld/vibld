@@ -5,9 +5,15 @@ import {
   type GenerationRequest,
   type GenerationStore,
   type ModelProvider,
+  type ProjectFile,
   type RunTrace,
 } from '@vibld/core';
-import { DEFAULT_MAX_TOKENS, ProviderError, findModel } from '@vibld/ai';
+import {
+  DEFAULT_MAX_TOKENS,
+  ProviderError,
+  RUN_STEP_TIMEOUT_MS,
+  findModel,
+} from '@vibld/ai';
 import { MAX_BASE_CONTENT_CHARS } from '@vibld/ai/limits';
 import type { PlanUsage } from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
@@ -17,6 +23,16 @@ import { ACCOUNT_BUDGET_KEY, microUsdOf } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 import type { UserBudget } from './budget.ts';
 import type { RunProgress } from './run-progress.ts';
+import type { ServiceBinding } from './publish-client.ts';
+import {
+  askWhileBusy,
+  buildWithin,
+  BUILD_CALL_TIMEOUT_MS,
+} from './publish-client.ts';
+import type { BuildFailureReason, buildProject } from './publish-client.ts';
+import { LEDGER_CALL_TIMEOUT_MS } from './reserve.ts';
+import type { reserveBudget } from './reserve.ts';
+import { OUT_OF_TIME, retrying, sleep, withinDeadline } from '@vibld/core';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -119,6 +135,32 @@ export interface WorkflowParams {
    * this field shipped, which is what `ceilingForRun` exists to handle.
    */
   maxTokens: number;
+  /**
+   * What the caller was allowed to spend when this run was admitted, so a
+   * repair turn can hold a reservation of its own without asking again
+   * (#194).
+   *
+   * Carried rather than re-derived, for the reason `maxTokens` above gives
+   * and one more. `spendableFor` needs a `Principal`, which a Workflow does
+   * not have and would have to reconstruct from `userId` and an optional
+   * `email`; a fabricated identity deciding what somebody may spend is a
+   * worse failure than a figure that is a few minutes old. These are the
+   * same two numbers the run was already admitted on, so the repair is
+   * held against the allowance that let the run start rather than one that
+   * moved underneath it.
+   *
+   * Being stale is not a way to overspend. They are ceiling *inputs*: the
+   * ledger still measures real spend at the moment the repair asks, so a
+   * caller who has spent more since is refused by `reserve` whatever these
+   * say.
+   *
+   * Optional, and absent means no repair. A payload persisted before these
+   * existed resumes without them, and a run that cannot say what its caller
+   * may spend must not guess: it finishes with whatever the first attempt
+   * produced, which is exactly what every run did before this shipped.
+   */
+  monthlyAllowance?: number;
+  topupCeiling?: number;
 }
 
 /**
@@ -248,10 +290,177 @@ export function throttleProgress(
   };
 }
 
+/**
+ * Which failures are statements about the project, one decision for both
+ * questions this file asks about a build (#196 review).
+ *
+ * A record over the whole union rather than a pair of comparisons, because
+ * a comparison does not notice a reason that did not exist when it was
+ * written. `worthRepairing` and `judgedTheProject` both used
+ * `reason === 'install' || reason === 'build'` against a `string`, so a
+ * sixth reason added to `publish-client.ts` would have been classified by
+ * both of them, silently, as not the project's. That is the safe direction
+ * and it is still a decision nobody took: the new reason might be exactly
+ * the evidence a repair turn acts on, and the feature would simply not fire
+ * for it.
+ *
+ * Typed as `Record<BuildFailureReason, boolean>`, so adding a member to
+ * that union and not classifying it here does not compile.
+ *
+ * `install` is usually a package the model invented or misspelled and
+ * `build` is the compiler refusing what it was given. The rest are the
+ * build service talking about itself: `busy` is a refusal issued before the
+ * build starts, so the code was never looked at, `sandbox` is the container,
+ * and `output` is a build that succeeded and could not be read back.
+ */
+const ABOUT_THE_PROJECT: Record<BuildFailureReason, boolean> = {
+  install: true,
+  build: true,
+  busy: false,
+  sandbox: false,
+  output: false,
+};
+
+/**
+ * The same question asked of a result rather than of a reason: `ok` is a
+ * statement about the project too, and an absent reason is not.
+ *
+ * An absent reason is deliberately not one. `publish-client.ts` leaves it
+ * absent when the build service sends something it does not recognise, and
+ * "I could not read why this failed" is not evidence about the project.
+ */
+function aboutTheProject(reason: BuildFailureReason | undefined): boolean {
+  return reason !== undefined && ABOUT_THE_PROJECT[reason];
+}
+
+/**
+ * Whether a failed build is worth spending a second model call on (#194).
+ *
+ * Two questions, and they are separate on purpose. The first is whether the
+ * failure says anything about the project, which is `ABOUT_THE_PROJECT`
+ * above and is asked the same way by both builds in this file.
+ *
+ * The second is whether the run can pay for it. A payload persisted before
+ * `monthlyAllowance` existed cannot say what its caller may spend, and a run
+ * that cannot say that must not guess: no repair, and the reader keeps what
+ * the first attempt produced, which is what every run did before this
+ * shipped.
+ */
+export function worthRepairing(
+  build: { ok: boolean; reason?: BuildFailureReason },
+  params: Pick<WorkflowParams, 'monthlyAllowance' | 'topupCeiling'>,
+): boolean {
+  if (build.ok) return false;
+  if (!aboutTheProject(build.reason)) return false;
+  return (
+    typeof params.monthlyAllowance === 'number' &&
+    typeof params.topupCeiling === 'number'
+  );
+}
+
+/**
+ * What to ask the model for, when its own project will not build.
+ *
+ * The compiler's words verbatim and nothing paraphrased: the whole reason
+ * this is worth a second call is that the error names the file and the line,
+ * and a summary would throw away the part that makes it fixable.
+ *
+ * Says what not to do as well as what to do. Left to itself a model asked to
+ * "fix the build" will happily rewrite the project, and the reader asked for
+ * the project, not for a second draft of it.
+ */
+/**
+ * What the verify-and-repair step is given before it is considered hung.
+ *
+ * A build, a model call and a second build. The first version of this said
+ * exactly that and then funded one build (#196 review): a slow first build
+ * followed by a model call near its own limit would have timed out before
+ * the second build, failing a Workflow whose project was already accepted,
+ * promoted and billed.
+ *
+ * Two builds at `apps/preview`'s own bounds (five minutes installing and
+ * five compiling, each) is twenty minutes, plus room for the work those
+ * bounds do not cover: writing the project into the container and reading
+ * the output back. `repair-timeout.test.ts` checks this against that
+ * module's real numbers, because the two live in separate deployments that
+ * share no build and can drift apart silently.
+ *
+ * Deliberately *not* added to anything the reclaim compares against, and
+ * that still holds at the larger figure. This step runs after the run's own
+ * settlement, so the only reservation alive while it works is the one it
+ * makes; and that one is settled immediately after the model call, before
+ * the second build, so its life is the model call rather than the step.
+ * RUN_ABANDONED_AFTER_MS bounds the hold, not the step (#194).
+ */
+export const REPAIR_BUILD_ALLOWANCE_MS = 30 * 60_000;
+export const REPAIR_STEP_TIMEOUT_MS =
+  RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS;
+
+/**
+ * How long the repair's second build waits out a busy workspace, and how
+ * often it asks again (#196 review).
+ *
+ * The first build's container teardown holds that user's build lock until
+ * the container is gone, and it no longer holds up the build it belongs to:
+ * it runs on `ctx.waitUntil`, so a repair's model call and its predecessor's
+ * teardown now overlap. Ordinarily the teardown is one `destroy()` and is
+ * finished long before the model call is, but when it is not, the second
+ * build met a `busy` refusal and the repair was returned unverified. The
+ * caller had just paid for it, and checking whether it builds is the whole
+ * point of paying.
+ *
+ * Bounded at half a minute rather than joined, because waiting out the
+ * teardown's own ten-minute cap would put back on the caller's clock exactly
+ * what moving it to `ctx.waitUntil` took off. Thirty seconds covers a slow
+ * destroy; a teardown still holding the lock after that is the pathological
+ * case, and giving up there reports the repair as unverified, which is what
+ * the code already did and is honest.
+ *
+ * It is spent inside `REPAIR_BUILD_ALLOWANCE_MS` and `repair-timeout.test.ts`
+ * checks that the allowance has room for it on top of the two builds. A wait
+ * that fits only because nobody added it up is the defect that allowance has
+ * had twice already.
+ *
+ * Counted in attempts rather than measured against the clock, and the budget
+ * is derived from the two. A loop whose only bound is `Date.now()` moving
+ * does not terminate when it does not move, which is not a hypothetical: the
+ * first version of this hung the test suite, because the fake clock these
+ * tests inject is a constant.
+ *
+ * The attempts bound the sleeping and a wall clock bounds the rest
+ * (#196 review). Six retries of a thirteen-minute call is ninety-one
+ * minutes of build, not one build and thirty seconds of waiting, and the
+ * allowance above was sized for the second reading: a near-limit first
+ * build, a near-limit model call and one near-limit busy retry already came
+ * to about fifty-six minutes against a step funded for sixty. So `rebuild`
+ * takes one budget of `BUILD_CALL_TIMEOUT_MS + REBUILD_WAIT_BUDGET_MS` for
+ * the whole sequence, passes what is left of it to each call, and stops
+ * asking when there is not enough left to wait and still build.
+ * `repair-timeout.test.ts` adds that up against the allowance.
+ */
+
+export function repairPromptFor(error: string): string {
+  return `The project you just wrote does not build. This is the exact output:
+
+${error}
+
+Fix it, and change nothing else. Keep every file that is not implicated, keep
+the design, the copy and the structure exactly as they are, and do not rename
+or reorganise anything. Return the complete set of files for the project as
+it should now be.`;
+}
+
 export interface GenerationWorkflowEnv {
   DB: D1Database;
   PROJECT_CONTENT: R2Bucket;
-  USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'settle'>>;
+  /**
+   * `reserve` as well as `settle` since #194: the verify-and-repair step
+   * holds a reservation of its own for the second model call.
+   */
+  USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'reserve' | 'settle'>>;
+  /** Read by `reserveBudget` when the repair holds its own reservation. */
+  VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
+  VIBLD_MAX_IN_FLIGHT?: string;
   /**
    * The live progress channel (#183). Typed by the one method used rather
    * than by the class, the way `USER_BUDGET` is: the Workflow only reports
@@ -263,11 +472,119 @@ export interface GenerationWorkflowEnv {
    * this channel existed.
    */
   RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'report' | 'finish'>>;
+  /**
+   * `@vibld/preview`, for building the project the run just produced (#194).
+   *
+   * Only the build half of what `publish-client.ts` calls: publishing needs
+   * `PUBLISH` too, and a deployment that can build but not publish must
+   * still check its own output. Optional, and absent means the run finishes
+   * unchecked, which is what every run did before this.
+   */
+  PREVIEW?: ServiceBinding;
+  PREVIEW_INTERNAL_SECRET?: string;
   ANTHROPIC_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;
   VIBLD_PROVIDER?: string;
   VIBLD_MODEL?: string;
+}
+
+/**
+ * What the verify-and-repair step is given to work with, and gives back.
+ *
+ * `built` is the question the step exists to answer, and it is deliberately
+ * three-valued. True and false are a build that ran; `undefined` is a build
+ * that never happened, because the binding is absent or the run produced no
+ * files to build, and reporting that as false would say a project failed a
+ * check nothing performed.
+ */
+export interface RepairOutcome {
+  built?: boolean;
+  /**
+   * Whether the repaired project builds, asked the same way the first one
+   * was (#196 review).
+   *
+   * Three-valued, and the middle case is the point. True and false are a
+   * second build that ran. `undefined` is a repair that happened and whose
+   * result could not be checked, because the build service went away
+   * between the two calls. Reporting that as true would declare the exact
+   * production failure this feature exists to catch fixed on the strength
+   * of the model having answered.
+   *
+   * It is deliberately not "the generation was accepted". Acceptance is the
+   * structural validator saying the files are well formed and inside the
+   * project root; it says nothing about whether they compile, which is the
+   * whole question.
+   */
+  repaired?: boolean;
+  /**
+   * The repaired project, when there is one, for the caller to return in
+   * place of the attempt that did not build.
+   *
+   * Without this the repair was invisible where it mattered most: it
+   * promotes a new accepted revision into the store, and the Workflow went
+   * on returning the first attempt's files, so the reader was shown the
+   * broken project while the store held the fixed one. Present only when
+   * the repair was accepted -- a repair that itself failed leaves the
+   * original result alone, because a project that does not build is still
+   * more than an error message.
+   */
+  result?: DurableGenerationResult;
+  /**
+   * Why no repair was attempted, when a failing build did not buy one.
+   *
+   * `unavailable` covers both services this step needs and says nothing
+   * about the project itself. `built` tells the two apart: absent means the
+   * build service could not be reached and nothing is known, false means the
+   * project was built and does not build, and the ledger could not be asked
+   * to pay for a repair.
+   */
+  skipped?:
+    | 'not-configured'
+    | 'not-the-project'
+    | 'no-budget'
+    | 'unavailable'
+    | 'timed-out';
+  /**
+   * Why a repair that was paid for came back unbuilt (#196 review).
+   *
+   * `repaired` being absent already says that nothing was found out, and it
+   * says nothing about which of the reasons it was. The one worth telling
+   * apart from the rest is `busy`, because that is this step tripping over
+   * its own predecessor's teardown rather than anything about the wider
+   * world, and it is the residual the bounded wait in `rebuild` does not
+   * cover. Without this the only sign of it is a repair that quietly never
+   * reports `repaired`, which is indistinguishable from the build service
+   * having been down.
+   *
+   * `unavailable` covers both a build that could not be asked at all and
+   * one whose answer named a reason this deployment does not know: neither
+   * came back with anything that says a thing about the files.
+   */
+  unverified?: BuildFailureReason | 'unavailable';
+  /** The repair's own reservation, settled by this step and not the run's. */
+  repairCostMicroUsd?: number;
+  /**
+   * Whether that reservation was actually closed.
+   *
+   * Present and false only where every settlement attempt failed, which
+   * leaves a hold open for `UserBudget`'s reclaim to charge at its full
+   * worst case thirty-five minutes later. It is worth a field rather than a
+   * silent catch: it is the one outcome here that costs the caller money
+   * nobody measured, and the log line is where an operator would see it.
+   */
+  settled?: boolean;
+  /**
+   * The repair's own row in the run record (#196 review).
+   *
+   * Its own row rather than an addition to the run's, because the repair is
+   * its own run: its own id, its own model call, its own tokens. Folding
+   * only its cost into the parent trace would have left that row's cost
+   * describing two calls while its token counts described one, and
+   * `contextPressure` and `cacheHitRate` read those counts. The run cost
+   * the sum of the two rows, and both rows say what they are.
+   */
+  trace?: RunTrace;
 }
 
 export interface GenerationOutcome {
@@ -472,6 +789,468 @@ export async function runGeneration(
   }
 }
 
+interface SettlementOutcome {
+  /** What was settled, absent when nothing was. */
+  cost?: number;
+  settled: boolean;
+}
+
+/**
+ * Close the repair's own reservation, and never fail the run doing it.
+ *
+ * The distinction this keeps is between money and files. The reservation is
+ * this step's to close and closing it matters, but the caller's project
+ * exists whether or not the ledger answered, and it is already promoted by
+ * the time this runs. So settlement is retried while there is reason to
+ * think it might work, and then recorded as not having happened rather than
+ * thrown (#196 review).
+ */
+async function settleRepairHold(
+  deps: {
+    settle: typeof settleBudget;
+    wait?: (ms: number) => Promise<void>;
+  },
+  env: GenerationWorkflowEnv,
+  params: WorkflowParams,
+  held: Awaited<ReturnType<typeof reserveBudget>>,
+  usage: PlanUsage | undefined,
+  /**
+   * Whether the repair's model call actually went out (#196 review).
+   *
+   * Not a hard-coded `true`, though it was. `runGeneration` returns
+   * normally with `providerRan: false` for the two refusals it makes before
+   * calling anybody: a base snapshot over `MAX_BASE_CONTENT_CHARS`, and a
+   * base revision that moved. Both are reachable here -- the repair carries
+   * the whole accepted project as its base, and another run can promote
+   * between the first build and this call -- and settling either at the
+   * worst case bills somebody the price of a full generation for being told
+   * no. True remains the answer when there is no outcome to read, which is
+   * a throw, because then the call may well have gone out.
+   */
+  providerRan: boolean,
+  /**
+   * Whether this repair was given up on rather than answered (#196 review).
+   *
+   * The caller is charged nothing for it and the account ledger still
+   * carries the worst case. The model was asked, so the deployment may well
+   * have spent that money, and the account ceiling exists to bound what
+   * this deployment spends; but the caller never received the repair, and
+   * the repair is something this service decided to attempt on their
+   * behalf rather than something they asked for.
+   *
+   * The same split `accountMicroUsd` was added for: the caller pays for the
+   * attempt they got, the ceiling holds the attempt that was made.
+   */
+  abandoned = false,
+): Promise<SettlementOutcome> {
+  // Remembered across attempts, because `retrying` reports the last failure
+  // and the informative one may not be last (#196 review). A first attempt
+  // that closed the caller's layer and failed on the account's knows what
+  // they were charged; a second attempt that cannot reach the caller's
+  // ledger at all does not, and reading only the final error erased the
+  // figure the first one had already established.
+  let charged: number | undefined;
+  const attempted = await retrying(async () => {
+    try {
+      return await withinDeadline(
+        deps.settle(
+          env.USER_BUDGET,
+          {
+            userId: params.userId,
+            reservationId: held.ok ? held.layers.user.id : undefined,
+            reservationKey: held.ok
+              ? held.layers.userReservationKey
+              : undefined,
+            accountReservationId: held.ok ? held.layers.account.id : undefined,
+            worstCaseMicroUsd: params.worstCaseMicroUsd,
+            prices: params.prices,
+          },
+          usage,
+          providerRan,
+          abandoned ? params.worstCaseMicroUsd : undefined,
+          abandoned ? 0 : undefined,
+        ),
+        LEDGER_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      // The `instanceof` is the whole guard, and it is enough. Every
+      // attempt recomputes the same figure from the same usage and prices,
+      // so which attempt is remembered cannot matter; what matters is that
+      // a later failure of a *different* kind, one that never reached the
+      // caller's ledger and so knows nothing, leaves this alone.
+      if (error instanceof PartialSettlement) charged = error.charged;
+      throw error;
+    }
+  }, deps.wait);
+  if (attempted.ok) return { cost: attempted.value, settled: true };
+  // Worth a line of its own: this is a hold the reclaim will charge at full
+  // worst case, and nothing else in the system will say so until then.
+  console.error('repair settlement failed', attempted.error);
+  // What the caller was actually billed, where that is known (#196 review).
+  // `settleBudget` writes the caller's layer before the account's, so the
+  // two can fail apart: a caller whose own hold closed at the figure their
+  // usage came to has been billed correctly, and only the shared ceiling is
+  // still holding a worst case. Reporting the worst case for both would
+  // overstate a bill that is already right, on the record the reader sees.
+  if (charged !== undefined) return { cost: charged, settled: false };
+  return { settled: false };
+}
+
+/**
+ * Build what the run produced, and buy one repair if it does not build.
+ *
+ * #194: two of six real generations against the production provider
+ * produced a project that fails `npm run build`, for two unrelated reasons,
+ * with the same prompt passing on one run and failing on another. Publish
+ * was the only gate on that, and it is the last of three exits.
+ *
+ * Everything this decides is decided elsewhere and tested there:
+ * `worthRepairing` says whether a failure is the project's and whether the
+ * run can pay, `repairPromptFor` says what to ask. What is here is the
+ * order, the reservation, and the settlement of that reservation.
+ *
+ * The repair is a second run in its own right, under its own run id, so it
+ * promotes its own revision rather than overwriting the stage record and
+ * promotion the first one already wrote. It settles its own reservation
+ * before returning, whatever happened: a hold this function makes and does
+ * not close is one the reclaim charges in full thirty-five minutes later.
+ */
+/**
+ * Whether a build result is a statement about the project, or about the
+ * service that was asked (#196 review).
+ *
+ * `ok` is one, and so is a failure `ABOUT_THE_PROJECT` names as the
+ * project's. Both builds in this file ask the same question of their own
+ * result, so they ask it the same way: one of them used to answer `false`
+ * where the other answered "unknown", which is the difference between
+ * "this does not compile" and "nobody compiled it".
+ */
+function judgedTheProject(result: {
+  ok: boolean;
+  reason?: BuildFailureReason;
+}): boolean {
+  return result.ok || aboutTheProject(result.reason);
+}
+
+export async function verifyAndRepair(
+  env: GenerationWorkflowEnv,
+  params: WorkflowParams,
+  result: DurableGenerationResult,
+  deps: {
+    build: typeof buildProject;
+    reserve: typeof reserveBudget;
+    settle: typeof settleBudget;
+    generate: (
+      provider: ModelProvider,
+      request: Pick<
+        WorkflowParams,
+        'projectId' | 'runId' | 'prompt' | 'baseRevision'
+      >,
+    ) => Promise<GenerationOutcome>;
+    providerFor: (onUsage: (usage: PlanUsage) => void) => ModelProvider;
+    now?: () => number;
+    /** Only so a test does not spend the settlement retry delay. */
+    wait?: (ms: number) => Promise<void>;
+  },
+): Promise<RepairOutcome> {
+  // Nothing to build. A refused or failed run has no files, and a build
+  // that never happened must not be reported as one that failed.
+  if (result.state !== 'accepted' || !result.accepted) return {};
+  if (!env.PREVIEW || !env.PREVIEW_INTERNAL_SECRET) {
+    return { skipped: 'not-configured' };
+  }
+
+  /**
+   * A build that reports a failure instead of throwing one.
+   *
+   * The service binding can reject: a preview-worker deploy, a Durable
+   * Object outage, anything. Letting that propagate would fail the whole
+   * Workflow *after* the project had been accepted, promoted and billed,
+   * so the caller would be sent an error instead of the files they paid
+   * for, and preview-service availability would quietly become a hard
+   * dependency of every generation (#196 review). Every other non-project
+   * build failure is already treated as "not the project's fault"; an
+   * unreachable service is the same fact arriving differently.
+   */
+  const build = (
+    files: ProjectFile[],
+    within = BUILD_CALL_TIMEOUT_MS,
+  ): Promise<
+    | { ok: true }
+    | { ok: false; error: string; reason?: BuildFailureReason }
+    | undefined
+  > =>
+    buildWithin(
+      () =>
+        deps.build(
+          {
+            PREVIEW: env.PREVIEW,
+            PREVIEW_INTERNAL_SECRET: env.PREVIEW_INTERNAL_SECRET,
+          },
+          params.userId,
+          files,
+        ),
+      within,
+    );
+
+  /**
+   * The same build, given a bounded wait when the workspace is busy
+   * (#196 review).
+   *
+   * Only the repair's second build uses this, and only because of what runs
+   * beside it: the first build's teardown holds that user's build lock until
+   * its container is gone, and since it moved to `ctx.waitUntil` it can still
+   * be holding it while the model call runs. A `busy` refusal there is this
+   * step tripping over its own predecessor, and it costs the thing the
+   * caller just paid for: the repair is returned without anybody finding out
+   * whether it builds.
+   *
+   * Asking again rather than joining the teardown. There is nothing to join:
+   * the lock is the only signal the two share, and waiting on it for the
+   * teardown's full cap would put ten minutes back on the caller's clock,
+   * which is what moving the teardown off it was for.
+   *
+   * `busy` and nothing else. Every other refusal is about this build rather
+   * than about a previous one, and asking again would spend the caller's
+   * clock on an answer that will not change.
+   */
+  const rebuild = (files: ProjectFile[]) =>
+    askWhileBusy(
+      (within) => build(files, within),
+      (answer) => Boolean(answer && !answer.ok && answer.reason === 'busy'),
+      { wait: deps.wait ?? sleep, now: deps.now ?? Date.now },
+    );
+
+  const first = await build(result.accepted.files);
+  // Unreachable, not failed. Nothing is known about the project, so nothing
+  // is claimed and no money is spent.
+  if (!first) return { skipped: 'unavailable' };
+  if (first.ok) return { built: true };
+  const judged = judgedTheProject(first);
+  if (!worthRepairing(first, params)) {
+    return {
+      ...(judged ? { built: false } : {}),
+      skipped: judged ? 'no-budget' : 'not-the-project',
+    };
+  }
+
+  const now = deps.now ?? Date.now;
+  // Asked for in a `try` for the same reason the build is (#196 review).
+  // `reserve` rejects, rather than denying, when the budget Durable Object
+  // is unreachable, and that rejection would escape a step with no retries
+  // and fail the Workflow after the project had been accepted, promoted and
+  // settled. A ledger that cannot be asked has not said no; it has said
+  // nothing, and nothing is not a reason to throw away the caller's files.
+  let held: Awaited<ReturnType<typeof reserveBudget>>;
+  try {
+    held = await withinDeadline(
+      deps.reserve(
+        env,
+        params.userId,
+        params.worstCaseMicroUsd,
+        params.monthlyAllowance!,
+        params.topupCeiling!,
+        now(),
+      ),
+      LEDGER_CALL_TIMEOUT_MS,
+    );
+  } catch {
+    // Including the deadline (#196 review). A ledger that never answers
+    // has said exactly as much as one that rejects, which is nothing.
+    //
+    // What giving up cannot do is call back a reservation that lands
+    // afterwards. There is no `waitUntil` inside a Workflow step, so a
+    // hold made after this gave up waiting is one nobody settles, and
+    // `UserBudget.reserve` charges it at its worst case when the reclaim
+    // reaches it. That is the same bounded outcome this step already
+    // records when a settlement cannot be made at all, and it is the
+    // cheaper side of the trade: the alternative is waiting on a ledger
+    // that is not answering until the step dies, which loses the caller
+    // the project as well as the money.
+    return { built: false, skipped: 'unavailable' };
+  }
+  // Out of budget is not a failure of this step. The reader keeps the
+  // project the first attempt produced, which is what they would have had
+  // before any of this existed.
+  if (!held.ok) return { built: false, skipped: 'no-budget' };
+
+  const startedAt = now();
+  let usage: PlanUsage | undefined;
+  let outcome: GenerationOutcome | undefined;
+  let settlement: SettlementOutcome | undefined;
+  /** Set when the model call was given up on rather than answered. */
+  let abandoned = false;
+  try {
+    // Bounded on its own, not only by the step around it (#196 review).
+    //
+    // The hold this call sits inside is settled immediately after it, so
+    // the hold's life *is* this call, and `UserBudget.reserve` reclaims any
+    // hold older than `RUN_ABANDONED_AFTER_MS` and charges it at its full
+    // worst case. The enclosing step is `REPAIR_STEP_TIMEOUT_MS`, which is
+    // longer than that on purpose, because it also has to cover two builds.
+    // So a provider that stalled could hold this open past the reclaim and
+    // the caller would be billed a worst case they never spent, which is
+    // the exact failure that decided where this step sits in the workflow.
+    // I wrote that invariant into the module comment above and then left
+    // the one call it depends on unbounded.
+    //
+    // Giving up does not stop the provider, and `settleRepairHold` in the
+    // `finally` below already handles a call that threw: it settles with
+    // whatever usage was reported before the deadline, which is the honest
+    // figure rather than a worst case nobody spent.
+    outcome = await withinDeadline(
+      deps.generate(
+        deps.providerFor((reported) => {
+          usage = reported;
+        }),
+        {
+          projectId: params.projectId,
+          // Its own id. `promote` and `saveStage` are both keyed on it, so
+          // reusing the run's would overwrite the record of the attempt
+          // this one is repairing.
+          runId: `${params.runId}:repair`,
+          prompt: repairPromptFor(first.error),
+          baseRevision: result.accepted.revision,
+        },
+      ),
+      RUN_STEP_TIMEOUT_MS,
+    );
+  } catch (error) {
+    // Never out of this function (#196 review). The `verify-and-repair`
+    // step has no retries and `handlePlan` reports an errored Workflow as
+    // a failed generation, so a rejection here discards the response for a
+    // project that was already accepted, promoted, settled and billed. The
+    // repair is an extra this service attempts on the caller's behalf, and
+    // nothing it does may cost them the run it is trying to improve.
+    //
+    // That was true of a throwing `deps.generate` before this bound
+    // existed, and it never fired: `runGeneration` catches the provider and
+    // the store itself, so an escape was something nobody had accounted
+    // for. The deadline made it a path that really happens, and turned a
+    // deliberate fail-closed into a routine way to lose somebody's work.
+    if (!(error instanceof Error) || error.message !== OUT_OF_TIME) throw error;
+    abandoned = true;
+    // What giving up does not do, written here because "we looked at this
+    // and accepted it" is worth nothing if the reasoning lives in a
+    // resolved review thread (#196 review).
+    //
+    // The call is not cancelled; nothing here can cancel it. So a provider
+    // that answers after the deadline runs on inside `runGeneration`, and
+    // if the accepted revision has not moved in the meantime its promotion
+    // succeeds. The caller then holds the project this function returned
+    // while the store holds a repair they never saw.
+    //
+    // The cost of that is one refused request, not lost work or a wrong
+    // charge. `runGeneration` checks the asserted base revision before it
+    // spends anything, so the caller's next edit is refused for free with
+    // "The project moved on before this could apply", and reloading the
+    // project recovers it with the repair in hand.
+    //
+    // Every fix I can reach is worse than that. There is no cancellation to
+    // call. Promoting something of our own to invalidate the late one hands
+    // the caller a revision they did not ask for, to fix a revision they
+    // did not ask for. Moving promotion out of `runGeneration` and into
+    // this function would close it properly and is a change to the path
+    // every generation takes, which is not a thing to do at the end of a
+    // review of something else. Recorded as its own issue instead.
+    //
+    // What would change this: promotion becoming this function's act, or
+    // the provider client gaining a cancel. Either makes the residual go
+    // away rather than shrink.
+  } finally {
+    // In a `finally`, because a repair that threw still asked the model and
+    // still holds a reservation. Leaving it open is the one outcome that
+    // costs the caller their worst case rather than what they spent.
+    //
+    // Retried and then swallowed rather than awaited bare (#196 review). A
+    // bare await put the settlement's own rejection in the way of
+    // everything after it: the enclosing step has no retries, so a Durable
+    // Object that blinked would have failed the Workflow and sent an error
+    // to a caller whose repair had already been promoted. Throwing does not
+    // close the hold either, so it loses the files and leaves the money.
+    settlement = await settleRepairHold(
+      deps,
+      env,
+      params,
+      held,
+      usage,
+      outcome?.providerRan ?? true,
+      abandoned,
+    );
+  }
+
+  const settled = settlement?.settled !== false;
+  // What the ledger will charge, which is not always what was measured. A
+  // hold nothing could close is charged at its worst case by the reclaim,
+  // so that is the figure the record carries rather than a zero that would
+  // under-report a bill the caller is about to see.
+  const repairCostMicroUsd =
+    settlement?.cost ?? (settled ? undefined : params.worstCaseMicroUsd);
+  const money = {
+    ...(repairCostMicroUsd === undefined ? {} : { repairCostMicroUsd }),
+    ...(settled ? {} : { settled: false }),
+    ...(outcome
+      ? {
+          trace: traceOf(
+            { ...params, runId: `${params.runId}:repair` },
+            outcome.result,
+            usage,
+            {
+              costMicroUsd: repairCostMicroUsd ?? 0,
+              elapsedMs: now() - startedAt,
+              endedAt: new Date(now()).toISOString(),
+            },
+          ),
+        }
+      : {}),
+  };
+
+  // A repair nobody answered leaves the caller exactly where they were,
+  // with the project the first attempt produced: this hands back no result
+  // of its own, so the workflow returns the one it already had. `built` is
+  // false because the first build ran and said so, which is what bought
+  // the repair in the first place.
+  if (abandoned) return { built: false, skipped: 'timed-out', ...money };
+
+  // Accepted is not built (#196 review). The validator says the files are
+  // well formed and inside the project root; it says nothing about whether
+  // they compile, and compiling is the entire question. This feature exists
+  // because a model's output passes every structural check and still fails
+  // `npm run build`, so believing acceptance here would declare that exact
+  // failure fixed without looking.
+  const promoted =
+    outcome?.result.state === 'accepted' && Boolean(outcome.result.accepted);
+  if (!promoted || !outcome?.result.accepted) {
+    return { built: false, repaired: false, ...money };
+  }
+
+  const second = await rebuild(outcome.result.accepted.files);
+  return {
+    built: false,
+    ...money,
+    // Undefined rather than false whenever the second build did not judge
+    // the project: one that could not run at all, and one that came back a
+    // refusal (#196 review). Another build can take the workspace lock
+    // between the model call and this, and `busy`, `sandbox` and `output`
+    // say as little about repaired files as they do about the originals.
+    // Reporting false there would be the same claim `built` used to make:
+    // that a project failed a check nothing performed.
+    ...(second && judgedTheProject(second)
+      ? { repaired: second.ok }
+      : {
+          unverified:
+            second && !second.ok
+              ? (second.reason ?? 'unavailable')
+              : 'unavailable',
+        }),
+    // Returned whether or not it builds, because it is what the store now
+    // holds. Handing back the first attempt would put the reader's copy and
+    // the accepted revision out of step, which is the other finding on this
+    // round.
+    result: outcome.result,
+  };
+}
+
 /**
  * What this run is worth recording (#167).
  *
@@ -525,6 +1304,38 @@ function usageOrWorstCase(
   return usage ? microUsdOf(usage, params.prices) : params.worstCaseMicroUsd;
 }
 
+/**
+ * A settlement that closed one ledger layer and not the other.
+ *
+ * Thrown rather than returned so that every existing caller keeps the
+ * behaviour it was written for: `settleBudget` still rejects when the
+ * ledger did not fully close, and the Workflow's own settle step still
+ * retries it. What this adds is that a caller who wants to know *what* was
+ * charged before the failure can ask, instead of assuming the worst
+ * (#196 review).
+ *
+ * Raising this *is* the statement that the caller's own layer closed: the
+ * write that closes it comes first and propagates its own failure directly,
+ * so the account layer is only ever reached once the caller's has landed.
+ * That is why there is no flag saying so, and why a test asserts a
+ * user-layer failure does not arrive as one of these. `charged` is the
+ * figure that layer was settled at, which is what makes a repair's recorded
+ * cost honest when only the shared account hold is left open.
+ */
+export class PartialSettlement extends Error {
+  /** What the caller's own layer was settled at, before this happened. */
+  readonly charged: number;
+
+  // Fields and assignments rather than parameter properties: this module is
+  // loaded under `node --test --experimental-strip-types`, which strips
+  // types without compiling them and rejects that shorthand outright.
+  constructor(charged: number, cause: unknown) {
+    super('the account ledger did not settle', { cause });
+    this.name = 'PartialSettlement';
+    this.charged = charged;
+  }
+}
+
 export async function settleBudget(
   ledger: DurableObjectNamespace<Pick<UserBudget, 'settle'>>,
   params: Pick<
@@ -560,6 +1371,22 @@ export async function settleBudget(
    * real request while another is pushed past a ceiling it never spent.
    */
   accountMicroUsd?: number,
+  /**
+   * What the *caller's* reservation settles at, where that is not what the
+   * three cases below would work out (#196 review).
+   *
+   * The mirror of `accountMicroUsd` and used for the same reason: the two
+   * layers answer to different people. A repair whose model call stalled
+   * and was abandoned is an attempt the caller never received, so they are
+   * not billed for it, while the deployment's daily ceiling still has to
+   * hold what may well have been spent on their behalf.
+   *
+   * Kept as an explicit argument rather than folded into `providerRan`.
+   * Saying "the provider never ran" to get a zero would be a lie in the
+   * one field that decides this, and the next reader would find a repair
+   * recorded as never asked for.
+   */
+  callerMicroUsd?: number,
 ): Promise<number> {
   // Three cases, not two, and the third used to be charged as if it were
   // the second.
@@ -576,7 +1403,8 @@ export async function settleBudget(
   // field existed arrives undefined, and reading that as "never ran" would
   // settle a real generation at zero -- the fail-safe inverted.
   const actual =
-    !usage && providerRan === false ? 0 : usageOrWorstCase(usage, params);
+    callerMicroUsd ??
+    (!usage && providerRan === false ? 0 : usageOrWorstCase(usage, params));
 
   if (params.reservationId !== undefined) {
     // `reservationKey` is always set alongside `reservationId` by index.ts's
@@ -594,9 +1422,21 @@ export async function settleBudget(
   // the two layers may differ: the caller's allowance is what they owe,
   // the account ceiling is what this deployment spent.
   if (params.accountReservationId !== undefined) {
-    await ledger
-      .getByName(ACCOUNT_BUDGET_KEY)
-      .settle(params.accountReservationId, accountMicroUsd ?? actual);
+    try {
+      await ledger
+        .getByName(ACCOUNT_BUDGET_KEY)
+        .settle(params.accountReservationId, accountMicroUsd ?? actual);
+    } catch (error) {
+      // Which layer stayed open is not a detail (#196 review). The two are
+      // settled together and can fail apart, and they answer to different
+      // people: the caller's hold decides what the caller is billed, the
+      // account hold decides what this deployment has spent today. A
+      // failure here with the caller's layer already closed means the
+      // caller was charged exactly what they used, and reporting that run
+      // at its worst case -- as a caller who could only see "settlement
+      // failed" had to -- overstates a bill that is already correct.
+      throw new PartialSettlement(actual, error);
+    }
   }
   // The caller's figure, which is what every caller logs and shows. The
   // absorbed part is deliberately not in it: it is not theirs.

@@ -1,7 +1,29 @@
 import { Sandbox } from '@cloudflare/sandbox';
+import { networkFailure } from './build-failure.ts';
+import { budgeted, OUT_OF_TIME, withinDeadline } from '@vibld/core';
+import { admit, collectOutput, writeFiles } from './build-files.ts';
+import { destroyWithin, releaseWithin } from './teardown.ts';
+import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
-import type { PreviewFleet } from './preview-fleet.ts';
+import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
 import { HARD_LIFETIME_MS } from './fleet.ts';
+import {
+  BUILD_COMPILE_TIMEOUT_MS,
+  BUILD_INSTALL_TIMEOUT_MS,
+  BUILD_LOCK_TTL_MS,
+  BUILD_WALL_CLOCK_MS,
+  FLEET_CALL_TIMEOUT_MS,
+  LOCK_RENEWAL_INTERVAL_MS,
+  MAX_DESTROY_WAIT_MS,
+  TEARDOWN_WALL_CLOCK_MS,
+} from './build-limits.ts';
+// L9's account-wide preview cap, which is no longer the whole container
+// budget: see `capacity.ts` for what builds take out of it.
+import {
+  ACCOUNT_MAX_IN_FLIGHT,
+  BUILD_CONTAINER_HEADROOM,
+  BUILD_FLEET_NAME,
+} from './capacity.ts';
 
 /**
  * Vibld's own untrusted-execution sandbox (ADR-0004; docs/decisions.md L7,
@@ -46,9 +68,6 @@ export interface Env {
   Fleet: DurableObjectNamespace<PreviewFleet>;
 }
 
-/** L9: the account-wide cap this sandbox asks `PreviewFleet` to enforce. */
-const ACCOUNT_MAX_IN_FLIGHT = 25;
-
 /** Vite's default dev-server port; every generated project here uses Vite. */
 const DEV_PORT = 5173;
 
@@ -78,6 +97,17 @@ const BUILD_OUTPUT_DIR = 'build/client';
 
 type Phase = 'queued' | 'installing' | 'starting' | 'ready' | 'failed';
 
+/**
+ * Why a build did not produce output, as a value rather than as prose.
+ * Declared in `build-failure.ts`, beside the list it is derived from, and
+ * re-exported here because this is the module callers of the build have.
+ */
+export type { BuildFailureReason } from './build-failure.ts';
+
+export type BuildOutcome =
+  | { files: ProjectFile[]; skipped: string[] }
+  | { reason: BuildFailureReason; error: string };
+
 interface PreviewState {
   phase: Phase;
   startedAt: number;
@@ -89,6 +119,21 @@ interface PreviewState {
 }
 
 const STORAGE_KEY = 'vibld:preview';
+
+/**
+ * When the build running in this instance started, while one is.
+ *
+ * Its own key rather than the preview's state: since #196 a build runs in
+ * an instance named for building, where `STORAGE_KEY` is never written at
+ * all, and what it needs to exclude is another build rather than a preview.
+ */
+const BUILD_LOCK_KEY = 'vibld:build';
+
+/** The lock a build holds, and the token that says whose it is. */
+interface BuildLock {
+  startedAt: number;
+  token: string;
+}
 
 export interface PreviewStatus {
   status: Phase | 'ready-to-start';
@@ -252,14 +297,27 @@ export class PreviewSandbox extends Sandbox<Env> {
   /**
    * A one-shot production build of `files` (ADR-0010's Cloudflare
    * auto-publish primary path: apps/web calls this, then hands the result
-   * straight to apps/publish's `/internal/publish`). Unlike `startPreview`,
-   * this never touches `PreviewFleet` -- a build finishes within one
-   * request's lifetime, holding no exposed port and no long-lived dev
-   * server, so L9's "1 concurrent preview per user" accounting (which
-   * exists to bound exactly those two things) does not apply to it. It does
-   * still run inside this same per-user sandbox instance, under the same
-   * L11 egress restrictions as a preview's own `npm install` -- untrusted
-   * code is untrusted whether or not anything is ever exposed.
+   * straight to apps/publish's `/internal/publish`; since #194 the
+   * generation workflow calls it too, to find out whether what it just
+   * produced compiles). It takes a `PreviewFleet` ticket like a preview
+   * does, but from an instance of its own, because it holds one of the
+   * platform's containers while it runs; `capacity.ts` states how that
+   * budget is divided. What it does not use is the preview queue, so two
+   * builds for one user are excluded by this method's own lock rather than
+   * by any preview count.
+   *
+   * It runs in an instance of its own, named for building rather than for
+   * the user's preview (`worker/index.ts`'s `buildSandboxName`), under the
+   * same L11 egress restrictions -- untrusted code is untrusted whether or
+   * not anything is ever exposed. It used to share the preview's instance
+   * and refuse whenever a preview was live, which was correct about the
+   * filesystem race and wrong about how often that happens (#196 review):
+   * the Workspace keeps a preview running across submissions and nothing
+   * stops it on submit, so the ordinary follow-up edit found the sandbox
+   * busy, and the verification this exists for was skipped exactly when a
+   * reader was iterating hardest. Two instances cost a second container and
+   * buy back both the verification and the ability to publish without
+   * stopping the preview first.
    *
    * Only text output is returned. A build that emits binary assets (images,
    * fonts) skips them and reports which paths were skipped, rather than
@@ -268,36 +326,285 @@ export class PreviewSandbox extends Sandbox<Env> {
    * interface already applies), so there is nowhere correct to put binary
    * bytes yet.
    */
-  async buildProject(
-    files: ProjectFile[],
-  ): Promise<{ files: ProjectFile[]; skipped: string[] } | { error: string }> {
-    // A running preview's dev server and this build would both write into
-    // the same /workspace at once -- not a security boundary (both are the
-    // same user's own untrusted code either way), but a real race on the
-    // filesystem a dev server may be watching. Refuse rather than risk a
-    // build that reads a half-written tree, or a preview restart mid-build.
-    const existing = await this.readState();
-    if (existing && !this.isExpired(existing) && existing.phase !== 'failed') {
+  async buildProject(files: ProjectFile[]): Promise<BuildOutcome> {
+    // Started before anything is awaited, including the lock (#196 review).
+    //
+    // It used to start after the lock had been read and written, on the
+    // reasoning that those are this object's own storage. Local is not the
+    // same as bounded, and it is certainly not the same as inside the
+    // bound: a storage call that stalled left `buildProject` with no
+    // deadline running at all, so the whole-build guarantee this method
+    // advertises did not cover its own first two lines. The caller in
+    // `apps/web` stops waiting after its own bound and `/api/publish` has
+    // none, so if storage then resumed, the abandoned invocation would
+    // take a fleet ticket and run a twelve-minute build for nobody.
+    //
+    // The round that enumerated every await here classified those two as
+    // "this object's own storage" and moved on. That was the wrong
+    // question: what matters is not where a call goes but whether the
+    // clock is already running when it is made.
+    const deadline = Date.now() + BUILD_WALL_CLOCK_MS;
+    const bounded = <T>(work: Promise<T>): Promise<T> =>
+      withinDeadline(work, deadline - Date.now());
+
+    // Two builds for the same user would still write into the same
+    // /workspace at once, which is the filesystem race the old refusal was
+    // really about -- a repair's verification build and an auto-publish can
+    // overlap. Not a security boundary (both are the same user's own
+    // untrusted code either way): a build that read a half-written tree
+    // would simply be measuring the wrong project.
+    //
+    // The lock expires rather than being trusted forever. A build whose
+    // container died between taking it and releasing it must not wedge
+    // every later build for this user, and nothing else here would ever
+    // clear it.
+    const held = await bounded(this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY));
+    if (held && Date.now() - held.startedAt < BUILD_LOCK_TTL_MS) {
       return {
+        reason: 'busy',
         error:
-          'A preview is currently running for this project. Stop it before publishing.',
+          'Another build is already running for this project. Try again once it has finished.',
       };
     }
+    // Read and written with nothing but storage awaited in between, which
+    // is what makes taking it atomic (#196 review).
+    //
+    // Cloudflare's input gate defers every other event to this object
+    // "until such a time as the object is no longer executing JavaScript
+    // code and is no longer waiting for any storage operations", so a
+    // read followed by a write is a critical section as long as only
+    // storage is awaited inside it. Await anything else here -- a
+    // `fetch`, a sleep, a service binding -- and the gate opens, a
+    // concurrent build reads the same absent lock, and two builds share
+    // one workspace. `apps/web/worker/budget.ts` makes the same point from
+    // the other side, which is why its reservation is synchronous.
+    //
+    // `build-reason.test.ts` counts the awaits in here rather than trusting
+    // this paragraph, because the guarantee is invisible at the call site:
+    // adding one innocuous await is all it takes, and nothing about the
+    // code would look wrong afterwards.
+    //
+    // Taken with a token, and released only while it is still this build's
+    // (#196 review). Expiry alone made the lock unsafe in the one case it
+    // was for: once a stale lock let a second build in, the first build's
+    // own `finally` deleted the second's lock on its way out, and a third
+    // would then walk into the second's workspace. Ownership is what makes
+    // release mean "give back mine" rather than "clear whatever is there".
+    const token = crypto.randomUUID();
+    // A lock written after this gave up ages out on its own after
+    // BUILD_LOCK_TTL_MS, which refuses that user's builds as `busy` in the
+    // meantime and claims nothing about any project. Bounded and
+    // self-healing, unlike a fleet ticket, which is why this one needs no
+    // late cleanup of its own.
+    await bounded(
+      this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
+        startedAt: Date.now(),
+        token,
+      }),
+    );
+
+    // The build half of the container split, actually enforced (#196
+    // review). Subtracting the headroom from the preview cap only made the
+    // partition true on the preview side: nothing stopped six builds
+    // overlapping nineteen previews and filling all twenty-five platform
+    // slots while the fleet still thought it had room.
+    //
+    // Its own `PreviewFleet` instance rather than the preview queue, since
+    // that queue's count is what enforces L9 and must stay about previews.
+    // Same class, same reserve-now/release-later shape, separate storage.
+    //
+    // Refused rather than queued when the slots are full: a build has a
+    // paid Workflow waiting on its answer, so making it wait behind others
+    // spends that Workflow's timeout. `busy` is the right refusal, and
+    // `worthRepairing` already reads it as saying nothing about the
+    // project, so no repair is bought and nothing is claimed.
+    // Asked for *inside* the try below rather than before it (#196 review).
+    // `enqueue` is a call to another Durable Object and can reject on its
+    // own account; outside the try, that rejection skipped every piece of
+    // cleanup and left this user's build lock in storage, so every
+    // verification and publish of theirs was refused as `busy` for the next
+    // fifteen minutes over a failure that had nothing to do with them.
+    let slot: EnqueueResult | undefined;
+
+    /**
+     * Whether anything was ever run in the container.
+     *
+     * A `PreviewSandbox` has no container until something executes in it,
+     * so every path that refuses before the first `exec` -- a full fleet,
+     * an `enqueue` that rejected -- has nothing to tear down and nothing
+     * to account for. Teardown reads this rather than special-casing those
+     * paths, which is what let the last version hold a ticket for a
+     * refusal it had issued itself (#196 review).
+     */
+    let started = false;
+
+    /**
+     * Whether this build is still entitled to the workspace: inside its
+     * wall clock, and still the owner of the lock (#196 review).
+     *
+     * Both halves stop the work rather than only failing to extend it.
+     * Renewing was conditional on ownership already, so a superseded build
+     * used to renew nothing, learn nothing, and carry on writing into a
+     * workspace its successor had emptied. And a build that has run out of
+     * time is not entitled to it either: without a bound of its own the
+     * lock's TTL and the fleet's hard lifetime were both things a slow
+     * build could outlive, which is what made every protection around it a
+     * heartbeat that had to cover every single `await`.
+     */
+    const keepAlive = async (): Promise<boolean> =>
+      Date.now() < deadline && (await this.keepLock(token, deadline));
+
+    /**
+     * A command's own cap, cut down to what is left (#196 review).
+     *
+     * Bounding the calls that had no bound left the ones that did: each
+     * command kept its full five minutes however much of the budget had
+     * gone, so a compile starting just before the deadline ran five
+     * minutes past it, and `REPAIR_BUILD_ALLOWANCE_MS` was funding two
+     * builds that could each overrun. A bound that the two slowest things
+     * in the build ignore is not a bound.
+     */
+    const within = (cap: number): number =>
+      budgeted(cap, deadline - Date.now());
+
+    /** What a build that was stopped says: nothing about the project. */
+    const stopped: BuildOutcome = {
+      reason: 'sandbox',
+      error:
+        'The build was stopped before it finished, so nothing was measured about this project.',
+    };
 
     try {
-      await this.writeProject(files);
+      // Bounded like every other cross-object call here (#196 review).
+      // Awaited directly, a stalled `enqueue` kept the build alive past its
+      // own deadline: the lock expired, a successor took the sandbox, and
+      // when this finally returned the very next thing it did was empty
+      // that successor's workspace.
+      //
+      // Giving up on it leaves a ticket nobody holds, which is worse than
+      // it sounds: `reclaimStale` only reclaims rows it has activated, so
+      // an abandoned queued row is never reclaimed at all. So whatever it
+      // hands back after we have stopped waiting is given back.
+      slot = await admit(
+        this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
+          `build:${this.ctx.id.toString()}`,
+          BUILD_CONTAINER_HEADROOM,
+        ),
+        bounded,
+        async (ticket) => {
+          await this.releaseTicket(ticket);
+        },
+        (work) => this.ctx.waitUntil(work),
+      );
+      if (!slot.active) {
+        return {
+          reason: 'busy',
+          error:
+            'Too many builds are running right now. Try again in a moment.',
+        };
+      }
 
+      // Emptied first, because this container is reused (#196 review).
+      // `writeProject` writes the paths it is given and removes nothing, so
+      // a second build in the same instance compiles the new snapshot on
+      // top of whatever the last one left: a file the repair deleted is
+      // still there to satisfy an import, and a broken file it replaced by
+      // a differently-named one is still there to fail the build. Either
+      // way `built` and `repaired` would describe a tree that is not the
+      // one handed back, which is the whole thing this feature is for.
+      //
+      // node_modules goes with it, deliberately, though it costs an install
+      // on every build and two on a repair. Keeping it would leave a
+      // package installed for an earlier project available to a later one
+      // that never declared it, so a project importing something missing
+      // from its own package.json would build here and fail anywhere else.
+      // That is one of the two production failures behind #194: this check
+      // is worth having only if it measures what a clean environment sees.
+      // Asked before the first thing that touches the container, not
+      // only between the steps that follow it (#196 review). Everything
+      // above this point can take time -- the admission most of all -- and
+      // the clear is destructive: starting it without knowing the lock is
+      // still ours is how a build that had been superseded emptied its
+      // successor's workspace.
+      if (!(await keepAlive())) return stopped;
+
+      started = true;
+      // Bounded like every other call here. Left direct, this one could
+      // stall past the deadline without ever reaching the teardown, and a
+      // late `rm -rf /workspace` would then empty a successor's tree
+      // (#196 review).
+      const cleared = await bounded(
+        this.exec('rm -rf /workspace', { cwd: '/' }),
+      );
+      if (!cleared.success) {
+        return {
+          reason: 'sandbox',
+          error: `The build workspace could not be emptied (exit ${cleared.exitCode}).`,
+        };
+      }
+      await bounded(this.mkdir('/workspace', { recursive: true }));
+
+      // Renewed at every boundary between bounded and unbounded work, so
+      // the TTL is measuring silence rather than project size, and inside
+      // this stretch as well as after it: writing the project in is one or
+      // two RPCs per file, and a big enough project outran the lock while
+      // the renewal sat waiting for the loop to finish (#196 review).
+      if (!(await this.writeProject(files, keepAlive, bounded))) return stopped;
+      if (!(await keepAlive())) return stopped;
+
+      const installStartedAt = Date.now();
+      const installTimeout = within(BUILD_INSTALL_TIMEOUT_MS);
       const install = await this.exec('npm install --no-audit --no-fund', {
         cwd: '/workspace',
+        timeout: installTimeout,
       });
       if (!install.success) {
+        // A command that reached its bound was stopped, and being stopped
+        // says nothing about the project: `sandbox` rather than `install`,
+        // so no repair is bought on the strength of it. Checked here as
+        // well as bounded above for `typecheck`'s reason -- whether the SDK
+        // reports its own timeout as a rejection or as an unsuccessful
+        // result is its business, and an "install failure" that was really
+        // a stopwatch would be this method inventing one.
+        if (Date.now() - installStartedAt >= installTimeout) {
+          return {
+            reason: 'sandbox',
+            error: 'npm install did not finish within the time allowed.',
+          };
+        }
+        // A registry or DNS outage is not the project's fault, and it
+        // exits fast rather than reaching the timeout above, so the clock
+        // cannot tell them apart (#196 review). Left as `install` it buys
+        // a repair: a second paid model call asked to fix a project that
+        // compiles perfectly well, whose reply cannot help, on a day when
+        // npm is having trouble and every caller hits it at once.
+        //
+        // Matching on wording, which #194 deliberately moved away from for
+        // the *caller's* decision -- but the caller decides from a typed
+        // reason, and this is where that reason is worked out. npm's own
+        // error codes are the only signal there is, and erring toward
+        // `sandbox` is the cheap direction: at worst a genuine dependency
+        // error goes unrepaired, which spends nothing and claims nothing.
         return {
+          reason: networkFailure(install.stderr) ? 'sandbox' : 'install',
           error: `npm install failed (exit ${install.exitCode}): ${install.stderr.slice(-2000)}`,
         };
       }
 
-      const build = await this.exec('npm run build', { cwd: '/workspace' });
+      if (!(await keepAlive())) return stopped;
+      const buildStartedAt = Date.now();
+      const compileTimeout = within(BUILD_COMPILE_TIMEOUT_MS);
+      const build = await this.exec('npm run build', {
+        cwd: '/workspace',
+        timeout: compileTimeout,
+      });
       if (!build.success) {
+        if (Date.now() - buildStartedAt >= compileTimeout) {
+          return {
+            reason: 'sandbox',
+            error: 'npm run build did not finish within the time allowed.',
+          };
+        }
         // stdout first, and stdout at all: `tsc` writes its diagnostics
         // there, and `build` runs `tsc --noEmit` before it bundles
         // anything. Reporting stderr alone told somebody whose publish was
@@ -308,40 +615,214 @@ export class PreviewSandbox extends Sandbox<Env> {
           .filter((stream) => stream.length > 0)
           .join('\n');
         return {
+          reason: 'build',
           error: `npm run build failed (exit ${build.exitCode}): ${said.slice(-2000)}`,
         };
       }
 
+      if (!(await keepAlive())) return stopped;
       const outputDir = `/workspace/${BUILD_OUTPUT_DIR}`;
-      const listing = await this.listFiles(outputDir, { recursive: true });
+      const listing = await bounded(
+        this.listFiles(outputDir, { recursive: true }),
+      );
       if (!listing.success) {
         return {
+          reason: 'output',
           error: `The build succeeded but its output directory (${BUILD_OUTPUT_DIR}) could not be read.`,
         };
       }
 
-      const output: ProjectFile[] = [];
-      const skipped: string[] = [];
-      for (const entry of listing.files) {
-        if (entry.type !== 'file') continue;
-        const read = await this.readFile(`${outputDir}/${entry.relativePath}`);
-        if (read.encoding === 'base64') {
-          skipped.push(entry.relativePath);
-          continue;
-        }
-        output.push({ path: entry.relativePath, content: read.content });
-      }
+      // One RPC per output file, so the longest unbounded stretch here and
+      // the one most likely to outrun a TTL. It lives in `build-files.ts`
+      // so it can be called with fakes rather than read with regexes
+      // (#196 review): the renewal used to count the files it kept rather
+      // than the files it read, and nothing that reads this file as source
+      // was ever going to notice.
+      const { output, skipped, complete } = await collectOutput(
+        listing.files,
+        (relativePath) =>
+          bounded(this.readFile(`${outputDir}/${relativePath}`)),
+        keepAlive,
+      );
+      // Half an output tree is not this project's output, and publishing
+      // or verifying against it would be a claim about files nobody read.
+      if (!complete) return stopped;
       if (output.length === 0) {
         return {
+          reason: 'output',
           error: `The build produced no readable output in ${BUILD_OUTPUT_DIR}.`,
         };
       }
       return { files: output, skipped };
     } catch (error) {
+      if (error instanceof Error && error.message === OUT_OF_TIME) {
+        return stopped;
+      }
       return {
+        reason: 'sandbox',
         error: error instanceof Error ? error.message : 'Build failed.',
       };
+    } finally {
+      // Not awaited, which is the point (#196 review). Tearing a container
+      // down is not the caller's business: they asked whether their project
+      // builds, and by here that is known. Awaiting it put up to ten more
+      // minutes of somebody else's problem on a paid Workflow's clock, and
+      // made the repair step's own allowance wrong for the second time --
+      // `REPAIR_BUILD_ALLOWANCE_MS` budgets for two builds, and a build had
+      // quietly grown a teardown.
+      //
+      // The alternative was to grow that allowance to seventy-five minutes,
+      // which fixes the arithmetic by making the product worse. This keeps
+      // a build the length of a build.
+      //
+      // `ctx.waitUntil` is the same idiom `beginProvisioning` already uses
+      // here, and the lock is held throughout by `releaseBuild` itself, so
+      // a build arriving during a teardown is refused rather than admitted.
+      this.ctx.waitUntil(this.releaseBuild(token, slot, started));
     }
+  }
+
+  /**
+   * Give back what this build was holding, once its container is gone.
+   *
+   * Its own method because the caller no longer waits for it, and written
+   * as the three cases it has rather than as a sequence of steps: every
+   * finding on this teardown has been an order nobody enumerated.
+   *
+   * What has to hold:
+   *  - the lock is not given up while this container exists or is being
+   *    torn down, or the next build for this user starts inside a container
+   *    that is about to die;
+   *  - the slot is not given up while this container exists, or the fleet
+   *    authorises a container the platform has no room for and the start
+   *    simply fails;
+   *  - neither is held forever, and neither is: the lock ages out after
+   *    BUILD_LOCK_TTL_MS, and `PreviewFleet` reclaims a stale ticket after
+   *    its own hard lifetime.
+   */
+  private async releaseBuild(
+    token: string,
+    slot: EnqueueResult | undefined,
+    started: boolean,
+  ): Promise<void> {
+    // A clock of its own, because it no longer runs inside the build's
+    // (#196 review). Every storage call below could stay pending, and a
+    // teardown that never finishes is one that never reaches its release.
+    //
+    // Running out of time propagates, exactly as a storage rejection
+    // already did, and the ticket is then held rather than released. That
+    // is safe only for a ticket this build activated, which the fleet
+    // reclaims after `HARD_LIFETIME_MS`; the queued one that nothing
+    // reclaims is given back before any of this, below.
+    const deadline = Date.now() + TEARDOWN_WALL_CLOCK_MS;
+    const bounded = <T>(work: Promise<T>): Promise<T> =>
+      withinDeadline(work, deadline - Date.now());
+
+    // A ticket for a build that never started goes back first, and without
+    // asking storage anything (#196 review).
+    //
+    // Nothing ever ran, so there is no container, so no ownership question
+    // arises: the answer the read would give cannot change what happens to
+    // this ticket. Ordering it after the read made the release depend on a
+    // call that can reject or stall, and `reclaimStale` never reclaims an
+    // inactive row, so a queued ticket abandoned here is promoted later
+    // for a build that already answered `busy` and holds a global slot for
+    // its whole hard lifetime. That is the leak this pull request has
+    // already fixed twice from other directions.
+    if (!started) {
+      if (slot) await this.releaseTicket(slot.id);
+      // The lock is still this build's to give back, but it expires on its
+      // own after BUILD_LOCK_TTL_MS and refuses safely in the meantime, so
+      // it is the half that may depend on storage answering.
+      const held = await bounded(
+        this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY),
+      );
+      if (held?.token === token) {
+        await bounded(this.ctx.storage.delete(BUILD_LOCK_KEY));
+      }
+      return;
+    }
+
+    // Confirmed and pushed forward in one go, immediately before the
+    // destroy (#196 review).
+    //
+    // Reading ownership answered the question and left the lock as old as
+    // it already was, and `destroyWithin` does not renew until a whole
+    // interval after the destroy is already in flight. The gap that opens
+    // is the build's last renewal, plus this teardown's own storage read,
+    // plus that interval: about eighteen minutes against a fifteen minute
+    // TTL. A successor then finds the lock stale, takes it, starts in this
+    // same container, and the destroy already running kills their build.
+    // That is the cascade the ownership token was added to stop, arriving
+    // from the one direction the token cannot see.
+    //
+    // A renewal answers both: false means the lock is no longer ours, and
+    // true leaves it with a full TTL at the moment the destroy starts, so
+    // the first interval cannot run it out. It rejects rather than
+    // answering when storage will not say, which holds the ticket, and the
+    // fleet reclaims an activated row.
+    const ours = await this.renewLock(token, deadline);
+
+    // Only ours is ours to destroy. A build that overran has had its lock
+    // taken and is running in this very container, so destroying it would
+    // end their build rather than free anything. The "nothing ever ran"
+    // case is handled above, before any of this.
+    const gone = ours ? await this.destroyHoldingLock(token, deadline) : false;
+
+    // After the container is gone, never before it: a lock given back
+    // mid-teardown hands this user's next build a container that is about
+    // to die. Re-read rather than trusting `ours`, which was answered
+    // before the destroy was awaited.
+    if (ours && gone) {
+      const still = await bounded(
+        this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY),
+      );
+      if (still?.token === token) {
+        await bounded(this.ctx.storage.delete(BUILD_LOCK_KEY));
+      }
+    }
+
+    // Given back when this container is confirmed gone, and when it was
+    // never ours -- in that case whoever took the lock holds a slot of
+    // their own, so ours is double-counting a container already accounted
+    // for.
+    //
+    // Held, along with the lock, when the destroy failed. That is a bounded
+    // loss of one build slot against a container in an unknown state, and
+    // it is the cheaper side: releasing would let the fleet admit a build
+    // the platform then refuses to start.
+    //
+    // Retried before it is given up on: `reclaimStale` only reclaims rows
+    // it has activated, so an abandoned queued ticket never expires at all.
+    if (slot && (!ours || gone)) await this.releaseTicket(slot.id);
+  }
+
+  /**
+   * Give one build ticket back.
+   *
+   * Retried before it is given up on: `reclaimStale` only reclaims rows it
+   * has activated, so an abandoned queued ticket never expires at all.
+   *
+   * Its own method because the teardown is no longer the only caller
+   * (#196 review): a build that gave up waiting for `enqueue` has to give
+   * back whatever that call eventually hands it, and it is the same
+   * release for the same reason.
+   */
+  private async releaseTicket(ticket: number): Promise<boolean> {
+    // Each attempt, not the sequence (#196 review). `retrying` never
+    // reaches its second attempt if the first never settles, so an
+    // unbounded call turns the retry into a single unbounded one. That
+    // matters most here of anywhere: a ticket for a build refused before
+    // anything ran is queued rather than active, `reclaimStale` never
+    // reclaims it, and this call is the only cleanup it will ever get.
+    return releaseWithin(
+      () =>
+        this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
+          ticket,
+          BUILD_CONTAINER_HEADROOM,
+        ),
+      FLEET_CALL_TIMEOUT_MS,
+    );
   }
 
   /**
@@ -504,7 +985,15 @@ export class PreviewSandbox extends Sandbox<Env> {
     fleetTicketId: number,
   ): Promise<void> {
     try {
-      await this.writeProject(files);
+      // Always alive: a preview holds no build lock, so there is nothing
+      // to renew and nothing that can take the workspace from it. Its own
+      // claim on this sandbox is the fleet ticket, which has a hard
+      // lifetime rather than a heartbeat and is `reclaimStale`'s business.
+      await this.writeProject(
+        files,
+        async () => true,
+        (work) => work,
+      );
       await this.writeState({ phase: 'starting', startedAt, fleetTicketId });
 
       const install = await this.exec('npm install --no-audit --no-fund', {
@@ -618,15 +1107,180 @@ export class PreviewSandbox extends Sandbox<Env> {
     }
   }
 
-  private async writeProject(files: ProjectFile[]): Promise<void> {
-    for (const file of files) {
-      const path = `/workspace/${file.path}`;
-      const dir = path.slice(0, path.lastIndexOf('/'));
-      if (dir && dir !== '/workspace') {
-        await this.mkdir(dir, { recursive: true });
-      }
-      await this.writeFile(path, file.content);
+  /**
+   * Push this build's lock forward, while it is still this build's.
+   *
+   * The TTL is what lets a crashed build stop blocking the next one, and
+   * it was being compared against work that is only partly bounded: the
+   * two commands have timeouts, but writing the project in and reading the
+   * output back are one RPC per file and scale with the project (#196
+   * review). A build that outran the TTL had its lock stolen, its
+   * workspace emptied underneath it, and -- worse -- went on to destroy
+   * the container the thief was now using.
+   *
+   * Renewing removes the premise rather than racing it: a lock goes stale
+   * only when nothing has touched it for the whole TTL, which now means
+   * the build really is gone.
+   *
+   * Conditional on still owning it, like every other write to this key. An
+   * unconditional renew would let a build that *had* been superseded take
+   * its lock back and start the whole problem again from the other side.
+   */
+  /**
+   * Destroy this build's container while keeping its lock alive.
+   *
+   * The renewals around the build stopped at the edge of teardown, and
+   * `destroy()` has no deadline of its own (#196 review). A destroy that
+   * blocked past the TTL let another build take the lock and start in this
+   * same named sandbox, and then the first destroy killed *their*
+   * container. Re-reading the token before deleting protects the newer
+   * lock; it cannot protect the newer container, because by then the
+   * destroy is already in flight and cannot be called back.
+   *
+   * So the lock is held for the whole teardown rather than up to it. The
+   * destroy races a renewal timer: whichever settles first decides, and a
+   * timer win renews and waits again.
+   *
+   * Bounded, because a destroy that never settles must not renew forever
+   * and block this user's builds for good. Giving up answers "not gone",
+   * which is the branch that keeps both the lock and the slot -- correct
+   * for a container in an unknown state, and self-limiting, because the
+   * lock then ages out on its own.
+   *
+   * What giving up leaves behind, which was raised in review and is
+   * accepted rather than overlooked (#196 review). The destroy is still in
+   * flight and cannot be called back: once the lock ages out, a later build
+   * for this user can start a fresh container here, and the orphaned SIGKILL
+   * could land on it.
+   *
+   * That is accepted for two reasons, and the second is why it is not a
+   * close call. `Container.destroy()` is one line -- `await
+   * this.container.destroy()`, a SIGKILL RPC with no poll or drain of its
+   * own -- so the case needs that single call to hang for ten minutes and
+   * then complete, against an object that would likely be evicted first.
+   * And when it does happen the later build's `exec` throws, which this
+   * method reports as `sandbox`; `judgedTheProject` reads that as unknown,
+   * so nothing is claimed about the project and no repair is bought. One
+   * wasted build.
+   *
+   * Every alternative is worse than one wasted build. Holding the lock
+   * until the destroy settles blocks this user's builds permanently when it
+   * never does; the SDK offers no way to abandon the call; and a persisted
+   * "destroying" marker needs its own expiry the moment the object is
+   * evicted, which is the same trade wearing a different hat.
+   */
+  private async destroyHoldingLock(
+    token: string,
+    deadline: number,
+  ): Promise<boolean> {
+    // Its own cap, or what is left of the teardown's, whichever runs out
+    // first (#196 review). I gave the teardown a wall clock one round ago
+    // and then let the longest thing inside it start a fresh window of its
+    // own, so the clock bounded every call in the method except the one it
+    // was added for: twelve minutes of build, twelve waiting on storage
+    // and ten more destroying is past the fleet's hard lifetime, and a
+    // later enqueue reclaims the ticket while this container still exists.
+    //
+    // Nested rather than added, which is the same rule `budgeted` states
+    // everywhere else it is used: a cap inside a budget is the smaller of
+    // the two, never the sum.
+    const until =
+      Date.now() + budgeted(MAX_DESTROY_WAIT_MS, deadline - Date.now());
+    return destroyWithin(
+      this.destroy().then(
+        () => true,
+        () => false,
+      ),
+      () => this.renewLock(token, until),
+      LOCK_RENEWAL_INTERVAL_MS,
+      until,
+    );
+  }
+
+  /**
+   * Push the lock forward, and say whether it was still ours to push
+   * (#196 review).
+   *
+   * The answer is the half that was missing. Renewing has always been
+   * conditional on ownership, so a build that had already been superseded
+   * called this, wrote nothing, and carried on working in a workspace that
+   * now belonged to somebody else. Returning the answer lets the loops
+   * stop, which is the only response that is actually safe.
+   */
+  /**
+   * The same renewal, from inside the build, where running out of time is
+   * an answer rather than a failure (#196 review).
+   *
+   * `keepAlive` answers false for "this build should stop", and a renewal
+   * the deadline cut off is exactly that: the wall clock has run out, so
+   * the build reports `sandbox` and tears down, which is the path it
+   * already takes when the lock has been taken from it. A rejection from
+   * storage still propagates, because that is a different fact and the
+   * caller has always treated it as one.
+   */
+  private async keepLock(token: string, deadline: number): Promise<boolean> {
+    try {
+      return await this.renewLock(token, deadline);
+    } catch (error) {
+      if (error instanceof Error && error.message === OUT_OF_TIME) return false;
+      throw error;
     }
+  }
+
+  private async renewLock(token: string, deadline: number): Promise<boolean> {
+    // Its own two storage calls, bounded like everything else that awaits
+    // (#196 review). Every protection this build has is a renewal, and a
+    // renewal that never returns is the one thing none of them can survive:
+    // `buildProject` outlives its wall clock without reaching its `finally`,
+    // the lock ages out and the ticket is reclaimed while the container is
+    // still running, and `/api/publish` waits with no bound of its own.
+    //
+    // Rejects rather than answering false, because each caller already
+    // knows what a failed renewal means and they do not agree: the build
+    // stops and reports `sandbox`, the teardown gives up and keeps both the
+    // lock and the ticket.
+    const bounded = <T>(work: Promise<T>): Promise<T> =>
+      withinDeadline(work, deadline - Date.now());
+    const mine = await bounded(this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY));
+    if (mine?.token !== token) return false;
+    await bounded(
+      this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
+        startedAt: Date.now(),
+        token,
+      }),
+    );
+    return true;
+  }
+
+  /**
+   * One or two RPCs per file and no bound of its own, which makes it the
+   * other end of the same hazard as reading the output back (#196 review).
+   * A build holds a lock while this runs, so `renew` pushes it forward as
+   * the loop goes; a preview holds none and says so at its call site.
+   */
+  private writeProject(
+    files: ProjectFile[],
+    keepAlive: () => Promise<boolean>,
+    /**
+     * Applied to each RPC rather than around the loop, because a loop bound
+     * only catches a build made of many slow calls and this also has to
+     * catch one made of a single stuck one (#196 review). A preview passes
+     * the identity, because it holds nothing anybody else is waiting for.
+     */
+    bounded: <T>(work: Promise<T>) => Promise<T>,
+  ): Promise<boolean> {
+    return writeFiles(
+      files,
+      async (file) => {
+        const path = `/workspace/${file.path}`;
+        const dir = path.slice(0, path.lastIndexOf('/'));
+        if (dir && dir !== '/workspace') {
+          await bounded(this.mkdir(dir, { recursive: true }));
+        }
+        await bounded(this.writeFile(path, file.content));
+      },
+      keepAlive,
+    );
   }
 
   private isExpired(state: PreviewState): boolean {

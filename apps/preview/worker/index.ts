@@ -7,6 +7,7 @@ import type { ProjectFile } from '@vibld/core';
 import { isAuthorizedInternalCaller } from './internal-auth.ts';
 import { PreviewFleet } from './preview-fleet.ts';
 import { PreviewSandbox } from './preview-sandbox.ts';
+import { buildSandboxName } from './build-sandbox.ts';
 import { signShare, verifyShare } from './share-token.ts';
 
 /** Re-exported so Wrangler can find these classes from the entrypoint. */
@@ -155,7 +156,9 @@ async function handleBuild(request: Request, env: Env): Promise<Response> {
     return json({ error: '"files" must be a list of {path, content}.' }, 400);
   }
 
-  const sandbox = getSandbox(env.Sandbox, userId, { normalizeId: true });
+  const sandbox = getSandbox(env.Sandbox, buildSandboxName(userId), {
+    normalizeId: true,
+  });
   const result = await sandbox.buildProject(files);
   return json(result, 'error' in result ? 422 : 200);
 }

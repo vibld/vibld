@@ -12,10 +12,17 @@ import type { QueueRow } from './fleet.ts';
  * concurrent previews across every user, the 26th queued with a visible
  * position rather than refused).
  *
- * A single, well-known instance (`getByName('fleet')`) rather than one per
- * user, deliberately: it is the one thing about preview concurrency that
- * genuinely has to be counted globally. Per-user concurrency needs none of
- * this -- see fleet.ts's module comment.
+ * Well-known instances rather than one per user, deliberately: this is the
+ * one thing about preview concurrency that genuinely has to be counted
+ * globally. Per-user concurrency needs none of this -- see fleet.ts's
+ * module comment.
+ *
+ * There are two such instances since #196, not one: `fleetName()` counts
+ * previews and `BUILD_FLEET_NAME` counts builds, because a build now runs
+ * in a container of its own and the platform's limit covers both. They are
+ * separate counters against a split budget, which is why the preview half
+ * no longer adds up to L9's twenty-five. That gap is the maintainer's to
+ * close and `capacity.ts` sets out the three ways.
  *
  * Same reserve-now/release-later shape as `apps/web`'s `UserBudget`, but a
  * queue slot has no calendar-day reset: a row is either waiting, active, or
@@ -35,7 +42,7 @@ export interface StatusResult {
   position?: number;
 }
 
-const ONLY_INSTANCE_NAME = 'fleet';
+const PREVIEW_INSTANCE_NAME = 'fleet';
 
 export class PreviewFleet extends DurableObject<unknown> {
   constructor(ctx: DurableObjectState, env: unknown) {
@@ -58,8 +65,8 @@ export class PreviewFleet extends DurableObject<unknown> {
 
   /**
    * `label` is metadata only (who is waiting, for observability) -- it is
-   * never used as a limit key. The limit is the single account-wide
-   * `maxInFlight`.
+   * never used as a limit key. The limit is this instance's `maxInFlight`,
+   * and which instance it is decides what is being counted.
    */
   enqueue(label: string, maxInFlight: number): EnqueueResult {
     const now = Date.now();
@@ -164,9 +171,12 @@ export class PreviewFleet extends DurableObject<unknown> {
   }
 }
 
-/** The one instance this Durable Object class is ever addressed by. */
+/**
+ * The instance that counts previews. Builds are counted by a second one,
+ * named in `capacity.ts`, against the same platform container budget.
+ */
 export function fleetName(): string {
-  return ONLY_INSTANCE_NAME;
+  return PREVIEW_INSTANCE_NAME;
 }
 
 export { HARD_LIFETIME_MS };
