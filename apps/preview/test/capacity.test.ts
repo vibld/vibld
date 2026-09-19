@@ -101,6 +101,27 @@ describe('counting the builds too', () => {
     source.indexOf('private async releaseBuild('),
   );
   /**
+   * The same region with its prose taken out.
+   *
+   * Because a window measured in characters is measuring the comments too:
+   * the assertion that `started` is set at the first `exec` broke when
+   * four lines of explanation were added between them, while the property
+   * it is about never changed. That is the ninth time on this file that a
+   * test has measured the text around a property rather than the property.
+   */
+  const code = body
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return (
+        trimmed.length > 0 &&
+        !trimmed.startsWith('//') &&
+        !trimmed.startsWith('*') &&
+        !trimmed.startsWith('/*')
+      );
+    })
+    .join('\n');
+  /**
    * The teardown, read as the method it now is.
    *
    * It used to sit inside `buildProject`'s `finally` and this region ran
@@ -287,7 +308,7 @@ describe('counting the builds too', () => {
       'nothing records whether the container was ever put to work',
     );
     assert.match(
-      body,
+      code,
       /started = true;[\s\S]{0,120}?this\.exec\(/,
       'the flag is not set at the first thing that starts a container',
     );

@@ -100,6 +100,25 @@ export function withinDeadline<T>(
 }
 
 /**
+ * A command's own cap, cut down to what is left of the build's wall clock
+ * (#196 review).
+ *
+ * Bounding the calls that had no bound of their own left the ones that
+ * did: each command kept its full five minutes however much of the budget
+ * had already gone, so a compile starting just before the deadline ran
+ * five minutes past it. The wall clock was not a bound on the build, it
+ * was a bound on everything except the two slowest things in it, and the
+ * comment above it claimed otherwise. That is the same shape as every
+ * finding on this pull request, written by me one commit earlier.
+ *
+ * Never negative, because a caller that is already out of time asks for
+ * zero rather than for a command with no timeout at all.
+ */
+export function budgeted(cap: number, msLeft: number): number {
+  return Math.min(cap, Math.max(0, msLeft));
+}
+
+/**
  * Writing the caller's project into the container, one file at a time.
  *
  * `write` is the caller's, because creating directories and writing bytes

@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   LOCK_RENEWAL_EVERY,
   OUT_OF_TIME,
+  budgeted,
   collectOutput,
   withinDeadline,
   writeFiles,
@@ -352,5 +353,34 @@ describe('one operation against what is left of the clock', () => {
       before,
       'the timer outlived the work it was watching',
     );
+  });
+});
+
+/**
+ * That a command's own cap cannot outlast the build's (#196 review).
+ *
+ * Bounding the calls that had no bound of their own left the ones that
+ * did. Each command kept its full five minutes however much of the budget
+ * had already gone, so a compile starting just before the deadline ran
+ * five minutes past it: the wall clock bounded everything except the two
+ * slowest things in the build, while its own comment said it bounded the
+ * build. That is the shape of every finding on this pull request, and I
+ * had written it one commit earlier.
+ */
+describe('a command cap against what is left of the build', () => {
+  it('keeps its own cap while there is room for it', () => {
+    assert.equal(budgeted(5 * 60_000, 9 * 60_000), 5 * 60_000);
+  });
+
+  it('is cut down to the budget that is left', () => {
+    assert.equal(budgeted(5 * 60_000, 90_000), 90_000);
+  });
+
+  it('is zero rather than negative when the budget is gone', () => {
+    // A negative timeout is the one answer that must never reach `exec`:
+    // depending on what the SDK makes of it, it is either an immediate
+    // failure or no timeout at all, and the second is the whole defect
+    // coming back.
+    assert.equal(budgeted(5 * 60_000, -30_000), 0);
   });
 });

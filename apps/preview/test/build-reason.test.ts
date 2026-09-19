@@ -312,10 +312,7 @@ describe('whose lock a build releases', () => {
     // repair: `sandbox`, which `judgedTheProject` reads as unknown, and
     // not `install` or `build`, which it reads as a verdict.
     const body = buildProjectCode();
-    for (const bound of [
-      'BUILD_INSTALL_TIMEOUT_MS',
-      'BUILD_COMPILE_TIMEOUT_MS',
-    ]) {
+    for (const bound of ['installTimeout', 'compileTimeout']) {
       const at = body.indexOf(`>= ${bound}`);
       assert.ok(at > 0, `${bound} is never compared against the clock`);
       const after = body.slice(at, at + 200);
@@ -491,13 +488,57 @@ describe('keeping the lock alive while the build is', () => {
     // are run through it. `exec` is absent on purpose: both commands carry
     // their own timeout, which is what `build-limits.ts` is for.
     const body = buildProjectCode();
-    for (const rpc of ['listFiles(', 'readFile(']) {
+    // The clear and the root mkdir are named as well as the two reads,
+    // because a mutation that unbounded the clear survived a version of
+    // this test that only looked at the reads: it asserted the call sites
+    // the last finding happened to name rather than the property, which is
+    // the mistake this pull request keeps finding in its own tests.
+    for (const rpc of [
+      "exec('rm -rf /workspace'",
+      "mkdir('/workspace'",
+      'listFiles(',
+      'readFile(',
+    ]) {
       const at = body.indexOf(rpc);
       assert.ok(at > 0, `${rpc} is no longer where this expected it`);
       assert.match(
         body.slice(Math.max(0, at - 120), at),
-        /bounded\(\s*$|bounded\([^)]*$/,
+        /bounded\(\s*(this\.)?$|bounded\([^)]*$/,
         `${rpc} can outlast the whole build's budget`,
+      );
+    }
+  });
+
+  it('cuts each command cap down to what is left of the build', () => {
+    // A wall clock that the two slowest things in the build ignore is not
+    // a wall clock. `build-files.test.ts` proves the arithmetic by calling
+    // it; this is that both commands go through it.
+    const body = buildProjectCode();
+    for (const cap of [
+      'BUILD_INSTALL_TIMEOUT_MS',
+      'BUILD_COMPILE_TIMEOUT_MS',
+    ]) {
+      assert.match(
+        body,
+        new RegExp(`within\\(${cap}\\)`),
+        `${cap} is spent in full however late the build already is`,
+      );
+    }
+  });
+
+  it('measures a stopped command against the bound it was actually given', () => {
+    // Otherwise a command cut short by the remaining budget reads as a
+    // failure of the project, which buys a repair for a build that was
+    // stopped rather than one that failed.
+    const body = buildProjectCode();
+    for (const [started, bound] of [
+      ['installStartedAt', 'installTimeout'],
+      ['buildStartedAt', 'compileTimeout'],
+    ]) {
+      assert.match(
+        body,
+        new RegExp(`Date\\.now\\(\\) - ${started} >= ${bound}`),
+        `a truncated command is reported as a verdict on the project`,
       );
     }
   });

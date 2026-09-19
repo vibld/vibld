@@ -3,6 +3,7 @@ import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
 import {
   OUT_OF_TIME,
+  budgeted,
   collectOutput,
   withinDeadline,
   writeFiles,
@@ -436,6 +437,19 @@ export class PreviewSandbox extends Sandbox<Env> {
     const bounded = <T>(work: Promise<T>): Promise<T> =>
       withinDeadline(work, deadline - Date.now());
 
+    /**
+     * A command's own cap, cut down to what is left (#196 review).
+     *
+     * Bounding the calls that had no bound left the ones that did: each
+     * command kept its full five minutes however much of the budget had
+     * gone, so a compile starting just before the deadline ran five
+     * minutes past it, and `REPAIR_BUILD_ALLOWANCE_MS` was funding two
+     * builds that could each overrun. A bound that the two slowest things
+     * in the build ignore is not a bound.
+     */
+    const within = (cap: number): number =>
+      budgeted(cap, deadline - Date.now());
+
     /** What a build that was stopped says: nothing about the project. */
     const stopped: BuildOutcome = {
       reason: 'sandbox',
@@ -473,14 +487,20 @@ export class PreviewSandbox extends Sandbox<Env> {
       // That is one of the two production failures behind #194: this check
       // is worth having only if it measures what a clean environment sees.
       started = true;
-      const cleared = await this.exec('rm -rf /workspace', { cwd: '/' });
+      // Bounded like every other call here. Left direct, this one could
+      // stall past the deadline without ever reaching the teardown, and a
+      // late `rm -rf /workspace` would then empty a successor's tree
+      // (#196 review).
+      const cleared = await bounded(
+        this.exec('rm -rf /workspace', { cwd: '/' }),
+      );
       if (!cleared.success) {
         return {
           reason: 'sandbox',
           error: `The build workspace could not be emptied (exit ${cleared.exitCode}).`,
         };
       }
-      await this.mkdir('/workspace', { recursive: true });
+      await bounded(this.mkdir('/workspace', { recursive: true }));
 
       // Renewed at every boundary between bounded and unbounded work, so
       // the TTL is measuring silence rather than project size, and inside
@@ -491,9 +511,10 @@ export class PreviewSandbox extends Sandbox<Env> {
       if (!(await keepAlive())) return stopped;
 
       const installStartedAt = Date.now();
+      const installTimeout = within(BUILD_INSTALL_TIMEOUT_MS);
       const install = await this.exec('npm install --no-audit --no-fund', {
         cwd: '/workspace',
-        timeout: BUILD_INSTALL_TIMEOUT_MS,
+        timeout: installTimeout,
       });
       if (!install.success) {
         // A command that reached its bound was stopped, and being stopped
@@ -503,7 +524,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         // reports its own timeout as a rejection or as an unsuccessful
         // result is its business, and an "install failure" that was really
         // a stopwatch would be this method inventing one.
-        if (Date.now() - installStartedAt >= BUILD_INSTALL_TIMEOUT_MS) {
+        if (Date.now() - installStartedAt >= installTimeout) {
           return {
             reason: 'sandbox',
             error: 'npm install did not finish within the time allowed.',
@@ -530,12 +551,13 @@ export class PreviewSandbox extends Sandbox<Env> {
 
       if (!(await keepAlive())) return stopped;
       const buildStartedAt = Date.now();
+      const compileTimeout = within(BUILD_COMPILE_TIMEOUT_MS);
       const build = await this.exec('npm run build', {
         cwd: '/workspace',
-        timeout: BUILD_COMPILE_TIMEOUT_MS,
+        timeout: compileTimeout,
       });
       if (!build.success) {
-        if (Date.now() - buildStartedAt >= BUILD_COMPILE_TIMEOUT_MS) {
+        if (Date.now() - buildStartedAt >= compileTimeout) {
           return {
             reason: 'sandbox',
             error: 'npm run build did not finish within the time allowed.',
