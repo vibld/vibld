@@ -484,6 +484,40 @@ describe('keeping the lock alive while the build is', () => {
     );
   });
 
+  it('bounds every call that has no bound of its own', () => {
+    // The deadline between operations does nothing for a build stuck
+    // inside one of them (#196 review). `build-files.test.ts` proves the
+    // race itself by calling it; what a source read can say is which calls
+    // are run through it. `exec` is absent on purpose: both commands carry
+    // their own timeout, which is what `build-limits.ts` is for.
+    const body = buildProjectCode();
+    for (const rpc of ['listFiles(', 'readFile(']) {
+      const at = body.indexOf(rpc);
+      assert.ok(at > 0, `${rpc} is no longer where this expected it`);
+      assert.match(
+        body.slice(Math.max(0, at - 120), at),
+        /bounded\(\s*$|bounded\([^)]*$/,
+        `${rpc} can outlast the whole build's budget`,
+      );
+    }
+  });
+
+  it('bounds the calls that write the project in too', () => {
+    // A separate region, because they live in `writeProject` rather than
+    // in the build itself, and the last round's lesson is that a region
+    // which quietly grows to cover a method is worse than no region.
+    const method = bodyOf('private writeProject(', 'private isExpired(');
+    for (const rpc of ['this.mkdir(', 'this.writeFile(']) {
+      const at = method.indexOf(rpc);
+      assert.ok(at > 0, `${rpc} is no longer where this expected it`);
+      assert.match(
+        method.slice(Math.max(0, at - 40), at),
+        /bounded\(/,
+        `${rpc} can outlast the whole build's budget`,
+      );
+    }
+  });
+
   it('refuses a half-read output tree rather than reporting it', () => {
     // A loop that stopped has read some of the files and not others, and
     // publishing or verifying against that would be a claim about files

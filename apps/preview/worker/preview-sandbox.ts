@@ -1,7 +1,12 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
-import { collectOutput, writeFiles } from './build-files.ts';
+import {
+  OUT_OF_TIME,
+  collectOutput,
+  withinDeadline,
+  writeFiles,
+} from './build-files.ts';
 import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
@@ -407,6 +412,30 @@ export class PreviewSandbox extends Sandbox<Env> {
     const keepAlive = async (): Promise<boolean> =>
       Date.now() < deadline && (await this.renewLock(token));
 
+    /**
+     * The deadline applied to one RPC rather than between two of them
+     * (#196 review).
+     *
+     * Checking the clock between operations bounds a build made of many
+     * quick calls and does nothing about a build stuck in one slow call.
+     * A single `writeFile` that hung past the deadline left everything the
+     * bound was for: the lock expired at its TTL, a second build took the
+     * workspace, the fleet reclaimed the ticket of a container still
+     * running, and when the stalled call finally landed it wrote into
+     * somebody else's tree. I claimed the ownership check on resume
+     * covered that. It does not: the write happens first and the check
+     * happens after.
+     *
+     * The losing call is not cancelled, because none of these can be. What
+     * this buys is that the *build* ends on time, so the teardown starts on
+     * time and destroys the container, and destroying the container is what
+     * actually stops an orphaned RPC. That is the same reasoning as
+     * `destroyHoldingLock`'s cap: bound what can be bounded, and let the
+     * container's death end what cannot.
+     */
+    const bounded = <T>(work: Promise<T>): Promise<T> =>
+      withinDeadline(work, deadline - Date.now());
+
     /** What a build that was stopped says: nothing about the project. */
     const stopped: BuildOutcome = {
       reason: 'sandbox',
@@ -458,7 +487,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       // this stretch as well as after it: writing the project in is one or
       // two RPCs per file, and a big enough project outran the lock while
       // the renewal sat waiting for the loop to finish (#196 review).
-      if (!(await this.writeProject(files, keepAlive))) return stopped;
+      if (!(await this.writeProject(files, keepAlive, bounded))) return stopped;
       if (!(await keepAlive())) return stopped;
 
       const installStartedAt = Date.now();
@@ -529,7 +558,9 @@ export class PreviewSandbox extends Sandbox<Env> {
 
       if (!(await keepAlive())) return stopped;
       const outputDir = `/workspace/${BUILD_OUTPUT_DIR}`;
-      const listing = await this.listFiles(outputDir, { recursive: true });
+      const listing = await bounded(
+        this.listFiles(outputDir, { recursive: true }),
+      );
       if (!listing.success) {
         return {
           reason: 'output',
@@ -545,7 +576,8 @@ export class PreviewSandbox extends Sandbox<Env> {
       // was ever going to notice.
       const { output, skipped, complete } = await collectOutput(
         listing.files,
-        (relativePath) => this.readFile(`${outputDir}/${relativePath}`),
+        (relativePath) =>
+          bounded(this.readFile(`${outputDir}/${relativePath}`)),
         keepAlive,
       );
       // Half an output tree is not this project's output, and publishing
@@ -559,6 +591,9 @@ export class PreviewSandbox extends Sandbox<Env> {
       }
       return { files: output, skipped };
     } catch (error) {
+      if (error instanceof Error && error.message === OUT_OF_TIME) {
+        return stopped;
+      }
       return {
         reason: 'sandbox',
         error: error instanceof Error ? error.message : 'Build failed.',
@@ -822,7 +857,11 @@ export class PreviewSandbox extends Sandbox<Env> {
       // to renew and nothing that can take the workspace from it. Its own
       // claim on this sandbox is the fleet ticket, which has a hard
       // lifetime rather than a heartbeat and is `reclaimStale`'s business.
-      await this.writeProject(files, async () => true);
+      await this.writeProject(
+        files,
+        async () => true,
+        (work) => work,
+      );
       await this.writeState({ phase: 'starting', startedAt, fleetTicketId });
 
       const install = await this.exec('npm install --no-audit --no-fund', {
@@ -1046,6 +1085,13 @@ export class PreviewSandbox extends Sandbox<Env> {
   private writeProject(
     files: ProjectFile[],
     keepAlive: () => Promise<boolean>,
+    /**
+     * Applied to each RPC rather than around the loop, because a loop bound
+     * only catches a build made of many slow calls and this also has to
+     * catch one made of a single stuck one (#196 review). A preview passes
+     * the identity, because it holds nothing anybody else is waiting for.
+     */
+    bounded: <T>(work: Promise<T>) => Promise<T>,
   ): Promise<boolean> {
     return writeFiles(
       files,
@@ -1053,9 +1099,9 @@ export class PreviewSandbox extends Sandbox<Env> {
         const path = `/workspace/${file.path}`;
         const dir = path.slice(0, path.lastIndexOf('/'));
         if (dir && dir !== '/workspace') {
-          await this.mkdir(dir, { recursive: true });
+          await bounded(this.mkdir(dir, { recursive: true }));
         }
-        await this.writeFile(path, file.content);
+        await bounded(this.writeFile(path, file.content));
       },
       keepAlive,
     );
