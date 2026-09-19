@@ -5,6 +5,7 @@ import {
   type GenerationRequest,
   type GenerationStore,
   type ModelProvider,
+  type ProjectFile,
   type RunTrace,
 } from '@vibld/core';
 import {
@@ -400,7 +401,22 @@ export interface GenerationWorkflowEnv {
  */
 export interface RepairOutcome {
   built?: boolean;
-  /** Set only when a repair was actually asked for and paid for. */
+  /**
+   * Whether the repaired project builds, asked the same way the first one
+   * was (#196 review).
+   *
+   * Three-valued, and the middle case is the point. True and false are a
+   * second build that ran. `undefined` is a repair that happened and whose
+   * result could not be checked, because the build service went away
+   * between the two calls. Reporting that as true would declare the exact
+   * production failure this feature exists to catch fixed on the strength
+   * of the model having answered.
+   *
+   * It is deliberately not "the generation was accepted". Acceptance is the
+   * structural validator saying the files are well formed and inside the
+   * project root; it says nothing about whether they compile, which is the
+   * whole question.
+   */
   repaired?: boolean;
   /**
    * The repaired project, when there is one, for the caller to return in
@@ -416,7 +432,7 @@ export interface RepairOutcome {
    */
   result?: DurableGenerationResult;
   /** Why no repair was attempted, when a failing build did not buy one. */
-  skipped?: 'not-configured' | 'not-the-project' | 'no-budget';
+  skipped?: 'not-configured' | 'not-the-project' | 'no-budget' | 'unavailable';
   /** The repair's own reservation, settled by this step and not the run's. */
   repairCostMicroUsd?: number;
 }
@@ -668,14 +684,41 @@ export async function verifyAndRepair(
     return { skipped: 'not-configured' };
   }
 
-  const first = await deps.build(
-    {
-      PREVIEW: env.PREVIEW,
-      PREVIEW_INTERNAL_SECRET: env.PREVIEW_INTERNAL_SECRET,
-    },
-    params.userId,
-    result.accepted.files,
-  );
+  /**
+   * A build that reports a failure instead of throwing one.
+   *
+   * The service binding can reject: a preview-worker deploy, a Durable
+   * Object outage, anything. Letting that propagate would fail the whole
+   * Workflow *after* the project had been accepted, promoted and billed,
+   * so the caller would be sent an error instead of the files they paid
+   * for, and preview-service availability would quietly become a hard
+   * dependency of every generation (#196 review). Every other non-project
+   * build failure is already treated as "not the project's fault"; an
+   * unreachable service is the same fact arriving differently.
+   */
+  const build = async (
+    files: ProjectFile[],
+  ): Promise<
+    { ok: true } | { ok: false; error: string; reason?: string } | undefined
+  > => {
+    try {
+      return await deps.build(
+        {
+          PREVIEW: env.PREVIEW,
+          PREVIEW_INTERNAL_SECRET: env.PREVIEW_INTERNAL_SECRET,
+        },
+        params.userId,
+        files,
+      );
+    } catch {
+      return undefined;
+    }
+  };
+
+  const first = await build(result.accepted.files);
+  // Unreachable, not failed. Nothing is known about the project, so nothing
+  // is claimed and no money is spent.
+  if (!first) return { skipped: 'unavailable' };
   if (first.ok) return { built: true };
   if (!worthRepairing(first, params)) {
     return {
@@ -739,12 +782,29 @@ export async function verifyAndRepair(
     );
   }
 
-  const repaired =
+  // Accepted is not built (#196 review). The validator says the files are
+  // well formed and inside the project root; it says nothing about whether
+  // they compile, and compiling is the entire question. This feature exists
+  // because a model's output passes every structural check and still fails
+  // `npm run build`, so believing acceptance here would declare that exact
+  // failure fixed without looking.
+  const promoted =
     outcome?.result.state === 'accepted' && Boolean(outcome.result.accepted);
+  if (!promoted || !outcome?.result.accepted) {
+    return { built: false, repaired: false };
+  }
+
+  const second = await build(outcome.result.accepted.files);
   return {
     built: false,
-    repaired,
-    ...(repaired && outcome ? { result: outcome.result } : {}),
+    // Undefined rather than false when the second build could not run: a
+    // repair whose result is unknown is not a repair that failed.
+    ...(second ? { repaired: second.ok } : {}),
+    // Returned whether or not it builds, because it is what the store now
+    // holds. Handing back the first attempt would put the reader's copy and
+    // the accepted revision out of step, which is the other finding on this
+    // round.
+    result: outcome.result,
   };
 }
 

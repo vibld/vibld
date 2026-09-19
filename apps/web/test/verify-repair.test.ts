@@ -64,6 +64,10 @@ function deps(
     reserveOk?: boolean;
     generateThrows?: boolean;
     accepted?: boolean;
+    /** What the build after the repair answers. Defaults to the first. */
+    rebuild?: { ok: boolean; error?: string; reason?: string };
+    /** Which call throws, counting from one. */
+    buildThrowsOn?: number;
   } = {},
 ) {
   const spy: Spy = { builds: 0, reserves: 0, settles: [], generates: [] };
@@ -72,7 +76,10 @@ function deps(
     deps: {
       build: (async () => {
         spy.builds += 1;
-        return build;
+        if (spy.builds === options.buildThrowsOn) {
+          throw new Error('the preview service is gone');
+        }
+        return spy.builds === 1 ? build : (options.rebuild ?? build);
       }) as never,
       reserve: (async () => {
         spy.reserves += 1;
@@ -158,11 +165,12 @@ describe('buying one repair', () => {
     // Its own id because `promote` and `saveStage` are both keyed on it:
     // reusing the run's would overwrite the record of the very attempt
     // this one is repairing.
-    const { spy, deps: d } = deps({
-      ok: false,
-      reason: 'build',
-      error: 'src/App.tsx(3,10): error TS1484',
-    });
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'src/App.tsx(3,10): error TS1484' },
+      // The happy path: the repair compiles. `repaired` comes from this
+      // second build and not from the model having answered.
+      { rebuild: { ok: true } },
+    );
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.equal(outcome.built, false);
     assert.equal(outcome.repaired, true);
@@ -176,11 +184,10 @@ describe('buying one repair', () => {
   });
 
   it('holds a reservation before it spends, and settles it after', async () => {
-    const { spy, deps: d } = deps({
-      ok: false,
-      reason: 'install',
-      error: 'npm install failed',
-    });
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'install', error: 'npm install failed' },
+      { rebuild: { ok: true } },
+    );
     await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.equal(spy.reserves, 1);
     assert.equal(spy.settles.length, 1, 'the repair hold was left open');
@@ -245,17 +252,61 @@ describe('buying one repair', () => {
     );
   });
 
+  it('builds the repaired project rather than believing the model', async () => {
+    // #196 review, P1. Acceptance is the structural validator saying the
+    // files are well formed and inside the project root. It says nothing
+    // about whether they compile, and compiling is the entire question:
+    // this feature exists because output that passes every structural
+    // check still fails `npm run build`.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: false, reason: 'build', error: 'TS1484 again' } },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.builds, 2, 'the repaired files were never built');
+    assert.equal(
+      outcome.repaired,
+      false,
+      'a repair that still does not build was reported as fixed',
+    );
+    assert.ok(outcome.result, 'the promoted revision was not handed back');
+  });
+
+  it('says it does not know when the second build cannot run', async () => {
+    // A repair whose result is unknown is not a repair that failed, and it
+    // is certainly not one that worked.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { buildThrowsOn: 2 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(outcome.repaired, undefined);
+    assert.ok(outcome.result, 'the promoted revision was thrown away');
+  });
+
+  it('keeps the project when the build service is unreachable', async () => {
+    // #196 review, P2. The project has already been accepted, promoted and
+    // billed. Letting the binding's rejection out of here fails the whole
+    // Workflow, so the caller is sent an error instead of the files they
+    // paid for, and preview-service availability quietly becomes a hard
+    // dependency of every generation.
+    const { spy, deps: d } = deps({ ok: true }, { buildThrowsOn: 1 });
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.deepEqual(outcome, { skipped: 'unavailable' });
+    assert.equal(spy.reserves, 0, 'an unreachable service bought a repair');
+    assert.equal(spy.generates.length, 0);
+  });
+
   it('hands back the repaired project, not the one that would not build', async () => {
     // The bug this exists to stop, found by re-reading the diff rather
     // than by a test failing. The repair promotes its own accepted
     // revision into the store; returning the first attempt would show the
     // reader the broken files while the store held the fixed ones, and the
     // two would disagree with nothing to say which was right.
-    const { deps: d } = deps({
-      ok: false,
-      reason: 'build',
-      error: 'src/App.tsx(3,10): error TS1484',
-    });
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'src/App.tsx(3,10): error TS1484' },
+      { rebuild: { ok: true } },
+    );
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.ok(outcome.result, 'the repaired project was thrown away');
     assert.equal(outcome.result.state, 'accepted');
