@@ -409,12 +409,26 @@ describe('keeping the lock alive while the build is', () => {
     );
   });
 
-  it('renews inside the loop that reads the output back', () => {
-    // The longest unbounded stretch in the method, and the one most likely
-    // to outrun a TTL on a project with many files.
+  it('hands its renewal to the loop that reads the output back', () => {
+    // The longest unbounded stretch a build has, and the one most likely to
+    // outrun a TTL on a project with many files. It lives in
+    // `build-output.ts` now, where `build-output.test.ts` calls it with
+    // fakes and counts the renewals directly (#196 review), so what is left
+    // to assert here is the wiring: that this build gives it a renewal of
+    // its own lock to call.
+    //
+    // Which is the whole argument for the extraction. The defect that
+    // prompted it was a renewal counting the files the loop kept rather
+    // than the files it read, and the test that used to stand here matched
+    // `renewLock(token)` inside the loop and passed throughout.
     const body = buildProjectCode();
-    const loop = body.slice(body.indexOf('for (const entry of listing.files'));
-    assert.match(loop, /renewLock\(token\)/, 'the read loop never renews');
+    const call = body.slice(body.indexOf('collectOutput('));
+    assert.ok(call.length > 0, 'the output is no longer read by that loop');
+    assert.match(
+      call.slice(0, call.indexOf(');')),
+      /renewLock\(token\)/,
+      'the read loop is given no way to push the lock forward',
+    );
   });
 
   it('keeps renewing while the container is being torn down', () => {

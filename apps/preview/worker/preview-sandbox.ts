@@ -1,6 +1,7 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
+import { collectOutput } from './build-output.ts';
 import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
@@ -123,15 +124,6 @@ const STORAGE_KEY = 'vibld:preview';
  * all, and what it needs to exclude is another build rather than a preview.
  */
 const BUILD_LOCK_KEY = 'vibld:build';
-
-/**
- * How often the output-reading loop pushes the lock forward.
- *
- * Every file would be an extra storage write per file for no more safety;
- * never would leave the longest unbounded stretch in this method measured
- * against a TTL it can outrun.
- */
-const LOCK_RENEWAL_EVERY = 25;
 
 /** The lock a build holds, and the token that says whose it is. */
 interface BuildLock {
@@ -517,22 +509,17 @@ export class PreviewSandbox extends Sandbox<Env> {
         };
       }
 
-      const output: ProjectFile[] = [];
-      const skipped: string[] = [];
-      for (const entry of listing.files) {
-        if (entry.type !== 'file') continue;
-        // The loop is one RPC per output file, so it is the longest
-        // unbounded stretch here and the one most likely to outrun a TTL.
-        if (output.length % LOCK_RENEWAL_EVERY === 0) {
-          await this.renewLock(token);
-        }
-        const read = await this.readFile(`${outputDir}/${entry.relativePath}`);
-        if (read.encoding === 'base64') {
-          skipped.push(entry.relativePath);
-          continue;
-        }
-        output.push({ path: entry.relativePath, content: read.content });
-      }
+      // One RPC per output file, so the longest unbounded stretch here and
+      // the one most likely to outrun a TTL. It lives in `build-output.ts`
+      // so it can be called with fakes rather than read with regexes
+      // (#196 review): the renewal used to count the files it kept rather
+      // than the files it read, and nothing that reads this file as source
+      // was ever going to notice.
+      const { output, skipped } = await collectOutput(
+        listing.files,
+        (relativePath) => this.readFile(`${outputDir}/${relativePath}`),
+        () => this.renewLock(token),
+      );
       if (output.length === 0) {
         return {
           reason: 'output',
