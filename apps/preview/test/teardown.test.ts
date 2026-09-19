@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { destroyWithin } from '../worker/teardown.ts';
+import { destroyWithin, releaseWithin } from '../worker/teardown.ts';
 
 /**
  * That the wait for a container to die is really capped (#196 review).
@@ -168,5 +168,66 @@ describe('waiting for a container to die', () => {
       false,
     );
     assert.equal(renewals.length, 0, 'a teardown out of time renewed a lock');
+  });
+});
+
+/**
+ * That a retried release can actually reach its second attempt
+ * (#196 review).
+ *
+ * `retrying` runs one attempt and then the next, so an attempt that never
+ * settles is the end of the sequence: the retry exists precisely for a
+ * fleet object that is restarting, which is the case most likely to leave
+ * a call pending rather than reject it. The bound is what makes the retry
+ * a retry.
+ *
+ * It matters more than the other releases in this file because of which
+ * ticket it is cleaning up. `PreviewFleet.reclaimStale` only reclaims rows
+ * it has activated, so a ticket for a build refused before anything ran
+ * has no expiry at all and this call is the only thing that will ever
+ * return it.
+ */
+describe('giving a fleet ticket back', () => {
+  it('reaches the next attempt when one never answers', async () => {
+    const asked: number[] = [];
+    await releaseWithin(() => {
+      asked.push(Date.now());
+      // Never for the first attempt, which is the whole point; the second
+      // answers, so a bounded first one lets the release succeed.
+      return asked.length === 1
+        ? new Promise<never>(() => {})
+        : Promise.resolve();
+    }, 20);
+    assert.equal(asked.length, 2, 'a pending attempt ended the sequence');
+  });
+
+  it('answers once a release lands', async () => {
+    let asked = 0;
+    await releaseWithin(async () => {
+      asked += 1;
+    }, 5_000);
+    assert.equal(asked, 1, 'a release that worked was asked for again');
+  });
+
+  it('says so rather than hanging when none of them answer', async () => {
+    // Two halves, and the second is the one that was missing: `retrying`
+    // returns its outcome as a value instead of throwing, and this caller
+    // discarded it, so a ticket that failed every attempt looked exactly
+    // like one that went back.
+    const started = Date.now();
+    assert.equal(
+      await releaseWithin(() => new Promise<never>(() => {}), 20),
+      false,
+      'a release nobody answered was reported as done',
+    );
+    assert.ok(
+      Date.now() - started < 5_000,
+      'the release held the teardown open past every attempt',
+    );
+  });
+
+  it('says a release that landed did land', async () => {
+    // So the answer above is an answer rather than a constant.
+    assert.equal(await releaseWithin(async () => {}, 5_000), true);
   });
 });

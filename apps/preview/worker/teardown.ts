@@ -1,4 +1,4 @@
-import { budgeted, withinDeadline } from '@vibld/core';
+import { budgeted, retrying, withinDeadline } from '@vibld/core';
 
 /**
  * Waiting for a container to die while keeping the lock alive, bounded
@@ -58,4 +58,37 @@ export async function destroyWithin(
     }
   }
   return false;
+}
+
+/**
+ * Giving a fleet ticket back, where each attempt is bounded rather than
+ * the sequence (#196 review).
+ *
+ * `retrying` never reaches its second attempt if the first never settles,
+ * so an unbounded call turns a retry into a single unbounded call wearing
+ * a retry's name. That matters more here than anywhere else in the
+ * teardown: a ticket for a build refused before anything ran is queued
+ * rather than active, `PreviewFleet.reclaimStale` only reclaims rows it
+ * activated, and so this call is the only cleanup that ticket will ever
+ * get. A pending one leaves it to be promoted later for a build that
+ * already answered `busy`, holding a global build slot for its whole hard
+ * lifetime.
+ *
+ * A module rather than a line inside the Durable Object, for the reason
+ * every other extraction on this pull request happened: the object cannot
+ * be loaded under `node --test`, so the only test its retry ever had was a
+ * regex over the text of the call.
+ */
+export async function releaseWithin(
+  release: () => Promise<unknown>,
+  within: number,
+): Promise<boolean> {
+  // The answer, rather than nothing. `retrying` returns its outcome as a
+  // value instead of throwing, and this caller discarded it, so a ticket
+  // that failed every attempt was indistinguishable from one that went
+  // back. Nothing in this process can do more about it than has already
+  // been done, but a fact nobody can observe is how this leak kept coming
+  // back from a new direction (see #199).
+  const done = await retrying(() => withinDeadline(release(), within));
+  return done.ok;
 }

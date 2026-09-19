@@ -199,11 +199,23 @@ describe('counting the builds too', () => {
     // promoted with nobody to use it, and only then begins its hard
     // lifetime, which turns one dropped release into a build slot lost to
     // whoever is next in the queue.
+    // The retrying itself, and that each attempt is bounded, is
+    // `teardown.test.ts`, which calls `releaseWithin` with an attempt that
+    // never settles. What is left here is that this release goes through
+    // it, and with the fleet bound rather than one of its own: an
+    // unbounded attempt makes `retrying` a single unbounded call wearing a
+    // retry's name, and this release is the only cleanup a queued ticket
+    // will ever get (#196 review).
     const tail = teardown;
     assert.match(
       tail,
-      /retrying\(\(\) =>[\s\S]{0,240}?\.release\(/,
+      /releaseWithin\([\s\S]{0,240}?\.release\(/,
       'one refused release abandons the ticket for good',
+    );
+    assert.match(
+      tail,
+      /\.release\([\s\S]{0,120}?FLEET_CALL_TIMEOUT_MS/,
+      'an attempt that never answers holds up every attempt after it',
     );
     assert.doesNotMatch(
       tail,

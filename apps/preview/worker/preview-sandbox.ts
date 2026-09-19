@@ -1,9 +1,8 @@
 import { Sandbox } from '@cloudflare/sandbox';
-import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
 import { budgeted, OUT_OF_TIME, withinDeadline } from '@vibld/core';
 import { admit, collectOutput, writeFiles } from './build-files.ts';
-import { destroyWithin } from './teardown.ts';
+import { destroyWithin, releaseWithin } from './teardown.ts';
 import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
@@ -13,8 +12,10 @@ import {
   BUILD_INSTALL_TIMEOUT_MS,
   BUILD_LOCK_TTL_MS,
   BUILD_WALL_CLOCK_MS,
+  FLEET_CALL_TIMEOUT_MS,
   LOCK_RENEWAL_INTERVAL_MS,
   MAX_DESTROY_WAIT_MS,
+  TEARDOWN_WALL_CLOCK_MS,
 } from './build-limits.ts';
 // L9's account-wide preview cap, which is no longer the whole container
 // budget: see `capacity.ts` for what builds take out of it.
@@ -433,7 +434,7 @@ export class PreviewSandbox extends Sandbox<Env> {
      * heartbeat that had to cover every single `await`.
      */
     const keepAlive = async (): Promise<boolean> =>
-      Date.now() < deadline && (await this.renewLock(token));
+      Date.now() < deadline && (await this.keepLock(token, deadline));
 
     /**
      * A command's own cap, cut down to what is left (#196 review).
@@ -472,7 +473,9 @@ export class PreviewSandbox extends Sandbox<Env> {
           BUILD_CONTAINER_HEADROOM,
         ),
         bounded,
-        (ticket) => this.releaseTicket(ticket),
+        async (ticket) => {
+          await this.releaseTicket(ticket);
+        },
         (work) => this.ctx.waitUntil(work),
       );
       if (!slot.active) {
@@ -684,6 +687,19 @@ export class PreviewSandbox extends Sandbox<Env> {
     slot: EnqueueResult | undefined,
     started: boolean,
   ): Promise<void> {
+    // A clock of its own, because it no longer runs inside the build's
+    // (#196 review). Every storage call below could stay pending, and a
+    // teardown that never finishes is one that never reaches its release.
+    //
+    // Running out of time propagates, exactly as a storage rejection
+    // already did, and the ticket is then held rather than released. That
+    // is safe only for a ticket this build activated, which the fleet
+    // reclaims after `HARD_LIFETIME_MS`; the queued one that nothing
+    // reclaims is given back before any of this, below.
+    const deadline = Date.now() + TEARDOWN_WALL_CLOCK_MS;
+    const bounded = <T>(work: Promise<T>): Promise<T> =>
+      withinDeadline(work, deadline - Date.now());
+
     // A ticket for a build that never started goes back first, and without
     // asking storage anything (#196 review).
     //
@@ -700,12 +716,16 @@ export class PreviewSandbox extends Sandbox<Env> {
       // The lock is still this build's to give back, but it expires on its
       // own after BUILD_LOCK_TTL_MS and refuses safely in the meantime, so
       // it is the half that may depend on storage answering.
-      const held = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
-      if (held?.token === token) await this.ctx.storage.delete(BUILD_LOCK_KEY);
+      const held = await bounded(
+        this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY),
+      );
+      if (held?.token === token) {
+        await bounded(this.ctx.storage.delete(BUILD_LOCK_KEY));
+      }
       return;
     }
 
-    const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+    const mine = await bounded(this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY));
     const ours = mine?.token === token;
 
     // Only ours is ours to destroy. A build that overran has had its lock
@@ -719,9 +739,11 @@ export class PreviewSandbox extends Sandbox<Env> {
     // to die. Re-read rather than trusting `ours`, which was answered
     // before the destroy was awaited.
     if (ours && gone) {
-      const still = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+      const still = await bounded(
+        this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY),
+      );
       if (still?.token === token) {
-        await this.ctx.storage.delete(BUILD_LOCK_KEY);
+        await bounded(this.ctx.storage.delete(BUILD_LOCK_KEY));
       }
     }
 
@@ -751,12 +773,20 @@ export class PreviewSandbox extends Sandbox<Env> {
    * back whatever that call eventually hands it, and it is the same
    * release for the same reason.
    */
-  private async releaseTicket(ticket: number): Promise<void> {
-    await retrying(() =>
-      this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
-        ticket,
-        BUILD_CONTAINER_HEADROOM,
-      ),
+  private async releaseTicket(ticket: number): Promise<boolean> {
+    // Each attempt, not the sequence (#196 review). `retrying` never
+    // reaches its second attempt if the first never settles, so an
+    // unbounded call turns the retry into a single unbounded one. That
+    // matters most here of anywhere: a ticket for a build refused before
+    // anything ran is queued rather than active, `reclaimStale` never
+    // reclaims it, and this call is the only cleanup it will ever get.
+    return releaseWithin(
+      () =>
+        this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
+          ticket,
+          BUILD_CONTAINER_HEADROOM,
+        ),
+      FLEET_CALL_TIMEOUT_MS,
     );
   }
 
@@ -1105,14 +1135,15 @@ export class PreviewSandbox extends Sandbox<Env> {
    * evicted, which is the same trade wearing a different hat.
    */
   private async destroyHoldingLock(token: string): Promise<boolean> {
+    const until = Date.now() + MAX_DESTROY_WAIT_MS;
     return destroyWithin(
       this.destroy().then(
         () => true,
         () => false,
       ),
-      () => this.renewLock(token),
+      () => this.renewLock(token, until),
       LOCK_RENEWAL_INTERVAL_MS,
-      Date.now() + MAX_DESTROY_WAIT_MS,
+      until,
     );
   }
 
@@ -1126,13 +1157,48 @@ export class PreviewSandbox extends Sandbox<Env> {
    * now belonged to somebody else. Returning the answer lets the loops
    * stop, which is the only response that is actually safe.
    */
-  private async renewLock(token: string): Promise<boolean> {
-    const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+  /**
+   * The same renewal, from inside the build, where running out of time is
+   * an answer rather than a failure (#196 review).
+   *
+   * `keepAlive` answers false for "this build should stop", and a renewal
+   * the deadline cut off is exactly that: the wall clock has run out, so
+   * the build reports `sandbox` and tears down, which is the path it
+   * already takes when the lock has been taken from it. A rejection from
+   * storage still propagates, because that is a different fact and the
+   * caller has always treated it as one.
+   */
+  private async keepLock(token: string, deadline: number): Promise<boolean> {
+    try {
+      return await this.renewLock(token, deadline);
+    } catch (error) {
+      if (error instanceof Error && error.message === OUT_OF_TIME) return false;
+      throw error;
+    }
+  }
+
+  private async renewLock(token: string, deadline: number): Promise<boolean> {
+    // Its own two storage calls, bounded like everything else that awaits
+    // (#196 review). Every protection this build has is a renewal, and a
+    // renewal that never returns is the one thing none of them can survive:
+    // `buildProject` outlives its wall clock without reaching its `finally`,
+    // the lock ages out and the ticket is reclaimed while the container is
+    // still running, and `/api/publish` waits with no bound of its own.
+    //
+    // Rejects rather than answering false, because each caller already
+    // knows what a failed renewal means and they do not agree: the build
+    // stops and reports `sandbox`, the teardown gives up and keeps both the
+    // lock and the ticket.
+    const bounded = <T>(work: Promise<T>): Promise<T> =>
+      withinDeadline(work, deadline - Date.now());
+    const mine = await bounded(this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY));
     if (mine?.token !== token) return false;
-    await this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
-      startedAt: Date.now(),
-      token,
-    });
+    await bounded(
+      this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
+        startedAt: Date.now(),
+        token,
+      }),
+    );
     return true;
   }
 

@@ -91,3 +91,30 @@ export const BUILD_WALL_CLOCK_MS = 12 * 60_000;
  */
 export const LOCK_RENEWAL_INTERVAL_MS = 60_000;
 export const MAX_DESTROY_WAIT_MS = 10 * 60_000;
+
+/**
+ * How long one call to the fleet Durable Object may stay pending, and how
+ * long the whole teardown may take (#196 review).
+ *
+ * The same hazard as everything else on this pull request, on the last two
+ * places in this file's code that did not have it. `releaseTicket` retries,
+ * and `retrying` never reaches its second attempt if the first never
+ * settles: a ticket for a build refused before anything ran is the one kind
+ * `PreviewFleet.reclaimStale` never reclaims, so that release is the only
+ * cleanup there is and an unbounded one is no cleanup at all. And
+ * `releaseBuild`'s own storage reads had no clock, so a stalled one left the
+ * teardown pending with a ticket still held.
+ *
+ * Seconds for the call, because these are same-colocation object calls and
+ * `retrying` waits a second between attempts, a pace that assumes sub-second
+ * answers. Minutes for the teardown, because it contains
+ * `MAX_DESTROY_WAIT_MS` and has to be able to finish what it starts.
+ *
+ * The relationship that matters is with `HARD_LIFETIME_MS`: a teardown that
+ * gives up holds an active ticket, which is safe only because the fleet
+ * reclaims activated rows. The whole teardown plus its last release has to
+ * fit inside that lifetime, or the cleanup is racing the thing it exists to
+ * make unnecessary. `build-limits.test.ts` adds it up.
+ */
+export const FLEET_CALL_TIMEOUT_MS = 15_000;
+export const TEARDOWN_WALL_CLOCK_MS = 12 * 60_000;

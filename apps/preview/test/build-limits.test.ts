@@ -6,10 +6,13 @@ import {
   BUILD_INSTALL_TIMEOUT_MS,
   BUILD_LOCK_TTL_MS,
   BUILD_WALL_CLOCK_MS,
+  FLEET_CALL_TIMEOUT_MS,
   LOCK_RENEWAL_INTERVAL_MS,
   MAX_DESTROY_WAIT_MS,
+  TEARDOWN_WALL_CLOCK_MS,
 } from '../worker/build-limits.ts';
 import { HARD_LIFETIME_MS } from '../worker/fleet.ts';
+import { RETRY_ATTEMPTS, RETRY_DELAY_MS } from '@vibld/core';
 
 /**
  * That a build cannot outlive its own lock (#196 review).
@@ -133,5 +136,59 @@ describe('holding the lock while a container is torn down', () => {
         60_000,
       'a build that spends both command bounds has no time left to read its own output',
     );
+  });
+});
+
+/**
+ * That the teardown is bounded as a whole, and that what it may hold is
+ * held for less time than the fleet takes to reclaim it (#196 review).
+ *
+ * The teardown moved off the build's clock and onto `ctx.waitUntil`, which
+ * left it with no clock at all: its storage reads and its ticket release
+ * could each stay pending, and a teardown that never finishes is one that
+ * never reaches its release. The numbers below are what make "it gives up"
+ * true rather than intended.
+ */
+describe('how long a teardown may take', () => {
+  // Every attempt plus the waits between them, which is what a release
+  // really costs when the fleet object is restarting.
+  const oneRelease =
+    RETRY_ATTEMPTS * FLEET_CALL_TIMEOUT_MS +
+    (RETRY_ATTEMPTS - 1) * RETRY_DELAY_MS;
+
+  it('can finish the destroy it waits for', () => {
+    // A teardown clock shorter than the destroy wait inside it would stop
+    // the teardown before the thing it exists to do, which is worse than
+    // no clock: the container survives and the lock is never cleared.
+    assert.ok(
+      TEARDOWN_WALL_CLOCK_MS > MAX_DESTROY_WAIT_MS + oneRelease,
+      `a teardown may need ${MAX_DESTROY_WAIT_MS + oneRelease}ms and is given ${TEARDOWN_WALL_CLOCK_MS}ms`,
+    );
+  });
+
+  it('gives up long before the fleet reclaims what it is holding', () => {
+    // A teardown that runs out of time holds its ticket, which is safe
+    // only because the fleet reclaims an activated row. If the teardown
+    // could still be running when that reclaim lands, the release and the
+    // reclaim race over the same row.
+    assert.ok(
+      TEARDOWN_WALL_CLOCK_MS + oneRelease < HARD_LIFETIME_MS,
+      `a teardown may hold a ticket for ${TEARDOWN_WALL_CLOCK_MS + oneRelease}ms ` +
+        `and the fleet reclaims after ${HARD_LIFETIME_MS}ms`,
+    );
+  });
+
+  it('keeps a fleet call far shorter than the wait it happens inside', () => {
+    // These are same-colocation object calls and `retrying` waits a second
+    // between attempts, a pace that assumes sub-second answers. A fleet
+    // bound anywhere near the destroy wait would make the release the
+    // biggest thing in the teardown.
+    assert.ok(FLEET_CALL_TIMEOUT_MS * 10 < MAX_DESTROY_WAIT_MS);
+  });
+
+  it('retries a release rather than asking once', () => {
+    // The release is the only cleanup a queued ticket will ever get, so a
+    // single attempt against a restarting object loses it for good.
+    assert.ok(RETRY_ATTEMPTS > 1);
   });
 });

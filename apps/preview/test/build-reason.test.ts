@@ -442,10 +442,15 @@ describe('keeping the lock alive while the build is', () => {
     const built = body.slice(body.indexOf('const keepAlive'));
     const definition = built.slice(0, built.indexOf(';'));
     assert.match(definition, /deadline/, 'a slow build never runs out of time');
+    // The renewal and the bound it is given, in one match. A renewal with
+    // no deadline of its own is the third way to stop being entitled to
+    // the workspace and the one that survives both checks above: its own
+    // two storage calls can stay pending, and then neither the clock nor
+    // the lock is ever consulted again (#196 review).
     assert.match(
       definition,
-      /renewLock\(token\)/,
-      'a superseded build never finds out it was superseded',
+      /keepLock\(token, deadline\)/,
+      'a superseded or timed-out build never finds out',
     );
   });
 
@@ -627,12 +632,28 @@ describe('keeping the lock alive while the build is', () => {
     const method = source.slice(at, source.indexOf('\n  private ', at + 10));
     assert.match(
       method,
-      /renewLock\(token\)/,
+      /renewLock\(token, until\)/,
       'the teardown waits out the destroy without holding the lock',
     );
+    // That the renewal happens *inside* the wait, repeatedly, rather than
+    // once before it, is `teardown.test.ts`, which calls `destroyWithin`
+    // and counts the renewals. This end of it is the wiring that test
+    // cannot see: that the teardown hands over a renewal at all, and hands
+    // it the same cap it is waiting under, so the renewal cannot outlast
+    // the wait it is renewing through (#196 review).
+    //
+    // The assertion here used to compare the position of the renewal
+    // against the position of `Promise.race`. Both moved into
+    // `destroyWithin` in another module, so both `indexOf` calls returned
+    // -1 and the comparison went on being evaluated against nothing.
+    assert.match(
+      method,
+      /destroyWithin\(/,
+      'the teardown no longer waits through a bounded loop at all',
+    );
     assert.ok(
-      method.indexOf('renewLock(token)') > method.indexOf('Promise.race'),
-      'the renewal does not happen inside the wait it is renewing through',
+      method.indexOf('renewLock(token, until)') > method.indexOf('until ='),
+      'the renewal is handed a cap before one has been worked out',
     );
   });
 
@@ -671,6 +692,92 @@ describe('keeping the lock alive while the build is', () => {
     assert.ok(
       deleted > reread,
       'the delete trusts an ownership answer from before the destroy',
+    );
+  });
+});
+
+/**
+ * That every storage call in the teardown and the renewal is bounded
+ * (#196 review).
+ *
+ * Counted rather than located. Six rounds of this file asserted that some
+ * named call was wrapped, and each time the next round found the one that
+ * was not: the finding is never "this call is unbounded", it is "one of
+ * these calls is unbounded and nothing says which". Counting both sides
+ * turns that into arithmetic, and a bound that is added without its
+ * wrapper fails here rather than in the round after next.
+ *
+ * `preview-sandbox.ts` cannot be loaded under `node --test`, so this is a
+ * source read. It is the property rather than the text around it: the
+ * number of storage calls and the number of bounded ones.
+ */
+describe('what the teardown and the renewal await', () => {
+  const source = readFileSync(
+    join(import.meta.dirname, '..', 'worker', 'preview-sandbox.ts'),
+    'utf8',
+  );
+
+  /** One method, from its signature to the next one. */
+  function methodOf(name: string): string {
+    const at = source.indexOf(name);
+    assert.ok(at > 0, `${name} is not where this expected it`);
+    const end = source.indexOf('\n  private ', at + 10);
+    assert.ok(end > at, `${name} runs to the end of the file`);
+    return source.slice(at, end);
+  }
+
+  /**
+   * Every `this.ctx.storage.` call, and every one of them inside a
+   * `bounded(` call. A storage call is one or the other, so the two counts
+   * have to match.
+   */
+  function unbounded(method: string): number {
+    const all = method.match(/this\.ctx\.storage\./g)?.length ?? 0;
+    const wrapped =
+      method.match(/bounded\(\s*\n?\s*this\.ctx\.storage\./g)?.length ?? 0;
+    assert.ok(all > 0, 'the method no longer touches storage at all');
+    return all - wrapped;
+  }
+
+  it('bounds both halves of a renewal', () => {
+    // The read that decides whether the lock is still ours and the write
+    // that pushes it forward. Either one pending means `keepAlive` never
+    // answers, and then neither the wall clock nor the lock is consulted
+    // again: the build outlives its budget without reaching its teardown.
+    assert.equal(
+      unbounded(methodOf('private async renewLock(')),
+      0,
+      'a renewal can stay pending past the build it is renewing for',
+    );
+  });
+
+  it('bounds every storage call in the teardown', () => {
+    // The teardown runs on `ctx.waitUntil` now, so it has no caller
+    // waiting to time out and no clock but its own. A stalled read here is
+    // a teardown that never reaches its release.
+    assert.equal(
+      unbounded(methodOf('private async releaseBuild(')),
+      0,
+      'a teardown can stay pending with a ticket still held',
+    );
+  });
+
+  it('gives the teardown a clock of its own to bound them against', () => {
+    // Its own, not one borrowed from something inside it. The teardown
+    // contains `MAX_DESTROY_WAIT_MS`, so measuring itself against that
+    // would stop it before the destroy it exists to wait for, and
+    // `build-limits.test.ts` holds that arithmetic on the constants.
+    //
+    // There was a second assertion here, that the clock is created before
+    // the calls it bounds, which is the shape of the finding two rounds
+    // ago. It cannot fail: `bounded` is a `const` every one of those calls
+    // reads, so moving its declaration below them is a compile error
+    // rather than a test failure. A mutation proved it and the assertion
+    // is gone, because one that cannot fail is worse than none.
+    assert.match(
+      methodOf('private async releaseBuild('),
+      /TEARDOWN_WALL_CLOCK_MS/,
+      'the teardown measures itself against something other than its own cap',
     );
   });
 });
