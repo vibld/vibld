@@ -135,6 +135,19 @@ describe('the link between a running step and the reader watching it', () => {
     assert.match(workflow, /RUN_PROGRESS/);
   });
 
+  it('has the generate step say when it has left', () => {
+    // #193 review, P2. The step is the only thing that knows the model call
+    // is over; the instance reports `running` for another minute of
+    // settlement and trace writes. In a finally, because a refused or
+    // emptied completion is exactly the case that leaves a last report of
+    // reasoning and no answer.
+    assert.match(
+      workflow,
+      /finally \{[\s\S]*channel\?\.finish\(\)/,
+      'a run that ends without writing an answer goes on being described as thinking',
+    );
+  });
+
   it('has the poll loop read the channel and say what it found', () => {
     assert.match(
       entrypoint,
@@ -143,12 +156,12 @@ describe('the link between a running step and the reader watching it', () => {
     );
     assert.match(
       entrypoint,
-      /stageFor\(status\.status, report\)/,
+      /stageFor\(status\.status, progress\)/,
       'the report is read but not used to name the stage, so a thinking run still reads as building',
     );
     assert.match(
       entrypoint,
-      /report\.characters > 0\s*\?\s*\{ characters: report\.characters \}/,
+      /characters > 0 \? \{ characters \} : \{\}/,
       'the count is sent unconditionally, so a run that has written nothing reports a confident zero',
     );
   });

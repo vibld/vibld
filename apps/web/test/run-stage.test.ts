@@ -47,23 +47,42 @@ describe('what the meter calls a run in flight', () => {
     }
   });
 
+  /** A run mid-thought: reasoning streamed, no answer, step still in it. */
+  const thinking = {
+    report: { characters: 0, reasoningCharacters: 4_120 },
+    finished: false,
+  };
+
   it('says thinking while a reasoning model has written nothing', () => {
     // The state the Workflow cannot report, because `status` is `running`
     // for all of it (#183). On the production provider this is between 57%
     // and 68% of a run's output tokens, so a meter without it spends most
     // of its time claiming a project is being built while the character
     // count beside it sits at zero.
-    assert.equal(
-      stageFor('running', { characters: 0, reasoningCharacters: 4_120 }),
-      'thinking',
-    );
+    assert.equal(stageFor('running', thinking), 'thinking');
   });
 
   it('stops saying thinking the moment the answer starts', () => {
     // Nothing decides that thinking is over: the condition is that no
     // answer exists yet, so one character ends it.
     assert.equal(
-      stageFor('running', { characters: 1, reasoningCharacters: 4_120 }),
+      stageFor('running', {
+        report: { characters: 1, reasoningCharacters: 4_120 },
+        finished: false,
+      }),
+      'running',
+    );
+  });
+
+  it('stops saying thinking once the model call has ended', () => {
+    // #193 review, P2, and the same mistake as "Writing" one state along.
+    // A completion that refused, was emptied or was cut off leaves exactly
+    // the report above, and the instance reports `running` through
+    // settlement and the trace write, retries included. Without the step
+    // saying it had left, the meter told somebody a model that had stopped
+    // was still thinking, for up to a minute.
+    assert.equal(
+      stageFor('running', { ...thinking, finished: true }),
       'running',
     );
   });
@@ -74,17 +93,22 @@ describe('what the meter calls a run in flight', () => {
     // produced nothing yet, which is ordinary at the start of every run and
     // is not evidence of thinking.
     assert.equal(
-      stageFor('running', { characters: 0, reasoningCharacters: 0 }),
+      stageFor('running', {
+        report: { characters: 0, reasoningCharacters: 0 },
+        finished: false,
+      }),
       'running',
     );
     assert.equal(stageFor('running'), 'running');
+    // An evicted object knows nothing, including that it finished. Nothing
+    // known, nothing claimed.
+    assert.equal(stageFor('running', { finished: false }), 'running');
   });
 
   it('never calls a queued or unnameable run thinking', () => {
     // A report outlives the state it was made in: the object holds the last
     // one, and a run can be re-read while the instance is paused between
     // retries. The thinking word must come from a running instance only.
-    const thinking = { characters: 0, reasoningCharacters: 4_120 };
     assert.equal(stageFor('queued', thinking), 'queued');
     for (const status of ['paused', 'waiting', 'waitingForPause', 'unknown']) {
       assert.equal(stageFor(status, thinking), undefined, status);

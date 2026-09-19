@@ -1,5 +1,5 @@
 import type { GenerationStage } from '../src/generation/session.ts';
-import type { ProgressReport } from './generation-run.ts';
+import type { RunProgressState } from './generation-run.ts';
 
 /**
  * What to call a Workflow's current state, on screen, to the person waiting.
@@ -35,9 +35,19 @@ import type { ProgressReport } from './generation-run.ts';
  *
  * Derived from the report rather than asked of the Workflow, because the
  * Workflow does not know: `status` is `running` throughout. The condition is
- * exactly what it says -- thinking has started and the answer has not -- so
- * the moment the first character of the answer arrives this stops claiming
- * it, without anything having to decide that thinking is over.
+ * exactly what it says -- thinking has started, the answer has not, and the
+ * step that would write it has not left -- so the moment the first character
+ * of the answer arrives this stops claiming it, without anything having to
+ * decide that thinking is over.
+ *
+ * That third clause is a correction (#193 review, P2), and it is the same
+ * mistake as the "Writing" one above, one state along. A completion that
+ * refused, or was emptied, or was cut off, leaves a last report of
+ * reasoning and no answer; the instance then reports `running` through
+ * settlement and the trace write, retries included, for up to a minute
+ * after the model call ended. Read from the report alone, the meter told
+ * somebody a model that had stopped was still thinking. The step says when
+ * it is done, and this believes it.
  *
  * A type-only import of the client's union, because a second copy of it
  * here is how the worker and the shell would come to disagree about what a
@@ -57,10 +67,11 @@ export const POLL_INTERVAL_MS = 1500;
 
 export function stageFor(
   status: string,
-  report?: ProgressReport,
+  progress?: RunProgressState,
 ): GenerationStage | undefined {
   if (status === 'queued') return 'queued';
   if (status !== 'running') return undefined;
+  const report = progress?.finished === false ? progress.report : undefined;
   if (report && report.characters === 0 && report.reasoningCharacters > 0) {
     return 'thinking';
   }

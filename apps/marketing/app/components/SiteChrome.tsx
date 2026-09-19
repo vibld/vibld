@@ -26,6 +26,20 @@ export function SiteHeader() {
               {SITE.tagline}
             </span>
             {/*
+              The other answer to "what does this actually do", and the one
+              that does not need reading. /styles was prerendered, listed in
+              the sitemap, and linked from the builder's style legend
+              (#192), so the only people who could reach it were the people
+              who had already signed in and already knew. A crawler could
+              find it and a visitor could not.
+            */}
+            <Link
+              to="/styles"
+              className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-medium hover:underline hover:underline-offset-4"
+            >
+              Styles
+            </Link>
+            {/*
               In the header rather than the footer only. The guides answer
               "what does this actually do", which is a question somebody has
               before they sign up, not after.

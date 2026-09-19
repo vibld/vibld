@@ -159,6 +159,25 @@ export interface ProgressReport {
 }
 
 /**
+ * What the channel answers, which is more than the last report.
+ *
+ * A report is evidence of what a run produced, never of when. The model
+ * call ends and the Workflow keeps reporting `running` through settlement
+ * and the trace write, retries included, so the last report outlives the
+ * work it described by up to a minute (#193 review, P2). Read on its own it
+ * would say a model that had stopped was still thinking.
+ *
+ * So the step says when it is done, and the channel carries that beside the
+ * numbers. Monotonic: a report that lands after the finish still lands, and
+ * still does not make the run unfinished again.
+ */
+export interface RunProgressState {
+  report?: ProgressReport;
+  /** True once the generate step has left, however it left. */
+  finished: boolean;
+}
+
+/**
  * The floor on how often a run reports, in milliseconds.
  *
  * A stream calls back on every delta, several times a second; the poll loop
@@ -235,7 +254,7 @@ export interface GenerationWorkflowEnv {
    * the meter falls back to the clock alone, which is what it showed before
    * this channel existed.
    */
-  RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'report'>>;
+  RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'report' | 'finish'>>;
   ANTHROPIC_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;

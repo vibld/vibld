@@ -159,7 +159,22 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             ...(referencePalette ? { palette: referencePalette } : {}),
           }),
         );
-        const outcome = await runGeneration(store, provider, params);
+        let outcome;
+        try {
+          outcome = await runGeneration(store, provider, params);
+        } finally {
+          // In a finally, and awaited, unlike the reports. The instance goes
+          // on reporting `running` through settlement and the trace write,
+          // so a run that ended having streamed reasoning and no answer --
+          // refused, emptied, cut off -- would keep the meter saying the
+          // model was thinking for as long as those took (#193 review, P2).
+          // The step is the only thing that knows it has left, and it knows
+          // it on the failing path too.
+          await channel?.finish().catch(() => {
+            // Same as a lost report: the meter falls back to what the
+            // Workflow itself says, which is the broader true word.
+          });
+        }
         // Measured inside the step and returned with the outcome, so it is
         // the model call that was timed and not the settlement that follows
         // it. A step's return value is durable, so a later step reads the

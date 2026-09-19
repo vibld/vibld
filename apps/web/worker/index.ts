@@ -1330,18 +1330,17 @@ async function handlePlan(
         // an honest name -- what the run is doing. `stageFor` returns
         // nothing for the rest rather than guessing, and the line carries
         // the clock alone.
-        const report = await env.RUN_PROGRESS?.getByName(runId)
+        const progress = await env.RUN_PROGRESS?.getByName(runId)
           .read()
           .catch(() => undefined);
-        const stage = stageFor(status.status, report);
+        const stage = stageFor(status.status, progress);
+        const characters = progress?.report?.characters ?? 0;
         if (!cancelled) {
           await write(
             encodeEvent('progress', {
               elapsedMs: Date.now() - waitingSince,
               ...(stage ? { stage } : {}),
-              ...(report && report.characters > 0
-                ? { characters: report.characters }
-                : {}),
+              ...(characters > 0 ? { characters } : {}),
             }),
           );
         }

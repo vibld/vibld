@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { ProgressReport } from './generation-run.ts';
+import type { ProgressReport, RunProgressState } from './generation-run.ts';
 
 /**
  * The live channel between a running Workflow step and the Worker polling it.
@@ -37,6 +37,7 @@ import type { ProgressReport } from './generation-run.ts';
  */
 export class RunProgress extends DurableObject {
   #report: ProgressReport | undefined;
+  #finished = false;
 
   /**
    * Called by the generate step, throttled by `throttleProgress`.
@@ -50,8 +51,28 @@ export class RunProgress extends DurableObject {
     this.#report = report;
   }
 
-  /** Undefined until the first report, and again after an eviction. */
-  read(): ProgressReport | undefined {
-    return this.#report;
+  /**
+   * Called once, as the generate step leaves, however it leaves.
+   *
+   * Deliberately one-way. Reports are sent without being awaited, so one
+   * can still be in flight when this arrives; letting a late report undo
+   * the finish would reopen exactly the window this closes (#193 review).
+   * A report that lands afterwards updates the numbers and nothing else.
+   */
+  finish(): void {
+    this.#finished = true;
+  }
+
+  /**
+   * The report is absent until the first one, and again after an eviction.
+   * `finished` is false in both of those cases, which is the same answer
+   * eviction gives to everything else here: nothing is known, so nothing is
+   * claimed, and `stageFor` falls back to what the Workflow itself says.
+   */
+  read(): RunProgressState {
+    return {
+      ...(this.#report ? { report: this.#report } : {}),
+      finished: this.#finished,
+    };
   }
 }
