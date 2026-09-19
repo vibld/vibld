@@ -116,16 +116,16 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         // throwing from inside the stream. The report is not awaited: a
         // channel that is slow or gone must cost the reader a stale number,
         // never the run.
-        const progress = this.env.RUN_PROGRESS;
-        const channel = progress
+        // One stub for the run rather than one per report: the name never
+        // changes, and resolving it again several hundred times says
+        // nothing that resolving it once did not.
+        const channel = this.env.RUN_PROGRESS?.getByName(params.runId);
+        const onProgress = channel
           ? throttleProgress((report) => {
-              void progress
-                .getByName(params.runId)
-                .report(report)
-                .catch(() => {
-                  // A run that cannot describe itself still finishes, and
-                  // the meter falls back to the clock alone.
-                });
+              void channel.report(report).catch(() => {
+                // A run that cannot describe itself still finishes, and
+                // the meter falls back to the clock alone.
+              });
             })
           : undefined;
 
@@ -144,7 +144,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             onUsage: (reported) => {
               usage = reported;
             },
-            ...(channel ? { onProgress: channel } : {}),
+            ...(onProgress ? { onProgress } : {}),
             ...(params.style ? { style: params.style } : {}),
             ...(params.styleDna && Object.keys(params.styleDna).length > 0
               ? { styleDna: params.styleDna }
