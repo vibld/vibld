@@ -1,16 +1,17 @@
 # https://app.vibld.com
 #
 # The builder is the signed-in product. Every page behind this host needs an
-# account, and access is invite-only, so there is nothing here a crawler can
-# reach and nothing worth indexing.
+# account and access is invite-only, so none of it belongs in a search index.
 #
-# Stated rather than assumed. Without this file the Worker's SPA fallback
-# answered /robots.txt with the application shell: a 200 and a page of HTML,
-# which a crawler reads as "no rules" rather than as "no".
+# Crawling is allowed anyway, which is the opposite of what it looks like.
+# A crawler that is refused here never fetches the page, so it never reads
+# the `x-robots-tag: noindex` this host sends with every response, and a URL
+# it found from a shared link or a backlink stays listed with no description.
+# Refusing the fetch would protect the bytes and leave the listing; allowing
+# it is what removes the listing.
 #
-# The public product lives on the marketing site, which welcomes crawlers
-# and carries the sitemap.
+# The public product lives on the marketing site, which carries the sitemap.
 User-agent: *
-Disallow: /
+Allow: /
 
 Sitemap: https://vibld.com/sitemap.xml

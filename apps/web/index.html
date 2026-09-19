@@ -16,11 +16,14 @@
     -->
     <title>Builder | vibld</title>
     <!--
-      Belt and braces with public/robots.txt, and the half that survives a
-      crawler reaching a page by a link rather than by the root. robots.txt
-      asks not to be crawled; this asks not to be indexed, and the two fail
-      independently: a URL shared anywhere can be indexed without ever being
-      fetched, which robots.txt alone does not prevent.
+      A second copy of the `x-robots-tag` header this host sends, for
+      anything that reads the document rather than the response.
+
+      The first version of this comment claimed robots.txt and this tag
+      failed independently. They do not, and it had the dependency the
+      wrong way round (#192 review): a `Disallow` stops the fetch, so the
+      tag is never read, and a URL found from a shared link stays listed
+      with no description. See public/robots.txt and src/crawling.ts.
 
       Correct for every page on this host, because every page on this host
       needs an account.

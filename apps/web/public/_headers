@@ -6,3 +6,4 @@
   permissions-policy: camera=(), microphone=(), geolocation=(), browsing-topics=()
   content-security-policy: frame-ancestors 'none'
   x-frame-options: DENY
+  x-robots-tag: noindex, nofollow

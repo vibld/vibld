@@ -67,7 +67,7 @@ import {
   monthlyAllowanceMicroUsd,
   tierFor,
 } from './entitlement.ts';
-import { secured } from '@vibld/security-headers';
+import { securedApp } from '../src/crawling.ts';
 import {
   KEEPALIVE_COMMENT,
   STREAM_HEADERS,
@@ -2189,7 +2189,7 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
-    return secured(await route(request, env, ctx));
+    return securedApp(await route(request, env, ctx));
   },
 
   /**
