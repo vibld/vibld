@@ -45,7 +45,7 @@ describe('accounting for an attempt nobody was billed for', () => {
     const source = await readFile(workerSource(), 'utf8');
     assert.match(
       source,
-      /onDiscarded: async \(spent\) => \{\s*absorbedMicroUsd \+= microUsdOf\(spent, prices\);/,
+      /onDiscarded: async \(spent\) => \{\s*absorbedMicroUsd =\s*\(absorbedMicroUsd \?\? 0\) \+ microUsdOf\(spent, prices\);/,
       'the absorbed attempt is not priced, or not priced first',
     );
   });
@@ -126,8 +126,37 @@ describe('accounting for an attempt nobody was billed for', () => {
     const source = await readFile(workerSource(), 'utf8');
     assert.match(
       source,
-      /settleBudget\([\s\S]*?absorbedMicroUsd > 0 \? absorbedMicroUsd : undefined,\s*\)/,
+      /settleBudget\([\s\S]*?\n\s*absorbedMicroUsd,\s*\);/,
       'the mockup settlement drops the absorbed spend on the floor',
+    );
+  });
+
+  it('keeps an attempt that priced at nothing distinguishable from none', async () => {
+    // The falsy trap `settleBudget` was taught to avoid, moved to its
+    // call site (#191 review). A discarded attempt that prices to zero is
+    // not the same fact as no discarded attempt: the first says this
+    // reservation covered an attempt that cost nothing, the second says
+    // it covered the run the reader is charged for. Collapsing them
+    // charges the retry to both reservations.
+    //
+    // Kept unrepresentable rather than merely avoided: the variable is
+    // undefined until an attempt is absorbed, so presence and price
+    // cannot part company.
+    const source = await readFile(workerSource(), 'utf8');
+    assert.match(
+      source,
+      /let absorbedMicroUsd: number \| undefined;/,
+      'a zero-priced discarded attempt is indistinguishable from none',
+    );
+    assert.doesNotMatch(
+      source,
+      /absorbedMicroUsd > 0/,
+      'a truthiness test on the absorbed figure is back',
+    );
+    assert.match(
+      source,
+      /absorbedMicroUsd =\s*\(absorbedMicroUsd \?\? 0\) \+ microUsdOf\(spent, prices\);/,
+      'the absorbed figure is not accumulated from its undefined start',
     );
   });
 

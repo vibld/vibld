@@ -1585,7 +1585,23 @@ async function handleMockups(
      * what it reserved, and every empty reply moved the ledger further
      * from what the day had really cost.
      */
-    let absorbedMicroUsd = 0;
+    /*
+     * Undefined until an attempt is absorbed, and a number after, even
+     * when that number is zero (#191 review).
+     *
+     * Not a count that starts at zero, because zero and "there was no
+     * discarded attempt" then look identical, and they settle
+     * differently: one says this reservation covered an attempt that cost
+     * nothing, the other says it covered the run the reader is being
+     * charged for. Collapsing them charged the retry to both
+     * reservations.
+     *
+     * Which is the falsy trap `settleBudget` was just taught to avoid,
+     * moved to its call site. Keeping the presence of the attempt and its
+     * price in one variable is what makes it unrepresentable rather than
+     * merely avoided.
+     */
+    let absorbedMicroUsd: number | undefined;
     // The hold taken for the second attempt, so the ceiling is enforced
     // before it is sent rather than only reported after.
     let retryHold: Reservation | undefined;
@@ -1647,7 +1663,8 @@ async function handleMockups(
            * spend again.
            */
           onDiscarded: async (spent) => {
-            absorbedMicroUsd += microUsdOf(spent, prices);
+            absorbedMicroUsd =
+              (absorbedMicroUsd ?? 0) + microUsdOf(spent, prices);
             try {
               retryHold = await reserveAccount(env, worstCase, Date.now());
             } catch (error) {
@@ -1728,8 +1745,9 @@ async function handleMockups(
           // reservation settles at rather than the reader's charge.
           // Undefined when nothing was absorbed, which is every ordinary
           // run: the two layers then settle at the same figure, as they
-          // always have.
-          absorbedMicroUsd > 0 ? absorbedMicroUsd : undefined,
+          // always have. Passed straight through, zero included, because
+          // the variable already says which case this is.
+          absorbedMicroUsd,
         );
         // And the hold taken for the retry carries the retry, which is
         // exactly what the reader was charged for.
@@ -1768,8 +1786,10 @@ async function handleMockups(
             outputTokens: settled?.outputTokens ?? 0,
             microUsd: actual,
             // Only when there was one, so the ordinary line stays the
-            // ordinary line and a discarded attempt is findable.
-            ...(absorbedMicroUsd > 0 ? { absorbedMicroUsd } : {}),
+            // ordinary line and a discarded attempt is findable -- which
+            // includes one that priced at nothing, since how often the
+            // defect fires is the reason this field exists.
+            ...(absorbedMicroUsd !== undefined ? { absorbedMicroUsd } : {}),
             elapsedMs: Date.now() - waitingSince,
           }),
         );
