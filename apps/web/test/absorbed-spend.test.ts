@@ -19,11 +19,25 @@ import { describe, it } from 'node:test';
  * be loaded here. What it pins is the wiring, which is exactly what was
  * missing: the pieces all existed and nothing connected them.
  */
-function workerSource(): string {
-  return join(
-    fileURLToPath(new URL('../worker/', import.meta.url)),
-    'index.ts',
-  );
+function workerSource(name = 'index.ts'): string {
+  return join(fileURLToPath(new URL('../worker/', import.meta.url)), name);
+}
+
+/**
+ * Both files that can hold a reservation, read as one.
+ *
+ * `reserveBudget` and `reserveAccount` moved to `reserve.ts` for #194, which
+ * needs a second caller. The invariant these assertions defend is about the
+ * worker rather than about one file of it -- one spelling of the account
+ * ceiling, wherever it lives -- so splitting the file must not be able to
+ * satisfy them by moving the second spelling out of view.
+ */
+async function reservationSources(): Promise<string> {
+  const [entry, reserve] = await Promise.all([
+    readFile(workerSource(), 'utf8'),
+    readFile(workerSource('reserve.ts'), 'utf8'),
+  ]);
+  return `${entry}\n${reserve}`;
 }
 
 describe('accounting for an attempt nobody was billed for', () => {
@@ -215,7 +229,12 @@ describe('accounting for an attempt nobody was billed for', () => {
   it('keeps one spelling of the account reservation', async () => {
     // Two spellings of a ceiling is a ceiling that can be enforced two
     // ways, which is the shape of three findings on this pull request.
-    const source = await readFile(workerSource(), 'utf8');
+    //
+    // Read across both files rather than the entrypoint alone (#194): the
+    // helper moved to `reserve.ts`, and an assertion that only looked at
+    // `index.ts` would now be satisfied by a second spelling sitting in the
+    // file it stopped reading.
+    const source = await reservationSources();
     assert.equal(
       source.match(/\.reserve\(\s*worstCase,\s*accountCeiling,/g)?.length,
       1,
