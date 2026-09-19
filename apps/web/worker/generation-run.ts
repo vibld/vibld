@@ -207,6 +207,14 @@ export const PROGRESS_REPORT_INTERVAL_MS = 1_000;
  * hold up the stream it is describing -- losing a progress report costs the
  * reader a stale number for a second, and blocking the model call to deliver
  * one would cost them the run.
+ *
+ * What makes the interval work at all is not visible from here. A Worker's
+ * clock advances only when the Worker performs I/O, so a throttle measured
+ * with `Date.now()` in a loop of pure computation would read the same
+ * instant forever and let exactly one report through. This one is driven by
+ * `readCompletionStream`, which awaits a read from the response body for
+ * every chunk, so the clock moves between deltas. Anything that ever calls
+ * this from a loop that does no I/O has to pass its own `now`.
  */
 export function throttleProgress(
   send: (report: ProgressReport) => void,
