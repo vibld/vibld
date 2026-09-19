@@ -232,12 +232,26 @@ describe('whose lock a build releases', () => {
   });
 
   it('releases only while the lock is still its own', () => {
+    // Asserted as "every delete is guarded by the ownership answer",
+    // rather than by matching the shape the code happened to have. The
+    // first version of this test matched adjacent text and broke when the
+    // teardown was restructured, while the property it was about never
+    // changed -- which is a test measuring the wrong thing, again.
     const body = buildProjectCode();
     assert.match(
       body,
-      /token === token[\s\S]{0,120}?storage\.delete\(BUILD_LOCK_KEY\)/,
-      'the release clears whatever lock is there rather than its own',
+      /const ours = mine\?\.token === token;/,
+      "nothing works out whether the lock is still this build's",
     );
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    for (const at of [...tail.matchAll(/storage\.delete\(BUILD_LOCK_KEY\)/g)]) {
+      const guard = tail.slice(0, at.index);
+      assert.match(
+        guard.slice(guard.lastIndexOf('if (')),
+        /if \([^)]*\bours\b/,
+        'a delete of the build lock is not guarded by owning it',
+      );
+    }
   });
 
   it('stops a command that reached its bound from reading as a project failure', () => {

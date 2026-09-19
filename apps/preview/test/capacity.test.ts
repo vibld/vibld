@@ -135,12 +135,58 @@ describe('counting the builds too', () => {
     // holds no slot today and is promoted later, so abandoning one hands
     // a build slot to nobody until the fleet's stale reclaim notices --
     // which is the leak this release exists to prevent, arriving late.
+    // Asserted as "the guard does not consult the ticket's state", not as
+    // the exact guard the code happens to have: the property is what
+    // matters and the shape has already changed once under it.
     const tail = body.slice(body.lastIndexOf('} finally {'));
     const guard = tail.slice(0, tail.indexOf('.release(slot.id'));
-    assert.match(
-      guard,
-      /if \(slot\) \{[^}]*$/,
+    const condition = guard.slice(guard.lastIndexOf('if ('));
+    assert.match(condition, /\bslot\b/, 'the release is not guarded at all');
+    assert.doesNotMatch(
+      condition,
+      /\.active\b/,
       'only an active ticket is released, so a queued one is abandoned',
+    );
+  });
+
+  it('never returns from the teardown', () => {
+    // A `return` in a `finally` replaces whatever the build had already
+    // decided to answer. Worth pinning because the three cases below read
+    // like early returns and are the obvious way to write them.
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    assert.doesNotMatch(
+      tail.replace(/\/\/[^\n]*/g, ''),
+      /\breturn\b/,
+      'the teardown can discard the build outcome',
+    );
+  });
+
+  it('holds both the lock and the slot when the container will not die', () => {
+    // #196 review. Releasing either after a failed destroy hands somebody
+    // a container the platform says does not exist: the lock starts this
+    // user's next build inside it, the slot lets the fleet authorise a
+    // twenty-sixth container the platform then refuses to start. Holding
+    // costs one build slot for as long as the fleet's stale reclaim takes,
+    // which is bounded, and refuses safely in the meantime.
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    // Both arms, in order: a destroy that resolved means gone, a destroy
+    // that rejected means *not* gone. Asserting only that `gone` is
+    // computed let a mutation flip the rejection arm to `true` and survive,
+    // which is precisely the claim this whole case rests on.
+    assert.match(
+      tail,
+      /const gone = ours[\s\S]{0,80}?destroy\(\)[\s\S]{0,80}?\(\) => true,[\s\S]{0,40}?\(\) => false,/,
+      'a destroy that rejected is not treated as a container that went away',
+    );
+    assert.match(
+      tail,
+      /if \(ours && gone\) \{[\s\S]{0,120}?storage\.delete\(BUILD_LOCK_KEY\)/,
+      'the lock is given back without confirming the container is gone',
+    );
+    assert.match(
+      tail,
+      /if \(slot && \(!ours \|\| gone\)\)/,
+      'the slot is given back without confirming the container is gone',
     );
   });
 
