@@ -26,19 +26,25 @@ pnpm --filter @vibld/preview test
   `npm run dev` and exposes it via `exposePort()`. Also `buildProject`
   (ADR-0010: Cloudflare auto-publish's build step) -- a one-shot
   `npm install && npm run build` in the same sandbox, reading the output
-  tree back with `listFiles`/`readFile` rather than exposing a port. Not
-  queued through `PreviewFleet`: a build finishes within one request's
-  lifetime, holding no exposed port and no long-lived process, so L9's
-  concurrency accounting (sized for exactly those two things) does not
-  apply to it. Refuses to run alongside an active preview in the same
-  sandbox, to avoid racing that preview's own filesystem writes.
+  tree back with `listFiles`/`readFile` rather than exposing a port. Runs
+  in an instance named for building rather than in the caller's preview
+  sandbox, because sharing one meant a build was refused whenever a preview
+  was live, which is most of the time (#196 review). It takes a ticket from
+  a `PreviewFleet` instance of its own and destroys its container as it
+  finishes: a build holds no exposed port and no long-lived process, but it
+  does hold one of the platform's container slots while it runs, and that
+  is what `worker/capacity.ts` accounts for. Two builds for one user are
+  still excluded, now by a lock rather than by the preview's presence.
 - **`worker/preview-fleet.ts`** / **`worker/fleet.ts`** -- `PreviewFleet`, a
-  single well-known Durable Object instance enforcing L9's other number: 25
-  concurrent previews across every user, with the 26th queued (a real FIFO
-  position, not a rejection) rather than refused. Same reserve-now/release-
-  later shape as `apps/web`'s `UserBudget`, split into a pure, tested
-  decision module (`fleet.ts`) and a thin Durable Object wrapper
-  (`preview-fleet.ts`), for the same reason `spend.ts`/`budget.ts` are split.
+  reserve-now/release-later counter enforcing L9's other number: concurrent
+  previews across every user, with the next request queued (a real FIFO
+  position, not a rejection) rather than refused. Same shape as `apps/web`'s
+  `UserBudget`, split into a pure, tested decision module (`fleet.ts`) and a
+  thin Durable Object wrapper (`preview-fleet.ts`), for the same reason
+  `spend.ts`/`budget.ts` are split. One well-known instance counts previews
+  and a second counts builds; **the number that cap is set to no longer
+  matches L9's twenty-five, and that is an open question for the
+  maintainer** rather than a settled trade. See `worker/capacity.ts`.
 - **`worker/index.ts`** -- routes three kinds of traffic on one Worker:
   public, unauthenticated requests on `*.vibld-preview.dev` (proxied straight
   into a sandbox by `proxyToSandbox`, satisfying L8's isolated-origin

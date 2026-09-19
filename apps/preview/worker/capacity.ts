@@ -45,14 +45,41 @@ export const CONTAINER_MAX_INSTANCES = 25;
  *
  * Five rather than one because a build is not the only thing in flight at
  * its own moment: a repair builds twice, auto-publish builds again, and
- * several callers can be finishing runs at once. Its cost is five previews
- * this deployment will not run concurrently, which is the cheaper side of
- * the trade: a refused preview says so and can be retried, while a build
- * that cannot start makes the verification silently do nothing, which is
- * the failure this whole pull request exists to remove.
+ * several callers can be finishing runs at once.
  */
 export const BUILD_CONTAINER_HEADROOM = 5;
 
-/** L9's account-wide preview concurrency cap. */
+/**
+ * How many previews may run at once, which is **not** L9's number, and that
+ * is a question for the maintainer rather than a trade taken here
+ * (#196 review).
+ *
+ * L9 reads "25 concurrent previews across all users. The 26th request is
+ * queued with a visible position, not rejected." This is twenty, so the
+ * twenty-first queues, and it is twenty whether or not anything is
+ * building. The register's own rule is that an accepted decision changes
+ * through a new ADR and an explicit register update, so nothing here
+ * amends it: the number is written down as what it is, and the gap is
+ * stated rather than reasoned away.
+ *
+ * Three ways out, and choosing between them is a product and spend call:
+ *
+ *  - **Raise `max_instances` to thirty.** L9 holds exactly and so does this
+ *    partition. It buys five more concurrent `lite` containers, which is
+ *    the part that is not mine to decide (L27 sizes the per-session cost
+ *    estimate against this instance type).
+ *  - **Count both workloads against one budget of twenty-five**, with
+ *    builds bounded at five of it. Previews then get all twenty-five
+ *    whenever nothing is building, which satisfies L9 whenever it can be
+ *    satisfied, and a preview queues behind a build when the platform
+ *    really is full. It costs nothing and it is not free either: it
+ *    reopens the accounting that three review rounds went into, and it
+ *    changes what a queued preview means.
+ *  - **Amend L9 to twenty**, which is an ADR and a register update.
+ *
+ * What is not on offer is leaving the code and the register disagreeing
+ * quietly, which is what this constant did until the nineteenth review
+ * round noticed.
+ */
 export const ACCOUNT_MAX_IN_FLIGHT =
   CONTAINER_MAX_INSTANCES - BUILD_CONTAINER_HEADROOM;
