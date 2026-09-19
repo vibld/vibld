@@ -287,6 +287,19 @@ jobs:
           npm install --no-audit --no-fund > build.log 2>&1 && npm run build >> build.log 2>&1
           status=$?
           set -e
+          # To the job log as well as the summary, which is what a failure
+          # on 2026-09-19 showed was missing: the portability check reported
+          # "FAILED" with the cause only in the step summary, and the step
+          # summary is not something the API serves. Diagnosing it meant
+          # downloading a 34MB artifact to read forty lines. A failure whose
+          # cause is only legible in a browser is a failure that gets guessed
+          # at instead of read.
+          if [ $status -ne 0 ]; then
+            echo '--- portability check failed, last 40 lines of build.log ---'
+            tail -40 build.log
+            echo '--- end of build.log ---'
+          fi
+
           {
             echo
             if [ $status -eq 0 ]; then

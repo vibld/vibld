@@ -15,6 +15,8 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { headersFile } from '@vibld/security-headers';
 
+import { APP_ONLY_HEADERS } from '../src/crawling.ts';
+
 const target = fileURLToPath(new URL('../public/_headers', import.meta.url));
-writeFileSync(target, headersFile());
+writeFileSync(target, headersFile(APP_ONLY_HEADERS));
 process.stdout.write(`wrote ${target}\n`);

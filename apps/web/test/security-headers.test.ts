@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { headersFile } from '@vibld/security-headers';
 
+import { APP_ONLY_HEADERS } from '../src/crawling.ts';
+
 /**
  * That app.vibld.com sends them, from both halves of itself (task #52).
  *
@@ -30,7 +32,7 @@ describe('what the shell sends', () => {
     // which is a worse state than either of them being absent.
     assert.equal(
       await readFile(HEADERS_FILE, 'utf8'),
-      headersFile(),
+      headersFile(APP_ONLY_HEADERS),
       'public/_headers has drifted -- run `pnpm --filter @vibld/web headers`',
     );
   });
@@ -63,8 +65,12 @@ describe('what the API sends', () => {
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
 
+    // `securedApp` rather than `secured`: this host adds an indexing
+    // directive the marketing site must not send (#192 review), and the
+    // one-statement rule is what stops that being added inline here, where
+    // a later route could return around it.
     assert.deepEqual(statements, [
-      'return secured(await route(request, env, ctx));',
+      'return securedApp(await route(request, env, ctx));',
     ]);
   });
 

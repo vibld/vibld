@@ -1121,10 +1121,30 @@ body {
 }
 
 .styles__legend {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
   padding: 0;
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--text-faint);
+}
+
+/*
+ * A way out to the catalogue that does not compete with the chips beside it
+ * (#186). Underlined rather than coloured, because the accent in this pane
+ * already means "chosen".
+ */
+.styles__catalogue {
+  font-weight: 500;
+  color: var(--text-faint);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.styles__catalogue:hover,
+.styles__catalogue:focus-visible {
+  color: var(--text);
 }
 
 .styles__row {

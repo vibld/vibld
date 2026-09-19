@@ -16,6 +16,20 @@
     -->
     <title>Builder | vibld</title>
     <!--
+      A second copy of the `x-robots-tag` header this host sends, for
+      anything that reads the document rather than the response.
+
+      The first version of this comment claimed robots.txt and this tag
+      failed independently. They do not, and it had the dependency the
+      wrong way round (#192 review): a `Disallow` stops the fetch, so the
+      tag is never read, and a URL found from a shared link stays listed
+      with no description. See public/robots.txt and src/crawling.ts.
+
+      Correct for every page on this host, because every page on this host
+      needs an account.
+    -->
+    <meta name="robots" content="noindex, nofollow" />
+    <!--
       This shell shipped no icon at all, so the tab showed the mark on
       vibld.com and a blank page glyph on app.vibld.com. Both files are
       generated from @vibld/brand by apps/marketing/scripts/brand-assets.ts,
