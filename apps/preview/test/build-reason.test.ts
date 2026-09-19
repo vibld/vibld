@@ -338,7 +338,7 @@ describe('what a build leaves behind', () => {
   it('destroys its container on the way out', () => {
     assert.match(
       releaseBuildCode(),
-      /destroyHoldingLock\(token\)/,
+      /destroyHoldingLock\(/,
       'a finished build holds its container until sleepAfter',
     );
   });
@@ -376,7 +376,7 @@ describe('what a build leaves behind', () => {
     // destroying it there would kill their build rather than free a slot.
     const teardown = releaseBuildCode();
     const owned = teardown.indexOf('token === token');
-    const destroyed = teardown.indexOf('destroyHoldingLock(token)');
+    const destroyed = teardown.indexOf('destroyHoldingLock(');
     assert.ok(owned > 0 && destroyed > owned, 'the destroy is unguarded');
   });
 });
@@ -684,7 +684,7 @@ describe('keeping the lock alive while the build is', () => {
     // and it has no container to wait for, so its read is not the one this
     // is about (#196 review).
     const teardown = releaseBuildCode();
-    const destroyed = teardown.indexOf('destroyHoldingLock(token)');
+    const destroyed = teardown.indexOf('destroyHoldingLock(');
     assert.ok(destroyed > 0, 'the teardown no longer destroys the container');
     const reread = teardown.indexOf('storage.get<BuildLock>', destroyed);
     const deleted = teardown.indexOf('storage.delete(BUILD_LOCK_KEY)', reread);
@@ -717,6 +717,14 @@ describe('what the teardown and the renewal await', () => {
     'utf8',
   );
 
+  /** A region with its prose taken out, so a position is not a comment's. */
+  function code(region: string): string {
+    return region
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  }
+
   /** One method, from its signature to the next one. */
   function methodOf(name: string): string {
     const at = source.indexOf(name);
@@ -748,6 +756,28 @@ describe('what the teardown and the renewal await', () => {
       unbounded(methodOf('private async renewLock(')),
       0,
       'a renewal can stay pending past the build it is renewing for',
+    );
+  });
+
+  it('bounds the destroy by what is left of the teardown', () => {
+    // The longest thing in the teardown, and the one the clock was added
+    // for. Left to start a window of its own it turns a twelve-minute
+    // teardown into twenty-two, and the ticket it is holding is reclaimed
+    // by the fleet at thirty while the container still exists.
+    //
+    // `budgeted` is the whole assertion: a cap inside a budget is the
+    // smaller of the two and never the sum, which is the rule every other
+    // nested bound in these two deployments already follows.
+    const method = methodOf('private async destroyHoldingLock(');
+    assert.match(
+      method,
+      /budgeted\(MAX_DESTROY_WAIT_MS, deadline - Date\.now\(\)\)/,
+      'the destroy starts a fresh window instead of using what is left',
+    );
+    assert.match(
+      code(methodOf('private async releaseBuild(')),
+      /destroyHoldingLock\(token, deadline\)/,
+      'the teardown does not tell the destroy how long it has',
     );
   });
 

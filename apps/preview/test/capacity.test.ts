@@ -282,7 +282,7 @@ describe('counting the builds too', () => {
     // destroy now lives; what the teardown reads is its answer.
     assert.match(
       computed,
-      /destroyHoldingLock\(token\)/,
+      /destroyHoldingLock\(/,
       'the teardown no longer asks whether the container went away',
     );
     const source = read(
@@ -352,7 +352,7 @@ describe('counting the builds too', () => {
     // over-admission the counter was added to prevent, moved from previews
     // to builds.
     const tail = teardown;
-    const destroyed = tail.indexOf('destroyHoldingLock(token)');
+    const destroyed = tail.indexOf('destroyHoldingLock(');
     const released = releaseAt(tail);
     assert.ok(destroyed > 0, 'the finally no longer destroys the container');
     assert.ok(

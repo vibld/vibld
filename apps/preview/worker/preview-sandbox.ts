@@ -732,7 +732,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     // taken and is running in this very container, so destroying it would
     // end their build rather than free anything. The "nothing ever ran"
     // case is handled above, before any of this.
-    const gone = ours ? await this.destroyHoldingLock(token) : false;
+    const gone = ours ? await this.destroyHoldingLock(token, deadline) : false;
 
     // After the container is gone, never before it: a lock given back
     // mid-teardown hands this user's next build a container that is about
@@ -1134,8 +1134,23 @@ export class PreviewSandbox extends Sandbox<Env> {
    * "destroying" marker needs its own expiry the moment the object is
    * evicted, which is the same trade wearing a different hat.
    */
-  private async destroyHoldingLock(token: string): Promise<boolean> {
-    const until = Date.now() + MAX_DESTROY_WAIT_MS;
+  private async destroyHoldingLock(
+    token: string,
+    deadline: number,
+  ): Promise<boolean> {
+    // Its own cap, or what is left of the teardown's, whichever runs out
+    // first (#196 review). I gave the teardown a wall clock one round ago
+    // and then let the longest thing inside it start a fresh window of its
+    // own, so the clock bounded every call in the method except the one it
+    // was added for: twelve minutes of build, twelve waiting on storage
+    // and ten more destroying is past the fleet's hard lifetime, and a
+    // later enqueue reclaims the ticket while this container still exists.
+    //
+    // Nested rather than added, which is the same rule `budgeted` states
+    // everywhere else it is used: a cap inside a budget is the smaller of
+    // the two, never the sum.
+    const until =
+      Date.now() + budgeted(MAX_DESTROY_WAIT_MS, deadline - Date.now());
     return destroyWithin(
       this.destroy().then(
         () => true,

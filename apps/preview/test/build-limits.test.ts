@@ -15,6 +15,17 @@ import { HARD_LIFETIME_MS } from '../worker/fleet.ts';
 import { RETRY_ATTEMPTS, RETRY_DELAY_MS } from '@vibld/core';
 
 /**
+ * What giving one fleet ticket back really costs: every attempt plus the
+ * waits between them, which is what a release takes when the fleet object
+ * is restarting. Shared, because both sums below contain it and a release
+ * counted in one place and forgotten in the other is how these numbers
+ * drift.
+ */
+const releaseCost =
+  RETRY_ATTEMPTS * FLEET_CALL_TIMEOUT_MS +
+  (RETRY_ATTEMPTS - 1) * RETRY_DELAY_MS;
+
+/**
  * That a build cannot outlive its own lock (#196 review).
  *
  * The failure this rules out needs no bad actor. `npm run build` runs
@@ -118,9 +129,18 @@ describe('holding the lock while a container is torn down', () => {
     // has to fit. `reclaimStale` releasing a live build's ticket lets the
     // fleet authorise a container the platform has no room for, which is
     // the over-admission that counter exists to prevent.
+    //
+    // The teardown's own clock, not the destroy wait inside it
+    // (#196 review). This sum was written when the destroy was the whole
+    // teardown, and the teardown then grew a clock two minutes longer plus
+    // a release after it, so the figure understated the hold by nearly
+    // three minutes. Every round of this pull request that got an
+    // allowance wrong got it wrong this way: added up against a number
+    // smaller than the truth.
+    const held = BUILD_WALL_CLOCK_MS + TEARDOWN_WALL_CLOCK_MS + releaseCost;
     assert.ok(
-      BUILD_WALL_CLOCK_MS + MAX_DESTROY_WAIT_MS < HARD_LIFETIME_MS,
-      `a build holds its ticket for up to ${BUILD_WALL_CLOCK_MS + MAX_DESTROY_WAIT_MS}ms ` +
+      held < HARD_LIFETIME_MS,
+      `a build holds its ticket for up to ${held}ms ` +
         `and the fleet reclaims after ${HARD_LIFETIME_MS}ms`,
     );
   });
@@ -150,19 +170,13 @@ describe('holding the lock while a container is torn down', () => {
  * true rather than intended.
  */
 describe('how long a teardown may take', () => {
-  // Every attempt plus the waits between them, which is what a release
-  // really costs when the fleet object is restarting.
-  const oneRelease =
-    RETRY_ATTEMPTS * FLEET_CALL_TIMEOUT_MS +
-    (RETRY_ATTEMPTS - 1) * RETRY_DELAY_MS;
-
   it('can finish the destroy it waits for', () => {
     // A teardown clock shorter than the destroy wait inside it would stop
     // the teardown before the thing it exists to do, which is worse than
     // no clock: the container survives and the lock is never cleared.
     assert.ok(
-      TEARDOWN_WALL_CLOCK_MS > MAX_DESTROY_WAIT_MS + oneRelease,
-      `a teardown may need ${MAX_DESTROY_WAIT_MS + oneRelease}ms and is given ${TEARDOWN_WALL_CLOCK_MS}ms`,
+      TEARDOWN_WALL_CLOCK_MS > MAX_DESTROY_WAIT_MS + releaseCost,
+      `a teardown may need ${MAX_DESTROY_WAIT_MS + releaseCost}ms and is given ${TEARDOWN_WALL_CLOCK_MS}ms`,
     );
   });
 
@@ -172,8 +186,8 @@ describe('how long a teardown may take', () => {
     // could still be running when that reclaim lands, the release and the
     // reclaim race over the same row.
     assert.ok(
-      TEARDOWN_WALL_CLOCK_MS + oneRelease < HARD_LIFETIME_MS,
-      `a teardown may hold a ticket for ${TEARDOWN_WALL_CLOCK_MS + oneRelease}ms ` +
+      TEARDOWN_WALL_CLOCK_MS + releaseCost < HARD_LIFETIME_MS,
+      `a teardown may hold a ticket for ${TEARDOWN_WALL_CLOCK_MS + releaseCost}ms ` +
         `and the fleet reclaims after ${HARD_LIFETIME_MS}ms`,
     );
   });
