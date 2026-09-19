@@ -160,6 +160,33 @@ export function PreviewPanel({
               {sandbox.stopError}
             </p>
           ) : null}
+          {/*
+            The project does not compile (#194). Said here rather than left
+            for the frame to show, because what the frame shows is Vite's
+            own transform error, which reads as Vibld being broken.
+
+            Not an error state, and deliberately not styled as one: the
+            preview is running, the sandbox is up, and the dev server is
+            serving. What is wrong is in the project, which is the user's
+            to edit, and `npm run build` is where it would otherwise have
+            surfaced -- on their own machine, after an export.
+
+            `role="status"` and not `alert`: it arrives with a preview
+            somebody asked for and is already looking at, so it is news
+            rather than an interruption.
+          */}
+          {sandbox.status?.status === 'ready' && sandbox.status.typeErrors ? (
+            <div className="pane-note" role="status">
+              <p>
+                The preview is running, but the project does not typecheck, so{' '}
+                <code>npm run build</code> would fail. What <code>tsc</code>{' '}
+                said:
+              </p>
+              <pre className="preview__typecheck">
+                {sandbox.status.typeErrors}
+              </pre>
+            </div>
+          ) : null}
         </>
       ) : null}
 

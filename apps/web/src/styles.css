@@ -478,6 +478,28 @@ body {
   color: var(--muted);
 }
 
+/*
+ * What `tsc` said, verbatim. Preformatted because compiler output is
+ * columnar -- a path, a line and column, then the message -- and reflowing
+ * it loses the one thing the reader needs, which is which line. Scrolls in
+ * both directions rather than wrapping or clipping, and is capped so a
+ * project with fifty errors cannot push the controls off the panel.
+ */
+.preview__typecheck {
+  margin: 0.5rem 0 0;
+  max-height: 12rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  padding: 0.6rem 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+}
+
 .preview__shares {
   display: flex;
   flex-direction: column;

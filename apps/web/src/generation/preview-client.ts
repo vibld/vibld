@@ -20,7 +20,7 @@ export type PreviewStatus =
   | { status: 'ready-to-start' }
   | { status: 'installing' }
   | { status: 'starting' }
-  | { status: 'ready'; url: string; expiresAt: number }
+  | { status: 'ready'; url: string; expiresAt: number; typeErrors?: string }
   | { status: 'failed'; error: string };
 
 async function authHeaders(
@@ -59,6 +59,13 @@ function parseStatus(body: unknown): PreviewStatus | null {
           status: 'ready',
           url: record.url,
           expiresAt: record.expiresAt,
+          // Carried only when it is a non-empty string. A ready preview
+          // with an unreadable finding attached is still a ready preview,
+          // so this is dropped rather than allowed to null the status
+          // (#194).
+          ...(typeof record.typeErrors === 'string' && record.typeErrors !== ''
+            ? { typeErrors: record.typeErrors }
+            : {}),
         };
       }
       // A ready with nowhere to point is not a ready, and it is not the

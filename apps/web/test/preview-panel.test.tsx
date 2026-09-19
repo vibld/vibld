@@ -181,6 +181,57 @@ describe('the preview, as it is actually wired', () => {
   });
 });
 
+describe('a preview whose project does not compile', () => {
+  it('says so, and quotes the compiler rather than paraphrasing it', async () => {
+    // #194. Without this the reader still sees the failure, as Vite's own
+    // transform error inside the frame, which reads as Vibld being broken
+    // rather than as their project needing a fix. The compiler's exact
+    // words are what make it actionable, so they are shown verbatim.
+    const said =
+      "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type and must be imported using a type-only import";
+    const ui = await mount(
+      stateWith('rev-1'),
+      sandboxWith({ ...READY, typeErrors: said }, 'rev-1'),
+    );
+    assert.match(ui.text(), /does not typecheck/);
+    assert.ok(ui.text().includes(said), 'the compiler output was not shown');
+    ui.unmount();
+  });
+
+  it('does not call a running preview broken', async () => {
+    // The sandbox is up, the URL works and the dev server is serving. This
+    // is a finding about the project, which is the user's to edit, so it
+    // is not an alert and does not claim the preview failed.
+    const ui = await mount(
+      stateWith('rev-1'),
+      sandboxWith(
+        { ...READY, typeErrors: 'src/App.tsx(1,1): error TS1005' },
+        'rev-1',
+      ),
+    );
+    // Compared as booleans rather than against the nodes themselves: a
+    // failed assertion on a happy-dom element serialises the whole tree
+    // into the diff, which turns a one-line failure into a hang.
+    assert.equal(
+      ui.container.querySelector('[role="alert"]') !== null,
+      false,
+      'a running preview was announced as an error',
+    );
+    assert.equal(
+      ui.container.querySelector('[role="status"]') !== null,
+      true,
+      'the finding was not announced at all',
+    );
+    ui.unmount();
+  });
+
+  it('says nothing when the project compiles', async () => {
+    const ui = await mount(stateWith('rev-1'), sandboxWith(READY, 'rev-1'));
+    assert.equal(/does not typecheck/.test(ui.text()), false);
+    ui.unmount();
+  });
+});
+
 describe('a stop that did not happen', () => {
   it('says the sandbox is still running, rather than removing it', async () => {
     // The panel used to clear the sandbox whatever the stop answered. Stop
