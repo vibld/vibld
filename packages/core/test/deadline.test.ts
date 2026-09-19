@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { budgeted, OUT_OF_TIME, withinDeadline } from '../src/deadline.ts';
+import { RETRY_ATTEMPTS, retryingWithin } from '../src/retry.ts';
 
 /**
  * That one stuck call cannot outlast a build's whole budget
@@ -97,5 +98,86 @@ describe('a command cap against what is left of the build', () => {
     // failure or no timeout at all, and the second is the whole defect
     // coming back.
     assert.equal(budgeted(5 * 60_000, -30_000), 0);
+  });
+});
+
+/**
+ * That a retry can reach its second attempt (#196 review).
+ *
+ * `retrying` runs one attempt and then the next, so an attempt that never
+ * settles ends the sequence: the retry becomes a single unbounded call
+ * wearing a retry's name. What these retries exist for is a Durable Object
+ * restarting, which is the case most likely to leave a call pending rather
+ * than reject it, so without a bound the retry is absent exactly when it
+ * is needed.
+ *
+ * Three call sites arrived at this one round apart, each reported as its
+ * own finding and each fixed with the same three lines: a fleet ticket
+ * nothing else will ever reclaim, a settlement that must not fail its
+ * Workflow, and the release of a hold against a ceiling the whole
+ * deployment shares.
+ */
+describe('retrying something that might never answer', () => {
+  /** So a test does not spend the real backoff. */
+  const instantly = async () => {};
+
+  it('reaches the next attempt when one never answers', async () => {
+    let asked = 0;
+    const done = await retryingWithin(
+      () => {
+        asked += 1;
+        return asked === 1
+          ? new Promise<string>(() => {})
+          : Promise.resolve('ok');
+      },
+      20,
+      instantly,
+    );
+    assert.deepEqual(done, { ok: true, value: 'ok' });
+    assert.equal(asked, 2, 'a pending attempt ended the sequence');
+  });
+
+  it('gives up rather than hanging when none of them answer', async () => {
+    const started = Date.now();
+    const done = await retryingWithin(
+      () => new Promise<never>(() => {}),
+      20,
+      instantly,
+    );
+    assert.equal(done.ok, false, 'a call nobody answered was reported as done');
+    assert.ok(
+      Date.now() - started < 5_000,
+      'the retry held its caller past every attempt',
+    );
+  });
+
+  it('spends its whole allowance of attempts before giving up', async () => {
+    // A bound that gave up after one would be a different defect wearing
+    // the same fix: the retry exists because the first attempt is the one
+    // most likely to meet a restarting object.
+    let asked = 0;
+    await retryingWithin(
+      () => {
+        asked += 1;
+        return new Promise<never>(() => {});
+      },
+      10,
+      instantly,
+    );
+    assert.equal(asked, RETRY_ATTEMPTS);
+  });
+
+  it('answers straight away when the first attempt does', async () => {
+    let asked = 0;
+    const done = await retryingWithin(
+      async () => {
+        asked += 1;
+        return 'first';
+      },
+      5_000,
+      instantly,
+    );
+    assert.deepEqual(done, { ok: true, value: 'first' });
+    assert.equal(asked, 1, 'a call that worked was made again');
   });
 });

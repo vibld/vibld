@@ -21,6 +21,8 @@
  * read rather than an exception it can forget to catch.
  */
 
+import { withinDeadline } from './deadline.ts';
+
 /** How many times, and how long between: shared so the two agree. */
 export const RETRY_ATTEMPTS = 3;
 export const RETRY_DELAY_MS = 1_000;
@@ -49,4 +51,33 @@ export async function retrying<T>(
     }
   }
   return { ok: false, error: last };
+}
+
+/**
+ * The same retry, with a bound on each attempt (#196 review).
+ *
+ * `retrying` runs one attempt and then the next, so an attempt that never
+ * settles is the end of the sequence: the retry becomes a single unbounded
+ * call wearing a retry's name, and the caller waits on it forever. The case
+ * these retries exist for is a Durable Object restarting, which is exactly
+ * the case most likely to leave a call pending rather than reject it, so
+ * the bound is what makes the retry a retry at all.
+ *
+ * Here rather than at any of the three call sites, because it arrived at
+ * each of them one review round apart: a fleet ticket that nothing else
+ * will ever reclaim, a settlement that must not fail its Workflow, and the
+ * release of a hold against a ceiling the whole deployment shares. Each was
+ * reported as its own finding, and each fix was the same three lines.
+ *
+ * The outcome is still a value rather than an exception, because every one
+ * of those callers is cleaning up on a path where something has already
+ * gone wrong and none of them may throw.
+ */
+export async function retryingWithin<T>(
+  step: () => Promise<T>,
+  within: number,
+  wait: (ms: number) => Promise<void> = sleep,
+  attempts: number = RETRY_ATTEMPTS,
+): Promise<Attempted<T>> {
+  return retrying(() => withinDeadline(step(), within), wait, attempts);
 }

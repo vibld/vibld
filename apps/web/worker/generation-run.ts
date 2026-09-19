@@ -30,6 +30,7 @@ import {
   BUILD_CALL_TIMEOUT_MS,
 } from './publish-client.ts';
 import type { BuildFailureReason, buildProject } from './publish-client.ts';
+import { LEDGER_CALL_TIMEOUT_MS } from './reserve.ts';
 import type { reserveBudget } from './reserve.ts';
 import { OUT_OF_TIME, retrying, sleep, withinDeadline } from '@vibld/core';
 
@@ -437,25 +438,6 @@ export const REPAIR_STEP_TIMEOUT_MS =
  * asking when there is not enough left to wait and still build.
  * `repair-timeout.test.ts` adds that up against the allowance.
  */
-/**
- * How long one call to a budget Durable Object may stay pending
- * (#196 review).
- *
- * The same hazard as the build call and the model call, on the last two
- * awaits in this step that did not have it: a ledger that *rejects* is
- * caught and reported, and a ledger that simply never answers is not,
- * because a pending promise reaches no catch. The step then runs out and
- * fails a Workflow whose project was already accepted, promoted, settled
- * and billed.
- *
- * Seconds rather than minutes, because these are same-colocation object
- * calls and `retrying` already waits a second between attempts, which is a
- * pace that assumes sub-second answers. Generous against that, and small
- * enough that the whole settlement, retries included, still fits inside
- * `REPAIR_BUILD_ALLOWANCE_MS` beside two builds. `repair-timeout.test.ts`
- * adds it up.
- */
-export const LEDGER_CALL_TIMEOUT_MS = 15_000;
 
 export function repairPromptFor(error: string): string {
   return `The project you just wrote does not build. This is the exact output:

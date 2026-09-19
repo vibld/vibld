@@ -3,10 +3,10 @@ import { describe, it } from 'node:test';
 
 import { RUN_ABANDONED_AFTER_MS, RUN_STEP_TIMEOUT_MS } from '@vibld/ai';
 import {
-  LEDGER_CALL_TIMEOUT_MS,
   REPAIR_BUILD_ALLOWANCE_MS,
   REPAIR_STEP_TIMEOUT_MS,
 } from '../worker/generation-run.ts';
+import { LEDGER_CALL_TIMEOUT_MS } from '../worker/reserve.ts';
 import {
   BUILD_CALL_TIMEOUT_MS,
   REBUILD_WAIT_BUDGET_MS,

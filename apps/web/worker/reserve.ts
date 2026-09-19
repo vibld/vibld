@@ -2,7 +2,27 @@ import { ACCOUNT_BUDGET_KEY, dayKey } from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
 import { allowancePeriodKey } from './entitlement.ts';
 import type { Reservation, UserBudget } from './budget.ts';
-import { retrying, sleep } from '@vibld/core';
+import { retryingWithin, sleep } from '@vibld/core';
+
+/**
+ * How long one call to a budget Durable Object may stay pending
+ * (#196 review).
+ *
+ * The same hazard as the build call and the model call, on the last two
+ * awaits in this step that did not have it: a ledger that *rejects* is
+ * caught and reported, and a ledger that simply never answers is not,
+ * because a pending promise reaches no catch. The step then runs out and
+ * fails a Workflow whose project was already accepted, promoted, settled
+ * and billed.
+ *
+ * Seconds rather than minutes, because these are same-colocation object
+ * calls and `retrying` already waits a second between attempts, which is a
+ * pace that assumes sub-second answers. Generous against that, and small
+ * enough that the whole settlement, retries included, still fits inside
+ * `REPAIR_BUILD_ALLOWANCE_MS` beside two builds. `repair-timeout.test.ts`
+ * adds it up.
+ */
+export const LEDGER_CALL_TIMEOUT_MS = 15_000;
 
 /**
  * Holding a run's worst case against every ceiling, in one place.
@@ -109,6 +129,13 @@ export async function reserveBudget(
   now: number,
   /** Only so a test does not spend the release retry delay. */
   wait: (ms: number) => Promise<void> = sleep,
+  /**
+   * Only so a test does not spend a real ledger timeout, for the same
+   * reason `wait` is injected: the attempt that has to be bounded is one
+   * that never answers, and waiting fifteen real seconds for it in a unit
+   * test is not a bound anybody would keep.
+   */
+  within: number = LEDGER_CALL_TIMEOUT_MS,
 ): Promise<
   { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
 > {
@@ -136,7 +163,12 @@ export async function reserveBudget(
    * cleanup failed, so the caller got an error instead of the answer the
    * ledger had already given.
    */
-  const giveBackAccount = () => retrying(releaseAccount, wait);
+  // Each attempt bounded, not just the sequence (#196 review). `retrying`
+  // never reaches its second attempt if the first never settles, and
+  // `handlePlan` calls this with no deadline of its own: a ledger that
+  // stays pending would hang the request instead of answering 503, while
+  // the account hold it is trying to give back is still held.
+  const giveBackAccount = () => retryingWithin(releaseAccount, within, wait);
 
   /**
    * The account hold is released when a later layer *refuses*, and it has

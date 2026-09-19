@@ -1,4 +1,4 @@
-import { budgeted, retrying, withinDeadline } from '@vibld/core';
+import { budgeted, retryingWithin, withinDeadline } from '@vibld/core';
 
 /**
  * Waiting for a container to die while keeping the lock alive, bounded
@@ -89,6 +89,6 @@ export async function releaseWithin(
   // back. Nothing in this process can do more about it than has already
   // been done, but a fact nobody can observe is how this leak kept coming
   // back from a new direction (see #199).
-  const done = await retrying(() => withinDeadline(release(), within));
+  const done = await retryingWithin(release, within);
   return done.ok;
 }

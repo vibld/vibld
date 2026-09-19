@@ -43,6 +43,8 @@ function ledgerThat(
   nextId = 100,
   /** How many settle calls reject before one is allowed through. */
   settleRejects = 0,
+  /** Settle calls that never answer at all, as against rejecting. */
+  settleStalls = 0,
 ): {
   env: ReserveEnv;
   reserves: Call[];
@@ -71,7 +73,12 @@ function ledgerThat(
           },
           async settle(reservationId: number, actual: number) {
             settles.push({ key, id: reservationId, actual });
-            if (settles.length <= settleRejects) {
+            if (settles.length <= settleStalls) {
+              // A Durable Object that is restarting: the call is accepted
+              // and never answered, which is what a rejection is not.
+              return new Promise<void>(() => {});
+            }
+            if (settles.length <= settleRejects + settleStalls) {
               throw new Error(`${key} could not settle`);
             }
           },
@@ -302,6 +309,36 @@ describe('releasing an account hold that does not want to be released', () => {
     assert.deepEqual(
       settles.map((call) => call.key),
       [ACCOUNT_BUDGET_KEY, ACCOUNT_BUDGET_KEY],
+    );
+  });
+
+  it('asks again when the release never answers at all', async () => {
+    // #196 review. `retrying` runs one attempt and then the next, so a
+    // release that stays pending is the end of the sequence rather than a
+    // slow start to it: `guard` never rethrows, and `handlePlan` calls
+    // this with no deadline of its own, so the request hangs instead of
+    // answering 503 while the hold it is trying to give back is still
+    // held against a ceiling the whole deployment shares.
+    //
+    // Pending, not rejecting, because that is the case the retry exists
+    // for: what takes a Durable Object down is usually a restart, and a
+    // restarting object accepts the call and never answers it.
+    const { env, settles } = ledgerThat(
+      { [ACCOUNT_BUDGET_KEY]: ALLOW, user_1: 'reject' },
+      100,
+      0,
+      1,
+    );
+    const started = Date.now();
+    await assert.rejects(
+      () => reserveBudget(env, 'user_1', 1_000, 5_000, 0, NOW, noWait, 20),
+      /user_1 is unreachable/,
+      'the release replaced the error that started all this',
+    );
+    assert.equal(settles.length, 2, 'a pending release ended the sequence');
+    assert.ok(
+      Date.now() - started < 5_000,
+      'the caller waited out an attempt that was never going to answer',
     );
   });
 
