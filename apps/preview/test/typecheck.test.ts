@@ -60,7 +60,7 @@ describe('what a preview finds out about the project it is running', () => {
     );
     assert.match(
       provision,
-      /typeErrors \? \{ typeErrors \} : \{\}/,
+      /typecheckFailure \? \{ typecheckFailure \} : \{\}/,
       'the answer is found and then dropped before anyone sees it',
     );
   });

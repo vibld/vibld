@@ -71,7 +71,7 @@ interface PreviewState {
   url?: string;
   expiresAt?: number;
   error?: string;
-  typeErrors?: string;
+  typecheckFailure?: string;
 }
 
 const STORAGE_KEY = 'vibld:preview';
@@ -83,13 +83,18 @@ export interface PreviewStatus {
   expiresAt?: number;
   error?: string;
   /**
-   * What `tsc` said about the project, when it said anything (#194).
+   * What `npm run typecheck` printed when it failed (#194).
+   *
+   * Named for the command rather than for the compiler, because the script
+   * is the generated manifest's to declare and need not be `tsc` (#195
+   * review). What is known is that the project's own typecheck exited
+   * non-zero and said this.
    *
    * Never an error: the preview started, and this is a finding about the
    * project rather than about the run. Present only when the typecheck
-   * actually failed, so absent means either clean or not asked.
+   * actually failed, so absent means clean, not declared, or not asked.
    */
-  typeErrors?: string;
+  typecheckFailure?: string;
 }
 
 /** L10's default and ceiling for how long a share grant lasts, independent of (but still capped by) the preview's own remaining L9 lifetime. */
@@ -509,7 +514,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       // may show Vite's own transform error where a page should be, which
       // reads as Vibld being broken rather than as the project needing a
       // fix. Naming it is the whole point.
-      const typeErrors = await this.typecheck();
+      const typecheckFailure = await this.typecheck();
 
       const dev = await this.startProcess(
         `npm run dev -- --host 0.0.0.0 --port ${DEV_PORT}`,
@@ -526,7 +531,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         fleetTicketId,
         url: exposed.url,
         expiresAt: startedAt + HARD_LIFETIME_MS,
-        ...(typeErrors ? { typeErrors } : {}),
+        ...(typecheckFailure ? { typecheckFailure } : {}),
       });
     } catch (error) {
       await this.writeState({
@@ -555,10 +560,12 @@ export class PreviewSandbox extends Sandbox<Env> {
    * rather than fail one.
    *
    * Reads stdout as well as stderr, and stdout first, because that is where
-   * `tsc` writes its diagnostics. stderr on this path carries npm's own
-   * wrapper ("exit code 2"), which says nothing a reader can act on. The
-   * same correction applies to `buildProject` below, where it was the whole
-   * of what a blocked publish reported.
+   * `tsc` writes its diagnostics and every generated manifest measured so
+   * far declares `tsc --noEmit` here. Both streams are reported rather than
+   * either assumed, since the script is the project's own. stderr on this
+   * path carries npm's wrapper ("exit code 2"), which says nothing a reader
+   * can act on, and the same correction applies to `buildProject` below,
+   * where it was the whole of what a blocked publish reported.
    *
    * Never throws. A typecheck that cannot run is not evidence about the
    * project, and turning it into one would fail previews over this
@@ -601,7 +608,9 @@ export class PreviewSandbox extends Sandbox<Env> {
       ...(state.url ? { url: state.url } : {}),
       ...(state.expiresAt ? { expiresAt: state.expiresAt } : {}),
       ...(state.error ? { error: state.error } : {}),
-      ...(state.typeErrors ? { typeErrors: state.typeErrors } : {}),
+      ...(state.typecheckFailure
+        ? { typecheckFailure: state.typecheckFailure }
+        : {}),
     };
   }
 

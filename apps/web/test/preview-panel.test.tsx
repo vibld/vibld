@@ -182,19 +182,41 @@ describe('the preview, as it is actually wired', () => {
 });
 
 describe('a preview whose project does not compile', () => {
-  it('says so, and quotes the compiler rather than paraphrasing it', async () => {
+  it('says so, and quotes the output rather than paraphrasing it', async () => {
     // #194. Without this the reader still sees the failure, as Vite's own
     // transform error inside the frame, which reads as Vibld being broken
-    // rather than as their project needing a fix. The compiler's exact
-    // words are what make it actionable, so they are shown verbatim.
+    // rather than as their project needing a fix. The exact words are what
+    // make it actionable, so they are shown verbatim.
     const said =
       "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type and must be imported using a type-only import";
     const ui = await mount(
       stateWith('rev-1'),
-      sandboxWith({ ...READY, typeErrors: said }, 'rev-1'),
+      sandboxWith({ ...READY, typecheckFailure: said }, 'rev-1'),
     );
-    assert.match(ui.text(), /does not typecheck/);
-    assert.ok(ui.text().includes(said), 'the compiler output was not shown');
+    assert.match(ui.text(), /npm run typecheck/);
+    assert.ok(ui.text().includes(said), 'the output was not shown');
+    ui.unmount();
+  });
+
+  it('claims nothing about a command it did not run', async () => {
+    // #195 review. An earlier draft said `npm run build` would fail. The
+    // model writes the manifest, and the prompt requires a "build" and a
+    // "typecheck" script without requiring the first to invoke the second,
+    // so a project whose build is a bare `vite build` can bundle perfectly
+    // well while this fails. What ran was `npm run typecheck`, and that is
+    // the whole of what can be reported.
+    const ui = await mount(
+      stateWith('rev-1'),
+      sandboxWith(
+        { ...READY, typecheckFailure: 'src/App.tsx(1,1): error TS1005' },
+        'rev-1',
+      ),
+    );
+    assert.equal(
+      /npm run build/.test(ui.text()),
+      false,
+      'the panel predicted the outcome of a command nothing ran',
+    );
     ui.unmount();
   });
 
@@ -205,7 +227,7 @@ describe('a preview whose project does not compile', () => {
     const ui = await mount(
       stateWith('rev-1'),
       sandboxWith(
-        { ...READY, typeErrors: 'src/App.tsx(1,1): error TS1005' },
+        { ...READY, typecheckFailure: 'src/App.tsx(1,1): error TS1005' },
         'rev-1',
       ),
     );
@@ -227,7 +249,7 @@ describe('a preview whose project does not compile', () => {
 
   it('says nothing when the project compiles', async () => {
     const ui = await mount(stateWith('rev-1'), sandboxWith(READY, 'rev-1'));
-    assert.equal(/does not typecheck/.test(ui.text()), false);
+    assert.equal(/npm run typecheck/.test(ui.text()), false);
     ui.unmount();
   });
 });

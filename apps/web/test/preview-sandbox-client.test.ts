@@ -87,14 +87,16 @@ describe('fetchPreviewStatus', () => {
           status: 'ready',
           url: 'https://5173-abc-def.vibld-preview.dev',
           expiresAt: 1_800_000_000_000,
-          typeErrors: "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type",
+          typecheckFailure:
+            "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type",
         }),
       ),
       {
         status: 'ready',
         url: 'https://5173-abc-def.vibld-preview.dev',
         expiresAt: 1_800_000_000_000,
-        typeErrors: "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type",
+        typecheckFailure:
+          "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type",
       },
     );
   });
@@ -103,20 +105,20 @@ describe('fetchPreviewStatus', () => {
     // The preview really is running. A finding this cannot read is dropped
     // rather than allowed to null the status, which would stop the poll
     // and take the Stop button away from a sandbox that is up.
-    for (const typeErrors of [42, null, '', { message: 'no' }]) {
+    for (const typecheckFailure of [42, null, '', { message: 'no' }]) {
       const status = await fetchPreviewStatus(
         jsonFetch({
           status: 'ready',
           url: 'https://x.vibld-preview.dev',
           expiresAt: 1_800_000_000_000,
-          typeErrors,
+          typecheckFailure,
         }),
       );
-      assert.equal(status?.status, 'ready', JSON.stringify(typeErrors));
+      assert.equal(status?.status, 'ready', JSON.stringify(typecheckFailure));
       assert.equal(
-        status?.status === 'ready' ? status.typeErrors : 'unset',
+        status?.status === 'ready' ? status.typecheckFailure : 'unset',
         undefined,
-        JSON.stringify(typeErrors),
+        JSON.stringify(typecheckFailure),
       );
     }
   });

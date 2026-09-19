@@ -17,7 +17,12 @@ export type PreviewStatus =
   | { status: 'ready-to-start' }
   | { status: 'installing' }
   | { status: 'starting' }
-  | { status: 'ready'; url: string; expiresAt: number; typeErrors?: string }
+  | {
+      status: 'ready';
+      url: string;
+      expiresAt: number;
+      typecheckFailure?: string;
+    }
   | { status: 'failed'; error: string };
 
 /** The slice of a Workers service binding this file calls. */
@@ -84,8 +89,9 @@ function parseStatus(body: unknown): PreviewStatus | null {
           // unreadable finding attached is still a ready preview -- the
           // sandbox is up and the URL works -- so this is dropped rather
           // than allowed to turn the whole status null (#194).
-          ...(typeof record.typeErrors === 'string' && record.typeErrors !== ''
-            ? { typeErrors: record.typeErrors }
+          ...(typeof record.typecheckFailure === 'string' &&
+          record.typecheckFailure !== ''
+            ? { typecheckFailure: record.typecheckFailure }
             : {}),
         };
       }

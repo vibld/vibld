@@ -20,7 +20,12 @@ export type PreviewStatus =
   | { status: 'ready-to-start' }
   | { status: 'installing' }
   | { status: 'starting' }
-  | { status: 'ready'; url: string; expiresAt: number; typeErrors?: string }
+  | {
+      status: 'ready';
+      url: string;
+      expiresAt: number;
+      typecheckFailure?: string;
+    }
   | { status: 'failed'; error: string };
 
 async function authHeaders(
@@ -63,8 +68,9 @@ function parseStatus(body: unknown): PreviewStatus | null {
           // with an unreadable finding attached is still a ready preview,
           // so this is dropped rather than allowed to null the status
           // (#194).
-          ...(typeof record.typeErrors === 'string' && record.typeErrors !== ''
-            ? { typeErrors: record.typeErrors }
+          ...(typeof record.typecheckFailure === 'string' &&
+          record.typecheckFailure !== ''
+            ? { typecheckFailure: record.typecheckFailure }
             : {}),
         };
       }
