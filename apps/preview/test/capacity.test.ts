@@ -231,15 +231,20 @@ describe('counting the builds too', () => {
     );
   });
 
-  it('never returns from the teardown', () => {
+  it('never returns from the finally the build tears down in', () => {
     // A `return` in a `finally` replaces whatever the build had already
-    // decided to answer. Worth pinning because the three cases below read
-    // like early returns and are the obvious way to write them.
-    const tail = teardown;
+    // decided to answer. That is about `buildProject`'s finally, which is
+    // where a return would do the damage; `releaseBuild` is a method of
+    // its own now and returns early on the path where nothing ran, which
+    // discards nothing (#196 review). The earlier version of this test
+    // read the teardown, which was the right region when the teardown was
+    // that finally and the wrong one afterwards.
+    const finallyAt = code.lastIndexOf('} finally {');
+    assert.ok(finallyAt > 0, 'the build no longer tears down on every path');
     assert.doesNotMatch(
-      tail.replace(/\/\/[^\n]*/g, ''),
+      code.slice(finallyAt),
       /\breturn\b/,
-      'the teardown can discard the build outcome',
+      'a return there can discard the outcome the build already had',
     );
   });
 
@@ -312,11 +317,19 @@ describe('counting the builds too', () => {
       /started = true;[\s\S]{0,120}?this\.exec\(/,
       'the flag is not set at the first thing that starts a container',
     );
-    const tail = teardown;
-    assert.match(
-      tail,
-      /const gone = !started\s*\?\s*true/,
-      'a refusal that ran nothing still has to prove its container is gone',
+    // Given back first, and without asking storage anything (#196 review).
+    // Nothing ran, so no ownership question arises, and ordering the
+    // release after the lock read made it depend on a call that can reject
+    // or stall -- which `reclaimStale` never repairs, because it does not
+    // reclaim an inactive row.
+    const early = teardown.slice(teardown.indexOf('if (!started) {'));
+    assert.ok(early.length > 0, 'the teardown no longer knows nothing ran');
+    const released = early.indexOf('releaseTicket(');
+    const read = early.indexOf('storage.get<BuildLock>');
+    assert.ok(released > 0, 'a refusal that ran nothing keeps its ticket');
+    assert.ok(
+      read === -1 || released < read,
+      'the ticket is given back only if storage answers first',
     );
   });
 

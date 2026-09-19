@@ -1,8 +1,9 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import { retrying } from '@vibld/core';
 import { networkFailure } from './build-failure.ts';
-import { OUT_OF_TIME, withinDeadline } from '@vibld/core';
-import { admit, budgeted, collectOutput, writeFiles } from './build-files.ts';
+import { budgeted, OUT_OF_TIME, withinDeadline } from '@vibld/core';
+import { admit, collectOutput, writeFiles } from './build-files.ts';
+import { destroyWithin } from './teardown.ts';
 import type { BuildFailureReason } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
@@ -683,23 +684,35 @@ export class PreviewSandbox extends Sandbox<Env> {
     slot: EnqueueResult | undefined,
     started: boolean,
   ): Promise<void> {
+    // A ticket for a build that never started goes back first, and without
+    // asking storage anything (#196 review).
+    //
+    // Nothing ever ran, so there is no container, so no ownership question
+    // arises: the answer the read would give cannot change what happens to
+    // this ticket. Ordering it after the read made the release depend on a
+    // call that can reject or stall, and `reclaimStale` never reclaims an
+    // inactive row, so a queued ticket abandoned here is promoted later
+    // for a build that already answered `busy` and holds a global slot for
+    // its whole hard lifetime. That is the leak this pull request has
+    // already fixed twice from other directions.
+    if (!started) {
+      if (slot) await this.releaseTicket(slot.id);
+      // The lock is still this build's to give back, but it expires on its
+      // own after BUILD_LOCK_TTL_MS and refuses safely in the meantime, so
+      // it is the half that may depend on storage answering.
+      const held = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+      if (held?.token === token) await this.ctx.storage.delete(BUILD_LOCK_KEY);
+      return;
+    }
+
     const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
     const ours = mine?.token === token;
 
-    // "No container of ours is left standing." True without asking when
-    // nothing ever ran, because there is no container until something does:
-    // a refusal issued before the first `exec` leaves nothing behind, and
-    // holding its lock or its ticket would be holding them against a
-    // container that was never created.
-    //
-    // Otherwise only ours is ours to destroy. A build that overran has had
-    // its lock taken and is running in this very container, so destroying
-    // it would end their build rather than free anything.
-    const gone = !started
-      ? true
-      : ours
-        ? await this.destroyHoldingLock(token)
-        : false;
+    // Only ours is ours to destroy. A build that overran has had its lock
+    // taken and is running in this very container, so destroying it would
+    // end their build rather than free anything. The "nothing ever ran"
+    // case is handled above, before any of this.
+    const gone = ours ? await this.destroyHoldingLock(token) : false;
 
     // After the container is gone, never before it: a lock given back
     // mid-teardown hands this user's next build a container that is about
@@ -1092,22 +1105,15 @@ export class PreviewSandbox extends Sandbox<Env> {
    * evicted, which is the same trade wearing a different hat.
    */
   private async destroyHoldingLock(token: string): Promise<boolean> {
-    const destroyed = this.destroy().then(
-      () => true,
-      () => false,
+    return destroyWithin(
+      this.destroy().then(
+        () => true,
+        () => false,
+      ),
+      () => this.renewLock(token),
+      LOCK_RENEWAL_INTERVAL_MS,
+      Date.now() + MAX_DESTROY_WAIT_MS,
     );
-    const until = Date.now() + MAX_DESTROY_WAIT_MS;
-    while (Date.now() < until) {
-      const settled = await Promise.race([
-        destroyed,
-        new Promise<undefined>((resolve) => {
-          setTimeout(() => resolve(undefined), LOCK_RENEWAL_INTERVAL_MS);
-        }),
-      ]);
-      if (settled !== undefined) return settled;
-      await this.renewLock(token);
-    }
-    return false;
   }
 
   /**

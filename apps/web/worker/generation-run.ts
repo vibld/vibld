@@ -26,7 +26,13 @@ import type { RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
 import type { BuildFailureReason, buildProject } from './publish-client.ts';
 import type { reserveBudget } from './reserve.ts';
-import { OUT_OF_TIME, retrying, sleep, withinDeadline } from '@vibld/core';
+import {
+  budgeted,
+  OUT_OF_TIME,
+  retrying,
+  sleep,
+  withinDeadline,
+} from '@vibld/core';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -420,6 +426,17 @@ export const REPAIR_STEP_TIMEOUT_MS =
  * does not terminate when it does not move, which is not a hypothetical: the
  * first version of this hung the test suite, because the fake clock these
  * tests inject is a constant.
+ *
+ * The attempts bound the sleeping and a wall clock bounds the rest
+ * (#196 review). Six retries of a thirteen-minute call is ninety-one
+ * minutes of build, not one build and thirty seconds of waiting, and the
+ * allowance above was sized for the second reading: a near-limit first
+ * build, a near-limit model call and one near-limit busy retry already came
+ * to about fifty-six minutes against a step funded for sixty. So `rebuild`
+ * takes one budget of `BUILD_CALL_TIMEOUT_MS + REBUILD_WAIT_BUDGET_MS` for
+ * the whole sequence, passes what is left of it to each call, and stops
+ * asking when there is not enough left to wait and still build.
+ * `repair-timeout.test.ts` adds that up against the allowance.
  */
 /**
  * How long one call to the build service may stay pending (#196 review).
@@ -468,6 +485,67 @@ export const REBUILD_WAIT_INTERVAL_MS = 5_000;
 export const REBUILD_WAIT_ATTEMPTS = 6;
 export const REBUILD_WAIT_BUDGET_MS =
   REBUILD_WAIT_INTERVAL_MS * REBUILD_WAIT_ATTEMPTS;
+
+/**
+ * One call to the build service, bounded, where no answer and a rejection
+ * are the same fact (#196 review).
+ *
+ * A pending promise reaches no catch, so the deadline is what turns a
+ * build service that will not answer into one that says nothing about the
+ * project, which is what a service that rejects already said. Both land
+ * on `undefined`, and the caller reports `unavailable` rather than failing
+ * a Workflow whose project was accepted, promoted, settled and billed.
+ *
+ * `within` is how much of a caller's budget is left, and the smaller of
+ * the two bounds wins. Separated from the step so a test can hand it a
+ * call that never answers and watch it give up: inside the step it closed
+ * over a service binding, and nothing could reach it.
+ */
+export async function buildWithin<T>(
+  run: () => Promise<T>,
+  within: number,
+): Promise<T | undefined> {
+  try {
+    return await withinDeadline(run(), budgeted(BUILD_CALL_TIMEOUT_MS, within));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Asking a busy workspace again, out of one budget for the asking
+ * (#196 review).
+ *
+ * A function rather than a loop inside the step, for the reason four other
+ * findings on this pull request ended the same way: a test that cannot
+ * call the thing ends up measuring the text around it. The build it asks
+ * with is unreachable from a test (it holds a service binding), so the
+ * budget arithmetic had nothing exercising it and the fake could not even
+ * observe the cap each call was given. Here `ask` is a parameter and the
+ * cap is its argument.
+ *
+ * The count bounds the sleeping, the clock bounds the rest, and the last
+ * check is why both are needed: nothing is started that the budget cannot
+ * also finish, because sleeping out the last of it and asking again spends
+ * the wait to get `unavailable` for it, which is a worse answer than the
+ * refusal already in hand.
+ */
+export async function askWhileBusy<T>(
+  ask: (within: number) => Promise<T>,
+  busy: (answer: T) => boolean,
+  clock: { wait: (ms: number) => Promise<void>; now: () => number },
+): Promise<T> {
+  const deadline = clock.now() + BUILD_CALL_TIMEOUT_MS + REBUILD_WAIT_BUDGET_MS;
+  const left = () => deadline - clock.now();
+  let answer = await ask(left());
+  for (let asked = 0; asked < REBUILD_WAIT_ATTEMPTS; asked += 1) {
+    if (!busy(answer)) break;
+    if (left() <= REBUILD_WAIT_INTERVAL_MS) break;
+    await clock.wait(REBUILD_WAIT_INTERVAL_MS);
+    answer = await ask(left());
+  }
+  return answer;
+}
 
 export function repairPromptFor(error: string): string {
   return `The project you just wrote does not build. This is the exact output:
@@ -1002,15 +1080,16 @@ export async function verifyAndRepair(
    * build failure is already treated as "not the project's fault"; an
    * unreachable service is the same fact arriving differently.
    */
-  const build = async (
+  const build = (
     files: ProjectFile[],
+    within = BUILD_CALL_TIMEOUT_MS,
   ): Promise<
     | { ok: true }
     | { ok: false; error: string; reason?: BuildFailureReason }
     | undefined
-  > => {
-    try {
-      return await withinDeadline(
+  > =>
+    buildWithin(
+      () =>
         deps.build(
           {
             PREVIEW: env.PREVIEW,
@@ -1019,15 +1098,8 @@ export async function verifyAndRepair(
           params.userId,
           files,
         ),
-        BUILD_CALL_TIMEOUT_MS,
-      );
-    } catch {
-      // Including the deadline, which lands here on purpose: a build
-      // service that will not answer says exactly as much about the
-      // project as one that rejects, which is nothing (#196 review).
-      return undefined;
-    }
-  };
+      within,
+    );
 
   /**
    * The same build, given a bounded wait when the workspace is busy
@@ -1050,16 +1122,12 @@ export async function verifyAndRepair(
    * than about a previous one, and asking again would spend the caller's
    * clock on an answer that will not change.
    */
-  const rebuild = async (files: ProjectFile[]) => {
-    const wait = deps.wait ?? sleep;
-    let answer = await build(files);
-    for (let asked = 0; asked < REBUILD_WAIT_ATTEMPTS; asked += 1) {
-      if (!answer || answer.ok || answer.reason !== 'busy') break;
-      await wait(REBUILD_WAIT_INTERVAL_MS);
-      answer = await build(files);
-    }
-    return answer;
-  };
+  const rebuild = (files: ProjectFile[]) =>
+    askWhileBusy(
+      (within) => build(files, within),
+      (answer) => Boolean(answer && !answer.ok && answer.reason === 'busy'),
+      { wait: deps.wait ?? sleep, now: deps.now ?? Date.now },
+    );
 
   const first = await build(result.accepted.files);
   // Unreachable, not failed. Nothing is known about the project, so nothing

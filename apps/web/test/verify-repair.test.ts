@@ -66,6 +66,8 @@ interface Spy {
     split?: { account: number | undefined; caller: number | undefined };
   }[];
   generates: { runId: string; prompt: string; baseRevision?: string }[];
+  /** How far the fake clock has been moved, in milliseconds. */
+  elapsed: number;
 }
 
 function deps(
@@ -87,6 +89,15 @@ function deps(
     busyRebuilds?: number;
     /** Which call throws, counting from one. */
     buildThrowsOn?: number;
+    /**
+     * How long each build takes on the fake clock.
+     *
+     * Zero by default, because every other test here wants a clock that
+     * does not move: a loop bounded only by `Date.now()` does not
+     * terminate when it does not move, and these fakes deliberately prove
+     * the attempt counter on its own.
+     */
+    buildTakesMs?: number;
     /** The model call never answers, so its deadline gives up on it. */
     generateStalls?: boolean;
     /** The build service never answers, as against rejecting. */
@@ -111,12 +122,20 @@ function deps(
     settleCost?: number;
   } = {},
 ) {
-  const spy: Spy = { builds: 0, reserves: 0, settles: [], generates: [] };
+  const spy: Spy = {
+    builds: 0,
+    reserves: 0,
+    settles: [],
+    generates: [],
+    elapsed: 0,
+  };
+  const started = Date.UTC(2026, 8, 19, 5, 0, 0);
   return {
     spy,
     deps: {
       build: (async () => {
         spy.builds += 1;
+        spy.elapsed += options.buildTakesMs ?? 0;
         if (spy.builds === options.buildThrowsOn) {
           throw new Error('the preview service is gone');
         }
@@ -230,9 +249,13 @@ function deps(
         };
       }) as never,
       providerFor: (() => ({}) as never) as never,
-      now: () => Date.UTC(2026, 8, 19, 5, 0, 0),
-      // So the settlement retries do not spend their real delay here.
-      wait: async () => {},
+      now: () => started + spy.elapsed,
+      // So the settlement retries do not spend their real delay here. The
+      // wait is charged to the fake clock rather than to the test, because
+      // the rebuild's budget pays for the waiting as well as the building.
+      wait: async (ms: number) => {
+        if (options.buildTakesMs) spy.elapsed += ms;
+      },
     },
   };
 }
@@ -590,6 +613,55 @@ describe('what the second build is allowed to claim', () => {
     assert.equal(outcome.unverified, undefined);
   });
 
+  it('stops asking when the budget for asking is spent', async () => {
+    // #196 review, and the fourth instance of this pull request's own
+    // shape: a bound per call is not a bound on a sequence of calls. Six
+    // retries of a thirteen-minute build is ninety-one minutes, not the
+    // one build and thirty seconds of waiting the allowance above was
+    // sized for, and a near-limit first build plus a near-limit model call
+    // plus one near-limit retry already came to about fifty-six minutes
+    // against a step funded for sixty.
+    //
+    // A build that eats six minutes of the clock each time, against a
+    // budget of one build plus the waiting. The attempt counter would
+    // allow six retries; the budget stops it well before that, and the
+    // count is what says which of the two did the stopping.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { busyRebuilds: Number.MAX_SAFE_INTEGER, buildTakesMs: 6 * 60_000 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    const rebuilds = spy.builds - 1;
+    assert.ok(
+      rebuilds < 1 + REBUILD_WAIT_ATTEMPTS,
+      `the sequence ran its full ${REBUILD_WAIT_ATTEMPTS} retries regardless of the clock`,
+    );
+    // How much of the budget one call may take is `askWhileBusy`'s own
+    // test, where the fake can see the cap it is given; this fake cannot,
+    // so what it shows is that the clock ends the sequence at all.
+    //
+    // The `busy` in hand is still the answer. Giving up on the clock is
+    // not a different verdict from giving up on the count.
+    assert.equal(outcome.unverified, 'busy');
+    assert.ok(outcome.result, 'the promoted revision was thrown away');
+  });
+
+  it('still asks again while there is budget to ask with', async () => {
+    // The other direction, so the bound above cannot be satisfied by never
+    // retrying at all. A build that costs a second leaves the whole budget
+    // intact, and the attempt counter is what ends it.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { busyRebuilds: Number.MAX_SAFE_INTEGER, buildTakesMs: 1_000 },
+    );
+    await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(
+      spy.builds,
+      2 + REBUILD_WAIT_ATTEMPTS,
+      'a rebuild with its budget intact stopped early',
+    );
+  });
+
   it('does not wait out a refusal about this build rather than the last', async () => {
     // Only `busy` is somebody else holding the workspace. `sandbox` is this
     // build's own container, and asking again spends the caller's clock on
@@ -693,19 +765,26 @@ describe('a build service that never answers', () => {
     // The half the fake above cannot reach. It throws what the deadline
     // throws, so it proves the catch maps that to `unavailable` and says
     // nothing about whether a bound exists: a mutation that removed
-    // `withinDeadline` entirely passed it. The bound is thirteen minutes
-    // and no test is going to wait for one, so this reads the wiring and
-    // `repair-timeout.test.ts` holds the arithmetic.
+    // `withinDeadline` entirely passed it.
+    //
+    // That bound is now `buildWithin`, which `rebuild-budget.test.ts`
+    // calls with a promise that really never settles. What is left here is
+    // the wiring: that this step's build goes through it, and hands on the
+    // budget it was given rather than starting a fresh one. Two lines of
+    // source, because the call closes over a service binding and there is
+    // nothing else to read them from.
     const source = await workflowSource('generation-run.ts');
-    const at = source.indexOf('const build = async (');
+    const at = source.indexOf('const build = (');
     assert.ok(at > 0, 'the build wrapper is no longer where this expected it');
-    const wrapper = source.slice(at, source.indexOf('\n  };', at));
+    // One match over both, rather than a region whose end has to be
+    // guessed at: the call and the argument it is given are the property,
+    // and every version of this test that sliced on a nearby landmark
+    // broke when the code around it moved.
     assert.match(
-      wrapper,
-      /withinDeadline\(\s*deps\.build\(/,
-      'a build service that never answers is waited on until the step dies',
+      source.slice(at),
+      /buildWithin\([\s\S]{0,400}?\n\s+within,/,
+      'the build is not bounded by what is left of the sequence budget',
     );
-    assert.match(wrapper, /BUILD_CALL_TIMEOUT_MS,/);
   });
 
   it('claims nothing about the project when the rebuild stalls', async () => {

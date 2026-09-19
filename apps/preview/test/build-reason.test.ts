@@ -301,7 +301,7 @@ describe('whose lock a build releases', () => {
       const guard = teardown.slice(0, at.index);
       assert.match(
         guard.slice(guard.lastIndexOf('if (')),
-        /if \([^)]*\b(ours|still\?\.token === token)\b/,
+        /if \([^)]*(\bours\b|\?\.token === token)/,
         'a delete of the build lock is not guarded by owning it',
       );
     }
@@ -658,13 +658,18 @@ describe('keeping the lock alive while the build is', () => {
     // The ownership answer used for the delete was computed before an
     // await. A build that overran could delete the lock somebody else took
     // during that await.
+    // Scoped to what happens after the destroy. The branch for a build
+    // that never started reads and deletes the lock before any of this,
+    // and it has no container to wait for, so its read is not the one this
+    // is about (#196 review).
     const teardown = releaseBuildCode();
     const destroyed = teardown.indexOf('destroyHoldingLock(token)');
+    assert.ok(destroyed > 0, 'the teardown no longer destroys the container');
     const reread = teardown.indexOf('storage.get<BuildLock>', destroyed);
-    const deleted = teardown.indexOf('storage.delete(BUILD_LOCK_KEY)');
-    assert.ok(destroyed > 0 && deleted > 0, 'the teardown lost a step');
+    const deleted = teardown.indexOf('storage.delete(BUILD_LOCK_KEY)', reread);
+    assert.ok(reread > destroyed, 'the teardown lost its re-read');
     assert.ok(
-      reread > destroyed && reread < deleted,
+      deleted > reread,
       'the delete trusts an ownership answer from before the destroy',
     );
   });
