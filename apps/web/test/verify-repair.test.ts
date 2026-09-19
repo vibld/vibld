@@ -11,6 +11,7 @@ import type {
   WorkflowParams,
 } from '../worker/generation-run.ts';
 import type { DurableGenerationResult } from '@vibld/core';
+import { OUT_OF_TIME } from '@vibld/core';
 
 /**
  * Building what a run produced, and buying one repair when it will not
@@ -58,7 +59,12 @@ const ENV = {
 interface Spy {
   builds: number;
   reserves: number;
-  settles: { usage: unknown; providerRan: boolean | undefined }[];
+  settles: {
+    usage: unknown;
+    providerRan: boolean | undefined;
+    /** What each layer was told to settle at, where they differ. */
+    split?: { account: number | undefined; caller: number | undefined };
+  }[];
   generates: { runId: string; prompt: string; baseRevision?: string }[];
 }
 
@@ -81,6 +87,8 @@ function deps(
     busyRebuilds?: number;
     /** Which call throws, counting from one. */
     buildThrowsOn?: number;
+    /** The model call never answers, so its deadline gives up on it. */
+    generateStalls?: boolean;
     /** The reservation could not be asked for at all, as against refused. */
     reserveThrows?: boolean;
     /** How many settlement attempts reject before one is allowed through. */
@@ -139,8 +147,16 @@ function deps(
         _params: unknown,
         usage: unknown,
         providerRan: boolean | undefined,
+        accountMicroUsd?: number,
+        callerMicroUsd?: number,
       ) => {
-        spy.settles.push({ usage, providerRan });
+        spy.settles.push({
+          usage,
+          providerRan,
+          ...(accountMicroUsd === undefined && callerMicroUsd === undefined
+            ? {}
+            : { split: { account: accountMicroUsd, caller: callerMicroUsd } }),
+        });
         if (options.settleAccountOnly !== undefined) {
           throw new PartialSettlement(
             options.settleAccountOnly,
@@ -166,6 +182,12 @@ function deps(
         request: { runId: string; prompt: string; baseRevision?: string },
       ) => {
         spy.generates.push(request);
+        if (options.generateStalls) {
+          // What `withinDeadline` does to a call that never returns. The
+          // real bound is thirty minutes, so the fake throws what the
+          // deadline throws rather than making the test wait for one.
+          throw new Error(OUT_OF_TIME);
+        }
         if (options.generateThrows) throw new Error('provider exploded');
         if (options.preflightRefusal) {
           return {
@@ -597,6 +619,58 @@ describe('what the second build is allowed to claim', () => {
     );
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.equal(outcome.repaired, false);
+  });
+});
+
+describe('a repair whose model call never answered', () => {
+  it('keeps the run rather than failing it', async () => {
+    // #196 review. The step has no retries and `handlePlan` reports an
+    // errored workflow as a failed generation, so letting the deadline
+    // escape would discard the response for a project already accepted,
+    // promoted, settled and billed. The repair is an extra this service
+    // attempts on the caller's behalf; it may not cost them the run.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { generateStalls: true },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(outcome.skipped, 'timed-out');
+    assert.equal(outcome.built, false, 'the first build did run and did fail');
+    assert.equal(
+      outcome.result,
+      undefined,
+      'a repair that never answered handed back a project of its own',
+    );
+  });
+
+  it('charges the caller nothing and the deployment the worst case', async () => {
+    // The split `accountMicroUsd` exists for: the caller pays for the
+    // attempt they got, the account ceiling holds the attempt that was
+    // made. A repair nobody answered is one the caller never received, and
+    // it is something this service chose to attempt for them; the model
+    // was still asked, so the deployment may well have spent it.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { generateStalls: true },
+    );
+    await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.settles.length, 1, 'the repair hold was left open');
+    assert.deepEqual(
+      spy.settles[0]?.split,
+      { account: PARAMS.worstCaseMicroUsd, caller: 0 },
+      'the caller was billed for a repair that never arrived',
+    );
+  });
+
+  it('still settles the hold rather than leaving it for the reclaim', async () => {
+    // Leaving it open is the one outcome that costs the caller their worst
+    // case: `UserBudget.reserve` reclaims and charges it in full.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { generateStalls: true },
+    );
+    await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.settles.length, 1);
   });
 });
 

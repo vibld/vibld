@@ -26,7 +26,7 @@ import type { RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
 import type { BuildFailureReason, buildProject } from './publish-client.ts';
 import type { reserveBudget } from './reserve.ts';
-import { retrying, sleep, withinDeadline } from '@vibld/core';
+import { OUT_OF_TIME, retrying, sleep, withinDeadline } from '@vibld/core';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -526,7 +526,12 @@ export interface RepairOutcome {
    * project was built and does not build, and the ledger could not be asked
    * to pay for a repair.
    */
-  skipped?: 'not-configured' | 'not-the-project' | 'no-budget' | 'unavailable';
+  skipped?:
+    | 'not-configured'
+    | 'not-the-project'
+    | 'no-budget'
+    | 'unavailable'
+    | 'timed-out';
   /**
    * Why a repair that was paid for came back unbuilt (#196 review).
    *
@@ -810,6 +815,20 @@ async function settleRepairHold(
    * a throw, because then the call may well have gone out.
    */
   providerRan: boolean,
+  /**
+   * Whether this repair was given up on rather than answered (#196 review).
+   *
+   * The caller is charged nothing for it and the account ledger still
+   * carries the worst case. The model was asked, so the deployment may well
+   * have spent that money, and the account ceiling exists to bound what
+   * this deployment spends; but the caller never received the repair, and
+   * the repair is something this service decided to attempt on their
+   * behalf rather than something they asked for.
+   *
+   * The same split `accountMicroUsd` was added for: the caller pays for the
+   * attempt they got, the ceiling holds the attempt that was made.
+   */
+  abandoned = false,
 ): Promise<SettlementOutcome> {
   // Remembered across attempts, because `retrying` reports the last failure
   // and the informative one may not be last (#196 review). A first attempt
@@ -832,6 +851,8 @@ async function settleRepairHold(
         },
         usage,
         providerRan,
+        abandoned ? params.worstCaseMicroUsd : undefined,
+        abandoned ? 0 : undefined,
       );
     } catch (error) {
       // The `instanceof` is the whole guard, and it is enough. Every
@@ -1028,6 +1049,8 @@ export async function verifyAndRepair(
   let usage: PlanUsage | undefined;
   let outcome: GenerationOutcome | undefined;
   let settlement: SettlementOutcome | undefined;
+  /** Set when the model call was given up on rather than answered. */
+  let abandoned = false;
   try {
     // Bounded on its own, not only by the step around it (#196 review).
     //
@@ -1063,6 +1086,21 @@ export async function verifyAndRepair(
       ),
       RUN_STEP_TIMEOUT_MS,
     );
+  } catch (error) {
+    // Never out of this function (#196 review). The `verify-and-repair`
+    // step has no retries and `handlePlan` reports an errored Workflow as
+    // a failed generation, so a rejection here discards the response for a
+    // project that was already accepted, promoted, settled and billed. The
+    // repair is an extra this service attempts on the caller's behalf, and
+    // nothing it does may cost them the run it is trying to improve.
+    //
+    // That was true of a throwing `deps.generate` before this bound
+    // existed, and it never fired: `runGeneration` catches the provider and
+    // the store itself, so an escape was something nobody had accounted
+    // for. The deadline made it a path that really happens, and turned a
+    // deliberate fail-closed into a routine way to lose somebody's work.
+    if (!(error instanceof Error) || error.message !== OUT_OF_TIME) throw error;
+    abandoned = true;
   } finally {
     // In a `finally`, because a repair that threw still asked the model and
     // still holds a reservation. Leaving it open is the one outcome that
@@ -1081,6 +1119,7 @@ export async function verifyAndRepair(
       held,
       usage,
       outcome?.providerRan ?? true,
+      abandoned,
     );
   }
 
@@ -1109,6 +1148,13 @@ export async function verifyAndRepair(
         }
       : {}),
   };
+
+  // A repair nobody answered leaves the caller exactly where they were,
+  // with the project the first attempt produced: this hands back no result
+  // of its own, so the workflow returns the one it already had. `built` is
+  // false because the first build ran and said so, which is what bought
+  // the repair in the first place.
+  if (abandoned) return { built: false, skipped: 'timed-out', ...money };
 
   // Accepted is not built (#196 review). The validator says the files are
   // well formed and inside the project root; it says nothing about whether
@@ -1269,6 +1315,22 @@ export async function settleBudget(
    * real request while another is pushed past a ceiling it never spent.
    */
   accountMicroUsd?: number,
+  /**
+   * What the *caller's* reservation settles at, where that is not what the
+   * three cases below would work out (#196 review).
+   *
+   * The mirror of `accountMicroUsd` and used for the same reason: the two
+   * layers answer to different people. A repair whose model call stalled
+   * and was abandoned is an attempt the caller never received, so they are
+   * not billed for it, while the deployment's daily ceiling still has to
+   * hold what may well have been spent on their behalf.
+   *
+   * Kept as an explicit argument rather than folded into `providerRan`.
+   * Saying "the provider never ran" to get a zero would be a lie in the
+   * one field that decides this, and the next reader would find a repair
+   * recorded as never asked for.
+   */
+  callerMicroUsd?: number,
 ): Promise<number> {
   // Three cases, not two, and the third used to be charged as if it were
   // the second.
@@ -1285,7 +1347,8 @@ export async function settleBudget(
   // field existed arrives undefined, and reading that as "never ran" would
   // settle a real generation at zero -- the fail-safe inverted.
   const actual =
-    !usage && providerRan === false ? 0 : usageOrWorstCase(usage, params);
+    callerMicroUsd ??
+    (!usage && providerRan === false ? 0 : usageOrWorstCase(usage, params));
 
   if (params.reservationId !== undefined) {
     // `reservationKey` is always set alongside `reservationId` by index.ts's
