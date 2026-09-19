@@ -298,6 +298,29 @@ jobs:
             echo '--- portability check failed, last 40 lines of build.log ---'
             tail -40 build.log
             echo '--- end of build.log ---'
+            # And the code the compiler was complaining about. The previous
+            # round of this step printed tsc's own lines and no more, and a
+            # run on 2026-09-19 failed with twenty-two errors that all said
+            # the same thing about one file ("unterminated string literal",
+            # then the parser losing its place) without once showing what
+            # was written there. A syntax error is diagnosed from the
+            # source; the diagnosis was still a 34MB download away.
+            #
+            # Every file tsc named, once, with line numbers, so the reading
+            # is the same reading whoever does it.
+            echo '--- the files those errors are in ---'
+            sed -n 's/^\(src\/[^(]*\)(.*$/\1/p' build.log | sort -u | head -5 |
+              while IFS= read -r file; do
+                [ -f "$file" ] || continue
+                echo "----- $file -----"
+                # 120 lines is a whole small component and a third of a big
+                # one. A syntax error is almost always legible from the line
+                # before it, so the head of the file is the part worth
+                # printing rather than a window around a column number that
+                # the parser has already lost track of.
+                head -120 "$file" | cat -n
+              done
+            echo '--- end of source ---'
           fi
 
           {
