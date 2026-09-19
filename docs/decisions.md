@@ -205,6 +205,41 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-19
+
+**An invite also approves the account in Clerk.** One gate, not two: an
+address the operator invites is admitted to Clerk in the same action, rather
+than waiting on a second manual approval. Asked and settled because Clerk
+runs in Waitlist mode (L5, L6), so an invite row alone lets somebody past
+this deployment's access gate and still leaves them unable to create a
+session, which made issuing an invite half an action.
+
+Already the shipped behaviour, which is why this changed no code:
+`handleInviteCreate` is the only path that creates or reinstates an invite
+and it calls `admitToClerk` unconditionally, on every submission rather than
+only when the row changed, so it doubles as the retry path for an address
+whose first attempt ran with no key configured. Its outcome is carried in
+the response rather than thrown, because a deployment with no
+`CLERK_SECRET_KEY` is a supported shape and the invite is this deployment's
+own record.
+
+**citeunseen.io (L52) is deferred past launch.** Not part of the launch bar.
+Unblocked since 2026-09-17 and still unbuilt; nothing else depends on it.
+
+**The Fimo competitive analysis is not merged.** PR #157 is closed. What it
+recommended survives as #158 to #162, of which #162 shipped as ADR-0013;
+recommendations 6 to 9 had no issue and are not carried forward.
+
+**Two of six generated projects did not compile.** Measured against the
+production provider on 2026-09-19, for two unrelated reasons, with the same
+prompt passing on one run and failing on another. A preview now runs the
+project's own `npm run typecheck` in the container it has already started
+and reports what it printed. The remaining exits, export and a run nobody
+previews, are covered by building the project before the plan is accepted
+and giving the model one repair turn when that build fails -- accepted
+deliberately as a container start and an install on every generation, plus a
+second generation's tokens only on the runs that need them.
+
 ### Resolved 2026-09-18
 
 **Security response headers on both hostnames.** Checked against the live
@@ -405,7 +440,7 @@ this deployment does not have.
 
 Raised in the response to PR #70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set -- 10 marketing page types, 6 SaaS screens, 5 style presets -- as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, whose disclosure question is resolved above.
 
-Steps (1) and (2) shipped 2026-09-11 (`packages/ai/src/patterns.ts`, alongside the pre-existing `style-presets.ts`): a closed, versioned set of 10 marketing page patterns and 6 SaaS screen patterns, matched by keyword against the request text and injected as structural guidance for whatever matches -- not semantic retrieval (that still needs #12's embedding provider and spend cap), but the smallest thing that satisfies L50's actual "a handful of relevant patterns injected per request" without either dependency. Step (3) is unblocked as of 2026-09-17: the disclosure framing is resolved above (on by default, disclosed at generation time, emitted as ordinary removable code that the project does not depend on). It is not yet built.
+Steps (1) and (2) shipped 2026-09-11 (`packages/ai/src/patterns.ts`, alongside the pre-existing `style-presets.ts`): a closed, versioned set of 10 marketing page patterns and 6 SaaS screen patterns, matched by keyword against the request text and injected as structural guidance for whatever matches -- not semantic retrieval (that still needs #12's embedding provider and spend cap), but the smallest thing that satisfies L50's actual "a handful of relevant patterns injected per request" without either dependency. Step (3) is unblocked as of 2026-09-17: the disclosure framing is resolved above (on by default, disclosed at generation time, emitted as ordinary removable code that the project does not depend on). It is not yet built, and it is **deferred past launch** (Chris, 2026-09-19): not part of the launch bar, and not to be raised against it. Nothing else here depends on it.
 
 ## Scale without speculative implementation
 
