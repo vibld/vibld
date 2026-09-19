@@ -77,8 +77,12 @@ describe('what a failed build says about itself', () => {
     // one is exactly how the caller starts reading `undefined` and doing
     // nothing, silently, on a failure that should have bought a repair.
     const body = buildProjectBody();
+    // A reason may be worked out rather than written down: the install
+    // failure asks `networkFailure` whether the registry or the project is
+    // at fault. What the count is about is that no refusal lacks one, so
+    // it counts assignments rather than literals.
     const errors = body.match(/\n\s+error:/g)?.length ?? 0;
-    const reasons = body.match(/\n\s+reason: '/g)?.length ?? 0;
+    const reasons = body.match(/\n\s+reason: /g)?.length ?? 0;
     assert.ok(errors > 0, 'no refusals found at all');
     assert.equal(
       reasons,
@@ -97,12 +101,31 @@ describe('what a failed build says about itself', () => {
     );
   });
 
+  it('asks whether a failed install was the registry before blaming the project', () => {
+    // `build-failure.test.ts` proves the classifier is right; this proves
+    // it is consulted. A mutation that dropped the call survived the
+    // classifier's own tests perfectly happily, because they never look at
+    // this file -- and an install failure that is not asked about buys a
+    // second paid model call to repair a project that compiles.
+    const body = buildProjectCode();
+    const at = body.indexOf("reason: 'install'");
+    const computed = body.indexOf('networkFailure(');
+    assert.ok(
+      computed > 0,
+      'the install failure never asks whether the registry was at fault',
+    );
+    assert.ok(
+      at === -1 || computed < at,
+      'the install reason is fixed before the classifier is consulted',
+    );
+  });
+
   it('separates a busy sandbox from a project that will not build', () => {
     // These two were the same value until #194, and conflating them spends
     // a model call on a project that compiles perfectly well.
     const body = buildProjectBody();
     for (const reason of ['busy', 'install', 'build']) {
-      assert.match(body, new RegExp(`reason: '${reason}'`), reason);
+      assert.match(body, new RegExp(`'${reason}'`), reason);
     }
   });
 });
@@ -248,7 +271,7 @@ describe('whose lock a build releases', () => {
       const guard = tail.slice(0, at.index);
       assert.match(
         guard.slice(guard.lastIndexOf('if (')),
-        /if \([^)]*\bours\b/,
+        /if \([^)]*\b(ours|still\?\.token === token)\b/,
         'a delete of the build lock is not guarded by owning it',
       );
     }
@@ -302,5 +325,73 @@ describe('what a build leaves behind', () => {
     const owned = body.indexOf('token === token');
     const destroyed = body.indexOf('this.destroy()');
     assert.ok(owned > 0 && destroyed > owned, 'the destroy is unguarded');
+  });
+});
+
+/**
+ * That a lock expires on silence rather than on project size
+ * (#196 review).
+ *
+ * The TTL exists so a crashed build stops blocking the next one, and it was
+ * being compared against work that is only partly bounded: the two commands
+ * have timeouts, but writing the project in and reading the output back are
+ * one RPC per file. A build that outran the TTL had its workspace emptied
+ * underneath it and then went on to destroy the container the thief was
+ * using, because its own ownership answer predated the destroy it awaited.
+ */
+describe('keeping the lock alive while the build is', () => {
+  it('pushes it forward around every unbounded stretch', () => {
+    const body = buildProjectCode();
+    const renewals = body.match(/renewLock\(token\)/g)?.length ?? 0;
+    assert.ok(
+      renewals >= 4,
+      `only ${renewals} renewals: the TTL still measures project size`,
+    );
+    assert.ok(
+      body.indexOf('renewLock(token)') < body.indexOf('npm install'),
+      'the first renewal comes after the project has been written in',
+    );
+  });
+
+  it('renews inside the loop that reads the output back', () => {
+    // The longest unbounded stretch in the method, and the one most likely
+    // to outrun a TTL on a project with many files.
+    const body = buildProjectCode();
+    const loop = body.slice(body.indexOf('for (const entry of listing.files'));
+    assert.match(loop, /renewLock\(token\)/, 'the read loop never renews');
+  });
+
+  it('renews only while the lock is still its own', () => {
+    // An unconditional renew would let a build that had already been
+    // superseded take its lock back, which starts the same problem from
+    // the other side.
+    const source = readFileSync(
+      join(import.meta.dirname, '..', 'worker', 'preview-sandbox.ts'),
+      'utf8',
+    );
+    const at = source.indexOf('private async renewLock(');
+    assert.ok(at > 0, 'renewLock is not where this expected it');
+    const method = source.slice(at, source.indexOf('\n  private ', at + 10));
+    assert.match(
+      method,
+      /token !== token\)? ?return|mine\?\.token !== token/,
+      'the renewal writes without checking whose lock it is',
+    );
+  });
+
+  it('re-reads the lock after the destroy it awaited', () => {
+    // The ownership answer used for the delete was computed before an
+    // await. A build that overran could delete the lock somebody else took
+    // during that await.
+    const body = buildProjectCode();
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const destroyed = tail.indexOf('this.destroy()');
+    const reread = tail.indexOf('storage.get<BuildLock>', destroyed);
+    const deleted = tail.indexOf('storage.delete(BUILD_LOCK_KEY)');
+    assert.ok(destroyed > 0 && deleted > 0, 'the teardown lost a step');
+    assert.ok(
+      reread > destroyed && reread < deleted,
+      'the delete trusts an ownership answer from before the destroy',
+    );
   });
 });

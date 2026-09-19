@@ -224,9 +224,13 @@ describe('counting the builds too', () => {
       /destroy\(\)[\s\S]*?\(\) => true,[\s\S]*?\(\) => false,/,
       'a destroy that rejected is not treated as a container that went away',
     );
+    // Widened deliberately: a re-read of the lock now sits between the
+    // guard and the delete, because the ownership answer the guard used
+    // predates the destroy it awaited. The property is that the delete is
+    // inside the `ours && gone` branch, not how close it sits to it.
     assert.match(
       tail,
-      /if \(ours && gone\) \{[\s\S]{0,120}?storage\.delete\(BUILD_LOCK_KEY\)/,
+      /if \(ours && gone\) \{[\s\S]*?storage\.delete\(BUILD_LOCK_KEY\)/,
       'the lock is given back without confirming the container is gone',
     );
     assert.match(

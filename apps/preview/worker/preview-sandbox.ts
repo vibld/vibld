@@ -1,5 +1,6 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import { retrying } from '@vibld/core';
+import { networkFailure } from './build-failure.ts';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
 import { HARD_LIFETIME_MS } from './fleet.ts';
@@ -136,6 +137,15 @@ const STORAGE_KEY = 'vibld:preview';
  * all, and what it needs to exclude is another build rather than a preview.
  */
 const BUILD_LOCK_KEY = 'vibld:build';
+
+/**
+ * How often the output-reading loop pushes the lock forward.
+ *
+ * Every file would be an extra storage write per file for no more safety;
+ * never would leave the longest unbounded stretch in this method measured
+ * against a TTL it can outrun.
+ */
+const LOCK_RENEWAL_EVERY = 25;
 
 /** The lock a build holds, and the token that says whose it is. */
 interface BuildLock {
@@ -440,6 +450,10 @@ export class PreviewSandbox extends Sandbox<Env> {
       await this.mkdir('/workspace', { recursive: true });
 
       await this.writeProject(files);
+      // Renewed at every boundary between bounded and unbounded work, so
+      // the TTL is measuring silence rather than project size. Writing the
+      // project in is one RPC per file and is the first such stretch.
+      await this.renewLock(token);
 
       const installStartedAt = Date.now();
       const install = await this.exec('npm install --no-audit --no-fund', {
@@ -460,12 +474,26 @@ export class PreviewSandbox extends Sandbox<Env> {
             error: 'npm install did not finish within the time allowed.',
           };
         }
+        // A registry or DNS outage is not the project's fault, and it
+        // exits fast rather than reaching the timeout above, so the clock
+        // cannot tell them apart (#196 review). Left as `install` it buys
+        // a repair: a second paid model call asked to fix a project that
+        // compiles perfectly well, whose reply cannot help, on a day when
+        // npm is having trouble and every caller hits it at once.
+        //
+        // Matching on wording, which #194 deliberately moved away from for
+        // the *caller's* decision -- but the caller decides from a typed
+        // reason, and this is where that reason is worked out. npm's own
+        // error codes are the only signal there is, and erring toward
+        // `sandbox` is the cheap direction: at worst a genuine dependency
+        // error goes unrepaired, which spends nothing and claims nothing.
         return {
-          reason: 'install',
+          reason: networkFailure(install.stderr) ? 'sandbox' : 'install',
           error: `npm install failed (exit ${install.exitCode}): ${install.stderr.slice(-2000)}`,
         };
       }
 
+      await this.renewLock(token);
       const buildStartedAt = Date.now();
       const build = await this.exec('npm run build', {
         cwd: '/workspace',
@@ -493,6 +521,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         };
       }
 
+      await this.renewLock(token);
       const outputDir = `/workspace/${BUILD_OUTPUT_DIR}`;
       const listing = await this.listFiles(outputDir, { recursive: true });
       if (!listing.success) {
@@ -506,6 +535,11 @@ export class PreviewSandbox extends Sandbox<Env> {
       const skipped: string[] = [];
       for (const entry of listing.files) {
         if (entry.type !== 'file') continue;
+        // The loop is one RPC per output file, so it is the longest
+        // unbounded stretch here and the one most likely to outrun a TTL.
+        if (output.length % LOCK_RENEWAL_EVERY === 0) {
+          await this.renewLock(token);
+        }
         const read = await this.readFile(`${outputDir}/${entry.relativePath}`);
         if (read.encoding === 'base64') {
           skipped.push(entry.relativePath);
@@ -569,7 +603,15 @@ export class PreviewSandbox extends Sandbox<Env> {
       // mid-teardown hands this user's next build a container that is
       // about to die.
       if (ours && gone) {
-        await this.ctx.storage.delete(BUILD_LOCK_KEY);
+        // Read again rather than trusting `ours`, which was answered
+        // before the destroy was awaited (#196 review). If this build had
+        // overrun and somebody took the lock during that await, deleting
+        // on the stale answer would delete *their* lock and hand a third
+        // build the workspace the second was using.
+        const still = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+        if (still?.token === token) {
+          await this.ctx.storage.delete(BUILD_LOCK_KEY);
+        }
       }
 
       // Given back when this container is confirmed gone, and when it was
@@ -881,6 +923,34 @@ export class PreviewSandbox extends Sandbox<Env> {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Push this build's lock forward, while it is still this build's.
+   *
+   * The TTL is what lets a crashed build stop blocking the next one, and
+   * it was being compared against work that is only partly bounded: the
+   * two commands have timeouts, but writing the project in and reading the
+   * output back are one RPC per file and scale with the project (#196
+   * review). A build that outran the TTL had its lock stolen, its
+   * workspace emptied underneath it, and -- worse -- went on to destroy
+   * the container the thief was now using.
+   *
+   * Renewing removes the premise rather than racing it: a lock goes stale
+   * only when nothing has touched it for the whole TTL, which now means
+   * the build really is gone.
+   *
+   * Conditional on still owning it, like every other write to this key. An
+   * unconditional renew would let a build that *had* been superseded take
+   * its lock back and start the whole problem again from the other side.
+   */
+  private async renewLock(token: string): Promise<void> {
+    const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+    if (mine?.token !== token) return;
+    await this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
+      startedAt: Date.now(),
+      token,
+    });
   }
 
   private async writeProject(files: ProjectFile[]): Promise<void> {
