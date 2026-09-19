@@ -16,6 +16,17 @@
     -->
     <title>Builder | vibld</title>
     <!--
+      Belt and braces with public/robots.txt, and the half that survives a
+      crawler reaching a page by a link rather than by the root. robots.txt
+      asks not to be crawled; this asks not to be indexed, and the two fail
+      independently: a URL shared anywhere can be indexed without ever being
+      fetched, which robots.txt alone does not prevent.
+
+      Correct for every page on this host, because every page on this host
+      needs an account.
+    -->
+    <meta name="robots" content="noindex, nofollow" />
+    <!--
       This shell shipped no icon at all, so the tab showed the mark on
       vibld.com and a blank page glyph on app.vibld.com. Both files are
       generated from @vibld/brand by apps/marketing/scripts/brand-assets.ts,

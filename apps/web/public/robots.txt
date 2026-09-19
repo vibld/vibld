@@ -1,0 +1,16 @@
+# https://app.vibld.com
+#
+# The builder is the signed-in product. Every page behind this host needs an
+# account, and access is invite-only, so there is nothing here a crawler can
+# reach and nothing worth indexing.
+#
+# Stated rather than assumed. Without this file the Worker's SPA fallback
+# answered /robots.txt with the application shell: a 200 and a page of HTML,
+# which a crawler reads as "no rules" rather than as "no".
+#
+# The public product lives on the marketing site, which welcomes crawlers
+# and carries the sitemap.
+User-agent: *
+Disallow: /
+
+Sitemap: https://vibld.com/sitemap.xml
