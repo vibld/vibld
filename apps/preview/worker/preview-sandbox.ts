@@ -295,11 +295,12 @@ export class PreviewSandbox extends Sandbox<Env> {
    * auto-publish primary path: apps/web calls this, then hands the result
    * straight to apps/publish's `/internal/publish`; since #194 the
    * generation workflow calls it too, to find out whether what it just
-   * produced compiles). Unlike `startPreview`, this never touches
-   * `PreviewFleet` -- a build finishes within one request's lifetime,
-   * holding no exposed port and no long-lived dev server, so L9's "1
-   * concurrent preview per user" accounting (which exists to bound exactly
-   * those two things) does not apply to it.
+   * produced compiles). It takes a `PreviewFleet` ticket like a preview
+   * does, but from an instance of its own, because it holds one of the
+   * platform's containers while it runs; `capacity.ts` states how that
+   * budget is divided. What it does not use is the preview queue, so two
+   * builds for one user are excluded by this method's own lock rather than
+   * by any preview count.
    *
    * It runs in an instance of its own, named for building rather than for
    * the user's preview (`worker/index.ts`'s `buildSandboxName`), under the

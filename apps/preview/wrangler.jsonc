@@ -8,9 +8,9 @@
   // preview session" estimate. max_instances is the whole container budget
   // for this class, enforced by Cloudflare as a hard platform limit
   // underneath PreviewFleet's own queue. It is no longer the same number as
-  // L9's preview cap: since #194 a build runs in an instance of this class
-  // too and takes no fleet ticket, so worker/capacity.ts splits this budget
-  // into the fleet's cap plus headroom for builds, and capacity.test.ts
+  // L9's preview cap, because builds run in this class too: how it is
+  // divided, and the open question about L9's twenty-five, are stated once
+  // in worker/capacity.ts rather than restated here. capacity.test.ts
   // asserts this number and that file still agree.
   "containers": [
     {

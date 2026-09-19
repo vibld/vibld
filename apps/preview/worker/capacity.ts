@@ -8,11 +8,12 @@
  * every container was a preview.
  *
  * Since #196 it is not: a build runs in an instance of the same class,
- * named for building, and takes no fleet ticket (#196 review). The fleet
- * cannot see those, so a cap equal to the platform limit lets it admit a
- * preview the platform has no room for, and a deployment at its preview cap
- * has no room left to verify or publish anything. Both halves of that are
- * bad in the same way: a number that means something it does not.
+ * named for building, and holds one of the platform's containers while it
+ * does. The preview queue cannot see those, so a preview cap equal to the
+ * platform limit lets it admit a preview the platform has no room for, and
+ * a deployment at its preview cap has no room left to verify or publish
+ * anything. Both halves of that are bad in the same way: a number that
+ * means something it does not.
  *
  * So the platform limit is split rather than shared, and both sides are
  * counted. Previews fill the fleet's cap; builds fill the remainder,
