@@ -260,3 +260,33 @@ describe('whose lock a build releases', () => {
     }
   });
 });
+
+/**
+ * That a finished build gives its container back (#196 review).
+ *
+ * Builds share the platform's container budget with previews now, and a
+ * container that has merely stopped working still holds a slot for the
+ * class's ten-minute `sleepAfter`. Nothing in it is worth keeping: the next
+ * build empties the workspace before it starts, so idling buys a container
+ * start and costs a preview somebody else wanted.
+ */
+describe('what a build leaves behind', () => {
+  it('destroys its container on the way out', () => {
+    const body = buildProjectCode();
+    assert.match(
+      body,
+      /this\.destroy\(\)/,
+      'a finished build holds its container until sleepAfter',
+    );
+  });
+
+  it('destroys it only while the lock is still its own', () => {
+    // The sharper half of the ownership check. A build that overran is
+    // running in the same container as whoever now holds the lock, so
+    // destroying it there would kill their build rather than free a slot.
+    const body = buildProjectCode();
+    const owned = body.indexOf('token === token');
+    const destroyed = body.indexOf('this.destroy()');
+    assert.ok(owned > 0 && destroyed > owned, 'the destroy is unguarded');
+  });
+});

@@ -82,6 +82,11 @@ function deps(
      * left open: the caller's own hold closed, at this figure.
      */
     settleAccountOnly?: number;
+    /**
+     * That, but only on the first attempt: every later one fails before
+     * reaching the caller's ledger at all, so it knows nothing.
+     */
+    settleAccountOnlyFirst?: number;
     /** What a settlement that succeeds says the repair cost. */
     settleCost?: number;
   } = {},
@@ -125,6 +130,15 @@ function deps(
             options.settleAccountOnly,
             new Error('the account object is unreachable'),
           );
+        }
+        if (options.settleAccountOnlyFirst !== undefined) {
+          if (spy.settles.length === 1) {
+            throw new PartialSettlement(
+              options.settleAccountOnlyFirst,
+              new Error('the account object is unreachable'),
+            );
+          }
+          throw new Error('the user ledger is unreachable too now');
         }
         if (spy.settles.length <= (options.settleRejects ?? 0)) {
           throw new Error('the budget object is unreachable');
@@ -424,6 +438,28 @@ describe('which ledger layer was left open', () => {
       'a caller already billed correctly was recorded at the worst case',
     );
     assert.equal(outcome.trace?.costMicroUsd, 6_400);
+  });
+
+  it('keeps what an earlier attempt established when a later one knows less', async () => {
+    // #196 review, P2. `retrying` reports the last failure, and the
+    // informative one need not be last: a first attempt that closed the
+    // caller's layer and failed on the account's knows exactly what they
+    // were charged, while a second that cannot reach the caller's ledger at
+    // all knows nothing. Reading only the final error threw away the figure
+    // the first attempt had already established, and fell back to the worst
+    // case for a caller who had been billed correctly minutes earlier.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true }, settleAccountOnlyFirst: 7_700 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.ok(spy.settles.length > 1, 'the settlement was not retried');
+    assert.equal(
+      outcome.repairCostMicroUsd,
+      7_700,
+      'a later, less informed failure erased what the first attempt knew',
+    );
+    assert.equal(outcome.settled, false);
   });
 
   it('still says the settlement did not finish', async () => {

@@ -709,9 +709,16 @@ async function settleRepairHold(
    */
   providerRan: boolean,
 ): Promise<SettlementOutcome> {
-  const attempted = await retrying(
-    () =>
-      deps.settle(
+  // Remembered across attempts, because `retrying` reports the last failure
+  // and the informative one may not be last (#196 review). A first attempt
+  // that closed the caller's layer and failed on the account's knows what
+  // they were charged; a second attempt that cannot reach the caller's
+  // ledger at all does not, and reading only the final error erased the
+  // figure the first one had already established.
+  let charged: number | undefined;
+  const attempted = await retrying(async () => {
+    try {
+      return await deps.settle(
         env.USER_BUDGET,
         {
           userId: params.userId,
@@ -723,9 +730,17 @@ async function settleRepairHold(
         },
         usage,
         providerRan,
-      ),
-    deps.wait,
-  );
+      );
+    } catch (error) {
+      // The `instanceof` is the whole guard, and it is enough. Every
+      // attempt recomputes the same figure from the same usage and prices,
+      // so which attempt is remembered cannot matter; what matters is that
+      // a later failure of a *different* kind, one that never reached the
+      // caller's ledger and so knows nothing, leaves this alone.
+      if (error instanceof PartialSettlement) charged = error.charged;
+      throw error;
+    }
+  }, deps.wait);
   if (attempted.ok) return { cost: attempted.value, settled: true };
   // Worth a line of its own: this is a hold the reclaim will charge at full
   // worst case, and nothing else in the system will say so until then.
@@ -736,9 +751,7 @@ async function settleRepairHold(
   // usage came to has been billed correctly, and only the shared ceiling is
   // still holding a worst case. Reporting the worst case for both would
   // overstate a bill that is already right, on the record the reader sees.
-  if (attempted.error instanceof PartialSettlement) {
-    return { cost: attempted.error.charged, settled: false };
-  }
+  if (charged !== undefined) return { cost: charged, settled: false };
   return { settled: false };
 }
 

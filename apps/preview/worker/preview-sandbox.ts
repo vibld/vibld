@@ -7,6 +7,9 @@ import {
   BUILD_INSTALL_TIMEOUT_MS,
   BUILD_LOCK_TTL_MS,
 } from './build-limits.ts';
+// L9's account-wide preview cap, which is no longer the whole container
+// budget: see `capacity.ts` for what builds take out of it.
+import { ACCOUNT_MAX_IN_FLIGHT } from './capacity.ts';
 
 /**
  * Vibld's own untrusted-execution sandbox (ADR-0004; docs/decisions.md L7,
@@ -50,9 +53,6 @@ import {
 export interface Env {
   Fleet: DurableObjectNamespace<PreviewFleet>;
 }
-
-/** L9: the account-wide cap this sandbox asks `PreviewFleet` to enforce. */
-const ACCOUNT_MAX_IN_FLIGHT = 25;
 
 /** Vite's default dev-server port; every generated project here uses Vite. */
 const DEV_PORT = 5173;
@@ -483,6 +483,22 @@ export class PreviewSandbox extends Sandbox<Env> {
       const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
       if (mine?.token === token) {
         await this.ctx.storage.delete(BUILD_LOCK_KEY);
+        // Given back as well as unlocked (#196 review). A build container
+        // that merely stops working still holds a platform container slot
+        // for the class's ten-minute `sleepAfter`, and those slots are now
+        // shared with previews. There is nothing left in it worth keeping:
+        // the next build empties the workspace before it starts, so the
+        // only thing idling buys is a container start.
+        //
+        // Under the same ownership check as the unlock, and for a sharper
+        // reason: if this build overran and somebody else now holds the
+        // lock, they are running in this very container, and destroying it
+        // would kill their build rather than free a slot.
+        await this.destroy().catch(() => {
+          // A container that will not go away is the platform's to
+          // reclaim. Failing the build over it would turn a capacity
+          // problem into a wrong answer about somebody's project.
+        });
       }
     }
   }
