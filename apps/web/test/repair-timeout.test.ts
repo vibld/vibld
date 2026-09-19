@@ -4,10 +4,12 @@ import { describe, it } from 'node:test';
 import { RUN_ABANDONED_AFTER_MS, RUN_STEP_TIMEOUT_MS } from '@vibld/ai';
 import {
   BUILD_CALL_TIMEOUT_MS,
+  LEDGER_CALL_TIMEOUT_MS,
   REBUILD_WAIT_BUDGET_MS,
   REPAIR_BUILD_ALLOWANCE_MS,
   REPAIR_STEP_TIMEOUT_MS,
 } from '../worker/generation-run.ts';
+import { RETRY_ATTEMPTS, RETRY_DELAY_MS } from '@vibld/core';
 import {
   BUILD_COMPILE_TIMEOUT_MS,
   BUILD_INSTALL_TIMEOUT_MS,
@@ -65,6 +67,38 @@ describe('how long a repair is allowed to take', () => {
       BUILD_CALL_TIMEOUT_MS >
         BUILD_INSTALL_TIMEOUT_MS + BUILD_COMPILE_TIMEOUT_MS,
     );
+  });
+
+  /**
+   * Everything the step waits on that is not the model call, added up
+   * (#196 review).
+   *
+   * Four rounds of review each found another await that could stay pending
+   * rather than reject, and each fix added a bound. The point of listing
+   * them here is that the allowance is the sum of them: a bound nobody
+   * adds up is how this number was wrong twice already.
+   */
+  const ledgerWork =
+    // The reservation, once.
+    LEDGER_CALL_TIMEOUT_MS +
+    // The settlement, every attempt plus the waits between them.
+    (RETRY_ATTEMPTS * LEDGER_CALL_TIMEOUT_MS +
+      (RETRY_ATTEMPTS - 1) * RETRY_DELAY_MS);
+
+  it('funds everything the step waits on, not only the builds', () => {
+    const waited = oneBuild * 2 + REBUILD_WAIT_BUDGET_MS + ledgerWork;
+    assert.ok(
+      REPAIR_BUILD_ALLOWANCE_MS >= waited + 60_000,
+      `the step can wait ${waited}ms and the allowance is ${REPAIR_BUILD_ALLOWANCE_MS}ms`,
+    );
+  });
+
+  it('keeps a ledger call far shorter than a build', () => {
+    // These are same-colocation object calls and `retrying` waits a second
+    // between attempts, which is a pace that assumes sub-second answers. A
+    // ledger bound anywhere near a build's would make the settlement the
+    // biggest thing in the step.
+    assert.ok(LEDGER_CALL_TIMEOUT_MS * 10 < BUILD_CALL_TIMEOUT_MS);
   });
 
   it('leaves room for the work the build bounds do not cover', () => {

@@ -93,6 +93,8 @@ function deps(
     buildStallsOn?: number;
     /** The reservation could not be asked for at all, as against refused. */
     reserveThrows?: boolean;
+    /** The ledger never answers the reservation, as against rejecting. */
+    reserveStalls?: boolean;
     /** How many settlement attempts reject before one is allowed through. */
     settleRejects?: number;
     /**
@@ -136,6 +138,10 @@ function deps(
       }) as never,
       reserve: (async () => {
         spy.reserves += 1;
+        if (options.reserveStalls) {
+          // What `withinDeadline` does to a ledger that never answers.
+          throw new Error(OUT_OF_TIME);
+        }
         if (options.reserveThrows) {
           throw new Error('the budget object is unreachable');
         }
@@ -627,6 +633,46 @@ describe('what the second build is allowed to claim', () => {
     );
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.equal(outcome.repaired, false);
+  });
+});
+
+describe('a ledger that never answers', () => {
+  it('reads as unavailable when the reservation stays pending', async () => {
+    // #196 review. A ledger that rejects is caught; one that never answers
+    // is not, because a pending promise reaches no catch. The step then
+    // runs out and fails a Workflow whose project was already accepted,
+    // promoted, settled and billed.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { reserveStalls: true },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.deepEqual(outcome, { built: false, skipped: 'unavailable' });
+    assert.equal(spy.generates.length, 0, 'a repair went out unfunded');
+  });
+
+  it('bounds the reservation and every settlement attempt', async () => {
+    // The behavioural half above cannot see the bound: the fake throws
+    // what the deadline throws, so it proves the catch and nothing about
+    // whether a deadline exists. Twice now a fake that produced the
+    // symptom has tested the handler rather than the mechanism, so the
+    // wiring gets its own assertion, and `repair-timeout.test.ts` holds
+    // the arithmetic that makes the number the right one.
+    const source = await workflowSource('generation-run.ts');
+    for (const call of ['deps.reserve(', 'deps.settle(']) {
+      const at = source.indexOf(call);
+      assert.ok(at > 0, `${call} is no longer where this expected it`);
+      assert.match(
+        source.slice(Math.max(0, at - 200), at),
+        /withinDeadline\(\s*$/,
+        `${call} can stay pending until the step dies`,
+      );
+    }
+    assert.equal(
+      source.match(/LEDGER_CALL_TIMEOUT_MS,/g)?.length,
+      2,
+      'one of the two ledger calls is bounded by something else',
+    );
   });
 });
 

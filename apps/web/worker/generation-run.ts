@@ -386,7 +386,7 @@ export function worthRepairing(
  * the second build, so its life is the model call rather than the step.
  * RUN_ABANDONED_AFTER_MS bounds the hold, not the step (#194).
  */
-export const REPAIR_BUILD_ALLOWANCE_MS = 28 * 60_000;
+export const REPAIR_BUILD_ALLOWANCE_MS = 30 * 60_000;
 export const REPAIR_STEP_TIMEOUT_MS =
   RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS;
 
@@ -443,6 +443,26 @@ export const REPAIR_STEP_TIMEOUT_MS =
  * inside `REPAIR_BUILD_ALLOWANCE_MS`.
  */
 export const BUILD_CALL_TIMEOUT_MS = 13 * 60_000;
+
+/**
+ * How long one call to a budget Durable Object may stay pending
+ * (#196 review).
+ *
+ * The same hazard as the build call and the model call, on the last two
+ * awaits in this step that did not have it: a ledger that *rejects* is
+ * caught and reported, and a ledger that simply never answers is not,
+ * because a pending promise reaches no catch. The step then runs out and
+ * fails a Workflow whose project was already accepted, promoted, settled
+ * and billed.
+ *
+ * Seconds rather than minutes, because these are same-colocation object
+ * calls and `retrying` already waits a second between attempts, which is a
+ * pace that assumes sub-second answers. Generous against that, and small
+ * enough that the whole settlement, retries included, still fits inside
+ * `REPAIR_BUILD_ALLOWANCE_MS` beside two builds. `repair-timeout.test.ts`
+ * adds it up.
+ */
+export const LEDGER_CALL_TIMEOUT_MS = 15_000;
 
 export const REBUILD_WAIT_INTERVAL_MS = 5_000;
 export const REBUILD_WAIT_ATTEMPTS = 6;
@@ -862,20 +882,25 @@ async function settleRepairHold(
   let charged: number | undefined;
   const attempted = await retrying(async () => {
     try {
-      return await deps.settle(
-        env.USER_BUDGET,
-        {
-          userId: params.userId,
-          reservationId: held.ok ? held.layers.user.id : undefined,
-          reservationKey: held.ok ? held.layers.userReservationKey : undefined,
-          accountReservationId: held.ok ? held.layers.account.id : undefined,
-          worstCaseMicroUsd: params.worstCaseMicroUsd,
-          prices: params.prices,
-        },
-        usage,
-        providerRan,
-        abandoned ? params.worstCaseMicroUsd : undefined,
-        abandoned ? 0 : undefined,
+      return await withinDeadline(
+        deps.settle(
+          env.USER_BUDGET,
+          {
+            userId: params.userId,
+            reservationId: held.ok ? held.layers.user.id : undefined,
+            reservationKey: held.ok
+              ? held.layers.userReservationKey
+              : undefined,
+            accountReservationId: held.ok ? held.layers.account.id : undefined,
+            worstCaseMicroUsd: params.worstCaseMicroUsd,
+            prices: params.prices,
+          },
+          usage,
+          providerRan,
+          abandoned ? params.worstCaseMicroUsd : undefined,
+          abandoned ? 0 : undefined,
+        ),
+        LEDGER_CALL_TIMEOUT_MS,
       );
     } catch (error) {
       // The `instanceof` is the whole guard, and it is enough. Every
@@ -1058,15 +1083,30 @@ export async function verifyAndRepair(
   // nothing, and nothing is not a reason to throw away the caller's files.
   let held: Awaited<ReturnType<typeof reserveBudget>>;
   try {
-    held = await deps.reserve(
-      env,
-      params.userId,
-      params.worstCaseMicroUsd,
-      params.monthlyAllowance!,
-      params.topupCeiling!,
-      now(),
+    held = await withinDeadline(
+      deps.reserve(
+        env,
+        params.userId,
+        params.worstCaseMicroUsd,
+        params.monthlyAllowance!,
+        params.topupCeiling!,
+        now(),
+      ),
+      LEDGER_CALL_TIMEOUT_MS,
     );
   } catch {
+    // Including the deadline (#196 review). A ledger that never answers
+    // has said exactly as much as one that rejects, which is nothing.
+    //
+    // What giving up cannot do is call back a reservation that lands
+    // afterwards. There is no `waitUntil` inside a Workflow step, so a
+    // hold made after this gave up waiting is one nobody settles, and
+    // `UserBudget.reserve` charges it at its worst case when the reclaim
+    // reaches it. That is the same bounded outcome this step already
+    // records when a settlement cannot be made at all, and it is the
+    // cheaper side of the trade: the alternative is waiting on a ledger
+    // that is not answering until the step dies, which loses the caller
+    // the project as well as the money.
     return { built: false, skipped: 'unavailable' };
   }
   // Out of budget is not a failure of this step. The reader keeps the
