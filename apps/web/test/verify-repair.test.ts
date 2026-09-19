@@ -236,13 +236,18 @@ describe('buying one repair', () => {
   });
 
   it('spends nothing on a sandbox that was merely busy', async () => {
+    // And claims nothing either. A refusal issued before any work happened
+    // is not a project that failed to build, so `built` is absent rather
+    // than false: the same rule as an unreachable build service, one line
+    // up. Saying false would put "this project does not build" in the log
+    // for a project nothing ever compiled.
     const { spy, deps: d } = deps({
       ok: false,
       reason: 'busy',
-      error: 'A preview is currently running for this project.',
+      error: 'Another build is already running for this project.',
     });
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
-    assert.deepEqual(outcome, { built: false, skipped: 'not-the-project' });
+    assert.deepEqual(outcome, { skipped: 'not-the-project' });
     assert.equal(spy.reserves, 0);
     assert.equal(spy.generates.length, 0);
   });

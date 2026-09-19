@@ -828,13 +828,17 @@ export async function verifyAndRepair(
   // is claimed and no money is spent.
   if (!first) return { skipped: 'unavailable' };
   if (first.ok) return { built: true };
+  // `built` reports what a build measured, and nothing else. `install` and
+  // `build` are a build that ran and judged the project; `busy`, `sandbox`,
+  // `output` and an unreadable reason are refusals or faults of the service
+  // that say nothing about the files. Saying `built: false` for one of
+  // those claims a project failed a check that never ran, which is the same
+  // mistake one layer down as reading acceptance as a build.
+  const judged = first.reason === 'install' || first.reason === 'build';
   if (!worthRepairing(first, params)) {
     return {
-      built: false,
-      skipped:
-        first.reason === 'install' || first.reason === 'build'
-          ? 'no-budget'
-          : 'not-the-project',
+      ...(judged ? { built: false } : {}),
+      skipped: judged ? 'no-budget' : 'not-the-project',
     };
   }
 

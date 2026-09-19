@@ -354,6 +354,31 @@ export class PreviewSandbox extends Sandbox<Env> {
     await this.ctx.storage.put(BUILD_LOCK_KEY, Date.now());
 
     try {
+      // Emptied first, because this container is reused (#196 review).
+      // `writeProject` writes the paths it is given and removes nothing, so
+      // a second build in the same instance compiles the new snapshot on
+      // top of whatever the last one left: a file the repair deleted is
+      // still there to satisfy an import, and a broken file it replaced by
+      // a differently-named one is still there to fail the build. Either
+      // way `built` and `repaired` would describe a tree that is not the
+      // one handed back, which is the whole thing this feature is for.
+      //
+      // node_modules goes with it, deliberately, though it costs an install
+      // on every build and two on a repair. Keeping it would leave a
+      // package installed for an earlier project available to a later one
+      // that never declared it, so a project importing something missing
+      // from its own package.json would build here and fail anywhere else.
+      // That is one of the two production failures behind #194: this check
+      // is worth having only if it measures what a clean environment sees.
+      const cleared = await this.exec('rm -rf /workspace', { cwd: '/' });
+      if (!cleared.success) {
+        return {
+          reason: 'sandbox',
+          error: `The build workspace could not be emptied (exit ${cleared.exitCode}).`,
+        };
+      }
+      await this.mkdir('/workspace', { recursive: true });
+
       await this.writeProject(files);
 
       const install = await this.exec('npm install --no-audit --no-fund', {

@@ -47,6 +47,30 @@ function buildProjectBody(): string {
   return source.slice(at, end);
 }
 
+/**
+ * The same region with its prose taken out.
+ *
+ * The comments in `buildProject` discuss the very things some of these
+ * assertions look for -- `writeProject`, `node_modules`, the order they
+ * happen in -- so a test that searched the raw text would be reading the
+ * explanation rather than the code, and would pass or fail on how the
+ * comment was worded. Only lines that are not comments count.
+ */
+function buildProjectCode(): string {
+  return buildProjectBody()
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return (
+        trimmed.length > 0 &&
+        !trimmed.startsWith('//') &&
+        !trimmed.startsWith('*') &&
+        !trimmed.startsWith('/*')
+      );
+    })
+    .join('\n');
+}
+
 describe('what a failed build says about itself', () => {
   it('gives every refusal a reason', () => {
     // Counted rather than spot-checked: a new early return added without
@@ -124,6 +148,64 @@ describe('one build at a time', () => {
       body,
       /finally \{[\s\S]*?storage\.delete\(BUILD_LOCK_KEY\)/,
       'the build lock is released on some paths and not others',
+    );
+  });
+});
+
+/**
+ * That a build measures the snapshot it was given, and not what the last
+ * one left behind (#196 review).
+ *
+ * `writeProject` writes the paths it is handed and removes nothing, and the
+ * build container is now reused across builds for a user. So the second
+ * build of a repair would compile the new files on top of the old ones: a
+ * file the repair deleted still satisfying an import, or one it replaced
+ * under a different name still failing the build. `built` and `repaired`
+ * would then be honest measurements of a tree nobody is going to receive,
+ * which is the same defect as reading acceptance as a build, one layer out.
+ */
+describe('what a build actually compiles', () => {
+  it('empties the workspace before it writes the snapshot', () => {
+    const body = buildProjectCode();
+    const cleared = body.indexOf('rm -rf /workspace');
+    assert.ok(cleared > 0, 'the workspace is never emptied');
+    assert.ok(
+      cleared < body.indexOf('writeProject'),
+      'the snapshot is written before the old one is cleared away',
+    );
+  });
+
+  it('refuses rather than measuring a workspace it could not empty', () => {
+    // A build over a tree that is half the last project is worse than no
+    // build: it answers the question with something that was never asked.
+    const body = buildProjectCode();
+    const cleared = body.indexOf('rm -rf /workspace');
+    const checked = body.indexOf('cleared.success', cleared);
+    assert.ok(checked > cleared, 'the clear result is never checked');
+    assert.ok(
+      checked < body.indexOf('writeProject'),
+      'the snapshot is written before the clear was checked',
+    );
+  });
+
+  it('clears the whole workspace, node_modules included', () => {
+    // Asserted as "the directory itself goes", not as "the word
+    // node_modules does not appear". The absence of a word is the weaker
+    // claim, and the first version of this test made it: a clear that named
+    // a few paths to remove preserved node_modules perfectly well without
+    // ever spelling it, and the test passed. What matters is that the root
+    // goes, because that is what makes the clear complete whatever the
+    // project happens to contain.
+    //
+    // It costs an install per build, and two on a repair. A package
+    // installed for an earlier project would otherwise satisfy a later one
+    // that never declared it, so a project missing a dependency from its
+    // own package.json would build here and fail everywhere else, which is
+    // one of the two production failures this feature exists for.
+    assert.match(
+      buildProjectCode(),
+      /rm -rf \/workspace['"`]/,
+      'the clear names paths inside the workspace, so what it does not name survives',
     );
   });
 });

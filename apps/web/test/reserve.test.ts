@@ -32,9 +32,14 @@ interface Call {
   period: string;
 }
 
-/** A ledger that answers however the test says, and records what it was asked. */
+/**
+ * A ledger that answers however the test says, and records what it was
+ * asked. A key staged as `'reject'` rather than a verdict stands for the
+ * Durable Object being unreachable: it throws instead of denying, which is
+ * a different thing and costs the same hold.
+ */
 function ledgerThat(
-  answers: Record<string, Reservation>,
+  answers: Record<string, Reservation | 'reject'>,
   nextId = 100,
 ): {
   env: ReserveEnv;
@@ -57,6 +62,9 @@ function ledgerThat(
             reserves.push({ key, worstCase, ceiling, maxInFlight, period });
             const answer = answers[key];
             assert.ok(answer, `no answer staged for ${key}`);
+            if (answer === 'reject') {
+              throw new Error(`${key} is unreachable`);
+            }
             return answer.verdict.allow ? { ...answer, id: (id += 1) } : answer;
           },
           async settle(reservationId: number, actual: number) {
@@ -183,5 +191,76 @@ describe('what a run has to get past before it may start', () => {
     for (const call of reserves) {
       assert.equal(call.worstCase, 1_610_000, call.key);
     }
+  });
+});
+
+/**
+ * That an account hold is never left behind (#196 review).
+ *
+ * The account layer's ceiling is the deployment's, not one caller's (L29),
+ * so a hold abandoned here is not that caller's problem: the reclaim
+ * charges it in full against the day everybody shares. A user ledger that
+ * keeps rejecting would spend the whole deployment's daily ceiling on runs
+ * that never went out, and refuse everybody else.
+ */
+describe('when a later layer cannot answer at all', () => {
+  it('releases the account hold before the error escapes', async () => {
+    const { env, settles } = ledgerThat({
+      [ACCOUNT_BUDGET_KEY]: ALLOW,
+      user_1: 'reject',
+    });
+    await assert.rejects(() =>
+      reserveBudget(env, 'user_1', 1_000, 5_000, 0, NOW),
+    );
+    assert.deepEqual(
+      settles.map((call) => ({ key: call.key, actual: call.actual })),
+      [{ key: ACCOUNT_BUDGET_KEY, actual: 0 }],
+      'the account hold was left for the reclaim to charge in full',
+    );
+  });
+
+  it('releases it when the top-up ledger is the one that cannot answer', async () => {
+    // The second place this can happen, and it was the one with no release
+    // at all on any path: by here the account layer has allowed and the
+    // monthly allowance is exhausted.
+    const { env, settles } = ledgerThat({
+      [ACCOUNT_BUDGET_KEY]: ALLOW,
+      user_1: OVER,
+      [topupKeyFor('user_1')]: 'reject',
+    });
+    await assert.rejects(() =>
+      reserveBudget(env, 'user_1', 1_000, 5_000, 900, NOW),
+    );
+    assert.deepEqual(
+      settles.map((call) => call.key),
+      [ACCOUNT_BUDGET_KEY],
+    );
+  });
+
+  it('still reports the ledger failure rather than a release failure', async () => {
+    // The release goes to the same ledger that just rejected. If its own
+    // failure replaced the original, the error would name the cleanup
+    // instead of the cause, and nothing would say which ledger was down.
+    const { env } = ledgerThat({
+      [ACCOUNT_BUDGET_KEY]: ALLOW,
+      user_1: 'reject',
+    });
+    const settleless = {
+      USER_BUDGET: {
+        getByName(key: string) {
+          const real = env.USER_BUDGET!.getByName(key);
+          return {
+            reserve: real.reserve.bind(real),
+            settle: async () => {
+              throw new Error('the release failed too');
+            },
+          };
+        },
+      } as unknown as ReserveEnv['USER_BUDGET'],
+    };
+    await assert.rejects(
+      () => reserveBudget(settleless, 'user_1', 1_000, 5_000, 0, NOW),
+      /user_1 is unreachable/,
+    );
   });
 });

@@ -90,10 +90,10 @@ export async function reserveAccount(
  * one first (cheaper to check, and failing it means nothing else needs
  * touching), then the caller's own monthly tier allowance (L35-L39), then --
  * only if that allowance is exhausted, not merely low -- their top-up
- * credit balance (L37). If an earlier layer allows but a later one refuses,
- * the earlier hold is released at once: a run that never starts must never
- * leave a phantom charge sitting against a ceiling for up to fifteen
- * minutes waiting on the abandoned-reservation reclaim.
+ * credit balance (L37). If an earlier layer allows but a later one refuses
+ * or is unreachable, the earlier hold is released at once: a run that never
+ * starts must never leave a phantom charge sitting against a ceiling
+ * waiting on the abandoned-reservation reclaim.
  *
  * `monthlyAllowance` and `topupCeiling` are the caller's to compute
  * (`handlePlan` reads them from `BillingStore`) -- this function only knows
@@ -121,13 +121,50 @@ export async function reserveBudget(
     }
   };
 
+  /**
+   * The account hold is released when a later layer *refuses*, and it has
+   * to be released when a later layer *rejects* too (#196 review).
+   *
+   * The two look nothing alike from here and cost the same thing. Once the
+   * account layer has allowed, this function holds a worst case against the
+   * deployment-wide daily ceiling (L29); a user-ledger Durable Object that
+   * is unreachable throws straight past every `releaseAccount` below, and
+   * the reclaim charges that hold in full thirty-five minutes later for a
+   * run that never went out. That ceiling is shared, so a caller whose own
+   * ledger keeps blinking would spend the whole deployment's day and refuse
+   * everybody else.
+   *
+   * The release itself is allowed to fail without saying so: it is the
+   * same ledger that just rejected, and replacing the original error with
+   * its second failure would hide why any of this happened.
+   *
+   * Takes a thunk rather than a promise so that a `getByName` throwing
+   * synchronously is caught too: passing the promise would build it before
+   * this was ever entered.
+   */
+  const guard = async <T>(step: () => Promise<T>): Promise<T> => {
+    try {
+      return await step();
+    } catch (error) {
+      await releaseAccount().catch(() => {});
+      throw error;
+    }
+  };
+
   const maxInFlight = positiveInt(
     env.VIBLD_MAX_IN_FLIGHT,
     DEFAULT_MAX_IN_FLIGHT,
   );
-  const primary = await ledger
-    .getByName(userId)
-    .reserve(worstCase, monthlyAllowance, maxInFlight, allowancePeriodKey(now));
+  const primary = await guard(() =>
+    ledger
+      .getByName(userId)
+      .reserve(
+        worstCase,
+        monthlyAllowance,
+        maxInFlight,
+        allowancePeriodKey(now),
+      ),
+  );
   if (primary.verdict.allow) {
     return {
       ok: true,
@@ -149,9 +186,11 @@ export async function reserveBudget(
   // down until spent (or, approximately, until it is 12 months old -- see
   // `BillingStore.totalTopupCreditMicroUsd`).
   const topupKey = topupKeyFor(userId);
-  const topup = await ledger
-    .getByName(topupKey)
-    .reserve(worstCase, topupCeiling, Number.MAX_SAFE_INTEGER, 'lifetime');
+  const topup = await guard(() =>
+    ledger
+      .getByName(topupKey)
+      .reserve(worstCase, topupCeiling, Number.MAX_SAFE_INTEGER, 'lifetime'),
+  );
   if (topup.verdict.allow) {
     return {
       ok: true,
