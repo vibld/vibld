@@ -4,26 +4,29 @@ import { describe, it } from 'node:test';
 import { PLAN_SYSTEM_PROMPT } from '../src/plan-schema.ts';
 
 /**
- * The one TypeScript rule a generated project cannot be written without.
+ * The two TypeScript rules a generated project cannot be written without.
  *
  * A real generation produced a project that failed `npm run build`; a second
  * run from the identical prompt built cleanly, so the difference was in what
  * the model happened to write. Reproduced without a model against the
- * scaffold's own tsconfig, two settings rejected ordinary React:
+ * scaffold's own tsconfig, two settings reject ordinary React:
  *
  *   TS1484  import { ReactNode } from 'react'        (verbatimModuleSyntax)
  *   TS1205  export { CardProps } from './Card.tsx'   (isolatedModules)
  *
- * The first was a preference and `plan-builder.ts` dropped it: it rejects
- * the most ordinary import in React with TypeScript, and a project that
- * cannot compile cannot be published or exported, which is ADR-0002's whole
- * promise.
+ * The first attempt at a fix turned `verbatimModuleSyntax` off in
+ * `plan-builder.ts` and told the model an ordinary type import was fine.
+ * That was the wrong place (#193 review). `buildProjectFiles` feeds
+ * `FakeModelProvider`; in production `RemoteModelProvider` returns the
+ * model's own files, tsconfig included, and nothing on that path rewrites
+ * them. So loosening our scaffold changed nothing a reader ever sees, while
+ * the prompt line actively encouraged the import that fails under the
+ * tsconfig `npm create vite@latest` writes.
  *
- * The second cannot be dropped. Vite compiles one file at a time through
- * esbuild and needs `isolatedModules` to be correct. So the rule it imposes
- * has to reach the model, and the only channel is the prompt. A prompt that
- * describes the stack without describing what the stack rejects leaves the
- * model to discover it one failed build at a time, at the reader's expense.
+ * Both rules are therefore the prompt's to carry, and the prompt is the only
+ * channel that reaches the files a reader is given. Code written to both
+ * compiles under either setting, which is the point: the model picks the
+ * tsconfig, so the code has to survive the pick.
  */
 describe('what the prompt tells the model about TypeScript', () => {
   it('states the re-export rule isolatedModules enforces', () => {
@@ -39,11 +42,20 @@ describe('what the prompt tells the model about TypeScript', () => {
     );
   });
 
-  it('does not ask for a type-only import it no longer needs', () => {
-    // Asking for `import type` everywhere would be cargo cult now that
-    // verbatimModuleSyntax is gone: it constrains the model for no compiler
-    // reason, and an instruction with no consequence teaches the model that
-    // instructions here have no consequences.
-    assert.doesNotMatch(PLAN_SYSTEM_PROMPT, /verbatimModuleSyntax/);
+  it('states the import rule verbatimModuleSyntax enforces', () => {
+    // Not cargo cult, which is what the previous round of this test called
+    // it: the model writes the tsconfig, and the conventional Vite one turns
+    // this on, so an ordinary type import is a build failure the reader
+    // inherits. The rule has a compiler reason on the path that ships.
+    assert.match(
+      PLAN_SYSTEM_PROMPT,
+      /verbatimModuleSyntax/,
+      'the prompt never names the setting that rejects `import { ReactNode }`',
+    );
+    assert.match(
+      PLAN_SYSTEM_PROMPT,
+      /import type \{/,
+      'the rule is named but never shown, so the model has to infer the syntax',
+    );
   });
 });

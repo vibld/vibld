@@ -206,30 +206,32 @@ export function buildProjectFiles(
             skipLibCheck: true,
             allowImportingTsExtensions: true,
             /*
-             * `verbatimModuleSyntax` is deliberately absent, and its absence
-             * is the point.
+             * Both kept, and matching `npm create vite@latest`.
              *
-             * `npm create vite@latest` includes it, so this is a departure
-             * from the template these settings otherwise follow. It was
-             * costing generated projects the build. Measured against this
-             * exact tsconfig:
+             * An earlier attempt removed `verbatimModuleSyntax` here,
+             * because it rejects `import { ReactNode } from 'react'` and a
+             * real generation had failed `npm run build`. That was the
+             * wrong place (#193 review): this scaffold feeds
+             * `FakeModelProvider` and nothing else. In production
+             * `defaultResolveProvider` returns `RemoteModelProvider`, whose
+             * files are the model's own, and the model writes its own
+             * tsconfig -- it is not even in the prompt's REQUIRED FILES,
+             * and a real run produced one anyway.
              *
-             *   import { ReactNode } from 'react';
-             *   TS1484: 'ReactNode' is a type and must be imported using a
-             *   type-only import when 'verbatimModuleSyntax' is enabled.
+             * So the fix belongs in the prompt, where it now is: code that
+             * uses type-only imports compiles under either setting, and
+             * that is what the model is asked for. Keeping these two here
+             * means the deterministic path compiles under the same rules
+             * the model's own projects will, rather than under looser ones
+             * that would hide the failure.
              *
-             * That is the most ordinary import in React with TypeScript.
-             * `npm run build` runs `tsc --noEmit` first, so a project that
-             * writes it does not build, does not publish, and hands the
-             * person an export that fails on their own machine. A strictness
-             * preference is not worth the promise in ADR-0002.
-             *
-             * `isolatedModules` stays. It is not a preference: esbuild and
-             * Vite compile one file at a time and need it to be correct. It
-             * does still require `export type` when re-exporting a type,
-             * which is why the system prompt now says so rather than leaving
-             * the model to discover it.
+             * The scaffold's own sources import no types, so this costs
+             * it nothing: written out and put through npm install and
+             * npm run build, it compiles and bundles clean, and adding
+             * one ordinary type import to it fails with TS1484, which is
+             * the failure the prompt rule now prevents.
              */
+            verbatimModuleSyntax: true,
             isolatedModules: true,
           },
           include: ['src'],

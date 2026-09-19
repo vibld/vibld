@@ -74,7 +74,7 @@ describe('the exported project', () => {
 });
 
 /**
- * That the settings the project ships accept the code a model writes.
+ * That the settings the project ships are the ones the prompt is written for.
  *
  * Found the same way the two failures above were, by running the commands:
  * a real generation produced a project that failed `npm run build`, a second
@@ -87,14 +87,23 @@ describe('the exported project', () => {
  *   TS1484: 'ReactNode' is a type and must be imported using a type-only
  *   import when 'verbatimModuleSyntax' is enabled.
  *
- * That is the most ordinary import in React with TypeScript, and `build`
- * runs `tsc --noEmit` before it bundles anything, so a project that writes it
- * cannot be published and cannot be built by the person who exported it.
+ * The first fix turned that setting off here. Wrong place (#193 review):
+ * this scaffold only ever feeds `FakeModelProvider`, and a reader's project
+ * comes from `RemoteModelProvider`, which returns the model's own files with
+ * the model's own tsconfig. Turning a setting off here cannot stop a build
+ * failure over there, and `npm create vite@latest` turns it on.
+ *
+ * So both settings stay, and the rule they impose is stated in the system
+ * prompt instead, where it reaches the files a reader is actually given.
+ * Keeping them here means the deterministic path compiles under the same
+ * rules the model's own projects will, rather than under looser ones that
+ * would hide the failure.
  *
  * Asserted against the compiler options rather than by compiling a fixture,
  * which would need a real `tsc` and a real `node_modules` inside a unit test.
- * The compiling was done once, by hand, and is what these two assertions are
- * standing in for.
+ * The compiling was done by hand: the scaffold written out, `npm install`
+ * and `npm run build` clean, and one ordinary type import added to it
+ * failing with TS1484.
  */
 describe('the settings the exported project compiles under', () => {
   const options = (
@@ -103,19 +112,19 @@ describe('the settings the exported project compiles under', () => {
     ) as { compilerOptions: Record<string, unknown> }
   ).compilerOptions;
 
-  it('does not reject an ordinary type import', () => {
+  it('keeps the setting that decides how a type is imported', () => {
     assert.equal(
       options.verbatimModuleSyntax,
-      undefined,
-      "verbatimModuleSyntax rejects `import { ReactNode } from 'react'`, which fails the build for a project nobody could publish",
+      true,
+      'the scaffold has to compile under the same rule the prompt gives the model, or it stops being evidence that the rule is followable',
     );
   });
 
   it('keeps the setting Vite actually needs', () => {
-    // Not a preference, unlike the one above: esbuild compiles one file at a
-    // time and needs this to be correct. It costs the project one rule --
-    // `export type` when re-exporting a type -- and the system prompt states
-    // that rule rather than leaving the model to discover it.
+    // esbuild compiles one file at a time and needs this to be correct. It
+    // costs the project one rule -- `export type` when re-exporting a type --
+    // and the system prompt states that rule rather than leaving the model to
+    // discover it.
     assert.equal(options.isolatedModules, true);
   });
 });
