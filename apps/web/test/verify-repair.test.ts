@@ -63,6 +63,8 @@ function deps(
   options: {
     reserveOk?: boolean;
     generateThrows?: boolean;
+    /** A refusal `runGeneration` makes before calling anybody. */
+    preflightRefusal?: boolean;
     accepted?: boolean;
     /** What the build after the repair answers. Defaults to the first. */
     rebuild?: { ok: boolean; error?: string; reason?: string };
@@ -121,6 +123,18 @@ function deps(
       ) => {
         spy.generates.push(request);
         if (options.generateThrows) throw new Error('provider exploded');
+        if (options.preflightRefusal) {
+          return {
+            result: {
+              state: 'failed',
+              stop: 'conflict',
+              errors: [],
+              conflict: true,
+            },
+            outcome: 'failed',
+            providerRan: false,
+          };
+        }
         return {
           result:
             options.accepted === false
@@ -329,6 +343,89 @@ describe('buying one repair', () => {
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.ok(outcome.result, 'the repaired project was thrown away');
     assert.equal(outcome.result.state, 'accepted');
+  });
+});
+
+describe('what the repair is charged for', () => {
+  it('settles a refusal that never reached the model at nothing', async () => {
+    // #196 review, P1. `runGeneration` returns normally with
+    // `providerRan: false` for the refusals it makes before calling
+    // anybody: a base over MAX_BASE_CONTENT_CHARS, or a base revision that
+    // moved. Both are reachable here -- the repair carries the whole
+    // accepted project as its base, and another run can promote between
+    // the first build and this call. Settling those at the worst case
+    // bills somebody a full generation for being told no.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { preflightRefusal: true },
+    );
+    await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.settles.length, 1);
+    assert.equal(
+      spy.settles[0]!.providerRan,
+      false,
+      'a repair the model never saw was charged its worst case',
+    );
+  });
+
+  it('still settles the cautious way when the call threw', async () => {
+    // No outcome to read, so nothing says the model was not reached. The
+    // cautious direction is the expensive one on purpose: over-counting a
+    // call that may have gone out beats under-counting one that did.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'boom' },
+      { generateThrows: true },
+    );
+    await assert.rejects(() => verifyAndRepair(ENV, PARAMS, ACCEPTED, d));
+    assert.equal(spy.settles[0]!.providerRan, true);
+  });
+
+  it('charges a repair that did reach the model', async () => {
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true } },
+    );
+    await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.settles[0]!.providerRan, true);
+  });
+});
+
+describe('what the second build is allowed to claim', () => {
+  it('says nothing when the rebuild was a refusal, not a judgement', async () => {
+    // #196 review, P2. Another build can take the workspace lock between
+    // the model call and this one, and `busy` says as little about the
+    // repaired files as it did about the originals. `built` already
+    // answered "unknown" there; `repaired` answered false, which claims a
+    // repair failed a check nothing performed.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      {
+        rebuild: {
+          ok: false,
+          reason: 'busy',
+          error: 'Another build is already running for this project.',
+        },
+      },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.builds, 2, 'the repaired files were never built');
+    assert.equal(
+      outcome.repaired,
+      undefined,
+      'a rebuild that never judged the project reported it as failed',
+    );
+    assert.ok(outcome.result, 'the promoted revision was thrown away');
+  });
+
+  it('still says false when the rebuild did judge the project', async () => {
+    // The distinction has to cut both ways or it is just a way of never
+    // reporting a failure.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: false, reason: 'build', error: 'TS1484 again' } },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(outcome.repaired, false);
   });
 });
 

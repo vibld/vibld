@@ -41,6 +41,8 @@ interface Call {
 function ledgerThat(
   answers: Record<string, Reservation | 'reject'>,
   nextId = 100,
+  /** How many settle calls reject before one is allowed through. */
+  settleRejects = 0,
 ): {
   env: ReserveEnv;
   reserves: Call[];
@@ -69,6 +71,9 @@ function ledgerThat(
           },
           async settle(reservationId: number, actual: number) {
             settles.push({ key, id: reservationId, actual });
+            if (settles.length <= settleRejects) {
+              throw new Error(`${key} could not settle`);
+            }
           },
         };
       },
@@ -89,6 +94,12 @@ const BUSY: Reservation = {
 };
 
 const NOW = Date.UTC(2026, 8, 19, 4, 0, 0);
+
+/**
+ * Passed wherever a release can be retried, so the suite does not spend the
+ * real back-off. The delays themselves are `retry.test.ts`'s subject.
+ */
+const noWait = async () => {};
 
 describe('what a run has to get past before it may start', () => {
   it('asks the account ceiling before touching anything else', () => {
@@ -210,7 +221,7 @@ describe('when a later layer cannot answer at all', () => {
       user_1: 'reject',
     });
     await assert.rejects(() =>
-      reserveBudget(env, 'user_1', 1_000, 5_000, 0, NOW),
+      reserveBudget(env, 'user_1', 1_000, 5_000, 0, NOW, noWait),
     );
     assert.deepEqual(
       settles.map((call) => ({ key: call.key, actual: call.actual })),
@@ -229,7 +240,7 @@ describe('when a later layer cannot answer at all', () => {
       [topupKeyFor('user_1')]: 'reject',
     });
     await assert.rejects(() =>
-      reserveBudget(env, 'user_1', 1_000, 5_000, 900, NOW),
+      reserveBudget(env, 'user_1', 1_000, 5_000, 900, NOW, noWait),
     );
     assert.deepEqual(
       settles.map((call) => call.key),
@@ -259,8 +270,54 @@ describe('when a later layer cannot answer at all', () => {
       } as unknown as ReserveEnv['USER_BUDGET'],
     };
     await assert.rejects(
-      () => reserveBudget(settleless, 'user_1', 1_000, 5_000, 0, NOW),
+      () => reserveBudget(settleless, 'user_1', 1_000, 5_000, 0, NOW, noWait),
       /user_1 is unreachable/,
     );
+  });
+});
+
+/**
+ * That the release is asked for more than once (#196 review).
+ *
+ * The first version of this fix protected the shared ceiling only when the
+ * cleanup worked first time, which is the case it was least needed in: what
+ * takes the user ledger down is a Durable Object restarting, and the
+ * account object can be restarting alongside it.
+ */
+describe('releasing an account hold that does not want to be released', () => {
+  it('asks again when the release itself rejects', async () => {
+    const { env, settles } = ledgerThat(
+      { [ACCOUNT_BUDGET_KEY]: ALLOW, user_1: 'reject' },
+      100,
+      1,
+    );
+    await assert.rejects(() =>
+      reserveBudget(env, 'user_1', 1_000, 5_000, 0, NOW, noWait),
+    );
+    assert.equal(
+      settles.length,
+      2,
+      'one refused release left the hold for the reclaim to charge',
+    );
+    assert.deepEqual(
+      settles.map((call) => call.key),
+      [ACCOUNT_BUDGET_KEY, ACCOUNT_BUDGET_KEY],
+    );
+  });
+
+  it('gives up rather than failing, and still reports the ledger', async () => {
+    // Bounded on purpose. A release that will not happen is money the
+    // reclaim charges either way, and the error worth reading is the one
+    // that started it.
+    const { env, settles } = ledgerThat(
+      { [ACCOUNT_BUDGET_KEY]: ALLOW, user_1: 'reject' },
+      100,
+      99,
+    );
+    await assert.rejects(
+      () => reserveBudget(env, 'user_1', 1_000, 5_000, 0, NOW, noWait),
+      /user_1 is unreachable/,
+    );
+    assert.ok(settles.length > 1, 'the release was not retried at all');
   });
 });

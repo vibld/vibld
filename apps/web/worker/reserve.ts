@@ -2,6 +2,7 @@ import { ACCOUNT_BUDGET_KEY, dayKey } from './spend.ts';
 import type { SpendVerdict } from './spend.ts';
 import { allowancePeriodKey } from './entitlement.ts';
 import type { Reservation, UserBudget } from './budget.ts';
+import { retrying, sleep } from './retry.ts';
 
 /**
  * Holding a run's worst case against every ceiling, in one place.
@@ -106,6 +107,8 @@ export async function reserveBudget(
   monthlyAllowance: number,
   topupCeiling: number,
   now: number,
+  /** Only so a test does not spend the release retry delay. */
+  wait: (ms: number) => Promise<void> = sleep,
 ): Promise<
   { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
 > {
@@ -134,9 +137,18 @@ export async function reserveBudget(
    * ledger keeps blinking would spend the whole deployment's day and refuse
    * everybody else.
    *
-   * The release itself is allowed to fail without saying so: it is the
-   * same ledger that just rejected, and replacing the original error with
-   * its second failure would hide why any of this happened.
+   * The release is asked for more than once before it is given up on
+   * (#196 review). What takes the user ledger down is usually a Durable
+   * Object restarting, and the account object can be restarting for the
+   * same reason at the same moment; a single attempt suppressed on failure
+   * leaves exactly the hold this exists to release, so the first version of
+   * this fix protected the shared ceiling only when the cleanup happened to
+   * work first time.
+   *
+   * It still never replaces the original error. The release goes to the
+   * same ledger that just rejected, so its own failure is the likeliest
+   * outcome of all, and reporting that one would name the cleanup instead
+   * of the cause and lose which ledger was down.
    *
    * Takes a thunk rather than a promise so that a `getByName` throwing
    * synchronously is caught too: passing the promise would build it before
@@ -146,7 +158,7 @@ export async function reserveBudget(
     try {
       return await step();
     } catch (error) {
-      await releaseAccount().catch(() => {});
+      await retrying(releaseAccount, wait);
       throw error;
     }
   };

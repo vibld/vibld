@@ -26,6 +26,7 @@ import type { RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
 import type { buildProject } from './publish-client.ts';
 import type { reserveBudget } from './reserve.ts';
+import { retrying } from './retry.ts';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -668,21 +669,6 @@ export async function runGeneration(
   }
 }
 
-/**
- * How many times the repair's settlement is asked for before it is given up
- * on, and how long between asks.
- *
- * Three rather than one because the failure this covers is a Durable Object
- * that is restarting, which is over in seconds; an immediate single retry
- * would land inside the same restart it was retrying. Three rather than
- * more because the enclosing step has a timeout, and a hold left open is
- * charged at its worst case by the reclaim either way: at some point the
- * honest thing is to record that it was not closed and hand the caller
- * their files.
- */
-const SETTLE_ATTEMPTS = 3;
-const SETTLE_RETRY_DELAY_MS = 1_000;
-
 interface SettlementOutcome {
   /** What was settled, absent when nothing was. */
   cost?: number;
@@ -708,13 +694,24 @@ async function settleRepairHold(
   params: WorkflowParams,
   held: Awaited<ReturnType<typeof reserveBudget>>,
   usage: PlanUsage | undefined,
+  /**
+   * Whether the repair's model call actually went out (#196 review).
+   *
+   * Not a hard-coded `true`, though it was. `runGeneration` returns
+   * normally with `providerRan: false` for the two refusals it makes before
+   * calling anybody: a base snapshot over `MAX_BASE_CONTENT_CHARS`, and a
+   * base revision that moved. Both are reachable here -- the repair carries
+   * the whole accepted project as its base, and another run can promote
+   * between the first build and this call -- and settling either at the
+   * worst case bills somebody the price of a full generation for being told
+   * no. True remains the answer when there is no outcome to read, which is
+   * a throw, because then the call may well have gone out.
+   */
+  providerRan: boolean,
 ): Promise<SettlementOutcome> {
-  const wait =
-    deps.wait ??
-    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  for (let attempt = 1; attempt <= SETTLE_ATTEMPTS; attempt += 1) {
-    try {
-      const cost = await deps.settle(
+  const attempted = await retrying(
+    () =>
+      deps.settle(
         env.USER_BUDGET,
         {
           userId: params.userId,
@@ -725,23 +722,14 @@ async function settleRepairHold(
           prices: params.prices,
         },
         usage,
-        // The model was asked the moment `generate` was entered, so a throw
-        // from inside it settles at the worst case rather than at nothing.
-        true,
-      );
-      return { cost, settled: true };
-    } catch (error) {
-      if (attempt === SETTLE_ATTEMPTS) {
-        // Worth a line of its own: this is a hold the reclaim will charge
-        // at full worst case, and nothing else in the system will say so
-        // until that happens.
-        console.error('repair settlement failed', error);
-        return { settled: false };
-      }
-      await wait(SETTLE_RETRY_DELAY_MS * attempt);
-    }
-  }
-  /* c8 ignore next */
+        providerRan,
+      ),
+    deps.wait,
+  );
+  if (attempted.ok) return { cost: attempted.value, settled: true };
+  // Worth a line of its own: this is a hold the reclaim will charge at full
+  // worst case, and nothing else in the system will say so until then.
+  console.error('repair settlement failed', attempted.error);
   return { settled: false };
 }
 
@@ -764,6 +752,23 @@ async function settleRepairHold(
  * before returning, whatever happened: a hold this function makes and does
  * not close is one the reclaim charges in full thirty-five minutes later.
  */
+/**
+ * Whether a build result is a statement about the project, or about the
+ * service that was asked (#196 review).
+ *
+ * `ok` and the two failures that name the project's own tooling are the
+ * former. `busy` (another build holds the workspace), `sandbox` (the
+ * container itself) and `output` (a build that succeeded and could not be
+ * read back) are the latter, and so is a reason this side does not
+ * recognise. Both builds in this file ask the same question of their own
+ * result, so they ask it the same way: one of them used to answer `false`
+ * where the other answered "unknown", which is the difference between
+ * "this does not compile" and "nobody compiled it".
+ */
+function judgedTheProject(result: { ok: boolean; reason?: string }): boolean {
+  return result.ok || result.reason === 'install' || result.reason === 'build';
+}
+
 export async function verifyAndRepair(
   env: GenerationWorkflowEnv,
   params: WorkflowParams,
@@ -828,13 +833,7 @@ export async function verifyAndRepair(
   // is claimed and no money is spent.
   if (!first) return { skipped: 'unavailable' };
   if (first.ok) return { built: true };
-  // `built` reports what a build measured, and nothing else. `install` and
-  // `build` are a build that ran and judged the project; `busy`, `sandbox`,
-  // `output` and an unreadable reason are refusals or faults of the service
-  // that say nothing about the files. Saying `built: false` for one of
-  // those claims a project failed a check that never ran, which is the same
-  // mistake one layer down as reading acceptance as a build.
-  const judged = first.reason === 'install' || first.reason === 'build';
+  const judged = judgedTheProject(first);
   if (!worthRepairing(first, params)) {
     return {
       ...(judged ? { built: false } : {}),
@@ -897,7 +896,14 @@ export async function verifyAndRepair(
     // Object that blinked would have failed the Workflow and sent an error
     // to a caller whose repair had already been promoted. Throwing does not
     // close the hold either, so it loses the files and leaves the money.
-    settlement = await settleRepairHold(deps, env, params, held, usage);
+    settlement = await settleRepairHold(
+      deps,
+      env,
+      params,
+      held,
+      usage,
+      outcome?.providerRan ?? true,
+    );
   }
 
   const settled = settlement?.settled !== false;
@@ -942,9 +948,14 @@ export async function verifyAndRepair(
   return {
     built: false,
     ...money,
-    // Undefined rather than false when the second build could not run: a
-    // repair whose result is unknown is not a repair that failed.
-    ...(second ? { repaired: second.ok } : {}),
+    // Undefined rather than false whenever the second build did not judge
+    // the project: one that could not run at all, and one that came back a
+    // refusal (#196 review). Another build can take the workspace lock
+    // between the model call and this, and `busy`, `sandbox` and `output`
+    // say as little about repaired files as they do about the originals.
+    // Reporting false there would be the same claim `built` used to make:
+    // that a project failed a check nothing performed.
+    ...(second && judgedTheProject(second) ? { repaired: second.ok } : {}),
     // Returned whether or not it builds, because it is what the store now
     // holds. Handing back the first attempt would put the reader's copy and
     // the accepted revision out of step, which is the other finding on this
