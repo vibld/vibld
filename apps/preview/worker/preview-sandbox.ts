@@ -53,6 +53,20 @@ const ACCOUNT_MAX_IN_FLIGHT = 25;
 const DEV_PORT = 5173;
 
 /**
+ * How long the pre-preview typecheck may take before it is abandoned.
+ *
+ * Generous against what it measures and strict against what it can cost.
+ * `tsc --noEmit` over a generated project is seconds on a container that
+ * has just finished `npm install`, so ninety seconds is not a budget
+ * anything real is expected to approach. It is a bound on the case where
+ * the script does not terminate at all (#195 review): the prompt requires
+ * a "typecheck" script to exist and cannot require it to exit, and a
+ * `--watch` variant would otherwise hold a fleet slot until the preview's
+ * hard lifetime ran out.
+ */
+const TYPECHECK_TIMEOUT_MS = 90_000;
+
+/**
  * Where `npm run build` writes its output, for the one template this
  * codebase generates today (`templates/marketing`'s `react-router.config.ts`
  * sets `ssr: false`, so `react-router build` emits plain static files here).
@@ -71,6 +85,7 @@ interface PreviewState {
   url?: string;
   expiresAt?: number;
   error?: string;
+  typecheckFailure?: string;
 }
 
 const STORAGE_KEY = 'vibld:preview';
@@ -81,6 +96,19 @@ export interface PreviewStatus {
   url?: string;
   expiresAt?: number;
   error?: string;
+  /**
+   * What `npm run typecheck` printed when it failed (#194).
+   *
+   * Named for the command rather than for the compiler, because the script
+   * is the generated manifest's to declare and need not be `tsc` (#195
+   * review). What is known is that the project's own typecheck exited
+   * non-zero and said this.
+   *
+   * Never an error: the preview started, and this is a finding about the
+   * project rather than about the run. Present only when the typecheck
+   * actually failed, so absent means clean, not declared, or not asked.
+   */
+  typecheckFailure?: string;
 }
 
 /** L10's default and ceiling for how long a share grant lasts, independent of (but still capped by) the preview's own remaining L9 lifetime. */
@@ -270,8 +298,17 @@ export class PreviewSandbox extends Sandbox<Env> {
 
       const build = await this.exec('npm run build', { cwd: '/workspace' });
       if (!build.success) {
+        // stdout first, and stdout at all: `tsc` writes its diagnostics
+        // there, and `build` runs `tsc --noEmit` before it bundles
+        // anything. Reporting stderr alone told somebody whose publish was
+        // blocked by a type error that npm had exited 2, and nothing else
+        // (#194).
+        const said = [build.stdout, build.stderr]
+          .map((stream) => stream.trim())
+          .filter((stream) => stream.length > 0)
+          .join('\n');
         return {
-          error: `npm run build failed (exit ${build.exitCode}): ${build.stderr.slice(-2000)}`,
+          error: `npm run build failed (exit ${build.exitCode}): ${said.slice(-2000)}`,
         };
       }
 
@@ -479,6 +516,20 @@ export class PreviewSandbox extends Sandbox<Env> {
         );
       }
 
+      // The cheapest place in the product to find out that a generated
+      // project does not compile (#194): the container is up and the
+      // install has already happened, so this costs seconds rather than a
+      // second sandbox. Two of six real generations measured against the
+      // production provider produced a project that fails `npm run build`,
+      // for two unrelated reasons, and until now the only gate was publish.
+      //
+      // Deliberately not a failure. The dev server starts either way, and
+      // Vite does not typecheck, so the preview really does run -- it just
+      // may show Vite's own transform error where a page should be, which
+      // reads as Vibld being broken rather than as the project needing a
+      // fix. Naming it is the whole point.
+      const typecheckFailure = await this.typecheck();
+
       const dev = await this.startProcess(
         `npm run dev -- --host 0.0.0.0 --port ${DEV_PORT}`,
         { cwd: '/workspace' },
@@ -494,6 +545,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         fleetTicketId,
         url: exposed.url,
         expiresAt: startedAt + HARD_LIFETIME_MS,
+        ...(typecheckFailure ? { typecheckFailure } : {}),
       });
     } catch (error) {
       await this.writeState({
@@ -510,6 +562,59 @@ export class PreviewSandbox extends Sandbox<Env> {
       await this.env.Fleet.getByName('fleet')
         .release(fleetTicketId, ACCOUNT_MAX_IN_FLIGHT)
         .catch(() => {});
+    }
+  }
+
+  /**
+   * `tsc` on the installed project, or nothing at all.
+   *
+   * `--if-present` because the script is the generated manifest's to
+   * declare: the prompt requires a "typecheck" script and a real run has
+   * written one, but a project that does not have it must start a preview
+   * rather than fail one.
+   *
+   * Reads stdout as well as stderr, and stdout first, because that is where
+   * `tsc` writes its diagnostics and every generated manifest measured so
+   * far declares `tsc --noEmit` here. Both streams are reported rather than
+   * either assumed, since the script is the project's own. stderr on this
+   * path carries npm's wrapper ("exit code 2"), which says nothing a reader
+   * can act on, and the same correction applies to `buildProject` below,
+   * where it was the whole of what a blocked publish reported.
+   *
+   * Bounded, and that bound is not a safety margin (#195 review). The
+   * prompt requires a "typecheck" script to exist and does not require it
+   * to terminate, so a manifest declaring `tsc --watch --noEmit` would
+   * never return here: the preview would sit in `starting` until its hard
+   * lifetime reclaimed it, holding one of the twenty-five account-wide
+   * fleet slots the whole time, for a diagnostic nobody asked for. A
+   * diagnostic that can stop a preview is worse than no diagnostic.
+   *
+   * Never throws, and a timeout is not a finding. A typecheck that cannot
+   * run, or does not finish, is not evidence about the project, and turning
+   * either into one would fail previews over this function's own problems.
+   */
+  private async typecheck(): Promise<string | undefined> {
+    const startedAt = Date.now();
+    try {
+      const result = await this.exec('npm run typecheck --if-present', {
+        cwd: '/workspace',
+        timeout: TYPECHECK_TIMEOUT_MS,
+      });
+      if (result.success) return undefined;
+      // A run that reached the bound is a run that was stopped, and being
+      // stopped says nothing about the project. Checked here as well as
+      // caught below because whether the SDK surfaces its own timeout as a
+      // rejection or as an unsuccessful result is its business, and a
+      // "finding" that turned out to be `tsc --watch` still running would
+      // be this function inventing one.
+      if (Date.now() - startedAt >= TYPECHECK_TIMEOUT_MS) return undefined;
+      const said = [result.stdout, result.stderr]
+        .map((stream) => stream.trim())
+        .filter((stream) => stream.length > 0)
+        .join('\n');
+      return said.length > 0 ? said.slice(-2000) : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -534,6 +639,9 @@ export class PreviewSandbox extends Sandbox<Env> {
       ...(state.url ? { url: state.url } : {}),
       ...(state.expiresAt ? { expiresAt: state.expiresAt } : {}),
       ...(state.error ? { error: state.error } : {}),
+      ...(state.typecheckFailure
+        ? { typecheckFailure: state.typecheckFailure }
+        : {}),
     };
   }
 

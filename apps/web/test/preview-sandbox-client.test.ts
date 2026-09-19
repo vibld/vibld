@@ -76,6 +76,53 @@ describe('fetchPreviewStatus', () => {
     );
   });
 
+  it('carries what tsc said about a project that does not compile', async () => {
+    // #194: two of six real generations produced a project that fails
+    // `npm run build`. The preview sandbox typechecks after installing,
+    // and the finding rides along on the ready status rather than
+    // becoming a failure -- the sandbox is up and the URL works.
+    assert.deepEqual(
+      await fetchPreviewStatus(
+        jsonFetch({
+          status: 'ready',
+          url: 'https://5173-abc-def.vibld-preview.dev',
+          expiresAt: 1_800_000_000_000,
+          typecheckFailure:
+            "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type",
+        }),
+      ),
+      {
+        status: 'ready',
+        url: 'https://5173-abc-def.vibld-preview.dev',
+        expiresAt: 1_800_000_000_000,
+        typecheckFailure:
+          "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type",
+      },
+    );
+  });
+
+  it('still reports a ready preview when the finding is unreadable', async () => {
+    // The preview really is running. A finding this cannot read is dropped
+    // rather than allowed to null the status, which would stop the poll
+    // and take the Stop button away from a sandbox that is up.
+    for (const typecheckFailure of [42, null, '', { message: 'no' }]) {
+      const status = await fetchPreviewStatus(
+        jsonFetch({
+          status: 'ready',
+          url: 'https://x.vibld-preview.dev',
+          expiresAt: 1_800_000_000_000,
+          typecheckFailure,
+        }),
+      );
+      assert.equal(status?.status, 'ready', JSON.stringify(typecheckFailure));
+      assert.equal(
+        status?.status === 'ready' ? status.typecheckFailure : 'unset',
+        undefined,
+        JSON.stringify(typecheckFailure),
+      );
+    }
+  });
+
   it('is null for an answer it cannot read, not a failed sandbox', async () => {
     // A failed status is the service saying the sandbox is not running, and
     // callers act on it: the poll stops asking, the panel takes the Stop

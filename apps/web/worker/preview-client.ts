@@ -17,7 +17,12 @@ export type PreviewStatus =
   | { status: 'ready-to-start' }
   | { status: 'installing' }
   | { status: 'starting' }
-  | { status: 'ready'; url: string; expiresAt: number }
+  | {
+      status: 'ready';
+      url: string;
+      expiresAt: number;
+      typecheckFailure?: string;
+    }
   | { status: 'failed'; error: string };
 
 /** The slice of a Workers service binding this file calls. */
@@ -80,6 +85,14 @@ function parseStatus(body: unknown): PreviewStatus | null {
           status: 'ready',
           url: record.url,
           expiresAt: record.expiresAt,
+          // Carried only when it is a string. A ready preview with an
+          // unreadable finding attached is still a ready preview -- the
+          // sandbox is up and the URL works -- so this is dropped rather
+          // than allowed to turn the whole status null (#194).
+          ...(typeof record.typecheckFailure === 'string' &&
+          record.typecheckFailure !== ''
+            ? { typecheckFailure: record.typecheckFailure }
+            : {}),
         };
       }
       // A ready with nowhere to point is not a ready, and it is not the

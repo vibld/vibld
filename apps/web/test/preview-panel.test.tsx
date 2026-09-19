@@ -181,6 +181,79 @@ describe('the preview, as it is actually wired', () => {
   });
 });
 
+describe('a preview whose project does not compile', () => {
+  it('says so, and quotes the output rather than paraphrasing it', async () => {
+    // #194. Without this the reader still sees the failure, as Vite's own
+    // transform error inside the frame, which reads as Vibld being broken
+    // rather than as their project needing a fix. The exact words are what
+    // make it actionable, so they are shown verbatim.
+    const said =
+      "src/App.tsx(3,10): error TS1484: 'ReactNode' is a type and must be imported using a type-only import";
+    const ui = await mount(
+      stateWith('rev-1'),
+      sandboxWith({ ...READY, typecheckFailure: said }, 'rev-1'),
+    );
+    assert.match(ui.text(), /npm run typecheck/);
+    assert.ok(ui.text().includes(said), 'the output was not shown');
+    ui.unmount();
+  });
+
+  it('claims nothing about a command it did not run', async () => {
+    // #195 review. An earlier draft said `npm run build` would fail. The
+    // model writes the manifest, and the prompt requires a "build" and a
+    // "typecheck" script without requiring the first to invoke the second,
+    // so a project whose build is a bare `vite build` can bundle perfectly
+    // well while this fails. What ran was `npm run typecheck`, and that is
+    // the whole of what can be reported.
+    const ui = await mount(
+      stateWith('rev-1'),
+      sandboxWith(
+        { ...READY, typecheckFailure: 'src/App.tsx(1,1): error TS1005' },
+        'rev-1',
+      ),
+    );
+    assert.equal(
+      /npm run build/.test(ui.text()),
+      false,
+      'the panel predicted the outcome of a command nothing ran',
+    );
+    ui.unmount();
+  });
+
+  it('does not call a running preview broken', async () => {
+    // The sandbox is up, the URL works and the dev server is serving. This
+    // is a finding about the project, which is the user's to edit, so it
+    // is not an alert and does not claim the preview failed.
+    const ui = await mount(
+      stateWith('rev-1'),
+      sandboxWith(
+        { ...READY, typecheckFailure: 'src/App.tsx(1,1): error TS1005' },
+        'rev-1',
+      ),
+    );
+    // Compared as booleans rather than against the nodes themselves: a
+    // failed assertion on a happy-dom element serialises the whole tree
+    // into the diff, which turns a one-line failure into a hang.
+    assert.equal(
+      ui.container.querySelector('[role="alert"]') !== null,
+      false,
+      'a running preview was announced as an error',
+    );
+    assert.equal(
+      ui.container.querySelector('[role="status"]') !== null,
+      true,
+      'the finding was not announced at all',
+    );
+    ui.unmount();
+  });
+
+  it('says nothing when the project compiles', async () => {
+    const ui = await mount(stateWith('rev-1'), sandboxWith(READY, 'rev-1'));
+    assert.equal(/npm run typecheck/.test(ui.text()), false);
+    ui.unmount();
+  });
+});
+
 describe('a stop that did not happen', () => {
   it('says the sandbox is still running, rather than removing it', async () => {
     // The panel used to clear the sandbox whatever the stop answered. Stop

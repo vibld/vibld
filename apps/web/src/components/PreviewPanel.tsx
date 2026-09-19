@@ -160,6 +160,43 @@ export function PreviewPanel({
               {sandbox.stopError}
             </p>
           ) : null}
+          {/*
+            The project's own typecheck failed (#194). Said here rather than
+            left for the frame to show, because what the frame shows is
+            Vite's own transform error, which reads as Vibld being broken.
+
+            Named as exactly what ran and exactly what it reported (#195
+            review). An earlier draft said the project "does not typecheck,
+            so npm run build would fail", and neither half was established:
+            the model writes the manifest, the prompt requires a "build" and
+            a "typecheck" script without requiring the first to invoke the
+            second, and "typecheck" is whatever that manifest declares
+            rather than tsc by definition. What is known is that
+            npm run typecheck exited non-zero and printed this, so that is
+            what this says.
+
+            Not an error state, and deliberately not styled as one: the
+            preview is running, the sandbox is up, and the dev server is
+            serving. What is wrong is in the project, which is the user's
+            to edit, and `npm run build` is where it would otherwise have
+            surfaced -- on their own machine, after an export.
+
+            `role="status"` and not `alert`: it arrives with a preview
+            somebody asked for and is already looking at, so it is news
+            rather than an interruption.
+          */}
+          {sandbox.status?.status === 'ready' &&
+          sandbox.status.typecheckFailure ? (
+            <div className="pane-note" role="status">
+              <p>
+                The preview is running, but this project&rsquo;s own{' '}
+                <code>npm run typecheck</code> failed. What it said:
+              </p>
+              <pre className="preview__typecheck">
+                {sandbox.status.typecheckFailure}
+              </pre>
+            </div>
+          ) : null}
         </>
       ) : null}
 
