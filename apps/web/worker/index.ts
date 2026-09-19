@@ -891,12 +891,14 @@ async function handlePlan(
   // (L35-L39) -- a monthly allowance by tier, plus whatever top-up credit
   // they have left.
   let reserved;
+  // Declared out here because the Workflow is given them too: a repair turn
+  // holds its own reservation and must do it against the figures this run
+  // was admitted on, not ones it re-derives minutes later (#194).
+  let monthlyAllowance: number;
+  let topupCeiling: number;
   try {
     const now = Date.now();
-    const { monthlyAllowance, topupCeiling } = await spendableFor(
-      env,
-      principal,
-    );
+    ({ monthlyAllowance, topupCeiling } = await spendableFor(env, principal));
 
     reserved = await reserveBudget(
       env,
@@ -1043,6 +1045,11 @@ async function handlePlan(
         worstCaseMicroUsd: worstCase,
         prices,
         maxTokens,
+        // The figures this run was admitted on, carried so a repair turn
+        // can hold its own reservation without reconstructing a Principal
+        // inside the Workflow (#194).
+        monthlyAllowance,
+        topupCeiling,
       },
     });
   } catch (error) {

@@ -119,6 +119,32 @@ export interface WorkflowParams {
    * this field shipped, which is what `ceilingForRun` exists to handle.
    */
   maxTokens: number;
+  /**
+   * What the caller was allowed to spend when this run was admitted, so a
+   * repair turn can hold a reservation of its own without asking again
+   * (#194).
+   *
+   * Carried rather than re-derived, for the reason `maxTokens` above gives
+   * and one more. `spendableFor` needs a `Principal`, which a Workflow does
+   * not have and would have to reconstruct from `userId` and an optional
+   * `email`; a fabricated identity deciding what somebody may spend is a
+   * worse failure than a figure that is a few minutes old. These are the
+   * same two numbers the run was already admitted on, so the repair is
+   * held against the allowance that let the run start rather than one that
+   * moved underneath it.
+   *
+   * Being stale is not a way to overspend. They are ceiling *inputs*: the
+   * ledger still measures real spend at the moment the repair asks, so a
+   * caller who has spent more since is refused by `reserve` whatever these
+   * say.
+   *
+   * Optional, and absent means no repair. A payload persisted before these
+   * existed resumes without them, and a run that cannot say what its caller
+   * may spend must not guess: it finishes with whatever the first attempt
+   * produced, which is exactly what every run did before this shipped.
+   */
+  monthlyAllowance?: number;
+  topupCeiling?: number;
 }
 
 /**
@@ -246,6 +272,61 @@ export function throttleProgress(
     sent = report;
     send(report);
   };
+}
+
+/**
+ * Whether a failed build is worth spending a second model call on (#194).
+ *
+ * Two questions, and they are separate on purpose. The first is whether the
+ * failure says anything about the project: `install` is usually a package
+ * the model invented, `build` is the compiler refusing what it was given,
+ * and the other reasons are this deployment having a bad day. A `busy`
+ * refusal in particular is issued before the build starts, so the code was
+ * never even looked at.
+ *
+ * The second is whether the run can pay for it. A payload persisted before
+ * `monthlyAllowance` existed cannot say what its caller may spend, and a run
+ * that cannot say that must not guess: no repair, and the reader keeps what
+ * the first attempt produced, which is what every run did before this
+ * shipped.
+ *
+ * An absent reason is deliberately not repairable. `publish-client.ts`
+ * leaves it absent when the build service sends something it does not
+ * recognise, and "I could not read why this failed" is not evidence that
+ * the project is broken.
+ */
+export function worthRepairing(
+  build: { ok: boolean; reason?: string },
+  params: Pick<WorkflowParams, 'monthlyAllowance' | 'topupCeiling'>,
+): boolean {
+  if (build.ok) return false;
+  if (build.reason !== 'install' && build.reason !== 'build') return false;
+  return (
+    typeof params.monthlyAllowance === 'number' &&
+    typeof params.topupCeiling === 'number'
+  );
+}
+
+/**
+ * What to ask the model for, when its own project will not build.
+ *
+ * The compiler's words verbatim and nothing paraphrased: the whole reason
+ * this is worth a second call is that the error names the file and the line,
+ * and a summary would throw away the part that makes it fixable.
+ *
+ * Says what not to do as well as what to do. Left to itself a model asked to
+ * "fix the build" will happily rewrite the project, and the reader asked for
+ * the project, not for a second draft of it.
+ */
+export function repairPromptFor(error: string): string {
+  return `The project you just wrote does not build. This is the exact output:
+
+${error}
+
+Fix it, and change nothing else. Keep every file that is not implicated, keep
+the design, the copy and the structure exactly as they are, and do not rename
+or reorganise anything. Return the complete set of files for the project as
+it should now be.`;
 }
 
 export interface GenerationWorkflowEnv {
