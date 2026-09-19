@@ -27,6 +27,41 @@ export function isStale(activatedAt: number, now: number): boolean {
   return activatedAt < now - HARD_LIFETIME_MS;
 }
 
+/**
+ * How long a row may wait with nobody asking after it before it is treated
+ * as abandoned (#199).
+ *
+ * The reclaim above only ever looked at rows it had activated, so a row
+ * that was still waiting had no expiry at all. That is the one kind of
+ * ticket nothing in this system can clean up on its own, and it is not
+ * harmless while it waits: it is promoted later, for a caller that gave up
+ * long ago, and only then starts its thirty-minute lifetime holding a slot
+ * somebody else wanted. Three separate findings on #196 were that leak
+ * arriving from three directions, each fixed by making one more release
+ * path infallible, which is an argument that stops working the moment
+ * somebody adds a fourth.
+ *
+ * Measured from the last time anybody asked about the row rather than from
+ * when it was requested, because those differ for the two callers and only
+ * one of them is a leak. A preview's client polls `status` for as long as
+ * its reader is watching, which refreshes this and means a queue deeper
+ * than this figure still never drops a waiting user. A build never asks
+ * again: it awaits `enqueue` once, gives up on its own wall clock, and
+ * relies on a late release. So this figure has to outlast everything a
+ * build could still be doing with the answer, and `fleet-abandoned.test.ts`
+ * adds that up.
+ *
+ * The same thirty minutes as the hard lifetime, deliberately: a row nobody
+ * has mentioned for as long as a sandbox is allowed to exist is not one
+ * anybody is waiting on.
+ */
+export const ABANDONED_AFTER_MS = HARD_LIFETIME_MS;
+
+/** True once nobody has asked about a still-waiting row for that long. */
+export function isAbandoned(lastSeenAt: number, now: number): boolean {
+  return lastSeenAt < now - ABANDONED_AFTER_MS;
+}
+
 export interface QueueRow {
   id: number;
   requested: number;
