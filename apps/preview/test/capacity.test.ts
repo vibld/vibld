@@ -76,6 +76,21 @@ describe('who gets a container', () => {
  * `preview-sandbox.ts` imports `@cloudflare/sandbox` and cannot be loaded
  * here, so this reads it as source.
  */
+/**
+ * Where the teardown gives the fleet ticket back.
+ *
+ * A helper rather than an `indexOf` at each site, because the arguments to
+ * that call have changed twice and every assertion written against them
+ * broke with it -- one of them silently, by slicing on an `indexOf` of -1
+ * and then passing for the wrong reason. The call is the anchor; what it
+ * is passed is not.
+ */
+function releaseAt(tail: string): number {
+  const at = tail.indexOf('.release(');
+  assert.ok(at > 0, 'the teardown no longer releases the fleet ticket');
+  return at;
+}
+
 describe('counting the builds too', () => {
   const source = read(
     join(import.meta.dirname, '..', 'worker', 'preview-sandbox.ts'),
@@ -123,10 +138,35 @@ describe('counting the builds too', () => {
   it('gives the slot back on every path out', () => {
     const finallyAt = body.lastIndexOf('} finally {');
     assert.ok(finallyAt > 0);
-    assert.match(
-      body.slice(finallyAt),
-      /\.release\(slot\.id, BUILD_CONTAINER_HEADROOM\)/,
+    const tail = body.slice(finallyAt);
+    assert.ok(
+      releaseAt(tail) > 0,
       'a finished build keeps its slot until the fleet reclaims it',
+    );
+    assert.match(
+      tail.slice(releaseAt(tail)),
+      /BUILD_CONTAINER_HEADROOM/,
+      'the release is counted against some other cap',
+    );
+  });
+
+  it('asks again when the release itself rejects', () => {
+    // #196 review. A suppressed release is not a delayed one here:
+    // `PreviewFleet.reclaimStale` only reclaims rows it has activated, so
+    // an abandoned queued ticket never expires. It waits for a slot, is
+    // promoted with nobody to use it, and only then begins its hard
+    // lifetime, which turns one dropped release into a build slot lost to
+    // whoever is next in the queue.
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    assert.match(
+      tail,
+      /retrying\(\(\) =>[\s\S]{0,240}?\.release\(/,
+      'one refused release abandons the ticket for good',
+    );
+    assert.doesNotMatch(
+      tail,
+      /\.release\([\s\S]{0,120}?\.catch\(\(\) => \{\}\)/,
+      'the release still swallows its own failure after one try',
     );
   });
 
@@ -139,7 +179,7 @@ describe('counting the builds too', () => {
     // the exact guard the code happens to have: the property is what
     // matters and the shape has already changed once under it.
     const tail = body.slice(body.lastIndexOf('} finally {'));
-    const guard = tail.slice(0, tail.indexOf('.release(slot.id'));
+    const guard = tail.slice(0, releaseAt(tail));
     const condition = guard.slice(guard.lastIndexOf('if ('));
     assert.match(condition, /\bslot\b/, 'the release is not guarded at all');
     assert.doesNotMatch(
@@ -229,8 +269,8 @@ describe('counting the builds too', () => {
     // to builds.
     const tail = body.slice(body.lastIndexOf('} finally {'));
     const destroyed = tail.indexOf('this.destroy()');
-    const released = tail.indexOf('.release(slot.id');
-    assert.ok(destroyed > 0 && released > 0, 'the finally lost a step');
+    const released = releaseAt(tail);
+    assert.ok(destroyed > 0, 'the finally no longer destroys the container');
     assert.ok(
       destroyed < released,
       'the slot is freed while its container is still running',

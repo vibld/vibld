@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { RETRY_ATTEMPTS, retrying } from '../worker/retry.ts';
+import { RETRY_ATTEMPTS, retrying } from '../src/retry.ts';
 
 /**
  * Asking again, a bounded number of times, without the asking becoming the

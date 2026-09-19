@@ -1,4 +1,5 @@
 import { Sandbox } from '@cloudflare/sandbox';
+import { retrying } from '@vibld/core';
 import type { ProjectFile } from '@vibld/core';
 import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
 import { HARD_LIFETIME_MS } from './fleet.ts';
@@ -582,9 +583,28 @@ export class PreviewSandbox extends Sandbox<Env> {
       // admit a build the platform then refuses to start, which is the
       // over-admission this counter exists to prevent.
       if (slot && (!ours || gone)) {
-        await this.env.Fleet.getByName(BUILD_FLEET_NAME)
-          .release(slot.id, BUILD_CONTAINER_HEADROOM)
-          .catch(() => {});
+        // Asked for more than once before it is given up on (#196 review).
+        // A suppressed release is not a delayed one here: `reclaimStale`
+        // only reclaims rows it has activated, so a queued ticket that is
+        // abandoned never expires. It waits for a slot, is promoted with
+        // nobody to use it, and only then begins its hard lifetime, which
+        // makes a single dropped release a build slot lost to whoever is
+        // next in the queue.
+        //
+        // The same bounded retry the budget ledger's cleanups use, from
+        // the package both Workers already depend on rather than a second
+        // copy of it: two cleanups with their own idea of how hard to try
+        // is how they come to disagree.
+        // Read out before the closure: narrowing from the `if` above does
+        // not survive into one, and `slot!` would be asserting what this
+        // line can simply carry.
+        const ticket = slot.id;
+        await retrying(() =>
+          this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
+            ticket,
+            BUILD_CONTAINER_HEADROOM,
+          ),
+        );
       }
     }
   }
