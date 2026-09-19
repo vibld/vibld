@@ -126,6 +126,17 @@ notice. Base UI is unstyled, so the project still styles it with its own plain
 CSS and its own tokens: the dependency buys behaviour, not appearance. Declare
 it in package.json's dependencies. Everything else is still built by hand.
 
+TYPESCRIPT
+The project compiles with isolatedModules, which Vite needs because esbuild
+compiles one file at a time. One rule follows from it, and breaking it fails
+the build before anything is bundled: when a file re-exports a type, say so.
+
+  export type { CardProps } from './components/Card.tsx';
+  export { Card } from './components/Card.tsx';
+
+Nothing else about imports is constrained. Importing a type as an ordinary
+named import is fine, and so is a type-only import if you prefer one.
+
 REQUIRED FILES
 package.json, index.html, src/main.tsx, src/App.tsx, src/styles.css,
 README.md and DESIGN.md must always be present. package.json must declare

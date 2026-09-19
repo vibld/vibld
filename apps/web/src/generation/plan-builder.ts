@@ -205,7 +205,31 @@ export function buildProjectFiles(
             noEmit: true,
             skipLibCheck: true,
             allowImportingTsExtensions: true,
-            verbatimModuleSyntax: true,
+            /*
+             * `verbatimModuleSyntax` is deliberately absent, and its absence
+             * is the point.
+             *
+             * `npm create vite@latest` includes it, so this is a departure
+             * from the template these settings otherwise follow. It was
+             * costing generated projects the build. Measured against this
+             * exact tsconfig:
+             *
+             *   import { ReactNode } from 'react';
+             *   TS1484: 'ReactNode' is a type and must be imported using a
+             *   type-only import when 'verbatimModuleSyntax' is enabled.
+             *
+             * That is the most ordinary import in React with TypeScript.
+             * `npm run build` runs `tsc --noEmit` first, so a project that
+             * writes it does not build, does not publish, and hands the
+             * person an export that fails on their own machine. A strictness
+             * preference is not worth the promise in ADR-0002.
+             *
+             * `isolatedModules` stays. It is not a preference: esbuild and
+             * Vite compile one file at a time and need it to be correct. It
+             * does still require `export type` when re-exporting a type,
+             * which is why the system prompt now says so rather than leaving
+             * the model to discover it.
+             */
             isolatedModules: true,
           },
           include: ['src'],
