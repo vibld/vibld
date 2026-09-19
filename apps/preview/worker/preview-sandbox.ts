@@ -366,6 +366,24 @@ export class PreviewSandbox extends Sandbox<Env> {
           'Another build is already running for this project. Try again once it has finished.',
       };
     }
+    // Read and written with nothing but storage awaited in between, which
+    // is what makes taking it atomic (#196 review).
+    //
+    // Cloudflare's input gate defers every other event to this object
+    // "until such a time as the object is no longer executing JavaScript
+    // code and is no longer waiting for any storage operations", so a
+    // read followed by a write is a critical section as long as only
+    // storage is awaited inside it. Await anything else here -- a
+    // `fetch`, a sleep, a service binding -- and the gate opens, a
+    // concurrent build reads the same absent lock, and two builds share
+    // one workspace. `apps/web/worker/budget.ts` makes the same point from
+    // the other side, which is why its reservation is synchronous.
+    //
+    // `build-reason.test.ts` counts the awaits in here rather than trusting
+    // this paragraph, because the guarantee is invisible at the call site:
+    // adding one innocuous await is all it takes, and nothing about the
+    // code would look wrong afterwards.
+    //
     // Taken with a token, and released only while it is still this build's
     // (#196 review). Expiry alone made the lock unsafe in the one case it
     // was for: once a stale lock let a second build in, the first build's

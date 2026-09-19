@@ -811,3 +811,110 @@ describe('what the teardown and the renewal await', () => {
     );
   });
 });
+
+/**
+ * That taking and renewing the build lock stay inside one input gate
+ * (#196 review).
+ *
+ * Cloudflare defers every other event to a Durable Object "until such a
+ * time as the object is no longer executing JavaScript code and is no
+ * longer waiting for any storage operations", so a read followed by a
+ * write is atomic exactly as long as nothing but storage is awaited
+ * between them. Both of this module's read-then-write pairs rely on that,
+ * and neither says so in a way anything can check.
+ *
+ * The failure it rules out is not exotic. A verification build and a
+ * publish arrive for the same user against the same instance; one await of
+ * anything that is not storage, and both read the same absent lock, both
+ * believe they own the workspace, and one empties it under the other.
+ * Nothing about the added await would look wrong.
+ *
+ * `apps/web/worker/budget.ts` states the same rule from the other side:
+ * its reservation is synchronous on purpose, for this reason.
+ */
+describe('taking the build lock without being interrupted', () => {
+  const source = readFileSync(
+    join(import.meta.dirname, '..', 'worker', 'preview-sandbox.ts'),
+    'utf8',
+  );
+
+  /** A region with its prose removed, so an `await` in a comment is not one. */
+  function statements(region: string): string {
+    return region
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  }
+
+  /**
+   * How many awaits in a region are on something other than storage.
+   *
+   * Counted, not located, for the same reason the bounded-call tests are:
+   * the finding is never "this await is wrong", it is "one of these awaits
+   * is not storage and nothing says which".
+   */
+  function nonStorage(region: string): number {
+    const code = statements(region);
+    const all = code.match(/\bawait\s/g)?.length ?? 0;
+    const storage =
+      code.match(/await\s+(?:bounded\(\s*)?this\.ctx\.storage\./g)?.length ?? 0;
+    assert.ok(all > 0, 'the region no longer awaits anything at all');
+    return all - storage;
+  }
+
+  /**
+   * The critical section: from reading the lock to the end of writing it.
+   *
+   * Ends at the write rather than at some landmark after it. The first
+   * version of this ran on to the fleet call and counted the two awaits
+   * that follow the section, which have nothing to do with its atomicity
+   * and are supposed to be there.
+   */
+  function takingTheLock(): string {
+    const from = source.indexOf('const held = await');
+    assert.ok(from > 0, 'the lock is no longer read where this expected it');
+    const written = source.indexOf('this.ctx.storage.put<BuildLock>', from);
+    assert.ok(written > from, 'the build never writes the lock it took');
+    const to = source.indexOf('\n\n', written);
+    assert.ok(to > written, 'the write runs to the end of the method');
+    return source.slice(from, to);
+  }
+
+  it('awaits nothing but storage between reading the lock and taking it', () => {
+    assert.equal(
+      nonStorage(takingTheLock()),
+      0,
+      'the input gate opens between reading the lock and writing it',
+    );
+  });
+
+  it('awaits nothing but storage inside a renewal either', () => {
+    // The same read-then-write shape, and the same protection. A renewal
+    // that checked ownership, awaited something else and then wrote would
+    // push forward a lock that had changed hands in between.
+    const at = source.indexOf('private async renewLock(');
+    assert.ok(at > 0, 'renewLock is not where this expected it');
+    assert.equal(
+      nonStorage(source.slice(at, source.indexOf('\n  private ', at + 10))),
+      0,
+      'a renewal can be interrupted between its check and its write',
+    );
+  });
+
+  it('writes the lock it just found absent, not one read earlier', () => {
+    // The other half: the gate protects a read and a write that are next
+    // to each other, and protects nothing if the write belongs to an
+    // earlier read. One read, one write, in that order, in that section.
+    const section = statements(takingTheLock());
+    assert.equal(
+      section.match(/this\.ctx\.storage\.get<BuildLock>/g)?.length,
+      1,
+      'the lock is read more than once before it is taken',
+    );
+    assert.equal(
+      section.match(/this\.ctx\.storage\.put<BuildLock>/g)?.length,
+      1,
+      'the lock is written more than once while taking it',
+    );
+  });
+});
