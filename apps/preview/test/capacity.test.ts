@@ -129,4 +129,49 @@ describe('counting the builds too', () => {
       'a finished build keeps its slot until the fleet reclaims it',
     );
   });
+
+  it('gives back a queued ticket as well as an active one', () => {
+    // Guarded by the ticket existing, not by its state. A waiting row
+    // holds no slot today and is promoted later, so abandoning one hands
+    // a build slot to nobody until the fleet's stale reclaim notices --
+    // which is the leak this release exists to prevent, arriving late.
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const guard = tail.slice(0, tail.indexOf('.release(slot.id'));
+    assert.match(
+      guard,
+      /if \(slot\) \{[^}]*$/,
+      'only an active ticket is released, so a queued one is abandoned',
+    );
+  });
+
+  it('gives it back only after the container is gone', () => {
+    // #196 review. The slot is what authorises somebody else to start a
+    // container, so releasing it while this one still exists lets the
+    // fleet admit a build the platform has no room for: the same
+    // over-admission the counter was added to prevent, moved from previews
+    // to builds.
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const destroyed = tail.indexOf('this.destroy()');
+    const released = tail.indexOf('.release(slot.id');
+    assert.ok(destroyed > 0 && released > 0, 'the finally lost a step');
+    assert.ok(
+      destroyed < released,
+      'the slot is freed while its container is still running',
+    );
+  });
+
+  it('takes the slot where the cleanup can still reach it', () => {
+    // `enqueue` is a call to another Durable Object and can reject. Outside
+    // the try that rejection skipped every piece of cleanup and left the
+    // build lock in storage, so the next fifteen minutes of that user's
+    // verifications and publishes were refused as `busy` over a failure
+    // that had nothing to do with them.
+    const tryAt = body.indexOf('try {');
+    const enqueued = body.indexOf('.enqueue(');
+    assert.ok(tryAt > 0 && enqueued > 0);
+    assert.ok(
+      enqueued > tryAt,
+      'a rejected enqueue leaves the build lock behind',
+    );
+  });
 });

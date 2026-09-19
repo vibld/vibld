@@ -1,6 +1,6 @@
 import { Sandbox } from '@cloudflare/sandbox';
 import type { ProjectFile } from '@vibld/core';
-import type { PreviewFleet } from './preview-fleet.ts';
+import type { EnqueueResult, PreviewFleet } from './preview-fleet.ts';
 import { HARD_LIFETIME_MS } from './fleet.ts';
 import {
   BUILD_COMPILE_TIMEOUT_MS,
@@ -379,22 +379,27 @@ export class PreviewSandbox extends Sandbox<Env> {
     // spends that Workflow's timeout. `busy` is the right refusal, and
     // `worthRepairing` already reads it as saying nothing about the
     // project, so no repair is bought and nothing is claimed.
-    const slot = await this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
-      `build:${this.ctx.id.toString()}`,
-      BUILD_CONTAINER_HEADROOM,
-    );
-    if (!slot.active) {
-      await this.env.Fleet.getByName(BUILD_FLEET_NAME)
-        .release(slot.id, BUILD_CONTAINER_HEADROOM)
-        .catch(() => {});
-      await this.ctx.storage.delete(BUILD_LOCK_KEY);
-      return {
-        reason: 'busy',
-        error: 'Too many builds are running right now. Try again in a moment.',
-      };
-    }
+    // Asked for *inside* the try below rather than before it (#196 review).
+    // `enqueue` is a call to another Durable Object and can reject on its
+    // own account; outside the try, that rejection skipped every piece of
+    // cleanup and left this user's build lock in storage, so every
+    // verification and publish of theirs was refused as `busy` for the next
+    // fifteen minutes over a failure that had nothing to do with them.
+    let slot: EnqueueResult | undefined;
 
     try {
+      slot = await this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
+        `build:${this.ctx.id.toString()}`,
+        BUILD_CONTAINER_HEADROOM,
+      );
+      if (!slot.active) {
+        return {
+          reason: 'busy',
+          error:
+            'Too many builds are running right now. Try again in a moment.',
+        };
+      }
+
       // Emptied first, because this container is reused (#196 review).
       // `writeProject` writes the paths it is given and removes nothing, so
       // a second build in the same instance compiles the new snapshot on
@@ -514,13 +519,6 @@ export class PreviewSandbox extends Sandbox<Env> {
       // Only if it is still this build's. A build that overran its lock
       // comes through here after somebody else has taken one, and deleting
       // that would hand a third build the workspace the second is using.
-      // Always, and before the lock: the slot is this build's by id, so no
-      // ownership question arises, and a slot held past its build is one
-      // fewer build anybody can run until the fleet's own stale reclaim
-      // notices thirty minutes later.
-      await this.env.Fleet.getByName(BUILD_FLEET_NAME)
-        .release(slot.id, BUILD_CONTAINER_HEADROOM)
-        .catch(() => {});
       const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
       if (mine?.token === token) {
         await this.ctx.storage.delete(BUILD_LOCK_KEY);
@@ -540,6 +538,23 @@ export class PreviewSandbox extends Sandbox<Env> {
           // reclaim. Failing the build over it would turn a capacity
           // problem into a wrong answer about somebody's project.
         });
+      }
+      // After the container is gone, never before it (#196 review). The
+      // slot is what authorises somebody else to start a container, so
+      // releasing it while this one still existed let the fleet admit a
+      // build the platform had no room for: the same over-admission this
+      // counter was added to prevent, moved from previews to builds.
+      //
+      // Released whatever the ticket's state, because a queued one holds a
+      // place in line as surely as an active one holds a slot. Released
+      // even when the destroy above failed: a container the platform has
+      // to reclaim is a bounded cost, while a slot nobody gives back costs
+      // everybody a build until the fleet's own stale reclaim notices half
+      // an hour later.
+      if (slot) {
+        await this.env.Fleet.getByName(BUILD_FLEET_NAME)
+          .release(slot.id, BUILD_CONTAINER_HEADROOM)
+          .catch(() => {});
       }
     }
   }
