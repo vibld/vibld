@@ -963,6 +963,28 @@ export class PreviewSandbox extends Sandbox<Env> {
    * which is the branch that keeps both the lock and the slot -- correct
    * for a container in an unknown state, and self-limiting, because the
    * lock then ages out on its own.
+   *
+   * What giving up leaves behind, which was raised in review and is
+   * accepted rather than overlooked (#196 review). The destroy is still in
+   * flight and cannot be called back: once the lock ages out, a later build
+   * for this user can start a fresh container here, and the orphaned SIGKILL
+   * could land on it.
+   *
+   * That is accepted for two reasons, and the second is why it is not a
+   * close call. `Container.destroy()` is one line -- `await
+   * this.container.destroy()`, a SIGKILL RPC with no poll or drain of its
+   * own -- so the case needs that single call to hang for ten minutes and
+   * then complete, against an object that would likely be evicted first.
+   * And when it does happen the later build's `exec` throws, which this
+   * method reports as `sandbox`; `judgedTheProject` reads that as unknown,
+   * so nothing is claimed about the project and no repair is bought. One
+   * wasted build.
+   *
+   * Every alternative is worse than one wasted build. Holding the lock
+   * until the destroy settles blocks this user's builds permanently when it
+   * never does; the SDK offers no way to abandon the call; and a persisted
+   * "destroying" marker needs its own expiry the moment the object is
+   * evicted, which is the same trade wearing a different hat.
    */
   private async destroyHoldingLock(token: string): Promise<boolean> {
     const destroyed = this.destroy().then(
