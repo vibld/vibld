@@ -3,9 +3,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { readFileSync as read } from 'node:fs';
+
 import {
   ACCOUNT_MAX_IN_FLIGHT,
   BUILD_CONTAINER_HEADROOM,
+  BUILD_FLEET_NAME,
   CONTAINER_MAX_INSTANCES,
 } from '../worker/capacity.ts';
 
@@ -57,6 +60,73 @@ describe('who gets a container', () => {
       Number(declared[1]),
       CONTAINER_MAX_INSTANCES,
       'the platform limit and this file have drifted apart',
+    );
+  });
+});
+
+/**
+ * That the build half of the split is counted, not merely subtracted
+ * (#196 review).
+ *
+ * Reserving five slots said nothing about how many builds may run: six
+ * overlapping builds and nineteen previews filled all twenty-five platform
+ * slots while the fleet still believed it had room for a twentieth preview.
+ * A partition only one side observes is not a partition.
+ *
+ * `preview-sandbox.ts` imports `@cloudflare/sandbox` and cannot be loaded
+ * here, so this reads it as source.
+ */
+describe('counting the builds too', () => {
+  const source = read(
+    join(import.meta.dirname, '..', 'worker', 'preview-sandbox.ts'),
+    'utf8',
+  );
+  const body = source.slice(
+    source.indexOf('async buildProject('),
+    source.indexOf('async createShare('),
+  );
+
+  it('takes a slot before it does any work', () => {
+    const taken = body.indexOf('.enqueue(');
+    assert.ok(taken > 0, 'a build takes no slot at all');
+    assert.ok(
+      taken < body.indexOf('npm install'),
+      'the slot is taken after the container is already working',
+    );
+  });
+
+  it('counts builds against their own cap, not the preview one', () => {
+    // Mixing them into the preview queue would make L9's cap mean
+    // something else again, which is the mistake one level up.
+    assert.match(body, /BUILD_CONTAINER_HEADROOM/);
+    assert.doesNotMatch(
+      body.slice(0, body.indexOf('npm install')),
+      /ACCOUNT_MAX_IN_FLIGHT/,
+      'a build is counted against the preview cap',
+    );
+  });
+
+  it('counts them in an instance of their own', () => {
+    assert.notEqual(BUILD_FLEET_NAME, 'fleet');
+    assert.match(body, /getByName\(BUILD_FLEET_NAME\)/);
+  });
+
+  it('refuses rather than queueing when the slots are full', () => {
+    // A paid Workflow is waiting on the answer, so waiting behind other
+    // builds spends its timeout. `busy` says nothing about the project,
+    // which is what makes refusing safe.
+    const at = body.indexOf('!slot.active');
+    assert.ok(at > 0, 'a build that was queued rather than admitted proceeds');
+    assert.match(body.slice(at, at + 400), /reason: 'busy'/);
+  });
+
+  it('gives the slot back on every path out', () => {
+    const finallyAt = body.lastIndexOf('} finally {');
+    assert.ok(finallyAt > 0);
+    assert.match(
+      body.slice(finallyAt),
+      /\.release\(slot\.id, BUILD_CONTAINER_HEADROOM\)/,
+      'a finished build keeps its slot until the fleet reclaims it',
     );
   });
 });

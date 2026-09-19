@@ -14,11 +14,28 @@
  * has no room left to verify or publish anything. Both halves of that are
  * bad in the same way: a number that means something it does not.
  *
- * So the platform limit is split rather than shared. Previews may fill the
- * fleet's cap; the remainder is kept for builds, which are short-lived,
- * hold no exposed port, and now destroy their container as they finish
- * rather than idling out the class's `sleepAfter`.
+ * So the platform limit is split rather than shared, and both sides are
+ * counted. Previews fill the fleet's cap; builds fill the remainder,
+ * against a `PreviewFleet` instance of their own. Subtracting the headroom
+ * without counting builds only made the partition true on one side (#196
+ * review): six builds could overlap nineteen previews and take every
+ * platform slot while the fleet still believed it had room.
+ *
+ * Builds are short-lived, hold no exposed port, and destroy their container
+ * as they finish rather than idling out the class's `sleepAfter`, so the
+ * headroom is about how many can run at once rather than how many ran
+ * recently.
  */
+
+/**
+ * The `PreviewFleet` instance that counts builds.
+ *
+ * Its own instance, not the preview queue: that queue's count is what
+ * enforces L9, and mixing builds into it would make the preview cap mean
+ * something else again. The class is a general reserve-now/release-later
+ * counter; the name is what scopes it.
+ */
+export const BUILD_FLEET_NAME = 'builds';
 
 /** What `wrangler.jsonc` gives the class. `capacity.test.ts` checks it. */
 export const CONTAINER_MAX_INSTANCES = 25;

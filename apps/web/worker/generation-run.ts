@@ -331,13 +331,27 @@ export function worthRepairing(
 /**
  * What the verify-and-repair step is given before it is considered hung.
  *
- * A build, a model call and a second build, so it is sized as the generate
- * step's own timeout plus room for two builds rather than picked. It is
- * deliberately *not* added to anything the reclaim compares against: this
- * step runs after settlement, so the only reservation alive while it works
- * is the one it makes and closes itself (#194).
+ * A build, a model call and a second build. The first version of this said
+ * exactly that and then funded one build (#196 review): a slow first build
+ * followed by a model call near its own limit would have timed out before
+ * the second build, failing a Workflow whose project was already accepted,
+ * promoted and billed.
+ *
+ * Two builds at `apps/preview`'s own bounds (five minutes installing and
+ * five compiling, each) is twenty minutes, plus room for the work those
+ * bounds do not cover: writing the project into the container and reading
+ * the output back. `repair-timeout.test.ts` checks this against that
+ * module's real numbers, because the two live in separate deployments that
+ * share no build and can drift apart silently.
+ *
+ * Deliberately *not* added to anything the reclaim compares against, and
+ * that still holds at the larger figure. This step runs after the run's own
+ * settlement, so the only reservation alive while it works is the one it
+ * makes; and that one is settled immediately after the model call, before
+ * the second build, so its life is the model call rather than the step.
+ * RUN_ABANDONED_AFTER_MS bounds the hold, not the step (#194).
  */
-export const REPAIR_BUILD_ALLOWANCE_MS = 10 * 60_000;
+export const REPAIR_BUILD_ALLOWANCE_MS = 25 * 60_000;
 export const REPAIR_STEP_TIMEOUT_MS =
   RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS;
 

@@ -1,0 +1,57 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { RUN_STEP_TIMEOUT_MS } from '@vibld/ai';
+import {
+  REPAIR_BUILD_ALLOWANCE_MS,
+  REPAIR_STEP_TIMEOUT_MS,
+} from '../worker/generation-run.ts';
+import {
+  BUILD_COMPILE_TIMEOUT_MS,
+  BUILD_INSTALL_TIMEOUT_MS,
+} from '../../preview/worker/build-limits.ts';
+
+/**
+ * That the repair step is given time for everything it does (#196 review).
+ *
+ * The step runs a build, a model call and a second build, and the first
+ * version of its allowance funded one build while its own comment said two.
+ * A slow first build followed by a model call near its limit would then
+ * have timed out with the project already accepted, promoted and billed,
+ * and the repair's hold left for the reclaim to charge in full.
+ *
+ * The two halves of that arithmetic live in separate deployments that share
+ * no build, so nothing but this test makes them agree: `apps/preview` can
+ * raise a build bound with no idea that `apps/web` is budgeting for it.
+ * Imported directly rather than read as source, because these are plain
+ * numbers with no runtime behind them.
+ */
+describe('how long a repair is allowed to take', () => {
+  const oneBuild = BUILD_INSTALL_TIMEOUT_MS + BUILD_COMPILE_TIMEOUT_MS;
+
+  it('funds both builds, not one', () => {
+    assert.ok(
+      REPAIR_BUILD_ALLOWANCE_MS >= oneBuild * 2,
+      `two builds may take ${oneBuild * 2}ms and the allowance is ${REPAIR_BUILD_ALLOWANCE_MS}ms`,
+    );
+  });
+
+  it('leaves room for the work the build bounds do not cover', () => {
+    // Writing the project into the container and reading its output back
+    // are untimed. An allowance of exactly two builds would satisfy the
+    // assertion above and still expire on a slow read.
+    assert.ok(
+      REPAIR_BUILD_ALLOWANCE_MS - oneBuild * 2 >= 60_000,
+      'no margin between the bounded work and the step timing out',
+    );
+  });
+
+  it('adds that to the model call rather than replacing it', () => {
+    // The repair's model call gets the same budget the run's did: it is
+    // the same model, asked for the same kind of thing.
+    assert.equal(
+      REPAIR_STEP_TIMEOUT_MS,
+      RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS,
+    );
+  });
+});

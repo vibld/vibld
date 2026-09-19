@@ -125,6 +125,20 @@ export async function reserveBudget(
   };
 
   /**
+   * The release, asked for more than once and never allowed to escape.
+   *
+   * Used on the denial paths as well as the rejection ones (#196 review).
+   * A denial is the commonest way this function ends and it leaves exactly
+   * the same hold behind, so a release that failed there was the same lost
+   * money for the same shared ceiling. It was also worse in one way the
+   * rejection path never was: `await releaseAccount()` bare turned a clean
+   * "no, you are over your allowance" into a thrown exception when the
+   * cleanup failed, so the caller got an error instead of the answer the
+   * ledger had already given.
+   */
+  const giveBackAccount = () => retrying(releaseAccount, wait);
+
+  /**
    * The account hold is released when a later layer *refuses*, and it has
    * to be released when a later layer *rejects* too (#196 review).
    *
@@ -158,7 +172,7 @@ export async function reserveBudget(
     try {
       return await step();
     } catch (error) {
-      await retrying(releaseAccount, wait);
+      await giveBackAccount();
       throw error;
     }
   };
@@ -188,7 +202,7 @@ export async function reserveBudget(
   // ever gated by the primary bucket, so this denial is final regardless of
   // top-up balance.
   if (primary.verdict.reason === 'too-many-in-flight' || topupCeiling <= 0) {
-    await releaseAccount();
+    await giveBackAccount();
     return { ok: false, verdict: primary.verdict };
   }
 
@@ -210,7 +224,7 @@ export async function reserveBudget(
     };
   }
 
-  await releaseAccount();
+  await giveBackAccount();
   // The monthly-allowance denial is the one worth reporting: it is what a
   // top-up would have fixed, whereas the top-up bucket's own denial is just
   // "also not enough" and says nothing new.

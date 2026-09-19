@@ -321,3 +321,83 @@ describe('releasing an account hold that does not want to be released', () => {
     assert.ok(settles.length > 1, 'the release was not retried at all');
   });
 });
+
+/**
+ * That a denial gives the account hold back too (#196 review).
+ *
+ * A denial is the commonest way this function ends and it leaves exactly
+ * the same hold behind as a rejection does, so the retry belonged on both
+ * paths. The bare release was also worse here in a way it never was on the
+ * rejection path: a cleanup failure turned a clean "over your allowance"
+ * into a thrown exception, so the caller got an error instead of the answer
+ * the ledger had already given.
+ */
+describe('releasing the account hold when a later layer says no', () => {
+  it('asks again when the release rejects on a denial', async () => {
+    const { env, settles } = ledgerThat(
+      { [ACCOUNT_BUDGET_KEY]: ALLOW, user_1: BUSY },
+      100,
+      1,
+    );
+    const outcome = await reserveBudget(
+      env,
+      'user_1',
+      1_000,
+      5_000,
+      0,
+      NOW,
+      noWait,
+    );
+    assert.equal(outcome.ok, false);
+    assert.equal(
+      settles.length,
+      2,
+      'one refused release left the hold for the reclaim to charge',
+    );
+  });
+
+  it('still answers with the denial when the release cannot happen', async () => {
+    // The caller asked whether they may spend. The ledger said no, and that
+    // is the answer, however badly the cleanup after it went.
+    const { env } = ledgerThat(
+      { [ACCOUNT_BUDGET_KEY]: ALLOW, user_1: BUSY },
+      100,
+      99,
+    );
+    const outcome = await reserveBudget(
+      env,
+      'user_1',
+      1_000,
+      5_000,
+      0,
+      NOW,
+      noWait,
+    );
+    assert.equal(outcome.ok, false);
+    assert.equal(!outcome.ok && outcome.verdict.reason, 'too-many-in-flight');
+  });
+
+  it('does the same after a top-up denial', async () => {
+    // The second denial path, which had its own bare release.
+    const { env, settles } = ledgerThat(
+      {
+        [ACCOUNT_BUDGET_KEY]: ALLOW,
+        user_1: OVER,
+        [topupKeyFor('user_1')]: OVER,
+      },
+      100,
+      1,
+    );
+    const outcome = await reserveBudget(
+      env,
+      'user_1',
+      1_000,
+      5_000,
+      900,
+      NOW,
+      noWait,
+    );
+    assert.equal(outcome.ok, false);
+    assert.equal(settles.length, 2, 'the top-up denial released only once');
+  });
+});

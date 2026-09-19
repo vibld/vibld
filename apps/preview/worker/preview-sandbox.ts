@@ -9,7 +9,11 @@ import {
 } from './build-limits.ts';
 // L9's account-wide preview cap, which is no longer the whole container
 // budget: see `capacity.ts` for what builds take out of it.
-import { ACCOUNT_MAX_IN_FLIGHT } from './capacity.ts';
+import {
+  ACCOUNT_MAX_IN_FLIGHT,
+  BUILD_CONTAINER_HEADROOM,
+  BUILD_FLEET_NAME,
+} from './capacity.ts';
 
 /**
  * Vibld's own untrusted-execution sandbox (ADR-0004; docs/decisions.md L7,
@@ -360,6 +364,36 @@ export class PreviewSandbox extends Sandbox<Env> {
       token,
     });
 
+    // The build half of the container split, actually enforced (#196
+    // review). Subtracting the headroom from the preview cap only made the
+    // partition true on the preview side: nothing stopped six builds
+    // overlapping nineteen previews and filling all twenty-five platform
+    // slots while the fleet still thought it had room.
+    //
+    // Its own `PreviewFleet` instance rather than the preview queue, since
+    // that queue's count is what enforces L9 and must stay about previews.
+    // Same class, same reserve-now/release-later shape, separate storage.
+    //
+    // Refused rather than queued when the slots are full: a build has a
+    // paid Workflow waiting on its answer, so making it wait behind others
+    // spends that Workflow's timeout. `busy` is the right refusal, and
+    // `worthRepairing` already reads it as saying nothing about the
+    // project, so no repair is bought and nothing is claimed.
+    const slot = await this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
+      `build:${this.ctx.id.toString()}`,
+      BUILD_CONTAINER_HEADROOM,
+    );
+    if (!slot.active) {
+      await this.env.Fleet.getByName(BUILD_FLEET_NAME)
+        .release(slot.id, BUILD_CONTAINER_HEADROOM)
+        .catch(() => {});
+      await this.ctx.storage.delete(BUILD_LOCK_KEY);
+      return {
+        reason: 'busy',
+        error: 'Too many builds are running right now. Try again in a moment.',
+      };
+    }
+
     try {
       // Emptied first, because this container is reused (#196 review).
       // `writeProject` writes the paths it is given and removes nothing, so
@@ -480,6 +514,13 @@ export class PreviewSandbox extends Sandbox<Env> {
       // Only if it is still this build's. A build that overran its lock
       // comes through here after somebody else has taken one, and deleting
       // that would hand a third build the workspace the second is using.
+      // Always, and before the lock: the slot is this build's by id, so no
+      // ownership question arises, and a slot held past its build is one
+      // fewer build anybody can run until the fleet's own stale reclaim
+      // notices thirty minutes later.
+      await this.env.Fleet.getByName(BUILD_FLEET_NAME)
+        .release(slot.id, BUILD_CONTAINER_HEADROOM)
+        .catch(() => {});
       const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
       if (mine?.token === token) {
         await this.ctx.storage.delete(BUILD_LOCK_KEY);
