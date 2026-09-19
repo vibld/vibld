@@ -188,21 +188,51 @@ export class MockupProvider {
         );
       }
       /*
-       * The meter goes back to zero before the second attempt starts
-       * (#191 review).
+       * Every meter goes back to zero before the second attempt starts
+       * (#191 review, twice).
        *
-       * A caller watching progress holds the last figure it was given, and
-       * settles a cancelled run from it. Without this the first attempt's
-       * counts are still sitting there while the retry runs, so a reader
-       * who cancels before the second attempt streams anything is charged
-       * for the attempt this branch just declared absorbed. That is the
-       * opposite of what `onDiscarded` above is for.
+       * A caller watching these holds the last figure it was given, and
+       * settles a cancelled run from them. Left standing, the absorbed
+       * attempt's counts are what a reader who cancels during the retry
+       * is charged for -- the attempt this branch just declared absorbed,
+       * which is the opposite of what `onDiscarded` above is for.
        *
        * Zero rather than an attempt-boundary event, because every consumer
-       * of `onProgress` already means "this is the total so far" by it, and
-       * for a run that is starting again the total so far is nothing.
+       * of these already means "so far" by them, and for a run that is
+       * starting again, so far is nothing.
+       *
+       * The prompt size joins the progress counts, because the client
+       * reports it before it sends, so it restores itself the moment the
+       * retry really goes out. When the retry does not go out, zero is
+       * what a reader owes for a request that never left.
        */
       this.#onProgress?.({ characters: 0, reasoningCharacters: 0 });
+      this.#onPromptChars?.(0);
+
+      /*
+       * Cancelled while the answer above was awaited (#191 review).
+       *
+       * The route checks this before the first attempt and could not
+       * check it here, because the awaiting happens inside this method.
+       * A reader who disconnects while the caller is reaching a ledger
+       * would otherwise have a second request built and sent on an
+       * already-aborted signal: it rejects without reporting usage, and
+       * settlement then prices a request that never left the Worker.
+       *
+       * The run leaves as the empty reply it has, which is what it was
+       * going to be. Both meters are already at zero above, so the
+       * cancellation settles at nothing, which is what one absorbed
+       * attempt and one request never sent really cost the reader.
+       */
+      if (this.#signal?.aborted) {
+        return readCompletion(
+          first,
+          this.#maxTokens,
+          MockupSetSchema,
+          MOCKUP_SUBJECT,
+        );
+      }
+
       completion = await this.#ask(request);
     }
 

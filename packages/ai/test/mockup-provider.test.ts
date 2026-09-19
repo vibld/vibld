@@ -290,6 +290,112 @@ describe('asking for three directions', () => {
     );
   });
 
+  it('does not send a retry to a reader who has gone', async () => {
+    // The route checks this before the first attempt and cannot check it
+    // here, because the awaiting happens inside `generate` (#191 review).
+    // A reader who disconnects while the caller reaches a ledger would
+    // otherwise have a second request built and sent on an already-aborted
+    // signal, which rejects without reporting usage -- and settlement then
+    // prices a request that never left the Worker.
+    const abort = new AbortController();
+    let call = 0;
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      signal: abort.signal,
+      onDiscarded: async () => {
+        // The window the finding is about: the caller is reaching a
+        // ledger, and the reader leaves while it does.
+        abort.abort();
+        await Promise.resolve();
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.equal(call, 1, 'a retry was sent to a reader who had gone');
+  });
+
+  it('puts the prompt size back to zero at the attempt boundary', async () => {
+    // The other half, and the one that decides the money. A client reports
+    // what it sent before it sends, so a pre-aborted retry still set the
+    // figure a cancelled run is priced from. Zeroed here, it restores
+    // itself the moment a retry really goes out, and stays zero when none
+    // does.
+    const abort = new AbortController();
+    const sent: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        request.onPromptChars?.(2_400);
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      signal: abort.signal,
+      onPromptChars: (characters) => sent.push(characters),
+      onDiscarded: async () => {
+        abort.abort();
+        await Promise.resolve();
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.deepEqual(
+      sent,
+      [2_400, 0],
+      'a cancelled run is still priced from the absorbed attempt\u2019s prompt',
+    );
+  });
+
+  it('lets the retry report its own prompt size', async () => {
+    // Zeroing the figure must not leave a real retry settling at nothing:
+    // the client reports it again before it sends, which is the whole
+    // reason zero is safe here.
+    let call = 0;
+    const sent: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        call += 1;
+        request.onPromptChars?.(2_400);
+        return call === 1
+          ? {
+              plan: null,
+              emptyBody: true,
+              stopReason: 'end_turn',
+              usage: usageOf(9999),
+            }
+          : { plan: VALID_SET, stopReason: 'end_turn', usage: usageOf(11) };
+      },
+    } as unknown as PlanClient;
+
+    await new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onPromptChars: (characters) => sent.push(characters),
+    }).generate({ prompt: 'a bakery' });
+
+    assert.deepEqual(sent, [2_400, 0, 2_400]);
+  });
+
   it('still names the failure when the retry is refused', async () => {
     // Leaving by one door is not leaving silently: the reader is owed the
     // same message they would have got had the empty reply been the end
