@@ -43,9 +43,30 @@ export function publishServiceConfigured(env: PublishServiceEnv): boolean {
 
 const INTERNAL_ORIGIN = 'https://internal.invalid';
 
+/**
+ * Why a build produced nothing, carried across the service boundary.
+ *
+ * A copy of `@vibld/preview`'s own union rather than an import: the two
+ * Workers are separate deployments that talk over a service binding and
+ * share no build, the same reason `ServiceBinding` is declared here rather
+ * than imported. `parseBuildResult` checks the wire value against this list,
+ * so the copy cannot silently drift into accepting something the other side
+ * never sends.
+ */
+export type BuildFailureReason =
+  'busy' | 'install' | 'build' | 'output' | 'sandbox';
+
+const BUILD_FAILURE_REASONS: readonly BuildFailureReason[] = [
+  'busy',
+  'install',
+  'build',
+  'output',
+  'sandbox',
+];
+
 export type BuildResult =
   | { ok: true; files: ProjectFile[]; skipped: string[] }
-  | { ok: false; error: string };
+  | { ok: false; error: string; reason?: BuildFailureReason };
 
 /**
  * `@vibld/preview`'s own reply is trusted content -- it is our other
@@ -57,6 +78,7 @@ function parseBuildResult(body: unknown): BuildResult {
     files?: unknown;
     skipped?: unknown;
     error?: unknown;
+    reason?: unknown;
   };
   if (Array.isArray(record.files)) {
     const files = record.files.filter(
@@ -78,12 +100,19 @@ function parseBuildResult(body: unknown): BuildResult {
       };
     }
   }
+  // Absent rather than guessed when the wire value is not one this knows.
+  // A caller deciding whether to spend a model call on a repair reads the
+  // absence as "no evidence about the project" and does nothing, which is
+  // the safe direction: the alternative is inventing a reason and spending
+  // somebody's money on it (#194).
+  const reason = BUILD_FAILURE_REASONS.find((known) => known === record.reason);
   return {
     ok: false,
     error:
       typeof record.error === 'string'
         ? record.error
         : 'The build service returned an unexpected response.',
+    ...(reason ? { reason } : {}),
   };
 }
 

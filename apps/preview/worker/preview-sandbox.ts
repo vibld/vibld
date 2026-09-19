@@ -78,6 +78,34 @@ const BUILD_OUTPUT_DIR = 'build/client';
 
 type Phase = 'queued' | 'installing' | 'starting' | 'ready' | 'failed';
 
+/**
+ * Why a build did not produce output, as a value rather than as prose.
+ *
+ * The message alone was enough while the only caller was publish, which
+ * shows it to a person and stops. #194 added a caller that has to *decide*
+ * from it: a generation that builds its own output and, when the build
+ * fails, spends a second model call trying to repair the project. Deciding
+ * that from a string means matching on wording, and wording changes.
+ *
+ * Only two of these are evidence about the project the model wrote:
+ *
+ *  - `install`: a dependency that does not resolve, which is usually a
+ *    package the model invented or misspelled.
+ *  - `build`: the compiler or bundler refused what it was given.
+ *
+ * The rest are about this service having a bad day, and none of them says
+ * anything is wrong with the code. `busy` in particular is a refusal before
+ * any work happens: a preview is already running for the project, so the
+ * build never started. Repairing on any of these would spend somebody's
+ * money to fix a problem they do not have.
+ */
+export type BuildFailureReason =
+  'busy' | 'install' | 'build' | 'output' | 'sandbox';
+
+export type BuildOutcome =
+  | { files: ProjectFile[]; skipped: string[] }
+  | { reason: BuildFailureReason; error: string };
+
 interface PreviewState {
   phase: Phase;
   startedAt: number;
@@ -268,9 +296,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    * interface already applies), so there is nowhere correct to put binary
    * bytes yet.
    */
-  async buildProject(
-    files: ProjectFile[],
-  ): Promise<{ files: ProjectFile[]; skipped: string[] } | { error: string }> {
+  async buildProject(files: ProjectFile[]): Promise<BuildOutcome> {
     // A running preview's dev server and this build would both write into
     // the same /workspace at once -- not a security boundary (both are the
     // same user's own untrusted code either way), but a real race on the
@@ -279,6 +305,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     const existing = await this.readState();
     if (existing && !this.isExpired(existing) && existing.phase !== 'failed') {
       return {
+        reason: 'busy',
         error:
           'A preview is currently running for this project. Stop it before publishing.',
       };
@@ -292,6 +319,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       });
       if (!install.success) {
         return {
+          reason: 'install',
           error: `npm install failed (exit ${install.exitCode}): ${install.stderr.slice(-2000)}`,
         };
       }
@@ -308,6 +336,7 @@ export class PreviewSandbox extends Sandbox<Env> {
           .filter((stream) => stream.length > 0)
           .join('\n');
         return {
+          reason: 'build',
           error: `npm run build failed (exit ${build.exitCode}): ${said.slice(-2000)}`,
         };
       }
@@ -316,6 +345,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       const listing = await this.listFiles(outputDir, { recursive: true });
       if (!listing.success) {
         return {
+          reason: 'output',
           error: `The build succeeded but its output directory (${BUILD_OUTPUT_DIR}) could not be read.`,
         };
       }
@@ -333,12 +363,14 @@ export class PreviewSandbox extends Sandbox<Env> {
       }
       if (output.length === 0) {
         return {
+          reason: 'output',
           error: `The build produced no readable output in ${BUILD_OUTPUT_DIR}.`,
         };
       }
       return { files: output, skipped };
     } catch (error) {
       return {
+        reason: 'sandbox',
         error: error instanceof Error ? error.message : 'Build failed.',
       };
     }
