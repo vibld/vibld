@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   PartialSettlement,
+  REBUILD_WAIT_ATTEMPTS,
   verifyAndRepair,
 } from '../worker/generation-run.ts';
 import type {
@@ -71,6 +72,13 @@ function deps(
     accepted?: boolean;
     /** What the build after the repair answers. Defaults to the first. */
     rebuild?: { ok: boolean; error?: string; reason?: string };
+    /**
+     * How many of the builds after the repair answer `busy` before the one
+     * above is given. A previous build's container teardown holds the
+     * workspace lock until its container is gone, and since it moved off
+     * that build's own clock it can still be holding it here.
+     */
+    busyRebuilds?: number;
     /** Which call throws, counting from one. */
     buildThrowsOn?: number;
     /** The reservation could not be asked for at all, as against refused. */
@@ -100,7 +108,15 @@ function deps(
         if (spy.builds === options.buildThrowsOn) {
           throw new Error('the preview service is gone');
         }
-        return spy.builds === 1 ? build : (options.rebuild ?? build);
+        if (spy.builds === 1) return build;
+        if (spy.builds - 1 <= (options.busyRebuilds ?? 0)) {
+          return {
+            ok: false,
+            reason: 'busy',
+            error: 'Another build is already running for this project.',
+          };
+        }
+        return options.rebuild ?? build;
       }) as never,
       reserve: (async () => {
         spy.reserves += 1;
@@ -496,22 +512,60 @@ describe('what the second build is allowed to claim', () => {
     // repair failed a check nothing performed.
     const { spy, deps: d } = deps(
       { ok: false, reason: 'build', error: 'TS1484' },
-      {
-        rebuild: {
-          ok: false,
-          reason: 'busy',
-          error: 'Another build is already running for this project.',
-        },
-      },
+      { busyRebuilds: Number.MAX_SAFE_INTEGER },
     );
     const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
-    assert.equal(spy.builds, 2, 'the repaired files were never built');
+    assert.equal(
+      spy.builds,
+      2 + REBUILD_WAIT_ATTEMPTS,
+      'the rebuild gave up on a busy workspace at a different count',
+    );
     assert.equal(
       outcome.repaired,
       undefined,
       'a rebuild that never judged the project reported it as failed',
     );
+    assert.equal(
+      outcome.unverified,
+      'busy',
+      'a repair nobody could build says nothing about why',
+    );
     assert.ok(outcome.result, 'the promoted revision was thrown away');
+  });
+
+  it('waits out a workspace the previous build is still tearing down', async () => {
+    // #196 review. The teardown holds the lock until its container is gone
+    // and no longer holds up the build it belongs to, so it overlaps the
+    // repair's model call. Refusing there costs the caller the one thing
+    // they just paid for: finding out whether the repair builds. Ordinarily
+    // the teardown is one `destroy()` and is long finished, which is why
+    // this waits rather than treating the refusal as an answer.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { busyRebuilds: 2, rebuild: { ok: true } },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.builds, 4, 'the rebuild did not ask again');
+    assert.equal(
+      outcome.repaired,
+      true,
+      'a repair that builds was reported as unverified',
+    );
+    assert.equal(outcome.unverified, undefined);
+  });
+
+  it('does not wait out a refusal about this build rather than the last', async () => {
+    // Only `busy` is somebody else holding the workspace. `sandbox` is this
+    // build's own container, and asking again spends the caller's clock on
+    // an answer that will not change.
+    const { spy, deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: false, reason: 'sandbox', error: 'container gone' } },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(spy.builds, 2, 'a refusal that will not change was retried');
+    assert.equal(outcome.repaired, undefined);
+    assert.equal(outcome.unverified, 'sandbox');
   });
 
   it('still says false when the rebuild did judge the project', async () => {

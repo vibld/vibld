@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { RUN_STEP_TIMEOUT_MS } from '@vibld/ai';
 import {
+  REBUILD_WAIT_BUDGET_MS,
   REPAIR_BUILD_ALLOWANCE_MS,
   REPAIR_STEP_TIMEOUT_MS,
 } from '../worker/generation-run.ts';
@@ -40,9 +41,26 @@ describe('how long a repair is allowed to take', () => {
     // Writing the project into the container and reading its output back
     // are untimed. An allowance of exactly two builds would satisfy the
     // assertion above and still expire on a slow read.
+    //
+    // The rebuild's wait is named rather than left inside that margin
+    // (#196 review). It is the second build waiting out the first build's
+    // container teardown, which runs beside the model call now, and a wait
+    // that fits only because nobody added it up is the defect this
+    // allowance has already had twice.
     assert.ok(
-      REPAIR_BUILD_ALLOWANCE_MS - oneBuild * 2 >= 60_000,
+      REPAIR_BUILD_ALLOWANCE_MS - oneBuild * 2 - REBUILD_WAIT_BUDGET_MS >=
+        60_000,
       'no margin between the bounded work and the step timing out',
+    );
+  });
+
+  it('gives up waiting for a workspace long before the step does', () => {
+    // A wait as long as the teardown's own cap would put back on the
+    // caller's clock exactly what moving that teardown to `ctx.waitUntil`
+    // took off it. It has to be a fraction of one build, not a second one.
+    assert.ok(
+      REBUILD_WAIT_BUDGET_MS < oneBuild / 2,
+      `waiting ${REBUILD_WAIT_BUDGET_MS}ms for a lock is a build's worth of the allowance`,
     );
   });
 

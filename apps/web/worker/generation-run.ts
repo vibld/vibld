@@ -26,7 +26,7 @@ import type { RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
 import type { BuildFailureReason, buildProject } from './publish-client.ts';
 import type { reserveBudget } from './reserve.ts';
-import { retrying } from '@vibld/core';
+import { retrying, sleep } from '@vibld/core';
 
 /**
  * The pure half of durable generation (docs/decisions.md L26):
@@ -390,6 +390,42 @@ export const REPAIR_BUILD_ALLOWANCE_MS = 25 * 60_000;
 export const REPAIR_STEP_TIMEOUT_MS =
   RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS;
 
+/**
+ * How long the repair's second build waits out a busy workspace, and how
+ * often it asks again (#196 review).
+ *
+ * The first build's container teardown holds that user's build lock until
+ * the container is gone, and it no longer holds up the build it belongs to:
+ * it runs on `ctx.waitUntil`, so a repair's model call and its predecessor's
+ * teardown now overlap. Ordinarily the teardown is one `destroy()` and is
+ * finished long before the model call is, but when it is not, the second
+ * build met a `busy` refusal and the repair was returned unverified. The
+ * caller had just paid for it, and checking whether it builds is the whole
+ * point of paying.
+ *
+ * Bounded at half a minute rather than joined, because waiting out the
+ * teardown's own ten-minute cap would put back on the caller's clock exactly
+ * what moving it to `ctx.waitUntil` took off. Thirty seconds covers a slow
+ * destroy; a teardown still holding the lock after that is the pathological
+ * case, and giving up there reports the repair as unverified, which is what
+ * the code already did and is honest.
+ *
+ * It is spent inside `REPAIR_BUILD_ALLOWANCE_MS` and `repair-timeout.test.ts`
+ * checks that the allowance has room for it on top of the two builds. A wait
+ * that fits only because nobody added it up is the defect that allowance has
+ * had twice already.
+ *
+ * Counted in attempts rather than measured against the clock, and the budget
+ * is derived from the two. A loop whose only bound is `Date.now()` moving
+ * does not terminate when it does not move, which is not a hypothetical: the
+ * first version of this hung the test suite, because the fake clock these
+ * tests inject is a constant.
+ */
+export const REBUILD_WAIT_INTERVAL_MS = 5_000;
+export const REBUILD_WAIT_ATTEMPTS = 6;
+export const REBUILD_WAIT_BUDGET_MS =
+  REBUILD_WAIT_INTERVAL_MS * REBUILD_WAIT_ATTEMPTS;
+
 export function repairPromptFor(error: string): string {
   return `The project you just wrote does not build. This is the exact output:
 
@@ -491,6 +527,23 @@ export interface RepairOutcome {
    * to pay for a repair.
    */
   skipped?: 'not-configured' | 'not-the-project' | 'no-budget' | 'unavailable';
+  /**
+   * Why a repair that was paid for came back unbuilt (#196 review).
+   *
+   * `repaired` being absent already says that nothing was found out, and it
+   * says nothing about which of the reasons it was. The one worth telling
+   * apart from the rest is `busy`, because that is this step tripping over
+   * its own predecessor's teardown rather than anything about the wider
+   * world, and it is the residual the bounded wait in `rebuild` does not
+   * cover. Without this the only sign of it is a repair that quietly never
+   * reports `repaired`, which is indistinguishable from the build service
+   * having been down.
+   *
+   * `unavailable` covers both a build that could not be asked at all and
+   * one whose answer named a reason this deployment does not know: neither
+   * came back with anything that says a thing about the files.
+   */
+  unverified?: BuildFailureReason | 'unavailable';
   /** The repair's own reservation, settled by this step and not the run's. */
   repairCostMicroUsd?: number;
   /**
@@ -901,6 +954,38 @@ export async function verifyAndRepair(
     }
   };
 
+  /**
+   * The same build, given a bounded wait when the workspace is busy
+   * (#196 review).
+   *
+   * Only the repair's second build uses this, and only because of what runs
+   * beside it: the first build's teardown holds that user's build lock until
+   * its container is gone, and since it moved to `ctx.waitUntil` it can still
+   * be holding it while the model call runs. A `busy` refusal there is this
+   * step tripping over its own predecessor, and it costs the thing the
+   * caller just paid for: the repair is returned without anybody finding out
+   * whether it builds.
+   *
+   * Asking again rather than joining the teardown. There is nothing to join:
+   * the lock is the only signal the two share, and waiting on it for the
+   * teardown's full cap would put ten minutes back on the caller's clock,
+   * which is what moving the teardown off it was for.
+   *
+   * `busy` and nothing else. Every other refusal is about this build rather
+   * than about a previous one, and asking again would spend the caller's
+   * clock on an answer that will not change.
+   */
+  const rebuild = async (files: ProjectFile[]) => {
+    const wait = deps.wait ?? sleep;
+    let answer = await build(files);
+    for (let asked = 0; asked < REBUILD_WAIT_ATTEMPTS; asked += 1) {
+      if (!answer || answer.ok || answer.reason !== 'busy') break;
+      await wait(REBUILD_WAIT_INTERVAL_MS);
+      answer = await build(files);
+    }
+    return answer;
+  };
+
   const first = await build(result.accepted.files);
   // Unreachable, not failed. Nothing is known about the project, so nothing
   // is claimed and no money is spent.
@@ -1017,7 +1102,7 @@ export async function verifyAndRepair(
     return { built: false, repaired: false, ...money };
   }
 
-  const second = await build(outcome.result.accepted.files);
+  const second = await rebuild(outcome.result.accepted.files);
   return {
     built: false,
     ...money,
@@ -1028,7 +1113,14 @@ export async function verifyAndRepair(
     // say as little about repaired files as they do about the originals.
     // Reporting false there would be the same claim `built` used to make:
     // that a project failed a check nothing performed.
-    ...(second && judgedTheProject(second) ? { repaired: second.ok } : {}),
+    ...(second && judgedTheProject(second)
+      ? { repaired: second.ok }
+      : {
+          unverified:
+            second && !second.ok
+              ? (second.reason ?? 'unavailable')
+              : 'unavailable',
+        }),
     // Returned whether or not it builds, because it is what the store now
     // holds. Handing back the first attempt would put the reader's copy and
     // the accepted revision out of step, which is the other finding on this

@@ -300,6 +300,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         ...(repair.built === undefined ? {} : { built: repair.built }),
         ...(repair.repaired === undefined ? {} : { repaired: repair.repaired }),
         ...(repair.skipped ? { skipped: repair.skipped } : {}),
+        ...(repair.unverified ? { unverified: repair.unverified } : {}),
         ...(repair.repairCostMicroUsd === undefined
           ? {}
           : { repairMicroUsd: repair.repairCostMicroUsd }),
