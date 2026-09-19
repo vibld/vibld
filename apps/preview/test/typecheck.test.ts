@@ -155,14 +155,17 @@ describe('what a preview finds out about the project it is running', () => {
     // npm's own wrapper, so a report built from stderr alone told somebody
     // whose publish was blocked by a type error that npm had exited 2, and
     // nothing else. Both paths that report a failed compile read both.
-    // Bounded by the method that follows each, not by a character count.
+    // Bounded by the method that follows each, not by a character count,
+    // and by the one that really does follow it: this ran to `createShare`
+    // and went on passing when the teardown was lifted out into
+    // `releaseBuild` between the two.
     // The fixed 3000-character window this used to take was measuring
     // nothing in particular: adding anything above the assertion inside
     // `buildProject` pushed the line it looks for out of the window, and
     // the test failed for a reason that had nothing to do with streams.
     const methods: [string, string][] = [
       ['private async typecheck(', 'private async destroyHoldingLock('],
-      ['async buildProject(', 'async createShare('],
+      ['async buildProject(', 'private async releaseBuild('],
     ];
     for (const [signature, next] of methods) {
       assert.match(

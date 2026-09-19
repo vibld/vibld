@@ -98,6 +98,21 @@ describe('counting the builds too', () => {
   );
   const body = source.slice(
     source.indexOf('async buildProject('),
+    source.indexOf('private async releaseBuild('),
+  );
+  /**
+   * The teardown, read as the method it now is.
+   *
+   * It used to sit inside `buildProject`'s `finally` and this region ran
+   * to `createShare`, so when it was lifted out into the method between
+   * the two, every assertion below went on reading it without one of them
+   * changing. That is a region measuring where the code happens to sit
+   * rather than what it does, and it is the seventh time a test on this
+   * file has done it. Naming both ends, and naming the method rather than
+   * a landmark past it, is what keeps the two regions honest.
+   */
+  const teardown = source.slice(
+    source.indexOf('private async releaseBuild('),
     source.indexOf('async createShare('),
   );
 
@@ -136,15 +151,21 @@ describe('counting the builds too', () => {
   });
 
   it('gives the slot back on every path out', () => {
+    // Two halves, because the teardown is a method away now: every exit
+    // from the build has to reach it, and it has to release.
     const finallyAt = body.lastIndexOf('} finally {');
-    assert.ok(finallyAt > 0);
-    const tail = body.slice(finallyAt);
+    assert.ok(finallyAt > 0, 'the build no longer tears down on every path');
+    assert.match(
+      body.slice(finallyAt),
+      /this\.releaseBuild\(/,
+      'a path out of the build never reaches the teardown',
+    );
     assert.ok(
-      releaseAt(tail) > 0,
+      releaseAt(teardown) > 0,
       'a finished build keeps its slot until the fleet reclaims it',
     );
     assert.match(
-      tail.slice(releaseAt(tail)),
+      teardown.slice(releaseAt(teardown)),
       /BUILD_CONTAINER_HEADROOM/,
       'the release is counted against some other cap',
     );
@@ -157,7 +178,7 @@ describe('counting the builds too', () => {
     // promoted with nobody to use it, and only then begins its hard
     // lifetime, which turns one dropped release into a build slot lost to
     // whoever is next in the queue.
-    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const tail = teardown;
     assert.match(
       tail,
       /retrying\(\(\) =>[\s\S]{0,240}?\.release\(/,
@@ -178,7 +199,7 @@ describe('counting the builds too', () => {
     // Asserted as "the guard does not consult the ticket's state", not as
     // the exact guard the code happens to have: the property is what
     // matters and the shape has already changed once under it.
-    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const tail = teardown;
     const guard = tail.slice(0, releaseAt(tail));
     const condition = guard.slice(guard.lastIndexOf('if ('));
     assert.match(condition, /\bslot\b/, 'the release is not guarded at all');
@@ -193,7 +214,7 @@ describe('counting the builds too', () => {
     // A `return` in a `finally` replaces whatever the build had already
     // decided to answer. Worth pinning because the three cases below read
     // like early returns and are the obvious way to write them.
-    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const tail = teardown;
     assert.doesNotMatch(
       tail.replace(/\/\/[^\n]*/g, ''),
       /\breturn\b/,
@@ -208,7 +229,7 @@ describe('counting the builds too', () => {
     // twenty-sixth container the platform then refuses to start. Holding
     // costs one build slot for as long as the fleet's stale reclaim takes,
     // which is bounded, and refuses safely in the meantime.
-    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const tail = teardown;
     // Both arms, in order: a destroy that resolved means gone, a destroy
     // that rejected means *not* gone. Asserting only that `gone` is
     // computed let a mutation flip the rejection arm to `true` and survive,
@@ -270,7 +291,7 @@ describe('counting the builds too', () => {
       /started = true;[\s\S]{0,120}?this\.exec\(/,
       'the flag is not set at the first thing that starts a container',
     );
-    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const tail = teardown;
     assert.match(
       tail,
       /const gone = !started\s*\?\s*true/,
@@ -284,7 +305,7 @@ describe('counting the builds too', () => {
     // fleet admit a build the platform has no room for: the same
     // over-admission the counter was added to prevent, moved from previews
     // to builds.
-    const tail = body.slice(body.lastIndexOf('} finally {'));
+    const tail = teardown;
     const destroyed = tail.indexOf('destroyHoldingLock(token)');
     const released = releaseAt(tail);
     assert.ok(destroyed > 0, 'the finally no longer destroys the container');

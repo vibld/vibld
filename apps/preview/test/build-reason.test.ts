@@ -31,33 +31,37 @@ const source = readFileSync(
 );
 
 /**
- * The body of `buildProject` and nothing else.
+ * One method's body, from its own signature to the next one's.
  *
- * `createShare` is the method immediately after it, and naming a boundary
- * further down the file was how the first version of this test came to
- * count `provision`'s own refusal as one of these: seven errors against six
- * reasons, for a region that was never being measured. The assertion below
- * counts, so the region it counts over has to be exact.
+ * Both ends are named, and the far end is named as the method that really
+ * does follow. The first version of this counted `provision`'s refusal as
+ * one of `buildProject`'s -- seven errors against six reasons, over a
+ * region that was never being measured. The second ran from `buildProject`
+ * to `createShare` and went on passing when the teardown was lifted out
+ * into `releaseBuild` between the two: the same defect from the other
+ * side, a region growing to keep covering assertions that had stopped
+ * being about it. The assertions below count and compare positions, so the
+ * regions they read have to be exactly the methods they name.
  */
-function buildProjectBody(): string {
-  const at = source.indexOf('async buildProject(');
-  assert.ok(at > 0, 'buildProject is not where this expected it');
-  const end = source.indexOf('async createShare(', at);
-  assert.ok(end > at, 'createShare is no longer the method after it');
+function bodyOf(signature: string, next: string): string {
+  const at = source.indexOf(signature);
+  assert.ok(at > 0, `${signature} is not where this expected it`);
+  const end = source.indexOf(next, at);
+  assert.ok(end > at, `${next} is no longer the method after it`);
   return source.slice(at, end);
 }
 
 /**
  * The same region with its prose taken out.
  *
- * The comments in `buildProject` discuss the very things some of these
+ * The comments in these methods discuss the very things some of these
  * assertions look for -- `writeProject`, `node_modules`, the order they
  * happen in -- so a test that searched the raw text would be reading the
  * explanation rather than the code, and would pass or fail on how the
  * comment was worded. Only lines that are not comments count.
  */
-function buildProjectCode(): string {
-  return buildProjectBody()
+function codeOf(body: string): string {
+  return body
     .split('\n')
     .filter((line) => {
       const trimmed = line.trim();
@@ -69,6 +73,23 @@ function buildProjectCode(): string {
       );
     })
     .join('\n');
+}
+
+/** What the build itself does, up to where it hands off the teardown. */
+function buildProjectBody(): string {
+  return bodyOf('async buildProject(', 'private async releaseBuild(');
+}
+
+function buildProjectCode(): string {
+  return codeOf(buildProjectBody());
+}
+
+/**
+ * What the teardown does, which is no longer on the caller's clock: the
+ * build's `finally` starts it and does not wait for it (#196 review).
+ */
+function releaseBuildCode(): string {
+  return codeOf(bodyOf('private async releaseBuild(', 'async createShare('));
 }
 
 describe('what a failed build says about itself', () => {
@@ -166,11 +187,19 @@ describe('one build at a time', () => {
     // Including the refusals that return from inside the `try`. A lock
     // taken and not returned blocks this user's next build until it ages
     // out, which is fifteen minutes of a feature silently not running.
-    const body = buildProjectBody();
+    //
+    // Two halves since the teardown became its own method: every exit has
+    // to reach it, and it has to give the lock back. Asserting only the
+    // second would pass on a build that never called it.
     assert.match(
-      body,
-      /finally \{[\s\S]*?storage\.delete\(BUILD_LOCK_KEY\)/,
-      'the build lock is released on some paths and not others',
+      buildProjectBody(),
+      /finally \{[\s\S]*?this\.releaseBuild\(/,
+      'a path out of the build never reaches the teardown',
+    );
+    assert.match(
+      releaseBuildCode(),
+      /storage\.delete\(BUILD_LOCK_KEY\)/,
+      'the teardown never gives the build lock back',
     );
   });
 });
@@ -260,15 +289,16 @@ describe('whose lock a build releases', () => {
     // first version of this test matched adjacent text and broke when the
     // teardown was restructured, while the property it was about never
     // changed -- which is a test measuring the wrong thing, again.
-    const body = buildProjectCode();
+    const teardown = releaseBuildCode();
     assert.match(
-      body,
+      teardown,
       /const ours = mine\?\.token === token;/,
       "nothing works out whether the lock is still this build's",
     );
-    const tail = body.slice(body.lastIndexOf('} finally {'));
-    for (const at of [...tail.matchAll(/storage\.delete\(BUILD_LOCK_KEY\)/g)]) {
-      const guard = tail.slice(0, at.index);
+    for (const at of [
+      ...teardown.matchAll(/storage\.delete\(BUILD_LOCK_KEY\)/g),
+    ]) {
+      const guard = teardown.slice(0, at.index);
       assert.match(
         guard.slice(guard.lastIndexOf('if (')),
         /if \([^)]*\b(ours|still\?\.token === token)\b/,
@@ -309,11 +339,37 @@ describe('whose lock a build releases', () => {
  */
 describe('what a build leaves behind', () => {
   it('destroys its container on the way out', () => {
-    const body = buildProjectCode();
     assert.match(
-      body,
+      releaseBuildCode(),
       /destroyHoldingLock\(token\)/,
       'a finished build holds its container until sleepAfter',
+    );
+  });
+
+  it('does not keep the caller waiting while it does', () => {
+    // #196 review. The teardown waits up to MAX_DESTROY_WAIT_MS for a
+    // container to die, and awaiting that put ten minutes of somebody
+    // else's problem onto the clock of a paid Workflow that already had
+    // its answer: `REPAIR_BUILD_ALLOWANCE_MS` budgets two builds
+    // (`apps/web/test/repair-timeout.test.ts`) and a build had quietly
+    // grown a teardown, so two of them could take forty minutes against a
+    // twenty-five minute allowance.
+    //
+    // Both halves, because either alone passes on the wrong code: dropping
+    // the call entirely satisfies "nothing is awaited", and an await
+    // sitting beside a `waitUntil` satisfies "the teardown is handed off".
+    const tail = buildProjectCode().slice(
+      buildProjectCode().lastIndexOf('} finally {'),
+    );
+    assert.match(
+      tail,
+      /ctx\.waitUntil\(this\.releaseBuild\(/,
+      'the teardown is not handed to the runtime to finish',
+    );
+    assert.doesNotMatch(
+      tail,
+      /await this\.releaseBuild\(/,
+      'the build waits out a teardown its caller has no use for',
     );
   });
 
@@ -321,9 +377,9 @@ describe('what a build leaves behind', () => {
     // The sharper half of the ownership check. A build that overran is
     // running in the same container as whoever now holds the lock, so
     // destroying it there would kill their build rather than free a slot.
-    const body = buildProjectCode();
-    const owned = body.indexOf('token === token');
-    const destroyed = body.indexOf('destroyHoldingLock(token)');
+    const teardown = releaseBuildCode();
+    const owned = teardown.indexOf('token === token');
+    const destroyed = teardown.indexOf('destroyHoldingLock(token)');
     assert.ok(owned > 0 && destroyed > owned, 'the destroy is unguarded');
   });
 });
@@ -409,11 +465,10 @@ describe('keeping the lock alive while the build is', () => {
     // The ownership answer used for the delete was computed before an
     // await. A build that overran could delete the lock somebody else took
     // during that await.
-    const body = buildProjectCode();
-    const tail = body.slice(body.lastIndexOf('} finally {'));
-    const destroyed = tail.indexOf('destroyHoldingLock(token)');
-    const reread = tail.indexOf('storage.get<BuildLock>', destroyed);
-    const deleted = tail.indexOf('storage.delete(BUILD_LOCK_KEY)');
+    const teardown = releaseBuildCode();
+    const destroyed = teardown.indexOf('destroyHoldingLock(token)');
+    const reread = teardown.indexOf('storage.get<BuildLock>', destroyed);
+    const deleted = teardown.indexOf('storage.delete(BUILD_LOCK_KEY)');
     assert.ok(destroyed > 0 && deleted > 0, 'the teardown lost a step');
     assert.ok(
       reread > destroyed && reread < deleted,

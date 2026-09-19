@@ -562,91 +562,97 @@ export class PreviewSandbox extends Sandbox<Env> {
         error: error instanceof Error ? error.message : 'Build failed.',
       };
     } finally {
-      // Teardown, written as the three cases it has rather than as a
-      // sequence of steps. This is the third review round on these lines
-      // and every finding has been an order I never enumerated, so the
-      // cases are the structure now instead of the commentary.
+      // Not awaited, which is the point (#196 review). Tearing a container
+      // down is not the caller's business: they asked whether their project
+      // builds, and by here that is known. Awaiting it put up to ten more
+      // minutes of somebody else's problem on a paid Workflow's clock, and
+      // made the repair step's own allowance wrong for the second time --
+      // `REPAIR_BUILD_ALLOWANCE_MS` budgets for two builds, and a build had
+      // quietly grown a teardown.
       //
-      // What has to hold:
-      //  - the lock is not given up while this container exists or is
-      //    being torn down, or the next build for this user starts inside
-      //    a container that is about to die;
-      //  - the slot is not given up while this container exists, or the
-      //    fleet authorises a container the platform has no room for and
-      //    the start simply fails;
-      //  - neither is held forever, and neither is: the lock ages out
-      //    after BUILD_LOCK_TTL_MS, and `PreviewFleet` reclaims a stale
-      //    ticket after its own hard lifetime.
+      // The alternative was to grow that allowance to seventy-five minutes,
+      // which fixes the arithmetic by making the product worse. This keeps
+      // a build the length of a build.
       //
-      // No `return` in here, deliberately: one would replace whatever the
-      // build had already decided to answer.
-      const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
-      const ours = mine?.token === token;
+      // `ctx.waitUntil` is the same idiom `beginProvisioning` already uses
+      // here, and the lock is held throughout by `releaseBuild` itself, so
+      // a build arriving during a teardown is refused rather than admitted.
+      this.ctx.waitUntil(this.releaseBuild(token, slot, started));
+    }
+  }
 
-      // "No container of ours is left standing." True without asking when
-      // nothing ever ran, because there is no container until something
-      // does: a refusal issued before the first `exec` leaves nothing
-      // behind, and holding its lock or its ticket would be holding them
-      // against a container that was never created.
-      //
-      // Otherwise only ours is ours to destroy. A build that overran has
-      // had its lock taken and is running in this very container, so
-      // destroying it would end their build rather than free anything.
-      const gone = !started
-        ? true
-        : ours
-          ? await this.destroyHoldingLock(token)
-          : false;
+  /**
+   * Give back what this build was holding, once its container is gone.
+   *
+   * Its own method because the caller no longer waits for it, and written
+   * as the three cases it has rather than as a sequence of steps: every
+   * finding on this teardown has been an order nobody enumerated.
+   *
+   * What has to hold:
+   *  - the lock is not given up while this container exists or is being
+   *    torn down, or the next build for this user starts inside a container
+   *    that is about to die;
+   *  - the slot is not given up while this container exists, or the fleet
+   *    authorises a container the platform has no room for and the start
+   *    simply fails;
+   *  - neither is held forever, and neither is: the lock ages out after
+   *    BUILD_LOCK_TTL_MS, and `PreviewFleet` reclaims a stale ticket after
+   *    its own hard lifetime.
+   */
+  private async releaseBuild(
+    token: string,
+    slot: EnqueueResult | undefined,
+    started: boolean,
+  ): Promise<void> {
+    const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+    const ours = mine?.token === token;
 
-      // After the container is gone, never before it: a lock given back
-      // mid-teardown hands this user's next build a container that is
-      // about to die.
-      if (ours && gone) {
-        // Read again rather than trusting `ours`, which was answered
-        // before the destroy was awaited (#196 review). If this build had
-        // overrun and somebody took the lock during that await, deleting
-        // on the stale answer would delete *their* lock and hand a third
-        // build the workspace the second was using.
-        const still = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
-        if (still?.token === token) {
-          await this.ctx.storage.delete(BUILD_LOCK_KEY);
-        }
+    // "No container of ours is left standing." True without asking when
+    // nothing ever ran, because there is no container until something does:
+    // a refusal issued before the first `exec` leaves nothing behind, and
+    // holding its lock or its ticket would be holding them against a
+    // container that was never created.
+    //
+    // Otherwise only ours is ours to destroy. A build that overran has had
+    // its lock taken and is running in this very container, so destroying
+    // it would end their build rather than free anything.
+    const gone = !started
+      ? true
+      : ours
+        ? await this.destroyHoldingLock(token)
+        : false;
+
+    // After the container is gone, never before it: a lock given back
+    // mid-teardown hands this user's next build a container that is about
+    // to die. Re-read rather than trusting `ours`, which was answered
+    // before the destroy was awaited.
+    if (ours && gone) {
+      const still = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+      if (still?.token === token) {
+        await this.ctx.storage.delete(BUILD_LOCK_KEY);
       }
+    }
 
-      // Given back when this container is confirmed gone, and when it was
-      // never ours -- in that case whoever took the lock holds a slot of
-      // their own, so ours is double-counting a container already
-      // accounted for.
-      //
-      // Held, along with the lock, when the destroy failed. That is a
-      // bounded loss of one build slot against a container in an unknown
-      // state, and it is the cheaper side: releasing would let the fleet
-      // admit a build the platform then refuses to start, which is the
-      // over-admission this counter exists to prevent.
-      if (slot && (!ours || gone)) {
-        // Asked for more than once before it is given up on (#196 review).
-        // A suppressed release is not a delayed one here: `reclaimStale`
-        // only reclaims rows it has activated, so a queued ticket that is
-        // abandoned never expires. It waits for a slot, is promoted with
-        // nobody to use it, and only then begins its hard lifetime, which
-        // makes a single dropped release a build slot lost to whoever is
-        // next in the queue.
-        //
-        // The same bounded retry the budget ledger's cleanups use, from
-        // the package both Workers already depend on rather than a second
-        // copy of it: two cleanups with their own idea of how hard to try
-        // is how they come to disagree.
-        // Read out before the closure: narrowing from the `if` above does
-        // not survive into one, and `slot!` would be asserting what this
-        // line can simply carry.
-        const ticket = slot.id;
-        await retrying(() =>
-          this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
-            ticket,
-            BUILD_CONTAINER_HEADROOM,
-          ),
-        );
-      }
+    // Given back when this container is confirmed gone, and when it was
+    // never ours -- in that case whoever took the lock holds a slot of
+    // their own, so ours is double-counting a container already accounted
+    // for.
+    //
+    // Held, along with the lock, when the destroy failed. That is a bounded
+    // loss of one build slot against a container in an unknown state, and
+    // it is the cheaper side: releasing would let the fleet admit a build
+    // the platform then refuses to start.
+    //
+    // Retried before it is given up on: `reclaimStale` only reclaims rows
+    // it has activated, so an abandoned queued ticket never expires at all.
+    if (slot && (!ours || gone)) {
+      const ticket = slot.id;
+      await retrying(() =>
+        this.env.Fleet.getByName(BUILD_FLEET_NAME).release(
+          ticket,
+          BUILD_CONTAINER_HEADROOM,
+        ),
+      );
     }
   }
 
