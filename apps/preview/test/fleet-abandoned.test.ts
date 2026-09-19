@@ -70,6 +70,14 @@ describe('what the fleet object does with that', () => {
     'utf8',
   );
 
+  /** A region with its prose removed, so a match is never a comment's. */
+  function code(region: string): string {
+    return region
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+  }
+
   function methodOf(name: string): string {
     const at = source.indexOf(name);
     assert.ok(at > 0, `${name} is not where this expected it`);
@@ -88,6 +96,58 @@ describe('what the fleet object does with that', () => {
       reclaim,
       /WHERE activated IS NOT NULL/,
       'the reclaim still only selects rows it activated',
+    );
+  });
+
+  it('keeps the abandonment deadline after a row is promoted', () => {
+    // #200 review. Written as a ternary, promotion erased it: a row nobody
+    // was waiting on, promoted at minute twenty-nine, stopped being judged
+    // by `seen` and started a fresh lifetime from its activation. That is
+    // the exact case this change exists to remove, so the release path in
+    // front of it would have stayed load bearing.
+    const reclaim = code(methodOf('private reclaimStale('));
+    assert.match(
+      reclaim,
+      /isAbandoned\([\s\S]{0,80}?\|\|/,
+      'promotion still switches the row from one deadline to the other',
+    );
+    assert.doesNotMatch(
+      reclaim,
+      /activated != null\s*\?/,
+      'the two deadlines are alternatives rather than both applying',
+    );
+  });
+
+  it('deletes rows that have been released long enough to be unreadable', () => {
+    // The other half of the index finding: rows were never removed, so the
+    // table grew with all historical usage and every query paid for it.
+    const reclaim = code(methodOf('private reclaimStale('));
+    assert.match(
+      reclaim,
+      /DELETE FROM queue WHERE released IS NOT NULL AND released < \?/,
+      'a released row is kept for the life of the instance',
+    );
+    assert.match(
+      reclaim,
+      /now - HARD_LIFETIME_MS/,
+      'released rows are purged on some bound other than the one that makes them unreadable',
+    );
+  });
+
+  it('indexes the predicate every one of its queries starts with', () => {
+    // An index led by `activated` cannot serve `WHERE released IS NULL` on
+    // its own, and the reclaim has no second predicate to narrow with, so
+    // it scanned the whole table on every enqueue, poll and release. A
+    // queued preview polls every 1.5 seconds.
+    assert.match(
+      source,
+      /CREATE INDEX IF NOT EXISTS \w+ ON queue\(released/,
+      'no index leads on the column every query filters by',
+    );
+    assert.match(
+      source,
+      /DROP INDEX IF EXISTS queue_waiting/,
+      'the superseded index is left to cost a write on every insert',
     );
   });
 

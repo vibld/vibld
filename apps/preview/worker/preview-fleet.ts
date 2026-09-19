@@ -58,9 +58,18 @@ export class PreviewFleet extends DurableObject<unknown> {
           released  INTEGER
         )
       `);
+      // Leading on `released`, because every query here starts by
+      // excluding released rows and the reclaim has no second predicate to
+      // narrow with (#200 review). An index led by `activated` cannot
+      // serve `WHERE released IS NULL` on its own, so the reclaim scanned
+      // the whole table on every enqueue, poll and release, and a queued
+      // preview polls every 1.5 seconds. This one serves all three
+      // queries; the old order served two of them and is dropped rather
+      // than left to cost a write on every insert.
       ctx.storage.sql.exec(
-        `CREATE INDEX IF NOT EXISTS queue_waiting ON queue(activated, released)`,
+        `CREATE INDEX IF NOT EXISTS queue_open ON queue(released, activated)`,
       );
+      ctx.storage.sql.exec(`DROP INDEX IF EXISTS queue_waiting`);
       // When anybody last asked about a row, so a waiting one that nobody
       // is waiting on can be reclaimed (#199). Added rather than included
       // in the CREATE above, because instances already exist with the old
@@ -151,10 +160,21 @@ export class PreviewFleet extends DurableObject<unknown> {
       )
       .toArray();
     for (const row of rows) {
+      // Either, never one instead of the other (#200 review). Written as a
+      // ternary, promotion erased the abandonment deadline: a row nobody
+      // was waiting on, promoted at minute twenty-nine, stopped being
+      // judged by `seen` and started a fresh lifetime from its activation,
+      // holding a slot for another half hour. That is the exact failure
+      // this change exists to remove, so the release path in front of it
+      // would have stayed load bearing.
+      //
+      // A caller that is still there keeps both clocks honest, because
+      // `status` refreshes `seen` on an activated row as well as a waiting
+      // one, and a build that never polls is covered by the arithmetic:
+      // its whole life plus its teardown is inside the abandonment bound.
       const done =
-        row.activated != null
-          ? isStale(row.activated, now)
-          : isAbandoned(row.seen!, now);
+        isAbandoned(row.seen!, now) ||
+        (row.activated != null && isStale(row.activated, now));
       if (done) {
         this.ctx.storage.sql.exec(
           `UPDATE queue SET released = ? WHERE id = ?`,
@@ -163,6 +183,26 @@ export class PreviewFleet extends DurableObject<unknown> {
         );
       }
     }
+
+    // Released rows were kept forever, so the table grew with all
+    // historical usage and every query above paid for it (#200 review).
+    // Indexing the predicate stops it costing a scan; this stops it
+    // costing storage.
+    //
+    // Nothing can read one again. `release` matches on `released IS NULL`,
+    // both counting queries exclude them, and `describe` already answers
+    // "not active, position 0" for a released row and for a missing one
+    // alike, so a caller polling an id this removed gets the same answer
+    // it got before.
+    //
+    // A hard lifetime of history rather than none, because a row released
+    // that long ago cannot be part of any decision still being made, and
+    // keeping the recent ones leaves something to read when a slot went
+    // missing.
+    this.ctx.storage.sql.exec(
+      `DELETE FROM queue WHERE released IS NOT NULL AND released < ?`,
+      now - HARD_LIFETIME_MS,
+    );
   }
 
   private promote(maxInFlight: number, now: number): void {
