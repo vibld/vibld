@@ -387,6 +387,18 @@ export class PreviewSandbox extends Sandbox<Env> {
     // fifteen minutes over a failure that had nothing to do with them.
     let slot: EnqueueResult | undefined;
 
+    /**
+     * Whether anything was ever run in the container.
+     *
+     * A `PreviewSandbox` has no container until something executes in it,
+     * so every path that refuses before the first `exec` -- a full fleet,
+     * an `enqueue` that rejected -- has nothing to tear down and nothing
+     * to account for. Teardown reads this rather than special-casing those
+     * paths, which is what let the last version hold a ticket for a
+     * refusal it had issued itself (#196 review).
+     */
+    let started = false;
+
     try {
       slot = await this.env.Fleet.getByName(BUILD_FLEET_NAME).enqueue(
         `build:${this.ctx.id.toString()}`,
@@ -416,6 +428,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       // from its own package.json would build here and fail anywhere else.
       // That is one of the two production failures behind #194: this check
       // is worth having only if it measures what a clean environment sees.
+      started = true;
       const cleared = await this.exec('rm -rf /workspace', { cwd: '/' });
       if (!cleared.success) {
         return {
@@ -533,15 +546,23 @@ export class PreviewSandbox extends Sandbox<Env> {
       const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
       const ours = mine?.token === token;
 
-      // Only ours is ours to destroy. A build that overran has had its
-      // lock taken and is running in this very container, so destroying
-      // it would end their build rather than free anything.
-      const gone = ours
-        ? await this.destroy().then(
-            () => true,
-            () => false,
-          )
-        : false;
+      // "No container of ours is left standing." True without asking when
+      // nothing ever ran, because there is no container until something
+      // does: a refusal issued before the first `exec` leaves nothing
+      // behind, and holding its lock or its ticket would be holding them
+      // against a container that was never created.
+      //
+      // Otherwise only ours is ours to destroy. A build that overran has
+      // had its lock taken and is running in this very container, so
+      // destroying it would end their build rather than free anything.
+      const gone = !started
+        ? true
+        : ours
+          ? await this.destroy().then(
+              () => true,
+              () => false,
+            )
+          : false;
 
       // After the container is gone, never before it: a lock given back
       // mid-teardown hands this user's next build a container that is

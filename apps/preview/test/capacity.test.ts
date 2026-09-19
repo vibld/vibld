@@ -173,9 +173,15 @@ describe('counting the builds too', () => {
     // that rejected means *not* gone. Asserting only that `gone` is
     // computed let a mutation flip the rejection arm to `true` and survive,
     // which is precisely the claim this whole case rests on.
+    // Sliced to the statement that computes it, so this says nothing about
+    // the shape of the rest of the expression: the property is that within
+    // it, the destroy's resolve arm means gone and its reject arm does not.
+    const at = tail.indexOf('const gone =');
+    assert.ok(at > 0, 'nothing works out whether the container went away');
+    const computed = tail.slice(at, tail.indexOf(';', at));
     assert.match(
-      tail,
-      /const gone = ours[\s\S]{0,80}?destroy\(\)[\s\S]{0,80}?\(\) => true,[\s\S]{0,40}?\(\) => false,/,
+      computed,
+      /destroy\(\)[\s\S]*?\(\) => true,[\s\S]*?\(\) => false,/,
       'a destroy that rejected is not treated as a container that went away',
     );
     assert.match(
@@ -187,6 +193,31 @@ describe('counting the builds too', () => {
       tail,
       /if \(slot && \(!ours \|\| gone\)\)/,
       'the slot is given back without confirming the container is gone',
+    );
+  });
+
+  it('gives back a ticket for a refusal it issued before anything ran', () => {
+    // #196 review. A full fleet is refused before the first `exec`, so
+    // there is no container: holding that ticket holds it against nothing.
+    // Worse than a delay, because `PreviewFleet.reclaimStale` only reclaims
+    // rows it has activated -- a queued row is never reclaimed, so an
+    // abandoned one waits for a slot, is promoted with nobody to use it,
+    // and only then starts its thirty-minute hard lifetime.
+    assert.match(
+      body,
+      /let started = false;/,
+      'nothing records whether the container was ever put to work',
+    );
+    assert.match(
+      body,
+      /started = true;[\s\S]{0,120}?this\.exec\(/,
+      'the flag is not set at the first thing that starts a container',
+    );
+    const tail = body.slice(body.lastIndexOf('} finally {'));
+    assert.match(
+      tail,
+      /const gone = !started\s*\?\s*true/,
+      'a refusal that ran nothing still has to prove its container is gone',
     );
   });
 
