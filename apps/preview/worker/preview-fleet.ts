@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   HARD_LIFETIME_MS,
+  isAbandoned,
   isStale,
   queuePosition,
   toActivate,
@@ -60,6 +61,19 @@ export class PreviewFleet extends DurableObject<unknown> {
       ctx.storage.sql.exec(
         `CREATE INDEX IF NOT EXISTS queue_waiting ON queue(activated, released)`,
       );
+      // When anybody last asked about a row, so a waiting one that nobody
+      // is waiting on can be reclaimed (#199). Added rather than included
+      // in the CREATE above, because instances already exist with the old
+      // shape and a CREATE TABLE IF NOT EXISTS does not reshape them.
+      // Every read coalesces it to `requested`, so a row from before this
+      // migration is treated as last seen when it was asked for, which is
+      // the only thing known about it and is the conservative reading.
+      const columns = ctx.storage.sql
+        .exec<{ name: string }>(`PRAGMA table_info(queue)`)
+        .toArray();
+      if (!columns.some((column) => column.name === 'seen')) {
+        ctx.storage.sql.exec(`ALTER TABLE queue ADD COLUMN seen INTEGER`);
+      }
     });
   }
 
@@ -74,8 +88,9 @@ export class PreviewFleet extends DurableObject<unknown> {
 
     const [inserted] = this.ctx.storage.sql
       .exec<{ id: number }>(
-        `INSERT INTO queue (label, requested) VALUES (?, ?) RETURNING id`,
+        `INSERT INTO queue (label, requested, seen) VALUES (?, ?, ?) RETURNING id`,
         label,
+        now,
         now,
       )
       .toArray();
@@ -88,6 +103,15 @@ export class PreviewFleet extends DurableObject<unknown> {
   /** Re-check a previously enqueued row -- promotes first, so a poll can observe a just-freed slot. */
   status(id: number, maxInFlight: number): StatusResult {
     const now = Date.now();
+    // Somebody is still waiting on this one, so it is not abandoned (#199).
+    // Before the reclaim rather than after it: a poll that arrives exactly
+    // on the boundary is a caller who is still there, and reclaiming their
+    // row and then answering the question is the wrong order.
+    this.ctx.storage.sql.exec(
+      `UPDATE queue SET seen = ? WHERE id = ? AND released IS NULL`,
+      now,
+      id,
+    );
     this.reclaimStale(now);
     this.promote(maxInFlight, now);
     const { active, position } = this.describe(id);
@@ -96,6 +120,9 @@ export class PreviewFleet extends DurableObject<unknown> {
 
   release(id: number, maxInFlight: number): void {
     const now = Date.now();
+    // Every entry point reclaims before it promotes, so a promotion can
+    // never hand a slot to a row the reclaim was about to take (#199).
+    this.reclaimStale(now);
     this.ctx.storage.sql.exec(
       `UPDATE queue SET released = ? WHERE id = ? AND released IS NULL`,
       now,
@@ -104,15 +131,31 @@ export class PreviewFleet extends DurableObject<unknown> {
     this.promote(maxInFlight, now);
   }
 
-  /** A row whose activation outran the hard lifetime without releasing must not hold its slot forever. */
+  /**
+   * Two ways a row stops being anybody's, and both used to have to be
+   * somebody else's job (#199).
+   *
+   * An activated row that outran the hard lifetime without releasing is
+   * the original case: a crashed Worker or a client that never called
+   * stop must not hold a slot forever.
+   *
+   * A waiting row that nobody has asked about is the case that had no
+   * expiry at all, which made every release path in front of it load
+   * bearing. It holds nothing while it waits and costs a slot later, when
+   * it is promoted for a caller that gave up long ago.
+   */
   private reclaimStale(now: number): void {
     const rows = this.ctx.storage.sql
-      .exec<{ id: number; activated: number }>(
-        `SELECT id, activated FROM queue WHERE activated IS NOT NULL AND released IS NULL`,
+      .exec<{ id: number; activated: number | null; seen: number | null }>(
+        `SELECT id, activated, COALESCE(seen, requested) AS seen FROM queue WHERE released IS NULL`,
       )
       .toArray();
     for (const row of rows) {
-      if (isStale(row.activated, now)) {
+      const done =
+        row.activated != null
+          ? isStale(row.activated, now)
+          : isAbandoned(row.seen!, now);
+      if (done) {
         this.ctx.storage.sql.exec(
           `UPDATE queue SET released = ? WHERE id = ?`,
           now,
