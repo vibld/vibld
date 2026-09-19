@@ -164,6 +164,37 @@ export class MockupProvider {
      */
     let completion = first;
     if (isEmptyReply(first)) {
+      /*
+       * Every meter goes back to zero here, at the boundary itself
+       * (#191 review, three times).
+       *
+       * A caller watching these holds the last figure it was given, and
+       * settles a cancelled run from them. Left standing, the absorbed
+       * attempt's counts are what a reader who cancels during the retry
+       * is charged for -- the attempt this branch is about to declare
+       * absorbed, which is the opposite of what `onDiscarded` is for.
+       *
+       * Zero rather than an attempt-boundary event, because every consumer
+       * of these already means "so far" by them, and for a run that is
+       * starting again, so far is nothing.
+       *
+       * The prompt size joins the progress counts, because the client
+       * reports it before it sends, so it restores itself the moment the
+       * retry really goes out. When the retry does not go out, zero is
+       * what a reader owes for a request that never left.
+       *
+       * Before the hook below rather than after it, which is not tidiness.
+       * A caller may learn from this very call that its reader has gone:
+       * the Worker writes it to the stream, and a broken stream rejects
+       * that write and cancels the run from a later microtask. A check
+       * placed after this and before an `await` cannot see that, because
+       * nothing has yielded yet. Reported here, the hook's own round trip
+       * to a ledger is what the cancellation lands during, and the check
+       * below is then looking at a signal that has had time to fire.
+       */
+      this.#onProgress?.({ characters: 0, reasoningCharacters: 0 });
+      this.#onPromptChars?.(0);
+
       if ((await this.#onDiscarded?.(first.usage)) === false) {
         /*
          * Refused, so this attempt is the whole run -- and it is the one
@@ -188,28 +219,6 @@ export class MockupProvider {
         );
       }
       /*
-       * Every meter goes back to zero before the second attempt starts
-       * (#191 review, twice).
-       *
-       * A caller watching these holds the last figure it was given, and
-       * settles a cancelled run from them. Left standing, the absorbed
-       * attempt's counts are what a reader who cancels during the retry
-       * is charged for -- the attempt this branch just declared absorbed,
-       * which is the opposite of what `onDiscarded` above is for.
-       *
-       * Zero rather than an attempt-boundary event, because every consumer
-       * of these already means "so far" by them, and for a run that is
-       * starting again, so far is nothing.
-       *
-       * The prompt size joins the progress counts, because the client
-       * reports it before it sends, so it restores itself the moment the
-       * retry really goes out. When the retry does not go out, zero is
-       * what a reader owes for a request that never left.
-       */
-      this.#onProgress?.({ characters: 0, reasoningCharacters: 0 });
-      this.#onPromptChars?.(0);
-
-      /*
        * Cancelled while the answer above was awaited (#191 review).
        *
        * The route checks this before the first attempt and could not
@@ -223,6 +232,13 @@ export class MockupProvider {
        * going to be. Both meters are already at zero above, so the
        * cancellation settles at nothing, which is what one absorbed
        * attempt and one request never sent really cost the reader.
+       *
+       * What this does not do is promise the reader is still there. A
+       * write that has not failed yet will fail after this line, and no
+       * ordering inside this method can know that. What it promises is
+       * that a departure the caller has already noticed is acted on
+       * rather than raced: the reset above is reported before an await,
+       * so a cancellation it triggers has somewhere to land.
        */
       if (this.#signal?.aborted) {
         return readCompletion(

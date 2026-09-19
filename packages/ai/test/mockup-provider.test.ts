@@ -327,6 +327,92 @@ describe('asking for three directions', () => {
     assert.equal(call, 1, 'a retry was sent to a reader who had gone');
   });
 
+  it('sees a cancellation the reset itself provoked', async () => {
+    // The Worker forwards progress by writing to the reader's stream, and
+    // a broken stream rejects that write and cancels the run from a later
+    // microtask. So the reset can be the very call that discovers the
+    // reader has gone, and a signal check placed after it with nothing
+    // awaited in between is looking before the news arrives (#191
+    // review). Reporting the reset before the hook gives that
+    // cancellation the hook's own round trip to land in.
+    let call = 0;
+    const abort = new AbortController();
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        call += 1;
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      signal: abort.signal,
+      // Exactly the Worker's shape: the write is not awaited, so the
+      // cancellation it causes is queued rather than immediate.
+      onProgress: () => {
+        void Promise.reject(new Error('stream closed')).catch(() =>
+          abort.abort(),
+        );
+      },
+      onDiscarded: async () => {
+        // Stands in for the account reservation, which is a Durable
+        // Object round trip in production.
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.equal(call, 1, 'a retry was sent after the stream had closed');
+  });
+
+  it('zeroes the meters before reporting the discarded attempt', async () => {
+    // The ordering the test above rests on, stated on its own so it
+    // cannot be undone by a tidy-looking move.
+    const order: string[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan(request: PlanRequest) {
+        request.onPromptChars?.(2_400);
+        order.push('ask');
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    await assert.rejects(
+      new MockupProvider(flaky, {
+        model: 'deepseek-flash',
+        onProgress: () => order.push('progress reset'),
+        onPromptChars: (characters) =>
+          order.push(
+            characters === 0 ? 'prompt reset' : `prompt ${characters}`,
+          ),
+        onDiscarded: () => {
+          order.push('discarded');
+          return false;
+        },
+      }).generate({ prompt: 'a bakery' }),
+    );
+
+    assert.deepEqual(order, [
+      'prompt 2400',
+      'ask',
+      'progress reset',
+      'prompt reset',
+      'discarded',
+    ]);
+  });
+
   it('puts the prompt size back to zero at the attempt boundary', async () => {
     // The other half, and the one that decides the money. A client reports
     // what it sent before it sends, so a pre-aborted retry still set the
