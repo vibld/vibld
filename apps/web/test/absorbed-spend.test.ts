@@ -83,6 +83,43 @@ describe('accounting for an attempt nobody was billed for', () => {
     );
   });
 
+  it('records that the retry was refused, not merely that it did not run', async () => {
+    // Without the flag, settlement cannot tell a refused retry from any
+    // other run that reported no usage, and `settleBudget` charges the
+    // full worst case for those (#191 review).
+    const source = await readFile(workerSource(), 'utf8');
+    assert.match(
+      source,
+      /retryRefused = !retryHold\.verdict\.allow;/,
+      'a denied hold is not recorded, so settlement cannot see it',
+    );
+    assert.match(
+      source,
+      /console\.error\('mockup retry hold failed', error\);\s*retryRefused = true;/,
+      'a ledger that threw refuses the retry without saying so to settlement',
+    );
+  });
+
+  it('settles a refused retry at nothing, ahead of the cancelled case', async () => {
+    // Two things at once, and the order is the substance. The reader owes
+    // nothing: the run was one attempt and that attempt was absorbed.
+    // And the check has to come before the cancelled branch, because a
+    // refused retry never reaches the progress reset, so the streamed
+    // counts still belong to the absorbed attempt and settling from them
+    // would bill it by the other door.
+    const source = await readFile(workerSource(), 'utf8');
+    const refused = source.indexOf('? NOTHING_TO_BILL');
+    const cancelledBranch = source.indexOf(
+      ': cancelled && providerRan',
+      refused === -1 ? 0 : refused,
+    );
+    assert.ok(refused > -1, 'a refused retry is not settled at nothing');
+    assert.ok(
+      cancelledBranch > refused,
+      'the cancelled case is reached first, and it prices the absorbed attempt',
+    );
+  });
+
   it('carries the figure into settlement', async () => {
     // Where the account layer and the caller's allowance are allowed to
     // differ, and the only place they are.

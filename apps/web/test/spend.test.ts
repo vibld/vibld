@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   DEFAULT_PRICES,
+  NOTHING_TO_BILL,
   PROVIDER_PRICES,
   cancelledUsage,
   dayKey,
@@ -479,5 +480,17 @@ describe('pricing a cancelled run that was still thinking', () => {
       cancelledUsage(10_000_000, 500, 100, 10_000_000).outputTokens,
       500,
     );
+  });
+});
+
+describe('a run whose cost somebody else is carrying', () => {
+  it('prices at nothing whatever the rates are', () => {
+    // The distinction `settleBudget` turns on: no usage at all means "the
+    // cost is unknown", and is charged at the full worst case. A mockup
+    // run whose retry was refused spent one attempt, that attempt was
+    // absorbed, and the account ledger already has it -- so the figure
+    // the caller owes is zero, stated rather than absent (#191 review).
+    assert.equal(microUsdOf(NOTHING_TO_BILL, DEFAULT_PRICES), 0);
+    assert.equal(microUsdOf(NOTHING_TO_BILL, priced(9_999, 9_999)), 0);
   });
 });

@@ -198,6 +198,29 @@ export function worstCaseMicroUsd(
 }
 
 /**
+ * A run whose whole cost somebody else is carrying (#191 review).
+ *
+ * `settleBudget` charges the full worst case for a run that happened and
+ * reported no usage, which is right when the cost is unknown and wrong
+ * here, where it is known and has already been counted somewhere else. A
+ * mockup run whose retry was refused spent exactly one attempt, that
+ * attempt was absorbed, and the account ledger was told about it at the
+ * moment it was absorbed. Billing the reader the worst case on top would
+ * charge them a whole generation for a provider defect they were
+ * explicitly being spared.
+ *
+ * Zero tokens rather than no usage at all, because the difference between
+ * them is the difference between "cost nothing the caller owes" and "cost
+ * something nobody measured".
+ */
+export const NOTHING_TO_BILL = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheWriteInputTokens: 0,
+} as const;
+
+/**
  * What a run the caller stopped should be charged (#189 review).
  *
  * Aborting the model call makes it reject, so the provider never reports

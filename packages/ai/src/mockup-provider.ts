@@ -163,10 +163,30 @@ export class MockupProvider {
      * nobody was charged is not.
      */
     let completion = first;
-    if (
-      isEmptyReply(first) &&
-      (await this.#onDiscarded?.(first.usage)) !== false
-    ) {
+    if (isEmptyReply(first)) {
+      if ((await this.#onDiscarded?.(first.usage)) === false) {
+        /*
+         * Refused, so this attempt is the whole run -- and it is the one
+         * just declared absorbed (#191 review).
+         *
+         * Returning here rather than falling through is the whole fix.
+         * Below, `onUsage` reports what the caller is to be billed for,
+         * and the first version of this veto reported the absorbed
+         * attempt through it: the reader was charged for exactly the
+         * defect this branch exists to spare them, and a caller that had
+         * already recorded it as absorbed put it on the account ledger a
+         * second time.
+         *
+         * So the attempt leaves by one door only. `onDiscarded` above
+         * has it, and nothing else is told about it.
+         */
+        return readCompletion(
+          first,
+          this.#maxTokens,
+          MockupSetSchema,
+          MOCKUP_SUBJECT,
+        );
+      }
       /*
        * The meter goes back to zero before the second attempt starts
        * (#191 review).

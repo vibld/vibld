@@ -49,6 +49,7 @@ import {
 } from './referral-handlers.ts';
 import {
   ACCOUNT_BUDGET_KEY,
+  NOTHING_TO_BILL,
   cancelledUsage,
   dayKey,
   microUsdOf,
@@ -1588,6 +1589,10 @@ async function handleMockups(
     // The hold taken for the second attempt, so the ceiling is enforced
     // before it is sent rather than only reported after.
     let retryHold: Reservation | undefined;
+    // Whether that hold was refused, which decides what the reader owes:
+    // the run then consists of one attempt, and that attempt is the one
+    // being absorbed (#191 review).
+    let retryRefused = false;
     try {
       const provider = new MockupProvider(
         createPlanClient(env, effectiveModel),
@@ -1647,8 +1652,10 @@ async function handleMockups(
               retryHold = await reserveAccount(env, worstCase, Date.now());
             } catch (error) {
               console.error('mockup retry hold failed', error);
+              retryRefused = true;
               return false;
             }
+            retryRefused = !retryHold.verdict.allow;
             return retryHold.verdict.allow;
           },
           ...(style.value ? { style: style.value } : {}),
@@ -1694,16 +1701,22 @@ async function handleMockups(
         // unknown charges the whole reservation for pressing Cancel
         // (#189 review). Only when the provider was actually asked --
         // stopping before that still costs nothing.
-        const settled =
-          usage ??
-          (cancelled && providerRan
-            ? cancelledUsage(
-                streamedCharacters,
-                maxTokens,
-                sentChars,
-                reasoningCharacters,
-              )
-            : undefined);
+        // Ahead of the cancelled branch on purpose (#191 review). A
+        // refused retry never reaches the progress reset, so the streamed
+        // counts still belong to the absorbed attempt, and settling from
+        // them would bill the reader for it by the other door.
+        const settled = usage
+          ? usage
+          : retryRefused
+            ? NOTHING_TO_BILL
+            : cancelled && providerRan
+              ? cancelledUsage(
+                  streamedCharacters,
+                  maxTokens,
+                  sentChars,
+                  reasoningCharacters,
+                )
+              : undefined;
         const actual = await settleBudget(
           env.USER_BUDGET!,
           settleParams,
@@ -1726,7 +1739,12 @@ async function handleMockups(
             event: 'mockups.settled',
             ...(usage
               ? {}
-              : { cancelled, streamedCharacters, reasoningCharacters }),
+              : {
+                  cancelled,
+                  retryRefused,
+                  streamedCharacters,
+                  reasoningCharacters,
+                }),
             userId: principal.userId,
             ...(principal.email ? { email: principal.email } : {}),
             model: effectiveModel,

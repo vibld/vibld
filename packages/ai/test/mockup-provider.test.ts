@@ -252,6 +252,59 @@ describe('asking for three directions', () => {
     );
   });
 
+  it('does not bill the reader for an attempt it refused to replace', async () => {
+    // The fix's own bug (#191 review). Refusing the retry left the
+    // absorbed attempt as the completion, and it was then reported
+    // through `onUsage` as well -- so the reader paid for exactly the
+    // defect the absorption exists to spare them, and a caller that had
+    // already recorded it as absorbed counted it twice.
+    const billed: number[] = [];
+    const absorbed: number[] = [];
+    const flaky = {
+      id: 'flaky',
+      async createPlan() {
+        return {
+          plan: null,
+          emptyBody: true,
+          stopReason: 'end_turn',
+          usage: usageOf(9999),
+        };
+      },
+    } as unknown as PlanClient;
+
+    const provider = new MockupProvider(flaky, {
+      model: 'deepseek-flash',
+      onUsage: (u) => billed.push(u.outputTokens),
+      onDiscarded: (u) => {
+        absorbed.push(u.outputTokens);
+        return false;
+      },
+    });
+
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }));
+    assert.deepEqual(absorbed, [9999]);
+    assert.deepEqual(
+      billed,
+      [],
+      'the absorbed attempt was billed to the reader as well',
+    );
+  });
+
+  it('still names the failure when the retry is refused', async () => {
+    // Leaving by one door is not leaving silently: the reader is owed the
+    // same message they would have got had the empty reply been the end
+    // of it.
+    const provider = new MockupProvider(
+      client({ plan: null, emptyBody: true, stopReason: 'end_turn' }),
+      { model: 'deepseek-flash', onDiscarded: () => false },
+    );
+    await assert.rejects(provider.generate({ prompt: 'a bakery' }), (error) => {
+      assert.ok(error instanceof ProviderShapeError);
+      assert.match(String(error.message), /set of three directions/);
+      return true;
+    });
+  });
+
   it('waits for the answer before asking again', async () => {
     // The point of awaiting it. A caller that has to reach a ledger before
     // it can answer would otherwise be raced by the request it was being
