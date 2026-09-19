@@ -209,3 +209,54 @@ describe('what a build actually compiles', () => {
     );
   });
 });
+
+/**
+ * That a build gives back its own lock and not somebody else's
+ * (#196 review).
+ *
+ * Expiry alone made the lock unsafe in exactly the case it existed for:
+ * once a stale lock let a second build in, the first build's `finally`
+ * deleted the second's lock on its way out, and a third would then walk
+ * into the workspace the second was using. The bounds in
+ * `build-limits.test.ts` make that overrun unlikely; ownership makes it
+ * harmless.
+ */
+describe('whose lock a build releases', () => {
+  it('takes the lock with a token of its own', () => {
+    const body = buildProjectCode();
+    assert.match(
+      body,
+      /crypto\.randomUUID\(\)/,
+      'the lock carries no token, so no release can tell whose it is',
+    );
+  });
+
+  it('releases only while the lock is still its own', () => {
+    const body = buildProjectCode();
+    assert.match(
+      body,
+      /token === token[\s\S]{0,120}?storage\.delete\(BUILD_LOCK_KEY\)/,
+      'the release clears whatever lock is there rather than its own',
+    );
+  });
+
+  it('stops a command that reached its bound from reading as a project failure', () => {
+    // Being stopped says nothing about the project, so it must not buy a
+    // repair: `sandbox`, which `judgedTheProject` reads as unknown, and
+    // not `install` or `build`, which it reads as a verdict.
+    const body = buildProjectCode();
+    for (const bound of [
+      'BUILD_INSTALL_TIMEOUT_MS',
+      'BUILD_COMPILE_TIMEOUT_MS',
+    ]) {
+      const at = body.indexOf(`>= ${bound}`);
+      assert.ok(at > 0, `${bound} is never compared against the clock`);
+      const after = body.slice(at, at + 200);
+      assert.match(
+        after,
+        /reason: 'sandbox'/,
+        `a ${bound} timeout is reported as a verdict on the project`,
+      );
+    }
+  });
+});

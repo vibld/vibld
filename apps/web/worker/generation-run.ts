@@ -730,6 +730,15 @@ async function settleRepairHold(
   // Worth a line of its own: this is a hold the reclaim will charge at full
   // worst case, and nothing else in the system will say so until then.
   console.error('repair settlement failed', attempted.error);
+  // What the caller was actually billed, where that is known (#196 review).
+  // `settleBudget` writes the caller's layer before the account's, so the
+  // two can fail apart: a caller whose own hold closed at the figure their
+  // usage came to has been billed correctly, and only the shared ceiling is
+  // still holding a worst case. Reporting the worst case for both would
+  // overstate a bill that is already right, on the record the reader sees.
+  if (attempted.error instanceof PartialSettlement) {
+    return { cost: attempted.error.charged, settled: false };
+  }
   return { settled: false };
 }
 
@@ -1017,6 +1026,38 @@ function usageOrWorstCase(
   return usage ? microUsdOf(usage, params.prices) : params.worstCaseMicroUsd;
 }
 
+/**
+ * A settlement that closed one ledger layer and not the other.
+ *
+ * Thrown rather than returned so that every existing caller keeps the
+ * behaviour it was written for: `settleBudget` still rejects when the
+ * ledger did not fully close, and the Workflow's own settle step still
+ * retries it. What this adds is that a caller who wants to know *what* was
+ * charged before the failure can ask, instead of assuming the worst
+ * (#196 review).
+ *
+ * Raising this *is* the statement that the caller's own layer closed: the
+ * write that closes it comes first and propagates its own failure directly,
+ * so the account layer is only ever reached once the caller's has landed.
+ * That is why there is no flag saying so, and why a test asserts a
+ * user-layer failure does not arrive as one of these. `charged` is the
+ * figure that layer was settled at, which is what makes a repair's recorded
+ * cost honest when only the shared account hold is left open.
+ */
+export class PartialSettlement extends Error {
+  /** What the caller's own layer was settled at, before this happened. */
+  readonly charged: number;
+
+  // Fields and assignments rather than parameter properties: this module is
+  // loaded under `node --test --experimental-strip-types`, which strips
+  // types without compiling them and rejects that shorthand outright.
+  constructor(charged: number, cause: unknown) {
+    super('the account ledger did not settle', { cause });
+    this.name = 'PartialSettlement';
+    this.charged = charged;
+  }
+}
+
 export async function settleBudget(
   ledger: DurableObjectNamespace<Pick<UserBudget, 'settle'>>,
   params: Pick<
@@ -1086,9 +1127,21 @@ export async function settleBudget(
   // the two layers may differ: the caller's allowance is what they owe,
   // the account ceiling is what this deployment spent.
   if (params.accountReservationId !== undefined) {
-    await ledger
-      .getByName(ACCOUNT_BUDGET_KEY)
-      .settle(params.accountReservationId, accountMicroUsd ?? actual);
+    try {
+      await ledger
+        .getByName(ACCOUNT_BUDGET_KEY)
+        .settle(params.accountReservationId, accountMicroUsd ?? actual);
+    } catch (error) {
+      // Which layer stayed open is not a detail (#196 review). The two are
+      // settled together and can fail apart, and they answer to different
+      // people: the caller's hold decides what the caller is billed, the
+      // account hold decides what this deployment has spent today. A
+      // failure here with the caller's layer already closed means the
+      // caller was charged exactly what they used, and reporting that run
+      // at its worst case -- as a caller who could only see "settlement
+      // failed" had to -- overstates a bill that is already correct.
+      throw new PartialSettlement(actual, error);
+    }
   }
   // The caller's figure, which is what every caller logs and shows. The
   // absorbed part is deliberately not in it: it is not theirs.

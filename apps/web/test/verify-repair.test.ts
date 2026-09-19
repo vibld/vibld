@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { verifyAndRepair } from '../worker/generation-run.ts';
+import {
+  PartialSettlement,
+  verifyAndRepair,
+} from '../worker/generation-run.ts';
 import type {
   GenerationWorkflowEnv,
   WorkflowParams,
@@ -74,6 +77,11 @@ function deps(
     reserveThrows?: boolean;
     /** How many settlement attempts reject before one is allowed through. */
     settleRejects?: number;
+    /**
+     * Reject as `settleBudget` does when only the shared account layer is
+     * left open: the caller's own hold closed, at this figure.
+     */
+    settleAccountOnly?: number;
     /** What a settlement that succeeds says the repair cost. */
     settleCost?: number;
   } = {},
@@ -112,6 +120,12 @@ function deps(
         providerRan: boolean | undefined,
       ) => {
         spy.settles.push({ usage, providerRan });
+        if (options.settleAccountOnly !== undefined) {
+          throw new PartialSettlement(
+            options.settleAccountOnly,
+            new Error('the account object is unreachable'),
+          );
+        }
         if (spy.settles.length <= (options.settleRejects ?? 0)) {
           throw new Error('the budget object is unreachable');
         }
@@ -387,6 +401,53 @@ describe('what the repair is charged for', () => {
     );
     await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
     assert.equal(spy.settles[0]!.providerRan, true);
+  });
+});
+
+describe('which ledger layer was left open', () => {
+  it('records what the caller was billed when only the account hold is open', async () => {
+    // #196 review, P2. `settleBudget` writes the caller's layer before the
+    // account's, so the two fail apart. A caller whose own hold closed at
+    // the figure their usage came to has been billed correctly and is done;
+    // only the shared daily ceiling is still holding a worst case. Recording
+    // the worst case for both overstates a bill that is already right, on
+    // the record the reader is shown.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true }, settleAccountOnly: 6_400 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(outcome.repairCostMicroUsd, 6_400);
+    assert.notEqual(
+      outcome.repairCostMicroUsd,
+      PARAMS.worstCaseMicroUsd,
+      'a caller already billed correctly was recorded at the worst case',
+    );
+    assert.equal(outcome.trace?.costMicroUsd, 6_400);
+  });
+
+  it('still says the settlement did not finish', async () => {
+    // The caller's figure being known does not mean the ledger is closed.
+    // The account hold is real money against a shared ceiling, and the log
+    // line is the only place anybody learns it is still open.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true }, settleAccountOnly: 6_400 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(outcome.settled, false);
+  });
+
+  it("falls back to the worst case when the caller's own hold is open", async () => {
+    // Nothing is known about what they were charged, and the reclaim will
+    // take the worst case, so that is the honest figure.
+    const { deps: d } = deps(
+      { ok: false, reason: 'build', error: 'TS1484' },
+      { rebuild: { ok: true }, settleRejects: 99 },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, d);
+    assert.equal(outcome.repairCostMicroUsd, PARAMS.worstCaseMicroUsd);
+    assert.equal(outcome.settled, false);
   });
 });
 

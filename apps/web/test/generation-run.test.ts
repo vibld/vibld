@@ -16,6 +16,7 @@ import {
   SanitizingModelProvider,
   assertedBaseRevision,
   ceilingForRun,
+  PartialSettlement,
   runGeneration,
   settleBudget,
   traceOf,
@@ -170,13 +171,14 @@ describe('runGeneration', () => {
   });
 });
 
-function fakeLedger() {
+function fakeLedger(rejects?: string) {
   const calls: { name: string; id: number; actual: number }[] = [];
   return {
     ledger: {
       getByName: (name: string) => ({
         settle: async (id: number, actual: number) => {
           calls.push({ name, id, actual });
+          if (name === rejects) throw new Error(`${name} is unreachable`);
         },
       }),
     },
@@ -784,6 +786,69 @@ describe('a run that predates the change', () => {
     assert.deepEqual(
       calls.map((call) => call.actual),
       [PRICE_PARAMS.worstCaseMicroUsd, PRICE_PARAMS.worstCaseMicroUsd],
+    );
+  });
+});
+
+/**
+ * Which ledger layer was left open, when they do not fail together
+ * (#196 review).
+ *
+ * The caller's layer is written first and the account layer second, so the
+ * two can fail apart. They also answer to different people: the caller's
+ * hold decides what the caller is billed, the account hold decides what
+ * this deployment has spent today. A caller told only "settlement failed"
+ * has to assume the worst of both, and for a run whose own layer closed at
+ * a measured figure that overstates a bill which is already correct.
+ */
+describe('a settlement that closed one layer and not the other', () => {
+  it('still rejects, so every existing caller retries as before', async () => {
+    const { ledger } = fakeLedger('__account__');
+    await assert.rejects(() =>
+      settleBudget(ledger, PRICE_PARAMS, undefined, false),
+    );
+  });
+
+  it('carries what the caller was actually charged', async () => {
+    const { ledger } = fakeLedger('__account__');
+    const raised = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      {
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      true,
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    assert.ok(
+      raised instanceof PartialSettlement,
+      "the account layer failing said nothing about the caller's",
+    );
+    assert.equal(raised.charged, 100 * 5 + 200 * 25);
+    assert.match(String(raised.cause), /unreachable/);
+  });
+
+  it('does not claim the caller settled when their own layer is what failed', async () => {
+    // The distinction is the whole value of the type. Reporting
+    // `userSettled: true` here would hand a caller a figure nobody wrote.
+    const { ledger } = fakeLedger('user_abc');
+    const raised = await settleBudget(
+      ledger,
+      PRICE_PARAMS,
+      undefined,
+      true,
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    assert.ok(
+      !(raised instanceof PartialSettlement),
+      "a failure of the caller's own layer was reported as a partial settlement",
     );
   });
 });

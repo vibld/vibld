@@ -2,6 +2,11 @@ import { Sandbox } from '@cloudflare/sandbox';
 import type { ProjectFile } from '@vibld/core';
 import type { PreviewFleet } from './preview-fleet.ts';
 import { HARD_LIFETIME_MS } from './fleet.ts';
+import {
+  BUILD_COMPILE_TIMEOUT_MS,
+  BUILD_INSTALL_TIMEOUT_MS,
+  BUILD_LOCK_TTL_MS,
+} from './build-limits.ts';
 
 /**
  * Vibld's own untrusted-execution sandbox (ADR-0004; docs/decisions.md L7,
@@ -127,16 +132,11 @@ const STORAGE_KEY = 'vibld:preview';
  */
 const BUILD_LOCK_KEY = 'vibld:build';
 
-/**
- * How long a build lock is believed before the build holding it is treated
- * as gone.
- *
- * Longer than any build should take (`npm install` and `npm run build` over
- * a generated project) and shorter than a person's patience, because the
- * only thing this bounds is how long a build that died mid-flight blocks
- * the next one.
- */
-const BUILD_LOCK_TTL_MS = 15 * 60_000;
+/** The lock a build holds, and the token that says whose it is. */
+interface BuildLock {
+  startedAt: number;
+  token: string;
+}
 
 export interface PreviewStatus {
   status: Phase | 'ready-to-start';
@@ -340,18 +340,25 @@ export class PreviewSandbox extends Sandbox<Env> {
     // container died between taking it and releasing it must not wedge
     // every later build for this user, and nothing else here would ever
     // clear it.
-    const startedAt = await this.ctx.storage.get<number>(BUILD_LOCK_KEY);
-    if (
-      typeof startedAt === 'number' &&
-      Date.now() - startedAt < BUILD_LOCK_TTL_MS
-    ) {
+    const held = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+    if (held && Date.now() - held.startedAt < BUILD_LOCK_TTL_MS) {
       return {
         reason: 'busy',
         error:
           'Another build is already running for this project. Try again once it has finished.',
       };
     }
-    await this.ctx.storage.put(BUILD_LOCK_KEY, Date.now());
+    // Taken with a token, and released only while it is still this build's
+    // (#196 review). Expiry alone made the lock unsafe in the one case it
+    // was for: once a stale lock let a second build in, the first build's
+    // own `finally` deleted the second's lock on its way out, and a third
+    // would then walk into the second's workspace. Ownership is what makes
+    // release mean "give back mine" rather than "clear whatever is there".
+    const token = crypto.randomUUID();
+    await this.ctx.storage.put<BuildLock>(BUILD_LOCK_KEY, {
+      startedAt: Date.now(),
+      token,
+    });
 
     try {
       // Emptied first, because this container is reused (#196 review).
@@ -381,18 +388,43 @@ export class PreviewSandbox extends Sandbox<Env> {
 
       await this.writeProject(files);
 
+      const installStartedAt = Date.now();
       const install = await this.exec('npm install --no-audit --no-fund', {
         cwd: '/workspace',
+        timeout: BUILD_INSTALL_TIMEOUT_MS,
       });
       if (!install.success) {
+        // A command that reached its bound was stopped, and being stopped
+        // says nothing about the project: `sandbox` rather than `install`,
+        // so no repair is bought on the strength of it. Checked here as
+        // well as bounded above for `typecheck`'s reason -- whether the SDK
+        // reports its own timeout as a rejection or as an unsuccessful
+        // result is its business, and an "install failure" that was really
+        // a stopwatch would be this method inventing one.
+        if (Date.now() - installStartedAt >= BUILD_INSTALL_TIMEOUT_MS) {
+          return {
+            reason: 'sandbox',
+            error: 'npm install did not finish within the time allowed.',
+          };
+        }
         return {
           reason: 'install',
           error: `npm install failed (exit ${install.exitCode}): ${install.stderr.slice(-2000)}`,
         };
       }
 
-      const build = await this.exec('npm run build', { cwd: '/workspace' });
+      const buildStartedAt = Date.now();
+      const build = await this.exec('npm run build', {
+        cwd: '/workspace',
+        timeout: BUILD_COMPILE_TIMEOUT_MS,
+      });
       if (!build.success) {
+        if (Date.now() - buildStartedAt >= BUILD_COMPILE_TIMEOUT_MS) {
+          return {
+            reason: 'sandbox',
+            error: 'npm run build did not finish within the time allowed.',
+          };
+        }
         // stdout first, and stdout at all: `tsc` writes its diagnostics
         // there, and `build` runs `tsc --noEmit` before it bundles
         // anything. Reporting stderr alone told somebody whose publish was
@@ -444,7 +476,14 @@ export class PreviewSandbox extends Sandbox<Env> {
       // Released on every path, including the refusals above that return
       // from inside the `try`. A lock this method takes and does not give
       // back is one that blocks this user's next build until it ages out.
-      await this.ctx.storage.delete(BUILD_LOCK_KEY);
+      //
+      // Only if it is still this build's. A build that overran its lock
+      // comes through here after somebody else has taken one, and deleting
+      // that would hand a third build the workspace the second is using.
+      const mine = await this.ctx.storage.get<BuildLock>(BUILD_LOCK_KEY);
+      if (mine?.token === token) {
+        await this.ctx.storage.delete(BUILD_LOCK_KEY);
+      }
     }
   }
 
