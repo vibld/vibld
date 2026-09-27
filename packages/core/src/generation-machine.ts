@@ -1,0 +1,163 @@
+import { stopForError } from './run-outcome.ts';
+import type {
+  GenerationRequest,
+  GenerationResult,
+  GenerationState,
+  ModelProvider,
+  ProjectSnapshot,
+  Validator,
+} from './types.ts';
+
+function revisionFor(snapshot: Omit<ProjectSnapshot, 'revision'>): string {
+  const payload = JSON.stringify(snapshot.files);
+  let hash = 2166136261;
+  for (let index = 0; index < payload.length; index += 1) {
+    hash ^= payload.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `r${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+export class GenerationMachine {
+  #state: GenerationState = 'idle';
+  #accepted?: ProjectSnapshot;
+  #staged?: ProjectSnapshot;
+  #summary?: string;
+  #cancelled = false;
+  #running = false;
+
+  get state(): GenerationState {
+    return this.#state;
+  }
+
+  get running(): boolean {
+    return this.#running;
+  }
+
+  get accepted(): ProjectSnapshot | undefined {
+    return this.#accepted ? structuredClone(this.#accepted) : undefined;
+  }
+
+  cancel(): void {
+    this.#cancelled = true;
+  }
+
+  async run(
+    request: GenerationRequest,
+    provider: ModelProvider,
+    validator: Validator,
+  ): Promise<GenerationResult> {
+    if (this.#running) {
+      return {
+        state: 'failed',
+        stop: 'not-started',
+        accepted: this.accepted,
+        staged: this.#staged ? structuredClone(this.#staged) : undefined,
+        errors: ['GenerationMachine already has an active run'],
+      };
+    }
+
+    this.#running = true;
+    this.#cancelled = false;
+    this.#state = 'planning';
+
+    try {
+      const plan = await provider.generate({
+        ...request,
+        base: request.base ?? this.#accepted,
+      });
+      this.#summary = plan.summary;
+
+      if (this.#cancelled) {
+        return this.#cancelledResult();
+      }
+
+      this.#state = 'staging';
+      const files = plan.files.map((file) => ({ ...file }));
+      const stagedWithoutRevision = { files };
+      this.#staged = {
+        ...stagedWithoutRevision,
+        revision: revisionFor(stagedWithoutRevision),
+      };
+
+      if (this.#cancelled) {
+        return this.#cancelledResult();
+      }
+
+      this.#state = 'validating';
+      const validation = await validator(structuredClone(this.#staged));
+
+      if (this.#cancelled) {
+        return this.#cancelledResult();
+      }
+
+      // Warnings ride along whichever way validation went. A rejected
+      // snapshot can still have been worth commenting on, and an accepted
+      // one is the whole reason this channel exists.
+      const warnings =
+        validation.warnings && validation.warnings.length > 0
+          ? [...validation.warnings]
+          : undefined;
+
+      if (!validation.ok) {
+        this.#state = 'failed';
+        return {
+          state: this.#state,
+          stop: 'validation-failed',
+          accepted: this.accepted,
+          staged: structuredClone(this.#staged),
+          errors: [...validation.errors],
+          summary: this.#summary,
+          ...(warnings ? { warnings } : {}),
+        };
+      }
+
+      // Compared before the promotion overwrites what it was. `revisionFor`
+      // hashes the files, so an identical project hashes identically.
+      const applied = this.#accepted?.revision !== this.#staged.revision;
+      this.#accepted = structuredClone(this.#staged);
+      this.#state = 'accepted';
+
+      return {
+        state: this.#state,
+        // `no-changes` when the project this produced is byte-identical to
+        // the one it started from. A run that worked and had nothing to do
+        // is a different fact from one that applied an edit, and both used
+        // to arrive as `accepted`.
+        stop: applied ? 'applied' : 'no-changes',
+        accepted: this.accepted,
+        staged: structuredClone(this.#staged),
+        errors: [],
+        summary: this.#summary,
+        ...(warnings ? { warnings } : {}),
+      };
+    } catch (error) {
+      this.#state = 'failed';
+      return {
+        state: this.#state,
+        // The error names its own kind. Stringifying it into `errors` and
+        // reporting a boolean outcome is what made every provider failure
+        // look alike to a finished run.
+        stop: stopForError(error),
+        accepted: this.accepted,
+        staged: this.#staged ? structuredClone(this.#staged) : undefined,
+        errors: [error instanceof Error ? error.message : String(error)],
+        summary: this.#summary,
+      };
+    } finally {
+      this.#running = false;
+    }
+  }
+
+  #cancelledResult(): GenerationResult {
+    this.#state = 'cancelled';
+    return {
+      state: this.#state,
+      stop: 'cancelled',
+      accepted: this.accepted,
+      staged: this.#staged ? structuredClone(this.#staged) : undefined,
+      errors: [],
+      summary: this.#summary,
+    };
+  }
+}
