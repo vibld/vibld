@@ -244,8 +244,8 @@ importers:
         version: link:../../packages/core
     devDependencies:
       '@cloudflare/workers-types':
-        specifier: 5.20260923.1
-        version: 5.20260923.1
+        specifier: 5.20260924.1
+        version: 5.20260924.1
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
@@ -260,8 +260,8 @@ importers:
         version: link:../../packages/core
     devDependencies:
       '@cloudflare/workers-types':
-        specifier: 5.20260923.1
-        version: 5.20260923.1
+        specifier: 5.20260924.1
+        version: 5.20260924.1
       '@types/node':
         specifier: 26.6.2
         version: 26.6.2
@@ -487,8 +487,8 @@ packages:
       '@xterm/xterm':
         optional: true
 
-  '@cloudflare/workers-types@5.20260923.1':
-    resolution: {integrity: sha512-zuOqyxfhzhN2LlxxcpnAS79aGVm9ku3ZcWKyvVLHyjPV6oHsuHSFidzSHhHE9ho9UTcUxU1IdtpdVuFXluKB+g==}
+  '@cloudflare/workers-types@5.20260924.1':
+    resolution: {integrity: sha512-puvr63PrfAFIkdh3FInGEgS0VTQ49WYNYDC2Eupd+qvwWwGpSRjxJD5Iz22oNHCmV1UEcsDz+OtGF++01vUloA==}
 
   '@emnapi/runtime@1.11.3':
     resolution: {integrity: sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==}
@@ -1921,7 +1921,7 @@ snapshots:
       capnweb: 0.8.0
       hono: 4.13.8
 
-  '@cloudflare/workers-types@5.20260923.1': {}
+  '@cloudflare/workers-types@5.20260924.1': {}
 
   '@emnapi/runtime@1.11.3':
     dependencies:
