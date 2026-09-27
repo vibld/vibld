@@ -77,7 +77,7 @@ describe('fetchPreviewStatus', () => {
   });
 
   it('carries what tsc said about a project that does not compile', async () => {
-    // #194: two of six real generations produced a project that fails
+    // internal issue 194: two of six real generations produced a project that fails
     // `npm run build`. The preview sandbox typechecks after installing,
     // and the finding rides along on the ready status rather than
     // becoming a failure -- the sandbox is up and the URL works.

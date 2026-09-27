@@ -29,7 +29,7 @@ pnpm --filter @vibld/preview test
   tree back with `listFiles`/`readFile` rather than exposing a port. Runs
   in an instance named for building rather than in the caller's preview
   sandbox, because sharing one meant a build was refused whenever a preview
-  was live, which is most of the time (#196 review). It takes a build
+  was live, which is most of the time (internal PR 196 review). It takes a build
   ticket from the same `PreviewFleet` previews use and destroys its
   container as it finishes: a build holds no exposed port and no long-lived
   process, but it does hold one of the platform's container slots while it
@@ -45,7 +45,7 @@ pnpm --filter @vibld/preview test
   (`fleet.ts`) and a thin Durable Object wrapper (`preview-fleet.ts`), for
   the same reason `spend.ts`/`budget.ts` are split. One well-known instance
   counts previews and builds against one budget of 25 containers, the
-  platform's `max_instances`, with builds bounded at 5 of it (#197).
+  platform's `max_instances`, with builds bounded at 5 of it (internal issue 197).
   Previews get all 25 whenever nothing is building; a preview queues behind
   a build only when every container is taken, and its position counts the
   previews ahead of it, because builds never wait in the queue. See

@@ -25,7 +25,7 @@ now: the first scoped action will be built against whatever shape exists when
 it is written, and a shape invented alongside that feature will be shaped by
 that feature.
 
-**The escalation path already has its mechanism.** #158 landed the four
+**The escalation path already has its mechanism.** Internal issue 158 landed the four
 outcomes a run can have and the continuation semantics that follow an `ask`: asking ends the invocation, and answering starts a new
 run carrying the held work plus the answer. A capability requested mid-run is
 exactly an `ask`, and the run that acts on the approval is exactly the
@@ -33,7 +33,7 @@ continuation it starts. That is not a coincidence to note in passing; it is
 the reason an approval cannot be banked, and this ADR depends on it.
 
 The vocabulary and the four rules below were first set out in an analysis
-written for this project (#157), which was closed without merging, so it is
+written for this project (internal PR 157), which was closed without merging, so it is
 not in this repository.
 
 ## Decision
@@ -173,6 +173,6 @@ on.
   visible before the run starts.
 - **Wait until the first scoped action needs it.** My own first
   recommendation, and the honest argument for it is that a format with no
-  consumer gets shaped by guesswork. Rejected for the same reason #158 was
+  consumer gets shaped by guesswork. Rejected for the same reason internal issue 158 was
   built early: by the time the consumer exists, whatever shape is lying
   around is load-bearing.

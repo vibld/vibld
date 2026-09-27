@@ -7,7 +7,7 @@
  * files changed.
  *
  * It is here for `PreviewFleet`, which decides how many containers this
- * deployment runs and until #197 had no test that ever ran it: every
+ * deployment runs and until internal issue 197 had no test that ever ran it: every
  * assertion about it read its source. Durable Object storage *is* SQLite,
  * so this runs the real statements rather than asserting that some mock was
  * called. What it deliberately does not model is the input gate. Every

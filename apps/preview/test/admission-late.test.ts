@@ -6,7 +6,7 @@ import { admit } from '../worker/build-files.ts';
 
 /**
  * That a build gives back a ticket it abandoned, and keeps one it did not
- * (#196 review).
+ * (internal PR 196 review).
  *
  * This is here because the inline version was wrong in a way no source
  * read could see and no regex was ever going to catch. It kept a `waiting`

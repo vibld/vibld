@@ -11,7 +11,7 @@ import { PublishButton } from '../src/components/PublishButton.tsx';
  * Publishing, as it is actually wired.
  *
  * Every rule in here was written and never run: the runner errors on JSX, so
- * until the harness on #124 this component was typechecked and nothing more.
+ * until the harness on internal PR 124 this component was typechecked and nothing more.
  */
 
 function snapshot(revision: string): ProjectSnapshot {
@@ -291,7 +291,7 @@ describe('publishing an accepted checkpoint', () => {
     // in flight still answers, and an unguarded completion then puts the
     // previous checkpoint's address back beside the new one, which is the
     // sentence this component is being fixed for. The same latest-wins gate
-    // the push button uses on #123.
+    // the push button uses on internal PR 123.
     const reply1 = held(() =>
       reply({
         ok: true,
@@ -359,7 +359,7 @@ describe('publishing an accepted checkpoint', () => {
   });
 
   it('stops saying the project is live once a new checkpoint arrives', async () => {
-    // The same rule the push button needed on #123: what is live is the
+    // The same rule the push button needed on internal PR 123: what is live is the
     // checkpoint that was published, and a later one has not been. Leaving
     // the sentence up reads as though the new work is already on the web.
     serving(() =>

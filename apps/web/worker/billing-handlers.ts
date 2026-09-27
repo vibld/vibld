@@ -284,7 +284,7 @@ export async function reconcileSubscriptions(
    */
   onClearedPayment?: (userId: string) => Promise<void>,
   /**
-   * How many subscriptions this run may check (#47).
+   * How many subscriptions this run may check (internal PR 47).
    *
    * It used to check all of them, every night, with nothing bounding it.
    * The three phases before this one in the same invocation share one D1
@@ -738,7 +738,7 @@ export function parkedPaymentOf(row: {
 }
 
 /**
- * The parked queue, for an admin to look at (#46).
+ * The parked queue, for an admin to look at (internal PR 46).
  *
  * Read-only on purpose. The nightly retry is what resolves these, and it
  * already runs; what was missing is anybody being able to see that it has

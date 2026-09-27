@@ -52,7 +52,7 @@ function Builder() {
   // across the change, which is the whole reason this is a state and not a
   // link to another document: a run takes minutes, and an admin who
   // stepped into settings during one would otherwise come back to an empty
-  // shell (#184).
+  // shell (internal issue 184).
   const pathname = usePathname();
   const onAdminPage = isAdminPath(pathname);
   // Where focus goes when the view changes under a reader who never left
@@ -129,7 +129,7 @@ function Builder() {
                         // mousedown that happened inside the panel, and an
                         // internal navigation changes nothing it watches, so
                         // without this the admin page opened underneath a menu
-                        // still standing over it (#188 review).
+                        // still standing over it (internal PR 188 review).
                         closeSettings();
                         navigate(ADMIN_PATH);
                       }}

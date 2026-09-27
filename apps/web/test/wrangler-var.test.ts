@@ -95,7 +95,7 @@ describe('the billing replay query budget', () => {
     // must not be entitled to the lot.
     // All four phases are bounded by this number now: the payout resume and
     // the subscription reconcile joined the replay and the parked retry in
-    // #47, and below 92 the pass rotates rather than splits (#176). The
+    // internal PR 47, and below 92 the pass rotates rather than splits (internal issue 176). The
     // ceiling of half the Paid-plan limit was set while two phases were
     // unbounded and is kept as margin for everything the pass does outside
     // these phases; raising it is a separate decision nobody has taken.

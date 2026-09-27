@@ -174,7 +174,7 @@ describe('where a mockup frame may go', () => {
 
   it('removes a nested document the query cannot see into', () => {
     // The sixth finding, and the first that parsing alone did not close
-    // (#189 review). The refresh lives inside an *attribute value* until
+    // (internal PR 189 review). The refresh lives inside an *attribute value* until
     // the browser makes a document of it, so a query over this document
     // never visits it. The nested context inherits the CSP, which does not
     // govern navigation, and the sandbox lets it replace itself.
@@ -253,7 +253,7 @@ describe('where a mockup frame may go', () => {
   });
 
   it('leaves an SVG link nothing to navigate with', () => {
-    // The seventh finding (#189 review). An `<a>` in the SVG namespace does
+    // The seventh finding (internal PR 189 review). An `<a>` in the SVG namespace does
     // not take its target from an HTML `<base>`, so stripping `target` and
     // trusting the base left it behaving as `_self`: a click replaces the
     // frame with the model's host, which is the disclosure the whole file

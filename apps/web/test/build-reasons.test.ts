@@ -7,7 +7,7 @@ import { worthRepairing } from '../worker/generation-run.ts';
 
 /**
  * That the two deployments still mean the same thing by a build failure
- * (#196 review).
+ * (internal PR 196 review).
  *
  * `apps/web` keeps its own copy of the reason list on purpose: the two
  * Workers are separate deployments that talk over a service binding and

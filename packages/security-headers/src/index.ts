@@ -127,7 +127,7 @@ export function secured(response: Response): Response {
  */
 export function headersFile(
   /**
-   * Headers this one site sends that the other must not (#192 review).
+   * Headers this one site sends that the other must not (internal PR 192 review).
    *
    * Everything in `SECURITY_HEADERS` is decided by facts both sites share,
    * which is why there is one object. Indexing is the first thing that is

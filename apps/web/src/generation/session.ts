@@ -114,7 +114,7 @@ export interface BuilderState {
    * What this deployment can actually generate with, from `/api/config`.
    *
    * Null until the probe answers. It decides one thing: whether to offer
-   * directions (#189 review). `explore` always calls the real
+   * directions (internal PR 189 review). `explore` always calls the real
    * `/api/mockups`, while a build in `fake` mode is served by
    * `FakeModelProvider`, so the button was offering something that could
    * only 503 in exactly the modes the fake exists to keep usable.
@@ -129,7 +129,7 @@ export interface BuilderState {
   generation: GenerationMode | null;
   /**
    * Directions to choose between, when the caller asked to look before
-   * building (#185). Empty is the ordinary case: most runs never ask.
+   * building (internal issue 185). Empty is the ordinary case: most runs never ask.
    */
   mockups: ParsedMockup[];
   /** A mockup run is in flight. Separate from `running`, which is a build. */
@@ -155,7 +155,7 @@ export interface TranscriptTurn {
 /**
  * Where a run has got to, as coarsely as the Worker can actually tell.
  *
- * `running` and not `writing` (#188 review). A Workflow instance reports
+ * `running` and not `writing` (internal PR 188 review). A Workflow instance reports
  * `running` for the whole of its work, and writing the project is only the
  * first of its three steps: settling the budget and recording the trace
  * follow, each with its own retries. A word that named the writing would go
@@ -168,7 +168,7 @@ export interface GenerationProgress {
    * Characters the model has produced, when that is known.
    *
    * Optional, and absent means unknown rather than none. The Worker reports
-   * a count only once a run has produced one (#183): before the first
+   * a count only once a run has produced one (internal issue 183): before the first
    * report, and on a reasoning model for as long as it is still thinking,
    * there is no honest number to send. The wording says nothing rather than
    * saying zero, because a counter frozen at 0 is the frozen line this whole
@@ -332,7 +332,7 @@ export class BuilderSession {
     referenceUrl: string | null;
   } | null = null;
   /**
-   * The look's own controller, separate from the build's `#abort` (#189
+   * The look's own controller, separate from the build's `#abort` (internal PR 189
    * review). A mockup run is about a minute and is billed; without this the
    * only way to stop one was to leave the page, and it kept spending either
    * way.
@@ -379,7 +379,7 @@ export class BuilderSession {
    *
    * The epoch and the listeners are about what gets *shown*; the
    * controllers are about what gets *spent*, and this used to do only the
-   * first (#189 review). A non-React owner -- the documented consumer of
+   * first (internal PR 189 review). A non-React owner -- the documented consumer of
    * this method -- could dispose a session mid-run and leave about a minute
    * of billed model time going, with the answer thrown away.
    *
@@ -481,7 +481,7 @@ export class BuilderSession {
     // request. Carrying them would leave three sketches of a project that
     // no longer exists, with a Build button that would rebuild it.
     //
-    // Aborted, not merely forgotten (#189 review). Clearing the context
+    // Aborted, not merely forgotten (internal PR 189 review). Clearing the context
     // and bumping the epoch stops the result being *shown*; it does not
     // stop the run, which is about a minute of billed model time whose
     // answer is then thrown away. Start over is reachable while a look is
@@ -495,7 +495,7 @@ export class BuilderSession {
   }
 
   /**
-   * Ask for three directions rather than a build (#185).
+   * Ask for three directions rather than a build (internal issue 185).
    *
    * Its own flag rather than reusing `running`: a build and a look are
    * different spends, they read differently on screen, and a chooser that
@@ -510,7 +510,7 @@ export class BuilderSession {
     prompt: string,
     style: StylePresetId | null = null,
     // Kept so choosing can resubmit the request the set was drawn from
-    // (#189 review). Without it a reference page the reader had filled in
+    // (internal PR 189 review). Without it a reference page the reader had filled in
     // was silently dropped on the build, while still sitting in the
     // composer looking like it had been used.
     referenceUrl: string | null = null,
@@ -573,7 +573,7 @@ export class BuilderSession {
   /**
    * Drop the reference to a look that has finished, if it is still ours.
    *
-   * The check is the point (#189 review). `explore` used to clear
+   * The check is the point (internal PR 189 review). `explore` used to clear
    * `#exploreAbort` unconditionally when its promise settled, so an
    * abandoned run landing after Start over -- or after a second look had
    * begun -- cleared the *new* run's controller. Nothing then held it, and
@@ -585,7 +585,7 @@ export class BuilderSession {
   }
 
   /**
-   * Stop a look that is still running (#189 review).
+   * Stop a look that is still running (internal PR 189 review).
    *
    * Aborting the fetch drops the connection, which is what tells the
    * endpoint to stop its own model call -- so this stops the spending
@@ -646,7 +646,7 @@ export class BuilderSession {
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
 
     // Any build invalidates the directions, not only choosing one
-    // (#189 review). Pressing Generate with a set on screen used to leave
+    // (internal PR 189 review). Pressing Generate with a set on screen used to leave
     // it there; once that build was accepted the chooser came back enabled,
     // and clicking a tile then submitted its *pre-build* request against
     // the project that had just been created -- a follow-up nobody asked
@@ -683,7 +683,7 @@ export class BuilderSession {
       estimateTokensForChars(baseChars) +
       estimateTokensForChars(this.#state.knowledge.length) +
       (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0) +
-      // A chosen direction is sent with the request too (#185), so it is
+      // A chosen direction is sent with the request too (internal issue 185), so it is
       // part of what this run spends. Counted from the document actually
       // being sent rather than from its cap, because unlike a reference URL
       // this content is already in hand.

@@ -154,7 +154,7 @@ describe('what one run may ask for', () => {
 
 /**
  * Looking before building is only worth offering if it is actually cheap
- * (#185). The dispatch lives in `runCeilingFor` rather than at the call
+ * (internal issue 185). The dispatch lives in `runCeilingFor` rather than at the call
  * sites, for the same reason the rest of this file exists: a second place
  * that decides a ceiling is a second place that can disagree with the
  * reservation it is supposed to match.
@@ -173,7 +173,7 @@ describe('what a run is for decides what it may ask for', () => {
     // The whole argument for offering this at all. If three mockups cost
     // what a build costs, nobody should be asked to spend a build on them.
     //
-    // This compared ceilings at a factor of ten until #190, which measured
+    // This compared ceilings at a factor of ten until internal PR 190, which measured
     // what the two actually cost and made the comparison unsound in both
     // directions. A look really is about a tenth of a build in money:
     // $0.026 against $0.30 on the production model. But a ceiling is not a
@@ -197,7 +197,7 @@ describe('what a run is for decides what it may ask for', () => {
   it('holds that ratio for every model, not just the production one', () => {
     // The clamp exists because the flat guard alone does not hold it: on
     // the smaller-ceilinged models a 64,000 look would have been allowed
-    // to reserve twice a whole build (#190).
+    // to reserve twice a whole build (internal PR 190).
     for (const model of MODEL_CATALOGUE) {
       const build = runCeilingFor(env, model.id, 'build');
       const mockups = runCeilingFor(env, model.id, 'mockups');
@@ -210,7 +210,7 @@ describe('what a run is for decides what it may ask for', () => {
 
   it('holds that ratio under a price override too', () => {
     // The P2 this file existed to prevent, in the one place it was not
-    // being derived (#191 review). The build ceiling has always been
+    // being derived (internal PR 191 review). The build ceiling has always been
     // computed from the price actually in force; the mockup clamp was
     // computed from the catalogue's, so an operator correcting the rate
     // upward shrank a build and left a look at the flat guard -- inverting

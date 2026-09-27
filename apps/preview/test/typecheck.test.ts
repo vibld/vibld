@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 /**
- * That the sandbox says whether a generated project compiles (#194).
+ * That the sandbox says whether a generated project compiles (internal issue 194).
  *
  * Two of six real generations measured against the production provider
  * produced a project that fails `npm run build`, for two unrelated reasons.
@@ -104,7 +104,7 @@ describe('what a preview finds out about the project it is running', () => {
   });
 
   it('bounds how long it may take', () => {
-    // #195 review. The prompt requires a "typecheck" script to exist and
+    // internal PR 195 review. The prompt requires a "typecheck" script to exist and
     // cannot require it to exit, so a manifest declaring `tsc --watch
     // --noEmit` would never return: the preview would sit in `starting`
     // until its hard lifetime reclaimed it, holding one of the

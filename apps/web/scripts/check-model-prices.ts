@@ -186,7 +186,7 @@ try {
     (Date.now() - Date.parse(`${snapshot.readOn}T00:00:00Z`)) / 86_400_000,
   );
   if (age > MAX_SNAPSHOT_AGE_DAYS) {
-    // Stale is not checked (#213 review). DeepSeek has no cost API, so an
+    // Stale is not checked (internal PR 213 review). DeepSeek has no cost API, so an
     // old snapshot leaves it with no check at all.
     failed.push(
       `published prices: read on ${snapshot.readOn}, ${age} days ago; the pricing routine has not refreshed them`,
@@ -303,12 +303,12 @@ if (process.env.GITHUB_STEP_SUMMARY) {
 }
 writeFileSync('price-report.md', `${report}\n`);
 
-// A missing admin key is an incomplete check, not a clean one (#213 review).
+// A missing admin key is an incomplete check, not a clean one (internal PR 213 review).
 // Passed as a success, the workflow would close an open pricing issue on a
 // run that never looked at what was billed. `--published-only` is for the
 // weekly routine, which compares published prices and holds no admin keys.
 const publishedOnly = process.argv.includes('--published-only');
-// Likewise a bill that was read only in part (#213 review).
+// Likewise a bill that was read only in part (internal PR 213 review).
 if (
   failed.length > 0 ||
   checked.length === 0 ||

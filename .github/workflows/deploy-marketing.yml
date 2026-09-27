@@ -115,7 +115,7 @@ jobs:
       # A green deploy only says the upload worked, not that the site is
       # answering. This used to warn and pass, for the days when a freshly
       # routed domain could still be propagating; vibld.com has been routed
-      # since, so a site that does not answer is a failed deploy (#59).
+      # since, so a site that does not answer is a failed deploy (internal PR 59).
       # A few tries, a few seconds apart, cover the edge picking up the new
       # version.
       - name: Smoke test the deployment

@@ -218,7 +218,7 @@ export function buildProjectFiles(
              * An earlier attempt removed `verbatimModuleSyntax` here,
              * because it rejects `import { ReactNode } from 'react'` and a
              * real generation had failed `npm run build`. That was the
-             * wrong place (#193 review): this scaffold feeds
+             * wrong place (internal PR 193 review): this scaffold feeds
              * `FakeModelProvider` and nothing else. In production
              * `defaultResolveProvider` returns `RemoteModelProvider`, whose
              * files are the model's own, and the model writes its own

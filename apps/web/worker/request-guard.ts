@@ -8,7 +8,7 @@ import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
 import { isStylePresetId } from '@vibld/ai/style-presets';
 // The one bound, from the schema that produces the labels this guard reads
 // back, rather than a second copy of 60 with a comment asserting they
-// agree (#189 review).
+// agree (internal PR 189 review).
 import { MAX_MOCKUP_LABEL_CHARS } from '@vibld/ai/mockup-schema';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
 import type { ProviderName } from '@vibld/ai/select-client';
@@ -52,7 +52,7 @@ export const DEFAULT_LIMITS: GuardLimits = {
   maxTotalContentChars: MAX_BASE_CONTENT_CHARS,
   maxKnowledgeChars: MAX_KNOWLEDGE_CHARS,
   // The bound the form's own field declares, rather than a second copy of
-  // 2048 that could drift from it (#189 review).
+  // 2048 that could drift from it (internal PR 189 review).
   maxReferenceUrlChars: MAX_REFERENCE_URL_CHARS,
 };
 
@@ -121,7 +121,7 @@ export function checkBodySize(
 /**
  * What a generation request carries once validated.
  *
- * `baseRevision` rather than a snapshot: since #181 the caller says which
+ * `baseRevision` rather than a snapshot: since internal issue 181 the caller says which
  * revision it believes it is editing, and the run reads that revision's
  * files from storage itself. The assertion is still load-bearing -- it is
  * what catches a second tab having moved the project on -- but the payload
@@ -163,7 +163,7 @@ export function parseGenerationRequest(
   }
 
   // Only the revision. The project itself is read from storage by the run
-  // that needs it (#181), so a follow-up no longer carries the whole thing
+  // that needs it (internal issue 181), so a follow-up no longer carries the whole thing
   // up from the browser and is no longer bounded by a model's context.
   //
   // `files` is not rejected if it arrives. A tab opened before this shipped
@@ -261,7 +261,7 @@ function parseProjectFiles(
  * got generated.
  */
 /**
- * The direction the caller picked, carried into the build (#185).
+ * The direction the caller picked, carried into the build (internal issue 185).
  *
  * The document itself, not its name. Picking a direction has to mean
  * something, and a build seeded with only a label can ignore it and still
@@ -313,7 +313,7 @@ export interface ParsedMockupRequest {
 }
 
 /**
- * A request for three directions to choose between (#185).
+ * A request for three directions to choose between (internal issue 185).
  *
  * Almost nothing to check, which is the point: no base project, no files,
  * no revision. A mockup run is asked before there is a project, so the

@@ -1,5 +1,5 @@
 /**
- * The document a mockup frame actually renders (#189 review).
+ * The document a mockup frame actually renders (internal PR 189 review).
  *
  * `sandbox=""` is the deny-everything list for *capabilities*: no scripts,
  * no same-origin, no forms, no navigating anything else. It is not a
@@ -101,7 +101,7 @@ export const MOCKUP_FRAME_POLICY =
  * rather than a hole -- and a one-document sketch has no use for a base.
  *
  * The nested browsing contexts are the sixth finding, and the first that
- * parsing alone did not close (#189 review). A query over this document
+ * parsing alone did not close (internal PR 189 review). A query over this document
  * never visits `<iframe srcdoc="...">`, because that markup is an
  * *attribute value* until the browser makes a document of it. The nested
  * document inherits the CSP, which does not govern navigation, and the
@@ -134,7 +134,7 @@ const REMOVE_ENTIRELY =
  * aims it at a context the sandbox will not create.
  *
  * That is the whole answer for an HTML link and none of it for an SVG one,
- * which is the seventh finding (#189 review). An `<a>` in the SVG namespace
+ * which is the seventh finding (internal PR 189 review). An `<a>` in the SVG namespace
  * does not take its target from an HTML `<base>`: absent one of its own it
  * behaves as `_self`, so stripping the attribute leaves it aimed at this
  * frame rather than at the context the sandbox refuses to open. The link
@@ -164,7 +164,7 @@ export function mockupFrameDocument(html: string): string {
   }
 
   // An SVG link is unwrapped rather than disarmed, and that is deliberate
-  // (#189 review). Removing its `href` would mean deciding which attribute
+  // (internal PR 189 review). Removing its `href` would mean deciding which attribute
   // is the href -- `href`, `xlink:href`, whatever a tokenizer folds those
   // into -- and this file has lost that argument five times. Removing the
   // element removes the question: there is no href to spell and no anchor
@@ -178,7 +178,7 @@ export function mockupFrameDocument(html: string): string {
   // against a navigation the sandbox cannot stop is not a close trade.
 
   // An SVG link is unwrapped rather than disarmed, and that is deliberate
-  // (#189 review). Removing its `href` would mean deciding which attribute
+  // (internal PR 189 review). Removing its `href` would mean deciding which attribute
   // is the href -- `href`, `xlink:href`, whatever a tokenizer folds those
   // into -- and this file has lost that argument five times. Removing the
   // element removes the question: there is no href to spell and no anchor

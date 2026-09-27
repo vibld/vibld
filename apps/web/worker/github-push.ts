@@ -428,7 +428,7 @@ export async function resolveBase(
 /**
  * What a push would change in the repository, without changing anything.
  *
- * #13 asks for a review of "the destination and diff" before the push, and
+ * Internal issue 13 asks for a review of "the destination and diff" before the push, and
  * the push is the irreversible half of this product's GitHub integration: it
  * writes a branch that is not force-pushed and opens a pull request other
  * people will read. Somebody pressing that button should know what it does

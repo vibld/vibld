@@ -1,4 +1,4 @@
--- What became of a pull request vibld opened (#13).
+-- What became of a pull request vibld opened (internal issue 13).
 --
 -- Until this, a pull request's link was reported once, by the push that
 -- opened it, and never again. Merge it, close it, and vibld goes on offering

@@ -22,7 +22,7 @@ import { renderDesignMd } from '@vibld/ai';
 
 /**
  * Building what a run produced, and buying one repair when it will not
- * build (#194).
+ * build (internal issue 194).
  *
  * The ordering this depends on is not visible from here and is the reason
  * the step sits where it does: `UserBudget.reserve` reclaims every
@@ -416,7 +416,7 @@ describe('buying one repair', () => {
   });
 
   it('builds the repaired project rather than believing the model', async () => {
-    // #196 review, P1. Acceptance is the structural validator saying the
+    // internal PR 196 review, P1. Acceptance is the structural validator saying the
     // files are well formed and inside the project root. It says nothing
     // about whether they compile, and compiling is the entire question:
     // this feature exists because output that passes every structural
@@ -448,7 +448,7 @@ describe('buying one repair', () => {
   });
 
   it('keeps the project when the build service is unreachable', async () => {
-    // #196 review, P2. The project has already been accepted, promoted and
+    // internal PR 196 review, P2. The project has already been accepted, promoted and
     // billed. Letting the binding's rejection out of here fails the whole
     // Workflow, so the caller is sent an error instead of the files they
     // paid for, and preview-service availability quietly becomes a hard
@@ -478,7 +478,7 @@ describe('buying one repair', () => {
 
 describe('what the repair is charged for', () => {
   it('settles a refusal that never reached the model at nothing', async () => {
-    // #196 review, P1. `runGeneration` returns normally with
+    // internal PR 196 review, P1. `runGeneration` returns normally with
     // `providerRan: false` for the refusals it makes before calling
     // anybody: a base over MAX_BASE_CONTENT_CHARS, or a base revision that
     // moved. Both are reachable here -- the repair carries the whole
@@ -522,7 +522,7 @@ describe('what the repair is charged for', () => {
 
 describe('which ledger layer was left open', () => {
   it('records what the caller was billed when only the account hold is open', async () => {
-    // #196 review, P2. `settleBudget` writes the caller's layer before the
+    // internal PR 196 review, P2. `settleBudget` writes the caller's layer before the
     // account's, so the two fail apart. A caller whose own hold closed at
     // the figure their usage came to has been billed correctly and is done;
     // only the shared daily ceiling is still holding a worst case. Recording
@@ -543,7 +543,7 @@ describe('which ledger layer was left open', () => {
   });
 
   it('keeps what an earlier attempt established when a later one knows less', async () => {
-    // #196 review, P2. `retrying` reports the last failure, and the
+    // internal PR 196 review, P2. `retrying` reports the last failure, and the
     // informative one need not be last: a first attempt that closed the
     // caller's layer and failed on the account's knows exactly what they
     // were charged, while a second that cannot reach the caller's ledger at
@@ -591,7 +591,7 @@ describe('which ledger layer was left open', () => {
 
 describe('what the second build is allowed to claim', () => {
   it('says nothing when the rebuild was a refusal, not a judgement', async () => {
-    // #196 review, P2. Another build can take the workspace lock between
+    // internal PR 196 review, P2. Another build can take the workspace lock between
     // the model call and this one, and `busy` says as little about the
     // repaired files as it did about the originals. `built` already
     // answered "unknown" there; `repaired` answered false, which claims a
@@ -620,7 +620,7 @@ describe('what the second build is allowed to claim', () => {
   });
 
   it('waits out a workspace the previous build is still tearing down', async () => {
-    // #196 review. The teardown holds the lock until its container is gone
+    // internal PR 196 review. The teardown holds the lock until its container is gone
     // and no longer holds up the build it belongs to, so it overlaps the
     // repair's model call. Refusing there costs the caller the one thing
     // they just paid for: finding out whether the repair builds. Ordinarily
@@ -641,7 +641,7 @@ describe('what the second build is allowed to claim', () => {
   });
 
   it('stops asking when the budget for asking is spent', async () => {
-    // #196 review, and the fourth instance of this pull request's own
+    // internal PR 196 review, and the fourth instance of this pull request's own
     // shape: a bound per call is not a bound on a sequence of calls. Six
     // retries of a thirteen-minute build is ninety-one minutes, not the
     // one build and thirty seconds of waiting the allowance above was
@@ -704,7 +704,7 @@ describe('what the second build is allowed to claim', () => {
   });
 
   it('gives the model call a bound of its own', async () => {
-    // #196 review, and a source read because the bound is thirty minutes
+    // internal PR 196 review, and a source read because the bound is thirty minutes
     // and no test is going to wait for it. What can be checked here is
     // that the call goes through one: `repair-timeout.test.ts` holds the
     // arithmetic that makes the number the right one.
@@ -737,7 +737,7 @@ describe('what the second build is allowed to claim', () => {
 
 describe('a ledger that never answers', () => {
   it('reads as unavailable when the reservation stays pending', async () => {
-    // #196 review. A ledger that rejects is caught; one that never answers
+    // internal PR 196 review. A ledger that rejects is caught; one that never answers
     // is not, because a pending promise reaches no catch. The step then
     // runs out and fails a Workflow whose project was already accepted,
     // promoted, settled and billed.
@@ -777,7 +777,7 @@ describe('a ledger that never answers', () => {
 
 describe('a build service that never answers', () => {
   it('reads as unavailable, exactly like one that rejects', async () => {
-    // #196 review. The catch was the right answer to the wrong half: a
+    // internal PR 196 review. The catch was the right answer to the wrong half: a
     // call that rejects reaches it, a call that stays pending does not.
     // The enclosing step then times out and fails a run that was already
     // accepted, promoted, settled and billed, over a build nobody asked
@@ -828,7 +828,7 @@ describe('a build service that never answers', () => {
 
 describe('a repair whose model call never answered', () => {
   it('keeps the run rather than failing it', async () => {
-    // #196 review. The step has no retries and `handlePlan` reports an
+    // internal PR 196 review. The step has no retries and `handlePlan` reports an
     // errored workflow as a failed generation, so letting the deadline
     // escape would discard the response for a project already accepted,
     // promoted, settled and billed. The repair is an extra this service
@@ -888,7 +888,7 @@ async function workflowSource(
 
 describe('settling the repair, and what it costs to fail at it', () => {
   it('keeps the project when the ledger cannot be asked for a hold', async () => {
-    // #196 review, P2. `reserve` rejects, rather than denying, when the
+    // internal PR 196 review, P2. `reserve` rejects, rather than denying, when the
     // budget Durable Object is unreachable. The project has already been
     // accepted, promoted and settled by then, so letting that rejection
     // out of a step with no retries sends the caller an error instead of
@@ -905,7 +905,7 @@ describe('settling the repair, and what it costs to fail at it', () => {
   });
 
   it('retries a settlement that rejects rather than losing the repair', async () => {
-    // #196 review, P1. A Durable Object that blinks is over in seconds,
+    // internal PR 196 review, P1. A Durable Object that blinks is over in seconds,
     // and the enclosing step has no retries of its own -- so a bare await
     // here put the ledger's transient failure in front of a repair that
     // had already been promoted.
@@ -944,7 +944,7 @@ describe('settling the repair, and what it costs to fail at it', () => {
   });
 
   it('records the repair as its own run, with its own tokens', async () => {
-    // #196 review, P2. The repair is settled against the same ledger, so a
+    // internal PR 196 review, P2. The repair is settled against the same ledger, so a
     // record that counts only the first call reports a lower cost than
     // billing charged. Its own row rather than a larger number on the
     // run's: the repair has its own tokens, and one row cannot honestly
@@ -993,7 +993,7 @@ describe('what the run finally answers with', () => {
   });
 
   it('keeps the whole project out of the log line', async () => {
-    // #196 review, P1. `RepairOutcome.result` carries every generated file.
+    // internal PR 196 review, P1. `RepairOutcome.result` carries every generated file.
     // Spreading the outcome into `generation.verified` wrote a tenant's own
     // project, and whatever knowledge was incorporated into it, into the
     // Worker log on each successful repair -- outside every access and

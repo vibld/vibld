@@ -143,7 +143,7 @@ export function createAnthropicPlanClient(
         : request.maxTokens;
 
       // The schema travels in `output_config` rather than in the prompt, so
-      // what goes as prompt is exactly these two (#189 review).
+      // what goes as prompt is exactly these two (internal PR 189 review).
       request.onPromptChars?.(request.system.length + request.prompt.length);
 
       const stream = client.messages.stream(
@@ -151,7 +151,7 @@ export function createAnthropicPlanClient(
           model: request.model,
           max_tokens: maxTokens,
           // One cache breakpoint, on the system prompt, and it is the only
-          // one this request can honestly place (#166).
+          // one this request can honestly place (internal issue 166).
           //
           // A cache entry matches a prefix, so a marker only pays where
           // everything before it is byte-identical from one request to the
@@ -184,7 +184,7 @@ export function createAnthropicPlanClient(
           output_config: {
             ...(effort ? { effort } : {}),
             // The schema the *caller* asked for, not this client's idea of
-            // one (#189 review). Hard-coding it here made a mockup run
+            // one (internal PR 189 review). Hard-coding it here made a mockup run
             // structurally impossible: the prompt asked for a set of
             // directions and the API constrained the reply to a plan.
             format: formatFor(outputFor(request).schema),

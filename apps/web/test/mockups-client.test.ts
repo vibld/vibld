@@ -6,7 +6,7 @@ import { SignInRequiredError } from '../src/generation/remote-provider.ts';
 import type { GenerationProgress } from '../src/generation/session.ts';
 
 /**
- * Asking for three directions over the wire (#185).
+ * Asking for three directions over the wire (internal issue 185).
  *
  * The same stream contract `/api/plan` uses, read with the same reader, so
  * what is tested here is the part that differs: the terminal `mockups`
@@ -85,7 +85,7 @@ describe('requesting mockups', () => {
 
   it('reports progress as it arrives', async () => {
     // The payoff of running in the request: the model client streams, so
-    // the character count has a producer again on this route (#183).
+    // the character count has a producer again on this route (internal issue 183).
     const seen: GenerationProgress[] = [];
     const { fetchImpl } = serving([
       event('progress', {

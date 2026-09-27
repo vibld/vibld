@@ -12,7 +12,7 @@ import type { OutputEntry, ReadFileResult } from '../worker/build-files.ts';
 
 /**
  * The two per-file loops a build runs, tested by calling them
- * (#196 review).
+ * (internal PR 196 review).
  *
  * This loop lived inside `buildProject`, which cannot be loaded under
  * `node --test`, so everything ever asserted about it was a regex over
@@ -196,7 +196,7 @@ describe('what writing a project in costs the lock', () => {
 });
 
 /**
- * That a loop which has lost the workspace stops using it (#196 review).
+ * That a loop which has lost the workspace stops using it (internal PR 196 review).
  *
  * The half renewing could never do. `renewLock` has always been
  * conditional on still owning the lock, so a build that had been

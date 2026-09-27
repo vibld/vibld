@@ -24,7 +24,7 @@ function positiveInt(raw: string | undefined, fallback: number): number {
  * whatever credit they hold on top of it.
  *
  * Its own function because a second route is about to need the same answer
- * (#185), and this is the part where two copies would actually hurt. The
+ * (internal issue 185), and this is the part where two copies would actually hurt. The
  * reservation arithmetic is already shared -- `runCeilingFor`,
  * `worstCaseMicroUsd`, `reserveBudget` are each one function with one
  * caller-independent answer. This is not arithmetic; it is policy, and a

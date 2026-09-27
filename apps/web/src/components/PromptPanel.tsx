@@ -22,7 +22,7 @@ export interface PromptPanelProps {
     referenceUrl: string | null,
   ) => void;
   /**
-   * Ask for three directions instead of building (#185). Carries the same
+   * Ask for three directions instead of building (internal issue 185). Carries the same
    * prompt and style the build would have used, because it is the same
    * request asked a smaller way.
    */
@@ -34,7 +34,7 @@ export interface PromptPanelProps {
   onReset: () => void;
   onCancel: () => void;
   /**
-   * Stop a look that is running (#189 review). Its own handler, because it
+   * Stop a look that is running (internal PR 189 review). Its own handler, because it
    * stops a different run from `onCancel` and leaves the build untouched.
    */
   onCancelExplore: () => void;
@@ -66,7 +66,7 @@ export function PromptPanel({
    * Everything that belonged to the request that just started.
    *
    * One function because the rule is one rule, and it was written for one
-   * path (#189 review). Choosing a direction submits through the session
+   * path (internal PR 189 review). Choosing a direction submits through the session
    * rather than through this form, so the composer still held the original
    * request and its reference page while the label above it asked "What
    * should change?" -- and submitting that repeated the build and refetched
@@ -166,7 +166,7 @@ export function PromptPanel({
         type="url"
         className="prompt__input"
         // The same bound the Worker's guard enforces, declared where the
-        // value is entered (#189 review). Without it an over-long address
+        // value is entered (internal PR 189 review). Without it an over-long address
         // was valid markup that paid for a look and was refused only by the
         // build that choosing a direction submits.
         maxLength={MAX_REFERENCE_URL_CHARS}
@@ -211,8 +211,8 @@ export function PromptPanel({
           {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
         </button>
         {/*
-          Offered until a project exists (#185), which is not the same as
-          until an attempt was made (#189 review), and only where there is
+          Offered until a project exists (internal issue 185), which is not the same as
+          until an attempt was made (internal PR 189 review), and only where there is
           a model to ask. `explore` always calls the real `/api/mockups`,
           while a build in `fake` mode is served by `FakeModelProvider`, so
           this was offering something that could only fail in exactly the
@@ -230,7 +230,7 @@ export function PromptPanel({
             className="button"
             onClick={(event) => {
               // The browser's own check, not a second URL parser of mine
-              // (#189 review). This control is a `button`, so clicking it
+              // (internal PR 189 review). This control is a `button`, so clicking it
               // skips the native validation `Generate` gets for free, and
               // a malformed reference then sailed past: the look is paid
               // for, the bad value is kept in the mockup context, and the
@@ -267,7 +267,7 @@ export function PromptPanel({
           </button>
         ) : null}
         {/*
-          A look is about a minute and is billed for (#189 review). Without
+          A look is about a minute and is billed for (internal PR 189 review). Without
           this the only way out of one was to leave the page, and it kept
           spending either way.
         */}

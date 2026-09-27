@@ -7,7 +7,7 @@
  *
  * One scanner, two callers. `parseMockupArgs` was very nearly a second copy
  * of the loop below with one name changed, which is the shape of mistake the
- * #189 review kept finding: two places that must agree about where a prompt
+ * internal PR 189 review kept finding: two places that must agree about where a prompt
  * ends.
  */
 
@@ -26,7 +26,7 @@ export interface MockupArgs {
    *
    * Exists to measure rather than to configure: `MOCKUP_OUTPUT_TOKENS` was a
    * flat 18,000 chosen from a description of what three sketches ought to
-   * be, and the first real run against a model overran it (#190). A number
+   * be, and the first real run against a model overran it (internal PR 190). A number
    * to replace it with should come from watching what a model actually
    * emits, not from a second description.
    */

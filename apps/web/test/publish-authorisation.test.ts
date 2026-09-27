@@ -198,7 +198,7 @@ describe('nothing but a person can publish', () => {
   });
 
   it('puts the operator takedown behind the platform-admin check', () => {
-    // #172. This route acts on a site the caller does not own, so the only
+    // internal issue 172. This route acts on a site the caller does not own, so the only
     // thing standing in front of it is `requireAdmin`. A version that read
     // the body before establishing that would be one an ordinary caller
     // could probe for which slugs exist.

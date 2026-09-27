@@ -271,7 +271,7 @@ describe('settleBudget', () => {
   });
 
   it('settles the account layer at what its own reservation covered', async () => {
-    // The two layers answer different questions, and #191's review found
+    // The two layers answer different questions, and internal PR 191's review found
     // where they part company. A mockup run absorbs a discarded empty
     // reply so the reader does not pay for a provider defect; the account
     // reservation taken at admission covered that attempt, so that
@@ -528,7 +528,7 @@ describe('the ceiling a run may ask for', () => {
 });
 
 /**
- * The project, read rather than received (#181).
+ * The project, read rather than received (internal issue 181).
  *
  * A follow-up used to upload the whole project and have it sent straight
  * into the prompt, which capped what could be edited at a model's context
@@ -750,7 +750,7 @@ describe('which project a follow-up edits', () => {
     assert.equal(outcome, 'failed');
     assert.equal(result.stop, 'model-truncated');
     // The first error and only the first, because that is the one and only
-    // string `/api/plan`'s SSE stream sends the browser (#208 review). An
+    // string `/api/plan`'s SSE stream sends the browser (internal PR 208 review). An
     // explanation anywhere else in this array is an explanation nobody
     // reads.
     const said = result.errors[0] ?? '';
@@ -842,7 +842,7 @@ describe('which project a follow-up edits', () => {
     };
 
     // A small project asked for a large expansion runs out of room on what
-    // the edit added, not on carrying the base (#208 review). Saying
+    // the edit added, not on carrying the base (internal PR 208 review). Saying
     // otherwise would name a couple of hundred tokens as the reason a
     // half-million-token ceiling filled up.
     const { result } = await runGeneration(store, provider, {
@@ -898,7 +898,7 @@ describe('which project a follow-up edits', () => {
   it('runs a follow-up whose ceiling looks too small to rewrite it', async () => {
     const { store, revision } = await seeded();
 
-    // The trap door this must not build (#208 review). A follow-up may
+    // The trap door this must not build (internal PR 208 review). A follow-up may
     // shrink a project, so the base is no lower bound on what comes back,
     // and refusing on it would mean a project that outgrew a model's
     // ceiling could never be edited back down by that model.
@@ -938,7 +938,7 @@ describe('which project a follow-up edits', () => {
 });
 
 /**
- * What a run queued before #181 shipped still contains.
+ * What a run queued before internal issue 181 shipped still contains.
  *
  * A Workflow's params are persisted JSON, so an interface change does not
  * reach the payloads already on disk. Both halves of this change had to be
@@ -977,7 +977,7 @@ describe('a run that predates the change', () => {
 
   it('charges nothing when the provider was never asked', async () => {
     // The case both routes now lean on to release a reservation for a
-    // caller who disconnected before anything was requested (#189 review):
+    // caller who disconnected before anything was requested (internal PR 189 review):
     // `handlePlan` settles this way instead of creating a Workflow it would
     // then have to terminate, and `handleMockups` returns before marking the
     // provider as having run. Neither had anything asserting the settlement
@@ -1019,7 +1019,7 @@ describe('a run that predates the change', () => {
 
 /**
  * Which ledger layer was left open, when they do not fail together
- * (#196 review).
+ * (internal PR 196 review).
  *
  * The caller's layer is written first and the account layer second, so the
  * two can fail apart. They also answer to different people: the caller's

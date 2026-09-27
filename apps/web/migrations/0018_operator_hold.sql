@@ -1,4 +1,4 @@
--- An operator taking a published site off the web (#172).
+-- An operator taking a published site off the web (internal issue 172).
 --
 -- 0016_unpublish.sql gave the owner a way down. This is the other case, and
 -- it is not the same act wearing a different hat: there the owner asked for

@@ -25,7 +25,7 @@ function deferred() {
 
 describe('the shared GitHub status', () => {
   it('gives every reader the same answer', async () => {
-    // The whole point of #34: the panel and the push button cannot say
+    // The whole point of internal PR 34: the panel and the push button cannot say
     // different things about one connection.
     const store = createGitHubStatusStore(async () => CONNECTED);
     let panelSaw = 0;

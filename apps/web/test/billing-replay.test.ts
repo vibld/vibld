@@ -916,7 +916,7 @@ describe('two phases in one invocation', () => {
     // rows. Every night, for ever, while the cursor moved on past the very
     // events that were parked: money already taken and never credited.
     //
-    // This is a property of the four-way split. Since #176 the nightly pass
+    // This is a property of the four-way split. Since internal issue 176 the nightly pass
     // uses the split only from 92 up; at the default it does not split at
     // all, and hands the parked queue its floor directly every night
     // (`nightSharesFor`, pinned in nightly-rotation.test.ts). The default
@@ -1043,14 +1043,14 @@ describe('the phases that hand over money already owed', () => {
     // numbers hid: on the Workers Free default of 40, a quarter is 10 and
     // one subscription can cost 17. There is no batch size that fits, so
     // the honest answer is none. The alternative is a batch that overruns,
-    // which is the failure #47 exists to prevent.
+    // which is the failure internal PR 47 exists to prevent.
     //
     // The replay still gets a share, which is the point of giving these two
     // no floor. It is the phase that applies the events in the first place.
     //
     // What this pins is the split's arithmetic, not what the live pass does
     // at the default. The "later night" this once promised never came,
-    // because the same split recurred every night (#176), so the pass no
+    // because the same split recurred every night (internal issue 176), so the pass no
     // longer splits below 92: at the default the parked queue keeps its
     // floor and payout, reconcile and replay take the rest in turn
     // (`nightSharesFor`, pinned in nightly-rotation.test.ts).
@@ -1155,7 +1155,7 @@ describe('the phases that hand over money already owed', () => {
   });
 
   it('is what the nightly pass actually hands the reconcile', async () => {
-    // #47. The reconcile's default is every subscription the deployment
+    // internal PR 47. The reconcile's default is every subscription the deployment
     // knows about, which is what it used to be called with: past about a
     // hundred it exceeds the invocation on its own, D1 throws, and the
     // handler's own catch turns that into a log line nobody reads.

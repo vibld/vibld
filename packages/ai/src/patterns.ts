@@ -7,7 +7,7 @@
  *
  * L50 calls for retrieval "on demand -- a handful of relevant patterns
  * injected per request," not the whole catalogue held permanently in the
- * system prompt. Issue #12's real retrieval path needs storage and an
+ * system prompt. Internal issue 12's real retrieval path needs storage and an
  * embedding provider Vibld does not yet have (see that issue and ADR-0009),
  * so this does the smallest thing that satisfies L50's actual requirement
  * without either dependency: a closed set, matched by keyword against the
@@ -15,7 +15,7 @@
  * search and does not claim to be -- a request that names a page type
  * directly ("a pricing page") matches; one that only implies it ("show what
  * the plans cost") may not, and that is an accepted gap, not a bug, until
- * #12 exists.
+ * internal issue 12 exists.
  *
  * The set is closed for the same reason `STYLE_PRESETS` is: nothing here
  * crosses the network from a caller, so there is no injection surface to

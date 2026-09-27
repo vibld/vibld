@@ -4,7 +4,7 @@ import type { ProgressReport, RunProgressState } from './generation-run.ts';
 /**
  * The live channel between a running Workflow step and the Worker polling it.
  *
- * #183: the progress meter was built, shipped and then orphaned. Everything
+ * Internal issue 183: the progress meter was built, shipped and then orphaned. Everything
  * on the client still works -- `ProgressMeter.tsx`, `progress.ts`,
  * `remote-provider.ts`'s `progress` event, the DeepSeek client's per-delta
  * callback -- and the one thing missing was a way for the model call, which
@@ -56,7 +56,7 @@ export class RunProgress extends DurableObject {
    *
    * Deliberately one-way. Reports are sent without being awaited, so one
    * can still be in flight when this arrives; letting a late report undo
-   * the finish would reopen exactly the window this closes (#193 review).
+   * the finish would reopen exactly the window this closes (internal PR 193 review).
    * A report that lands afterwards updates the numbers and nothing else.
    */
   finish(): void {

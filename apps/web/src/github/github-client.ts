@@ -1,7 +1,7 @@
 import { getClerkToken } from '../auth/clerk-token.ts';
 
 /**
- * Calls the Worker's `/api/github/*` endpoints (issues #13 and #121).
+ * Calls the Worker's `/api/github/*` endpoints (internal issues 13 and 121).
  *
  * JSX-free for the same reason `billing-client.ts` is: the test runner
  * strips TypeScript types only and errors on JSX, so anything a `*.test.ts`

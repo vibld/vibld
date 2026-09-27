@@ -16,18 +16,18 @@ import type { FleetKind, QueueRow } from './fleet.ts';
 /**
  * The account-wide container gate (docs/decisions.md L9: 25 concurrent
  * previews across every user, the 26th queued with a visible position
- * rather than refused), which since #197 counts builds as well.
+ * rather than refused), which since internal issue 197 counts builds as well.
  *
  * A well-known instance rather than one per user, deliberately: this is
  * the one thing about preview concurrency that genuinely has to be counted
  * globally. Per-user concurrency needs none of this -- see fleet.ts's
  * module comment.
  *
- * One instance, counting both kinds of work against one budget. #196 made
+ * One instance, counting both kinds of work against one budget. Internal PR 196 made
  * builds run in containers of the same class and counted them in a second
  * instance against a static split, which kept the total honest and left
  * previews five short of L9 even when nothing was building. The shared
- * budget Chris chose for #197 needs one counter that can tell a build row
+ * budget Chris chose for internal issue 197 needs one counter that can tell a build row
  * from a preview row, so each row records its kind, `toActivate` enforces
  * the build bound inside the one total, and the limits come from
  * `capacity.ts` rather than from each caller.
@@ -69,7 +69,7 @@ export class PreviewFleet extends DurableObject<unknown> {
       `);
       // Leading on `released`, because every query here starts by
       // excluding released rows and the reclaim has no second predicate to
-      // narrow with (#200 review). An index led by `activated` cannot
+      // narrow with (internal PR 200 review). An index led by `activated` cannot
       // serve `WHERE released IS NULL` on its own, so the reclaim scanned
       // the whole table on every enqueue, poll and release, and a queued
       // preview polls every 1.5 seconds. This one serves all three
@@ -80,7 +80,7 @@ export class PreviewFleet extends DurableObject<unknown> {
       );
       ctx.storage.sql.exec(`DROP INDEX IF EXISTS queue_waiting`);
       // When anybody last asked about a row, so a waiting one that nobody
-      // is waiting on can be reclaimed (#199). Added rather than included
+      // is waiting on can be reclaimed (internal issue 199). Added rather than included
       // in the CREATE above, because instances already exist with the old
       // shape and a CREATE TABLE IF NOT EXISTS does not reshape them.
       // Every read coalesces it to `requested`, so a row from before this
@@ -92,7 +92,7 @@ export class PreviewFleet extends DurableObject<unknown> {
       if (!columns.some((column) => column.name === 'seen')) {
         ctx.storage.sql.exec(`ALTER TABLE queue ADD COLUMN seen INTEGER`);
       }
-      // What each row holds a container for (#197), added the same way and
+      // What each row holds a container for (internal issue 197), added the same way and
       // for the same reason. Every row that exists before this runs was
       // written while this instance counted previews alone, so defaulting
       // them to a preview is a fact rather than a guess.
@@ -150,7 +150,7 @@ export class PreviewFleet extends DurableObject<unknown> {
   /** Re-check a previously enqueued row -- promotes first, so a poll can observe a just-freed slot. */
   status(id: number): StatusResult {
     const now = Date.now();
-    // Somebody is still waiting on this one, so it is not abandoned (#199).
+    // Somebody is still waiting on this one, so it is not abandoned (internal issue 199).
     // Before the reclaim rather than after it: a poll that arrives exactly
     // on the boundary is a caller who is still there, and reclaiming their
     // row and then answering the question is the wrong order.
@@ -166,7 +166,7 @@ export class PreviewFleet extends DurableObject<unknown> {
   }
 
   /**
-   * Idempotent, and only for the kind of ticket it names (#197). Previews
+   * Idempotent, and only for the kind of ticket it names (internal issue 197). Previews
    * and builds were separate instances until the budget was shared, so a
    * build's ticket id could never name a preview's row; in one table it
    * could, and a release that names the wrong kind must not free somebody
@@ -176,7 +176,7 @@ export class PreviewFleet extends DurableObject<unknown> {
     const checked = kindOf(kind);
     const now = Date.now();
     // Every entry point reclaims before it promotes, so a promotion can
-    // never hand a slot to a row the reclaim was about to take (#199).
+    // never hand a slot to a row the reclaim was about to take (internal issue 199).
     this.reclaimStale(now);
     this.ctx.storage.sql.exec(
       `UPDATE queue SET released = ? WHERE id = ? AND kind = ? AND released IS NULL`,
@@ -189,7 +189,7 @@ export class PreviewFleet extends DurableObject<unknown> {
 
   /**
    * Two ways a row stops being anybody's, and both used to have to be
-   * somebody else's job (#199).
+   * somebody else's job (internal issue 199).
    *
    * An activated row that outran the hard lifetime without releasing is
    * the original case: a crashed Worker or a client that never called
@@ -207,7 +207,7 @@ export class PreviewFleet extends DurableObject<unknown> {
       )
       .toArray();
     for (const row of rows) {
-      // Either, never one instead of the other (#200 review). Written as a
+      // Either, never one instead of the other (internal PR 200 review). Written as a
       // ternary, promotion erased the abandonment deadline: a row nobody
       // was waiting on, promoted at minute twenty-nine, stopped being
       // judged by `seen` and started a fresh lifetime from its activation,
@@ -232,7 +232,7 @@ export class PreviewFleet extends DurableObject<unknown> {
     }
 
     // Released rows were kept forever, so the table grew with all
-    // historical usage and every query above paid for it (#200 review).
+    // historical usage and every query above paid for it (internal PR 200 review).
     // Indexing the predicate stops it costing a scan; this stops it
     // costing storage.
     //
@@ -323,7 +323,7 @@ function kindOf(kind: FleetKind): FleetKind {
   return kind;
 }
 
-/** The one instance, which counts previews and builds alike (#197). */
+/** The one instance, which counts previews and builds alike (internal issue 197). */
 export function fleetName(): string {
   return FLEET_NAME;
 }

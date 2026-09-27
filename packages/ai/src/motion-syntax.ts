@@ -9,7 +9,7 @@ import type { ScriptDialect } from './script-syntax.ts';
  * where the animation sits relative to it: under the branch the read
  * rules out, after a return it takes, inside a `<MotionConfig>` that
  * follows it. The text alone kept answering that one pattern at a time
- * (#239 review); the tree answers it for each animation, by walking the
+ * (internal PR 239 review); the tree answers it for each animation, by walking the
  * animation's ancestors.
  */
 
@@ -45,7 +45,7 @@ export interface MotionCoverage {
    * For each component declared at the top of the file, the element at the
    * root of each JSX it returns: `Layout` for `return <Layout>...</Layout>`,
    * and '' for a fragment or anything else. A provider that wraps what a
-   * wrapper returns wraps what is passed through it (#239 review).
+   * wrapper returns wraps what is passed through it (internal PR 239 review).
    */
   returnRoots: Record<string, string[]>;
 }
@@ -91,7 +91,7 @@ const MOTION_PROPS = new Set([
 /**
  * The movement MotionConfig's reduced-motion setting turns off: transforms
  * and layout. Width, position and path drawing keep animating under it
- * (#239 review).
+ * (internal PR 239 review).
  */
 const TRANSFORM =
   /^(?:x|y|z|scale[XYZ]?|rotate[XYZ]?|skew[XY]?|translate[XYZ]?|transform|perspective)$/;
@@ -309,11 +309,11 @@ export function motionCoverage(
   const program = file.program;
   // Components of this file that hand their props to a Motion element,
   // `<motion.div {...props} />`: what a use passes them animates
-  // (#239 review).
+  // (internal PR 239 review).
   const forwarders = motionForwarders(program, bindings.factories);
 
   // Each use of a name, tied to the declaration in scope where it is used
-  // (#239 review): the preference (`const reduce = useReducedMotion()`),
+  // (internal PR 239 review): the preference (`const reduce = useReducedMotion()`),
   // a linked value with the hook that makes it, or a function that starts
   // motion (`animate` as imported, or as `useAnimate()` hands it back). A
   // parameter or local of the same name elsewhere is not them.
@@ -323,12 +323,12 @@ export function motionCoverage(
   const objectUses = new Map<Node, Node>();
   const arrayUses = new Map<Node, Node>();
   // Calls to the preference hook as imported, resolved in scope: a
-  // parameter or local function of that name is not it (#239 review).
+  // parameter or local function of that name is not it (internal PR 239 review).
   const preferenceCalls = new Set<Node>();
   // Elements and calls whose names resolve, in scope, to Motion: an element
   // made by the imported factory or a component made with it, a configured
   // MotionConfig, and `NS.animate` through the namespace import. A prop or
-  // local of the same name is not them (#239 review).
+  // local of the same name is not them (internal PR 239 review).
   const motionOpenings = new Set<Node>();
   const configOpenings = new Set<Node>();
   const starterCalls = new Set<Node>();
@@ -449,7 +449,7 @@ export function motionCoverage(
       return;
     }
     // An object or list read where it is written only when nothing can
-    // reassign it: `let target = {...}; target = {...}` (#239 review).
+    // reassign it: `let target = {...}; target = {...}` (internal PR 239 review).
     const fixed = kind === 'const';
     if (fixed && id.type === 'Identifier' && init.type === 'ObjectExpression') {
       scope.set(id.name as string, { object: init });
@@ -461,12 +461,12 @@ export function motionCoverage(
     }
     if (id.type === 'Identifier') {
       // A local alias of a linked value is the value: `const progress =
-      // scrollYProgress` (#239 review).
+      // scrollYProgress` (internal PR 239 review).
       // So is an alias of an object or array declared first, `const style =
-      // base` (#239 review).
+      // base` (internal PR 239 review).
       const source =
         init.type === 'Identifier' ? lookup(init.name as string) : undefined;
-      // So is an alias of the preference, `const calm = reduce` (#239 review).
+      // So is an alias of the preference, `const calm = reduce` (internal PR 239 review).
       if (preference || source?.preference) {
         scope.set(id.name as string, { preference: true });
       } else if (linked) {
@@ -479,7 +479,7 @@ export function motionCoverage(
           importedCallee(init, bindings.animate))
       ) {
         // `const run = animate` starts motion as animate does, and so does
-        // `const run = Motion.animate` through the namespace (#239 review).
+        // `const run = Motion.animate` through the namespace (internal PR 239 review).
         scope.set(id.name as string, { starter: true });
       } else if (fixed && source?.object) {
         scope.set(id.name as string, { object: source.object });
@@ -694,10 +694,10 @@ export function motionCoverage(
   // An object declared first, then written to: `const style = {};
   // style.y = scrollY`. `const` keeps the name, not the object, so it is
   // not read as written, and what is written to it is part of it
-  // (#239 review).
+  // (internal PR 239 review).
   const mutated = new Set<Node>();
   const writes = new Map<Node, Node[]>();
-  // Lists too: `sequence.push([el, { x: 100 }])` (#239 review).
+  // Lists too: `sequence.push([el, { x: 100 }])` (internal PR 239 review).
   const mutatedArrays = new Set<Node>();
   const baseOf = (target: unknown): Node | undefined => {
     let current = target;
@@ -743,7 +743,7 @@ export function motionCoverage(
       written(node.callee.object);
     } else if (
       node.type === 'CallExpression' &&
-      // And through Reflect: `Reflect.set(target, 'x', 100)` (#239 review).
+      // And through Reflect: `Reflect.set(target, 'x', 100)` (internal PR 239 review).
       /^(?:Object\.(?:assign|defineProperty|defineProperties|setPrototypeOf)|Reflect\.(?:set|defineProperty|deleteProperty|setPrototypeOf))$/.test(
         dotted(node.callee) ?? '',
       )
@@ -812,7 +812,7 @@ export function motionCoverage(
    * Whether evaluating a node may change something: an assignment, an
    * update, a delete, or a call other than a read (`Math.*`, or a method
    * named `get...`). `const next = (el.style.transform = t)` moves the
-   * element as it declares (#239 review).
+   * element as it declares (internal PR 239 review).
    */
   const effects = (node: Node): boolean => {
     if (
@@ -899,7 +899,7 @@ export function motionCoverage(
   /**
    * The setting of the nearest MotionConfig around a node that sets
    * reduced motion: a nearer `reducedMotion="never"` overrides a
-   * configured provider further out (#239 review).
+   * configured provider further out (internal PR 239 review).
    */
   const nearestConfig = (
     ancestors: Node[],
@@ -998,7 +998,7 @@ export function motionCoverage(
    * preference: the branch the preference takes (`reduce ? A : B` gives A,
    * `!reduce ? A : B` gives B), `null` when that is nothing
    * (`!reduce && A`), or `undefined` when the value does not decide on it
-   * or the direction cannot be told (#239 review).
+   * or the direction cannot be told (internal PR 239 review).
    */
   const reducedBranch = (expression: Node): Node | null | undefined => {
     if (expression.type === 'ConditionalExpression') {
@@ -1073,7 +1073,7 @@ export function motionCoverage(
    * Whether a prop animates movement at all: any moving key, whatever its
    * value, since `y: 0` moves from wherever the element was; or a value
    * that is not written out (a variant name, a condition). Only `false`
-   * and objects of fades and colours do not (#239 review).
+   * and objects of fades and colours do not (internal PR 239 review).
    */
   /**
    * Keyframes that only fade or colour: `{ opacity: 1 }`, a list of such
@@ -1081,7 +1081,7 @@ export function motionCoverage(
    * animates such keyframes. Labels in a sequence move nothing.
    */
   const fadeOnly = (node: Node, depth = 0): boolean => {
-    // A target declared first, list or object (#239 review).
+    // A target declared first, list or object (internal PR 239 review).
     const list = arrayUses.get(node);
     const resolved =
       (list && !mutatedArrays.has(list) ? list : undefined) ??
@@ -1112,7 +1112,7 @@ export function motionCoverage(
   };
   const moves = (value: unknown): boolean => {
     // A target declared first, `const fade = { opacity: 1 }`, is read
-    // where it is written (#239 review).
+    // where it is written (internal PR 239 review).
     const expression = resolveObject(unwrap(value));
     if (!expression) return true;
     if (expression.type === 'BooleanLiteral') return expression.value !== false;
@@ -1129,17 +1129,17 @@ export function motionCoverage(
    * Whether the preference leaves a value still for a visitor who asked:
    * the branch it takes is still (`reduce ? {} : { x: 100 }`, not
    * `reduce ? { x: 100 } : {}`), or, in an object, each key that moves is
-   * (#239 review). `{ x: 200, opacity: reduce ? 0 : 1 }` still moves
+   * (internal PR 239 review). `{ x: 200, opacity: reduce ? 0 : 1 }` still moves
    * along x.
    */
   const governs = (value: unknown, key?: string): boolean => {
-    // A target declared first is read where it is written (#239 review).
+    // A target declared first is read where it is written (internal PR 239 review).
     const expression = resolveObject(unwrap(value));
     if (!expression) return false;
     const branch = reducedBranch(expression);
     if (branch === null) return true;
     // The branch read where it is written, `reduce ? calm : {...}` with
-    // `const calm = { x: 0 }` (#239 review).
+    // `const calm = { x: 0 }` (internal PR 239 review).
     if (branch !== undefined) {
       const resolved = resolveObject(branch) ?? branch;
       return still(resolved, key) || governs(branch, key);
@@ -1165,14 +1165,14 @@ export function motionCoverage(
   const referencesLinked = (node: Node): Node[] => {
     const found: Node[] = [];
     // Through a style object declared first, `const style = { y: scrollY }`
-    // (#239 review).
+    // (internal PR 239 review).
     const seen = new Set<Node>();
     const visit = (current: Node, parent?: Node) => {
       const object = objectUses.get(current);
       if (object && !seen.has(object)) {
         seen.add(object);
         visit(object);
-        // And what is written to it after (#239 review).
+        // And what is written to it after (internal PR 239 review).
         for (const value of writes.get(object) ?? []) visit(value);
       }
       if (
@@ -1222,7 +1222,7 @@ export function motionCoverage(
    * A linked value's hook told to rest, by an argument that gives it its
    * value: `useTransform(p, [0, 1], reduce ? [0, 0] : [0, 200])`. Options
    * chosen on the preference, `useSpring(scrollY, reduce ? {} : {...})`,
-   * still follow the source (#239 review).
+   * still follow the source (internal PR 239 review).
    */
   const initRests = (init: Node): boolean =>
     init.type === 'CallExpression' &&
@@ -1235,7 +1235,7 @@ export function motionCoverage(
     );
   /**
    * Whether every linked value a style carries is replaced or told to rest
-   * for a visitor who asked (#239 review): the style chosen on the
+   * for a visitor who asked (internal PR 239 review): the style chosen on the
    * preference with no linked value in the branch it takes, or each key
    * that carries one decided so, or the value's own hook told to rest.
    * `{ y, opacity: reduce ? 0 : 1 }` still moves with y.
@@ -1258,7 +1258,7 @@ export function motionCoverage(
             : undefined;
         if (!carried) return true;
         // A linked opacity or colour fades; only a key that moves counts
-        // (#239 review).
+        // (internal PR 239 review).
         const key =
           property.type === 'ObjectProperty' ? keyOf(property) : undefined;
         if (key !== undefined && !MOVEMENT.test(key)) return true;
@@ -1274,7 +1274,7 @@ export function motionCoverage(
   /**
    * The linked values a style moves the element by: under a key that
    * moves, or where the key cannot be read. `style={{ opacity }}` linked to
-   * scroll fades, as a declarative fade does (#239 review).
+   * scroll fades, as a declarative fade does (internal PR 239 review).
    */
   const movingLinked = (value: unknown): Node[] => {
     const expression = resolveObject(unwrap(value));
@@ -1303,10 +1303,10 @@ export function motionCoverage(
         );
         // A bare `layout` or `drag` moves; a prop that only fades does not,
         // and an element that only fades is not motion MotionConfig would
-        // stop (#239 review).
+        // stop (internal PR 239 review).
         // `initial` alone sets where the element starts and animates
         // nothing: it moves only toward a target another prop, or a spread
-        // that may carry one, gives it (#239 review).
+        // that may carry one, gives it (internal PR 239 review).
         const targeted =
           attributes.some(
             (attribute) => dotted(attribute.name) !== 'initial',
@@ -1317,7 +1317,7 @@ export function motionCoverage(
           );
         // And only by the keys a target animates: `initial={{ x: 100,
         // opacity: 0 }} animate={{ opacity: 1 }}` leaves x where it starts
-        // (#239 review). Unknown when a target is not written out (a
+        // (internal PR 239 review). Unknown when a target is not written out (a
         // variant name, a condition, a spread).
         const targetKeys = ((): Set<string> | undefined => {
           if (
@@ -1385,12 +1385,12 @@ export function motionCoverage(
             (attribute) => attribute.value !== null && governs(attribute.value),
           );
           // A provider stops only transforms and layout: a width, a
-          // position or a path drawn keeps moving under it (#239 review).
+          // position or a path drawn keeps moving under it (internal PR 239 review).
           // Only what is written out where it can be read: an object of
-          // transforms, or variant names whose variants are (#239 review).
+          // transforms, or variant names whose variants are (internal PR 239 review).
           const transformsOnly = (value: unknown): boolean => {
             // A target declared first is read where it is written
-            // (#239 review).
+            // (internal PR 239 review).
             const target = resolveObject(unwrap(value));
             if (!target || target.type !== 'ObjectExpression') return false;
             return (target.properties as unknown[]).every((property) => {
@@ -1488,7 +1488,7 @@ export function motionCoverage(
     }
     // useAnimationFrame(() => { ... }) runs its callback every frame:
     // the callback has to leave the element still for a visitor who asked,
-    // returning first or running only without the preference (#239 review).
+    // returning first or running only without the preference (internal PR 239 review).
     if (frameCalls.has(node)) {
       coverage.scripted.total += 1;
       const callback = (node.arguments as unknown[])[0];
@@ -1498,7 +1498,7 @@ export function motionCoverage(
         body?.type === 'BlockStatement' ? (body.body as unknown[]) : [];
       const decided =
         // A guard that runs first: nothing but declarations before it, or
-        // the frame has already moved (#239 review).
+        // the frame has already moved (internal PR 239 review).
         statements.some(
           (statement, index) =>
             isNode(statement) &&
@@ -1533,12 +1533,12 @@ export function motionCoverage(
       const args = (node.arguments as unknown[]).filter(isNode);
       // The keyframes: the second argument, after the element or value it
       // moves (`animate(el, { x: 100 }, options)`), or the only one, a
-      // sequence. Options decide nothing about what moves (#239 review).
+      // sequence. Options decide nothing about what moves (internal PR 239 review).
       // A sequence, `animate([[el, { x: 100 }]], options)`, carries its
-      // keyframes in the first (#239 review).
+      // keyframes in the first (internal PR 239 review).
       // So does one declared first, `const seq = [[el, { x: 100 }]]`, and
       // one passed with only options after it, whatever it is called
-      // (#239 review).
+      // (internal PR 239 review).
       const sequence =
         args.length < 2 ||
         args[0]?.type === 'ArrayExpression' ||
@@ -1556,12 +1556,12 @@ export function motionCoverage(
       const keyframes = sequence ? args[0] : args[1];
       // Keyframes that only fade or colour start no movement, as an
       // object, a list of them, or a sequence of such segments
-      // (#239 review).
+      // (internal PR 239 review).
       if (starts && !(keyframes !== undefined && fadeOnly(keyframes))) {
         coverage.scripted.total += 1;
         // The keyframes decide, not any argument that mentions the
         // preference: `animate(el, { x: 100, opacity: reduce ? 0 : 1 })`
-        // still moves (#239 review).
+        // still moves (internal PR 239 review).
         const decided = keyframes !== undefined && governs(keyframes);
         if (!decided && !guarded(node, ancestors, { provider: false })) {
           coverage.scripted.uncovered += 1;

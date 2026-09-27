@@ -77,7 +77,7 @@ site back.
 ## An operator taking a site down
 
 `POST /internal/hold` with `{slug, by, reason}`, and `POST /internal/release`
-with `{slug, by}` (#172, `0018_operator_hold.sql`, `0020_hold_history.sql`). apps/web reaches both through
+with `{slug, by}` (internal issue 172, `0018_operator_hold.sql`, `0020_hold_history.sql`). apps/web reaches both through
 `/api/admin/publish/hold` and `/api/admin/publish/release`, behind the
 platform-admin check. There is no ownership check here, which is the point of
 the route rather than a gap in it: the caller has already been established as

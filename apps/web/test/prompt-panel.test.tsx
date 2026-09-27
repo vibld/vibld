@@ -13,7 +13,7 @@ import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
  * The composer, as it is actually wired.
  *
  * Every rule in here was written and never run: the runner errors on JSX, so
- * until the harness on #124 this component was typechecked and nothing more.
+ * until the harness on internal PR 124 this component was typechecked and nothing more.
  */
 
 interface Sent {
@@ -34,7 +34,7 @@ function builder(overrides: Partial<BuilderState> = {}): BuilderState {
     acceptedSnapshot: null,
     // A deployment with a real model, which is the ordinary case. The
     // composer only offers directions where there is a model to ask
-    // (#189 review), so leaving this absent hid the button from every
+    // (internal PR 189 review), so leaving this absent hid the button from every
     // test that expected it.
     generation: 'model',
     ...overrides,
@@ -215,7 +215,7 @@ describe('the composer, as it is actually wired', () => {
 
   it('empties the composer for a run this form did not start', async () => {
     // Choosing a direction submits through the session, not through this
-    // form, so its cleanup never ran (#189 review). The composer then asked
+    // form, so its cleanup never ran (internal PR 189 review). The composer then asked
     // "What should change?" over the original build request and its
     // reference page, and submitting that repeated the build and refetched
     // the reference.
@@ -316,7 +316,7 @@ describe('the composer, as it is actually wired', () => {
 });
 
 /**
- * Asking to look before building (#185).
+ * Asking to look before building (internal issue 185).
  *
  * Offered only before there is a project: directions are for deciding what
  * to build, and once something exists the question is what to change about
@@ -330,7 +330,7 @@ describe('asking for directions', () => {
   });
 
   it('carries the prompt, style and reference the build would have used', async () => {
-    // The reference page especially (#189 review): it was dropped on the
+    // The reference page especially (internal PR 189 review): it was dropped on the
     // way to a mockup run while still sitting in the composer, looking for
     // all the world as though it had been used.
     const view = await mount(builder());
@@ -362,7 +362,7 @@ describe('asking for directions', () => {
 
   it('refuses to spend on a look with a malformed reference', async () => {
     // The button is a `button`, so it skips the native validation the
-    // submit path gets for free (#189 review). Without this the look is
+    // submit path gets for free (internal PR 189 review). Without this the look is
     // paid for, the bad value is kept in the mockup context, and the build
     // that choosing a direction submits is refused on a field the reader
     // could have been told about before spending.
@@ -376,7 +376,7 @@ describe('asking for directions', () => {
   });
 
   it('bounds the reference field at what the guard will accept', async () => {
-    // The other half of the same finding (#189 review), which
+    // The other half of the same finding (internal PR 189 review), which
     // `reportValidity` does not cover: a 3,000-character address is a
     // perfectly valid `type="url"` value, so the browser's own check passes
     // it, the look is paid for, and the guard refuses it on the build that
@@ -408,7 +408,7 @@ describe('asking for directions', () => {
 
   it('does not offer it where there is no model to ask', async () => {
     // `explore` always calls the real `/api/mockups`, while a build in
-    // `fake` mode is served by `FakeModelProvider` (#189 review). Offering
+    // `fake` mode is served by `FakeModelProvider` (internal PR 189 review). Offering
     // the action there offered something that could only fail, in exactly
     // the modes the fake exists to keep usable.
     //
@@ -430,7 +430,7 @@ describe('asking for directions', () => {
   });
 
   it('keeps offering it after a first attempt that built nothing', async () => {
-    // A failed or cancelled build still appends a transcript turn (#189
+    // A failed or cancelled build still appends a transcript turn (internal PR 189
     // review), so gating on "has anything been attempted" hid the feature
     // at exactly the moment it is for: no project, and a reader deciding
     // what to try next.
@@ -443,7 +443,7 @@ describe('asking for directions', () => {
   });
 
   it('offers a way to stop a look that is running', async () => {
-    // A look is about a minute and is billed for (#189 review). Without
+    // A look is about a minute and is billed for (internal PR 189 review). Without
     // this the only way out was to leave the page, and it kept spending
     // either way.
     const view = await mount(builder({ exploring: true }));

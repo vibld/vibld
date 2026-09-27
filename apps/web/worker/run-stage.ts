@@ -25,7 +25,7 @@ import type { RunProgressState } from './generation-run.ts';
  * rest. An absent stage is already a supported shape (`progress.ts`): the
  * line carries the clock alone, which stays true in every state.
  *
- * A third state arrived with the progress channel (#183), and it is not a
+ * A third state arrived with the progress channel (internal issue 183), and it is not a
  * Workflow state at all: a reasoning model thinks before it writes, so a
  * run can be reporting thousands of characters of reasoning and none of
  * the answer. On the production provider that was between 57% and 68% of a
@@ -40,7 +40,7 @@ import type { RunProgressState } from './generation-run.ts';
  * of the answer arrives this stops claiming it, without anything having to
  * decide that thinking is over.
  *
- * That third clause is a correction (#193 review, P2), and it is the same
+ * That third clause is a correction (internal PR 193 review, P2), and it is the same
  * mistake as the "Writing" one above, one state along. A completion that
  * refused, or was emptied, or was cut off, leaves a last report of
  * reasoning and no answer; the instance then reports `running` through

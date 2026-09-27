@@ -7,10 +7,10 @@ import { PreviewFleet } from '../worker/preview-fleet.ts';
 import { fakeDurableObjectCtx } from './fakes/sqlite-do-storage.ts';
 
 /**
- * That previews and builds share one container budget (#197).
+ * That previews and builds share one container budget (internal issue 197).
  *
  * `max_instances` gives the `PreviewSandbox` class twenty-five containers,
- * and since #196 a build runs in one of them. The budget used to be split
+ * and since internal PR 196 a build runs in one of them. The budget used to be split
  * statically: twenty for previews and five kept back for builds, counted by
  * two separate fleet instances. So the twenty-first preview queued even
  * when nothing at all was building, which is not what L9 says ("25

@@ -7,7 +7,7 @@
  * reserving budget -- and a caller who disconnected during any of that had
  * already aborted the signal by the time the listener went on. Nothing
  * fired, and the run started anyway: a Workflow for a build, a model call
- * for a look, both for somebody who is not there (#189 review).
+ * for a look, both for somebody who is not there (internal PR 189 review).
  *
  * The finding named the mockup route. The build route had it too, and that
  * one is the more expensive instance of the same bug -- a whole generation

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { MAX_CHOSEN_MOCKUP_CHARS } from './limits.ts';
 
 /**
- * Three directions to look at before committing to a build (#185).
+ * Three directions to look at before committing to a build (internal issue 185).
  *
  * Chris's question was whether to offer mockups before attempting the whole
  * thing, and the answer chosen was three cheap rendered HTML mockups rather
@@ -23,7 +23,7 @@ import { MAX_CHOSEN_MOCKUP_CHARS } from './limits.ts';
  *
  * Exported because the guard had its own `60` with a comment saying it
  * "matches `MockupSchema`'s own bound, so the two cannot disagree" -- which
- * was a claim about a number nothing was keeping in step (#189 review).
+ * was a claim about a number nothing was keeping in step (internal PR 189 review).
  * They cannot disagree now; before, they only happened to agree.
  */
 export const MAX_MOCKUP_LABEL_CHARS = 60;
@@ -35,7 +35,7 @@ export const MockupSchema = z.object({
    * Trimmed before the non-empty check, for the reason `html` below is:
    * `.min(1)` counts spaces and `parseChosenMockup` does not, so a label of
    * whitespace produced a nameless tile that could be chosen and then
-   * refused, after the run was paid for (#189 review).
+   * refused, after the run was paid for (internal PR 189 review).
    *
    * The same fix twice in one file is worth naming rather than quietly
    * repeating: I fixed `html` when it was found and did not ask which other
@@ -63,7 +63,7 @@ export const MockupSchema = z.object({
     }),
   /**
    * One complete HTML document, bounded by what the build will accept back
-   * (#189 review).
+   * (internal PR 189 review).
    *
    * The two numbers have to agree and nothing was making them: this schema
    * took any length, while `parseChosenMockup` refuses past
@@ -80,7 +80,7 @@ export const MockupSchema = z.object({
     .string()
     .max(MAX_CHOSEN_MOCKUP_CHARS)
     // Trimmed before the non-empty check, because `.min(1)` counts spaces
-    // and `parseChosenMockup` does not (#189 review). A document of
+    // and `parseChosenMockup` does not (internal PR 189 review). A document of
     // whitespace renders as a blank tile, reads as a direction that failed,
     // and is then refused on the way back -- the same paid-run-then-
     // unbuildable failure the bound above exists to prevent.
@@ -140,7 +140,7 @@ Body text must stay legible against its background in every direction, including
 /**
  * What a styled run says around the chosen preset's direction.
  *
- * Its own constant because the reservation has to count it (#189 review).
+ * Its own constant because the reservation has to count it (internal PR 189 review).
  * The worst case bounded the caller's prompt and the style direction and
  * nothing else, while every run also sends `MOCKUP_SYSTEM_PROMPT` and a
  * styled one sends this as well: about 1,600 characters of input that was
@@ -151,7 +151,7 @@ Body text must stay legible against its background in every direction, including
  * The user prompt a mockup run actually sends.
  *
  * Exported so the route can measure what was sent without rebuilding it
- * (#189 review). A cancelled run has to be settled from the real prompt,
+ * (internal PR 189 review). A cancelled run has to be settled from the real prompt,
  * and the only alternative was a second copy of this concatenation in
  * `handleMockups` -- which is the two-places-that-must-agree problem this
  * PR has tripped over repeatedly, in a place where disagreeing means

@@ -3,7 +3,7 @@
   "main": "./worker/index.ts",
   "compatibility_date": "2026-09-07",
 
-  // Workers Logs, for the same reason as `apps/web` (#201): this service
+  // Workers Logs, for the same reason as `apps/web` (internal PR 201): this service
   // builds the generated project, and when a build fails the only thing the
   // caller records is the reason code it answered with. What the container
   // actually printed was unreadable from outside.
@@ -15,7 +15,7 @@
   // for this class, enforced by Cloudflare as a hard platform limit
   // underneath PreviewFleet's own queue. Builds run in this class too, and
   // PreviewFleet counts previews and builds against this one number, with
-  // builds bounded at five of it (#197); worker/capacity.ts states how,
+  // builds bounded at five of it (internal issue 197); worker/capacity.ts states how,
   // rather than it being restated here. capacity.test.ts asserts this
   // number and that file still agree.
   "containers": [

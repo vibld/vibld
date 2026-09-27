@@ -10,7 +10,7 @@ import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
 
 /**
- * The parked queue, made visible (#46).
+ * The parked queue, made visible (internal PR 46).
  *
  * `0010_unattributed_events.sql` says what the table is for: "a visible
  * queue with a count and an age, which is a thing somebody can act on,

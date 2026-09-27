@@ -2,13 +2,13 @@ import { registerHooks } from 'node:module';
 
 /**
  * `cloudflare:workers`, resolvable, so `PreviewFleet` can be run here
- * rather than only read (#197).
+ * rather than only read (internal issue 197).
  *
  * The fleet decides how many containers this deployment may run and who
  * gets them, and every test of it used to read its source, because it
  * extends `DurableObject` from a module node cannot resolve. That was a
  * poor instrument for the most safety-critical counting in this Worker:
- * #196 took many review rounds on it, and none of them could run it.
+ * Internal PR 196 took many review rounds on it, and none of them could run it.
  *
  * Loaded with `--import`, so it is in place before any test file resolves.
  * The same stub `apps/web/test/harness/components.mjs` registers for the

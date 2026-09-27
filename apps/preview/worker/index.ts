@@ -340,7 +340,7 @@ async function handleInternal(
 /**
  * Links minted before each share had its own host (`handleShareHost`),
  * still honoured until they expire. Only the document itself works through
- * one: the app's absolute paths lose the prefix and credentials (#222).
+ * one: the app's absolute paths lose the prefix and credentials (internal issue 222).
  *
  * Redeem a share link (docs/decisions.md L10): `/{sandboxId}/{shareId}` on
  * the reserved `share.` subdomain, with `?exp=` and `?sig=` proving this URL

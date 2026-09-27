@@ -6,7 +6,7 @@ import { retryingWithin, sleep } from '@vibld/core';
 
 /**
  * How long one call to a budget Durable Object may stay pending
- * (#196 review).
+ * (internal PR 196 review).
  *
  * The same hazard as the build call and the model call, on the last two
  * awaits in this step that did not have it: a ledger that *rejects* is
@@ -27,12 +27,12 @@ export const LEDGER_CALL_TIMEOUT_MS = 15_000;
 /**
  * Holding a run's worst case against every ceiling, in one place.
  *
- * Lifted out of `index.ts` rather than written fresh (#194). Two callers
+ * Lifted out of `index.ts` rather than written fresh (internal issue 194). Two callers
  * need it now: `handlePlan`, which holds a reservation before a run may
  * start, and the generate step, which has to hold one again before a repair
  * turn goes out. A ceiling the Worker spells twice is a ceiling that can be
  * enforced two different ways, which is the reasoning `reserveAccount`
- * already carried for the account layer alone (#191 review); this extends it
+ * already carried for the account layer alone (internal PR 191 review); this extends it
  * to all three layers.
  *
  * There is a second reason, and it is not a side benefit. `index.ts` imports
@@ -84,7 +84,7 @@ export function positiveInt(raw: string | undefined, fallback: number): number {
 /**
  * The account-wide daily ceiling, held for one run's worst case.
  *
- * Its own function because a second caller appeared (#191 review): a
+ * Its own function because a second caller appeared (internal PR 191 review): a
  * mockup run that retries an empty reply asks for this again before the
  * second attempt goes out, and a reservation the Worker spells twice is a
  * ceiling that can be enforced two different ways.
@@ -154,7 +154,7 @@ export async function reserveBudget(
   /**
    * The release, asked for more than once and never allowed to escape.
    *
-   * Used on the denial paths as well as the rejection ones (#196 review).
+   * Used on the denial paths as well as the rejection ones (internal PR 196 review).
    * A denial is the commonest way this function ends and it leaves exactly
    * the same hold behind, so a release that failed there was the same lost
    * money for the same shared ceiling. It was also worse in one way the
@@ -163,7 +163,7 @@ export async function reserveBudget(
    * cleanup failed, so the caller got an error instead of the answer the
    * ledger had already given.
    */
-  // Each attempt bounded, not just the sequence (#196 review). `retrying`
+  // Each attempt bounded, not just the sequence (internal PR 196 review). `retrying`
   // never reaches its second attempt if the first never settles, and
   // `handlePlan` calls this with no deadline of its own: a ledger that
   // stays pending would hang the request instead of answering 503, while
@@ -172,7 +172,7 @@ export async function reserveBudget(
 
   /**
    * The account hold is released when a later layer *refuses*, and it has
-   * to be released when a later layer *rejects* too (#196 review).
+   * to be released when a later layer *rejects* too (internal PR 196 review).
    *
    * The two look nothing alike from here and cost the same thing. Once the
    * account layer has allowed, this function holds a worst case against the
@@ -184,7 +184,7 @@ export async function reserveBudget(
    * everybody else.
    *
    * The release is asked for more than once before it is given up on
-   * (#196 review). What takes the user ledger down is usually a Durable
+   * (internal PR 196 review). What takes the user ledger down is usually a Durable
    * Object restarting, and the account object can be restarting for the
    * same reason at the same moment; a single attempt suppressed on failure
    * leaves exactly the hold this exists to release, so the first version of

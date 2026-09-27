@@ -96,7 +96,7 @@ export function decideModel(
   const preferred =
     granted.find((model) => model.id === wanted)?.id ??
     // Not granted the default itself, then the newest version of its family
-    // that is (#214 review). A policy written when Opus 5 was the default
+    // that is (internal PR 214 review). A policy written when Opus 5 was the default
     // grants Opus 5 and not 5.5; falling straight to the first grant would
     // hand that person whatever the catalogue lists first, which may be a
     // different model at twice the price.

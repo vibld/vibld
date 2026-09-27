@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { stageFor } from '../worker/run-stage.ts';
 
 /**
- * The meter may not name a state it cannot name (#188 review, P2).
+ * The meter may not name a state it cannot name (internal PR 188 review, P2).
  *
  * `WorkflowInstanceStatus` carries more states than the meter has words
  * for. The first cut treated every non-terminal, non-queued state as
@@ -55,7 +55,7 @@ describe('what the meter calls a run in flight', () => {
 
   it('says thinking while a reasoning model has written nothing', () => {
     // The state the Workflow cannot report, because `status` is `running`
-    // for all of it (#183). On the production provider this is between 57%
+    // for all of it (internal issue 183). On the production provider this is between 57%
     // and 68% of a run's output tokens, so a meter without it spends most
     // of its time claiming a project is being built while the character
     // count beside it sits at zero.
@@ -75,7 +75,7 @@ describe('what the meter calls a run in flight', () => {
   });
 
   it('stops saying thinking once the model call has ended', () => {
-    // #193 review, P2, and the same mistake as "Writing" one state along.
+    // internal PR 193 review, P2, and the same mistake as "Writing" one state along.
     // A completion that refused, was emptied or was cut off leaves exactly
     // the report above, and the instance reports `running` through
     // settlement and the trace write, retries included. Without the step

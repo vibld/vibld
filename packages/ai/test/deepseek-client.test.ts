@@ -244,7 +244,7 @@ describe('createDeepseekPlanClient', () => {
     // 100 for the two 200-character strings, plus the output instruction
     // this client appends to the system message. That used to read a flat
     // 100, which under-reported every run by the length of the instruction
-    // (#189 review) -- the same figure `onPromptChars` reports, and now
+    // (internal PR 189 review) -- the same figure `onPromptChars` reports, and now
     // literally the same expression.
     const appended = `${'a'.repeat(200)}\n\n${PLAN_OUTPUT.instruction}`;
     assert.equal(
@@ -258,9 +258,9 @@ describe('createDeepseekPlanClient', () => {
   });
 
   it('counts reasoning in the estimate, because the provider bills it', async () => {
-    // The omission #191's review found, and the same one as pricing a
+    // The omission internal PR 191's review found, and the same one as pricing a
     // cancelled run on the answer alone: two thirds of a measured mockup
-    // run's output tokens were thinking (#190), so a stream that ended
+    // run's output tokens were thinking (internal PR 190), so a stream that ended
     // without its usage chunk settled a reasoning-heavy reply at a third
     // of what it cost.
     const reasoning = `data: ${JSON.stringify({
@@ -424,7 +424,7 @@ describe('the provider above, driven by DeepSeek', () => {
 });
 
 /**
- * What shape the system prompt demands (#189 review, P1).
+ * What shape the system prompt demands (internal PR 189 review, P1).
  *
  * This client has no way to enforce a schema, so the instruction appended
  * to the system prompt *is* the constraint. It always described a
@@ -478,7 +478,7 @@ describe('what the appended instruction asks for', () => {
 });
 
 /**
- * How large a prompt this client says it sent (#189 review).
+ * How large a prompt this client says it sent (internal PR 189 review).
  *
  * The route settling a cancelled run cannot work this out for itself: it
  * knows the system prompt and the user prompt, and this client appends the
@@ -529,7 +529,7 @@ describe('what this client reports sending', () => {
 
 describe('what the stream does not show', () => {
   /**
-   * The gap #190 measured: 19,203 characters streamed against 21,224 output
+   * The gap internal PR 190 measured: 19,203 characters streamed against 21,224 output
    * tokens on a real run, which is 0.9 characters per token where this
    * codebase assumes four. Reasoning is billed as output and counted
    * against `max_tokens`, and until now the reader dropped it silently, so
@@ -575,7 +575,7 @@ describe('what the stream does not show', () => {
     // thinking must never inflate it. It is reported all the same, on its
     // own field and as it arrives, because a run cancelled before the
     // first content delta has streamed nothing else and would otherwise
-    // settle at zero output tokens (#190).
+    // settle at zero output tokens (internal PR 190).
     const seen: { characters: number; reasoningCharacters: number }[] = [];
     await readCompletionStream(
       stream([
@@ -593,7 +593,7 @@ describe('what the stream does not show', () => {
 });
 
 /**
- * The one fact only this layer can state (#191 review).
+ * The one fact only this layer can state (internal PR 191 review).
  *
  * Above it, an empty body and JSON that would not parse are both a null
  * plan, and the retry that could not tell them apart asked a model to
@@ -603,7 +603,7 @@ describe('what the stream does not show', () => {
 describe('saying whether anything came back at all', () => {
   it('marks a reply with no body as empty', async () => {
     // DeepSeek's JSON mode documents that it may occasionally return empty
-    // content, and a real run did exactly that (#190).
+    // content, and a real run did exactly that (internal PR 190).
     const { impl } = fetchReturning(sse(contentFrames('')));
     const completion = await createDeepseekPlanClient({
       apiKey: 'k',

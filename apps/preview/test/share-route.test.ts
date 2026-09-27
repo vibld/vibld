@@ -14,7 +14,7 @@ import { signShare } from '../worker/share-token.ts';
 /**
  * A share link redeemed on its own origin into a cookie, so the shared
  * app's absolute paths (`/src/main.tsx`, `/media/hero.jpg`) reach the
- * preview without credentials in their URLs (#222).
+ * preview without credentials in their URLs (internal issue 222).
  */
 
 const SECRET = 'share-secret';

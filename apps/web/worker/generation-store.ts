@@ -111,7 +111,7 @@ export class D1GenerationStore implements GenerationStore {
   }
 
   /**
-   * Record what became of one run (#167).
+   * Record what became of one run (internal issue 167).
    *
    * Refuses to write a trace for a stop that did not describe a run, which
    * is the rule that keeps a refusal out of somebody's generation history.

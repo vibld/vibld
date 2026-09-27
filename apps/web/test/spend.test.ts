@@ -347,7 +347,7 @@ describe('the chosen model prices its own run', () => {
 });
 
 /**
- * The reservation and the request are one number (#179).
+ * The reservation and the request are one number (internal PR 179).
  *
  * A reservation is a promise that a run cannot cost more than it held back.
  * That only holds while the token ceiling the budget prices and the token
@@ -388,7 +388,7 @@ describe('what a run reserves against what it may spend', () => {
 });
 
 /**
- * What a run the reader stopped costs them (#189 review).
+ * What a run the reader stopped costs them (internal PR 189 review).
  *
  * The bug this replaces: aborting makes the model call reject, so no usage
  * is ever reported, and `settleBudget`'s unknown-cost case charges the full
@@ -410,7 +410,7 @@ describe('what a cancelled run is charged', () => {
 
   it('charges the input that was sent, not the input that was allowed', () => {
     // The whole input does go before a token comes back, and for a while I
-    // read that as licence to charge the reservation's bound (#189 review).
+    // read that as licence to charge the reservation's bound (internal PR 189 review).
     // It is not: the whole input being sent is not the whole allowance
     // being used. A short unstyled prompt was billed as though it carried
     // four thousand characters and a style direction nobody chose.
@@ -464,7 +464,7 @@ describe('what a cancelled run is charged', () => {
 
 describe('pricing a cancelled run that was still thinking', () => {
   /**
-   * The case #190 measured: a reasoning model bills its thinking as output
+   * The case internal PR 190 measured: a reasoning model bills its thinking as output
    * and thinks before it writes, so a run stopped in its first seconds has
    * streamed no answer at all. Counting only the answer settled that at
    * zero, for a minute of billed reasoning.
@@ -518,7 +518,7 @@ describe('a run whose cost somebody else is carrying', () => {
     // cost is unknown", and is charged at the full worst case. A mockup
     // run whose retry was refused spent one attempt, that attempt was
     // absorbed, and the account ledger already has it -- so the figure
-    // the caller owes is zero, stated rather than absent (#191 review).
+    // the caller owes is zero, stated rather than absent (internal PR 191 review).
     assert.equal(microUsdOf(NOTHING_TO_BILL, DEFAULT_PRICES), 0);
     assert.equal(microUsdOf(NOTHING_TO_BILL, priced(9_999, 9_999)), 0);
   });

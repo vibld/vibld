@@ -15,7 +15,7 @@ import { describe, it } from 'node:test';
  *
  * The first fix was `Disallow: /` beside a `noindex` meta, which is
  * self-defeating and was defended here with a comment that had the
- * dependency backwards (#192 review). A crawler that obeys the refusal
+ * dependency backwards (internal PR 192 review). A crawler that obeys the refusal
  * never fetches the page, so it never reads the tag, and a URL found from a
  * shared link stays listed with no description. Refusing the fetch protects
  * the bytes and leaves the listing.
@@ -37,7 +37,7 @@ describe('what the builder host tells a crawler', () => {
   });
 
   it('lets a crawler fetch, so the directive can be read at all', async () => {
-    // The correction (#192 review). `Disallow: /` would stop a compliant
+    // The correction (internal PR 192 review). `Disallow: /` would stop a compliant
     // crawler fetching the page, and the noindex it would have found there
     // is the only thing that removes an existing listing.
     const robots = await readFile(webFile('public', 'robots.txt'), 'utf8');

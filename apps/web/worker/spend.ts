@@ -216,7 +216,7 @@ export function worstCaseMicroUsd(
 }
 
 /**
- * A run whose whole cost somebody else is carrying (#191 review).
+ * A run whose whole cost somebody else is carrying (internal PR 191 review).
  *
  * `settleBudget` charges the full worst case for a run that happened and
  * reported no usage, which is right when the cost is unknown and wrong
@@ -239,7 +239,7 @@ export const NOTHING_TO_BILL = {
 } as const;
 
 /**
- * What a run the caller stopped should be charged (#189 review).
+ * What a run the caller stopped should be charged (internal PR 189 review).
  *
  * Aborting the model call makes it reject, so the provider never reports
  * usage, and `settleBudget`'s middle case then charges the full worst-case
@@ -256,7 +256,7 @@ export const NOTHING_TO_BILL = {
  *   and passed in. An earlier version passed the reservation's *bound*
  *   here, on the reasoning that "the input was sent in full before a token
  *   came back" -- which is true, and does not make the bound the right
- *   number (#189 review). The whole input being sent is not the whole
+ *   number (internal PR 189 review). The whole input being sent is not the whole
  *   allowance being used: a ten-character unstyled prompt was settled as
  *   though it were four thousand characters plus a style direction that
  *   was never chosen, about five times over.
@@ -265,7 +265,7 @@ export const NOTHING_TO_BILL = {
  *   uses. That is a rough number, and HTML can run denser than four, so it
  *   can under-count.
  *
- * That second half counted only the *answer* until #190, which made it
+ * That second half counted only the *answer* until internal PR 190, which made it
  * wrong by far more than density. A reasoning model bills its thinking as
  * output and thinks before it writes: a measured run spent 16,395 tokens
  * reasoning and 7,927 writing, two thirds of the bill in a place no

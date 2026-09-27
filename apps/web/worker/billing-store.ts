@@ -844,7 +844,7 @@ export class BillingStore {
   }
 
   /**
-   * Where the subscription reconcile's walk has got to (#47,
+   * Where the subscription reconcile's walk has got to (internal PR 47,
    * 0017_reconcile_cursor.sql).
    *
    * `undefined` means start from the top: a fresh deployment, and every run
@@ -908,7 +908,7 @@ export class BillingStore {
 
   /**
    * Advance a nightly rotation by one run and say which run this is
-   * (#176, 0028_nightly_rotation.sql).
+   * (internal issue 176, 0028_nightly_rotation.sql).
    *
    * Zero on the first run, then one more on each after it. One query, the
    * upsert and the read together, because the allowance this is taken out

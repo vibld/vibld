@@ -368,7 +368,7 @@ describe('findContrastFailures', () => {
       assert.equal(findings[0].theme, 'dark', selector);
     }
     // A condition on the root holds only some of the time: it does not
-    // replace the dark theme's values (#239 review).
+    // replace the dark theme's values (internal PR 239 review).
     for (const state of ['.dark:hover', '.dark.compact', 'html.dark:focus']) {
       const findings = findContrastFailures(
         ':root { --background: oklch(1 0 0); --foreground: oklch(0.145 0 0); }\n' +
@@ -500,7 +500,7 @@ describe('readRootTokens on hostile input', () => {
   it('still reads a real block that follows a hostile prefix', () => {
     // Fast is not enough: it has to remain correct on the same input. The
     // prefix ends at a `;`: without one it would run into the selector,
-    // `:root:root… :root`, a chain that selects nothing (#239 review).
+    // `:root:root… :root`, a chain that selects nothing (internal PR 239 review).
     const tokens = readRootTokens(
       `${':root'.repeat(5_000)};\n:root { --primary: #2563EB; }`,
     );

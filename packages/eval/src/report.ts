@@ -92,7 +92,7 @@ export function formatReport(report: EvalReport): string {
  *
  * The per-run report already says what happened each time. What it cannot say
  * is whether a model does a thing reliably or got lucky once, and that is the
- * question #10's gate is written in terms of (10 prompts, 3 runs each). Three
+ * question internal issue 10's gate is written in terms of (10 prompts, 3 runs each). Three
  * accepted runs and two accepted out of three are the same line in a pooled
  * score and completely different answers.
  */

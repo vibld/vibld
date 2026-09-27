@@ -7,7 +7,7 @@ import type { Root } from 'react-dom/client';
 import { SiteTakedown } from '../src/components/SiteTakedown.tsx';
 
 /**
- * The operator's takedown (#172), as it is actually wired.
+ * The operator's takedown (internal issue 172), as it is actually wired.
  *
  * This acts on work that is not the operator's, which is what makes the two
  * presses and the required reason load-bearing rather than ceremony.

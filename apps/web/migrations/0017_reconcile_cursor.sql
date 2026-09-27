@@ -1,4 +1,4 @@
--- Where the nightly subscription reconcile has got to (#47).
+-- Where the nightly subscription reconcile has got to (internal PR 47).
 --
 -- `reconcileSubscriptions` used to walk every subscription the deployment
 -- knows about, on every run, with no bound at all. The three phases before

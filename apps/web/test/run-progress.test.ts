@@ -11,7 +11,7 @@ import {
 import { POLL_INTERVAL_MS } from '../worker/run-stage.ts';
 
 /**
- * What a run is allowed to spend to say how it is doing (#183).
+ * What a run is allowed to spend to say how it is doing (internal issue 183).
  *
  * The progress meter was built, shipped, and then orphaned when generation
  * moved into a durable Workflow: a step's return value is the only channel
@@ -81,7 +81,7 @@ describe('how often a run reports what it has produced', () => {
 
   it('counts a provider that says nothing about reasoning as none', () => {
     // `PlanProgress.reasoningCharacters` is optional so that "this provider
-    // does not say" stays distinguishable from "it says none" (#190). The
+    // does not say" stays distinguishable from "it says none" (internal PR 190). The
     // channel carries a count, and a count that is sometimes absent would
     // make the reader re-draw that distinction for no purpose -- and would
     // leave `stageFor` comparing undefined against zero.
@@ -103,7 +103,7 @@ describe('how often a run reports what it has produced', () => {
 /**
  * That the chain is joined, end to end.
  *
- * This is the finding #183 actually was. Nothing in the meter was missing:
+ * This is the finding internal issue 183 actually was. Nothing in the meter was missing:
  * the component, the wording, the SSE event, the client's decoder and the
  * provider's per-delta callback all shipped and all still worked. One link
  * was cut, and every piece on either side of it went on passing its own
@@ -136,7 +136,7 @@ describe('the link between a running step and the reader watching it', () => {
   });
 
   it('has the generate step say when it has left', () => {
-    // #193 review, P2. The step is the only thing that knows the model call
+    // internal PR 193 review, P2. The step is the only thing that knows the model call
     // is over; the instance reports `running` for another minute of
     // settlement and trace writes. In a finally, because a refused or
     // emptied completion is exactly the case that leaves a last report of

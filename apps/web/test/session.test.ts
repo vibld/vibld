@@ -658,7 +658,7 @@ describe('what the deployment can serve survives a reset', () => {
   });
 
   it('starts not knowing, rather than starting at no', () => {
-    // Three states, not two (#184). The answer comes from the /api/config
+    // Three states, not two (internal issue 184). The answer comes from the /api/config
     // fetch, so every session begins before anyone has answered, and the
     // admin page has to tell that silence apart from a refusal or it
     // reports that an admin's own page does not exist for as long as a

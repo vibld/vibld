@@ -64,7 +64,7 @@ export interface RunCeiling {
  * What a run is for, which is what decides how much it may ask for.
  *
  * A build is as large as the project needs; three mockups are as large as
- * three sketches (#185, `MOCKUP_OUTPUT_TOKENS`). The two answers differ by
+ * three sketches (internal issue 185, `MOCKUP_OUTPUT_TOKENS`). The two answers differ by
  * more than an order of magnitude, and the dispatch lives here rather than
  * at the call sites for the reason this whole file exists: a second place
  * that decides a ceiling is a second place that can disagree with the
@@ -78,7 +78,7 @@ export type RunKind = 'build' | 'mockups';
  * Here rather than inline in the route for the reason this whole file
  * exists: a second place that decides what a run costs is a second place
  * that can disagree with the reservation. It was inline, and it was wrong
- * (#189 review) -- it counted the caller's prompt and the style direction
+ * (internal PR 189 review) -- it counted the caller's prompt and the style direction
  * and stopped, while every run also sends `MOCKUP_SYSTEM_PROMPT` and a
  * styled one sends the preamble too. About 1,600 characters reserved for
  * nobody, so an account with exactly the computed reservation left was
@@ -96,7 +96,7 @@ export type RunKind = 'build' | 'mockups';
  * Extracted for the same reason `MOCKUP_INPUT_CHARS` below was, and after
  * the same mutation result: the fix for the chosen-mockup term lived in
  * `packages/ai`, so removing it from the Worker's own sum broke nothing
- * (#189 review). A bound that no test can see the caller use is a bound
+ * (internal PR 189 review). A bound that no test can see the caller use is a bound
  * that can be quietly dropped.
  *
  * Every term is something the request guard has already refused to exceed,
@@ -123,7 +123,7 @@ export const MOCKUP_INPUT_CHARS =
 
 /**
  * `carryTokens` is what a follow-up spends re-emitting the project it edits
- * (#209), from `carryTokensFor` below. A build gets the room a first run
+ * (internal issue 209), from `carryTokensFor` below. A build gets the room a first run
  * would, plus that. A mockup run ignores it: three sketches carry nothing
  * back, and a mockup's ceiling is a runaway guard rather than a budget.
  */
@@ -160,7 +160,7 @@ export function runCeilingFor(
 
 /**
  * What a follow-up will spend carrying its project back out, for sizing the
- * run before it starts (#209).
+ * run before it starts (internal issue 209).
  *
  * Read here, in the request, because the reservation is made here: the
  * Workflow reads the ceiling from its params and never derives one, so this
@@ -184,7 +184,7 @@ export async function carryTokensFor(
   try {
     const base = await store.loadAccepted(projectId);
     if (!base) return 0;
-    // Only a run that will actually rewrite this project carries it (#210
+    // Only a run that will actually rewrite this project carries it (internal PR 210
     // review). `runGeneration` refuses two follow-ups for free before the
     // model is called: one whose revision has moved on, and one whose
     // project is too large to send. Both still reserve first, and the
@@ -215,11 +215,11 @@ export interface SizedReservation<Reserved> {
 
 /**
  * Reserve for a follow-up at the size it needs, and at the size a first run
- * gets if the caller cannot cover that (#210 review).
+ * gets if the caller cannot cover that (internal PR 210 review).
  *
  * The larger room was approved as something a caller gets when they can
  * afford it. Refusing outright when they cannot would make a follow-up on a
- * large project strictly worse off than it was before #209, which reserved
+ * large project strictly worse off than it was before internal issue 209, which reserved
  * the ordinary amount and let the run try. So a budget refusal of the larger
  * amount is answered by asking for the ordinary one, and only a refusal of
  * *that* reaches the caller.

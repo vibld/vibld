@@ -1,4 +1,4 @@
--- What an operator did to a published site, kept after the fact (#172).
+-- What an operator did to a published site, kept after the fact (internal issue 172).
 --
 -- `published_projects.held_at`, `held_by` and `held_reason` are the *current*
 -- state: they are what public serving and the republish refusal read. They

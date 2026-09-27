@@ -6,7 +6,7 @@ import { RETRY_ATTEMPTS, retryingWithin } from '../src/retry.ts';
 
 /**
  * That one stuck call cannot outlast a build's whole budget
- * (#196 review).
+ * (internal PR 196 review).
  *
  * The deadline was checked between operations, which bounds a build made
  * of many quick calls and does nothing about a build stuck inside one slow
@@ -73,7 +73,7 @@ describe('one operation against what is left of the clock', () => {
 });
 
 /**
- * That a command's own cap cannot outlast the build's (#196 review).
+ * That a command's own cap cannot outlast the build's (internal PR 196 review).
  *
  * Bounding the calls that had no bound of their own left the ones that
  * did. Each command kept its full five minutes however much of the budget
@@ -102,7 +102,7 @@ describe('a command cap against what is left of the build', () => {
 });
 
 /**
- * That a retry can reach its second attempt (#196 review).
+ * That a retry can reach its second attempt (internal PR 196 review).
  *
  * `retrying` runs one attempt and then the next, so an attempt that never
  * settles ends the sequence: the retry becomes a single unbounded call

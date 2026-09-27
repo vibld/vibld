@@ -88,7 +88,7 @@ function parseStatus(body: unknown): PreviewStatus | null {
           // Carried only when it is a string. A ready preview with an
           // unreadable finding attached is still a ready preview -- the
           // sandbox is up and the URL works -- so this is dropped rather
-          // than allowed to turn the whole status null (#194).
+          // than allowed to turn the whole status null (internal issue 194).
           ...(typeof record.typecheckFailure === 'string' &&
           record.typecheckFailure !== ''
             ? { typecheckFailure: record.typecheckFailure }

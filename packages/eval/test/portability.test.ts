@@ -225,7 +225,7 @@ describe('scripts that cannot actually run', () => {
     }
   });
   it('rejects a script whose tool the project does not install', () => {
-    // The CI stub's own shape, reported accepted until #59: `vite build` with
+    // The CI stub's own shape, reported accepted until internal PR 59: `vite build` with
     // no vite dependency, which stops at "vite: not found".
     const problems = checkPortability(
       snapshot([
@@ -260,7 +260,7 @@ describe('scripts that cannot actually run', () => {
   it("accepts either package that ships Tailwind's CLI", () => {
     // v4 moved the executable into @tailwindcss/cli; v3's tailwindcss
     // package ships it itself. Requiring the v4 one refused a working v3
-    // project (#237 review).
+    // project (internal PR 237 review).
     const withTailwind = (dependency: string, range: string) =>
       checkPortability(
         snapshot([

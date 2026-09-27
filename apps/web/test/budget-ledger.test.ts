@@ -6,7 +6,7 @@ import { RUN_ABANDONED_AFTER_MS } from '@vibld/ai';
 import { fakeDurableObjectCtx } from './fakes/sqlite-do-storage.ts';
 
 /**
- * What a caller is actually charged (#180).
+ * What a caller is actually charged (internal PR 180).
  *
  * The ledger reclaims a reservation that never came back, and charges it at
  * its full worst case, because a run that vanished may have spent anything.

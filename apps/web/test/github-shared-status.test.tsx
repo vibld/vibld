@@ -11,7 +11,7 @@ import { githubStatus } from '../src/github/github-status.ts';
 
 /**
  * The panel and the push button, mounted together, which is how they are
- * used and the only way the thing #34 is about can be seen at all.
+ * used and the only way the thing internal PR 34 is about can be seen at all.
  *
  * Each had its own copy of the connection and its own probe, so the two
  * could name different repositories at the same moment. Neither component's

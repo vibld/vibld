@@ -71,7 +71,7 @@ export interface PublishR2Bucket {
     prefix?: string;
     cursor?: string;
     limit?: number;
-    /** Resume point for the orphan sweep: R2 lists in key order (#177). */
+    /** Resume point for the orphan sweep: R2 lists in key order (internal issue 177). */
     startAfter?: string;
   }): Promise<{
     objects: { key: string }[];

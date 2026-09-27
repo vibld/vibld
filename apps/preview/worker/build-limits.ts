@@ -12,7 +12,7 @@
  * What each half of a build is given before it is abandoned.
  *
  * Bounded at all because the command is the generated project's to declare
- * (#196 review). `npm run build` is whatever its package.json says, and a
+ * (internal PR 196 review). `npm run build` is whatever its package.json says, and a
  * manifest naming a watch-mode script never returns: the build held its
  * lock forever, the lock aged out under a second build that then emptied
  * the workspace beneath the first, and the paid Workflow waiting on the
@@ -44,7 +44,7 @@ export const BUILD_LOCK_TTL_MS = 15 * 60_000;
  * How long a whole build may take before it gives up.
  *
  * The thing that was missing, and the reason three rounds of review each
- * found another place a heartbeat did not reach (#196 review). Install and
+ * found another place a heartbeat did not reach (internal PR 196 review). Install and
  * compile were bounded; writing the project in, reading the output back and
  * tearing the container down were not, so a build had no maximum duration
  * at all. Every protection around it was a heartbeat, and a heartbeat has
@@ -80,7 +80,7 @@ export const BUILD_WALL_CLOCK_MS = 12 * 60_000;
  * `destroy()` has no deadline of its own, and the renewals around the build
  * stopped at the edge of teardown, so a destroy that blocked past the TTL
  * let another build take the lock and start in the same sandbox -- which
- * the first destroy then killed (#196 review). The lock is held for the
+ * the first destroy then killed (internal PR 196 review). The lock is held for the
  * whole teardown now, which needs these two.
  *
  * Both sit inside `BUILD_LOCK_TTL_MS`: the interval so a renewal always
@@ -94,7 +94,7 @@ export const MAX_DESTROY_WAIT_MS = 10 * 60_000;
 
 /**
  * How long one call to the fleet Durable Object may stay pending, and how
- * long the whole teardown may take (#196 review).
+ * long the whole teardown may take (internal PR 196 review).
  *
  * The same hazard as everything else on this pull request, on the last two
  * places in this file's code that did not have it. `releaseTicket` retries,

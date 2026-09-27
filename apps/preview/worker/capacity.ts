@@ -3,12 +3,12 @@
  *
  * `wrangler.jsonc` sets `max_instances` on the `PreviewSandbox` class, and
  * Cloudflare enforces it as a hard platform limit underneath
- * `PreviewFleet`'s own queue. Until #196 every container of that class was
+ * `PreviewFleet`'s own queue. Until internal PR 196 every container of that class was
  * a preview, so the platform limit and L9's preview cap were the same
  * number.
  *
- * Since #196 a build runs in an instance of the same class, named for
- * building, and holds one of the platform's containers while it does. #196
+ * Since internal PR 196 a build runs in an instance of the same class, named for
+ * building, and holds one of the platform's containers while it does. Internal PR 196
  * split the budget statically to keep the fleet from admitting a preview
  * the platform had no room for: twenty for previews, five kept back for
  * builds, counted by two separate fleet instances. That was safe and it
@@ -16,7 +16,7 @@
  * request is queued with a visible position, not rejected." The
  * twenty-first preview queued whether or not anything was building.
  *
- * Chris chose the shared budget on 2026-09-27 (#197), and this is it:
+ * Chris chose the shared budget on 2026-09-27 (internal issue 197), and this is it:
  * previews and builds are counted against one budget of twenty-five, in one
  * `PreviewFleet` instance, with builds bounded at five of it. Previews get
  * all twenty-five whenever nothing is building, which meets L9 whenever a

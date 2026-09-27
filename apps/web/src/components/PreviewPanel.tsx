@@ -161,11 +161,11 @@ export function PreviewPanel({
             </p>
           ) : null}
           {/*
-            The project's own typecheck failed (#194). Said here rather than
+            The project's own typecheck failed (internal issue 194). Said here rather than
             left for the frame to show, because what the frame shows is
             Vite's own transform error, which reads as Vibld being broken.
 
-            Named as exactly what ran and exactly what it reported (#195
+            Named as exactly what ran and exactly what it reported (internal PR 195
             review). An earlier draft said the project "does not typecheck,
             so npm run build would fail", and neither half was established:
             the model writes the manifest, the prompt requires a "build" and

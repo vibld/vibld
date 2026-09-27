@@ -13,7 +13,7 @@ import type { GitHubStatus } from '../src/github/github-client.ts';
  * Whether to offer a push, decided apart from the button that draws it.
  *
  * The runner strips TypeScript types and errors on JSX, so a rule written
- * inside a component is typechecked and never run. Four findings on #122
+ * inside a component is typechecked and never run. Four findings on internal PR 122
  * were exactly that, so these live here from the start rather than after a
  * reviewer finds them.
  */

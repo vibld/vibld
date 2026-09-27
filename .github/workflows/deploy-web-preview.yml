@@ -239,7 +239,7 @@ jobs:
           fi
 
       # The GitHub App that pushes a checkpoint to a user's repository
-      # (issue #13). Optional, same rule as every secret above: unset means
+      # (internal issue 13). Optional, same rule as every secret above: unset means
       # /api/github/* answers "not configured" rather than the deploy
       # failing.
       #

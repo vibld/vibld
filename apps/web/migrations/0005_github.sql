@@ -1,4 +1,4 @@
--- Which GitHub repository a user's work pushes to (issue #13, docs/decisions
+-- Which GitHub repository a user's work pushes to (internal issue 13, docs/decisions
 -- L30/L42a).
 --
 -- Nothing in here is a secret, which is the whole reason this table can

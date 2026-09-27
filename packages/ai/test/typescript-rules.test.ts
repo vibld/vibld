@@ -16,7 +16,7 @@ import { PLAN_SYSTEM_PROMPT } from '../src/plan-schema.ts';
  *
  * The first attempt at a fix turned `verbatimModuleSyntax` off in
  * `plan-builder.ts` and told the model an ordinary type import was fine.
- * That was the wrong place (#193 review). `buildProjectFiles` feeds
+ * That was the wrong place (internal PR 193 review). `buildProjectFiles` feeds
  * `FakeModelProvider`; in production `RemoteModelProvider` returns the
  * model's own files, tsconfig included, and nothing on that path rewrites
  * them. So loosening our scaffold changed nothing a reader ever sees, while

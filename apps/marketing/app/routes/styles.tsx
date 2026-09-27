@@ -14,7 +14,7 @@ export function meta() {
 }
 
 /**
- * The catalogue of visual directions (#186), each one drawn.
+ * The catalogue of visual directions (internal issue 186), each one drawn.
  *
  * Read from the builder's own preset list, so this page cannot drift from
  * what the product will actually do. See `app/catalogue.ts`.

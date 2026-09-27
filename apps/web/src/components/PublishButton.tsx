@@ -108,7 +108,7 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   // What is live is the checkpoint that was published, and a later one has
   // not been. Leaving "Live at ..." up beside a project that has moved on
   // reads as though the new work is already on the web, which is the same
-  // thing the push button was fixed for on #123: the address is still
+  // thing the push button was fixed for on internal PR 123: the address is still
   // serving, but it is serving the previous checkpoint.
   //
   // The slug is deliberately not forgotten with it. It is the name of the
@@ -117,7 +117,7 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   // they already told us.
   //
   // Clearing alone is not enough, for the reason the push button found on
-  // #123: a publish still in flight lands afterwards and draws the previous
+  // internal PR 123: a publish still in flight lands afterwards and draws the previous
   // checkpoint's address beside the new one, which is the sentence this is
   // here to stop. The gate is `createStatusGate`, the same latest-wins
   // primitive rather than a second copy of the rule, and the abandoned wait

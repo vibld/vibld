@@ -10,7 +10,7 @@ import { MAX_MOCKUP_LABEL_CHARS } from '../src/mockup-schema.ts';
 import { ProviderContextError } from '../src/errors.ts';
 
 /**
- * Carrying the chosen direction into the build (#185).
+ * Carrying the chosen direction into the build (internal issue 185).
  *
  * The document travels, not its name: a build seeded with only a label can
  * ignore the choice and still look like it obeyed, which is the failure
@@ -128,7 +128,7 @@ describe('a chosen direction in the build prompt', () => {
 });
 
 /**
- * What the reservation has to cover for a chosen direction (#189 review).
+ * What the reservation has to cover for a chosen direction (internal PR 189 review).
  *
  * The build's worst case counted `MAX_CHOSEN_MOCKUP_CHARS`, which is the
  * document alone. The label is sent too, through `JSON.stringify`, and so

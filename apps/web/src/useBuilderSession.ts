@@ -25,7 +25,7 @@ export interface ConfigurableSession {
  * how the two came to differ in the first place, and the reason the bug
  * below could exist in one place and not obviously in the other.
  *
- * A rejected probe still has to settle `isAdmin` (#188 review). It reads
+ * A rejected probe still has to settle `isAdmin` (internal PR 188 review). It reads
  * `null` for "nobody has answered yet", and the admin page renders that as
  * a wait. `detectDeploymentConfig` rejects when the endpoint answers 401 or
  * the Clerk token cannot be had, and both call sites used to swallow that,

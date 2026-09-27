@@ -34,7 +34,7 @@ incremented deliberately, not read off a release that does not exist.
 
 The mechanism below, including the do-not-auto-upgrade rule and the
 identifiers-not-paths rule, was first set out in an analysis written for
-this project (#157), which was closed without merging, so it is not in this
+this project (internal PR 157), which was closed without merging, so it is not in this
 repository.
 
 ## Decision

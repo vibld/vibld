@@ -137,7 +137,7 @@ export const CASES: EvalCase[] = [
       // What the brief asks the app to do, not only what it is called: a
       // page that merely describes a booking app mentions "booking" too.
       // "browser" is the disclosure. Whether it really saves is checked by
-      // reloading it in a browser (#72): read from the source, that took
+      // reloading it in a browser (internal PR 72): read from the source, that took
       // five review rounds and was still wrong in both directions.
       content: ['booking', 'slot', 'cancel', 'browser'],
     },
@@ -180,7 +180,7 @@ export const CASES: EvalCase[] = [
  *
  * It is not a model and the harness says so in its report: a score measured
  * against this measures the machinery, not generation quality. The real
- * baseline needs a provider and an approved spend cap (#9, #18).
+ * baseline needs a provider and an approved spend cap (internal issue 9, internal issue 18).
  *
  * It emits the same file set `PLAN_SYSTEM_PROMPT` requires of a real model,
  * rather than the minimum the older cases happened to assert. A stub that
@@ -211,7 +211,7 @@ export function stubPlan(testCase: EvalCase): GenerationPlan {
           },
           // The packages and ranges the prompt asks a model for (ADR-0014),
           // so CI's build of this stub installs and compiles exactly the set
-          // a real generation declares. Until #59 the stub declared no vite
+          // a real generation declares. Until internal PR 59 the stub declared no vite
           // at all, and the project it reported accepted stopped at
           // "vite: not found".
           ...stackDependencies(),

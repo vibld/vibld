@@ -55,7 +55,7 @@ const INTERNAL_ORIGIN = 'https://internal.invalid';
  * sends, and `build-reasons.test.ts` compares the two lists, so it cannot
  * drift into rejecting something the other side does.
  *
- * The list is the source and the type is derived from it (#196 review).
+ * The list is the source and the type is derived from it (internal PR 196 review).
  * Written the other way round, as a union with a `readonly
  * BuildFailureReason[]` beside it, a member added to the union and
  * forgotten in the list compiled perfectly: the wire value would then be
@@ -112,7 +112,7 @@ function parseBuildResult(body: unknown): BuildResult {
   // A caller deciding whether to spend a model call on a repair reads the
   // absence as "no evidence about the project" and does nothing, which is
   // the safe direction: the alternative is inventing a reason and spending
-  // somebody's money on it (#194).
+  // somebody's money on it (internal issue 194).
   const reason = BUILD_FAILURE_REASONS.find((known) => known === record.reason);
   return {
     ok: false,
@@ -268,7 +268,7 @@ export type HoldResult =
 
 /**
  * Take somebody else's published site off the web, or put the decision back
- * (#172). Called only from the platform-admin routes.
+ * (internal issue 172). Called only from the platform-admin routes.
  *
  * `by` and `reason` travel because a takedown of work that is not yours is
  * the clearest case of the auditable action SECURITY.md asks for, and the
@@ -342,7 +342,7 @@ export function releaseProject(
 }
 
 /**
- * How long one call to the build service may stay pending (#196 review).
+ * How long one call to the build service may stay pending (internal PR 196 review).
  *
  * `build` catches a rejection and reports `unavailable`, which claims
  * nothing about the project. A call that never rejects never reaches that
@@ -371,7 +371,7 @@ export const REBUILD_WAIT_BUDGET_MS =
 
 /**
  * One call to the build service, bounded, where no answer and a rejection
- * are the same fact (#196 review).
+ * are the same fact (internal PR 196 review).
  *
  * A pending promise reaches no catch, so the deadline is what turns a
  * build service that will not answer into one that says nothing about the
@@ -397,7 +397,7 @@ export async function buildWithin<T>(
 
 /**
  * Asking a busy workspace again, out of one budget for the asking
- * (#196 review).
+ * (internal PR 196 review).
  *
  * A function rather than a loop inside the step, for the reason four other
  * findings on this pull request ended the same way: a test that cannot

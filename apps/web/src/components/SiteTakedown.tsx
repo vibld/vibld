@@ -22,7 +22,7 @@ function describe(state: SiteState, slug: string): string {
 }
 
 /**
- * Take somebody else's published site off the web (#172).
+ * Take somebody else's published site off the web (internal issue 172).
  *
  * The lever an abuse report is answered through. Before this the only one
  * was editing D1 and R2 by hand, which is not something to reach for under

@@ -63,7 +63,7 @@ export interface ModelChoice {
   supportsEffort: boolean;
   /**
    * Output tokens a second, where that has been measured on this model
-   * rather than assumed (#209).
+   * rather than assumed (internal issue 209).
    *
    * Optional, and absence means "not measured", not "fast". A model without
    * one is sized by `MEASURED_OUTPUT_TOKENS_PER_SECOND`, which was measured
@@ -92,7 +92,7 @@ export interface ModelChoice {
 
 /**
  * What a cached input token costs, as a multiple of the model's own input
- * rate (#166, #165).
+ * rate (internal issue 166, internal issue 165).
  *
  * A multiple rather than a figure per model, because that is what it is: each
  * provider publishes one ratio that applies across its line-up, and writing
@@ -128,7 +128,7 @@ export interface ModelChoice {
  * without re-checking defeats the only mechanism there is.
  *
  * This is also the honest answer to "source the facts from the provider's
- * catalogue at runtime" (#165): no provider serves prices. OpenAI's and
+ * catalogue at runtime" (internal issue 165): no provider serves prices. OpenAI's and
  * DeepSeek's models endpoints list ids and little else, and Anthropic's adds
  * each model's context window, output ceiling and effort support; prices
  * and cache rates live on a pricing page meant for people. What the

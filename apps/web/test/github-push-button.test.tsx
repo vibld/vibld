@@ -15,7 +15,7 @@ import { GitHubPushButton } from '../src/components/GitHubPushButton.tsx';
  * `decidePush` decides everything this component shows and has its own
  * tests. What those cannot reach is whether the component asks the right
  * question, sends what it says it sends, and survives an answer arriving
- * after the thing it was about has moved on. Two findings on #123 were
+ * after the thing it was about has moved on. Two findings on internal PR 123 were
  * exactly that, and the second was introduced while fixing the first.
  */
 
@@ -97,7 +97,7 @@ async function mount(element: React.ReactNode) {
 }
 
 /**
- * The connection is shared state now (#34), and shared state outlives a
+ * The connection is shared state now (internal PR 34), and shared state outlives a
  * test. Without this, a test mounting after one that connected would find a
  * repository already there and pass without ever asking for one.
  */
@@ -119,7 +119,7 @@ describe('the push button, as it is actually wired', () => {
   });
 
   it('sends the revision and the destination it is showing', async () => {
-    // The two things #123 established the route needs: the revision it keys
+    // The two things internal PR 123 established the route needs: the revision it keys
     // on, and where the click believed it was going.
     const calls = serving({
       '/api/github/status': () => reply(CONNECTED),
@@ -147,7 +147,7 @@ describe('the push button, as it is actually wired', () => {
 });
 
 /**
- * The four findings on #123 that lived in here rather than in a rule.
+ * The four findings on internal PR 123 that lived in here rather than in a rule.
  *
  * Each one was found by a reviewer reading the code, because nothing in
  * this repository could run it. Each one is a test now.

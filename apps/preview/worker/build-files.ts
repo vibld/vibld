@@ -9,17 +9,17 @@ import type { ProjectFile } from '@vibld/core';
  * protection. A build holds a lock with a fifteen-minute TTL and both loops
  * are one or two RPCs per file, so each has to push that lock forward as it
  * goes. The read loop was given renewals; the write loop was not, and
- * nothing about either file said the pair existed (#196 review).
+ * nothing about either file said the pair existed (internal PR 196 review).
  *
  * `keepAlive` says whether to carry on, rather than only pushing the lock
- * forward (#196 review). Renewing was never enough by itself: the renewal
+ * forward (internal PR 196 review). Renewing was never enough by itself: the renewal
  * is conditional on still owning the lock, so a build that had already been
  * superseded renewed nothing, learned nothing, and went on writing into the
  * workspace its successor had just emptied. Losing the lock has to stop the
  * work rather than merely fail to extend it, and running out of time is the
  * same fact arriving the other way.
  *
- * Its own module so they can be called rather than read (#196 review).
+ * Its own module so they can be called rather than read (internal PR 196 review).
  * `preview-sandbox.ts` imports `@cloudflare/sandbox` and cannot be loaded
  * under `node --test`, so every assertion about this loop has been a regex
  * over source, and the defect that prompted the extraction is exactly the
@@ -58,7 +58,7 @@ export const LOCK_RENEWAL_EVERY = 25;
 
 /**
  * Waiting for a fleet ticket, and giving back one that arrives too late
- * (#196 review).
+ * (internal PR 196 review).
  *
  * Here rather than inline because the inline version was wrong in a way no
  * source read could see. It kept a `waiting` flag, set false after the

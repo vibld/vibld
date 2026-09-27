@@ -2,7 +2,7 @@ import { budgeted, retryingWithin, withinDeadline } from '@vibld/core';
 
 /**
  * Waiting for a container to die while keeping the lock alive, bounded
- * (#196 review).
+ * (internal PR 196 review).
  *
  * A destroy is the only thing that actually stops an orphaned RPC, so the
  * teardown waits for one; and a container that will not die must not hold
@@ -62,7 +62,7 @@ export async function destroyWithin(
 
 /**
  * Giving a fleet ticket back, where each attempt is bounded rather than
- * the sequence (#196 review).
+ * the sequence (internal PR 196 review).
  *
  * `retrying` never reaches its second attempt if the first never settles,
  * so an unbounded call turns a retry into a single unbounded call wearing
@@ -70,7 +70,7 @@ export async function destroyWithin(
  * teardown: a ticket that is never given back holds one of the shared
  * containers until `PreviewFleet` reclaims it, and a queued preview may be
  * waiting for that container. (A build the fleet refused has no such
- * ticket: the fleet closes its row itself, #197.)
+ * ticket: the fleet closes its row itself, internal issue 197.)
  *
  * A module rather than a line inside the Durable Object, for the reason
  * every other extraction on this pull request happened: the object cannot
@@ -86,7 +86,7 @@ export async function releaseWithin(
   // that failed every attempt was indistinguishable from one that went
   // back. Nothing in this process can do more about it than has already
   // been done, but a fact nobody can observe is how this leak kept coming
-  // back from a new direction (see #199).
+  // back from a new direction (see internal issue 199).
   const done = await retryingWithin(release, within);
   return done.ok;
 }

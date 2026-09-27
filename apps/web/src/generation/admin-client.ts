@@ -235,7 +235,7 @@ export type ParkedQueueResult =
   { ok: true; queue: ParkedQueue } | { ok: false; error: string };
 
 /**
- * Payments Stripe says moved that this deployment cannot yet name (#46).
+ * Payments Stripe says moved that this deployment cannot yet name (internal PR 46).
  *
  * Read-only: the nightly retry is what resolves these. This exists so that
  * it stopping resolving them is something somebody can see.

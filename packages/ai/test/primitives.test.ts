@@ -53,7 +53,7 @@ describe('the primitive catalogue', () => {
       assert.ok(RADIX.includes(name), `${name} is not a verified export`);
     }
     // The unified package, not the per-primitive scoped ones, and not the
-    // library the prompt used before (#74).
+    // library the prompt used before (internal PR 74).
     assert.ok(!/@radix-ui\//.test(ALL));
     assert.ok(!ALL.includes('@base-ui'));
   });

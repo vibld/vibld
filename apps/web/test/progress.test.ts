@@ -78,7 +78,7 @@ describe('reassurance', () => {
 
   it('explains a still counter rather than leaving it unexplained', () => {
     // The worst-looking state the meter can show, and the one the progress
-    // channel made visible (#183): a reasoning model has written nothing,
+    // channel made visible (internal issue 183): a reasoning model has written nothing,
     // so the clock moves and nothing else does. "Building a whole project
     // takes several minutes" would be answering a question nobody asked,
     // because on screen nothing is being built.
@@ -106,7 +106,7 @@ describe('what the meter says while a model is thinking', () => {
 
   it('is spoken as well as shown', () => {
     // A meter careful on screen and careless out loud is not careful
-    // (#188 review). A new stage that only half of the two knows about is
+    // (internal PR 188 review). A new stage that only half of the two knows about is
     // exactly the drift that finding was about.
     assert.equal(
       progressAnnouncement({
@@ -156,7 +156,7 @@ describe('progressAnnouncement', () => {
   });
 
   it('tells a queue apart from a run, out loud as well as on screen', () => {
-    // This said "Still generating" whatever the run was doing (#188
+    // This said "Still generating" whatever the run was doing (internal PR 188
     // review), so somebody using a screen reader was told the run was
     // under way while it sat in a queue. A meter that is careful on
     // screen and careless out loud is not careful.
@@ -184,7 +184,7 @@ describe('progressAnnouncement', () => {
 
   it('says the same thing out loud as on screen for an unnamed stage', () => {
     // The two drifted once already: the announcement said "Still working"
-    // while the sentence beside it deliberately claimed nothing (#188
+    // while the sentence beside it deliberately claimed nothing (internal PR 188
     // review). They share one constant now, and this is what holds them to
     // it -- matching strings written twice would drift again.
     const spoken = String(
@@ -201,7 +201,7 @@ describe('progressAnnouncement', () => {
 });
 
 /**
- * What the line says when the count is unavailable (#183).
+ * What the line says when the count is unavailable (internal issue 183).
  *
  * Generation moved into a durable Workflow, which has no live channel back
  * to the Worker polling it, so the character count these helpers were built
@@ -265,7 +265,7 @@ describe('a run whose character count is unknown', () => {
   it('claims no work it cannot see when there is no stage', () => {
     // Removing the stage word for a paused or waiting run and then
     // explaining the wait in terms of the work being done would put the
-    // same claim back one line lower (#188 review). All that is known is
+    // same claim back one line lower (internal PR 188 review). All that is known is
     // that the run has not finished.
     const unknown = reassurance({ elapsedMs: 60_000 }) ?? '';
     assert.notEqual(unknown, '');

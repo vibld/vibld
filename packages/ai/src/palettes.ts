@@ -9,7 +9,7 @@
  * much larger set (192 product/palette combinations) via a local search
  * tool. That tool is Python and queried on demand at generation time --
  * neither fits this Worker (no Python runtime, no retrieval infrastructure
- * until #12/D13 exists). What is ported instead is a hand-picked subset of
+ * until internal issue 12/D13 exists). What is ported instead is a hand-picked subset of
  * the underlying values themselves -- real hex tokens and real Google Fonts
  * pairings, already vetted for contrast and pairing sense -- adapted to
  * Vibld's own closed-set, keyword-matched retrieval (`selectPalette` below)

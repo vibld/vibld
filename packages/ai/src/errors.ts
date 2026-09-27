@@ -45,7 +45,7 @@ export class ProviderRefusalError extends ProviderError {
  * What a run was asked to produce, so every failure can name it.
  *
  * This started as a truncation-only fix and was wrong for the same reason
- * twice (#190). The truncation message was written for a build and shown on
+ * twice (internal PR 190). The truncation message was written for a build and shown on
  * a mockup run, telling somebody who asked for three sketches that their
  * *project* was incomplete. I gave truncation a vocabulary and stopped
  * there, and the next real run failed on `ProviderShapeError`, which still

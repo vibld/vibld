@@ -32,7 +32,7 @@ import {
   TEARDOWN_WALL_CLOCK_MS,
 } from './build-limits.ts';
 // The one fleet instance that counts every container, previews and builds
-// alike: see `capacity.ts` for how the budget is shared (#197).
+// alike: see `capacity.ts` for how the budget is shared (internal issue 197).
 import { FLEET_NAME } from './capacity.ts';
 
 /**
@@ -106,7 +106,7 @@ const DEV_PORT = 5173;
  * `tsc --noEmit` over a generated project is seconds on a container that
  * has just finished `npm install`, so ninety seconds is not a budget
  * anything real is expected to approach. It is a bound on the case where
- * the script does not terminate at all (#195 review): the prompt requires
+ * the script does not terminate at all (internal PR 195 review): the prompt requires
  * a "typecheck" script to exist and cannot require it to exit, and a
  * `--watch` variant would otherwise hold a fleet slot until the preview's
  * hard lifetime ran out.
@@ -141,7 +141,7 @@ const STORAGE_KEY = 'vibld:preview';
 /**
  * When the build running in this instance started, while one is.
  *
- * Its own key rather than the preview's state: since #196 a build runs in
+ * Its own key rather than the preview's state: since internal PR 196 a build runs in
  * an instance named for building, where `STORAGE_KEY` is never written at
  * all, and what it needs to exclude is another build rather than a preview.
  */
@@ -160,10 +160,10 @@ export interface PreviewStatus {
   expiresAt?: number;
   error?: string;
   /**
-   * What `npm run typecheck` printed when it failed (#194).
+   * What `npm run typecheck` printed when it failed (internal issue 194).
    *
    * Named for the command rather than for the compiler, because the script
-   * is the generated manifest's to declare and need not be `tsc` (#195
+   * is the generated manifest's to declare and need not be `tsc` (internal PR 195
    * review). What is known is that the project's own typecheck exited
    * non-zero and said this.
    *
@@ -335,12 +335,12 @@ export class PreviewSandbox extends Sandbox<Env> {
   /**
    * A one-shot production build of `files` (ADR-0010's Cloudflare
    * auto-publish primary path: apps/web calls this, then hands the result
-   * straight to apps/publish's `/internal/publish`; since #194 the
+   * straight to apps/publish's `/internal/publish`; since internal issue 194 the
    * generation workflow calls it too, to find out whether what it just
    * produced compiles). It takes a `PreviewFleet` ticket like a preview
    * does, from the same instance and against the same budget, because it
    * holds one of the platform's containers while it runs; `capacity.ts`
-   * states how that budget is shared (#197). Its ticket is a build's, so
+   * states how that budget is shared (internal issue 197). Its ticket is a build's, so
    * it counts against the build bound as well and is refused rather than
    * queued, and two builds for one user are still excluded by this
    * method's own lock rather than by any count.
@@ -350,7 +350,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    * same L11 egress restrictions -- untrusted code is untrusted whether or
    * not anything is ever exposed. It used to share the preview's instance
    * and refuse whenever a preview was live, which was correct about the
-   * filesystem race and wrong about how often that happens (#196 review):
+   * filesystem race and wrong about how often that happens (internal PR 196 review):
    * the Workspace keeps a preview running across submissions and nothing
    * stops it on submit, so the ordinary follow-up edit found the sandbox
    * busy, and the verification this exists for was skipped exactly when a
@@ -366,7 +366,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    * bytes yet.
    */
   async buildProject(files: ProjectFile[]): Promise<BuildOutcome> {
-    // Started before anything is awaited, including the lock (#196 review).
+    // Started before anything is awaited, including the lock (internal PR 196 review).
     //
     // It used to start after the lock had been read and written, on the
     // reasoning that those are this object's own storage. Local is not the
@@ -406,7 +406,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       };
     }
     // Read and written with nothing but storage awaited in between, which
-    // is what makes taking it atomic (#196 review).
+    // is what makes taking it atomic (internal PR 196 review).
     //
     // Cloudflare's input gate defers every other event to this object
     // "until such a time as the object is no longer executing JavaScript
@@ -424,7 +424,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     // code would look wrong afterwards.
     //
     // Taken with a token, and released only while it is still this build's
-    // (#196 review). Expiry alone made the lock unsafe in the one case it
+    // (internal PR 196 review). Expiry alone made the lock unsafe in the one case it
     // was for: once a stale lock let a second build in, the first build's
     // own `finally` deleted the second's lock on its way out, and a third
     // would then walk into the second's workspace. Ownership is what makes
@@ -442,8 +442,8 @@ export class PreviewSandbox extends Sandbox<Env> {
       }),
     );
 
-    // The build's container, counted (#196 review) and counted in the same
-    // budget as every preview (#197). Subtracting headroom from the preview
+    // The build's container, counted (internal PR 196 review) and counted in the same
+    // budget as every preview (internal issue 197). Subtracting headroom from the preview
     // cap without counting builds let six builds overlap nineteen previews
     // and fill all twenty-five platform slots while the fleet still thought
     // it had room; counting them in an instance of their own fixed that and
@@ -458,7 +458,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     // `busy` is the right refusal, and `worthRepairing` already reads it as
     // saying nothing about the project, so no repair is bought and nothing
     // is claimed.
-    // Asked for *inside* the try below rather than before it (#196 review).
+    // Asked for *inside* the try below rather than before it (internal PR 196 review).
     // `enqueue` is a call to another Durable Object and can reject on its
     // own account; outside the try, that rejection skipped every piece of
     // cleanup and left this user's build lock in storage, so every
@@ -474,13 +474,13 @@ export class PreviewSandbox extends Sandbox<Env> {
      * an `enqueue` that rejected -- has nothing to tear down and nothing
      * to account for. Teardown reads this rather than special-casing those
      * paths, which is what let the last version hold a ticket for a
-     * refusal it had issued itself (#196 review).
+     * refusal it had issued itself (internal PR 196 review).
      */
     let started = false;
 
     /**
      * Whether this build is still entitled to the workspace: inside its
-     * wall clock, and still the owner of the lock (#196 review).
+     * wall clock, and still the owner of the lock (internal PR 196 review).
      *
      * Both halves stop the work rather than only failing to extend it.
      * Renewing was conditional on ownership already, so a superseded build
@@ -495,7 +495,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       Date.now() < deadline && (await this.keepLock(token, deadline));
 
     /**
-     * A command's own cap, cut down to what is left (#196 review).
+     * A command's own cap, cut down to what is left (internal PR 196 review).
      *
      * Bounding the calls that had no bound left the ones that did: each
      * command kept its full five minutes however much of the budget had
@@ -515,14 +515,14 @@ export class PreviewSandbox extends Sandbox<Env> {
     };
 
     try {
-      // Bounded like every other cross-object call here (#196 review).
+      // Bounded like every other cross-object call here (internal PR 196 review).
       // Awaited directly, a stalled `enqueue` kept the build alive past its
       // own deadline: the lock expired, a successor took the sandbox, and
       // when this finally returned the very next thing it did was empty
       // that successor's workspace.
       //
       // Giving up on it leaves a ticket nobody holds. A build the fleet
-      // does not admit has its row closed by the fleet itself (#197), but
+      // does not admit has its row closed by the fleet itself (internal issue 197), but
       // one admitted after we stopped waiting holds one of the shared
       // containers, which a preview may be queued for, until it is given
       // back or the fleet reclaims it. So whatever it hands back after we
@@ -546,7 +546,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         };
       }
 
-      // Emptied first, because this container is reused (#196 review).
+      // Emptied first, because this container is reused (internal PR 196 review).
       // `writeProject` writes the paths it is given and removes nothing, so
       // a second build in the same instance compiles the new snapshot on
       // top of whatever the last one left: a file the repair deleted is
@@ -560,10 +560,10 @@ export class PreviewSandbox extends Sandbox<Env> {
       // package installed for an earlier project available to a later one
       // that never declared it, so a project importing something missing
       // from its own package.json would build here and fail anywhere else.
-      // That is one of the two production failures behind #194: this check
+      // That is one of the two production failures behind internal issue 194: this check
       // is worth having only if it measures what a clean environment sees.
       // Asked before the first thing that touches the container, not
-      // only between the steps that follow it (#196 review). Everything
+      // only between the steps that follow it (internal PR 196 review). Everything
       // above this point can take time -- the admission most of all -- and
       // the clear is destructive: starting it without knowing the lock is
       // still ours is how a build that had been superseded emptied its
@@ -574,7 +574,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       // Bounded like every other call here. Left direct, this one could
       // stall past the deadline without ever reaching the teardown, and a
       // late `rm -rf /workspace` would then empty a successor's tree
-      // (#196 review).
+      // (internal PR 196 review).
       const cleared = await bounded(
         this.exec('rm -rf /workspace', { cwd: '/' }),
       );
@@ -590,7 +590,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       // the TTL is measuring silence rather than project size, and inside
       // this stretch as well as after it: writing the project in is one or
       // two RPCs per file, and a big enough project outran the lock while
-      // the renewal sat waiting for the loop to finish (#196 review).
+      // the renewal sat waiting for the loop to finish (internal PR 196 review).
       if (!(await this.writeProject(files, keepAlive, bounded))) return stopped;
       if (!(await keepAlive())) return stopped;
 
@@ -616,12 +616,12 @@ export class PreviewSandbox extends Sandbox<Env> {
         }
         // A registry or DNS outage is not the project's fault, and it
         // exits fast rather than reaching the timeout above, so the clock
-        // cannot tell them apart (#196 review). Left as `install` it buys
+        // cannot tell them apart (internal PR 196 review). Left as `install` it buys
         // a repair: a second paid model call asked to fix a project that
         // compiles perfectly well, whose reply cannot help, on a day when
         // npm is having trouble and every caller hits it at once.
         //
-        // Matching on wording, which #194 deliberately moved away from for
+        // Matching on wording, which internal issue 194 deliberately moved away from for
         // the *caller's* decision -- but the caller decides from a typed
         // reason, and this is where that reason is worked out. npm's own
         // error codes are the only signal there is, and erring toward
@@ -651,7 +651,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         // there, and `build` runs `tsc --noEmit` before it bundles
         // anything. Reporting stderr alone told somebody whose publish was
         // blocked by a type error that npm had exited 2, and nothing else
-        // (#194).
+        // (internal issue 194).
         const said = [build.stdout, build.stderr]
           .map((stream) => stream.trim())
           .filter((stream) => stream.length > 0)
@@ -695,7 +695,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       // One RPC per output file, so the longest unbounded stretch here and
       // the one most likely to outrun a TTL. It lives in `build-files.ts`
       // so it can be called with fakes rather than read with regexes
-      // (#196 review): the renewal used to count the files it kept rather
+      // (internal PR 196 review): the renewal used to count the files it kept rather
       // than the files it read, and nothing that reads this file as source
       // was ever going to notice.
       const { output, skipped, complete } = await collectOutput(
@@ -723,7 +723,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         error: error instanceof Error ? error.message : 'Build failed.',
       };
     } finally {
-      // Not awaited, which is the point (#196 review). Tearing a container
+      // Not awaited, which is the point (internal PR 196 review). Tearing a container
       // down is not the caller's business: they asked whether their project
       // builds, and by here that is known. Awaiting it put up to ten more
       // minutes of somebody else's problem on a paid Workflow's clock, and
@@ -766,7 +766,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     started: boolean,
   ): Promise<void> {
     // A clock of its own, because it no longer runs inside the build's
-    // (#196 review). Every storage call below could stay pending, and a
+    // (internal PR 196 review). Every storage call below could stay pending, and a
     // teardown that never finishes is one that never reaches its release.
     //
     // Running out of time propagates, exactly as a storage rejection
@@ -779,13 +779,13 @@ export class PreviewSandbox extends Sandbox<Env> {
       withinDeadline(work, deadline - Date.now());
 
     // A ticket for a build that never started goes back first, and without
-    // asking storage anything (#196 review).
+    // asking storage anything (internal PR 196 review).
     //
     // Nothing ever ran, so there is no container, so no ownership question
     // arises: the answer the read would give cannot change what happens to
     // this ticket. Ordering it after the read made the release depend on a
     // call that can reject or stall. A refused build's row is closed by the
-    // fleet itself (#197), so what this still protects is an admitted
+    // fleet itself (internal issue 197), so what this still protects is an admitted
     // ticket for a build that stopped before its first command: left here,
     // it holds one of the shared containers, which a preview may be queued
     // for, until the fleet reclaims it.
@@ -804,7 +804,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     }
 
     // Confirmed and pushed forward in one go, immediately before the
-    // destroy (#196 review).
+    // destroy (internal PR 196 review).
     //
     // Reading ownership answered the question and left the lock as old as
     // it already was, and `destroyWithin` does not renew until a whole
@@ -866,12 +866,12 @@ export class PreviewSandbox extends Sandbox<Env> {
    * preview may be queued behind it.
    *
    * Its own method because the teardown is no longer the only caller
-   * (#196 review): a build that gave up waiting for `enqueue` has to give
+   * (internal PR 196 review): a build that gave up waiting for `enqueue` has to give
    * back whatever that call eventually hands it, and it is the same
    * release for the same reason.
    */
   private async releaseTicket(ticket: number): Promise<boolean> {
-    // Each attempt, not the sequence (#196 review). `retrying` never
+    // Each attempt, not the sequence (internal PR 196 review). `retrying` never
     // reaches its second attempt if the first never settles, so an
     // unbounded call turns the retry into a single unbounded one, and a
     // release that never settles never frees the container it was for.
@@ -1112,7 +1112,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       }
 
       // The cheapest place in the product to find out that a generated
-      // project does not compile (#194): the container is up and the
+      // project does not compile (internal issue 194): the container is up and the
       // install has already happened, so this costs seconds rather than a
       // second sandbox. Two of six real generations measured against the
       // production provider produced a project that fails `npm run build`,
@@ -1176,7 +1176,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    * can act on, and the same correction applies to `buildProject` below,
    * where it was the whole of what a blocked publish reported.
    *
-   * Bounded, and that bound is not a safety margin (#195 review). The
+   * Bounded, and that bound is not a safety margin (internal PR 195 review). The
    * prompt requires a "typecheck" script to exist and does not require it
    * to terminate, so a manifest declaring `tsc --watch --noEmit` would
    * never return here: the preview would sit in `starting` until its hard
@@ -1219,7 +1219,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    * The TTL is what lets a crashed build stop blocking the next one, and
    * it was being compared against work that is only partly bounded: the
    * two commands have timeouts, but writing the project in and reading the
-   * output back are one RPC per file and scale with the project (#196
+   * output back are one RPC per file and scale with the project (internal PR 196
    * review). A build that outran the TTL had its lock stolen, its
    * workspace emptied underneath it, and -- worse -- went on to destroy
    * the container the thief was now using.
@@ -1236,7 +1236,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    * Destroy this build's container while keeping its lock alive.
    *
    * The renewals around the build stopped at the edge of teardown, and
-   * `destroy()` has no deadline of its own (#196 review). A destroy that
+   * `destroy()` has no deadline of its own (internal PR 196 review). A destroy that
    * blocked past the TTL let another build take the lock and start in this
    * same named sandbox, and then the first destroy killed *their*
    * container. Re-reading the token before deleting protects the newer
@@ -1254,7 +1254,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    * lock then ages out on its own.
    *
    * What giving up leaves behind, which was raised in review and is
-   * accepted rather than overlooked (#196 review). The destroy is still in
+   * accepted rather than overlooked (internal PR 196 review). The destroy is still in
    * flight and cannot be called back: once the lock ages out, a later build
    * for this user can start a fresh container here, and the orphaned SIGKILL
    * could land on it.
@@ -1280,7 +1280,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     deadline: number,
   ): Promise<boolean> {
     // Its own cap, or what is left of the teardown's, whichever runs out
-    // first (#196 review). I gave the teardown a wall clock one round ago
+    // first (internal PR 196 review). I gave the teardown a wall clock one round ago
     // and then let the longest thing inside it start a fresh window of its
     // own, so the clock bounded every call in the method except the one it
     // was added for: twelve minutes of build, twelve waiting on storage
@@ -1305,7 +1305,7 @@ export class PreviewSandbox extends Sandbox<Env> {
 
   /**
    * Push the lock forward, and say whether it was still ours to push
-   * (#196 review).
+   * (internal PR 196 review).
    *
    * The answer is the half that was missing. Renewing has always been
    * conditional on ownership, so a build that had already been superseded
@@ -1315,7 +1315,7 @@ export class PreviewSandbox extends Sandbox<Env> {
    */
   /**
    * The same renewal, from inside the build, where running out of time is
-   * an answer rather than a failure (#196 review).
+   * an answer rather than a failure (internal PR 196 review).
    *
    * `keepAlive` answers false for "this build should stop", and a renewal
    * the deadline cut off is exactly that: the wall clock has run out, so
@@ -1335,7 +1335,7 @@ export class PreviewSandbox extends Sandbox<Env> {
 
   private async renewLock(token: string, deadline: number): Promise<boolean> {
     // Its own two storage calls, bounded like everything else that awaits
-    // (#196 review). Every protection this build has is a renewal, and a
+    // (internal PR 196 review). Every protection this build has is a renewal, and a
     // renewal that never returns is the one thing none of them can survive:
     // `buildProject` outlives its wall clock without reaching its `finally`,
     // the lock ages out and the ticket is reclaimed while the container is
@@ -1360,7 +1360,7 @@ export class PreviewSandbox extends Sandbox<Env> {
 
   /**
    * One or two RPCs per file and no bound of its own, which makes it the
-   * other end of the same hazard as reading the output back (#196 review).
+   * other end of the same hazard as reading the output back (internal PR 196 review).
    * A build holds a lock while this runs, so `renew` pushes it forward as
    * the loop goes; a preview holds none and says so at its call site.
    */
@@ -1370,7 +1370,7 @@ export class PreviewSandbox extends Sandbox<Env> {
     /**
      * Applied to each RPC rather than around the loop, because a loop bound
      * only catches a build made of many slow calls and this also has to
-     * catch one made of a single stuck one (#196 review). A preview passes
+     * catch one made of a single stuck one (internal PR 196 review). A preview passes
      * the identity, because it holds nothing anybody else is waiting for.
      */
     bounded: <T>(work: Promise<T>) => Promise<T>,

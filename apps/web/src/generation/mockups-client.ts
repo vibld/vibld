@@ -5,7 +5,7 @@ import { SignInRequiredError, readPlanEvents } from './remote-provider.ts';
 import type { GenerationProgress } from './session.ts';
 
 /**
- * Ask for three directions to choose between (#185).
+ * Ask for three directions to choose between (internal issue 185).
  *
  * Deliberately a plain function rather than a `ModelProvider`. What comes
  * back is not a project: it is three things to look at, two of which are

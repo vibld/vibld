@@ -1,6 +1,6 @@
 /**
  * Connecting a repository: proving who is connecting before anything is
- * bound (issue #121).
+ * bound (internal issue 121).
  *
  * This file exists because of one fact about GitHub. After someone installs
  * a GitHub App, GitHub redirects to the App's setup URL with

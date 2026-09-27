@@ -455,7 +455,7 @@ describe('what a slug keeps', () => {
   });
 
   it('sweeps up an object no catalogue row names', async () => {
-    // The interleaving #177 describes, played out: a takedown collects a
+    // The interleaving internal issue 177 describes, played out: a takedown collects a
     // revision while one of its uploads is still in the air, and the write
     // lands afterwards under a prefix nothing points at any more.
     //
@@ -919,7 +919,7 @@ describe('taking a published site down', () => {
 });
 
 /**
- * An operator taking somebody else's site off the web (#172).
+ * An operator taking somebody else's site off the web (internal issue 172).
  *
  * Not the owner takedown wearing a different hat. There the owner asked for
  * their own work to go and can put it back; here somebody else is being

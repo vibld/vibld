@@ -250,7 +250,7 @@ describe('the command line and the container (#237 review)', () => {
     const joined = args.join(' ');
     assert.match(joined, /--volume \/stage\/0:\/candidate:ro/);
     assert.equal(args.filter((arg) => arg === '--volume').length, 1);
-    // Nothing written inside reaches the runner's disk (#237 review): a
+    // Nothing written inside reaches the runner's disk (internal PR 237 review): a
     // read-only image, and a size-bounded tmpfs for each writable path.
     assert.ok(args.includes('--read-only'));
     const tmpfs = args.flatMap((arg, i) =>

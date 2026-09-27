@@ -23,7 +23,7 @@
   // see the PR this shipped in for the exact one-time step.
   "routes": [{ "pattern": "app.vibld.com", "custom_domain": true }],
 
-  // Workers Logs, on, because production was unreadable without it (#201).
+  // Workers Logs, on, because production was unreadable without it (internal PR 201).
   //
   // A generation failed live with Cloudflare's own
   // `WorkflowInternalError: Attempt failed due to internal workflows error`
@@ -42,7 +42,7 @@
   "observability": { "enabled": true },
 
   // CPU, not wall time: streaming a long generation and parsing it is real
-  // compute, and the default ceiling is thirty seconds (#201).
+  // compute, and the default ceiling is thirty seconds (internal PR 201).
   //
   // A run streams tens of thousands of output tokens over several minutes
   // and then parses and validates the whole thing against an existing
@@ -109,12 +109,12 @@
     // longer so, and raising it is a separate decision not taken here.
     //
     // The reconcile used to be bounded by nothing, reading every
-    // subscription Stripe knows about. Since #47 it takes a quarter like the
+    // subscription Stripe knows about. Since internal PR 47 it takes a quarter like the
     // others, sized by `reconcileBatchFor` at its measured worst case per
     // subscription, and walks the list from a saved cursor
     // (0017_reconcile_cursor.sql), so a lap takes several nights instead of
     // one unbounded run. Below 92 the split would starve phases and the pass
-    // rotates instead (#176); 500 is well above that, so it splits.
+    // rotates instead (internal issue 176); 500 is well above that, so it splits.
     "VIBLD_REPLAY_QUERY_BUDGET": "500",
 
     // A run reserves its worst case up front -- with a 64000-token output
@@ -179,7 +179,7 @@
       "namespace_id": "1004",
       "simple": { "limit": 3, "period": 60 },
     },
-    // Issue #13: a push mints an installation token and writes commits and a
+    // internal issue 13: a push mints an installation token and writes commits and a
     // branch into somebody's repository. Same reasoning as PUBLISH_BURST,
     // keyed on the Clerk user id and checked after identity: the cost of a
     // flood here lands on GitHub's API quota and on a real repository, not on
@@ -205,7 +205,7 @@
   // is not billed there.
   //
   // RUN_PROGRESS is the live channel between a running Workflow step and the
-  // poll loop that serves /api/plan's SSE stream (#183, worker/run-progress
+  // poll loop that serves /api/plan's SSE stream (internal issue 183, worker/run-progress
   // .ts). Named per run, holds nothing in storage, and is created on first
   // access like the ledger above.
   "durable_objects": {

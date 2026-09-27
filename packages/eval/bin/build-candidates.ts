@@ -23,7 +23,7 @@ import { parseArgs } from 'node:util';
  * "Accepted" meant the plan passed validation and mentioned what was asked
  * for. It never meant the project builds: the bakeoff wrote its candidates
  * out and stopped, and the CI stub's own project stopped at
- * "vite: not found" while being reported accepted (#59). A person exporting
+ * "vite: not found" while being reported accepted (internal PR 59). A person exporting
  * a project runs `npm install` and `npm run build` next, so that is what
  * this runs.
  *
@@ -33,7 +33,7 @@ import { parseArgs } from 'node:util';
  * also hands each command only what npm needs (see PASSED_ENV), installs with
  * `--ignore-scripts`, and sets a time limit.
  *
- * One candidate must not be able to reach another (#237 review), and only
+ * One candidate must not be able to reach another (internal PR 237 review), and only
  * a boundary the candidate cannot cross gives that. With `--container
  * <image>`, which is how CI and the bakeoff run it, each candidate builds in
  * a container of its own: its snapshot mounted read-only and copied inside,
@@ -67,7 +67,7 @@ const CONTAINER_REMOVE_TIMEOUT_MS = 60_000;
 /**
  * The longest one candidate can take: its install limit plus its build
  * limit, and in a container the limits on starting and removing it as well
- * (#237 review).
+ * (internal PR 237 review).
  */
 export function candidateWorstCaseMs(container: boolean): number {
   return (
@@ -94,7 +94,7 @@ export function canStart(
  * Whether this file is the one Node was asked to run. Compared by URL rather
  * than with `import.meta.main`, which Node only has from 22.18 and 24.2: on
  * an earlier supported release it is undefined, and the script would exit
- * successfully having built nothing (#237 review).
+ * successfully having built nothing (internal PR 237 review).
  */
 export function isEntry(moduleUrl: string, argv1: string | undefined): boolean {
   return (
@@ -342,7 +342,7 @@ export function containerStart(
     '2',
     '--pids-limit',
     '2048',
-    // Nothing the candidate writes reaches the runner's disk (#237 review):
+    // Nothing the candidate writes reaches the runner's disk (internal PR 237 review):
     // the image is read-only, and the only places it can write are its home
     // (the work copy, node_modules and npm's cache) and /tmp, each an
     // in-memory filesystem with a size and an inode limit.
@@ -364,7 +364,7 @@ export function containerStart(
 
 /**
  * Whether a proxy setting may hold a user name or password. Such a proxy is
- * not passed into a candidate's container at all (#237 review): the
+ * not passed into a candidate's container at all (internal PR 237 review): the
  * candidate's own code runs there and can read its environment, and a URL
  * with its credentials removed would only fail to authenticate. Read as
  * any `@`, the only way a URL carries them, so that a value the URL parser
@@ -419,7 +419,7 @@ async function buildInContainer(
   // A container that is still there may still be running what the candidate
   // started, beside the next one. So a removal that failed fails this
   // candidate, whatever its build did, and the run starts no other
-  // (#237 review).
+  // (internal PR 237 review).
   // A container that never started is already gone, and docker says so.
   const gone = removal.ok || /No such container/i.test(removal.output);
   if (!gone) {

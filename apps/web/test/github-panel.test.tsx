@@ -18,7 +18,7 @@ import { githubStatus } from '../src/github/github-status.ts';
  * before it. Worse than looking out of date: Disconnect on a stale panel
  * disconnects whatever is bound now rather than the thing it is naming.
  *
- * It shipped on #123 with no test, because subscribing is wiring in a
+ * It shipped on internal PR 123 with no test, because subscribing is wiring in a
  * `.tsx` and there was no way to run one. This is that gap closed.
  */
 
@@ -30,7 +30,7 @@ function reply(value: unknown): Response {
 }
 
 /**
- * The connection is shared state now (#34), and shared state outlives a
+ * The connection is shared state now (internal PR 34), and shared state outlives a
  * test. Without this, a test mounting after one that connected would find a
  * repository already there and pass without ever asking for one.
  */

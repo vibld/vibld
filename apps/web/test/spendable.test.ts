@@ -12,7 +12,7 @@ import { schemaSql } from './fakes/schema.ts';
 import type { Principal } from '../worker/principal.ts';
 
 /**
- * What a caller is allowed to spend (#185).
+ * What a caller is allowed to spend (internal issue 185).
  *
  * Extracted from `handlePlan` because a second route is about to need the
  * same answer, and this is the part where two copies would hurt. The

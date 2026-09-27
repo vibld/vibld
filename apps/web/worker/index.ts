@@ -188,7 +188,7 @@ export interface Env {
   /** Per-user spend ledger. Without it the ceiling cannot be enforced. */
   USER_BUDGET?: DurableObjectNamespace<UserBudget>;
   /**
-   * The live progress channel a running generation reports through (#183),
+   * The live progress channel a running generation reports through (internal issue 183),
    * read by the poll loop and written by the Workflow step.
    *
    * Optional, unlike the ledger, because what it carries is decoration
@@ -302,7 +302,7 @@ export interface Env {
   /** Uploads to the media library, per caller (`media-handlers.ts`). */
   MEDIA_BURST?: RateLimit;
   /**
-   * The GitHub App this deployment pushes with (issue #13). Both are Worker
+   * The GitHub App this deployment pushes with (internal issue 13). Both are Worker
    * secrets and both are Vibld's own infrastructure credential, never a
    * user's (ADR-0006): the private key signs a JWT, the JWT mints an
    * installation token scoped to the one repository a user connected, and
@@ -315,7 +315,7 @@ export interface Env {
   /** Worker secret. The whole of the authentication on /api/github/webhook. */
   VIBLD_GITHUB_WEBHOOK_SECRET?: string;
   /**
-   * The OAuth half of the same App (issue #121). Connecting a repository has
+   * The OAuth half of the same App (internal issue 121). Connecting a repository has
    * to establish that the person doing it controls the GitHub account,
    * because GitHub's post-install redirect proves nothing on its own: it is
    * an unsigned GET carrying an installation id. These let Vibld ask GitHub,
@@ -373,7 +373,7 @@ export interface Env {
    * the plan's real limit is worse than leaving it alone.
    *
    * Below 92, a four-way split cannot buy every phase of the nightly pass an
-   * item, so the pass rotates instead (#176, `nightSharesFor`): the parked
+   * item, so the pass rotates instead (internal issue 176, `nightSharesFor`): the parked
    * queue keeps its floor every night and the other three phases take the
    * rest in turn. The default of 40 is below it.
    */
@@ -447,7 +447,7 @@ function isConfigured(env: Env): boolean {
  * readout and drive its checkout/portal buttons (L35).
  */
 /**
- * This project's finished runs, newest first (#167).
+ * This project's finished runs, newest first (internal issue 167).
  *
  * Read-only, and scoped to the caller's own project by construction: the
  * project id is the principal's user id, so there is no identifier on the
@@ -867,7 +867,7 @@ async function handlePlan(
   }
 
   // The direction the caller picked from a mockup run, if they ran one
-  // (#185). Carried as the document rather than its name: a build seeded
+  // (internal issue 185). Carried as the document rather than its name: a build seeded
   // with only a label can ignore the choice and still look like it obeyed.
   const chosenMockup = parseChosenMockup(body);
   if (!chosenMockup.ok) {
@@ -924,7 +924,7 @@ async function handlePlan(
   // tokens while letting the model emit 384000 is a run that outspends its
   // own reservation six times over.
   //
-  // A follow-up is sized to carry the project it edits as well (#209): it
+  // A follow-up is sized to carry the project it edits as well (internal issue 209): it
   // returns the complete set of files, so a reservation sized for building
   // something new left a large project no room for the change itself. One
   // project per Clerk user, the convention the run itself uses.
@@ -948,7 +948,7 @@ async function handlePlan(
     };
   };
   // Assigned by the reservation below, which may settle on the ordinary
-  // size rather than the carried one (#210 review). Everything after it,
+  // size rather than the carried one (internal PR 210 review). Everything after it,
   // the Workflow's params included, reads what was actually reserved.
   let prices: TokenPrices;
   let maxTokens: number;
@@ -960,7 +960,7 @@ async function handlePlan(
   let reserved;
   // Declared out here because the Workflow is given them too: a repair turn
   // holds its own reservation and must do it against the figures this run
-  // was admitted on, not ones it re-derives minutes later (#194).
+  // was admitted on, not ones it re-derives minutes later (internal issue 194).
   let monthlyAllowance: number;
   let topupCeiling: number;
   try {
@@ -999,7 +999,7 @@ async function handlePlan(
   }
 
   if (!reserved.ok) {
-    // The two refusals #159 asks for by name. Both were 429 with different
+    // The two refusals internal issue 159 asks for by name. Both were 429 with different
     // prose, so a caller could only tell them apart by reading the sentence,
     // and they lead somewhere completely different: one is resolved by
     // buying a top-up or waiting for the month to turn, the other by waiting
@@ -1033,7 +1033,7 @@ async function handlePlan(
    *
    * One function because it is needed on both sides of `create()` and two
    * copies of a settlement is two things that can come to disagree about
-   * what a cancelled run costs (#189 review).
+   * what a cancelled run costs (internal PR 189 review).
    *
    * Settled through the ordinary path rather than a second one:
    * `settleBudget`'s third case is "the provider was never asked", which is
@@ -1061,7 +1061,7 @@ async function handlePlan(
 
   /**
    * Noticed before anything durable exists, and kept noticing across the
-   * call that makes something durable (#189 review).
+   * call that makes something durable (internal PR 189 review).
    *
    * The previous round added the check below, which asks once whether the
    * caller has already left. The round after it found what one check cannot
@@ -1120,7 +1120,7 @@ async function handlePlan(
         maxTokens,
         // The figures this run was admitted on, carried so a repair turn
         // can hold its own reservation without reconstructing a Principal
-        // inside the Workflow (#194).
+        // inside the Workflow (internal issue 194).
         monthlyAllowance,
         topupCeiling,
       },
@@ -1133,7 +1133,7 @@ async function handlePlan(
     );
   }
 
-  // The other side of the window the flag above exists for (#189 review).
+  // The other side of the window the flag above exists for (internal PR 189 review).
   // The abort landed while `create()` was in flight, so there is now a
   // Workflow to stop, and stopping it here rather than several statements
   // later is the difference between the next step boundary and the one
@@ -1192,7 +1192,7 @@ async function handlePlan(
   // Through `whenClientGone`, because a caller who left during the identity
   // check or the reservation above has already aborted by the time this
   // runs, and an abort is not replayed to a listener added afterwards
-  // (#189 review). This route's version of that is the expensive one: a
+  // (internal PR 189 review). This route's version of that is the expensive one: a
   // whole generation starts for somebody who is not there.
   //
   // The second registration in this route, and both are needed. The first
@@ -1257,7 +1257,7 @@ async function handlePlan(
         }
 
         if (status.status === 'errored' || status.status === 'terminated') {
-          // Recorded, not just shown (#201). A run that dies inside the
+          // Recorded, not just shown (internal PR 201). A run that dies inside the
           // Workflow engine leaves nothing this service wrote: the step's
           // own output is null and the instance API reports one generic
           // sentence. That sentence is the only evidence there is, and
@@ -1286,7 +1286,7 @@ async function handlePlan(
         }
 
         // Still going. The generate step reports what it has produced
-        // through a named Durable Object (#183, `run-progress.ts`), which
+        // through a named Durable Object (internal issue 183, `run-progress.ts`), which
         // is read here and nowhere else. A read that fails, or a run that
         // has not reported yet, leaves the count absent rather than zero:
         // "unknown" and "none written" are different, and the client's
@@ -1326,7 +1326,7 @@ async function handlePlan(
 }
 
 /**
- * Three directions to choose between, before a build is attempted (#185).
+ * Three directions to choose between, before a build is attempted (internal issue 185).
  *
  * The same shape as `handlePlan` and deliberately not the same code. It
  * calls the same shared functions for every number that decides money --
@@ -1440,7 +1440,7 @@ async function handleMockups(
   // asked before there is a project, so none of them exists to send.
   //
   // Named rather than inlined because the settlement of a cancelled run
-  // needs the same figure (#189 review), and a second spelling of it is a
+  // needs the same figure (internal PR 189 review), and a second spelling of it is a
   // second chance for the two to disagree about what was reserved.
   const inputChars = MOCKUP_INPUT_CHARS;
   const worstCase = worstCaseMicroUsd(prices, maxTokens, inputChars);
@@ -1515,7 +1515,7 @@ async function handleMockups(
     // this scope, so the signal reaches it.
     //
     // Stopping the provider is only half of it, which is what the first
-    // version of this got wrong (#189 review). The abort makes the call
+    // version of this got wrong (internal PR 189 review). The abort makes the call
     // reject, so no usage is ever reported, and settlement's unknown-cost
     // case charges the full reservation -- Cancel cost more than waiting.
     // The `finally` below settles a stopped run from what was streamed.
@@ -1523,7 +1523,7 @@ async function handleMockups(
   };
   // Same reason as `handlePlan`'s: everything above this line is real work
   // a caller can disconnect during, and an abort that landed then is not
-  // replayed to a listener added now (#189 review).
+  // replayed to a listener added now (internal PR 189 review).
   whenClientGone(request.signal, cancel);
 
   const write = (chunk: string) =>
@@ -1535,7 +1535,7 @@ async function handleMockups(
   // What this run really sends, reported by the client that sends it.
   //
   // Reconstructed here at first, from the system prompt and
-  // `mockupUserPrompt` (#189 review). That was right for two of the three
+  // `mockupUserPrompt` (internal PR 189 review). That was right for two of the three
   // clients and wrong for DeepSeek, which appends the output instruction to
   // the system message -- so the figure was short by about 430 characters
   // on the one provider production actually runs. The assembly is
@@ -1552,16 +1552,16 @@ async function handleMockups(
     let providerRan = false;
     // What the model had streamed when the reader stopped it. The only
     // measurement of a cancelled run there is, and without it settlement
-    // falls back to the full reservation (#189 review).
+    // falls back to the full reservation (internal PR 189 review).
     let streamedCharacters = 0;
-    // Counted beside it rather than added into it (#190). A reasoning model
+    // Counted beside it rather than added into it (internal PR 190). A reasoning model
     // thinks before it writes, so a run stopped in its first seconds has
     // streamed nothing but this, and settling on the answer alone priced a
     // minute of billed thinking at zero.
     let reasoningCharacters = 0;
     /*
      * What the retry spent that this reader is not being charged for
-     * (#191 review).
+     * (internal PR 191 review).
      *
      * The provider absorbs one empty reply on the reader's behalf, and
      * the first version of that let the money vanish: settlement saw only
@@ -1572,7 +1572,7 @@ async function handleMockups(
      */
     /*
      * Undefined until an attempt is absorbed, and a number after, even
-     * when that number is zero (#191 review).
+     * when that number is zero (internal PR 191 review).
      *
      * Not a count that starts at zero, because zero and "there was no
      * discarded attempt" then look identical, and they settle
@@ -1592,7 +1592,7 @@ async function handleMockups(
     let retryHold: Reservation | undefined;
     // Whether that hold was refused, which decides what the reader owes:
     // the run then consists of one attempt, and that attempt is the one
-    // being absorbed (#191 review).
+    // being absorbed (internal PR 191 review).
     let retryRefused = false;
     try {
       const provider = new MockupProvider(
@@ -1605,9 +1605,9 @@ async function handleMockups(
             usage = reported;
           },
           // Forwarded as SSE, which is what makes the character count real
-          // on this route (#189 review). The build cannot do this: its
+          // on this route (internal PR 189 review). The build cannot do this: its
           // model call happens inside a Workflow step with no live channel
-          // back to the Worker polling it (#183). Here the call is in this
+          // back to the Worker polling it (internal issue 183). Here the call is in this
           // scope, so the count the client streams is the count the reader
           // sees.
           onProgress: ({ characters, reasoningCharacters: reasoning }) => {
@@ -1630,7 +1630,7 @@ async function handleMockups(
           },
           /*
            * The absorbed attempt, recorded and then permitted or refused
-           * (#191 review).
+           * (internal PR 191 review).
            *
            * Recorded first, because it has already happened: the money is
            * spent whatever is decided next, and the account ledger is
@@ -1653,7 +1653,7 @@ async function handleMockups(
             try {
               /*
                * Reconcile the attempt that is over before asking to
-               * hold for the next one (#191 review).
+               * hold for the next one (internal PR 191 review).
                *
                * An unsettled reservation counts at its worst case, so
                * without this the day sees two whole worst cases for a
@@ -1693,7 +1693,7 @@ async function handleMockups(
       );
 
       // Nothing has been asked for yet, so a caller who left before this
-      // line costs nothing (#189 review). Without the check, two fixes from
+      // line costs nothing (internal PR 189 review). Without the check, two fixes from
       // earlier rounds met badly: `whenClientGone` aborts the controller for
       // a caller who had already gone, and then this marked the provider as
       // having run and called it with a pre-aborted signal -- so settlement
@@ -1729,9 +1729,9 @@ async function handleMockups(
         // A run the reader stopped is not a run whose cost is unknown: the
         // streamed count is a measurement of it, and settling it as
         // unknown charges the whole reservation for pressing Cancel
-        // (#189 review). Only when the provider was actually asked --
+        // (internal PR 189 review). Only when the provider was actually asked --
         // stopping before that still costs nothing.
-        // Ahead of the cancelled branch on purpose (#191 review). A
+        // Ahead of the cancelled branch on purpose (internal PR 191 review). A
         // refused retry never reaches the progress reset, so the streamed
         // counts still belong to the absorbed attempt, and settling from
         // them would bill the reader for it by the other door.
@@ -1753,7 +1753,7 @@ async function handleMockups(
           settled,
           providerRan,
           // Each account reservation carries the attempt it admitted
-          // (#191 review). The first one covers the first attempt, so
+          // (internal PR 191 review). The first one covers the first attempt, so
           // when that attempt was absorbed, its cost is what this
           // reservation settles at rather than the reader's charge.
           // Undefined when nothing was absorbed, which is every ordinary
@@ -1982,7 +1982,7 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   }
 
   // Asked again while the workspace is busy, on the same budget the
-  // repair's rebuild uses (#196 review). A verification build returns as
+  // repair's rebuild uses (internal PR 196 review). A verification build returns as
   // soon as it has an answer and tears its container down afterwards, on
   // `ctx.waitUntil`, holding that user's build lock for as long as the
   // destroy takes. Publishing straight after a generation therefore met a
@@ -2089,7 +2089,7 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
 
 /**
  * Take somebody else's published site off the web, or put the decision back
- * (#172).
+ * (internal issue 172).
  *
  * The one control an abuse report has an answer through. Until it existed
  * the only lever was editing D1 and R2 by hand, which is not a lever to
@@ -2267,7 +2267,7 @@ export default {
           () => undefined,
         );
       // Every phase, each from its own share of the allowance. What every
-      // night did before #176, and still what a night does whenever the
+      // night did before internal issue 176, and still what a night does whenever the
       // split buys every phase at least one item, which the deployed 500
       // does.
       const everyPhase = () =>
@@ -2358,7 +2358,7 @@ export default {
             (error: unknown) =>
               console.error('referral payout resume failed', error),
           )
-          // Last, and bounded like the rest of the pass (#47). It used to
+          // Last, and bounded like the rest of the pass (internal PR 47). It used to
           // take whatever the allowance had left and then keep going, which
           // past about a hundred subscriptions meant D1 threw, the handler
           // below caught it, and the reconcile stopped happening with
@@ -2383,7 +2383,7 @@ export default {
               console.error('billing reconcile failed', error),
           );
 
-      // A rotating night (#176). A quarter of the Workers Free default buys
+      // A rotating night (internal issue 176). A quarter of the Workers Free default buys
       // no payout, no subscription and no page of events, and the split
       // recurred every night, so those phases never ran. Here each phase
       // spends exactly what `nightSharesFor` gave it, and a phase given
@@ -2473,7 +2473,7 @@ export default {
             // every night anyway, it is handed no more than the allowance
             // less the query that just failed, so the night stays inside
             // the budget, and a pass that did nothing until somebody read
-            // this line is the failure #176 was about.
+            // this line is the failure internal issue 176 was about.
             console.error('nightly rotation unavailable', error);
             return {
               turn: 'parked',

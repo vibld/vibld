@@ -2,7 +2,7 @@ name: Model bakeoff
 
 # Runs the versioned prompt set against real models and keeps what they
 # produced. This is the only thing that answers "which model writes a good
-# website", which the stub cannot (packages/eval/README.md), and #9/#10 ask
+# website", which the stub cannot (packages/eval/README.md), and internal issue 9/#10 ask
 # for reliability rather than a single sample, so it runs each case more than
 # once and reports the spread.
 #
@@ -189,7 +189,7 @@ jobs:
           if-no-files-found: warn
 
   # Whether what was accepted builds, which the run above never checked
-  # (#59): a person exporting a candidate runs npm install and npm run build
+  # (internal PR 59): a person exporting a candidate runs npm install and npm run build
   # next. A separate job on purpose. A candidate's package.json and build
   # config are code a model wrote, and they run here, so this job has no
   # environment and so no provider key to reach; build-candidates.ts also
@@ -208,7 +208,7 @@ jobs:
 
     steps:
       # The job's clock starts here, not when the build step does: checkout,
-      # setup, the download and the image pull all spend it first (#237
+      # setup, the download and the image pull all spend it first (internal PR 237
       # review).
       - name: Note when the job started
         run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"

@@ -8,7 +8,7 @@ export const OUT_OF_TIME = 'vibld:out-of-time';
  * One awaited thing, bounded by a deadline.
  *
  * In `@vibld/core` because both deployments need it and a second copy is
- * the defect rather than the convenience (#196 review): `retrying` already
+ * the defect rather than the convenience (internal PR 196 review): `retrying` already
  * moved here for the same reason, after a duplicate of it shipped.
  *
  * Checking a deadline between operations bounds a build made of many quick
@@ -46,7 +46,7 @@ export function withinDeadline<T>(
 
 /**
  * A command's own cap, cut down to what is left of the build's wall clock
- * (#196 review).
+ * (internal PR 196 review).
  *
  * Bounding the calls that had no bound of their own left the ones that
  * did: each command kept its full five minutes however much of the budget

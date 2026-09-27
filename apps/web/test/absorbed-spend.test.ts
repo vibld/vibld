@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
 /**
- * Spend the reader is spared, which the deployment still paid (#191 review).
+ * Spend the reader is spared, which the deployment still paid (internal PR 191 review).
  *
  * The mockup route absorbs one discarded empty reply on the reader's
  * behalf. The first version of that let the money disappear: settlement saw
@@ -26,7 +26,7 @@ function workerSource(name = 'index.ts'): string {
 /**
  * Both files that can hold a reservation, read as one.
  *
- * `reserveBudget` and `reserveAccount` moved to `reserve.ts` for #194, which
+ * `reserveBudget` and `reserveAccount` moved to `reserve.ts` for internal issue 194, which
  * needs a second caller. The invariant these assertions defend is about the
  * worker rather than about one file of it -- one spelling of the account
  * ceiling, wherever it lives -- so splitting the file must not be able to
@@ -87,7 +87,7 @@ describe('accounting for an attempt nobody was billed for', () => {
   it('reconciles the finished attempt before holding for the next', async () => {
     // An unsettled reservation counts at its worst case, so asking for a
     // second hold beside the first makes the day see two whole worst
-    // cases for a run that will spend one and a bit (#191 review). That
+    // cases for a run that will spend one and a bit (internal PR 191 review). That
     // refuses retries the budget could actually cover, which fails a
     // reader for a provider defect while their deployment had room.
     //
@@ -135,7 +135,7 @@ describe('accounting for an attempt nobody was billed for', () => {
   it('records that the retry was refused, not merely that it did not run', async () => {
     // Without the flag, settlement cannot tell a refused retry from any
     // other run that reported no usage, and `settleBudget` charges the
-    // full worst case for those (#191 review).
+    // full worst case for those (internal PR 191 review).
     const source = await readFile(workerSource(), 'utf8');
     assert.match(
       source,
@@ -182,7 +182,7 @@ describe('accounting for an attempt nobody was billed for', () => {
 
   it('keeps an attempt that priced at nothing distinguishable from none', async () => {
     // The falsy trap `settleBudget` was taught to avoid, moved to its
-    // call site (#191 review). A discarded attempt that prices to zero is
+    // call site (internal PR 191 review). A discarded attempt that prices to zero is
     // not the same fact as no discarded attempt: the first says this
     // reservation covered an attempt that cost nothing, the second says
     // it covered the run the reader is charged for. Collapsing them
@@ -210,7 +210,7 @@ describe('accounting for an attempt nobody was billed for', () => {
   });
 
   it('settles each reservation with the attempt it admitted', async () => {
-    // The midnight case (#191 review). An empty reply whose retry crosses
+    // The midnight case (internal PR 191 review). An empty reply whose retry crosses
     // into the next UTC day holds that day's ceiling, so settling the
     // hold at nothing and putting both attempts on the first reservation
     // makes one day forget a real request while the day before is pushed
@@ -230,7 +230,7 @@ describe('accounting for an attempt nobody was billed for', () => {
     // Two spellings of a ceiling is a ceiling that can be enforced two
     // ways, which is the shape of three findings on this pull request.
     //
-    // Read across both files rather than the entrypoint alone (#194): the
+    // Read across both files rather than the entrypoint alone (internal issue 194): the
     // helper moved to `reserve.ts`, and an assertion that only looked at
     // `index.ts` would now be satisfied by a second spelling sitting in the
     // file it stopped reading.

@@ -2,7 +2,7 @@ import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 import type { StylePreset } from '@vibld/ai/style-presets';
 
 /**
- * The visual directions vibld can build in, for the catalogue page (#186).
+ * The visual directions vibld can build in, for the catalogue page (internal issue 186).
  *
  * Read from `packages/ai/src/style-presets.ts` rather than restated here.
  * That file is what the builder actually sends a model, so a second list on

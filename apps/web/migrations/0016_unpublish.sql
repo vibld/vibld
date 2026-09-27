@@ -1,4 +1,4 @@
--- Taking a published site off the web (ADR-0013, #162).
+-- Taking a published site off the web (ADR-0013, internal issue 162).
 --
 -- Until this column existed there was no way down at all: publishing
 -- claimed a slug and overwrote R2, and nothing removed either. A site

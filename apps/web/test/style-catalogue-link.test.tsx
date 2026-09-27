@@ -12,7 +12,7 @@ import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 import { StylePicker } from '../src/components/StylePicker.tsx';
 
 /**
- * The way out of the empty prompt box (#186).
+ * The way out of the empty prompt box (internal issue 186).
  *
  * Chris asked for "linking from the app to see a preview sample catalog",
  * and the reason is the one the issue names: a chip reading "Brutalist"

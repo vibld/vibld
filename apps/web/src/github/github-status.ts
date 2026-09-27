@@ -2,7 +2,7 @@ import { fetchGitHubStatus } from './github-client.ts';
 import type { GitHubStatus } from './github-client.ts';
 
 /**
- * One copy of "what is connected", shared by everything that shows it (#34).
+ * One copy of "what is connected", shared by everything that shows it (internal PR 34).
  *
  * The panel in the header and the push button in the Code tab each kept their
  * own status and each probed for it separately, so the two could say

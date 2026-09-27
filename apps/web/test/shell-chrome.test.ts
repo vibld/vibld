@@ -10,7 +10,7 @@ import { describe, it } from 'node:test';
  *
  * The header used to carry the brand, a sentence describing the deployment,
  * a billing readout with three buttons, the whole GitHub connection panel
- * and the account button, all competing for one row. #170 moved every piece
+ * and the account button, all competing for one row. Internal PR 170 moved every piece
  * of configuration behind the gear, and three documentation pages went on
  * telling readers to look in the header for a readout that is no longer
  * there. Every check in the repository stayed green, because nothing
@@ -29,7 +29,7 @@ const DOCS = fileURLToPath(
   new URL('../../marketing/app/routes/', import.meta.url),
 );
 
-/** The pieces #170 moved. Each one was in the header and is not any more. */
+/** The pieces internal PR 170 moved. Each one was in the header and is not any more. */
 const BEHIND_THE_GEAR = [
   'BillingStatusWidget',
   'GitHubPanel',

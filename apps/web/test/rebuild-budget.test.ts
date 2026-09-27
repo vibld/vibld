@@ -12,7 +12,7 @@ import {
 
 /**
  * That asking a busy workspace again is bounded as a sequence, not only
- * per call (#196 review).
+ * per call (internal PR 196 review).
  *
  * The repair's second build waits out the first build's container
  * teardown, and each of those calls was bounded at thirteen minutes while
@@ -146,7 +146,7 @@ describe('asking a busy workspace again', () => {
 
 /**
  * That one call to the build service is bounded, and that both ways of
- * getting no answer end the same way (#196 review).
+ * getting no answer end the same way (internal PR 196 review).
  *
  * The step's own wrapper closed over a service binding, so the fakes that
  * exercise it could only ever throw what a deadline throws: the test that

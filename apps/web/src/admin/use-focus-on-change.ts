@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
 /**
- * Move focus to a container when the view behind it changes (#188 review).
+ * Move focus to a container when the view behind it changes (internal PR 188 review).
  *
  * A document load repositions focus by itself; a view switch inside one
  * document does not. Both links in this shell intercept the click, so the

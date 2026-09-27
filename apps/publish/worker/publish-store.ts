@@ -542,7 +542,7 @@ export class PublishStore {
   }
 
   /**
-   * Collect objects that no catalogue row names (#177).
+   * Collect objects that no catalogue row names (internal issue 177).
    *
    * Everything else in this file keeps D1 ahead of R2 so that bytes are
    * never unreachable: `putFiles` catalogues a revision before writing one,
@@ -767,7 +767,7 @@ export class PublishStore {
   }
 
   /**
-   * Take somebody else's site off the web (#172, 0018_operator_hold.sql).
+   * Take somebody else's site off the web (internal issue 172, 0018_operator_hold.sql).
    *
    * The flag only. The bytes stay, on purpose: the harm is the content being
    * reachable and this stops that the moment it is written, while deleting

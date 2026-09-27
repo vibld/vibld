@@ -730,7 +730,7 @@ describe('apps/publish Worker: taking a site down', () => {
 });
 
 /**
- * `/internal/hold` and `/internal/release` (#172): an operator taking
+ * `/internal/hold` and `/internal/release` (internal issue 172): an operator taking
  * somebody else's site off the web.
  *
  * No ownership check, which is the point of the route rather than a gap in

@@ -3,7 +3,7 @@ import { cachedFraction, contextPressure } from '@vibld/core';
 import { getClerkToken } from '../auth/clerk-token.ts';
 
 /**
- * The builder's half of run history (#167): fetching `/api/runs` and turning
+ * The builder's half of run history (internal issue 167): fetching `/api/runs` and turning
  * a stored trace into the words a person reads.
  *
  * JSX-free for the reason `billing-client.ts` gives: this project's test

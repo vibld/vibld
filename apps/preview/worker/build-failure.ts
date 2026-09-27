@@ -5,7 +5,7 @@
  * imports `@cloudflare/sandbox` and cannot be loaded under `node --test`,
  * and every assertion about it so far has been a regex over source. That is
  * a poor instrument for a decision this consequential -- the answer decides
- * whether a caller is charged for a second model call (#196 review).
+ * whether a caller is charged for a second model call (internal PR 196 review).
  */
 
 /**
@@ -32,7 +32,7 @@ export const NETWORK_FAILURE_CODES = [
   'ERR_SOCKET_TIMEOUT',
   'EPROTO',
   'ENETUNREACH',
-  // Reached it and it was not well (#196 review). The first list covered
+  // Reached it and it was not well (internal PR 196 review). The first list covered
   // only the case where the connection fails, which is the smaller half of
   // "npm is having a bad day": a registry that answers 503 is squarely an
   // outage, and npm reports it as `E503`. Leaving these out meant the
@@ -50,7 +50,7 @@ export const NETWORK_FAILURE_CODES = [
 /**
  * Whether a failed `npm install` was the registry rather than the project.
  *
- * Matching on wording, which #194 deliberately moved away from for the
+ * Matching on wording, which internal issue 194 deliberately moved away from for the
  * *caller's* decision. The difference is which layer: the caller decides
  * from a typed reason, and this is where that reason is worked out, from
  * the only signal there is. Erring toward "not the project" is the cheap
@@ -66,13 +66,13 @@ export function networkFailure(said: string): boolean {
  * than as prose.
  *
  * The message alone was enough while the only caller was publish, which
- * shows it to a person and stops. #194 added a caller that has to *decide*
+ * shows it to a person and stops. Internal issue 194 added a caller that has to *decide*
  * from it: a generation that builds its own output and, when the build
  * fails, spends a second model call trying to repair the project. Deciding
  * that from a string means matching on wording, and wording changes.
  *
  * The list is the source and the type is derived from it, rather than the
- * two being written out beside each other (#196 review). `apps/web` keeps
+ * two being written out beside each other (internal PR 196 review). `apps/web` keeps
  * its own copy, deliberately: the two Workers are separate deployments that
  * talk over a service binding and share no build. A copy is only safe while
  * it can be checked against this one, and it cannot be checked against a

@@ -31,11 +31,11 @@ export function SettingsMenu({
 }: {
   /**
    * Given a way to close the popover, because some of what lives in here
-   * takes the reader somewhere else. A link to the admin page (#184) left
+   * takes the reader somewhere else. A link to the admin page (internal issue 184) left
    * the menu standing open over the page it had just opened: the
    * document-level handler below deliberately ignores a mousedown that
    * happened inside the panel, and an internal navigation changes no state
-   * this component watches, so nothing closed it (#188 review).
+   * this component watches, so nothing closed it (internal PR 188 review).
    *
    * A function rather than a context or an imperative handle: there is one
    * caller, and the closing is part of what that one control does.

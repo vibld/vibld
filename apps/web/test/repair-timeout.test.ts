@@ -19,7 +19,7 @@ import {
 } from '../../preview/worker/build-limits.ts';
 
 /**
- * That the repair step is given time for everything it does (#196 review).
+ * That the repair step is given time for everything it does (internal PR 196 review).
  *
  * The step runs a build, a model call and a second build, and the first
  * version of its allowance funded one build while its own comment said two.
@@ -35,7 +35,7 @@ import {
  */
 describe('how long a repair is allowed to take', () => {
   // What one call to the build service can cost this step, which is not
-  // the same as what the two commands inside it can cost (#196 review).
+  // the same as what the two commands inside it can cost (internal PR 196 review).
   // The earlier version of this file added up the command bounds, and a
   // build is more than its commands: it writes the project in, reads the
   // output back, and waits for a fleet slot, all inside its own wall
@@ -73,7 +73,7 @@ describe('how long a repair is allowed to take', () => {
 
   /**
    * Everything the step waits on that is not the model call, added up
-   * (#196 review).
+   * (internal PR 196 review).
    *
    * Four rounds of review each found another await that could stay pending
    * rather than reject, and each fix added a bound. The point of listing
@@ -109,7 +109,7 @@ describe('how long a repair is allowed to take', () => {
     // assertion above and still expire on a slow read.
     //
     // The rebuild's wait is named rather than left inside that margin
-    // (#196 review). It is the second build waiting out the first build's
+    // (internal PR 196 review). It is the second build waiting out the first build's
     // container teardown, which runs beside the model call now, and a wait
     // that fits only because nobody added it up is the defect this
     // allowance has already had twice.
@@ -141,7 +141,7 @@ describe('how long a repair is allowed to take', () => {
 
   it('bounds the model call below the reclaim that would charge its hold', () => {
     // The invariant the whole step's position rests on, asserted rather
-    // than described (#196 review). The repair's hold is settled
+    // than described (internal PR 196 review). The repair's hold is settled
     // immediately after the model call, so the hold's life is that call,
     // and `UserBudget.reserve` charges any hold older than
     // `RUN_ABANDONED_AFTER_MS` at its full worst case. The step around it

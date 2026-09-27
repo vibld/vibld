@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { ADMIN_PATH, adminPageView, isAdminPath } from '../src/admin/route.ts';
 
 /**
- * Which path is the admin page, and what it shows (#184).
+ * Which path is the admin page, and what it shows (internal issue 184).
  *
  * The third view is the one worth a test. `isAdmin` arrives from a fetch,
  * so every page load begins not knowing, and a shell that read that silence

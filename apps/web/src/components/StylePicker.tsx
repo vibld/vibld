@@ -14,7 +14,7 @@ import type { StylePreset, StylePresetId } from '@vibld/ai/style-presets';
  * own colours and fonts and replaces the product-type palette entirely.
  * Someone picking between them should be able to see which they are choosing.
  *
- * The names are still only names, which is the gap #186 names: a chip
+ * The names are still only names, which is the gap internal issue 186 names: a chip
  * reading "Brutalist" tells somebody who has not seen one nothing at all,
  * and the cheapest way to find out is currently to spend a run. So the
  * legend carries a link to vibld.com/styles, which is generated from this

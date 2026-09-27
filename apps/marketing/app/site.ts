@@ -60,7 +60,7 @@ export const SITE = {
    * and a laptop both fed the production numbers.
    */
   analyticsHosts: ['vibld.com', 'www.vibld.com'] as readonly string[],
-  /** Issue #7 -- link the repository and the open-source, portable-code promise. */
+  /** internal issue 7 -- link the repository and the open-source, portable-code promise. */
   repoUrl: 'https://github.com/vibld/vibld',
   /**
    * The builder (docs/decisions.md L20). A separate host, so this is a plain
@@ -84,7 +84,7 @@ export const SITE = {
    * so it lists only profiles that actually exist -- an invented URL is worse
    * than an omitted one.
    */
-  /** The social card built by the brand system (issue #7). Absolute URL is filled in against SITE.url; see `metaFor`. */
+  /** The social card built by the brand system (internal issue 7). Absolute URL is filled in against SITE.url; see `metaFor`. */
   ogImage: '/og-image.png',
   ogImageAlt:
     'vibld: an AI application builder that generates conventional, portable projects.',

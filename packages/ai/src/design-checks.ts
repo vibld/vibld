@@ -404,9 +404,9 @@ function sameChannels(a: Channels, b: Channels): boolean {
 /**
  * The utilities that take a colour, as Tailwind names them, with the
  * important modifier in either place: `!bg-primary`, and v4's
- * `bg-primary!` (#239 review). Behind any variants, each read whole, so
+ * `bg-primary!` (internal PR 239 review). Behind any variants, each read whole, so
  * one with a selector or a name in it, `[&>a]:`, `data-[state=open]:` or
- * `group-hover/item:`, still leaves the utility (#239 review).
+ * `group-hover/item:`, still leaves the utility (internal PR 239 review).
  */
 const COLOR_UTILITY =
   /^(?:(?:[\w@*/.-]|\[[^\]\s]*\])+:)*!?(?:bg|text|border(?:-[trblxyse])?|fill|stroke|from|via|to|ring|ring-offset|outline|decoration|accent|caret|divide|placeholder|shadow|inset-shadow)-(\[[^\]\s]{1,80}\]|\(--[\w-]{1,80}\)|[a-z][a-z0-9-]{0,40})(?:\/(\d{1,3}|\[\d*\.?\d+%?\]))?!?$/;
@@ -428,7 +428,7 @@ function customProperties(css: string): Map<string, string[]> {
   // Last declaration wins within one block's selector, as the cascade does
   // there, while each selector keeps its own: shadcn/ui declares
   // `--primary` in :root and again in .dark, and `bg-primary` draws each
-  // in its theme, so either is a colour the page uses (#239 review). One
+  // in its theme, so either is a colour the page uses (internal PR 239 review). One
   // pass, a stack of the selectors the cursor is inside.
   const scoped = new Map<string, string>();
   const stack: string[] = [];
@@ -487,7 +487,7 @@ function opacityOf(modifier: string): number {
 
 /**
  * A class-like token, keeping a `[...]` arbitrary value whole, and v4's
- * custom-property shorthand, `bg-(--accent)` (#239 review), as often as a
+ * custom-property shorthand, `bg-(--accent)` (internal PR 239 review), as often as a
  * token has them: `[&>a]:bg-[#fff]`.
  */
 const CLASS_TOKEN =
@@ -504,7 +504,7 @@ function tailwindColors(
   const seen = new Set<string>();
   // A bracketed arbitrary value is one token whatever it holds:
   // `bg-[rgb(255,0,0)]` has parentheses and commas that separate class
-  // strings everywhere else, in cva() calls and objects (#239 review).
+  // strings everywhere else, in cva() calls and objects (internal PR 239 review).
   for (const token of source.match(CLASS_TOKEN) ?? []) {
     if (token.length > 160 || seen.has(token)) continue;
     seen.add(token);
@@ -513,7 +513,7 @@ function tailwindColors(
     const [, name, modifier] = match;
     if (TAILWIND_PALETTE.test(name!)) {
       // Keyed with its opacity, since `bg-red-500/20` and `bg-red-500/60`
-      // draw two colours (#239 review).
+      // draw two colours (internal PR 239 review).
       // Canonical, since `/100`, `/[100%]` and none draw the same.
       const alpha = modifier === undefined ? 1 : opacityOf(modifier);
       palette.add(`${name}@${Number(alpha.toFixed(3))}`);
@@ -529,7 +529,7 @@ function tailwindColors(
       });
     } else if (name!.startsWith('[')) {
       const value = name!.slice(1, -1).replace(/_/g, ' ');
-      // `bg-[var(--accent)]` is `bg-(--accent)` (#239 review).
+      // `bg-[var(--accent)]` is `bg-(--accent)` (internal PR 239 review).
       const pointer = /^var\(\s*--([\w-]+)\s*\)$/.exec(value);
       values = pointer
         ? lookup(pointer[1]!).flatMap((inner) => {
@@ -1203,13 +1203,13 @@ function specFindings(
   // a warning, as an error would buy a paid repair on a guess. But each
   // palette utility draws one colour, so when more distinct colours are
   // unmatched than there are palette utilities, some are certainly missing
-  // and they stay errors (#239 review).
+  // and they stay errors (internal PR 239 review).
   const distinct = new Set(
     unmatched.map((color) => normalizeCssValue(color.value)),
   );
   // A palette utility's opacity is known even where its colour is not: a
   // `bg-red-500/20` cannot draw an opaque spec colour, so only utilities of
-  // a colour's own opacity count for it, group by group (#239 review).
+  // a colour's own opacity count for it, group by group (internal PR 239 review).
   const candidateAlphas = utilities.palette.map((key) =>
     Number(key.slice(key.lastIndexOf('@') + 1)),
   );
@@ -1413,7 +1413,7 @@ const HIDES = /\b(?:display\s*:\s*none|visibility\s*:\s*hidden)/i;
 
 /**
  * Whether a body hides the element by the declarations that win in it:
- * `display: none; display: block` shows it (#239 review).
+ * `display: none; display: block` shows it (internal PR 239 review).
  */
 function hides(body: string): boolean {
   if (!HIDES.test(body)) return false;
@@ -1428,7 +1428,7 @@ function negligibleDuration(body: string, kind: 'animation' | 'transition') {
   // Every duration in the list: `0s, 2s` stops the first animation and
   // leaves the second running for two seconds.
   // Only the declaration that wins: `0s` then `2s` runs for two seconds
-  // (#239 review).
+  // (internal PR 239 review).
   const won = winningValue(body, `${kind}-duration`);
   return won !== undefined && negligibleList(won);
 }
@@ -1458,7 +1458,7 @@ function stopsAnimation(
   // Every entry of the list: `animation: none, spin 1s` stops the first
   // animation and leaves the second running. The same for paused. Only
   // the declaration that wins counts: `animation: none; animation: spin
-  // 1s` animates (#239 review).
+  // 1s` animates (internal PR 239 review).
   const every = (property: string, value: RegExp) => {
     const won = winningValue(body, property);
     return (
@@ -1515,7 +1515,7 @@ function stopsTransition(
   body: string,
   { hidden = true }: { hidden?: boolean } = {},
 ): boolean {
-  // The declaration that wins, as for animations (#239 review).
+  // The declaration that wins, as for animations (internal PR 239 review).
   return (
     /^none$/i.test(winningValue(body, 'transition(?:-property)?') ?? '') ||
     /^none$/i.test(winningValue(body, 'transform') ?? '') ||
@@ -1591,7 +1591,7 @@ interface SelectorMember {
   scopeNames: string[];
   /**
    * Its specificity, where it differs from what its keys say: what a
-   * `:where()` holds weighs nothing (#239 review).
+   * `:where()` holds weighs nothing (internal PR 239 review).
    */
   weight?: number;
 }
@@ -1603,7 +1603,7 @@ interface SelectorMember {
 /** A subject's plain pseudo-classes, not the functional ones. */
 function pseudoOf(subject: string): string[] {
   // Not inside a functional one either: `.card:not(:hover)` asks the
-  // opposite of `:hover` (#239 review).
+  // opposite of `:hover` (internal PR 239 review).
   let plain = subject;
   for (let i = 0; i < 4; i += 1) {
     plain = plain.replace(/:(?:is|not|has|where)\([^()]*\)/gi, '');
@@ -1629,7 +1629,7 @@ function subjectMembers(selector: string): SelectorMember[] {
       const compounds = part.trim().split(/\s*[\s>+~]\s*/);
       const subject = compounds.pop() ?? '';
       const scope = compounds.join(' ');
-      // `.card:where(.active)` weighs as `.card` does (#239 review).
+      // `.card:where(.active)` weighs as `.card` does (internal PR 239 review).
       const weighed = withoutWhere(subject);
       const weighedScope = withoutWhere(scope);
       return {
@@ -1643,7 +1643,7 @@ function subjectMembers(selector: string): SelectorMember[] {
         scope,
         scopeNames: scope.match(/[.#][\w-]+/g) ?? [],
         // Not the functional ones, `:is(.active)`: their argument is
-        // already among the keys (#239 review).
+        // already among the keys (internal PR 239 review).
         pseudoClasses: pseudoOf(subject).length,
         pseudo: pseudoOf(subject),
       };
@@ -1685,7 +1685,7 @@ function covers(
 ): boolean {
   // With `states`, nor one that asks a state the moving rule does not: an
   // animation on `.card` runs whenever the card is not hovered, whatever
-  // `.card:hover` says (#239 review). A transitioned transform moves by
+  // `.card:hover` says (internal PR 239 review). A transitioned transform moves by
   // entering the state, so a stop there answers it.
   return (
     (stopper.scope === '' || stopper.scope === moving.scope) &&
@@ -1703,7 +1703,7 @@ function covers(
  */
 function coversEverything(selector: string): boolean {
   return selector.split(',').some((part) =>
-    // `*::before` matches generated content only (#239 review).
+    // `*::before` matches generated content only (internal PR 239 review).
     /^(?:(?:html|body|:root)\s+)?\*$/i.test(part.trim()),
   );
 }
@@ -1857,7 +1857,7 @@ function utilitiesOf(
 /**
  * A utility without Tailwind's important modifier, at either end
  * (`!animate-spin`, v4's `animate-spin!`), and whether it had one
- * (#239 review).
+ * (internal PR 239 review).
  */
 function importanceOf(utility: string): {
   utility: string;
@@ -1902,7 +1902,7 @@ function tailwindStops(
   // A reset stops the transform it resets: `motion-reduce:translate-x-0`
   // leaves `hover:scale-110` moving. What stops the transition itself
   // stops them all, and a transition utility moves only through the
-  // transforms it carries (#239 review).
+  // transforms it carries (internal PR 239 review).
   const transformOf = (utility: string) =>
     /^-?(translate-[xy]|scale|rotate)(?:-[xy])?-/.exec(utility)?.[1];
   const resets: Record<string, RegExp> = {
@@ -1922,7 +1922,7 @@ function tailwindStops(
   ) => {
     // An important utility is stopped only by an important reset:
     // `animate-spin!` keeps spinning over `motion-reduce:animate-none`
-    // (#239 review).
+    // (internal PR 239 review).
     if (token.important && !candidate.important) return false;
     if (kind === 'animation') return true;
     if (generic.test(candidate.utility)) return true;
@@ -1945,7 +1945,7 @@ function tailwindStops(
   // A reset of the transform itself is different: it has to hold in the
   // state the transform moves to. `hover:scale-110` outweighs
   // `motion-reduce:scale-100`, which the hovered card leaves behind, unless
-  // the reset is important (#239 review).
+  // the reset is important (internal PR 239 review).
   const holdsState = (
     candidate: { variants: string[]; utility: string; important: boolean },
     token: { variants: string[]; important: boolean },
@@ -1971,7 +1971,7 @@ function tailwindStops(
  * A Tailwind variant for a state the element enters and leaves, where a
  * transitioned transform moves: hover, focus and the like, an open or
  * checked element, and one driven by an attribute, `data-[state=open]:`
- * or `aria-expanded:`, or an arbitrary one (#239 review).
+ * or `aria-expanded:`, or an arbitrary one (internal PR 239 review).
  */
 const STATE_VARIANT =
   /^(?:group-|peer-|in-)?(?:hover|focus|focus-visible|focus-within|active|open|checked|selected|expanded|target|visited|disabled|enabled|required|optional|invalid|valid|user-invalid|user-valid|indeterminate|default|placeholder-shown|autofill|read-only|read-write|in-range|out-of-range|empty|popover-open|(?:data|aria|has|not)-.+|\[.+\])(?:\/[\w-]+)?$/;
@@ -2047,7 +2047,7 @@ function motionSources(text: string): MotionSources {
   };
   for (const rule of rules) {
     // By the declaration that wins: `animation: spin 1s; animation: none`
-    // moves nothing (#239 review).
+    // moves nothing (internal PR 239 review).
     if (
       ANIMATES.test(
         winningDeclaration(rule.body, 'animation(?:-name)?')?.text ?? '',
@@ -2142,15 +2142,15 @@ function motionLibrary(
   const declarativeAt: number[] = [];
   // The names the factory goes by here, as the file imports it: `motion`,
   // `m`, an alias, `import { motion as animated }`, or a namespace's,
-  // `Motion.motion` (#239 review).
+  // `Motion.motion` (internal PR 239 review).
   const factories = motionNames(text, ['motion', 'm']);
   const factory =
     factories.size > 0 ? [...factories].map(escapeRegExp).join('|') : '(?!)';
   // Components Motion wraps, `const MotionButton = motion.create(Button)`
   // or the older `motion(Button)`, or an element of its own bound to a
   // name, `const MotionButton = motion.button`, animate as <motion.*> does
-  // (#239 review).
-  // And those another module created and this one imports (#239 review).
+  // (internal PR 239 review).
+  // And those another module created and this one imports (internal PR 239 review).
   const created = [...motionCreated(text, factory), ...imported];
   const tags = new RegExp(
     `<(?:(?:${factory})\\.[a-z][\\w]*${created.map((name) => `|${escapeRegExp(name)}(?![\\w$.])`).join('')})`,
@@ -2164,7 +2164,7 @@ function motionLibrary(
   // Hooks and functions only as the file imports them from Motion, under
   // their own names, an alias, `useScroll as usePageScroll`, or a
   // namespace, `Motion.useScroll`: a helper of its own called `animate` is
-  // not Motion's (#239 review).
+  // not Motion's (internal PR 239 review).
   const aliases = (names: string[]) => {
     const found = motionNames(text, names);
     if (found.size === 0) return /(?!)/;
@@ -2183,9 +2183,9 @@ function motionLibrary(
     'useMotionTemplate',
   ]).test(text);
   // animate() and useAnimate() start animation from script, outside the
-  // React tree MotionConfig governs (#239 review).
+  // React tree MotionConfig governs (internal PR 239 review).
   // useAnimate() starts nothing until the animate it returns is called
-  // (#239 review).
+  // (internal PR 239 review).
   const starters = motionStarters(text);
   const imperative =
     starters.size > 0 &&
@@ -2201,7 +2201,7 @@ function motionLibrary(
  */
 function motionCreated(text: string, factory: string): string[] {
   // And a component that hands its props to one, `<motion.div {...props}
-  // />`: what a use passes it animates (#239 review).
+  // />`: what a use passes it animates (internal PR 239 review).
   const forwarders = [
     ...text.matchAll(
       new RegExp(
@@ -2239,7 +2239,7 @@ function motionStarters(text: string): Set<string> {
       starters.add(bound[1]!);
     }
   }
-  // And each local name one is given, `const run = animate` (#239 review).
+  // And each local name one is given, `const run = animate` (internal PR 239 review).
   for (
     let grew = starters.size > 0, rounds = 0;
     grew && rounds < 8;
@@ -2287,7 +2287,7 @@ function motionBindings(
 /**
  * Where each configured `<MotionConfig>` in a file starts and ends, from
  * its syntax tree, where the name resolves to Motion's in scope
- * (#239 review), or from its text when it does not parse.
+ * (internal PR 239 review), or from its text when it does not parse.
  */
 function providerExtents(file: ProjectFileLike): Array<[number, number]> {
   const dialect = dialectOf(file.path);
@@ -2299,7 +2299,7 @@ function providerExtents(file: ProjectFileLike): Array<[number, number]> {
 
 /**
  * Whether every Motion animation of `kind` in a file is stopped for a
- * visitor who asked, each on its own (#239 review): read from the syntax
+ * visitor who asked, each on its own (internal PR 239 review): read from the syntax
  * tree, and from the text only when the file does not parse or the tree
  * finds none of the animations the text did.
  */
@@ -2321,7 +2321,7 @@ function fileMotionAnswered(
     : undefined;
   // The tree is the answer when the file parses: a linked value that
   // reaches no moving style, or useAnimate() whose animate is never
-  // called, moves nothing (#239 review).
+  // called, moves nothing (internal PR 239 review).
   if (!coverage) return fallback();
   return coverage[kind].uncovered === 0;
 }
@@ -2330,7 +2330,7 @@ function fileMotionAnswered(
  * For each script, the components another module of the project created
  * with Motion's factory and exported, under the names this script imports
  * them by: `export const MotionCard = motion.div` in one file animates as
- * `<MotionCard animate={...}>` in the file that imports it (#239 review).
+ * `<MotionCard animate={...}>` in the file that imports it (internal PR 239 review).
  */
 function importedMotionComponents(
   scripts: ProjectFileLike[],
@@ -2350,7 +2350,7 @@ function importedMotionComponents(
       ),
     );
     // An export list gives each its exported name, alias and all:
-    // `export { Card as MotionCard }` (#239 review). A list re-exported
+    // `export { Card as MotionCard }` (internal PR 239 review). A list re-exported
     // from another module is read below.
     for (const list of file.content.matchAll(
       /\bexport\s*\{([^}]{0,400})\}(?!\s*from\b)/g,
@@ -2367,7 +2367,7 @@ function importedMotionComponents(
     }
     // The default export too, by name or as the factory itself:
     // `export default MotionCard`, `export default motion.div`
-    // (#239 review).
+    // (internal PR 239 review).
     if (
       created.some((name) =>
         new RegExp(
@@ -2384,7 +2384,7 @@ function importedMotionComponents(
   }
   // Through re-exports, as far as they go: a barrel's `export { MotionCard }
   // from './motion-card'`, `export * from`, or `export { default as Card }
-  // from` (#239 review).
+  // from` (internal PR 239 review).
   for (
     let changed = exported.size > 0, rounds = 0;
     changed && rounds < scripts.length;
@@ -2441,7 +2441,7 @@ function importedMotionComponents(
         }
       }
     }
-    // Through a namespace, `<Cards.MotionCard>` (#239 review).
+    // Through a namespace, `<Cards.MotionCard>` (internal PR 239 review).
     for (const match of file.content.matchAll(
       /\bimport\s*\*\s*as\s+([A-Za-z_$][\w$]*)\s+from\s*["']([^"']+)["']/g,
     )) {
@@ -2488,7 +2488,7 @@ const MOTION_PROP_NAMES = [
 
 /**
  * Whether a read of the reduced-motion preference decides the motion in
- * this file, not merely something (#239 review): a read that picks a
+ * this file, not merely something (internal PR 239 review): a read that picks a
  * label leaves the animation running. A static reading cannot follow the
  * value, so the answer is held to where it is used:
  *
@@ -2498,10 +2498,10 @@ const MOTION_PROP_NAMES = [
  *   or inside the braces around a linked value (`style={{ y: reduce ? 0 : y }}`);
  * - a condition on the same line whose motion runs only without the
  *   preference: `reduce || animate(...)`, `!reduce && animate(...)`,
- *   `reduce ? null : animate(...)` (#239 review);
+ *   `reduce ? null : animate(...)` (internal PR 239 review);
  * - an `if (!reduce)` whose body starts motion, or an `if (reduce)` that
  *   returns before motion that follows; `if (reduce) animate(...)`
- *   animates for exactly the people who asked it not to (#239 review).
+ *   animates for exactly the people who asked it not to (internal PR 239 review).
  */
 function preferenceGovernsMotion(
   text: string,
@@ -2636,7 +2636,7 @@ function preferenceGovernsMotion(
     const after = match.index + match[0].length;
     if (!match[1]) {
       // A return leaves the block it is in: the motion has to follow it
-      // there, not in some other callback (#239 review).
+      // there, not in some other callback (internal PR 239 review).
       if (/^(?:\{\s*)?return\b/.test(text.slice(after, after + 20))) {
         const block = enclosingOpen(text, match.index);
         const end =
@@ -2748,7 +2748,7 @@ const MOTION_REDUCE_STOPS_ANIMATION =
  * A `motion-reduce:` utility that stops a transitioned transform whatever
  * it is. A reset of one transform, `translate-x-0`, leaves the others
  * moving, and is weighed against them where the utilities are read
- * (#239 review).
+ * (internal PR 239 review).
  */
 const MOTION_REDUCE_STOPS_TRANSITION =
   /(?:^|\s)motion-reduce:!?(?:transition-none|transform-none|duration-0|hidden|invisible)!?(?![\w-])/;
@@ -2771,7 +2771,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
   const reads = READS_PREFERENCE.test(text);
   const gated = reads ? gatedClassLists(text) : [];
   // Each reduce rule where it sits in the stylesheet, so a later rule that
-  // restarts the motion can be weighed against it (#239 review).
+  // restarts the motion can be weighed against it (internal PR 239 review).
   let searched = 0;
   const reduceRules = [
     ...mediaBlocks(text, 'prefers-reduced-motion\\s*:\\s*reduce', {
@@ -2790,7 +2790,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
   ];
   // Not a rule only a visitor who did not ask sees: `@media
   // (prefers-reduced-motion: no-preference)` never applies to one who did
-  // (#239 review).
+  // (internal PR 239 review).
   const unseen: Array<[number, number]> = [];
   for (const block of text.matchAll(
     /@media[^{;]*prefers-reduced-motion\s*:\s*no-preference[^{;]*\{/gi,
@@ -2802,7 +2802,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
     (rule) => !unseen.some(([start, end]) => rule.at > start && rule.at < end),
   );
   // The cascade layer each rule sits in: a later layer holds over an
-  // earlier one whatever the specificity (#239 review).
+  // earlier one whatever the specificity (internal PR 239 review).
   const layerAt = new Map<number, number[]>();
   {
     const tracker = blockTracker(text);
@@ -2841,7 +2841,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
    * Each way a stop works, read from the declaration that wins in a rule:
    * whether it stops the motion that way, whether another rule's winning
    * declaration undoes it, and whether that declaration is important. A
-   * stop holds while any of the ways it works holds (#239 review).
+   * stop holds while any of the ways it works holds (internal PR 239 review).
    */
   interface Mechanism {
     stops(body: string): boolean;
@@ -2854,7 +2854,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
       winningDeclaration(body, property)?.important ?? false;
   // Display and visibility hide on their own, each weighed by its own
   // declaration: an important `visibility: visible` does not make a
-  // normal `display: none` important (#239 review).
+  // normal `display: none` important (internal PR 239 review).
   const hidingByDisplay: Mechanism = {
     stops: (body) => /^none$/i.test(winningValue(body, 'display') ?? ''),
     undoes: (body) => {
@@ -2925,7 +2925,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
         important: declared('transition(?:-property)?'),
       },
       // `transform: none` is undone by a transform set again over it
-      // (#239 review).
+      // (internal PR 239 review).
       {
         stops: (body) => /^none$/i.test(winningValue(body, 'transform') ?? ''),
         undoes: (body) => {
@@ -2961,7 +2961,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
    * specificity; between two alike, more specific, or as specific and
    * later. `.spinner { animation: spin 1s }` after the reduce block, or a
    * more specific `.spinner.active` before it, starts the motion again
-   * (#239 review).
+   * (internal PR 239 review).
    */
   const overridden = (
     rule: Rule,
@@ -2993,17 +2993,17 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
   /**
    * Whether a page-wide stop holds over inline motion: an inline style
    * outweighs every normal declaration in a stylesheet, so only a way of
-   * stopping declared important does (#239 review).
+   * stopping declared important does (internal PR 239 review).
    */
   // And that no other important rule, which may reach the element too,
-  // starts it again over the stop (#239 review).
+  // starts it again over the stop (internal PR 239 review).
   const overInline = (rule: Rule) =>
     [...mechanisms.animation, ...mechanisms.transition].some(
       (mechanism) =>
         mechanism.stops(rule.body) &&
         mechanism.important(rule.body) &&
         // Only a rule that reaches every element can be known to reach
-        // the one with the inline style: `.other` may not (#239 review).
+        // the one with the inline style: `.other` may not (internal PR 239 review).
         !everyRule.some(
           (other) =>
             other !== rule &&
@@ -3048,7 +3048,7 @@ function answersReducedMotion(text: string, sources: MotionSources): boolean {
         lists.some(
           (names) =>
             // An important class is stopped only by an important reset
-            // (#239 review).
+            // (internal PR 239 review).
             (/^\.!|!$/.test(key)
               ? names
                   .split(/\s+/)
@@ -3654,14 +3654,14 @@ const MEDIA_QUERY_READ =
 /**
  * Reading the preference: `useReducedMotion()`, under its own name, the
  * alias a Motion import gives it, `useReducedMotion as usePrefersReduced`,
- * or a namespace's (#239 review), or the media query.
+ * or a namespace's (internal PR 239 review), or the media query.
  */
 function preferenceRead(
   text: string,
   { motion = false }: { motion?: boolean } = {},
 ): string {
   // For Motion, only Motion's hook as the file imports it: a hook of its
-  // own by that name may answer anything (#239 review). Elsewhere the name
+  // own by that name may answer anything (internal PR 239 review). Elsewhere the name
   // alone, as before: react-spring and others have one too.
   const hooks = motionNames(text, ['useReducedMotion']);
   if (!motion) hooks.add('useReducedMotion');
@@ -3706,8 +3706,8 @@ function readsPreference(
  * `createRoot().render()` or `hydrateRoot()` renders, what the component
  * it renders returns (`import App from './App'`, `<App />`), or what a
  * framework's root layout returns. Tied to that render or that component's
- * return, not any provider-wrapped return in the file (#239 review), and
- * not to any file named `index.tsx` (#239 review).
+ * return, not any provider-wrapped return in the file (internal PR 239 review), and
+ * not to any file named `index.tsx` (internal PR 239 review).
  */
 function rootProviderWraps(
   scripts: ProjectFileLike[],
@@ -3738,13 +3738,13 @@ function rootProviderWraps(
       return component !== undefined && matches(component);
     }) ||
     // Or through a wrapper it returns whole, `return <Providers>...`,
-    // whose own return a provider wraps (#239 review).
+    // whose own return a provider wraps (internal PR 239 review).
     Object.entries(returnRootsOf(file)).some(
       ([component, roots]) =>
         matches(component) &&
         roots.length > 0 &&
         // Each return on its own path: a second branch returning the same
-        // wrapper is not a cycle (#239 review).
+        // wrapper is not a cycle (internal PR 239 review).
         roots.every((tag) => wrapper(file, tag, new Set(seen))),
     );
   const wrapper = (
@@ -3794,7 +3794,7 @@ function rootProviderWraps(
       `\\bexport\\s+default\\s+(?:function\\s+)?${escapeRegExp(name)}\\b`,
     ).test(text);
   // Every root the entries mount, each wrapped on its own: a provider
-  // around one root does not reach a second one (#239 review).
+  // around one root does not reach a second one (internal PR 239 review).
   const roots: boolean[] = [];
   for (const file of scripts) {
     if (
@@ -3811,12 +3811,12 @@ function rootProviderWraps(
       ),
     ];
     // What each root render is handed, not any tag in the file: an unused
-    // `const preview = <Preview />` renders nothing (#239 review).
+    // `const preview = <Preview />` renders nothing (internal PR 239 review).
     for (const call of file.content.matchAll(
       /\b(?:render|hydrateRoot)\s*\(/g,
     )) {
       // React's, not another library's `renderer.render(scene, camera)`
-      // (#239 review).
+      // (internal PR 239 review).
       if (!reactRender(file.content, call.index, call[0])) continue;
       const open = call.index + call[0].length - 1;
       const close = matchingClose(file.content, open, {
@@ -3827,7 +3827,7 @@ function rootProviderWraps(
       const argument = file.content.slice(open, close);
       // The component the render is handed whole, inside nothing but
       // wrappers of its own: `<><Providers /><App /></>` leaves App
-      // outside the provider (#239 review).
+      // outside the provider (internal PR 239 review).
       const rendered = (local: string) => wrapsArgument(argument, local);
       const direct = extents.some(
         (extent) =>
@@ -3856,7 +3856,7 @@ function rootProviderWraps(
             returns(target, defaultExport(target.content)))
         );
       });
-      // Or a component the entry declares itself (#239 review).
+      // Or a component the entry declares itself (internal PR 239 review).
       const local = returns(file, (name) => rendered(name));
       roots.push(direct || viaComponent || local);
     }
@@ -3874,7 +3874,7 @@ function rootProviderWraps(
 /**
  * Whether a `<MotionConfig reducedMotion="user">` (or "always") is written:
  * the prop on that element only, since another component can take a prop
- * of the same name and govern nothing (#239 review).
+ * of the same name and govern nothing (internal PR 239 review).
  */
 function configuresReducedMotion(text: string): boolean {
   return motionConfigExtents(text).length > 0;
@@ -3887,9 +3887,9 @@ function configuresReducedMotion(text: string): boolean {
  */
 function motionConfigExtents(text: string): Array<[number, number]> {
   // Under its own name, an import's alias, `MotionConfig as Config`, or a
-  // namespace's, `<Motion.MotionConfig>` (#239 review).
+  // namespace's, `<Motion.MotionConfig>` (internal PR 239 review).
   // Only as the file imports it: a component of its own called
-  // MotionConfig configures nothing (#239 review).
+  // MotionConfig configures nothing (internal PR 239 review).
   const names = motionNames(text, ['MotionConfig']);
   if (names.size === 0) return [];
   const extents: Array<[number, number]> = [];
@@ -3900,7 +3900,7 @@ function motionConfigExtents(text: string): Array<[number, number]> {
   for (const match of text.matchAll(tags)) {
     const tag = readJsxTag(text, match.index);
     // A literal only: `reducedMotion={userSetting}` could hold "never"
-    // (#239 review).
+    // (internal PR 239 review).
     if (
       !/\sreducedMotion\s*=\s*(?:(["'])(?:user|always)\1|\{\s*(["'`])(?:user|always)\2\s*\})/.test(
         tag,
@@ -3920,7 +3920,7 @@ function motionConfigExtents(text: string): Array<[number, number]> {
 /**
  * Whether a provider wraps everything a render or return renders: only
  * opening tags stand between `render(` or `return (` and it, and only
- * closing tags after it (#239 review). A provider around one subtree
+ * closing tags after it (internal PR 239 review). A provider around one subtree
  * leaves its siblings moving.
  */
 function wrapsRender(
@@ -3952,7 +3952,7 @@ function wrapsRender(
 /**
  * Whether Motion's declarative animation follows the reduced-motion
  * preference. Neither answer can be traced through React by a static
- * reading, so each is held to where it is written (#239 review):
+ * reading, so each is held to where it is written (internal PR 239 review):
  * `<MotionConfig reducedMotion="user">` counts in the file the app renders
  * from, or else in the file that animates; a read of the preference counts
  * in the file that animates.
@@ -3963,13 +3963,13 @@ function declarativeMotionAnswered(
 ): boolean {
   const scripts = files.filter((file) => /\.[jt]sx?$/.test(file.path));
   // A provider in the app's root file counts when it wraps what that file
-  // renders (#239 review).
+  // renders (internal PR 239 review).
   // It covers what MotionConfig stops, transforms and layout, not every
-  // animation (#239 review).
+  // animation (internal PR 239 review).
   const aliases = projectAliases(files);
   const rootWrapped = rootProviderWraps(scripts, aliases);
   // In the file that animates: a provider around each animating tag, or a
-  // read of the preference that decides the animation (#239 review).
+  // read of the preference that decides the animation (internal PR 239 review).
   const imports = importedMotionComponents(scripts, aliases);
   const importsOf = (file: ProjectFileLike) =>
     imports.get(file.path) ?? new Set<string>();
@@ -4011,7 +4011,7 @@ function declarativeMotionAnswered(
 /**
  * Whether Motion that MotionConfig does not govern, values linked to scroll
  * or the pointer and animation started from script, reads the preference
- * in each file that does it (#239 review).
+ * in each file that does it (internal PR 239 review).
  */
 function scriptedMotionAnswered(
   files: ProjectFileLike[],
@@ -4030,7 +4030,7 @@ function scriptedMotionAnswered(
     return readsPreference(everything, { framework: false });
   }
   // A read that decides the motion, not one used for something else
-  // (#239 review).
+  // (internal PR 239 review).
   return moving.every((file) =>
     fileMotionAnswered(file, 'scripted', importsOf(file), () =>
       preferenceGovernsMotion(file.content, 'scripted'),
@@ -4189,7 +4189,7 @@ function universalFindings(
   // to scroll or the pointer do not, and only a read of the preference
   // that decides them stops those.
   // Classified file by file, then combined: an import in one file does not
-  // make a helper named animate() in another Motion (#239 review).
+  // make a helper named animate() in another Motion (internal PR 239 review).
   const library = { declarative: false, linked: false, imperative: false };
   const motionImports = importedMotionComponents(
     files.filter((file) => /\.[jt]sx?$/.test(file.path)),
@@ -4214,7 +4214,7 @@ function universalFindings(
     });
   }
   // Checked on its own, not as an else: MotionConfig, which the warning
-  // above prescribes, does not stop these (#239 review).
+  // above prescribes, does not stop these (internal PR 239 review).
   if (
     (library.linked || library.imperative) &&
     !scriptedMotionAnswered(files, everything)
@@ -4262,9 +4262,9 @@ function universalFindings(
   // The uses of a wrapper that spreads its props onto an input, each
   // counted if it names nothing. An id there names nothing without a label
   // for it, and an aria-labelledby nothing without its target, as on an
-  // input (#239 review). A use that spreads its own props on is itself a
+  // input (internal PR 239 review). A use that spreads its own props on is itself a
   // pass-through: its component's uses carry the name, followed up the
-  // chain (#239 review).
+  // chain (internal PR 239 review).
   const unlabelledUses = (wrapper: string, seen: Set<string>): number => {
     if (seen.has(wrapper) || seen.size >= 8) return 0;
     seen.add(wrapper);
@@ -4298,7 +4298,7 @@ function universalFindings(
   /**
    * The uses of a wrapper that clear `attribute` and name nothing else:
    * each replaces, through the wrapper's later spread, the name the
-   * wrapper gave (#239 review).
+   * wrapper gave (internal PR 239 review).
    */
   const clearedUses = (wrapper: string, attribute: string): number => {
     let count = 0;
@@ -4338,7 +4338,7 @@ function universalFindings(
     }
     // A name a later spread can replace holds unless a use of the wrapper
     // clears it: `<input aria-label="Search" {...props} />` used as
-    // `<Search aria-label={undefined} />` names nothing (#239 review).
+    // `<Search aria-label={undefined} />` names nothing (internal PR 239 review).
     const replaced = (at: number, attribute: string): number => {
       if (!/\{\s*\.\.\./.test(tag.slice(at))) return 0;
       const wrapper = enclosingComponent(source, opener.index);
@@ -4411,11 +4411,11 @@ function universalFindings(
     // labelled where `<Input id=... />` is used, and that use is checked.
     // Unless a naming attribute is cleared after it, which React applies
     // over whatever the spread carried, so the label the call site gives
-    // never arrives (#239 review).
+    // never arrives (internal PR 239 review).
     if (spreadMayName(tag)) {
       // The wrapper is labelled where it is used. `<Input>` uses are read by
       // this same scan; any other name's uses are read here, each counted
-      // if it names nothing (#239 review).
+      // if it names nothing (internal PR 239 review).
       const wrapper = enclosingComponent(source, opener.index);
       if (wrapper === undefined) {
         unlabelled += 1;
@@ -4442,7 +4442,7 @@ function universalFindings(
  * Whether a tag has a spread that can carry its name, which the checker
  * cannot see into: not when an `aria-label`, `aria-labelledby` or `id` is
  * cleared after it, which React applies over whatever the spread carried
- * (#239 review).
+ * (internal PR 239 review).
  */
 function spreadMayName(tag: string): boolean {
   const spread = [...tag.matchAll(/\{\s*\.\.\./g)].pop();
@@ -4512,7 +4512,7 @@ function namedBy(tag: string, source: string): boolean {
  * The names a component is used under: its own, a named import's alias
  * (`import { TextField as Field }`), and, when it is a default export, a
  * default import from a module named for it (`import Field from
- * './text-field'`) (#239 review).
+ * './text-field'`) (internal PR 239 review).
  */
 function componentNames(source: string, name: string): Set<string> {
   const names = new Set([name]);
@@ -4539,7 +4539,7 @@ function componentNames(source: string, name: string): Set<string> {
       if (flat(base) === flat(name)) names.add(match[1]!);
     }
   }
-  // Through a namespace import, `<Fields.TextField>` (#239 review): any
+  // Through a namespace import, `<Fields.TextField>` (internal PR 239 review): any
   // namespace, since which module holds the wrapper is not traced, and a
   // use read that renders something else only reads more call sites.
   for (const space of source.matchAll(
@@ -5299,7 +5299,7 @@ function shadowingFunction(
  * Whether a declaration at `declared` lies outside the body of the function
  * that starts at `body`, so that function's parameter of the same name
  * hides it. Wherever it is written: a const declared after the function,
- * lower in the file, is hidden just the same (#226).
+ * lower in the file, is hidden just the same (internal issue 226).
  */
 function outsideBody(
   text: string,
@@ -5310,7 +5310,7 @@ function outsideBody(
   if (declared < body) return true;
   // A braced body starts just past its `{`; a concise arrow's body is one
   // expression, and depth alone would run it to the end of the file
-  // (#249 review).
+  // (internal PR 249 review).
   return text[body - 1] === '{'
     ? !encloses(depths, body, declared)
     : declared >= expressionEnd(text, body, { commas: true });
@@ -8147,7 +8147,7 @@ type Alias = [prefix: string, targets: string[]];
  * The import aliases a project configures: `compilerOptions.paths` in a
  * tsconfig or jsconfig (`"@/*": ["./src/*"]`, against its baseUrl), and a
  * Vite config's `alias` entries that name a directory. With none, the
- * `@/` the generated stack uses, to `src/` (#239 review).
+ * `@/` the generated stack uses, to `src/` (internal PR 239 review).
  */
 function projectAliases(files: ProjectFileLike[]): Alias[] {
   const aliases: Alias[] = [];
@@ -8207,13 +8207,13 @@ function projectAliases(files: ProjectFileLike[]): Alias[] {
  * Whether a `render(` or `hydrateRoot(` at `at` is React's: hydrateRoot,
  * `ReactDOM.render`, a render imported from react-dom, or `.render` on
  * what `createRoot()` returns, directly or through the name it is bound
- * to. `renderer.render(scene, camera)` is not (#239 review).
+ * to. `renderer.render(scene, camera)` is not (internal PR 239 review).
  */
 function reactRender(text: string, at: number, call: string): boolean {
   const before = text.slice(Math.max(0, at - 400), at);
   if (/\bReactDOM\s*\.\s*$/.test(before)) return true;
   // hydrateRoot and createRoot as react-dom exports them, not a helper of
-  // the file's own by that name (#239 review).
+  // the file's own by that name (internal PR 239 review).
   if (call.startsWith('hydrateRoot')) {
     return !/\.\s*$/.test(before) && fromReactDom(text, 'hydrateRoot');
   }

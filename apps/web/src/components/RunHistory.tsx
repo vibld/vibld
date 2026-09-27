@@ -8,7 +8,7 @@ import {
 } from '../generation/runs-client.ts';
 
 /**
- * What every run on this project did (#167).
+ * What every run on this project did (internal issue 167).
  *
  * The facts here were already produced on every run and only ever reached
  * the server log: the model, the tokens, the cached fraction, the cost, and

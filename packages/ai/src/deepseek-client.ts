@@ -4,7 +4,7 @@ import { PLAN_JSON_INSTRUCTION, outputFor } from './plan-output.ts';
 /**
  * A second real model provider, behind the same `PlanClient` seam.
  *
- * Issue #9 asks for exactly this -- "prove a second real provider before
+ * Internal issue 9 asks for exactly this -- "prove a second real provider before
  * broad independence claims" -- and ADR-0003 is what makes it cheap: every
  * layer above `PlanClient` is already provider-agnostic, so this file is the
  * whole integration.
@@ -41,7 +41,7 @@ export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 /**
  * Kept as an export because it is part of this module's public surface, but
  * it is no longer this module's constant: the shape a reply must take
- * belongs to the request now, not to the client (#189 review). This is the
+ * belongs to the request now, not to the client (internal PR 189 review). This is the
  * plan's spelling of it, which is what every caller that does not say
  * otherwise still gets.
  */
@@ -75,7 +75,7 @@ interface StreamedChoice {
      * A reasoning model's thinking, streamed beside the answer. Billed as
      * output and counted against `max_tokens`, and deliberately not
      * appended to `text`: it is not part of the JSON the schema parses
-     * (#190).
+     * (internal PR 190).
      */
     reasoning_content?: string | null;
   };
@@ -89,7 +89,7 @@ interface StreamedUsage {
   /**
    * Where a reasoning model reports its thinking separately. Already inside
    * `completion_tokens`, so this explains that figure rather than adding to
-   * it (#190).
+   * it (internal PR 190).
    */
   completion_tokens_details?: { reasoning_tokens?: number };
 }
@@ -120,7 +120,7 @@ export async function readCompletionStream(
    * Characters of reasoning seen, counted rather than kept. Nothing needs
    * the text; what was missing was any sign that it existed at all, which
    * is how a ceiling came to be reasoned about from the answer's size
-   * alone (#190).
+   * alone (internal PR 190).
    */
   reasoningCharacters: number;
 }> {
@@ -164,7 +164,7 @@ export async function readCompletionStream(
         // Counted, not accumulated, and deliberately not reported through
         // `onProgress`: that meter means "how much of the answer exists so
         // far", and folding thinking into it would make a different number
-        // wrong (#190).
+        // wrong (internal PR 190).
         const reasoning = choice?.delta?.reasoning_content;
         if (typeof reasoning === 'string') {
           reasoningCharacters += reasoning.length;
@@ -172,7 +172,7 @@ export async function readCompletionStream(
           // reasoning model thinks first, so a run cancelled early has
           // streamed nothing but this, and a caller told only about the
           // answer would settle a minute of billed thinking at zero
-          // (#190). `characters` is unchanged here, so the meter still
+          // (internal PR 190). `characters` is unchanged here, so the meter still
           // means what it meant.
           onProgress?.({ characters: text.length, reasoningCharacters });
         }
@@ -231,7 +231,7 @@ export function createDeepseekPlanClient(
       // What this client really sends: the caller's system prompt with the
       // output instruction appended, plus the user prompt. That appended
       // paragraph is this client's alone, which is why measuring it here is
-      // the only way to be right (#189 review).
+      // the only way to be right (internal PR 189 review).
       const systemSent = `${request.system}\n\n${outputFor(request).instruction}`;
       request.onPromptChars?.(systemSent.length + request.prompt.length);
 
@@ -253,7 +253,7 @@ export function createDeepseekPlanClient(
           messages: [
             {
               role: 'system',
-              // The shape the caller asked for (#189 review). This always
+              // The shape the caller asked for (internal PR 189 review). This always
               // described a generation plan, so a mockup prompt was
               // followed by a paragraph contradicting it.
               content: systemSent,
@@ -284,7 +284,7 @@ export function createDeepseekPlanClient(
         );
 
       // `systemSent`, not `request.system`: the same figure `onPromptChars`
-      // reports, and for the same reason (#189 review). This estimate feeds
+      // reports, and for the same reason (internal PR 189 review). This estimate feeds
       // the fallback usage when a stream ends without its terminal chunk,
       // so leaving it on the un-appended system prompt under-reported a
       // mockup run by the length of the output instruction.
@@ -297,7 +297,7 @@ export function createDeepseekPlanClient(
       return {
         plan: readJsonPlan(text),
         // Said here because here is the only place that knows. Above this,
-        // an empty body and unparseable JSON are both a null plan (#191
+        // an empty body and unparseable JSON are both a null plan (internal PR 191
         // review).
         ...(text.trim().length === 0 ? { emptyBody: true } : {}),
         stopReason: mapFinishReason(finishReason),
@@ -309,10 +309,10 @@ export function createDeepseekPlanClient(
           // the safe direction for a budget; under-reporting is not.
           inputTokens: usage?.prompt_tokens ?? estimateTokens(promptCharacters),
           // Reasoning counted in, because DeepSeek bills it as output
-          // (#191 review). This estimate is reached only when a stream ends
+          // (internal PR 191 review). This estimate is reached only when a stream ends
           // without its terminal usage chunk, and on that path the answer's
           // length alone is not the run: two thirds of a measured mockup
-          // run's output tokens were thinking (#190), so a reasoning-heavy
+          // run's output tokens were thinking (internal PR 190), so a reasoning-heavy
           // reply settled at a third of its cost, and the empty reply this
           // same commit retries settled at nothing at all.
           //
@@ -329,7 +329,7 @@ export function createDeepseekPlanClient(
           cacheWriteInputTokens: 0,
         },
         // Reported only where there is something to report, so "this
-        // provider does not say" stays distinguishable from "none" (#190).
+        // provider does not say" stays distinguishable from "none" (internal PR 190).
         ...(reasoningCharacters > 0 ||
         usage?.completion_tokens_details?.reasoning_tokens !== undefined
           ? {

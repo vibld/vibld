@@ -24,7 +24,7 @@ import type {
 } from './client.ts';
 
 /**
- * Three directions to choose between, before a build is attempted (#185).
+ * Three directions to choose between, before a build is attempted (internal issue 185).
  *
  * Not `ModelProvider`. That interface returns a `GenerationPlan` -- a
  * project -- and this returns something a person looks at and then throws
@@ -51,14 +51,14 @@ export interface MockupProviderOptions {
   onUsage?: (usage: PlanUsage) => void;
   /**
    * What the run spent that the usage figures do not explain, where the
-   * client reports it (#190). Separate from `onUsage` because it is
+   * client reports it (internal PR 190). Separate from `onUsage` because it is
    * provider-specific and optional: a client with nothing to say calls
    * neither this nor anything else.
    */
   onDiagnostics?: (diagnostics: PlanDiagnostics) => void;
   /**
    * An attempt that was thrown away and not billed to the caller, so
-   * whoever runs this can see what it absorbed (#190).
+   * whoever runs this can see what it absorbed (internal PR 190).
    *
    * Without it the retry below hides real money: the provider charges for
    * an empty reply, the reader is not charged, and nothing anywhere says
@@ -67,7 +67,7 @@ export interface MockupProviderOptions {
    *
    * It is also where the retry is permitted, because this is the only
    * moment at which a caller knows what the absorbed attempt cost and the
-   * second one has not yet been sent (#191 review). Returning false
+   * second one has not yet been sent (internal PR 191 review). Returning false
    * refuses it, and the run then fails on the empty reply it already has
    * rather than spending again. The Worker refuses when the account-wide
    * daily ceiling cannot cover another attempt: absorbing a provider
@@ -81,7 +81,7 @@ export interface MockupProviderOptions {
   onDiscarded?: (usage: PlanUsage) => boolean | void | Promise<boolean | void>;
   signal?: AbortSignal;
   /**
-   * Called as output arrives (#189 review). The claim that this route
+   * Called as output arrives (internal PR 189 review). The claim that this route
    * restores a real character count was written before the callback was
    * threaded, so it was false: the provider never asked the client for
    * progress, and the client never reported any.
@@ -93,7 +93,7 @@ export interface MockupProviderOptions {
    * Forwarded rather than reconstructed, because the assembly is
    * provider-specific: DeepSeek appends the output instruction to the
    * system message, Anthropic and OpenAI carry the schema structurally
-   * instead (#189 review).
+   * instead (internal PR 189 review).
    */
   onPromptChars?: (characters: number) => void;
   style?: StylePresetId;
@@ -136,7 +136,7 @@ export class MockupProvider {
     const first = await this.#ask(request);
 
     /*
-     * One retry, for an empty reply and nothing else (#190).
+     * One retry, for an empty reply and nothing else (internal PR 190).
      *
      * DeepSeek's JSON mode documents that it "may occasionally return
      * empty content", and a real run produced exactly that: 22,828
@@ -156,7 +156,7 @@ export class MockupProvider {
      * visibly rather than quietly.
      *
      * And absorbed is not the same as unaccounted, which is what the
-     * first version of this confused (#191 review). `onDiscarded` is
+     * first version of this confused (internal PR 191 review). `onDiscarded` is
      * awaited and may refuse, so a caller that answers to a spend ceiling
      * can record the attempt and decline the second one. Deciding not to
      * charge a reader is ours to make; spending past a ceiling because
@@ -166,7 +166,7 @@ export class MockupProvider {
     if (isEmptyReply(first)) {
       /*
        * Every meter goes back to zero here, at the boundary itself
-       * (#191 review, three times).
+       * (internal PR 191 review, three times).
        *
        * A caller watching these holds the last figure it was given, and
        * settles a cancelled run from them. Left standing, the absorbed
@@ -198,7 +198,7 @@ export class MockupProvider {
       if ((await this.#onDiscarded?.(first.usage)) === false) {
         /*
          * Refused, so this attempt is the whole run -- and it is the one
-         * just declared absorbed (#191 review).
+         * just declared absorbed (internal PR 191 review).
          *
          * Returning here rather than falling through is the whole fix.
          * Below, `onUsage` reports what the caller is to be billed for,
@@ -219,7 +219,7 @@ export class MockupProvider {
         );
       }
       /*
-       * Cancelled while the answer above was awaited (#191 review).
+       * Cancelled while the answer above was awaited (internal PR 191 review).
        *
        * The route checks this before the first attempt and could not
        * check it here, because the awaiting happens inside this method.
@@ -259,7 +259,7 @@ export class MockupProvider {
     if (completion.diagnostics) this.#onDiagnostics?.(completion.diagnostics);
 
     // Named, so a truncation talks about three directions rather than about
-    // a project nobody asked this route for (#190).
+    // a project nobody asked this route for (internal PR 190).
     return readCompletion(
       completion,
       this.#maxTokens,
@@ -278,7 +278,7 @@ export class MockupProvider {
       maxTokens: this.#maxTokens,
       effort: this.#effort,
       // The shape this provider is about to validate, told to the client
-      // that is about to ask for it (#189 review). Without this the client
+      // that is about to ask for it (internal PR 189 review). Without this the client
       // constrained the reply to a generation plan while the system prompt
       // above asked for a set of directions, so on Anthropic and OpenAI the
       // run could not succeed and on DeepSeek it was being argued with.
@@ -288,7 +288,7 @@ export class MockupProvider {
       // Forwarded so the caller can settle a cancelled run from what was
       // really sent. Only the client knows: DeepSeek appends the output
       // instruction to the system message and the other two do not
-      // (#189 review).
+      // (internal PR 189 review).
       ...(this.#onPromptChars ? { onPromptChars: this.#onPromptChars } : {}),
     });
   }
@@ -298,7 +298,7 @@ export class MockupProvider {
  * Nothing came back, as distinct from anything else that leaves a null plan.
  *
  * The first version of this read `completion.plan === null`, and the commit
- * message called it narrow. It was not (#191 review). `readJsonPlan`
+ * message called it narrow. It was not (internal PR 191 review). `readJsonPlan`
  * returns null for an empty body *and* for JSON it cannot parse, and a
  * refusal and a truncation can both arrive with a null plan as well. So the
  * predicate retried all four: a truncation and a refusal would each have

@@ -657,7 +657,7 @@ function applicableSegments(source: string, layered = false): Segment[] {
  *
  * Source order is only the tie-breaker; between rules of different
  * specificity the more specific wins wherever it sits, so
- * `html body{background:#111} body{background:#fff}` renders dark and
+ * `html body{background:internal PR 111} body{background:#fff}` renders dark and
  * reading it in order calls it light.
  *
  * This is cheap only because the accepted set is so small. Every compound is

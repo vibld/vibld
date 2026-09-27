@@ -58,7 +58,7 @@ function estimateTokens(text: string): number {
  *
  * A README that repeats the brief, or a comment that does, contains every
  * word the brief used, so reading those would pass a project that only
- * describes the thing asked for (#234). Markdown files are left out and
+ * describes the thing asked for (internal PR 234). Markdown files are left out and
  * comments are removed: HTML comments, block comments (JSX's comment form
  * included) and whole-line `//` comments. A `//` after code on the same
  * line stays, because a URL has one too and telling them apart takes a

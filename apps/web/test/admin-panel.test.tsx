@@ -10,7 +10,7 @@ import { AdminPanel } from '../src/components/AdminPanel.tsx';
  * The tool that moves other people's money, as it is actually wired.
  *
  * Every rule in here was written and never run: the runner errors on JSX, so
- * until the harness on #124 this component was typechecked and nothing more.
+ * until the harness on internal PR 124 this component was typechecked and nothing more.
  */
 
 function reply(value: unknown, status = 200): Response {

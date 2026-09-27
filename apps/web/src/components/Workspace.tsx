@@ -55,7 +55,7 @@ export function Workspace({
   /**
    * Off screen without being taken apart. The preview sandbox, the chosen
    * tab and the selected file are all live state this component owns, and
-   * a trip to the admin page (#184) should cost none of it. The stylesheet
+   * a trip to the admin page (internal issue 184) should cost none of it. The stylesheet
    * carries `[hidden] { display: none !important }`, which is what makes
    * the attribute beat `.workspace`'s own layout rules.
    */

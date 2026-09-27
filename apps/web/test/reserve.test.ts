@@ -20,7 +20,7 @@ import type { Reservation } from '../worker/budget.ts';
  * later one refuses after an earlier one has already allowed, were the parts
  * no test could reach, and they are the parts where money leaks.
  *
- * Extracted for #194, which needs a second caller: a repair turn has to hold
+ * Extracted for internal issue 194, which needs a second caller: a repair turn has to hold
  * a reservation of its own before it goes out.
  */
 
@@ -213,7 +213,7 @@ describe('what a run has to get past before it may start', () => {
 });
 
 /**
- * That an account hold is never left behind (#196 review).
+ * That an account hold is never left behind (internal PR 196 review).
  *
  * The account layer's ceiling is the deployment's, not one caller's (L29),
  * so a hold abandoned here is not that caller's problem: the reclaim
@@ -284,7 +284,7 @@ describe('when a later layer cannot answer at all', () => {
 });
 
 /**
- * That the release is asked for more than once (#196 review).
+ * That the release is asked for more than once (internal PR 196 review).
  *
  * The first version of this fix protected the shared ceiling only when the
  * cleanup worked first time, which is the case it was least needed in: what
@@ -313,7 +313,7 @@ describe('releasing an account hold that does not want to be released', () => {
   });
 
   it('asks again when the release never answers at all', async () => {
-    // #196 review. `retrying` runs one attempt and then the next, so a
+    // internal PR 196 review. `retrying` runs one attempt and then the next, so a
     // release that stays pending is the end of the sequence rather than a
     // slow start to it: `guard` never rethrows, and `handlePlan` calls
     // this with no deadline of its own, so the request hangs instead of
@@ -360,7 +360,7 @@ describe('releasing an account hold that does not want to be released', () => {
 });
 
 /**
- * That a denial gives the account hold back too (#196 review).
+ * That a denial gives the account hold back too (internal PR 196 review).
  *
  * A denial is the commonest way this function ends and it leaves exactly
  * the same hold behind as a rejection does, so the retry belonged on both

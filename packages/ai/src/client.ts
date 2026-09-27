@@ -35,7 +35,7 @@ export interface PlanRequest {
    * What shape the reply must take. Defaults to a generation plan.
    *
    * Part of the *request* rather than of the client, which is the whole of
-   * the P1 this fixed (#189 review): every client hard-coded the plan's
+   * the P1 this fixed (internal PR 189 review): every client hard-coded the plan's
    * schema, so a mockup run asked for one thing in its prompt and was
    * constrained to another by the API.
    */
@@ -44,7 +44,7 @@ export interface PlanRequest {
    * The size of the prompt this client actually sent, in characters,
    * reported once just before the request goes out.
    *
-   * Exists because only the client knows (#189 review). The route settling
+   * Exists because only the client knows (internal PR 189 review). The route settling
    * a cancelled run was reconstructing the figure from the system prompt
    * and the user prompt, which is right for two of the three clients and
    * wrong for DeepSeek, where the output instruction is appended to the
@@ -68,7 +68,7 @@ export interface PlanProgress {
    * exists": a meter that folded thinking in would report progress towards
    * a document that has not been started. But a caller settling a
    * cancelled run needs both, because reasoning is billed and was two
-   * thirds of a measured run's output tokens (#190).
+   * thirds of a measured run's output tokens (internal PR 190).
    *
    * The case that makes this matter: a reasoning model thinks before it
    * writes, so a run cancelled early has streamed reasoning and no answer
@@ -124,7 +124,7 @@ export interface PlanRefusal {
  * watching characters is watching the wrong number. That is not a
  * hypothetical: the first real mockup run truncated at an 18,000-token
  * ceiling having streamed 19,203 characters, which is 0.9 characters per
- * output token where this codebase assumes four (#190).
+ * output token where this codebase assumes four (internal PR 190).
  *
  * Optional because it is provider-specific. A client that has nothing to
  * report leaves it unset rather than reporting zero, so "this provider does
@@ -148,7 +148,7 @@ export interface PlanCompletion {
   diagnostics?: PlanDiagnostics;
   /**
    * The provider sent no body at all, as distinct from sending one that
-   * could not be parsed (#191 review).
+   * could not be parsed (internal PR 191 review).
    *
    * `plan` is null for both, and for a truncation and a refusal besides, so
    * nothing above the client can tell those apart. That mattered as soon as

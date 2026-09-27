@@ -560,7 +560,7 @@ describe('reference material', () => {
 });
 
 /**
- * What one run may ask the model for (#179).
+ * What one run may ask the model for (internal PR 179).
  *
  * This was a flat 64000 tokens for every model. It was chosen against Claude
  * Opus 5, where it reserves $1.60, and then the deployment moved to DeepSeek

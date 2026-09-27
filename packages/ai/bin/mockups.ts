@@ -1,7 +1,7 @@
 /**
  * Run one real mockup set and print what came back.
  *
- * This exists because #189 shipped the feature with no real-model evidence
+ * This exists because internal PR 189 shipped the feature with no real-model evidence
  * at all. Every test of `/api/mockups`, of `MockupProvider` and of the
  * routes around them uses a fake client, and that gap is not hypothetical:
  * it is exactly why the sixth review round found that every client
@@ -19,7 +19,7 @@
  * somebody has picked one. `--out <dir>` writes the three documents so they
  * can be opened; without it this is a dry read.
  *
- * About a tenth of a build (#185): roughly 18,000 tokens against 252,000.
+ * About a tenth of a build (internal issue 185): roughly 18,000 tokens against 252,000.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -118,7 +118,7 @@ try {
   if (error instanceof ProviderError) {
     console.error(`\n${error.name}: ${error.message}`);
     // Reported on the way out too, which the first version did not do and
-    // should have (#190). A truncation is the case where these numbers
+    // should have (internal PR 190). A truncation is the case where these numbers
     // matter most -- they are the difference between "the ceiling is a
     // little low" and "this request was never going to fit" -- and printing
     // them only on success meant the one real run that failed said nothing
@@ -133,7 +133,7 @@ try {
  * What the run cost and what it was told, whether or not it succeeded.
  *
  * Each of these was a claim this feature made before the code behind it
- * existed (#189 review): the progress callback was never threaded, and the
+ * existed (internal PR 189 review): the progress callback was never threaded, and the
  * sent size was being reconstructed by the route rather than reported by the
  * client.
  */
@@ -153,7 +153,7 @@ function report(): void {
     );
   }
   // The question this was built to answer: where the output tokens went
-  // that the streamed characters do not account for (#190). Silence here
+  // that the streamed characters do not account for (internal PR 190). Silence here
   // means the provider said nothing, which is itself the answer.
   if (diagnostics?.reasoningCharacters !== undefined) {
     console.log(

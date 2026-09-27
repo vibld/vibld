@@ -62,7 +62,7 @@ function dependencyNames(pkg: Record<string, unknown>): string[] {
 function simpleRangeMajor(text: string): number | undefined {
   // A prerelease or build suffix only after a whole major.minor.patch:
   // `3.4.0-beta.1` is a version, while `3.4-beta` is a dist-tag to npm,
-  // which may name any version or none (#237 review).
+  // which may name any version or none (internal PR 237 review).
   const match =
     /^(?:[\^~]|=)?\s*v?(\d+)(?:(?:\.(?:\d+|[xX*])(?:\.(?:\d+|[xX*]))?)?|\.\d+\.\d+[-+][0-9A-Za-z.+-]+)$/.exec(
       text,
@@ -79,7 +79,7 @@ function simpleRangeMajor(text: string): number | undefined {
  * such as `>=3`, `>=3 <4` or `3.0.0 - 4.0.0`, gives `undefined`: an
  * open-ended one can reach a later major, a bounded one can be
  * unsatisfiable (`>=4 <4`), and telling those apart needs a semver range
- * solver this check does not carry (#237 review). A project that names its
+ * solver this check does not carry (internal PR 237 review). A project that names its
  * Tailwind v3 with one of those spellings is refused, not guessed at.
  */
 export function rangeHighestMajor(range: string): number | undefined {
@@ -97,7 +97,7 @@ export function rangeHighestMajor(range: string): number | undefined {
  * run; any one of them declared is enough. A package can also require its
  * range to qualify: Tailwind's CLI is `@tailwindcss/cli` from v4, and the
  * `tailwindcss` package itself only up to v3, so `tailwindcss@^4` with a
- * `tailwindcss` script does not install the command (#237 review).
+ * `tailwindcss` script does not install the command (internal PR 237 review).
  */
 const TOOL_PACKAGES: Record<
   string,
@@ -140,7 +140,7 @@ const INSTALL_SCRIPTS = [
 /**
  * Each declared dependency's range, dependencies and devDependencies alike.
  * Only a string is a range: npm refuses any other spec ("must provide
- * string spec"), so one declared that way installs nothing (#237 review).
+ * string spec"), so one declared that way installs nothing (internal PR 237 review).
  */
 function dependencyRanges(pkg: Record<string, unknown>): Map<string, string> {
   const ranges = new Map<string, string>();
@@ -233,7 +233,7 @@ function checkToolConfiguration(
   // A script's command has to be installed by the project itself. `vite
   // build` with no vite dependency passes every check above and then stops
   // at `vite: not found` -- the stub this harness runs against in CI did
-  // exactly that and was reported accepted (#59). Only tools this map knows
+  // exactly that and was reported accepted (internal PR 59). Only tools this map knows
   // are checked: `node`, `rm` and the like come with the machine, and a
   // guess about an unfamiliar name would be a false alarm.
   const ranges = dependencyRanges(pkg);
@@ -262,7 +262,7 @@ function checkToolConfiguration(
   // install hook writes something its build needs would then fail its build
   // for a reason that is not in its build. So a project that relies on one
   // is refused here, by name, rather than reported as a build failure it
-  // does not have (#237 review).
+  // does not have (internal PR 237 review).
   for (const name of INSTALL_SCRIPTS) {
     if (typeof (scripts as Record<string, unknown>)[name] === 'string') {
       problems.push({
@@ -385,7 +385,7 @@ type CommandKind =
 /**
  * Whether a script command type-checks on every way it can succeed: each
  * path through its `&&`, `||` and `;` that ends in exit status 0 has to pass
- * through a tsc that checked the project and succeeded (#247 review). A tsc
+ * through a tsc that checked the project and succeeded (internal PR 247 review). A tsc
  * after `||`, before a `;` or in a pipe can fail without failing the
  * command; `tsc && vite build || exit 1` cannot. A script run by name counts
  * if it type-checks the same way. `seen` stops a script that runs itself.
@@ -499,7 +499,7 @@ interface TscInvocation {
 
 /**
  * Each tsc a script command runs, with the tsconfig it reads: the one
- * `-p` names, each project `-b` names (#244 review), or the root one.
+ * `-p` names, each project `-b` names (internal PR 244 review), or the root one.
  */
 function tscInvocations(command: string): TscInvocation[] {
   const found: TscInvocation[] = [];
@@ -594,7 +594,7 @@ function loadedConfigs(
     for (const match of references?.matchAll(/["']path["']\s*:\s*"([^"]*)"/g) ??
       []) {
       // Only `tsc -b` builds a referenced project; `tsc -p` reads its
-      // declarations and never its tsconfig's options (#244 review).
+      // declarations and never its tsconfig's options (internal PR 244 review).
       if (build) {
         queue.push({ path: configPath(dir, match[1]!, 'project'), build });
       }
@@ -685,7 +685,7 @@ function checkStackConfiguration(
   // And TS2882 is TypeScript's only where it checks side-effect imports:
   // by default from 6.0, before that where the tsconfig asks.
   // The tsconfig each script builds with: `tsc -p config/tsconfig.json`
-  // names its own (#241 review).
+  // names its own (internal PR 241 review).
   const invocations: TscInvocation[] = [];
   for (const command of typeof scripts === 'object' && scripts !== null
     ? Object.values(scripts as Record<string, unknown>)
@@ -721,8 +721,8 @@ function checkStackConfiguration(
 
   // Only in what tsc loads: the configs the scripts name and those they
   // extend or reference. A config nothing builds with may keep it
-  // (#244 review). And a range that cannot be bounded, `*` or `latest`,
-  // installs TypeScript 7 today (#244 review).
+  // (internal PR 244 review). And a range that cannot be bounded, `*` or `latest`,
+  // installs TypeScript 7 today (internal PR 244 review).
   if (
     typechecks &&
     typescriptRange !== undefined &&
@@ -731,7 +731,7 @@ function checkStackConfiguration(
     const reported = new Set<string>();
     for (const file of loadedConfigs(invocations, files)) {
       if (reported.has(file.path)) continue;
-      // Not in a comment: tsconfig is JSONC (#244 review).
+      // Not in a comment: tsconfig is JSONC (internal PR 244 review).
       if (/["']baseUrl["']\s*:/.test(withoutJsonComments(file.content))) {
         reported.add(file.path);
         problems.push({

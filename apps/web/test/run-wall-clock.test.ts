@@ -11,7 +11,7 @@ import {
 } from '@vibld/ai';
 
 /**
- * A token ceiling is a time budget (#179 follow-up).
+ * A token ceiling is a time budget (internal PR 179 follow-up).
  *
  * Tokens are produced at a rate, so raising what a run may emit raises how
  * long it takes, and two constants elsewhere were sized for the old figure:
@@ -48,7 +48,7 @@ describe('how long one run is allowed to take', () => {
   it('asks no model for more than it can produce in the time allowed', () => {
     // Walked over the catalogue, because the way this breaks is a faster or
     // cheaper model arriving whose ceiling the clock, not the money, decides.
-    // At each model's own speed where it has been measured (#209): one
+    // At each model's own speed where it has been measured (internal issue 209): one
     // global rate was five and a half times too generous for the slowest.
     const seconds = RUN_WALL_CLOCK_BUDGET_MS / 1000;
     for (const model of MODEL_CATALOGUE) {

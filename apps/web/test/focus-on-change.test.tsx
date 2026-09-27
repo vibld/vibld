@@ -7,7 +7,7 @@ import type { Root } from 'react-dom/client';
 import { useFocusOnChange } from '../src/admin/use-focus-on-change.ts';
 
 /**
- * Where focus lands when the view changes but the document does not (#188
+ * Where focus lands when the view changes but the document does not (internal PR 188
  * review).
  *
  * A document load repositions focus by itself. A view switch inside one

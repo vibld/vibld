@@ -66,7 +66,7 @@ export interface WorkflowParams {
   prompt: string;
   /**
    * The revision the caller believed it was editing, or absent for a new
-   * project. Not the project itself (#181): the files are read from storage
+   * project. Not the project itself (internal issue 181): the files are read from storage
    * by `runGeneration` below, so a follow-up is no longer bounded by what a
    * browser can upload or by a model's context window.
    *
@@ -130,7 +130,7 @@ export interface WorkflowParams {
   reservationKey?: string;
   accountReservationId?: number;
   /**
-   * The direction the caller chose from a mockup run (#185), as the
+   * The direction the caller chose from a mockup run (internal issue 185), as the
    * document rather than its name. Optional: most builds have never seen a
    * mockup, and a payload persisted before this field existed has none.
    */
@@ -156,7 +156,7 @@ export interface WorkflowParams {
   /**
    * What the caller was allowed to spend when this run was admitted, so a
    * repair turn can hold a reservation of its own without asking again
-   * (#194).
+   * (internal issue 194).
    *
    * Carried rather than re-derived, for the reason `maxTokens` above gives
    * and one more. `spendableFor` needs a `Principal`, which a Workflow does
@@ -207,7 +207,7 @@ export function ceilingForRun(
  * model and they answer different questions. `characters` is the answer:
  * what `onProgress` has always meant, and what the meter displays.
  * `reasoningCharacters` is the thinking that precedes it, billed as output
- * and deliberately kept out of the meter (#190) -- but it is the difference
+ * and deliberately kept out of the meter (internal PR 190) -- but it is the difference
  * between "nothing has happened" and "the model has not started writing
  * yet", and on a measured mockup run it was between 57% and 68% of the
  * output tokens. A meter fed only by the answer would sit at zero for most
@@ -224,7 +224,7 @@ export interface ProgressReport {
  * A report is evidence of what a run produced, never of when. The model
  * call ends and the Workflow keeps reporting `running` through settlement
  * and the trace write, retries included, so the last report outlives the
- * work it described by up to a minute (#193 review, P2). Read on its own it
+ * work it described by up to a minute (internal PR 193 review, P2). Read on its own it
  * would say a model that had stopped was still thinking.
  *
  * So the step says when it is done, and the channel carries that beside the
@@ -286,7 +286,7 @@ export function throttleProgress(
   return (progress) => {
     // Normalised here rather than passed through. A provider that does not
     // stream reasoning omits the field, and "this provider does not say" is
-    // a distinction the client keeps on purpose (#190) -- but the channel
+    // a distinction the client keeps on purpose (internal PR 190) -- but the channel
     // reports a count, and a channel whose number is sometimes absent would
     // make the reader distinguish it from zero for no reason.
     const report: ProgressReport = {
@@ -310,7 +310,7 @@ export function throttleProgress(
 
 /**
  * Which failures are statements about the project, one decision for both
- * questions this file asks about a build (#196 review).
+ * questions this file asks about a build (internal PR 196 review).
  *
  * A record over the whole union rather than a pair of comparisons, because
  * a comparison does not notice a reason that did not exist when it was
@@ -352,7 +352,7 @@ function aboutTheProject(reason: BuildFailureReason | undefined): boolean {
 }
 
 /**
- * Whether a failed build is worth spending a second model call on (#194).
+ * Whether a failed build is worth spending a second model call on (internal issue 194).
  *
  * Two questions, and they are separate on purpose. The first is whether the
  * failure says anything about the project, which is `ABOUT_THE_PROJECT`
@@ -401,7 +401,7 @@ export function canPayForRepair(
  * What the verify-and-repair step is given before it is considered hung.
  *
  * A build, a model call and a second build. The first version of this said
- * exactly that and then funded one build (#196 review): a slow first build
+ * exactly that and then funded one build (internal PR 196 review): a slow first build
  * followed by a model call near its own limit would have timed out before
  * the second build, failing a Workflow whose project was already accepted,
  * promoted and billed.
@@ -418,7 +418,7 @@ export function canPayForRepair(
  * settlement, so the only reservation alive while it works is the one it
  * makes; and that one is settled immediately after the model call, before
  * the second build, so its life is the model call rather than the step.
- * RUN_ABANDONED_AFTER_MS bounds the hold, not the step (#194).
+ * RUN_ABANDONED_AFTER_MS bounds the hold, not the step (internal issue 194).
  */
 export const REPAIR_BUILD_ALLOWANCE_MS = 30 * 60_000;
 export const REPAIR_STEP_TIMEOUT_MS =
@@ -426,7 +426,7 @@ export const REPAIR_STEP_TIMEOUT_MS =
 
 /**
  * How long the repair's second build waits out a busy workspace, and how
- * often it asks again (#196 review).
+ * often it asks again (internal PR 196 review).
  *
  * The first build's container teardown holds that user's build lock until
  * the container is gone, and it no longer holds up the build it belongs to:
@@ -456,7 +456,7 @@ export const REPAIR_STEP_TIMEOUT_MS =
  * tests inject is a constant.
  *
  * The attempts bound the sleeping and a wall clock bounds the rest
- * (#196 review). Six retries of a thirteen-minute call is ninety-one
+ * (internal PR 196 review). Six retries of a thirteen-minute call is ninety-one
  * minutes of build, not one build and thirty seconds of waiting, and the
  * allowance above was sized for the second reading: a near-limit first
  * build, a near-limit model call and one near-limit busy retry already came
@@ -496,7 +496,7 @@ export interface GenerationWorkflowEnv {
   DB: D1Database;
   PROJECT_CONTENT: R2Bucket;
   /**
-   * `reserve` as well as `settle` since #194: the verify-and-repair step
+   * `reserve` as well as `settle` since internal issue 194: the verify-and-repair step
    * holds a reservation of its own for the second model call.
    */
   USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'reserve' | 'settle'>>;
@@ -504,7 +504,7 @@ export interface GenerationWorkflowEnv {
   VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
   VIBLD_MAX_IN_FLIGHT?: string;
   /**
-   * The live progress channel (#183). Typed by the one method used rather
+   * The live progress channel (internal issue 183). Typed by the one method used rather
    * than by the class, the way `USER_BUDGET` is: the Workflow only reports
    * and the poll loop only reads.
    *
@@ -515,7 +515,7 @@ export interface GenerationWorkflowEnv {
    */
   RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'report' | 'finish'>>;
   /**
-   * `@vibld/preview`, for building the project the run just produced (#194).
+   * `@vibld/preview`, for building the project the run just produced (internal issue 194).
    *
    * Only the build half of what `publish-client.ts` calls: publishing needs
    * `PUBLISH` too, and a deployment that can build but not publish must
@@ -544,7 +544,7 @@ export interface RepairOutcome {
   built?: boolean;
   /**
    * Whether the repaired project builds, asked the same way the first one
-   * was (#196 review).
+   * was (internal PR 196 review).
    *
    * Three-valued, and the middle case is the point. True and false are a
    * second build that ran. `undefined` is a repair that happened and whose
@@ -599,7 +599,7 @@ export interface RepairOutcome {
     | 'unavailable'
     | 'timed-out';
   /**
-   * Why a repair that was paid for came back unbuilt (#196 review).
+   * Why a repair that was paid for came back unbuilt (internal PR 196 review).
    *
    * `repaired` being absent already says that nothing was found out, and it
    * says nothing about which of the reasons it was. The one worth telling
@@ -638,7 +638,7 @@ export interface RepairOutcome {
    */
   settled?: boolean;
   /**
-   * The repair's own row in the run record (#196 review).
+   * The repair's own row in the run record (internal PR 196 review).
    *
    * Its own row rather than an addition to the run's, because the repair is
    * its own run: its own id, its own model call, its own tokens. Folding
@@ -681,7 +681,7 @@ export interface GenerationOutcome {
  * else is replaced, and the original goes to the log where an operator can
  * see it and a caller cannot.
  *
- * Shared by the build path and the mockup one (#185) rather than written
+ * Shared by the build path and the mockup one (internal issue 185) rather than written
  * twice. This is the rule that decides what a stranger is allowed to read
  * when something breaks, and a second copy of it is how one of the two
  * would come to leak what the other does not.
@@ -730,7 +730,7 @@ export class SanitizingModelProvider implements ModelProvider {
  * The revision a run asserts it is editing, whichever shape said so.
  *
  * A Workflow's params are persisted JSON and do not change shape when an
- * interface does. One queued before #181 shipped carries the whole `base`
+ * interface does. One queued before internal issue 181 shipped carries the whole `base`
  * snapshot and no `baseRevision`, and reading only the new field would take
  * it for a run with nothing to assert -- which is precisely the lost update
  * this change exists to prevent, reintroduced for the runs that were already
@@ -764,7 +764,7 @@ export function assertedBaseRevision(
  * cheaper-per-token models the ceiling is several times what it is on the
  * expensive ones. That is the move, and nothing in the message named it.
  *
- * Every figure is given as an estimate, because every figure is one (#208
+ * Every figure is given as an estimate, because every figure is one (internal PR 208
  * review): four characters a token is a rule of thumb, and the share of
  * output that reaches the answer rather than the thinking is one measured
  * sample. That is fine here and was not fine as a refusal. Being roughly
@@ -782,7 +782,7 @@ export function explainTruncation(
   if (result.stop !== 'model-truncated' || baseChars === 0) return result;
 
   // Only where carrying the project is plausibly what filled the ceiling
-  // (#208 review). A small project asked for a large expansion truncates on
+  // (internal PR 208 review). A small project asked for a large expansion truncates on
   // what the edit *added*, and this sentence would then report a couple of
   // hundred tokens against a thirty-two thousand token ceiling and blame the
   // rewrite, which is both wrong and unhelpful. There the provider's own
@@ -799,7 +799,7 @@ export function explainTruncation(
   const label = findModel(params.model)?.label ?? params.model;
   const explanation = `Carrying this project back out takes roughly ${overhead} of the ${ceiling} output tokens ${label} had on this run, before anything you asked for: a follow-up returns the whole project, not just the part that changed. A model with a larger output budget has the room for it.`;
   // Joined onto the first error rather than added as a second one, because
-  // a second one would never be read (#208 review). `/api/plan`'s SSE
+  // a second one would never be read (internal PR 208 review). `/api/plan`'s SSE
   // stream sends `result.errors[0]` and nothing else, so an explanation at
   // index 1 reaches the browser never, and the person goes on seeing the
   // advice this exists to replace. The order within the sentence is
@@ -822,7 +822,7 @@ export async function runGeneration(
   const runner = new DurableGenerationRunner(store);
 
   try {
-    // The project, read here rather than received (#181). `loadAccepted`
+    // The project, read here rather than received (internal issue 181). `loadAccepted`
     // was already the runner's fallback; now it is the only path, so the
     // files never make the round trip through the browser.
     const asserted = assertedBaseRevision(params);
@@ -875,7 +875,7 @@ export async function runGeneration(
     // What this deliberately does *not* do: refuse the run here.
     //
     // It was written as a refusal first, and the arithmetic looked airtight
-    // (#208 review). A follow-up is asked to return the complete set of
+    // (internal PR 208 review). A follow-up is asked to return the complete set of
     // files, so the ceiling has to carry the project back out, and the live
     // failure of 2026-09-23 was a 63,903-character project against a
     // 32,000-token ceiling: doomed before a token was spent, and ten and a
@@ -896,7 +896,7 @@ export async function runGeneration(
     // what happened once a run has actually been cut off, instead of
     // leaving somebody with a truncation and no idea which way to move.
     // The ten minutes are still spent. Sizing the run to the job rather
-    // than explaining it afterwards is #209.
+    // than explaining it afterwards is internal issue 209.
     const result = await runner.run(
       {
         prompt: params.prompt,
@@ -949,7 +949,7 @@ interface SettlementOutcome {
  * exists whether or not the ledger answered, and it is already promoted by
  * the time this runs. So settlement is retried while there is reason to
  * think it might work, and then recorded as not having happened rather than
- * thrown (#196 review).
+ * thrown (internal PR 196 review).
  */
 async function settleRepairHold(
   deps: {
@@ -961,7 +961,7 @@ async function settleRepairHold(
   held: Awaited<ReturnType<typeof reserveBudget>>,
   usage: PlanUsage | undefined,
   /**
-   * Whether the repair's model call actually went out (#196 review).
+   * Whether the repair's model call actually went out (internal PR 196 review).
    *
    * Not a hard-coded `true`, though it was. `runGeneration` returns
    * normally with `providerRan: false` for the two refusals it makes before
@@ -975,7 +975,7 @@ async function settleRepairHold(
    */
   providerRan: boolean,
   /**
-   * Whether this repair was given up on rather than answered (#196 review).
+   * Whether this repair was given up on rather than answered (internal PR 196 review).
    *
    * The caller is charged nothing for it and the account ledger still
    * carries the worst case. The model was asked, so the deployment may well
@@ -990,7 +990,7 @@ async function settleRepairHold(
   abandoned = false,
 ): Promise<SettlementOutcome> {
   // Remembered across attempts, because `retrying` reports the last failure
-  // and the informative one may not be last (#196 review). A first attempt
+  // and the informative one may not be last (internal PR 196 review). A first attempt
   // that closed the caller's layer and failed on the account's knows what
   // they were charged; a second attempt that cannot reach the caller's
   // ledger at all does not, and reading only the final error erased the
@@ -1032,7 +1032,7 @@ async function settleRepairHold(
   // Worth a line of its own: this is a hold the reclaim will charge at full
   // worst case, and nothing else in the system will say so until then.
   console.error('repair settlement failed', attempted.error);
-  // What the caller was actually billed, where that is known (#196 review).
+  // What the caller was actually billed, where that is known (internal PR 196 review).
   // `settleBudget` writes the caller's layer before the account's, so the
   // two can fail apart: a caller whose own hold closed at the figure their
   // usage came to has been billed correctly, and only the shared ceiling is
@@ -1045,7 +1045,7 @@ async function settleRepairHold(
 /**
  * Build what the run produced, and buy one repair if it does not build.
  *
- * #194: two of six real generations against the production provider
+ * Internal issue 194: two of six real generations against the production provider
  * produced a project that fails `npm run build`, for two unrelated reasons,
  * with the same prompt passing on one run and failing on another. Publish
  * was the only gate on that, and it is the last of three exits.
@@ -1063,7 +1063,7 @@ async function settleRepairHold(
  */
 /**
  * Whether a build result is a statement about the project, or about the
- * service that was asked (#196 review).
+ * service that was asked (internal PR 196 review).
  *
  * `ok` is one, and so is a failure `ABOUT_THE_PROJECT` names as the
  * project's. Both builds in this file ask the same question of their own
@@ -1131,7 +1131,7 @@ export async function verifyAndRepair(
    * Workflow *after* the project had been accepted, promoted and billed,
    * so the caller would be sent an error instead of the files they paid
    * for, and preview-service availability would quietly become a hard
-   * dependency of every generation (#196 review). Every other non-project
+   * dependency of every generation (internal PR 196 review). Every other non-project
    * build failure is already treated as "not the project's fault"; an
    * unreachable service is the same fact arriving differently.
    */
@@ -1152,7 +1152,7 @@ export async function verifyAndRepair(
 
   /**
    * The same build, given a bounded wait when the workspace is busy
-   * (#196 review).
+   * (internal PR 196 review).
    *
    * Only the repair's second build uses this, and only because of what runs
    * beside it: the first build's teardown holds that user's build lock until
@@ -1251,7 +1251,7 @@ export async function verifyAndRepair(
   );
 
   const now = deps.now ?? Date.now;
-  // Asked for in a `try` for the same reason the build is (#196 review).
+  // Asked for in a `try` for the same reason the build is (internal PR 196 review).
   // `reserve` rejects, rather than denying, when the budget Durable Object
   // is unreachable, and that rejection would escape a step with no retries
   // and fail the Workflow after the project had been accepted, promoted and
@@ -1271,7 +1271,7 @@ export async function verifyAndRepair(
       LEDGER_CALL_TIMEOUT_MS,
     );
   } catch {
-    // Including the deadline (#196 review). A ledger that never answers
+    // Including the deadline (internal PR 196 review). A ledger that never answers
     // has said exactly as much as one that rejects, which is nothing.
     //
     // What giving up cannot do is call back a reservation that lands
@@ -1299,7 +1299,7 @@ export async function verifyAndRepair(
   /** Set when the model call was given up on rather than answered. */
   let abandoned = false;
   try {
-    // Bounded on its own, not only by the step around it (#196 review).
+    // Bounded on its own, not only by the step around it (internal PR 196 review).
     //
     // The hold this call sits inside is settled immediately after it, so
     // the hold's life *is* this call, and `UserBudget.reserve` reclaims any
@@ -1348,7 +1348,7 @@ export async function verifyAndRepair(
       RUN_STEP_TIMEOUT_MS,
     );
   } catch (error) {
-    // Never out of this function (#196 review). The `verify-and-repair`
+    // Never out of this function (internal PR 196 review). The `verify-and-repair`
     // step has no retries and `handlePlan` reports an errored Workflow as
     // a failed generation, so a rejection here discards the response for a
     // project that was already accepted, promoted, settled and billed. The
@@ -1364,7 +1364,7 @@ export async function verifyAndRepair(
     abandoned = true;
     // What giving up does not do, written here because "we looked at this
     // and accepted it" is worth nothing if the reasoning lives in a
-    // resolved review thread (#196 review).
+    // resolved review thread (internal PR 196 review).
     //
     // The call is not cancelled; nothing here can cancel it. So a provider
     // that answers after the deadline runs on inside `runGeneration`, and
@@ -1394,7 +1394,7 @@ export async function verifyAndRepair(
     // still holds a reservation. Leaving it open is the one outcome that
     // costs the caller their worst case rather than what they spent.
     //
-    // Retried and then swallowed rather than awaited bare (#196 review). A
+    // Retried and then swallowed rather than awaited bare (internal PR 196 review). A
     // bare await put the settlement's own rejection in the way of
     // everything after it: the enclosing step has no retries, so a Durable
     // Object that blinked would have failed the Workflow and sent an error
@@ -1446,7 +1446,7 @@ export async function verifyAndRepair(
     return { ...builtField, ...designCounts, skipped: 'timed-out', ...money };
   }
 
-  // Accepted is not built (#196 review). The validator says the files are
+  // Accepted is not built (internal PR 196 review). The validator says the files are
   // well formed and inside the project root; it says nothing about whether
   // they compile, and compiling is the entire question. This feature exists
   // because a model's output passes every structural check and still fails
@@ -1565,7 +1565,7 @@ export async function verifyAndRepair(
     ...money,
     // Undefined rather than false whenever the second build did not judge
     // the project: one that could not run at all, and one that came back a
-    // refusal (#196 review). Another build can take the workspace lock
+    // refusal (internal PR 196 review). Another build can take the workspace lock
     // between the model call and this, and `busy`, `sandbox` and `output`
     // say as little about repaired files as they do about the originals.
     // Reporting false there would be the same claim `built` used to make:
@@ -1676,7 +1676,7 @@ async function restoreFirstAttempt(
 }
 
 /**
- * What this run is worth recording (#167).
+ * What this run is worth recording (internal issue 167).
  *
  * Pure, and built from values the workflow already had in hand at
  * settlement: the same model, tokens and cost its `generation.settled` log
@@ -1736,7 +1736,7 @@ function usageOrWorstCase(
  * ledger did not fully close, and the Workflow's own settle step still
  * retries it. What this adds is that a caller who wants to know *what* was
  * charged before the failure can ask, instead of assuming the worst
- * (#196 review).
+ * (internal PR 196 review).
  *
  * Raising this *is* the statement that the caller's own layer closed: the
  * write that closes it comes first and propagates its own failure directly,
@@ -1778,7 +1778,7 @@ export async function settleBudget(
   providerRan: boolean | undefined,
   /**
    * What the account-wide reservation settles at, where that is not what
-   * the caller is charged (#191 review).
+   * the caller is charged (internal PR 191 review).
    *
    * The two layers answer different questions, and a mockup run that
    * absorbs a discarded empty reply is where they part company. The
@@ -1797,7 +1797,7 @@ export async function settleBudget(
   accountMicroUsd?: number,
   /**
    * What the *caller's* reservation settles at, where that is not what the
-   * three cases below would work out (#196 review).
+   * three cases below would work out (internal PR 196 review).
    *
    * The mirror of `accountMicroUsd` and used for the same reason: the two
    * layers answer to different people. A repair whose model call stalled
@@ -1851,7 +1851,7 @@ export async function settleBudget(
         .getByName(ACCOUNT_BUDGET_KEY)
         .settle(params.accountReservationId, accountMicroUsd ?? actual);
     } catch (error) {
-      // Which layer stayed open is not a detail (#196 review). The two are
+      // Which layer stayed open is not a detail (internal PR 196 review). The two are
       // settled together and can fail apart, and they answer to different
       // people: the caller's hold decides what the caller is billed, the
       // account hold decides what this deployment has spent today. A

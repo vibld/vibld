@@ -8,7 +8,7 @@ import type { DeploymentConfig } from '../src/generation/remote-provider.ts';
 /**
  * What the shell does with an answer from `/api/config`, and with no answer.
  *
- * The second is the interesting one (#188 review). `isAdmin` reads `null`
+ * The second is the interesting one (internal PR 188 review). `isAdmin` reads `null`
  * for "nobody has answered yet", which the admin page renders as a wait.
  * A probe that rejects has answered nothing, but it has finished, and a
  * wait that never ends is worse than a refusal: the refusal at least
@@ -87,7 +87,7 @@ describe('applying the deployment probe', () => {
 });
 
 /**
- * What the deployment can generate with, which decides one thing (#189
+ * What the deployment can generate with, which decides one thing (internal PR 189
  * review): whether the composer offers directions at all.
  *
  * `explore` always calls the real `/api/mockups`, while a build in `fake`

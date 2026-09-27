@@ -7,7 +7,7 @@ import { registerHooks } from 'node:module';
  *
  * `node --test --experimental-strip-types` strips TypeScript types and
  * errors on JSX, so every `.tsx` in this app was typechecked and never
- * exercised. Four findings on #122 and four on #123 were rules or wiring
+ * exercised. Four findings on internal PR 122 and four on internal PR 123 were rules or wiring
  * inside a component for exactly that reason, and two of those were
  * introduced while fixing the one before. The rules moved into plain
  * modules, which is the better half of the answer; this is the other half,
@@ -38,7 +38,7 @@ import { registerHooks } from 'node:module';
  * `UserBudget` is the spend ledger and extends `DurableObject` from this
  * module, which node cannot resolve, so the one class that decides what a
  * caller is charged was the one class no test could even import. That is
- * not a gap worth keeping: #180 turned on whether a reclaimed reservation
+ * not a gap worth keeping: Internal PR 180 turned on whether a reclaimed reservation
  * can be corrected, and answering that by reading the SQL is how the bug
  * got there.
  *

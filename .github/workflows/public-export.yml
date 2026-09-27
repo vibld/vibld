@@ -1,0 +1,123 @@
+name: Public export
+
+# After every merge to main, writes this repository's tree into
+# github.com/vibld/vibld as one commit on its main. Chris chose this on
+# 2026-09-27: vibld-internal stays the source of truth and the public copy
+# follows it. scripts/public-export.mjs says what changes on the way out.
+#
+# A change made in the public repository is not kept by the next export
+# unless it has been made here too, so a public pull request is merged by
+# porting it to this repository.
+#
+# Needs one secret, PUBLIC_EXPORT_TOKEN: a fine-grained personal access
+# token for vibld/vibld alone, with Contents read and write. Chris chose a
+# token over a deploy key on 2026-09-27 because it can be made in a phone's
+# browser. It pushes as the account that made it, so main's ruleset there
+# lets repository admins bypass the pull request requirement, and it expires,
+# so it needs renewing. Without it the job stops at the clone and says so.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One at a time, and never cancelled halfway through a push. Each run exports
+# the commit it was started for, and the queue keeps only the newest.
+concurrency:
+  group: public-export
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # To list the issue and pull request numbers the export marks internal.
+  issues: read
+  pull-requests: read
+
+jobs:
+  export:
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # For Prettier, which the export runs on the files it changes.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: List this repository's issue and pull request numbers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --paginate
+          "repos/${GITHUB_REPOSITORY}/issues?state=all&per_page=100"
+          --jq '.[] | [.number, has("pull_request")] | @tsv'
+          > "$RUNNER_TEMP/refs.tsv"
+
+      - name: Export
+        run: >-
+          node scripts/public-export.mjs "$RUNNER_TEMP/export" "$GITHUB_SHA"
+          --refs "$RUNNER_TEMP/refs.tsv"
+
+      # The public repository's CI runs this on what arrives. Failing here
+      # keeps a tree it would reject off its main.
+      - name: Format check on the exported tree
+        run: >-
+          pnpm exec prettier --check "$RUNNER_TEMP/export"
+          --ignore-path "$RUNNER_TEMP/export/.prettierignore"
+
+      # The token travels as an HTTP header, masked in the log, and never in
+      # a URL that git would write into the clone's config.
+      - name: Clone the public repository
+        env:
+          TOKEN: ${{ secrets.PUBLIC_EXPORT_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::PUBLIC_EXPORT_TOKEN is not set. See the comment at the top of this workflow."
+            exit 1
+          fi
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          echo "PUBLIC_AUTH=AUTHORIZATION: basic $auth" >> "$GITHUB_ENV"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            clone --depth 1 --branch main https://github.com/vibld/vibld.git "$RUNNER_TEMP/public"
+
+      - name: Commit and push
+        run: |
+          rsync -a --delete --exclude .git "$RUNNER_TEMP/export/" "$RUNNER_TEMP/public/"
+          cd "$RUNNER_TEMP/public"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The public tree already matches ${GITHUB_SHA}."
+            exit 0
+          fi
+          # The merged change's own subject, less its private PR number,
+          # with any other number marked internal the way the tree is.
+          subject="$(git -C "$GITHUB_WORKSPACE" log -1 --format=%s "$GITHUB_SHA")"
+          subject="$(SUBJECT="$subject" REFS="$RUNNER_TEMP/refs.tsv" node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            import { parseRefs, rewriteReferences } from '${GITHUB_WORKSPACE}/scripts/public-export.mjs';
+            const refs = parseRefs(readFileSync(process.env.REFS, 'utf8'));
+            const bare = process.env.SUBJECT.replace(/\s*\(#\d+\)\s*$/, '');
+            console.log(rewriteReferences(bare, { file: 'subject.md', refs }).text);
+          ")"
+          # Co-authors and sign-offs carry over, so a contribution ported
+          # from a public pull request stays credited to its author there.
+          trailers="$(git -C "$GITHUB_WORKSPACE" log -1 --format='%(trailers:key=Co-authored-by,key=Signed-off-by)' "$GITHUB_SHA")"
+          if [ -n "$trailers" ]; then
+            git -c user.name=vibld -c user.email=hello@vibld.com commit -q -m "$subject" -m "$trailers"
+          else
+            git -c user.name=vibld -c user.email=hello@vibld.com commit -q -m "$subject"
+          fi
+          git -c "http.https://github.com/.extraheader=$PUBLIC_AUTH" push origin HEAD:main
+          echo "Pushed $(git rev-parse --short HEAD): $subject"

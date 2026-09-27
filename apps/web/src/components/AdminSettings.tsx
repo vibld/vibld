@@ -6,7 +6,7 @@ import { adminPageView } from '../admin/route.ts';
 import { navigate } from '../admin/use-pathname.ts';
 
 /**
- * Platform administration, on a page of its own (#184).
+ * Platform administration, on a page of its own (internal issue 184).
  *
  * These four tools used to sit in the composer, beneath the style controls,
  * for every admin on every session. Two things were wrong with that. The
@@ -47,7 +47,7 @@ export function AdminSettings({ isAdmin }: { isAdmin: boolean | null }) {
         {/*
           Also where a caller lands whose `/api/config` probe rejected, so
           the wording offers the reload that would settle it rather than
-          only asserting the account lacks the page (#188 review). A refusal
+          only asserting the account lacks the page (internal PR 188 review). A refusal
           with a way onward beats a wait with none, which is what this
           state replaced.
         */}

@@ -8,7 +8,7 @@ import {
 import type { ParkedQueue } from '../src/components/parked-queue-view.ts';
 
 /**
- * The wording of the parked queue (#46).
+ * The wording of the parked queue (internal PR 46).
  *
  * This is money Stripe says moved that this deployment cannot yet put a name
  * to, and both wrong readings of that are expensive. Read as "payments lost"

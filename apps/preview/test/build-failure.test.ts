@@ -7,7 +7,7 @@ import {
 } from '../worker/build-failure.ts';
 
 /**
- * That a registry outage does not get charged to the project (#196 review).
+ * That a registry outage does not get charged to the project (internal PR 196 review).
  *
  * A failed `npm install` bought a repair turn: a second paid model call,
  * asked to fix a project that compiles perfectly well, on a day when npm is
@@ -41,7 +41,7 @@ describe('whether a failed install was the project or the registry', () => {
   });
 
   it('reads a registry that answers badly as an outage', () => {
-    // #196 review. The first version of this list covered only failures to
+    // internal PR 196 review. The first version of this list covered only failures to
     // reach the registry, which is the smaller half of "npm is having a bad
     // day". A registry up enough to answer 503 is still an outage, and it
     // was being billed to the project.

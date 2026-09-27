@@ -90,7 +90,7 @@ Every palette's values in `palettes.ts` are adapted from
 (89 styles, 192 product/palette pairs, 119 UX guidelines) meant to be queried
 by a local Python tool at generation time. Neither the tool nor live
 retrieval fits here yet (no Python runtime in a Worker, no retrieval
-infrastructure until #12/D13 exists -- see `patterns.ts`'s own comment), so
+infrastructure until internal issue 12/D13 exists -- see `patterns.ts`'s own comment), so
 what is ported is a hand-picked, adapted subset of the underlying values:
 real hex tokens and real Google Fonts pairings, restated as CSS custom
 properties mapped into Tailwind v4's `@theme` (`theme-css.ts`) rather than the

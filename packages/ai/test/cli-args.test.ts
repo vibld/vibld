@@ -87,7 +87,7 @@ describe('parseMockupArgs', () => {
   it('reads the ceiling probe without it reaching the prompt', () => {
     // The probe exists to measure what three documents really cost, so a
     // value swallowed into the prompt would send the number to the model
-    // and leave the ceiling where it was (#190).
+    // and leave the ceiling where it was (internal PR 190).
     const args = parseMockupArgs(['a', 'bakery', '--max-tokens', '40000']);
     assert.equal(args.prompt, 'a bakery');
     assert.equal(args.maxTokens, '40000');

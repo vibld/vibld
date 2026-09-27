@@ -8,7 +8,7 @@ import type { Root } from 'react-dom/client';
 import { AdminSettings } from '../src/components/AdminSettings.tsx';
 
 /**
- * The page the admin tools moved onto (#184).
+ * The page the admin tools moved onto (internal issue 184).
  *
  * Nothing here is a permission. Every `/api/admin/*` route checks the
  * caller at the trusted boundary (ADR-0006), and these assertions are about
@@ -71,7 +71,7 @@ describe('the platform admin page', () => {
     );
     assert.match(page.text(), /Nothing here/);
     // A refusal has to carry a way onward. This is also where a caller
-    // whose probe rejected lands (#188 review), and a page with neither a
+    // whose probe rejected lands (internal PR 188 review), and a page with neither a
     // reload nor a link back would strand them.
     assert.match(page.text(), /reload/i);
     assert.match(page.text(), /back to the builder/i);
@@ -123,7 +123,7 @@ describe('where the admin tools are mounted', () => {
     // `settings-menu.test.tsx` proves the popover can be closed by what is
     // inside it. This is the other half: that the one control which needs
     // to actually does. Without it the admin page opened underneath a menu
-    // still standing over it (#188 review).
+    // still standing over it (internal PR 188 review).
     const app = await readFile(
       new URL('../src/App.tsx', import.meta.url).pathname,
       'utf8',

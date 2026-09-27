@@ -127,7 +127,7 @@ describe('reading Anthropic usage', () => {
 });
 
 /**
- * The schema in the request is the caller's, not this client's (#189
+ * The schema in the request is the caller's, not this client's (internal PR 189
  * review, P1).
  *
  * `output_config.format` was `zodOutputFormat(GenerationPlanSchema)`
@@ -177,7 +177,7 @@ describe('the shape a request asks for', () => {
 });
 
 /**
- * How large a prompt this client says it sent (#189 review).
+ * How large a prompt this client says it sent (internal PR 189 review).
  *
  * As with OpenAI, the schema travels in a structured field rather than in
  * the prompt, so this reports the two strings it was handed. Pinned because
@@ -207,7 +207,7 @@ describe('what the Anthropic client reports sending', () => {
 });
 
 /**
- * A reply cut off at the output ceiling reads as truncated (#73).
+ * A reply cut off at the output ceiling reads as truncated (internal PR 73).
  *
  * Through the real SDK rather than the double above, because the double is
  * where this hid: the SDK's stream parses the structured output inside

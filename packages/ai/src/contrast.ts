@@ -11,7 +11,7 @@
  *
  * Pure arithmetic on purpose: no dependency, no canvas, no colour library.
  * It runs anywhere the rest of this package runs, which is what makes it
- * reusable for checking a *generated* project's tokens later (#27) rather
+ * reusable for checking a *generated* project's tokens later (internal PR 27) rather
  * than only this repo's own.
  *
  * Formulae are WCAG 2.2, sections "relative luminance" and "contrast
@@ -103,7 +103,7 @@ function readDeclarations(
     if (!name.startsWith('--') || name.length < 3) continue;
     if (/[\s{}]/.test(name)) continue;
     // `!important` is not part of the value, and holds over a later
-    // declaration that lacks it (#239 review).
+    // declaration that lacks it (internal PR 239 review).
     const raw = declaration.slice(colon + 1).trim();
     const flagged = /\s*!\s*important\s*$/i.exec(raw);
     const value = flagged ? raw.slice(0, flagged.index) : raw;
@@ -129,7 +129,7 @@ function specificity(selector: string): number {
  * A block's declarations over what is already read, where the cascade
  * would apply them: at least as specific as the selector that set each
  * before, later winning a tie. `html.dark` holds over a later `.dark`
- * (#239 review).
+ * (internal PR 239 review).
  */
 function readWeighted(
   block: string,
@@ -153,7 +153,7 @@ function readWeighted(
  * Where the cascade places a declaration: its cascade layer, then its
  * selector's specificity, then where its block sits in the stylesheet.
  * The layer is the rank of each layer it sits in, outermost first; an
- * empty list is outside every layer (#239 review).
+ * empty list is outside every layer (internal PR 239 review).
  */
 interface Weight {
   layer: number[];
@@ -190,7 +190,7 @@ function outweighs(a: Weight, b: Weight): boolean {
   if (aOwn !== bOwn) return aOwn;
   // An important declaration holds over a normal one, and among important
   // ones the layer order is reversed: an earlier layer wins, and one
-  // outside every layer loses to those in one (#239 review).
+  // outside every layer loses to those in one (internal PR 239 review).
   if (Boolean(a.important) !== Boolean(b.important)) {
     return Boolean(a.important);
   }
@@ -210,7 +210,7 @@ interface WeightedTokens {
 /**
  * Whether a position in the stylesheet sits inside a conditional at-rule,
  * `@media`, `@supports` or `@container`, whose declarations hold only some
- * of the time and so do not define a theme (#239 review), and the cascade
+ * of the time and so do not define a theme (internal PR 239 review), and the cascade
  * layers it sits in. `@layer` is not conditional: shadcn/ui's tokens often
  * sit in `@layer base`.
  *
@@ -226,7 +226,7 @@ export function blockTracker(
   let conditional = 0;
   // Cascade layers, ranked where each is first named: `@layer a, b;` or
   // `@layer a { ... }`, nested ones under their parent's name
-  // (#239 review).
+  // (internal PR 239 review).
   const ranks = new Map<string, number>();
   let anonymous = 0;
   const current = (): string | undefined => {
@@ -245,7 +245,7 @@ export function blockTracker(
     }
     return full;
   };
-  // A brace inside a string, `content: "{"`, opens nothing (#239 review).
+  // A brace inside a string, `content: "{"`, opens nothing (internal PR 239 review).
   let quote: string | undefined;
   return (at: number) => {
     for (; scanned < at; scanned += 1) {
@@ -315,9 +315,9 @@ function readRootWeighted(css: string): WeightedTokens {
     // Only a block whose selector list has a member that is the root
     // itself, one compound: `:root`, `html:root` or `:host`. `:root.dark`
     // is the dark theme, and `.scope :root` or `:root :root` select nothing
-    // (#239 review). The list is read back from the brace to the rule,
+    // (internal PR 239 review). The list is read back from the brace to the rule,
     // block or declaration before it, stopping at the last block read. Not
-    // one inside `@media`, which holds only some of the time (#239 review).
+    // one inside `@media`, which holds only some of the time (internal PR 239 review).
     let start = open;
     while (start > cursor && !'{};'.includes(css[start - 1]!)) start -= 1;
     const members = css
@@ -448,14 +448,14 @@ function tokenContrast(a: string, b: string): number | null {
  */
 /**
  * A selector for the dark theme on the page itself: `.dark`, or the class
- * on the root, `html.dark`, `:root.dark` or `html:root.dark` (#239 review). Nothing more:
+ * on the root, `html.dark`, `:root.dark` or `html:root.dark` (internal PR 239 review). Nothing more:
  * a combinator, `.dark .card`, selects something inside it, and any other
  * condition, `.dark:hover` or `.dark.compact`, holds only some of the time
- * (#239 review).
+ * (internal PR 239 review).
  */
 function darkRoot(selector: string): boolean {
   // Only forms that can be the root or host: `body:root` never is
-  // (#239 review).
+  // (internal PR 239 review).
   return /^(?:html(?::root)?|:root|:host|body)?\.dark$|^(?:html)?\.dark:root$/.test(
     selector,
   );
@@ -477,7 +477,7 @@ function readDarkWeighted(css: string): WeightedTokens {
     if (open === -1) break;
     // Only a block with the dark root in its selector list: `.dark .card`
     // or `.darker` declares something else, and `.dark, [data-theme=dark]`
-    // applies to `.dark` (#239 review). The list is read back from the
+    // applies to `.dark` (internal PR 239 review). The list is read back from the
     // brace to the rule, block or declaration before it; the walk back
     // stops at the last block read, so the whole pass stays linear.
     let start = open;
@@ -487,7 +487,7 @@ function readDarkWeighted(css: string): WeightedTokens {
     if (close === -1) break;
     // Not one inside `@media`, `@supports` or `@container`: it holds only
     // some of the time, and must not replace the theme's values
-    // (#239 review).
+    // (internal PR 239 review).
     const members = head
       .split(',')
       .map((member) => member.trim())
@@ -498,7 +498,7 @@ function readDarkWeighted(css: string): WeightedTokens {
       // what body inherits from the root, whatever the root's selector or
       // layer.
       // Only when every member is on body: with `.dark, body.dark` and
-      // the class on the root, `.dark` is what applies (#239 review).
+      // the class on the root, `.dark` is what applies (internal PR 239 review).
       const onBody = members.every((member) => member.startsWith('body'));
       readWeighted(
         css.slice(open + 1, close),
@@ -525,7 +525,7 @@ function readDarkWeighted(css: string): WeightedTokens {
 /**
  * The .dark declarations the cascade applies over :root's. With the class
  * on the root element, `html:root { --foreground: #666 }` holds over a
- * later `.dark` block's foreground (#239 review).
+ * later `.dark` block's foreground (internal PR 239 review).
  */
 function appliedDark(
   root: WeightedTokens,
@@ -595,14 +595,14 @@ export function readThemeTokens(css: string): Map<string, string> {
 
 /**
  * The stylesheet without its comments, in one pass: a commented-out
- * `@theme` or `:root` block is not a token the page draws (#239 review).
+ * `@theme` or `:root` block is not a token the page draws (internal PR 239 review).
  * An unclosed comment runs to the end, as in CSS.
  */
 function withoutCssComments(css: string): string {
   let out = '';
   let cursor = 0;
   // A `/*` inside a string, `content: "/*"`, starts no comment
-  // (#239 review). A string ends at its quote or, unclosed, at the end of
+  // (internal PR 239 review). A string ends at its quote or, unclosed, at the end of
   // the line, as in CSS; a backslash escapes the character after it.
   let copied = 0;
   while (cursor < css.length) {
@@ -643,12 +643,12 @@ export function findContrastFailures(raw: string): ContrastFinding[] {
   // left for :root to answer. So a literal @theme value is what the
   // utility draws, over a :root property of the same name, and .dark,
   // which only redefines :root's properties, does not reach it
-  // (#239 review).
+  // (internal PR 239 review).
   const theme = readThemeTokens(css);
   const rootWeighted = readRootWeighted(css);
   const rootTokens = rootWeighted.tokens;
   // A block can also set the property a utility reads, `--color-*`, over
-  // the @theme value (#239 review).
+  // the @theme value (internal PR 239 review).
   const root = new Map([
     ...rootTokens,
     ...theme,

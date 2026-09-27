@@ -91,7 +91,7 @@ describe('the exported project', () => {
  *   TS1484: 'ReactNode' is a type and must be imported using a type-only
  *   import when 'verbatimModuleSyntax' is enabled.
  *
- * The first fix turned that setting off here. Wrong place (#193 review):
+ * The first fix turned that setting off here. Wrong place (internal PR 193 review):
  * this scaffold only ever feeds `FakeModelProvider`, and a reader's project
  * comes from `RemoteModelProvider`, which returns the model's own files with
  * the model's own tsconfig. Turning a setting off here cannot stop a build

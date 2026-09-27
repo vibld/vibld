@@ -61,7 +61,7 @@ jobs:
         run: pnpm build
 
   # The eval stub reported a project accepted that stopped at
-  # "vite: not found" (#59). Writing one case out and building it is the
+  # "vite: not found" (internal PR 59). Writing one case out and building it is the
   # only check that sees that. One case: they share a manifest, and each
   # build is a registry install. In a container, as the bakeoff runs
   # candidates, so the path a model's code takes is exercised on every pull
@@ -70,7 +70,7 @@ jobs:
   # A job of its own, with its own time: one candidate may take up to 13
   # minutes at its worst (install, build, and the container's start and
   # removal), more than the quality job's limit allows after everything
-  # else it runs (#237 review). The script is given what is left of the
+  # else it runs (internal PR 237 review). The script is given what is left of the
   # job's time, less a reserve, so a slow registry is reported as a
   # candidate it had no time for, not cut off without a word.
   eval-build:

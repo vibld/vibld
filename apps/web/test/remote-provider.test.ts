@@ -253,7 +253,7 @@ describe('streamed progress', () => {
 
   it('reports a clock-only event, which is all a Workflow run can send', async () => {
     // The bug this closes. Generation runs inside a durable Workflow with no
-    // live channel back to the polling Worker (#183), so a progress event
+    // live channel back to the polling Worker (internal issue 183), so a progress event
     // carries the elapsed time and no character count. Requiring both here
     // dropped every one of them, and the meter never appeared for any real
     // run -- a whole chain intact except for its last link.
@@ -341,7 +341,7 @@ describe('streamed progress', () => {
     //
     // `{ elapsedMs: 10 }` used to be listed here as malformed and is not any
     // more: a clock with no character count is what every Workflow run now
-    // sends (#183). Only the frames with no usable clock are dropped.
+    // sends (internal issue 183). Only the frames with no usable clock are dropped.
     const seen: unknown[] = [];
     const provider = new RemoteModelProvider({
       fetchImpl: (async () =>

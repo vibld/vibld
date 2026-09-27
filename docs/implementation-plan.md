@@ -4,14 +4,14 @@ This plan applies the [accepted D1-D30 decisions](decisions.md). GitHub issues t
 
 ## Work order
 
-| Stage | Outcome                                                                                              | Issues                                                                                                                                                                                                                                            | Depends on                                                           |
-| ----- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| 0     | Enforced repository baseline and verified private reporting                                          | #2, #17; tracker #1                                                                                             | Reviewed decisions and governance                                    |
-| 1     | Small domain contracts and an independently buildable fixed marketing template                       | #8, #5                                                                                                                                                      | Stage 0                                                              |
-| 2     | Fixed-template sandbox/preview feasibility test; invited-user shell, storage, permissions and quotas | #6, #14, #11, #15, #18 | Stage 1; verified infrastructure capabilities and approved budget    |
-| 3     | Fake-provider prompt-to-checkpoint flow, then bounded live generation                                | #9, #16                                                                                                                                                    | Stage 2 controls; begin deterministic tests without paid credentials |
-| 4     | Revision-scoped retrieval and GitHub branches/PRs                                                    | #12, #13                                                                                                                                                  | Stable contracts, durable checkpoints and permission enforcement     |
-| 5     | Measured model selection and hosted-alpha acceptance                                                 | #9, #10; tracker #4                                                                                             | All M1 capabilities; approved live-evaluation budget                 |
+| Stage | Outcome                                                                                              | Issues                                                                                       | Depends on                                                           |
+| ----- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 0     | Enforced repository baseline and verified private reporting                                          | internal issue 2, internal issue 17; tracker internal issue 1                                | Reviewed decisions and governance                                    |
+| 1     | Small domain contracts and an independently buildable fixed marketing template                       | internal issue 8, internal issue 5                                                           | Stage 0                                                              |
+| 2     | Fixed-template sandbox/preview feasibility test; invited-user shell, storage, permissions and quotas | internal issue 6, internal issue 14, internal issue 11, internal issue 15, internal issue 18 | Stage 1; verified infrastructure capabilities and approved budget    |
+| 3     | Fake-provider prompt-to-checkpoint flow, then bounded live generation                                | internal issue 9, internal issue 16                                                          | Stage 2 controls; begin deterministic tests without paid credentials |
+| 4     | Revision-scoped retrieval and GitHub branches/PRs                                                    | internal issue 12, internal issue 13                                                         | Stable contracts, durable checkpoints and permission enforcement     |
+| 5     | Measured model selection and hosted-alpha acceptance                                                 | internal issue 9, internal issue 10; tracker internal issue 4                                | All M1 capabilities; approved live-evaluation budget                 |
 
 Build the evaluation harness alongside each slice, not after integration. Stage 2 work can overlap where its interfaces are stable, but private-preview acceptance depends on identity, permissions and budgets. No invited user runs untrusted code before those controls pass. Do not turn the feasibility test into a public service.
 
@@ -66,15 +66,15 @@ Normal CI uses deterministic providers and test data without live credentials. R
 
 ## Operational decisions before live use
 
-| Detail                                          | Required evidence                                                                                       | Owner / tracked in            |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| Account capabilities, regions and service tiers | Cloudflare Sandbox access/limits and Supabase connection/backup requirements confirmed; budget approved | Lead maintainer; #6, #11, #14 |
-| Preview origin and sessions                     | Selected domain, cookie isolation, all-path authorization and bypass tests                              | #6, #14, #15                  |
-| User-secret storage and encryption keys         | Key separation, rotation/recovery/deletion design and tests                                             | #15                           |
-| Authenticated SQL                               | Least-privilege roles, tenant enforcement and transaction/pooling tests; no stale authorization cache   | #11, #14                      |
-| Models and embeddings                           | Versioned comparison, source-processing disclosure and approved spending cap                            | #9, #10, #12                  |
-| Budgets and retention                           | Numeric run/account caps, backup deletion windows, telemetry schema and opt-out policy                  | #11, #18                      |
-| Operations                                      | Monitoring, safe diagnostics, incident owner, resource cleanup and restore drill                        | #6, #11, #17, #18             |
+| Detail                                          | Required evidence                                                                                       | Owner / tracked in                                                        |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Account capabilities, regions and service tiers | Cloudflare Sandbox access/limits and Supabase connection/backup requirements confirmed; budget approved | Lead maintainer; internal issue 6, internal issue 11, internal issue 14   |
+| Preview origin and sessions                     | Selected domain, cookie isolation, all-path authorization and bypass tests                              | internal issue 6, internal issue 14, internal issue 15                    |
+| User-secret storage and encryption keys         | Key separation, rotation/recovery/deletion design and tests                                             | internal issue 15                                                         |
+| Authenticated SQL                               | Least-privilege roles, tenant enforcement and transaction/pooling tests; no stale authorization cache   | internal issue 11, internal issue 14                                      |
+| Models and embeddings                           | Versioned comparison, source-processing disclosure and approved spending cap                            | internal issue 9, internal issue 10, internal issue 12                    |
+| Budgets and retention                           | Numeric run/account caps, backup deletion windows, telemetry schema and opt-out policy                  | internal issue 11, internal issue 18                                      |
+| Operations                                      | Monitoring, safe diagnostics, incident owner, resource cleanup and restore drill                        | internal issue 6, internal issue 11, internal issue 17, internal issue 18 |
 
 The maintainer approves product/security tradeoffs and spending. Implementation issues identify the engineer or agent doing the work when assigned; this plan does not assign work to external people or authorize new credentials.
 
@@ -84,4 +84,4 @@ The current deliverable is repository documentation and backlog alignment. Root 
 
 M0 remains open until quality enforcement and private reporting are verified. M1 remains open until all hosted-alpha gates pass. M2 adds reliable conversational editing; publishing follows, then one full-stack integration, then visual targeting. An alternate runtime/self-hosting path needs evidence before making a working standalone OSS claim.
 
-Brand/landing-page work #7 and extensive contributor templates #3 remain open but deferred. This keeps their history without treating them as release blockers.
+Brand/landing-page work internal issue 7 and extensive contributor templates internal issue 3 remain open but deferred. This keeps their history without treating them as release blockers.

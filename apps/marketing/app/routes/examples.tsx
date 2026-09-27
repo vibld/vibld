@@ -10,7 +10,7 @@ export function meta() {
 }
 
 /**
- * What vibld has built, shown as it was built (#59 follow-up, task #71).
+ * What vibld has built, shown as it was built (internal PR 59 follow-up, task #71).
  *
  * Every example is the generator's output with no hand edits. One that does
  * not build is regenerated or left out, never patched: an example page that

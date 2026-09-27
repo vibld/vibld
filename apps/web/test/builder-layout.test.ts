@@ -108,7 +108,7 @@ describe('the wide-screen builder layout', () => {
   });
 
   it('lets the admin page scroll, so its lower tools are reachable', async () => {
-    // The same rule, one page over (#184). These four tools are what grew
+    // The same rule, one page over (internal issue 184). These four tools are what grew
     // the composer past the fold in the first place; a page that dropped
     // the grid without taking a scroller would have moved the bug rather
     // than fixed it, and an expanded panel's fields would sit below a page

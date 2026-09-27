@@ -119,7 +119,7 @@ async function main(): Promise<number> {
       const result = await runCase(testCase, provider);
       results.push(result);
       // Written out like a live candidate, so CI can build what the stub
-      // says it accepted (bin/build-candidates.ts). Until #59 nothing did,
+      // says it accepted (bin/build-candidates.ts). Until internal PR 59 nothing did,
       // and the stub's project could not build.
       if (live.outDir && result.outcome === 'accepted') {
         const root = join(live.outDir, 'stub', testCase.id);

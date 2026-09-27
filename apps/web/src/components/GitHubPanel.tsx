@@ -22,7 +22,7 @@ import { clerkConfigured } from '../auth/clerk-token.ts';
 
 /**
  * Connecting a repository, and the receiving half of the callback handoff
- * (issues #13 and #121).
+ * (internal issues 13 and 121).
  *
  * The worker's `/api/github/callback` cannot be authenticated, because
  * GitHub returns through a top-level navigation that carries no bearer
@@ -58,7 +58,7 @@ export function GitHubPanel() {
  * what it looks like: two lines with nothing in them to get wrong.
  */
 export function GitHubConnection() {
-  // Shared with the push button (#34), so the two cannot describe the same
+  // Shared with the push button (internal PR 34), so the two cannot describe the same
   // connection differently. The supersede rule this used to hold in a local
   // gate lives in the store now, along with "a probe only commits what it
   // got": both are properties of the connection rather than of this panel,
@@ -239,7 +239,7 @@ export function GitHubConnection() {
         // so a probe that fails would leave this panel showing "Connected
         // to acme/site" beside an error the server has just written saying
         // it is connected to somewhere else, and still offering to
-        // disconnect the wrong one. The push button was given this on #123
+        // disconnect the wrong one. The push button was given this on internal PR 123
         // for the same reason; the panel was not.
         githubStatus.forget();
         noteConnectionChanged();

@@ -15,7 +15,7 @@ import { PreviewPanel } from '../src/components/PreviewPanel.tsx';
  * The preview, as it is actually wired.
  *
  * Every rule in here was written and never run: the runner errors on JSX, so
- * until the harness on #124 this component was typechecked and nothing more.
+ * until the harness on internal PR 124 this component was typechecked and nothing more.
  */
 
 function stateWith(revision: string | null): BuilderState {
@@ -99,7 +99,7 @@ async function mount(state: BuilderState, sandbox: PreviewSandbox) {
 describe('the preview, as it is actually wired', () => {
   it('says when the sandbox is running a checkpoint that has been moved on from', async () => {
     // The address is still live; it is live on the previous checkpoint. The
-    // same thing #123 and #126 fixed for the push and publish buttons.
+    // same thing internal PR 123 and internal PR 126 fixed for the push and publish buttons.
     const view = await mount(stateWith('r2'), sandboxWith(READY, 'r1'));
 
     assert.match(view.text(), /not the one accepted since/);
@@ -183,7 +183,7 @@ describe('the preview, as it is actually wired', () => {
 
 describe('a preview whose project does not compile', () => {
   it('says so, and quotes the output rather than paraphrasing it', async () => {
-    // #194. Without this the reader still sees the failure, as Vite's own
+    // internal issue 194. Without this the reader still sees the failure, as Vite's own
     // transform error inside the frame, which reads as Vibld being broken
     // rather than as their project needing a fix. The exact words are what
     // make it actionable, so they are shown verbatim.
@@ -199,7 +199,7 @@ describe('a preview whose project does not compile', () => {
   });
 
   it('claims nothing about a command it did not run', async () => {
-    // #195 review. An earlier draft said `npm run build` would fail. The
+    // internal PR 195 review. An earlier draft said `npm run build` would fail. The
     // model writes the manifest, and the prompt requires a "build" and a
     // "typecheck" script without requiring the first to invoke the second,
     // so a project whose build is a bare `vite build` can bundle perfectly

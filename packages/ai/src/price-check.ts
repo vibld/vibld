@@ -79,7 +79,7 @@ export type PriceFindingKind =
   | 'not-published'
   /**
    * Offered here and published, but without a rate for a kind of token
-   * vibld bills (#213 review). Nothing was compared for that kind, so the
+   * vibld bills (internal PR 213 review). Nothing was compared for that kind, so the
    * check is incomplete rather than clean.
    */
   | 'rate-missing';
@@ -153,7 +153,7 @@ export function comparePublished(
 ): PriceFinding[] {
   const findings: PriceFinding[] = [];
   const byId = new Map(catalogue.map((model) => [model.id, model]));
-  // By provider and id together (#213 review): an entry filed under the
+  // By provider and id together (internal PR 213 review): an entry filed under the
   // wrong provider did not publish that model, and must not hide it.
   const listed = new Set(
     published.map((price) => `${price.provider}\u0000${price.model}`),
@@ -358,7 +358,7 @@ const ANTHROPIC_TOKEN_TYPES: Readonly<
  * `unread` names every charge for tokens that did not become a per-token
  * rate: a token type or line item this does not recognise, or one with no
  * token count to divide by. A check that quietly skipped them would report
- * the bill it could not read as a bill that agreed (#213 review), so the
+ * the bill it could not read as a bill that agreed (internal PR 213 review), so the
  * script treats a non-empty list as an incomplete check, never a clean one.
  */
 export interface RealisedReading {
@@ -637,7 +637,7 @@ export function parsePublishedSnapshot(
   if (typeof readOn !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(readOn)) {
     throw new Error('the published price snapshot needs readOn as YYYY-MM-DD');
   }
-  // A real calendar date, and not a future one (#213 review). `2026-99-99`
+  // A real calendar date, and not a future one (internal PR 213 review). `2026-99-99`
   // has no age at all and a future date a negative one, and either would
   // hold the stale-snapshot check open for good.
   const read = new Date(`${readOn}T00:00:00Z`);
@@ -655,7 +655,7 @@ export function parsePublishedSnapshot(
     );
   }
   const parsed = parsePublishedPrices(prices);
-  // Every provider, every time (#213 review). A rewrite that dropped one
+  // Every provider, every time (internal PR 213 review). A rewrite that dropped one
   // would otherwise read as that provider's page not having been read, and
   // quietly stop every check on its models. DeepSeek has no cost API, so
   // for it this snapshot is the only check there is.

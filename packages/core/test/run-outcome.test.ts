@@ -54,7 +54,7 @@ describe('the reason vocabulary', () => {
   });
 
   it('names the two budget refusals separately', async () => {
-    // The distinction #159 asks for by name. Being out of allowance and
+    // The distinction internal issue 159 asks for by name. Being out of allowance and
     // already having a run in flight are both "not now" and lead a person
     // to do completely different things about it.
     assert.ok((RUN_REFUSALS as readonly string[]).includes('account-ceiling'));

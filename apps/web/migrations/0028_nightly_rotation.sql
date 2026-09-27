@@ -1,5 +1,5 @@
 -- Whose turn it is in the nightly billing pass, when the query budget is too
--- small for every phase to run on the same night (#176).
+-- small for every phase to run on the same night (internal issue 176).
 --
 -- The pass has four phases (parked events, stranded payouts, the
 -- subscription reconcile, the event replay) and splits one D1 query

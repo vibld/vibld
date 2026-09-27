@@ -1149,7 +1149,7 @@ describe('the image-alt check, following a value to its sink', () => {
       `const html = ${HERO};\nfunction show(html) { root.innerHTML = html; }\nshow('<p>ok</p>');`,
       `const show = (html) => { root.innerHTML = html; };\nshow('<p>ok</p>');\nconst html = ${HERO};`,
       `function show(opts) { root.innerHTML = opts.hero; }\nshow({ hero: '<p>ok</p>' });\nconst opts = { hero: ${HERO} };`,
-      // A concise arrow's body ends with its expression (#249 review).
+      // A concise arrow's body ends with its expression (internal PR 249 review).
       `const show = (html) => root.innerHTML = html;\nshow('<p>ok</p>');\nconst html = ${HERO};`,
       `const show = html => (root.innerHTML = html);\nshow('<p>ok</p>');\nconst html = ${HERO};`,
     ]) {
@@ -7467,7 +7467,7 @@ export function App() { return <main><h1>Know it all.</h1>${use}</main>; }`,
 });
 
 /**
- * Generated projects on Tailwind v4, shadcn/ui and Motion (#74).
+ * Generated projects on Tailwind v4, shadcn/ui and Motion (internal PR 74).
  *
  * Each of these was a false finding on a correct project before the
  * checker read the stack: a colour written as a utility with an opacity
@@ -9744,7 +9744,7 @@ describe('media the page references', () => {
 });
 
 /**
- * The rule scanner that replaced `/([^{}]+)\{([^{}]*)\}/g` (#75).
+ * The rule scanner that replaced `/([^{}]+)\{([^{}]*)\}/g` (internal PR 75).
  *
  * The regex was quadratic on a long run with no brace in it, and it ran over
  * the source as well as the stylesheets: one generated page with a 66 KB

@@ -5,7 +5,7 @@ import { repairPromptFor, worthRepairing } from '../worker/generation-run.ts';
 import type { BuildFailureReason } from '../worker/publish-client.ts';
 
 /**
- * When a project that will not build is worth a second model call (#194).
+ * When a project that will not build is worth a second model call (internal issue 194).
  *
  * Two of six real generations against the production provider produced a
  * project that fails `npm run build`, for two unrelated reasons, with the
@@ -15,7 +15,7 @@ import type { BuildFailureReason } from '../worker/publish-client.ts';
  * broken and the caller really can pay.
  */
 
-/** A run admitted with an allowance, which is every run since #194. */
+/** A run admitted with an allowance, which is every run since internal issue 194. */
 const FUNDED = { monthlyAllowance: 1_000_000, topupCeiling: 0 };
 
 describe('whether a failed build buys a repair', () => {
@@ -51,7 +51,7 @@ describe('whether a failed build buys a repair', () => {
   });
 
   it('treats a reason from the future as no evidence either', () => {
-    // The cast is the point rather than a way around the type (#196
+    // The cast is the point rather than a way around the type (internal PR 196
     // review). Since the reason became `BuildFailureReason` this argument
     // cannot be written without one, which is the improvement: the value
     // is parsed at the service boundary and an unrecognised one is already

@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { whenClientGone } from '../worker/client-gone.ts';
 
 /**
- * Noticing a caller who left before anyone was listening (#189 review).
+ * Noticing a caller who left before anyone was listening (internal PR 189 review).
  *
  * Both streaming routes did real work -- identity, allowance, reservation --
  * before registering their `cancel`. A caller who disconnected during any
@@ -99,7 +99,7 @@ describe('how a route learns the caller has gone', () => {
   });
 
   /**
-   * Where the check happens, not only that it happens (#189 review).
+   * Where the check happens, not only that it happens (internal PR 189 review).
    *
    * Source-level, and weaker than a behavioural test, which I would rather
    * say than dress up: `handlePlan` and `handleMockups` need Clerk, D1,
@@ -188,7 +188,7 @@ describe('how a route learns the caller has gone', () => {
     // Source-level and weaker than a behavioural test, as above. The point
     // is which figure reaches `cancelledUsage`: `inputChars` is the
     // reservation's bound and `sentChars` is the prompt that really went
-    // (#189 review). The reasoning count joined it in #190, because a run
+    // (internal PR 189 review). The reasoning count joined it in internal PR 190, because a run
     // stopped before the first content delta had streamed nothing else and
     // settled at zero output tokens.
     const source = await readFile(workerSource(), 'utf8');
@@ -202,7 +202,7 @@ describe('how a route learns the caller has gone', () => {
   it('takes the sent size from the client rather than rebuilding it', async () => {
     // The route cannot work this out for itself: DeepSeek appends the
     // output instruction to the system message and the other two clients
-    // carry the schema structurally (#189 review). Reconstructing it here
+    // carry the schema structurally (internal PR 189 review). Reconstructing it here
     // was short by 430-odd characters on the provider production runs.
     const source = await readFile(workerSource(), 'utf8');
     assert.match(

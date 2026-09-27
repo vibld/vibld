@@ -41,7 +41,7 @@ The [charter](../VIBLD.md), [roadmap](../ROADMAP.md), and [ADRs](adr/README.md) 
 
 ## Launch decisions (accepted 2026-09-09)
 
-Accepted 2026-09-09 (PR #70). L1 and L24 amend D30 -- D23 is untouched by both.
+Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched by both.
 
 | ID   | Choice         | Accepted direction                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ---- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -208,7 +208,7 @@ exactly this path.
 ### Resolved 2026-09-27
 
 **The nightly billing pass rotates when its query budget is too small to
-split (#176).** Chris chose option 1, rotate, on 2026-09-27, in this form:
+split (internal issue 176).** Chris chose option 1, rotate, on 2026-09-27, in this form:
 the parked queue keeps its floor every night, and payout, reconcile and
 replay take the rest in turn, in that order. It applies below the allowance
 where a four-way split buys every phase an item (92). The turn is a counter
@@ -218,7 +218,7 @@ a subscription at all). The default stays 40,
 safe on Workers Free. At 92 and above, including the deployed 500, the pass
 is unchanged.
 
-**L9 -- previews and builds share the container budget (#197).** Since #196, builds run in the same container class as previews, whose `max_instances` is 25, and the budget was split statically: 20 for previews and 5 for builds, so the 21st preview queued even when nothing was building. Chris chose the shared budget: previews and builds count against one budget of 25, with builds bounded at 5 of it. Previews get all 25 whenever nothing is building, and a preview queues behind a build only when every container is taken. L9 holds again and its wording is unchanged; `max_instances` is unchanged. See `apps/preview/worker/capacity.ts`.
+**L9 -- previews and builds share the container budget (internal issue 197).** Since internal PR 196, builds run in the same container class as previews, whose `max_instances` is 25, and the budget was split statically: 20 for previews and 5 for builds, so the 21st preview queued even when nothing was building. Chris chose the shared budget: previews and builds count against one budget of 25, with builds bounded at 5 of it. Previews get all 25 whenever nothing is building, and a preview queues behind a build only when every container is taken. L9 holds again and its wording is unchanged; `max_instances` is unchanged. See `apps/preview/worker/capacity.ts`.
 
 ### Resolved 2026-09-19
 
@@ -241,8 +241,8 @@ own record.
 **citeunseen.io (L52) is deferred past launch.** Not part of the launch bar.
 Unblocked since 2026-09-17 and still unbuilt; nothing else depends on it.
 
-**The analysis in PR #157 is not merged.** The PR is closed. What it
-recommended survives as #158 to #162, of which #162 shipped as ADR-0013;
+**The analysis in internal PR 157 is not merged.** The PR is closed. What it
+recommended survives as internal issue 158 to internal issue 162, of which internal issue 162 shipped as ADR-0013;
 recommendations 6 to 9 had no issue and are not carried forward.
 
 **Two of six generated projects did not compile.** Measured against the
@@ -346,7 +346,7 @@ Neither is retryable, which is the point. The same prompt asks the same
 question, so the move is to answer it, and retained work is finished and
 sitting there, so re-running replaces it.
 
-Refines D11 and sits beside D12. #158.
+Refines D11 and sits beside D12. Internal issue 158.
 
 ### Resolved 2026-09-27
 
@@ -362,6 +362,18 @@ colour. `packages/brand` is still the one place a colour is decided, and
 **Fonts: self-hosted.** Bricolage Grotesque, Hanken Grotesk and JetBrains Mono
 are served from vibld.com's own origin rather than from a font service, so the
 Cookie Notice's list of third parties does not grow.
+
+**The public repository follows this one.** github.com/vibld/vibld is written
+from this repository after every merge to main
+(`.github/workflows/public-export.yml`), not developed in separately. A
+public pull request is reviewed there and landed here, keeping its author as
+co-author; the export brings it back. Public Dependabot version updates are
+off (the config is not exported), since they could only merge by diverging.
+References to this repository's issues and pull requests read "internal issue
+N" and "internal PR N" in the public copy, in prose and comments only.
+
+**Code of conduct: our own.** Written for this project rather than adopted,
+with reports to hello@vibld.com (`CODE_OF_CONDUCT.md`).
 
 ### Resolved 2026-09-16
 
@@ -468,9 +480,9 @@ this deployment does not have.
 
 ## Generation pattern/style/SEO catalogue (scoped 2026-09-09)
 
-Raised in the response to PR #70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set -- 10 marketing page types, 6 SaaS screens, 5 style presets -- as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, whose disclosure question is resolved above.
+Raised in the response to internal PR 70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set -- 10 marketing page types, 6 SaaS screens, 5 style presets -- as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, whose disclosure question is resolved above.
 
-Steps (1) and (2) shipped 2026-09-11 (`packages/ai/src/patterns.ts`, alongside the pre-existing `style-presets.ts`): a closed, versioned set of 10 marketing page patterns and 6 SaaS screen patterns, matched by keyword against the request text and injected as structural guidance for whatever matches -- not semantic retrieval (that still needs #12's embedding provider and spend cap), but the smallest thing that satisfies L50's actual "a handful of relevant patterns injected per request" without either dependency. Step (3) is unblocked as of 2026-09-17: the disclosure framing is resolved above (on by default, disclosed at generation time, emitted as ordinary removable code that the project does not depend on). It is not yet built, and it is **deferred past launch** (Chris, 2026-09-19): not part of the launch bar, and not to be raised against it. Nothing else here depends on it.
+Steps (1) and (2) shipped 2026-09-11 (`packages/ai/src/patterns.ts`, alongside the pre-existing `style-presets.ts`): a closed, versioned set of 10 marketing page patterns and 6 SaaS screen patterns, matched by keyword against the request text and injected as structural guidance for whatever matches -- not semantic retrieval (that still needs internal issue 12's embedding provider and spend cap), but the smallest thing that satisfies L50's actual "a handful of relevant patterns injected per request" without either dependency. Step (3) is unblocked as of 2026-09-17: the disclosure framing is resolved above (on by default, disclosed at generation time, emitted as ordinary removable code that the project does not depend on). It is not yet built, and it is **deferred past launch** (Chris, 2026-09-19): not part of the launch bar, and not to be raised against it. Nothing else here depends on it.
 
 ## Scale without speculative implementation
 

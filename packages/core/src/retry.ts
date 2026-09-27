@@ -2,7 +2,7 @@
  * Asking a Durable Object again, a bounded number of times, without letting
  * the asking become the failure.
  *
- * Three places need exactly this and reached for it separately (#196
+ * Three places need exactly this and reached for it separately (internal PR 196
  * review): closing the repair's own reservation, releasing an account hold
  * when a later ceiling could not be asked, and giving a build's fleet
  * ticket back. All three are cleanup on an error path, all three are
@@ -54,7 +54,7 @@ export async function retrying<T>(
 }
 
 /**
- * The same retry, with a bound on each attempt (#196 review).
+ * The same retry, with a bound on each attempt (internal PR 196 review).
  *
  * `retrying` runs one attempt and then the next, so an attempt that never
  * settles is the end of the sequence: the retry becomes a single unbounded

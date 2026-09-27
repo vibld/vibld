@@ -5,7 +5,7 @@ import { secured } from '@vibld/security-headers';
  *
  * The first version of this shipped `Disallow: /` in robots.txt beside a
  * `noindex` meta in the shell, and a comment claiming the two failed
- * independently. They do not, and the claim was backwards (#192 review): a
+ * independently. They do not, and the claim was backwards (internal PR 192 review): a
  * crawler that obeys `Disallow` never fetches the page, so it never reads
  * the `noindex`, and a URL discovered from a shared link or a backlink can
  * still be listed with no description. The rule intended to keep the

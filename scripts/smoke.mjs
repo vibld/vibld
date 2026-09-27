@@ -45,7 +45,7 @@ async function head(path, init = {}) {
 /**
  * A refusal has to be one of the refusals the route is written to give.
  *
- * "Anything but 200" was the rule until the harness review (#59), and it let
+ * "Anything but 200" was the rule until the harness review (internal PR 59), and it let
  * a 500 through: a Worker throwing on every request passed every check here,
  * because an exception is not a 200. Naming the statuses a closed route
  * answers with means a crash, a 404 from a lost route and a redirect all

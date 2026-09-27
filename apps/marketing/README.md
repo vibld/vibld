@@ -65,7 +65,7 @@ These are boilerplate drafts, not legal advice. Have a Georgia attorney read
 the Terms and Privacy Policy before the first payment is taken (see the
 Refund Policy, which exists ahead of any billing on purpose).
 
-## Brand (Issue #7)
+## Brand (internal issue 7)
 
 Deferred under D28(c) until "the product works" -- picked back up once it
 did. Before drawing anything, the repository already had _two_
@@ -93,7 +93,7 @@ just never assembled into an actual system:
 - **Repository link**: `SITE.repoUrl`, referenced from the homepage's new
   "View the code on GitHub" line.
 
-`apps/web`'s own violet theme is untouched -- issue #7's acceptance
+`apps/web`'s own violet theme is untouched -- internal issue 7's acceptance
 criteria scope this to the public brand expression, not product UI.
 
 ## The waitlist

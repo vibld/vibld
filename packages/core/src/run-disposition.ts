@@ -1,6 +1,6 @@
 /**
  * The four outcomes a generation run can have, and what each says should
- * happen to the work (#158).
+ * happen to the work (internal issue 158).
  *
  * Named for the disposition of the work rather than for the run, so it is
  * not mistaken for `run-outcome.ts` next door: that file says why a run was
@@ -101,7 +101,7 @@ export function isRunOutcomeKind(value: unknown): value is RunOutcomeKind {
 /**
  * Whether this outcome puts a question to the person.
  *
- * True for exactly one of the four, which is the rule #158 states and the
+ * True for exactly one of the four, which is the rule internal issue 158 states and the
  * one most easily lost: retaining work for review does not ask a question.
  * A reviewer looking at held work has nothing to answer, and a surface that
  * prompts them for one invents a decision nobody asked for.

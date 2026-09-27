@@ -5,10 +5,10 @@ import { BuilderSession } from '../src/generation/session.ts';
 import type { ParsedMockup } from '@vibld/ai/mockup-schema';
 
 /**
- * The session's own end of asking for directions (#185).
+ * The session's own end of asking for directions (internal issue 185).
  *
  * This file exists because it did not, which is the whole explanation for
- * two of the third round's findings (#189 review). `explore`, `chooseMockup`
+ * two of the third round's findings (internal PR 189 review). `explore`, `chooseMockup`
  * and `discardMockups` were covered only through `PromptPanel`, so every
  * rule about what a *session* does with a set -- what a build does to one,
  * what Start over does to a run in flight -- had nothing asserting it. Both
@@ -106,7 +106,7 @@ describe('asking a session for directions', () => {
 });
 
 /**
- * What a build does to a set that is still on screen (#189 review).
+ * What a build does to a set that is still on screen (internal PR 189 review).
  *
  * The chooser is disabled while a build runs, so this only bites after that
  * build is accepted: the tiles come back enabled, and a click then submits
@@ -156,7 +156,7 @@ describe('a build invalidates the directions it did not choose', () => {
 });
 
 /**
- * Start over, while a look is in flight (#189 review).
+ * Start over, while a look is in flight (internal PR 189 review).
  *
  * Reachable in practice rather than in theory: after a first build that
  * failed, both Start over and the directions button are offered, which is
@@ -224,7 +224,7 @@ describe('resetting a session that is still looking', () => {
 });
 
 /**
- * Disposing a session that is still spending (#189 review).
+ * Disposing a session that is still spending (internal PR 189 review).
  *
  * `dispose` is for a non-React owner, and it used to advance the epoch and
  * clear the listeners and nothing else. That stops the answer being shown;

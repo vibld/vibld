@@ -1170,7 +1170,7 @@ body {
 
 /*
  * A way out to the catalogue that does not compete with the chips beside it
- * (#186). Underlined rather than coloured, because the accent in this pane
+ * (internal issue 186). Underlined rather than coloured, because the accent in this pane
  * already means "chosen".
  */
 .styles__catalogue {
@@ -1681,12 +1681,12 @@ body {
 }
 
 /* --- Platform admin page -------------------------------------------------
- * A page, not a column (#184). The builder's body is a two-column grid; the
+ * A page, not a column (internal issue 184). The builder's body is a two-column grid; the
  * admin page is one measure of prose and four tools, so the grid is dropped
  * rather than fought with. The builder is still mounted beside it, carrying
  * `hidden`, which the `[hidden]` rule at the top of this file makes stick.
  *
- * And it scrolls, which is not a refinement (#188 review). Above 68.01rem
+ * And it scrolls, which is not a refinement (internal PR 188 review). Above 68.01rem
  * `.shell` is bounded to the viewport with `overflow: hidden`, so anything
  * inside it that can grow must carry its own scroller or its lower half is
  * unreachable: no scrollbar, no overflow, nothing to drag. That is the exact

@@ -97,7 +97,7 @@ export type RunStop =
   /** Anything else the provider did that this service could not classify. */
   | 'provider-error'
   /**
-   * The run stopped because only the person can decide something (#158).
+   * The run stopped because only the person can decide something (internal issue 158).
    *
    * A real end to a real run, not a failure and not a pause: the invocation
    * is over, and the way forward is a continuation carrying the held work

@@ -5,7 +5,7 @@ import { GenerationPlanSchema } from './plan-schema.ts';
 import { MockupSetSchema } from './mockup-schema.ts';
 
 /**
- * What shape a model is being asked to reply in (#189 review, P1).
+ * What shape a model is being asked to reply in (internal PR 189 review, P1).
  *
  * This exists because it did not, and the omission broke a whole feature
  * silently. Every client hard-coded the *plan's* shape: Anthropic put
@@ -134,7 +134,7 @@ export const PLAN_OUTPUT: PlanOutput = {
   instruction: PLAN_JSON_INSTRUCTION,
 };
 
-/** Three directions to choose between (#185). */
+/** Three directions to choose between (internal issue 185). */
 export const MOCKUP_OUTPUT: PlanOutput = {
   name: 'mockup_set',
   schema: MockupSetSchema,

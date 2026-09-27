@@ -2,7 +2,7 @@ import type { ParsedMockup } from '@vibld/ai/mockup-schema';
 import { mockupFrameDocument } from '../generation/mockup-frame.ts';
 
 /**
- * The three directions, to look at and choose between (#185).
+ * The three directions, to look at and choose between (internal issue 185).
  *
  * Every mockup is model output, so every one is untrusted. Each renders in
  * an iframe with `srcDoc` and an empty `sandbox`, which is the same thing
@@ -13,7 +13,7 @@ import { mockupFrameDocument } from '../generation/mockup-frame.ts';
  * through does not run.
  *
  * The sandbox is not a network policy, which is a separate guarantee this
- * component used to claim and not have (#189 review): a remote image or
+ * component used to claim and not have (internal PR 189 review): a remote image or
  * font is fetched from inside a fully sandboxed frame and discloses the
  * viewer's IP. `mockupFrameDocument` adds the content policy that actually
  * stops it.

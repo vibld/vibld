@@ -1,6 +1,6 @@
 /**
  * Reading a GitHub webhook delivery: is it really from GitHub, and what does
- * it say happened to a pull request (#13)?
+ * it say happened to a pull request (internal issue 13)?
  *
  * Pure, and apart from the handler that stores the result, for the reason
  * every other decision in this codebase is split that way: the parts worth

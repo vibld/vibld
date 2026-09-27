@@ -14,11 +14,11 @@ import {
 } from '../worker/build-limits.ts';
 
 /**
- * That a queue row nobody is waiting on stops holding a place (#199).
+ * That a queue row nobody is waiting on stops holding a place (internal issue 199).
  *
  * `reclaimStale` only ever looked at rows it had activated, so a waiting
  * row had no expiry at all. It is the one kind of ticket nothing in this
- * system can clean up on its own, and three separate findings on #196 were
+ * system can clean up on its own, and three separate findings on internal PR 196 were
  * that single fact arriving from three directions: a build that gave up
  * waiting, a build refused before anything ran, and a release whose retry
  * could never reach a second attempt. Each was fixed by making one more
@@ -100,7 +100,7 @@ describe('what the fleet object does with that', () => {
   });
 
   it('keeps the abandonment deadline after a row is promoted', () => {
-    // #200 review. Written as a ternary, promotion erased it: a row nobody
+    // internal PR 200 review. Written as a ternary, promotion erased it: a row nobody
     // was waiting on, promoted at minute twenty-nine, stopped being judged
     // by `seen` and started a fresh lifetime from its activation. That is
     // the exact case this change exists to remove, so the release path in

@@ -9,7 +9,7 @@
 ADR-0007 lists "whole-repository context on every request" among the
 alternatives it declines, for "unnecessary cost and avoidable disclosure", and
 prescribes exact search combined with semantic retrieval, scoped to tenant,
-project and revision. That is issue #12, and it needs storage and an embedding
+project and revision. That is internal issue 12, and it needs storage and an embedding
 provider that Vibld does not yet have.
 
 In the meantime `buildUserPrompt` sent the base project's file **paths** and
@@ -56,7 +56,7 @@ project is about 30,000 input tokens, roughly $0.15 -- and the ceiling now
 accounts for it rather than under-reporting.
 
 This is **not** a general answer to repository context and does not reduce the
-need for #12. It applies only to a project Vibld generated in this session,
+need for internal issue 12. It applies only to a project Vibld generated in this session,
 inside the file cap, that the user is actively editing: there is no third
 party's code and nothing to disclose. Arbitrary repository import, which
 ADR-0007 also defers, still requires retrieval before it can be considered.
@@ -71,7 +71,7 @@ retrieval lands.
   builder that does not iterate, and an instruction the model cannot follow.
 - **Truncate to fit.** Silently deletes the files that did not fit. The worst
   option available: it fails without saying so, and the failure destroys work.
-- **Wait for retrieval (#12).** The right long-term answer, and unavailable:
+- **Wait for retrieval (internal issue 12).** The right long-term answer, and unavailable:
   it needs storage and an embedding provider that have not been provisioned.
 - **Send a diff of what changed.** Requires the model to have the prior
   content to apply it against, which is the thing being withheld.
@@ -81,7 +81,7 @@ retrieval lands.
   then grep. This is the
   exact-search half of what ADR-0007 prescribes, working without the semantic
   half -- so it needs no vector store and no embedding provider, and it is a
-  real option now rather than after #12. It costs one extra model call per
+  real option now rather than after internal issue 12. It costs one extra model call per
   turn, and it can silently miss a file the plan did not think to look for,
   which the decision above cannot. It should be measured against this decision
   rather than assumed better.

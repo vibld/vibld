@@ -1,5 +1,5 @@
 /**
- * The routes behind "push this to GitHub" (issue #13).
+ * The routes behind "push this to GitHub" (internal issue 13).
  *
  * Kept out of `index.ts` for the same reason `billing-handlers.ts` is: the
  * router should read as a list of paths, not as the bodies of the things
@@ -230,7 +230,7 @@ function parseExpectedRepository(
 /**
  * What a push would do to the connected repository, before it does it.
  *
- * #13 asks for the destination and the diff to be reviewable, and the push is
+ * Internal issue 13 asks for the destination and the diff to be reviewable, and the push is
  * the irreversible half of this integration. The answer nobody can get today
  * is the one that matters most: a push writes the accepted snapshot and
  * nothing else, so a file the repository has and vibld does not is gone from

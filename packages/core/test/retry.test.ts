@@ -5,7 +5,7 @@ import { RETRY_ATTEMPTS, retrying } from '../src/retry.ts';
 
 /**
  * Asking again, a bounded number of times, without the asking becoming the
- * failure (#196 review).
+ * failure (internal PR 196 review).
  *
  * Both callers are cleanup on an error path against a Durable Object that
  * is probably restarting: closing the repair's reservation, and releasing

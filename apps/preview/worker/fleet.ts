@@ -1,6 +1,6 @@
 /**
  * The arithmetic behind the account-wide container budget
- * (docs/decisions.md L9, and #197 for how builds share it), with no storage
+ * (docs/decisions.md L9, and internal issue 197 for how builds share it), with no storage
  * and no runtime behind it.
  *
  * Lives apart from `preview-fleet.ts`'s Durable Object for the same reason
@@ -32,14 +32,14 @@ export function isStale(activatedAt: number, now: number): boolean {
 
 /**
  * How long a row may wait with nobody asking after it before it is treated
- * as abandoned (#199).
+ * as abandoned (internal issue 199).
  *
  * The reclaim above only ever looked at rows it had activated, so a row
  * that was still waiting had no expiry at all. That is the one kind of
  * ticket nothing in this system can clean up on its own, and it is not
  * harmless while it waits: it is promoted later, for a caller that gave up
  * long ago, and only then starts its thirty-minute lifetime holding a slot
- * somebody else wanted. Three separate findings on #196 were that leak
+ * somebody else wanted. Three separate findings on internal PR 196 were that leak
  * arriving from three directions, each fixed by making one more release
  * path infallible, which is an argument that stops working the moment
  * somebody adds a fourth.
@@ -100,7 +100,7 @@ const NO_BUILD_ROOM: BuildRoom = { active: 0, max: 0 };
  * which is assigned in insertion order, so the ordering is total and stable.
  *
  * Still a count of the previews ahead since builds share the budget
- * (#197): a build is refused rather than left waiting, so every waiting row
+ * (internal issue 197): a build is refused rather than left waiting, so every waiting row
  * is a preview, and a container freed by either kind goes to the head of
  * the queue. A position of N therefore means N containers have to free up
  * first, whichever kind of work is holding them.
@@ -116,7 +116,7 @@ export function queuePosition(row: QueueRow, waiting: QueueRow[]): number {
 /**
  * Which of the oldest waiting rows can be activated right now.
  *
- * Two constraints inside one counter (#197). Every row, of either kind,
+ * Two constraints inside one counter (internal issue 197). Every row, of either kind,
  * needs room in the whole budget: `activeCount` counts previews and builds
  * together against `maxInFlight`. A build also needs room under the build
  * bound, and a build that bound is holding back is passed over rather than

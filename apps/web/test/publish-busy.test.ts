@@ -5,7 +5,7 @@ import { describe, it } from 'node:test';
 
 /**
  * That publishing is not refused by a build that has already finished
- * (#196 review).
+ * (internal PR 196 review).
  *
  * A verification build answers as soon as it has an answer and destroys
  * its container afterwards, on `ctx.waitUntil`, holding that user's build

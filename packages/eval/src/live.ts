@@ -27,7 +27,7 @@ export interface LiveOptions {
    * How many times each model runs each case. One unless asked otherwise.
    *
    * A single generation says whether a model can do a thing once. It cannot
-   * say whether it does it reliably, and the gate proposed in #10 is stated
+   * say whether it does it reliably, and the gate proposed in internal issue 10 is stated
    * in exactly those terms (10 prompts, 3 runs each). This is the multiplier
    * that makes that measurable, and it multiplies the bill by the same
    * number, which is why `liveRuns` refuses anything it cannot read as a

@@ -1,7 +1,7 @@
 -- Where the orphan sweep got to, so successive bounded runs cover the whole
 -- bucket instead of the same front of it for ever.
 --
--- `sweepOrphans` (#177) walks R2 looking for prefixes no catalogue row
+-- `sweepOrphans` (internal issue 177) walks R2 looking for prefixes no catalogue row
 -- names, and it is bounded, because a sweep that cannot finish is one that
 -- dies partway and leaves the same mess. The first cut started from the top
 -- of the listing every night and stopped at its bound, on the reasoning that

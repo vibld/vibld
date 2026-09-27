@@ -8,7 +8,7 @@ import { MockupChooser } from '../src/components/MockupChooser.tsx';
 import type { ParsedMockup } from '@vibld/ai/mockup-schema';
 
 /**
- * Three directions on screen, and the rule that keeps them harmless (#185).
+ * Three directions on screen, and the rule that keeps them harmless (internal issue 185).
  *
  * Every mockup is model output. The assertions about the frame are the
  * security ones: this markup must never reach the shell's own document,

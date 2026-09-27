@@ -239,7 +239,7 @@ describe('createOpenaiPlanClient', () => {
   });
 
   /**
-   * The schema is the caller's, not this client's (#189 review, P1).
+   * The schema is the caller's, not this client's (internal PR 189 review, P1).
    *
    * `text.format` was named `generation_plan` and carried
    * `planJsonSchema()` whatever was asked for, so strict mode constrained a
@@ -470,7 +470,7 @@ describe('createOpenaiPlanClient', () => {
 });
 
 /**
- * How large a prompt this client says it sent (#189 review).
+ * How large a prompt this client says it sent (internal PR 189 review).
  *
  * The schema goes in `text.format`, not in the prompt, so what this
  * reports is the two strings it was handed. That is worth pinning rather

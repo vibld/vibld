@@ -67,7 +67,7 @@ function parseStatus(body: unknown): PreviewStatus | null {
           // Carried only when it is a non-empty string. A ready preview
           // with an unreadable finding attached is still a ready preview,
           // so this is dropped rather than allowed to null the status
-          // (#194).
+          // (internal issue 194).
           ...(typeof record.typecheckFailure === 'string' &&
           record.typecheckFailure !== ''
             ? { typecheckFailure: record.typecheckFailure }

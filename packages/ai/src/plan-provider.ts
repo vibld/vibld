@@ -52,7 +52,7 @@ import type { OutputSubject } from './errors.ts';
  * The part of reading a completion that has nothing to do with what was
  * asked for: why it stopped, and whether the JSON is the shape expected.
  *
- * Shared by the build provider and the mockup one (#185) rather than
+ * Shared by the build provider and the mockup one (internal issue 185) rather than
  * written twice. The two ask for entirely different things and agree on
  * exactly this, and a second copy of it is how one of them would quietly
  * stop reporting a refusal, or start reporting a truncation against the
@@ -63,7 +63,7 @@ export function readCompletion<T>(
   maxTokens: number,
   schema: ZodType<T>,
   // Which request this was, so every failure below can name what was asked
-  // for. The default keeps every existing caller reading as it did (#190).
+  // for. The default keeps every existing caller reading as it did (internal PR 190).
   subject: OutputSubject = PLAN_SUBJECT,
 ): T {
   if (completion.stopReason === 'refusal') {
@@ -132,7 +132,7 @@ export interface ModelProviderOptions {
    */
   knowledge?: string;
   /**
-   * The direction the caller chose from a mockup run (#185), as the
+   * The direction the caller chose from a mockup run (internal issue 185), as the
    * document itself rather than its name. A build seeded with only a label
    * can ignore the choice and still look like it obeyed.
    *
@@ -292,7 +292,7 @@ export const RUN_ABANDONED_AFTER_MS = RUN_STEP_TIMEOUT_MS + 5 * 60_000;
  * which number won.
  *
  * `carryTokens` is what a follow-up spends re-emitting the project it is
- * editing, before it has written a word of the change (#209). A follow-up
+ * editing, before it has written a word of the change (internal issue 209). A follow-up
  * returns the complete set of files, so a flat reserve sized for building
  * something new left a large project's follow-up with less room for its
  * edit than a first run gets for the whole site, and on the expensive
@@ -356,7 +356,7 @@ export function outputTokensPerSecondFor(model: string): number {
  * It used to be eighteen thousand, described as "three self-contained
  * documents of roughly a page and a half each". That reading was wrong in a
  * way no amount of care about document sizes could have fixed, and the
- * first real run against a model showed it (#190): an ordinary bakery
+ * first real run against a model showed it (internal PR 190): an ordinary bakery
  * prompt, no style preset, no reference page, spent **16,395 tokens
  * thinking** and 7,927 writing. Two thirds of the budget went somewhere the
  * description never mentioned, so a ceiling derived from how big three
@@ -375,7 +375,7 @@ export function outputTokensPerSecondFor(model: string): number {
  *
  * The figures the feature was justified with still hold, measured rather
  * than asserted: about 69 seconds and about $0.026 on the production model,
- * against a build's thirty cents (#185, #190).
+ * against a build's thirty cents (internal issue 185, internal PR 190).
  */
 export const MOCKUP_OUTPUT_TOKENS = 64_000;
 
@@ -384,7 +384,7 @@ export const MOCKUP_OUTPUT_TOKENS = 64_000;
  * budget, whichever is smaller.
  *
  * The flat guard alone is not enough, and raising it to 64,000 is what
- * showed that (#190). A build's ceiling is derived per model, and on the
+ * showed that (internal PR 190). A build's ceiling is derived per model, and on the
  * smaller ones it lands near or below the guard: `claude-fable-5-1` and
  * `gpt-6-astra` both allow 32,000 for a whole project. A look permitted
  * 64,000 there would be allowed to cost *twice* a build, which inverts the
@@ -396,7 +396,7 @@ export const MOCKUP_OUTPUT_TOKENS = 64_000;
  * The cost of that is worth stating rather than burying: on a
  * small-ceilinged model a look is bounded tightly enough that it may
  * truncate, because two thirds of a mockup run's tokens are reasoning
- * (#190). It fails clearly when it does. The production model is not
+ * (internal PR 190). It fails clearly when it does. The production model is not
  * affected -- `deepseek-flash` allows 252,000 for a build, so the guard is
  * what binds there.
  */
@@ -404,7 +404,7 @@ export function mockupMaxTokensFor(
   model: string,
   /**
    * The rate this deployment will really be charged, where it overrides the
-   * catalogue's (#191 review).
+   * catalogue's (internal PR 191 review).
    *
    * Without it the clamp was computed from the catalogue price while
    * `runCeilingFor` computed the build ceiling from the effective one, so
@@ -565,7 +565,7 @@ export function withDesignRecord(
  * alternative, for cost and disclosure. That reasoning is about a repository.
  * This is a project the user generated in this session, bounded at 25 files
  * by the system prompt, that they are actively editing: there is no third
- * party's code here and nothing to disclose. Targeted retrieval (#12) is
+ * party's code here and nothing to disclose. Targeted retrieval (internal issue 12) is
  * still the answer once arbitrary repository import exists; it needs
  * infrastructure that does not, and it is not a reason to ship an iteration
  * that does not iterate. See docs/adr/0009.
@@ -577,10 +577,10 @@ export function withDesignRecord(
  * the complete set of files" unambiguous.
  */
 /**
- * The whole prompt section a chosen direction contributes (#185).
+ * The whole prompt section a chosen direction contributes (internal issue 185).
  *
  * Its own function so the reservation can measure it rather than estimate
- * it (#189 review). The build's worst case counted `MAX_CHOSEN_MOCKUP_CHARS`
+ * it (internal PR 189 review). The build's worst case counted `MAX_CHOSEN_MOCKUP_CHARS`
  * and stopped, which is the document alone: the label goes in too, through
  * `JSON.stringify` (so a 60-character label can serialise to more than
  * that), and so do roughly 470 characters of fixed framing. Same mistake as
@@ -709,7 +709,7 @@ Where these conflict with the request above, follow the request.`,
     );
   }
 
-  // The direction the caller picked, if they looked before building (#185).
+  // The direction the caller picked, if they looked before building (internal issue 185).
   // After the standing instructions and before the project, because it is a
   // statement about this build specifically.
   //

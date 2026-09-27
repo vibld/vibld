@@ -86,7 +86,7 @@ describe('toActivate', () => {
 });
 
 /**
- * The second constraint inside the one counter (#197).
+ * The second constraint inside the one counter (internal issue 197).
  *
  * Previews and builds share one budget of twenty-five containers, with
  * builds bounded at five of it. So a waiting row is admitted only if there

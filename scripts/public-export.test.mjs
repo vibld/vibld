@@ -13,7 +13,13 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { EXCLUDE, isText, rewriteLinks } from './public-export.mjs';
+import {
+  EXCLUDE,
+  isText,
+  parseRefs,
+  rewriteLinks,
+  rewriteReferences,
+} from './public-export.mjs';
 
 // Assembled rather than written out: this file is exported too, and a
 // literal issue URL here would be rewritten on the way out, leaving the
@@ -171,6 +177,126 @@ describe('rewriteLinks', () => {
   });
 });
 
+describe('rewriteReferences', () => {
+  const refs = new Map([
+    [12, 'issue'],
+    [70, 'pr'],
+    [158, 'issue'],
+    [162, 'issue'],
+    [196, 'pr'],
+  ]);
+  const rewrite = (text, file) => rewriteReferences(text, { file, refs }).text;
+
+  it('says which private numbers are issues and which are pull requests', () => {
+    assert.equal(
+      rewrite('Blocked on #12, reviewed in #196.', 'docs/a.md'),
+      'Blocked on internal issue 12, reviewed in internal PR 196.',
+    );
+  });
+
+  it('folds the word already there into the rewrite', () => {
+    assert.equal(
+      rewrite(
+        'Accepted (PR #70), see issue #12 and issues #158 and #162.',
+        'a.md',
+      ),
+      'Accepted (internal PR 70), see internal issue 12 and internal issues 158 and 162.',
+    );
+  });
+
+  it('capitalises only where a sentence starts', () => {
+    assert.equal(
+      rewrite('Done. #12 exists.\n#158 too, and\n#162 later.', 'a.md'),
+      'Done. Internal issue 12 exists.\nInternal issue 158 too, and\ninternal issue 162 later.',
+    );
+    assert.equal(
+      rewrite('**Shipped.** #12 landed.', 'a.md'),
+      '**Shipped.** Internal issue 12 landed.',
+    );
+  });
+
+  it('leaves numbers the private repository does not have', () => {
+    assert.equal(
+      rewrite('Option #3 of #12.', 'a.md'),
+      'Option #3 of internal issue 12.',
+    );
+  });
+
+  it('leaves code in Markdown alone', () => {
+    const input = ['Colour `#162` for #12.', '```', 'see #12', '```'].join(
+      '\n',
+    );
+    assert.equal(
+      rewrite(input, 'a.md'),
+      ['Colour `#162` for internal issue 12.', '```', 'see #12', '```'].join(
+        '\n',
+      ),
+    );
+  });
+
+  it('rewrites comments in code and never its strings', () => {
+    const input = [
+      "const colour = '#162'; // since internal PR 196",
+      'const note = `#12`;',
+      '/**',
+      ' * Until #12 lands.',
+      ' */',
+      '{/* #158 */}',
+      'const url = "https://example.com/#12";',
+    ].join('\n');
+    assert.equal(
+      rewrite(input, 'a.tsx'),
+      [
+        "const colour = '#162'; // since internal PR 196",
+        'const note = `#12`;',
+        '/**',
+        ' * Until internal issue 12 lands.',
+        ' */',
+        '{/* Internal issue 158 */}',
+        'const url = "https://example.com/#12";',
+      ].join('\n'),
+    );
+  });
+
+  it('rewrites SQL and YAML comments', () => {
+    assert.equal(
+      rewrite('-- added for #12', 'm.sql'),
+      '-- added for internal issue 12',
+    );
+    assert.equal(
+      rewrite('  run: x # see #196.\n# #12 below', 'w.yml'),
+      '  run: x # see internal PR 196.\n# Internal issue 12 below',
+    );
+  });
+
+  it('leaves the internal task list, generated examples and other file types alone', () => {
+    assert.equal(rewrite('(task #12)', 'a.md'), '(task #12)');
+    assert.equal(rewrite('// #12', 'examples/generated/x/a.ts'), '// #12');
+    assert.equal(rewrite('#12', 'a.txt'), '#12');
+    assert.equal(rewrite('color: #162;', 'a.css'), 'color: #162;');
+  });
+
+  it('takes every number for an issue without a refs file', () => {
+    assert.equal(
+      rewriteReferences('See #5.', { file: 'a.md' }).text,
+      'See internal issue 5.',
+    );
+  });
+});
+
+describe('parseRefs', () => {
+  it('reads the number and pull-request columns gh prints', () => {
+    const refs = parseRefs('12\tfalse\n196\ttrue\n\nnoise\n');
+    assert.deepEqual(
+      [...refs],
+      [
+        [12, 'issue'],
+        [196, 'pr'],
+      ],
+    );
+  });
+});
+
 describe('isText', () => {
   it('accepts UTF-8 text and rejects NUL bytes and invalid UTF-8', () => {
     assert.equal(isText(Buffer.from('plain text, and some UTF-8: é')), true);
@@ -187,6 +313,7 @@ describe('the export', () => {
     assert.deepEqual(EXCLUDE, [
       'docs/social-launch.md',
       'docs/pricing-routine.md',
+      '.github/dependabot.yml',
     ]);
   });
 
@@ -239,7 +366,7 @@ describe('the export', () => {
       );
       assert.equal(
         readFileSync(join(out, 'README.md'), 'utf8'),
-        'See #4 and the kit.\n',
+        'See internal issue 4 and the kit.\n',
       );
       assert.deepEqual([...readFileSync(join(out, 'logo.bin'))], [0, 1, 2, 3]);
     } finally {

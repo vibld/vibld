@@ -13,7 +13,7 @@ import {
 } from '../worker/capacity.ts';
 
 /**
- * That the fleet's cap and the platform's cannot disagree (#196 review).
+ * That the fleet's cap and the platform's cannot disagree (internal PR 196 review).
  *
  * `wrangler.jsonc`'s own comment used to be able to say they never could,
  * because every container was a preview and the fleet counted every one.
@@ -22,8 +22,8 @@ import {
  * had nothing left to verify or publish with. Neither shows up as an error
  * in the code that causes it.
  *
- * #196 closed that with a static split, twenty for previews and five for
- * builds, which left L9's twenty-five unmet. Since #197 both kinds share
+ * Internal PR 196 closed that with a static split, twenty for previews and five for
+ * builds, which left L9's twenty-five unmet. Since internal issue 197 both kinds share
  * one budget in one counter, so the properties below are about that budget:
  * it is the platform's whole number, never more, and builds are bounded
  * inside it rather than given slots beside it. `shared-budget.test.ts` runs
@@ -31,7 +31,7 @@ import {
  */
 describe('who gets a container', () => {
   it('never lets the fleet authorise more containers than the platform allows', () => {
-    // Previews and builds together, because since #197 this one number
+    // Previews and builds together, because since internal issue 197 this one number
     // counts both. Above the platform limit, the fleet would admit work the
     // platform then refuses to start.
     assert.ok(
@@ -83,7 +83,7 @@ describe('who gets a container', () => {
 
 /**
  * That the build half of the split is counted, not merely subtracted
- * (#196 review).
+ * (internal PR 196 review).
  *
  * Reserving five slots said nothing about how many builds may run: six
  * overlapping builds and nineteen previews filled all twenty-five platform
@@ -164,7 +164,7 @@ describe('counting the builds too', () => {
   });
 
   it('counts a build as a build, so the build bound applies to it', () => {
-    // #197. In the one counter a build's ticket is what the build bound is
+    // internal issue 197. In the one counter a build's ticket is what the build bound is
     // enforced against. Taken as a preview's, a sixth build would run.
     assert.match(
       code,
@@ -179,7 +179,7 @@ describe('counting the builds too', () => {
   });
 
   it('counts them in the same instance as previews', () => {
-    // #197. A second instance was the static split: its count could never
+    // internal issue 197. A second instance was the static split: its count could never
     // give a free container to a preview, or hold one back from it.
     assert.match(body, /getByName\(FLEET_NAME\)/);
     assert.equal(FLEET_NAME, 'fleet');
@@ -195,7 +195,7 @@ describe('counting the builds too', () => {
   });
 
   it('leaves the limits to the fleet rather than to each caller', () => {
-    // #197. With both kinds of work in one instance, a caller that passed
+    // internal issue 197. With both kinds of work in one instance, a caller that passed
     // its own cap would promote the whole queue under it: a build's release
     // carrying the build bound would admit five containers in total.
     assert.doesNotMatch(
@@ -236,7 +236,7 @@ describe('counting the builds too', () => {
   });
 
   it('asks again when the release itself rejects', () => {
-    // #196 review. A suppressed release is not a delayed one here:
+    // internal PR 196 review. A suppressed release is not a delayed one here:
     // `PreviewFleet.reclaimStale` only reclaims rows it has activated, so
     // an abandoned queued ticket never expires. It waits for a slot, is
     // promoted with nobody to use it, and only then begins its hard
@@ -248,7 +248,7 @@ describe('counting the builds too', () => {
     // it, and with the fleet bound rather than one of its own: an
     // unbounded attempt makes `retrying` a single unbounded call wearing a
     // retry's name, and this release is the only cleanup a queued ticket
-    // will ever get (#196 review).
+    // will ever get (internal PR 196 review).
     const tail = teardown;
     assert.match(
       tail,
@@ -291,7 +291,7 @@ describe('counting the builds too', () => {
     // decided to answer. That is about `buildProject`'s finally, which is
     // where a return would do the damage; `releaseBuild` is a method of
     // its own now and returns early on the path where nothing ran, which
-    // discards nothing (#196 review). The earlier version of this test
+    // discards nothing (internal PR 196 review). The earlier version of this test
     // read the teardown, which was the right region when the teardown was
     // that finally and the wrong one afterwards.
     const finallyAt = code.lastIndexOf('} finally {');
@@ -304,7 +304,7 @@ describe('counting the builds too', () => {
   });
 
   it('holds both the lock and the slot when the container will not die', () => {
-    // #196 review. Releasing either after a failed destroy hands somebody
+    // internal PR 196 review. Releasing either after a failed destroy hands somebody
     // a container the platform says does not exist: the lock starts this
     // user's next build inside it, the slot lets the fleet authorise a
     // twenty-sixth container the platform then refuses to start. Holding
@@ -356,7 +356,7 @@ describe('counting the builds too', () => {
   });
 
   it('gives back a ticket for a refusal it issued before anything ran', () => {
-    // #196 review. A full fleet is refused before the first `exec`, so
+    // internal PR 196 review. A full fleet is refused before the first `exec`, so
     // there is no container: holding that ticket holds it against nothing.
     // Worse than a delay, because `PreviewFleet.reclaimStale` only reclaims
     // rows it has activated -- a queued row is never reclaimed, so an
@@ -372,7 +372,7 @@ describe('counting the builds too', () => {
       /started = true;[\s\S]{0,120}?this\.exec\(/,
       'the flag is not set at the first thing that starts a container',
     );
-    // Given back first, and without asking storage anything (#196 review).
+    // Given back first, and without asking storage anything (internal PR 196 review).
     // Nothing ran, so no ownership question arises, and ordering the
     // release after the lock read made it depend on a call that can reject
     // or stall -- which `reclaimStale` never repairs, because it does not
@@ -389,7 +389,7 @@ describe('counting the builds too', () => {
   });
 
   it('gives it back only after the container is gone', () => {
-    // #196 review. The slot is what authorises somebody else to start a
+    // internal PR 196 review. The slot is what authorises somebody else to start a
     // container, so releasing it while this one still exists lets the
     // fleet admit a build the platform has no room for: the same
     // over-admission the counter was added to prevent, moved from previews
@@ -405,7 +405,7 @@ describe('counting the builds too', () => {
   });
 
   it('waits for a slot no longer than the build itself may take', () => {
-    // #196 review. Awaited directly, a stalled `enqueue` kept the build
+    // internal PR 196 review. Awaited directly, a stalled `enqueue` kept the build
     // alive past its own deadline: the lock expired, a successor took the
     // sandbox, and when this finally returned the next thing it did was
     // empty that successor's workspace.

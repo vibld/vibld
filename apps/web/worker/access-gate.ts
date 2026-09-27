@@ -67,7 +67,7 @@ export const GATED_PATHS: readonly string[] = [
   '/api/plan',
   // Spends model budget too, and less of it is not a different answer: the
   // gate is about whether an uninvited account may spend this deployment's
-  // money at all, not about how much (#185).
+  // money at all, not about how much (internal issue 185).
   '/api/mockups',
   // Writes into somebody's repository, and mints tokens to do it.
   '/api/github/connect',
@@ -165,7 +165,7 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/admin/invites': 'behind the platform-admin check instead',
   '/api/admin/invite': 'behind the platform-admin check instead',
   '/api/admin/invite/revoke': 'behind the platform-admin check instead',
-  // Taking somebody else's published site off the web (#172). Behind the
+  // Taking somebody else's published site off the web (internal issue 172). Behind the
   // platform-admin check, which an invite does not confer and an admin
   // passes without one -- and this is the control an abuse report is
   // answered through, so it must not depend on the operator's own invite

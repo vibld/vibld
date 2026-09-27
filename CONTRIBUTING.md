@@ -2,6 +2,12 @@
 
 Thank you for helping build Vibld. The project is in an early architectural stage, so small, reviewable contributions are especially valuable.
 
+## Where changes land
+
+This repository is published from the maintainers' working repository: after every merge there, a workflow exports the tree and commits it here. Open issues, discussions and pull requests here as usual. When a pull request is accepted, a maintainer applies the same change in the working repository, keeping you as co-author, and the next export brings it back to this one. A change merged only here would be overwritten by that export, which is why pull requests are not merged here directly.
+
+References such as "internal issue 194" in comments and documents point to that working repository's tracker, which is private.
+
 ## Before starting
 
 1. Search existing issues and architecture decision records.
@@ -48,7 +54,7 @@ Copy `docs/adr/0000-template.md`, assign the next number, and submit the ADR wit
 
 ## Conduct
 
-Be respectful, specific, and generous in technical discussion. A formal code of conduct will be adopted before broader community launch.
+Be respectful, specific, and generous in technical discussion. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) says what that means here and how to report a problem.
 
 ## License
 

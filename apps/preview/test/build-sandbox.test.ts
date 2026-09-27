@@ -7,14 +7,14 @@ import { buildSandboxName } from '../worker/build-sandbox.ts';
 
 /**
  * That a build does not run in the sandbox the user's preview is running in
- * (#196 review).
+ * (internal PR 196 review).
  *
  * The old arrangement shared one instance per user and refused a build as
  * `busy` whenever a preview was live. That was correct about the filesystem
  * race and wrong about how often it happens: `Workspace` owns the preview
  * so it survives a tab switch, and `BuilderSession.submit` does not stop it,
  * so the ordinary follow-up edit met a live preview. `worthRepairing` reads
- * `busy` as "nothing to do with the project", quite rightly, so #194's
+ * `busy` as "nothing to do with the project", quite rightly, so internal issue 194's
  * verification quietly did nothing for exactly the readers who were
  * iterating hardest -- and it never failed, which is why nothing said so.
  */

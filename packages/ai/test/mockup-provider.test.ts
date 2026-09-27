@@ -12,7 +12,7 @@ import {
 import type { PlanClient, PlanCompletion, PlanRequest } from '../src/client.ts';
 
 /**
- * The run that produces three directions to choose between (#185).
+ * The run that produces three directions to choose between (internal issue 185).
  */
 
 const USAGE = {
@@ -153,7 +153,7 @@ describe('asking for three directions', () => {
     // DeepSeek's JSON mode documents that it may occasionally return empty
     // content, and a real run did: 22,828 characters streamed, 24,322
     // output tokens billed, and null where the object should have been
-    // (#190). The reader did not cause that, so they do not pay for it.
+    // (internal PR 190). The reader did not cause that, so they do not pay for it.
     let call = 0;
     const billed: number[] = [];
     const absorbed: number[] = [];
@@ -213,7 +213,7 @@ describe('asking for three directions', () => {
     // Absorbing a provider defect decides who pays for it. It is not a way
     // to spend past a ceiling, which is what the first version of this
     // amounted to: the Worker reserved for one run, the retry sent a
-    // second, and the account-wide ledger was told about neither (#191
+    // second, and the account-wide ledger was told about neither (internal PR 191
     // review). The caller now answers before the second attempt goes out.
     let call = 0;
     const absorbed: number[] = [];
@@ -253,7 +253,7 @@ describe('asking for three directions', () => {
   });
 
   it('does not bill the reader for an attempt it refused to replace', async () => {
-    // The fix's own bug (#191 review). Refusing the retry left the
+    // The fix's own bug (internal PR 191 review). Refusing the retry left the
     // absorbed attempt as the completion, and it was then reported
     // through `onUsage` as well -- so the reader paid for exactly the
     // defect the absorption exists to spare them, and a caller that had
@@ -292,7 +292,7 @@ describe('asking for three directions', () => {
 
   it('does not send a retry to a reader who has gone', async () => {
     // The route checks this before the first attempt and cannot check it
-    // here, because the awaiting happens inside `generate` (#191 review).
+    // here, because the awaiting happens inside `generate` (internal PR 191 review).
     // A reader who disconnects while the caller reaches a ledger would
     // otherwise have a second request built and sent on an already-aborted
     // signal, which rejects without reporting usage -- and settlement then
@@ -332,7 +332,7 @@ describe('asking for three directions', () => {
     // a broken stream rejects that write and cancels the run from a later
     // microtask. So the reset can be the very call that discovers the
     // reader has gone, and a signal check placed after it with nothing
-    // awaited in between is looking before the news arrives (#191
+    // awaited in between is looking before the news arrives (internal PR 191
     // review). Reporting the reset before the hook gives that
     // cancellation the hook's own round trip to land in.
     let call = 0;
@@ -532,7 +532,7 @@ describe('asking for three directions', () => {
   });
 
   it('does not retry a body it could not parse', async () => {
-    // The P1 the first version of this shipped (#191 review). A null plan
+    // The P1 the first version of this shipped (internal PR 191 review). A null plan
     // is not the same fact as an empty body: `readJsonPlan` returns null
     // for text it cannot parse as well, and that is a disagreement about
     // shape wearing the same clothes. Only the client can tell the two
@@ -556,7 +556,7 @@ describe('asking for three directions', () => {
 
   it('does not retry a truncation that happened to arrive empty', async () => {
     // A run that hit the ceiling has told us something, and the answer to
-    // it is a smaller ask rather than the same ask again (#191 review).
+    // it is a smaller ask rather than the same ask again (internal PR 191 review).
     // Retrying charged a second full-price run to hear it twice, and the
     // reader was then told about whichever attempt came back second.
     let call = 0;
@@ -584,7 +584,7 @@ describe('asking for three directions', () => {
   it('does not retry a refusal that arrived empty', async () => {
     // The other stop reason that is an answer. A model that declined will
     // decline again, and the person is owed the refusal rather than a
-    // second bill (#191 review).
+    // second bill (internal PR 191 review).
     let call = 0;
     const declined = {
       id: 'declined',
@@ -611,7 +611,7 @@ describe('asking for three directions', () => {
   it('names what it asked for when the shape is wrong', async () => {
     // The sibling I missed. Truncation got a vocabulary one commit before a
     // real run failed on this instead, still saying "the model returned a
-    // plan" to somebody who asked for three sketches (#190). DeepSeek's
+    // plan" to somebody who asked for three sketches (internal PR 190). DeepSeek's
     // JSON mode documents that it may occasionally return empty content,
     // so this is a path real runs take, not a theoretical one.
     const provider = new MockupProvider(
@@ -631,7 +631,7 @@ describe('asking for three directions', () => {
     // the build's: somebody who asked for three sketches was told "the
     // generated project is incomplete. Ask for a smaller project, or build
     // it a few pages at a time." The first real run against a model
-    // produced exactly that (#190), which is how an assertion about a
+    // produced exactly that (internal PR 190), which is how an assertion about a
     // number and not about the words lets wrong advice ship.
     const provider = new MockupProvider(client({ stopReason: 'max_tokens' }), {
       model: 'deepseek-flash',
@@ -647,9 +647,9 @@ describe('asking for three directions', () => {
 
 describe('reporting progress while sketching', () => {
   it('asks the client for progress and passes it on', async () => {
-    // The claim that this route restores a real character count (#183) was
+    // The claim that this route restores a real character count (internal issue 183) was
     // written before the callback was threaded, so it was false: the
-    // provider never asked, and the client never reported (#189 review).
+    // provider never asked, and the client never reported (internal PR 189 review).
     const seen: number[] = [];
     const reporting: PlanClient = {
       id: 'fake',
@@ -672,13 +672,13 @@ describe('reporting progress while sketching', () => {
   });
 
   it('puts the meter back to zero before retrying', async () => {
-    // What the caller holds is what the caller charges (#191 review). A
+    // What the caller holds is what the caller charges (internal PR 191 review). A
     // reader who cancels during the retry, before it has streamed
     // anything, would otherwise be settled from the first attempt's
     // counts -- the very attempt `onDiscarded` had just declared absorbed.
     //
     // Reasoning is what makes this more than a rounding error: two thirds
-    // of a measured mockup run's output tokens were thinking (#190), and
+    // of a measured mockup run's output tokens were thinking (internal PR 190), and
     // an empty reply spends the full run before returning nothing, so the
     // stale figure being carried into the retry is close to a whole run.
     const seen: Array<[number, number | undefined]> = [];
@@ -719,7 +719,7 @@ describe('reporting progress while sketching', () => {
 });
 
 /**
- * What this provider tells the client it wants back (#189 review, P1).
+ * What this provider tells the client it wants back (internal PR 189 review, P1).
  *
  * The gap this closes is the reason that P1 shipped at all. Every test in
  * this file uses a fake client, so the provider was exercised end to end

@@ -145,7 +145,7 @@ jobs:
           fi
           echo "Using $answering" >> "$GITHUB_STEP_SUMMARY"
 
-      # Three directions rather than a project (#185). Separate step rather
+      # Three directions rather than a project (internal issue 185). Separate step rather
       # than a branch inside the one below, so neither run has to carry the
       # other's flags: this one has no --out project to build and no
       # follow-up to iterate on.

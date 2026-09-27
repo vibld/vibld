@@ -21,7 +21,7 @@ import { createEvalValidator } from './validator.ts';
  * worth proving.
  *
  * Expired grants are not here. There is no permission system to expire yet
- * (#15), and a scenario that pretends otherwise would report a pass for
+ * (internal issue 15), and a scenario that pretends otherwise would report a pass for
  * something nobody built.
  */
 

@@ -133,7 +133,7 @@ export interface RemoteModelProviderOptions {
    */
   model?: string | null;
   /**
-   * The direction the caller picked from a mockup run (#185), as the
+   * The direction the caller picked from a mockup run (internal issue 185), as the
    * document rather than its name. The Worker bounds it
    * (`MAX_CHOSEN_MOCKUP_CHARS`) and the build's reservation covers it.
    */
@@ -185,7 +185,7 @@ export class RemoteModelProvider implements ModelProvider {
       },
       body: JSON.stringify({
         prompt: request.prompt,
-        // The revision only, never the files (#181). The Worker reads the
+        // The revision only, never the files (internal issue 181). The Worker reads the
         // project from storage, so a follow-up on a large project is no
         // longer an upload of the whole thing, and is no longer refused for
         // exceeding a budget that describes a model's context window.
@@ -230,7 +230,7 @@ export class RemoteModelProvider implements ModelProvider {
         };
         // Only the clock is required. Requiring a character count too meant
         // that once generation moved into a durable Workflow, which has no
-        // live channel to report one (#183), every progress event was
+        // live channel to report one (internal issue 183), every progress event was
         // dropped here and the meter never appeared -- the last cut link in
         // a chain that was otherwise still whole.
         if (typeof elapsedMs === 'number') {

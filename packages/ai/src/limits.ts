@@ -23,9 +23,9 @@
  * should meet", and that is no longer true, so it is corrected here rather
  * than left to mislead the next reader. A run may now emit up to
  * `maxTokensFor(model)` tokens, which on the production model is 252000 and
- * was 64000 before #179. Even the old ceiling could produce a project past
+ * was 64000 before internal PR 179. Even the old ceiling could produce a project past
  * this cap; the current one clears it several times over. What that should
- * mean is open in #181, which also covers the separate problem that this
+ * mean is open in internal issue 181, which also covers the separate problem that this
  * constant is a model-context budget yet currently gates `/api/preview` and
  * `/api/publish`, where nothing reaches a model.
  *
@@ -68,7 +68,7 @@ export const MAX_REFERENCE_CHARS = 6_000;
 export const MAX_REFERENCE_MEASURE_CHARS = 1_500;
 
 /**
- * The largest visual direction a mockup prompt may carry (#185).
+ * The largest visual direction a mockup prompt may carry (internal issue 185).
  *
  * A mockup run sends the caller's prompt plus, when they have already chosen
  * a preset, that preset's direction from `style-presets.ts`. Both go to the
@@ -90,7 +90,7 @@ export const MAX_REFERENCE_MEASURE_CHARS = 1_500;
 export const MAX_MOCKUP_DIRECTION_CHARS = 3_200;
 
 /**
- * The fixed prompt text every mockup run sends, whoever is asking (#189
+ * The fixed prompt text every mockup run sends, whoever is asking (internal PR 189
  * review).
  *
  * `MOCKUP_SYSTEM_PROMPT` goes on every run and `MOCKUP_STYLE_PREAMBLE` on
@@ -109,7 +109,7 @@ export const MAX_MOCKUP_DIRECTION_CHARS = 3_200;
 export const MAX_MOCKUP_FIXED_PROMPT_CHARS = 2_500;
 
 /**
- * The largest chosen mockup a build request may carry (#185).
+ * The largest chosen mockup a build request may carry (internal issue 185).
  *
  * Picking a direction has to mean something. Seeding the next prompt with
  * the direction's name would let the build ignore it and still look like it
@@ -120,13 +120,13 @@ export const MAX_MOCKUP_FIXED_PROMPT_CHARS = 2_500;
  * Where the figure came from: `MOCKUP_OUTPUT_TOKENS` was thought to buy
  * three mockups, so one of them was about a third of it, at roughly four
  * characters a token -- 18,000 / 3 * 4. That is an origin story, not a
- * derivation, and this comment used to call it one (#189 review). Nothing
+ * derivation, and this comment used to call it one (internal PR 189 review). Nothing
  * makes a model split its budget three ways, and nothing fixes four
  * characters to a token, so a run really can produce a direction larger
  * than this.
  *
  * The premise under that story has since been measured false as well
- * (#190): two thirds of a mockup run's output tokens are reasoning, so the
+ * (internal PR 190): two thirds of a mockup run's output tokens are reasoning, so the
  * ceiling never bought three documents' worth of documents, and it is no
  * longer a budget at all. The arithmetic is kept here as history, because
  * the number it produced is still the number, and the reason that is safe
@@ -142,7 +142,7 @@ export const MAX_CHOSEN_MOCKUP_CHARS = 24_000;
 
 /**
  * The whole prompt section a chosen direction contributes, document and all
- * (#189 review).
+ * (internal PR 189 review).
  *
  * The build's worst case counted `MAX_CHOSEN_MOCKUP_CHARS` and stopped,
  * which is the document by itself. `chosenMockupSection` also sends the
@@ -170,7 +170,7 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
  * motion, surfaces, diagrams, primitives, palette, style direction).
  *
  * None of it was in the build's reservation. The mockup route learned this
- * lesson in #189 (`MAX_MOCKUP_FIXED_PROMPT_CHARS`), the build never did, and
+ * lesson in internal PR 189 (`MAX_MOCKUP_FIXED_PROMPT_CHARS`), the build never did, and
  * the spec added to `PLAN_SYSTEM_PROMPT` made the gap larger. Measured at
  * about 13,000 characters of system prompt and up to about 9,300 of
  * guidance; the bound leaves room for the catalogues to grow a little
@@ -180,7 +180,7 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
 export const MAX_BUILD_FIXED_PROMPT_CHARS = 32_000;
 
 /**
- * The longest reference URL a request may carry (#189 review).
+ * The longest reference URL a request may carry (internal PR 189 review).
  *
  * Not `MAX_REFERENCE_CHARS` above, which bounds the text fetched *from* that
  * address. This bounds the address itself: generous next to what a real
@@ -205,7 +205,7 @@ export const MAX_REFERENCE_URL_CHARS = 2_048;
  *
  * One function because the question is asked in more than one place and the
  * answers have to agree. The request sizes a follow-up's reservation from it
- * and the run then measures the same project again (#209); two reducers that
+ * and the run then measures the same project again (internal issue 209); two reducers that
  * drifted apart would reserve for one project and run against another.
  */
 export function projectChars(
@@ -235,14 +235,14 @@ export const CHARS_PER_OUTPUT_TOKEN = 4;
  * is used in, and a subtraction is where a reader loses track of which end of
  * a range they are holding.
  *
- * Measured, not assumed (#190), and a range rather than a figure: on a
+ * Measured, not assumed (internal PR 190), and a range rather than a figure: on a
  * measured mockup run the thinking was between 57% and 68% of the output
  * tokens, which leaves the answer between 32% and 43%. That range is already
  * written down in `ProgressReport` (`generation-run.ts`), and this is the 43.
  *
  * The favourable end, so the estimate it feeds never overstates what a run
  * needed. It once drove a refusal and the far end would have turned away
- * runs that could have finished (#208 review); it now only explains a
+ * runs that could have finished (internal PR 208 review); it now only explains a
  * truncation, where the same choice keeps the explanation from telling
  * somebody their project was further out of reach than it was.
  *
@@ -254,10 +254,10 @@ export const LARGEST_OBSERVED_ANSWER_SHARE = 0.43;
 /**
  * The smallest share of a run's output tokens ever measured reaching the
  * answer: the other end of the range `LARGEST_OBSERVED_ANSWER_SHARE` comes
- * from (#190), where thinking took 68%.
+ * from (internal PR 190), where thinking took 68%.
  *
  * Two constants because the same measurement is used in two directions, and
- * which end is the safe one flips between them (#210 review). Explaining a
+ * which end is the safe one flips between them (internal PR 210 review). Explaining a
  * failure after the fact must not overstate what a run needed, so it takes
  * the favourable end. Sizing a run before it starts must not *under*state
  * it, or the room reserved for carrying the project runs out partway and the
@@ -268,7 +268,7 @@ export const SMALLEST_OBSERVED_ANSWER_SHARE = 0.32;
 
 /**
  * The output tokens to reserve for carrying a project back out, when sizing
- * a follow-up before it runs (#209).
+ * a follow-up before it runs (internal issue 209).
  *
  * The same arithmetic as `outputTokensToRewrite`, at the other end of the
  * measured range, for the reason `SMALLEST_OBSERVED_ANSWER_SHARE` gives. Too
@@ -298,7 +298,7 @@ export function outputTokensToCarry(baseChars: number): number {
  * rather than the thinking is one measured sample.
  *
  * It was written first as a refusal, to stop a doomed run before it spent
- * ten and a half minutes and a full charge, and that was wrong twice (#208
+ * ten and a half minutes and a full charge, and that was wrong twice (internal PR 208
  * review). A product of two estimates proves nothing cannot fit. And a
  * follow-up may *shrink* a project -- "delete the blog", "cut it back to one
  * page" -- so the base is not even a lower bound on the output: refusing on
@@ -306,7 +306,7 @@ export function outputTokensToCarry(baseChars: number): number {
  * edited back down by that model.
  *
  * So it explains rather than decides. Sizing a run to the job it has, which
- * is what would actually have prevented that failure, is #209.
+ * is what would actually have prevented that failure, is internal issue 209.
  */
 export function outputTokensToRewrite(baseChars: number): number {
   const answer = Math.ceil(Math.max(0, baseChars) / CHARS_PER_OUTPUT_TOKEN);

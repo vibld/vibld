@@ -55,7 +55,7 @@ describe('outputTokensToRewrite', () => {
   });
 
   it('uses the favourable end of the measured range, not the far end', () => {
-    // The finding this was corrected for (#208 review). Thinking was
+    // The finding this was corrected for (internal PR 208 review). Thinking was
     // measured between 57% and 68% of the output, so the answer was between
     // 32% and 43%. Taking the 32 would overstate what a run needed, which
     // read as caution while it drove a refusal and reads as exaggeration
@@ -97,7 +97,7 @@ describe('outputTokensToCarry', () => {
   });
 
   it('never reserves less than the explanation says a run needed', () => {
-    // The two ends of one measurement, used in opposite directions (#210
+    // The two ends of one measurement, used in opposite directions (internal PR 210
     // review). If sizing ever came out smaller than explaining, a run could
     // be refused room it would later be told it needed.
     for (const chars of [0, 1, 4, 100, 10_000, 63_903, 160_000]) {

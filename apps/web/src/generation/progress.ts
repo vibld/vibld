@@ -48,7 +48,7 @@ export function formatCharacters(characters: number): string {
  * and the spoken one had already drifted once: `d11a8a4` gave the live
  * region "Still working", an active-work label for a run that may be paused
  * or asleep between retries, while the visible line beside it claimed
- * nothing of the kind (#188 review). Sharing the words is what stops the
+ * nothing of the kind (internal PR 188 review). Sharing the words is what stops the
  * two disagreeing again.
  *
  * "Going" and not "working": what is known is that the run has not
@@ -59,7 +59,7 @@ const STILL_GOING = 'Still going';
 /**
  * What each stage is called on screen. Plain words, not internal states.
  *
- * "Building" rather than "Writing" (#188 review). The Worker can see that a
+ * "Building" rather than "Writing" (internal PR 188 review). The Worker can see that a
  * run is under way; it cannot see which of the Workflow's three steps it is
  * in, and the writing is only the first of them. A word naming the writing
  * kept claiming it through settlement and the trace write, which is a
@@ -80,7 +80,7 @@ const STAGE_WORDS: Record<GenerationStage, string> = {
  * The one-line summary shown beside the meter.
  *
  * Built from whichever facts are actually known, rather than a fixed shape
- * with holes in it. The character count is live again (#183), but it is
+ * with holes in it. The character count is live again (internal issue 183), but it is
  * still often absent: before the first report, on a provider that streams
  * nothing, and for as long as a reasoning model is thinking rather than
  * writing. Printing "0 characters written" for a run that is working
@@ -122,7 +122,7 @@ export function reassurance(progress: GenerationProgress): string | null {
     // No stage means the Workflow is in a state the Worker has no honest
     // word for (`run-stage.ts`). Removing the stage word and then
     // explaining the wait in terms of the work being done would put the
-    // same claim back a line lower (#188 review). All that is known here is
+    // same claim back a line lower (internal PR 188 review). All that is known here is
     // that the run has not finished, so that is all this says.
     return `${STILL_GOING}. It can take several minutes, and you can cancel at any time.`;
   }
@@ -139,7 +139,7 @@ const STAGE_ANNOUNCEMENTS: Record<GenerationStage, string> = {
 /**
  * Text for the polite live region, or null before the first boundary.
  *
- * Stage-aware, like the visible line and for the same reason (#188 review).
+ * Stage-aware, like the visible line and for the same reason (internal PR 188 review).
  * This said "Still generating" whatever the run was doing, so somebody
  * using a screen reader heard a claim that the run was under way while it
  * sat in a queue, and heard it again for a state the Worker had

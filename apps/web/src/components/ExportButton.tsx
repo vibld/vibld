@@ -20,7 +20,7 @@ export function ExportButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   // A refusal is about the checkpoint it was refused for. Once a later one
   // is accepted it is a red message under a project it was never about,
   // which reads as "this one cannot be exported either" and stops somebody
-  // trying. The same rule the publish result needed on #126.
+  // trying. The same rule the publish result needed on internal PR 126.
   useEffect(() => {
     setProblem(null);
   }, [snapshot.revision]);

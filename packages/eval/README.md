@@ -16,7 +16,7 @@ The set is versioned because a score means nothing without knowing what was aske
 
 **Portability** (`src/portability.ts`). Accepted output is checked for the properties ADR-0002 promises: conventional scripts, the files a person needs to install and understand it, no `.vibld/` directory, no dependency on a Vibld package. A run that produces an unportable project has not succeeded, whatever it rendered.
 
-**Whether it builds** (`bin/build-candidates.ts`). Accepted means the plan passed validation and mentions what was asked for; it never meant the project builds, and the stub's own project did not (#59). So CI writes one stub case out and runs `npm install` and `npm run build` on it, and the bakeoff runs the same script on every candidate in a separate job that holds no provider key, because a candidate's build config is code a model wrote. Portability also checks that each script's tool (`vite`, `tsc` and a few others) is a declared dependency. Candidates install with `--ignore-scripts`, so portability also refuses a project whose own install runs a lifecycle script, naming the script, rather than letting it fail its build for a reason that is not in its build.
+**Whether it builds** (`bin/build-candidates.ts`). Accepted means the plan passed validation and mentions what was asked for; it never meant the project builds, and the stub's own project did not (internal PR 59). So CI writes one stub case out and runs `npm install` and `npm run build` on it, and the bakeoff runs the same script on every candidate in a separate job that holds no provider key, because a candidate's build config is code a model wrote. Portability also checks that each script's tool (`vite`, `tsc` and a few others) is a declared dependency. Candidates install with `--ignore-scripts`, so portability also refuses a project whose own install runs a lifecycle script, naming the script, rather than letting it fail its build for a reason that is not in its build.
 
 **Injected failures** (`src/scenarios.ts`). The easy half is proving things work. These prove what happens when they don't -- a staged file escaping the project root, a provider dying mid-run, a second writer landing first, a sandbox evicted with work in flight, output that would tie the project to Vibld. Every one asserts both that the run reached a terminal state and that **the checkpoint the user already had is still there afterwards**. Losing accepted work to a failed run is the outcome that would make the product untrustworthy, so it is the thing most worth proving.
 
@@ -26,11 +26,11 @@ The set is versioned because a score means nothing without knowing what was aske
 
 **Generation quality** by default. CI runs this against a deterministic stub, not a model -- so `9/9 accepted` says the machinery and the failure paths work, and says nothing about whether a model writes a good website. The report states this wherever it prints a score, because a number that looks like a quality measure will be read as one unless it is contradicted in place.
 
-A real baseline needs a provider and an approved spend cap (#9, #18). The proposed gate in #10 -- 10 prompts × 3 runs, at least 27/30 within two repair attempts -- is a target to calibrate against that baseline, not a reliability guarantee, and not something a stub can be measured against.
+A real baseline needs a provider and an approved spend cap (internal issue 9, internal issue 18). The proposed gate in internal issue 10 -- 10 prompts × 3 runs, at least 27/30 within two repair attempts -- is a target to calibrate against that baseline, not a reliability guarantee, and not something a stub can be measured against.
 
-**Post-repair success.** There is no repair loop yet (#16). Reporting a post-repair figure before one exists would be reporting a number nobody earned, so the report gives first-pass results only.
+**Post-repair success.** There is no repair loop yet (internal issue 16). Reporting a post-repair figure before one exists would be reporting a number nobody earned, so the report gives first-pass results only.
 
-**Expired grants.** There is no permission system to expire yet (#15). A scenario for it would report a pass for something nobody built.
+**Expired grants.** There is no permission system to expire yet (internal issue 15). A scenario for it would report a pass for something nobody built.
 
 ## Running against a real model
 
@@ -53,7 +53,7 @@ at what came out.
 ### Repeated runs
 
 One generation says whether a model can do a thing. It cannot say whether it
-does it reliably, and the gate proposed in #10
+does it reliably, and the gate proposed in internal issue 10
 is written in exactly those terms: 10 prompts, 3 runs each. `VIBLD_EVAL_RUNS`
 is that multiplier.
 

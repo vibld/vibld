@@ -26,7 +26,7 @@ import {
 import { DEFAULT_LIMITS } from '../worker/request-guard.ts';
 
 /**
- * What a mockup run reserves against what it actually sends (#189 review).
+ * What a mockup run reserves against what it actually sends (internal PR 189 review).
  *
  * This file exists because the fix without it did nothing measurable.
  * `MAX_MOCKUP_FIXED_PROMPT_CHARS` was added, `packages/ai` pinned the
@@ -82,7 +82,7 @@ describe('what a mockup run reserves', () => {
 });
 
 /**
- * What a build reserves for a chosen direction (#189 review).
+ * What a build reserves for a chosen direction (internal PR 189 review).
  *
  * Here rather than in `packages/ai` for the reason the suite above exists:
  * a mutation dropped the whole-section term from the Worker's own sum and
@@ -93,7 +93,7 @@ describe('what a build reserves for a chosen direction', () => {
    * Everything a build sends that is not the chosen direction.
    *
    * The reference budget belongs in here, and the first version of this
-   * test left it out (#189 review). That made the assertion pass with the
+   * test left it out (internal PR 189 review). That made the assertion pass with the
    * bug reintroduced: `MAX_REFERENCE_CHARS` is 6,000, which is more than
    * enough to absorb the 500-odd characters of label and framing the old
    * sum was missing. A test that borrows another term's headroom is not

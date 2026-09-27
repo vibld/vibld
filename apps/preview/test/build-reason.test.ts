@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 /**
- * That a build failure says which kind it is (#194).
+ * That a build failure says which kind it is (internal issue 194).
  *
  * The message alone was enough while publish was the only caller: it shows
  * the text to a person and stops. The generation path now has to *decide*
@@ -16,7 +16,7 @@ import { describe, it } from 'node:test';
  * wrote. `busy` is the one that would have cost real money for nothing: it
  * is a refusal issued before any work happens, because another build is
  * already running for that project, and nothing about the code is
- * implicated. Since #196 that is all it means -- it used to fire whenever a
+ * implicated. Since internal PR 196 that is all it means -- it used to fire whenever a
  * preview was live, which is most of the time, so the caller read
  * "nothing to do with the project" on the ordinary follow-up edit and the
  * verification never ran (see `build-sandbox.test.ts`).
@@ -86,7 +86,7 @@ function buildProjectCode(): string {
 
 /**
  * What the teardown does, which is no longer on the caller's clock: the
- * build's `finally` starts it and does not wait for it (#196 review).
+ * build's `finally` starts it and does not wait for it (internal PR 196 review).
  */
 function releaseBuildCode(): string {
   return codeOf(bodyOf('private async releaseBuild(', 'async createShare('));
@@ -142,7 +142,7 @@ describe('what a failed build says about itself', () => {
   });
 
   it('separates a busy sandbox from a project that will not build', () => {
-    // These two were the same value until #194, and conflating them spends
+    // These two were the same value until internal issue 194, and conflating them spends
     // a model call on a project that compiles perfectly well.
     const body = buildProjectBody();
     for (const reason of ['busy', 'install', 'build']) {
@@ -153,7 +153,7 @@ describe('what a failed build says about itself', () => {
 
 /**
  * That two builds for the same user cannot write into one /workspace at
- * once (#196 review).
+ * once (internal PR 196 review).
  *
  * This is what the old refusal was really protecting, and moving builds
  * into their own instance did not remove it: a repair's verification build
@@ -206,7 +206,7 @@ describe('one build at a time', () => {
 
 /**
  * That a build measures the snapshot it was given, and not what the last
- * one left behind (#196 review).
+ * one left behind (internal PR 196 review).
  *
  * `writeProject` writes the paths it is handed and removes nothing, and the
  * build container is now reused across builds for a user. So the second
@@ -264,7 +264,7 @@ describe('what a build actually compiles', () => {
 
 /**
  * That a build gives back its own lock and not somebody else's
- * (#196 review).
+ * (internal PR 196 review).
  *
  * Expiry alone made the lock unsafe in exactly the case it existed for:
  * once a stale lock let a second build in, the first build's `finally`
@@ -313,7 +313,7 @@ describe('whose lock a build releases', () => {
   });
 
   it('confirms ownership by renewing it, right before the destroy', () => {
-    // #196 review. A read answers "is it ours" and leaves the lock as old
+    // internal PR 196 review. A read answers "is it ours" and leaves the lock as old
     // as it already was, and `destroyWithin` does not renew until a whole
     // interval after the destroy is in flight. The build's last renewal,
     // plus this teardown's own storage read, plus that interval comes to
@@ -358,7 +358,7 @@ describe('whose lock a build releases', () => {
 });
 
 /**
- * That a finished build gives its container back (#196 review).
+ * That a finished build gives its container back (internal PR 196 review).
  *
  * Builds share the platform's container budget with previews now, and a
  * container that has merely stopped working still holds a slot for the
@@ -376,7 +376,7 @@ describe('what a build leaves behind', () => {
   });
 
   it('does not keep the caller waiting while it does', () => {
-    // #196 review. The teardown waits up to MAX_DESTROY_WAIT_MS for a
+    // internal PR 196 review. The teardown waits up to MAX_DESTROY_WAIT_MS for a
     // container to die, and awaiting that put ten minutes of somebody
     // else's problem onto the clock of a paid Workflow that already had
     // its answer: `REPAIR_BUILD_ALLOWANCE_MS` budgets two builds
@@ -415,7 +415,7 @@ describe('what a build leaves behind', () => {
 
 /**
  * That a lock expires on silence rather than on project size
- * (#196 review).
+ * (internal PR 196 review).
  *
  * The TTL exists so a crashed build stops blocking the next one, and it was
  * being compared against work that is only partly bounded: the two commands
@@ -439,7 +439,7 @@ describe('keeping the lock alive while the build is', () => {
   });
 
   it('starts its clock before it awaits anything, including the lock', () => {
-    // #196 review. The deadline used to be created after the lock had been
+    // internal PR 196 review. The deadline used to be created after the lock had been
     // read and written, on the reasoning that those are this object's own
     // storage. Local is not the same as inside the bound: a storage call
     // that stalled left the method with no deadline running at all, so the
@@ -478,7 +478,7 @@ describe('keeping the lock alive while the build is', () => {
     // no deadline of its own is the third way to stop being entitled to
     // the workspace and the one that survives both checks above: its own
     // two storage calls can stay pending, and then neither the clock nor
-    // the lock is ever consulted again (#196 review).
+    // the lock is ever consulted again (internal PR 196 review).
     assert.match(
       definition,
       /keepLock\(token, deadline\)/,
@@ -528,7 +528,7 @@ describe('keeping the lock alive while the build is', () => {
     // The longest unbounded stretch a build has, and the one most likely to
     // outrun a TTL on a project with many files. It lives in
     // `build-files.ts` now, where `build-files.test.ts` calls it with fakes
-    // (#196 review), so what is left to assert here is the wiring.
+    // (internal PR 196 review), so what is left to assert here is the wiring.
     //
     // Which is the whole argument for the extraction. The defect that
     // prompted it was a renewal counting the files the loop kept rather
@@ -546,7 +546,7 @@ describe('keeping the lock alive while the build is', () => {
 
   it('bounds every call that has no bound of its own', () => {
     // The deadline between operations does nothing for a build stuck
-    // inside one of them (#196 review). `build-files.test.ts` proves the
+    // inside one of them (internal PR 196 review). `build-files.test.ts` proves the
     // race itself by calling it; what a source read can say is which calls
     // are run through it. `exec` is absent on purpose: both commands carry
     // their own timeout, which is what `build-limits.ts` is for.
@@ -573,7 +573,7 @@ describe('keeping the lock alive while the build is', () => {
   });
 
   it('knows the lock is still its own before it empties the workspace', () => {
-    // #196 review. The clear is the first destructive thing a build does
+    // internal PR 196 review. The clear is the first destructive thing a build does
     // and everything before it can take time, the fleet admission most of
     // all. Checking only between the steps that follow it let a build that
     // had already been superseded empty its successor's workspace.
@@ -672,7 +672,7 @@ describe('keeping the lock alive while the build is', () => {
     // and counts the renewals. This end of it is the wiring that test
     // cannot see: that the teardown hands over a renewal at all, and hands
     // it the same cap it is waiting under, so the renewal cannot outlast
-    // the wait it is renewing through (#196 review).
+    // the wait it is renewing through (internal PR 196 review).
     //
     // The assertion here used to compare the position of the renewal
     // against the position of `Promise.race`. Both moved into
@@ -714,7 +714,7 @@ describe('keeping the lock alive while the build is', () => {
     // Scoped to what happens after the destroy. The branch for a build
     // that never started reads and deletes the lock before any of this,
     // and it has no container to wait for, so its read is not the one this
-    // is about (#196 review).
+    // is about (internal PR 196 review).
     const teardown = releaseBuildCode();
     const destroyed = teardown.indexOf('destroyHoldingLock(');
     assert.ok(destroyed > 0, 'the teardown no longer destroys the container');
@@ -730,7 +730,7 @@ describe('keeping the lock alive while the build is', () => {
 
 /**
  * That every storage call in the teardown and the renewal is bounded
- * (#196 review).
+ * (internal PR 196 review).
  *
  * Counted rather than located. Six rounds of this file asserted that some
  * named call was wrapped, and each time the next round found the one that
@@ -846,7 +846,7 @@ describe('what the teardown and the renewal await', () => {
 
 /**
  * That taking and renewing the build lock stay inside one input gate
- * (#196 review).
+ * (internal PR 196 review).
  *
  * Cloudflare defers every other event to a Durable Object "until such a
  * time as the object is no longer executing JavaScript code and is no

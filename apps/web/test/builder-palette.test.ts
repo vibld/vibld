@@ -33,7 +33,7 @@ const STYLES = join(
  *
  * `#ffffff` backs the frames that hold somebody else's document rendering on
  * its own page: the preview iframe, and each mockup tile in the chooser
- * (#185). Backing either with the builder's paper colour would tint their
+ * (internal issue 185). Backing either with the builder's paper colour would tint their
  * work and make a light direction look broken in dark mode.
  */
 const ALLOWED = new Map<string, string>([

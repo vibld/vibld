@@ -1,5 +1,5 @@
 /**
- * What happens after a run stops to ask something (#158).
+ * What happens after a run stops to ask something (internal issue 158).
  *
  * Asking ends the invocation. There is no paused run to resume: the run that
  * asked is over and recorded, and the way forward is a new run carrying the

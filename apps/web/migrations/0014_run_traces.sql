@@ -1,4 +1,4 @@
--- What became of each generation run, attached to the run itself (#167).
+-- What became of each generation run, attached to the run itself (internal issue 167).
 --
 -- The facts were already produced: `generation-workflow.ts` logs a
 -- `generation.settled` line carrying the model, the outcome and the tokens.

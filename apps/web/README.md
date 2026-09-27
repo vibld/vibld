@@ -62,7 +62,7 @@ stored data, so nothing deployed here belongs to the trusted control plane.
 
 This deploys the **builder UI**. It is _not_ the private, origin-isolated
 preview ADR-0006 requires for running untrusted generated applications; that
-arrives with sandbox execution (#6).
+arrives with sandbox execution (internal issue 6).
 
 ### One-time setup
 
@@ -803,7 +803,7 @@ Dashboard needs no code change, only the amount to change.
   instead of holding the front of it and starving every newer one.
 
   **The reconcile is bounded like the rest of the pass, and resumable**
-  (#47, `0017_reconcile_cursor.sql`). It used to walk every subscription on
+  (internal PR 47, `0017_reconcile_cursor.sql`). It used to walk every subscription on
   every run with nothing bounding it, in an invocation whose D1 allowance
   three other phases had already drawn on. At roughly ten queries a
   subscription that exceeds the invocation somewhere past a hundred of them:
@@ -958,7 +958,7 @@ grant again for more.
    preview" → "Deploying" above) picks up any pending migration
    automatically on the next deploy.
 
-## Pushing to GitHub (issue #13, docs/decisions.md L30/L42a)
+## Pushing to GitHub (internal issue 13, docs/decisions.md L30/L42a)
 
 A checkpoint can be pushed to a repository the user connected: a branch
 `vibld/<revision>`, one commit carrying the generated files, and a pull
@@ -1020,7 +1020,7 @@ repository.
    as every other secret here: unset means `/api/github/*` answers "not
    configured", not open.
 
-### Connecting a repository (issue #121)
+### Connecting a repository (internal issue 121)
 
 The part that decides _which_ repository, and the only part of this feature
 where the security is the feature rather than the error messages.

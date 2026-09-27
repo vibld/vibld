@@ -94,7 +94,7 @@ const QUERIES_PER_RUN = 1;
  * in `worker/index.ts`.
  *
  * It is too small to split four ways and still buy every phase an item, and
- * that is known rather than overlooked (#176). Below the allowance where the
+ * that is known rather than overlooked (internal issue 176). Below the allowance where the
  * split works, the nightly pass rotates instead: the parked queue keeps its
  * floor every night and the rest goes to one of the other three phases a
  * night, in turn. See `nightSharesFor`.
@@ -569,7 +569,7 @@ export function payoutReserveFor(queryBudget: number): number {
   // none, which is that night off rather than an overrun.
   //
   // A night off that recurs every night is not a night off, and at the
-  // default allowance that is what this split produced (#176). The pass now
+  // default allowance that is what this split produced (internal issue 176). The pass now
   // uses it only when it buys every phase an item, and rotates otherwise:
   // see `takeNightlyTurn`.
   return Math.floor(queryBudget / 4);
@@ -600,7 +600,7 @@ export const MAX_QUERIES_PER_SUBSCRIPTION = 5 + MAX_QUERIES_PER_REFERRAL_PAYOUT;
 const FIXED_RECONCILE_QUERIES = 3;
 
 /**
- * The share held back for the nightly subscription reconcile (#47).
+ * The share held back for the nightly subscription reconcile (internal PR 47).
  *
  * It had none. It ran last, after the three phases above had taken their
  * shares of the allowance, and then walked every subscription the deployment
@@ -893,14 +893,14 @@ export interface NightPlan {
  * What each phase may spend on the given run of the rotation.
  *
  * The parked queue keeps its floor every night, and the rest, less the
- * turn, goes to payout, reconcile and replay in turn (Chris, #176). A
+ * turn, goes to payout, reconcile and replay in turn (Chris, internal issue 176). A
  * parked event is a payment already taken and not credited, and its floor
  * exists so that no night passes without one being retried; the other
  * three keep, so they wait their turn.
  *
  * Below 35 the floor cannot be held without starving somebody for good:
  * what is left after it cannot buy a subscription on any night, so the
- * reconcile would never run again, which is #176 back with a different
+ * reconcile would never run again, which is internal issue 176 back with a different
  * victim. There the parked queue gives up its floor and joins the
  * rotation, and the whole allowance less the turn goes to one of all four
  * phases a night. That works down to 24, where the allowance less the turn
@@ -933,7 +933,7 @@ function wrap(night: number, count: number): number {
 }
 
 /**
- * Tonight's plan, or null when every phase runs on its share (#176).
+ * Tonight's plan, or null when every phase runs on its share (internal issue 176).
  *
  * At the default allowance of 40 a quarter buys no payout, no subscription
  * and no page of events, and the split recurred every night, so three of

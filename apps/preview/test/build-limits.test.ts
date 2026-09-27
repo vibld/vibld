@@ -26,7 +26,7 @@ const releaseCost =
   (RETRY_ATTEMPTS - 1) * RETRY_DELAY_MS;
 
 /**
- * That a build cannot outlive its own lock (#196 review).
+ * That a build cannot outlive its own lock (internal PR 196 review).
  *
  * The failure this rules out needs no bad actor. `npm run build` runs
  * whatever the generated package.json declares, so a manifest naming a
@@ -68,7 +68,7 @@ describe('how long a build may take against how long its lock lasts', () => {
 
 /**
  * That holding the lock through teardown cannot itself lose the lock
- * (#196 review).
+ * (internal PR 196 review).
  *
  * The renewals around the build stopped at the edge of teardown, and
  * `destroy()` has no deadline. A destroy that blocked past the TTL let
@@ -104,7 +104,7 @@ describe('holding the lock while a container is torn down', () => {
 
   /**
    * That a build has a maximum duration at all, and that everything
-   * protecting it outlasts that maximum (#196 review).
+   * protecting it outlasts that maximum (internal PR 196 review).
    *
    * Three review rounds each found another place a heartbeat did not
    * reach, which is what an unbounded thing does to the protections around
@@ -131,7 +131,7 @@ describe('holding the lock while a container is torn down', () => {
     // the over-admission that counter exists to prevent.
     //
     // The teardown's own clock, not the destroy wait inside it
-    // (#196 review). This sum was written when the destroy was the whole
+    // (internal PR 196 review). This sum was written when the destroy was the whole
     // teardown, and the teardown then grew a clock two minutes longer plus
     // a release after it, so the figure understated the hold by nearly
     // three minutes. Every round of this pull request that got an
@@ -161,7 +161,7 @@ describe('holding the lock while a container is torn down', () => {
 
 /**
  * That the teardown is bounded as a whole, and that what it may hold is
- * held for less time than the fleet takes to reclaim it (#196 review).
+ * held for less time than the fleet takes to reclaim it (internal PR 196 review).
  *
  * The teardown moved off the build's clock and onto `ctx.waitUntil`, which
  * left it with no clock at all: its storage reads and its ticket release

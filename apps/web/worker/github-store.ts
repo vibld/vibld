@@ -49,7 +49,7 @@ export interface PushAttempt {
   commitSha: string | null;
   treeSha: string | null;
   pullRequestUrl: string | null;
-  /** What became of that pull request, once a webhook has said (#13). */
+  /** What became of that pull request, once a webhook has said (internal issue 13). */
   pullRequestNumber: number | null;
   pullRequestState: PullRequestState | null;
   /** GitHub's own clock, which is what orders two deliveries. */

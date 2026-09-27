@@ -22,7 +22,7 @@ import { STYLE_PRESETS, styleDirection } from '../src/style-presets.ts';
 import { maxTokensFor } from '../src/plan-provider.ts';
 
 /**
- * Three directions to look at before committing to a build (#185).
+ * Three directions to look at before committing to a build (internal issue 185).
  */
 
 function mockup(over: Record<string, unknown> = {}) {
@@ -92,7 +92,7 @@ describe('what a mockup set may be', () => {
   });
 
   it('refuses a document that is only whitespace', () => {
-    // `.min(1)` counts spaces and `parseChosenMockup` does not (#189
+    // `.min(1)` counts spaces and `parseChosenMockup` does not (internal PR 189
     // review). A whitespace document renders as a blank tile, reads as a
     // direction that failed, and is then refused on the way back -- the
     // paid-run-then-unbuildable failure again, in a different disguise.
@@ -197,7 +197,7 @@ describe('carrying a chosen direction into the build', () => {
     // This used to derive the cap from the token budget: three mockups
     // share MOCKUP_OUTPUT_TOKENS, so one is a third of it at four
     // characters a token. Both halves of that are now measured false
-    // (#190). Two thirds of a mockup run's tokens are reasoning, so the
+    // (internal PR 190). Two thirds of a mockup run's tokens are reasoning, so the
     // documents never had the budget the arithmetic assigned them, and the
     // ceiling is a runaway guard rather than a budget at all.
     //
@@ -229,7 +229,7 @@ describe('carrying a chosen direction into the build', () => {
 });
 
 /**
- * What the reservation has to cover but the caller never sends (#189
+ * What the reservation has to cover but the caller never sends (internal PR 189
  * review).
  *
  * `MAX_MOCKUP_FIXED_PROMPT_CHARS` is documentation of a contract, like the
@@ -261,7 +261,7 @@ describe('what every mockup run sends regardless of who asked', () => {
  * `parseChosenMockup` requires `label.trim().length > 0`. I fixed `html`
  * when it was found and did not ask which other field had the same shape,
  * so the same paid-run-then-unbuildable failure was still reachable through
- * a nameless tile (#189 review).
+ * a nameless tile (internal PR 189 review).
  */
 describe('what a direction must be called', () => {
   it('refuses a label that is only whitespace', () => {
@@ -298,7 +298,7 @@ describe('what a direction must be called', () => {
 });
 
 /**
- * What a run really sends, assembled once (#189 review).
+ * What a run really sends, assembled once (internal PR 189 review).
  *
  * The route has to measure this to settle a cancelled run honestly, and
  * the provider has to send it. Two copies of the concatenation would be

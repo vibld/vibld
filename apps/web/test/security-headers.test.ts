@@ -66,7 +66,7 @@ describe('what the API sends', () => {
       .filter((line) => line.length > 0);
 
     // `securedApp` rather than `secured`: this host adds an indexing
-    // directive the marketing site must not send (#192 review), and the
+    // directive the marketing site must not send (internal PR 192 review), and the
     // one-statement rule is what stops that being added inline here, where
     // a later route could return around it.
     assert.deepEqual(statements, [

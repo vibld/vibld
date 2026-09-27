@@ -33,7 +33,7 @@ import { clerkConfigured } from '../auth/clerk-token.ts';
 /**
  * Send an accepted checkpoint to the connected repository.
  *
- * #120 landed the route and the store and #122 landed the connecting, and
+ * Internal PR 120 landed the route and the store and internal PR 122 landed the connecting, and
  * until this nothing in the builder called `/api/github/push`: the feature
  * was reachable only with a hand-written request. This is the caller.
  *
@@ -81,7 +81,7 @@ function DiffList({
 }
 
 export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
-  // The panel's copy, not a second one (#34). Before this each kept its own
+  // The panel's copy, not a second one (internal PR 34). Before this each kept its own
   // and probed separately, so the two could name different repositories at
   // the same moment: the panel's disconnect path carries a comment saying
   // exactly that.

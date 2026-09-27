@@ -1,7 +1,7 @@
 import { getClerkToken } from '../auth/clerk-token.ts';
 
 /**
- * The operator's takedown, from the browser (#172).
+ * The operator's takedown, from the browser (internal issue 172).
  *
  * JSX-free for the same reason `publish-client.ts` is: this project's test
  * runner strips TypeScript types only and errors on JSX. `SiteTakedown.tsx`

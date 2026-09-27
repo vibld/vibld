@@ -520,7 +520,7 @@ describe('Stripe pagination that does not advance', () => {
 });
 
 /**
- * The walk, once it stopped being unbounded (#47).
+ * The walk, once it stopped being unbounded (internal PR 47).
  *
  * `reconcileSubscriptions` checked every subscription on every run, with
  * nothing bounding it, in an invocation whose D1 allowance three other

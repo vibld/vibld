@@ -40,7 +40,7 @@ is attacker-controllable until the signature is checked.
 
 Keeping deployment separate from publishing, barring agents from
 publishing entirely, and stating the webhook case explicitly were first set
-out in an analysis written for this project (#157), which was closed without
+out in an analysis written for this project (internal PR 157), which was closed without
 merging, so it is not in this repository.
 
 ## Decision

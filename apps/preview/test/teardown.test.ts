@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { destroyWithin, releaseWithin } from '../worker/teardown.ts';
 
 /**
- * That the wait for a container to die is really capped (#196 review).
+ * That the wait for a container to die is really capped (internal PR 196 review).
  *
  * `MAX_DESTROY_WAIT_MS` is what stops a container that will not die from
  * holding a workspace lock and a fleet ticket forever, and the loop that
@@ -173,7 +173,7 @@ describe('waiting for a container to die', () => {
 
 /**
  * That a retried release can actually reach its second attempt
- * (#196 review).
+ * (internal PR 196 review).
  *
  * `retrying` runs one attempt and then the next, so an attempt that never
  * settles is the end of the sequence: the retry exists precisely for a

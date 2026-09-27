@@ -134,7 +134,7 @@ describe('generation request validation', () => {
   });
 
   // These four are asked of `parsePreviewRequest` rather than
-  // `parseGenerationRequest`. Since #181 a generation request carries no
+  // `parseGenerationRequest`. Since internal issue 181 a generation request carries no
   // files at all, so the rules that bound a file list are exercised where a
   // file list still arrives: /api/preview and /api/publish. The rules
   // themselves are unchanged, and `parseProjectFiles` is still the one
@@ -188,7 +188,7 @@ describe('generation request validation', () => {
   });
 
   it('rejects a malformed base snapshot', () => {
-    // `{ revision: 'r1' }` is no longer among these: since #181 a base is
+    // `{ revision: 'r1' }` is no longer among these: since internal issue 181 a base is
     // exactly that, and carrying files is what stopped being required.
     for (const base of [{}, { revision: 1 }, { revision: '' }, [], 'r1']) {
       assert.equal(parseGenerationRequest({ prompt: 'edit', base }).ok, false);
@@ -211,7 +211,7 @@ describe('generation request validation', () => {
   });
 
   it('drops files a caller still sends, rather than refusing them', () => {
-    // A tab opened before #181 shipped still uploads the project. Refusing
+    // A tab opened before internal issue 181 shipped still uploads the project. Refusing
     // would break a session someone is in the middle of, for no gain: the
     // revision decides which project is used and it is still here. Dropping
     // is also the safer reading -- nothing a caller supplies becomes the
@@ -235,7 +235,7 @@ describe('generation request validation', () => {
   });
 
   it('no longer refuses a follow-up for the size of its project', () => {
-    // The failure #181 was filed for: a project bigger than a model's
+    // The failure internal issue 181 was filed for: a project bigger than a model's
     // context could be generated and then never edited again, because the
     // whole thing had to come back up with the next request. It does not
     // come back up any more, so the size of it cannot refuse anything.
@@ -300,7 +300,7 @@ describe('parseStylePreset', () => {
 });
 
 describe('the project content budget on a route that takes files', () => {
-  // Asked of `parsePreviewRequest` since #181. A generation request carries
+  // Asked of `parsePreviewRequest` since internal issue 181. A generation request carries
   // no files, so this budget cannot be checked there any more; the run
   // checks the project it loads instead, and `generation-run.test.ts` holds
   // the case that it still refuses before paying. What is left here is the
@@ -682,7 +682,7 @@ describe('parsePreviewRequest', () => {
 });
 
 /**
- * A request for three directions to choose between (#185).
+ * A request for three directions to choose between (internal issue 185).
  *
  * Almost nothing to check, which is the point: no base project, no files,
  * no revision, because a mockup run is asked before there is a project.
@@ -732,7 +732,7 @@ describe('a request for mockups', () => {
 });
 
 /**
- * The direction a caller picked, coming back in on a build (#185).
+ * The direction a caller picked, coming back in on a build (internal issue 185).
  *
  * Model output that went out to a browser and returned, so it is bounded
  * and shape-checked like anything else crossing this boundary.

@@ -39,7 +39,7 @@ export type { WorkflowParams } from './generation-run.ts';
  *
  * Two client-visible things this move costs, both accepted deliberately:
  *  - Character-by-character progress used to be lost here, and is not any
- *    more (#183). A Workflow step still has no channel of its own -- its
+ *    more (internal issue 183). A Workflow step still has no channel of its own -- its
  *    return value arrives once, at the end -- so the generate step reports
  *    through a named Durable Object (`run-progress.ts`) that the poll loop
  *    reads, throttled to about a report a second and never awaited.
@@ -109,7 +109,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             })()
           : null;
 
-        // The live channel #183 was missing. The provider has always called
+        // The live channel internal issue 183 was missing. The provider has always called
         // back on every delta; what there was no way to do was say so
         // outside this step, which returns once and at the end.
         // `throttleProgress` turns the per-delta callback into about one
@@ -173,7 +173,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           // on reporting `running` through settlement and the trace write,
           // so a run that ended having streamed reasoning and no answer --
           // refused, emptied, cut off -- would keep the meter saying the
-          // model was thinking for as long as those took (#193 review, P2).
+          // model was thinking for as long as those took (internal PR 193 review, P2).
           // The step is the only thing that knows it has left, and it knows
           // it on the failing path too.
           await channel?.finish().catch(() => {
@@ -233,7 +233,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
     );
 
     // After settlement, and that ordering is the whole reason this is safe
-    // rather than a convenience (#194).
+    // rather than a convenience (internal issue 194).
     //
     // `UserBudget.reserve` reclaims every unsettled reservation older than
     // RUN_ABANDONED_AFTER_MS before it does anything else, charging each one
@@ -289,7 +289,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         }),
     );
 
-    // Field by field, never a spread of `repair` (#196 review). That object
+    // Field by field, never a spread of `repair` (internal PR 196 review). That object
     // carries `result`, and `result.accepted.files` is the whole project:
     // spreading it wrote every generated file into the Worker log on each
     // successful repair, which puts a tenant's own copy, and whatever
@@ -343,7 +343,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             endedAt: generation.endedAt,
           }),
         );
-        // The repair's own row, under its own run id (#196 review). Without
+        // The repair's own row, under its own run id (internal PR 196 review). Without
         // it the Runs view reported the first call's cost as what the run
         // cost, while billing had charged for two. Its own row rather than a
         // larger number on this one: the repair has its own tokens, and a
@@ -358,7 +358,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
 
     // The repaired project where there is one. The repair promoted its own
     // accepted revision, so returning the first attempt here would show the
-    // reader the broken files while the store held the fixed ones (#194).
+    // reader the broken files while the store held the fixed ones (internal issue 194).
     return repair.result ?? generation.result;
   }
 }

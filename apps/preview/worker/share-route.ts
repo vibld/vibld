@@ -2,7 +2,7 @@ import { verifyShare } from './share-token.ts';
 
 /**
  * Where a share link lives, and how a request to it is answered
- * (docs/decisions.md L10, #222).
+ * (docs/decisions.md L10, internal issue 222).
  *
  * Each share has an origin of its own, `sh-<shareId>.<preview domain>`.
  * The shared app is ordinary web code: it loads `/@vite/client`,

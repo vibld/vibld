@@ -10,7 +10,7 @@ import { RunHistory } from '../src/components/RunHistory.tsx';
 /**
  * The run history pane, as it is actually wired.
  *
- * The point of #167 is that these facts survive a reload, so the rule worth
+ * The point of internal issue 167 is that these facts survive a reload, so the rule worth
  * testing is that the list comes from the route rather than from anything
  * this tab accumulated while it was open.
  */

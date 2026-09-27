@@ -9,7 +9,7 @@ import type {
  * Whether to offer a push, and what to say about one that happened.
  *
  * Separate from the button that draws it, for the reason four findings on
- * #122 established: the test runner strips TypeScript types and errors on
+ * internal PR 122 established: the test runner strips TypeScript types and errors on
  * JSX, so a decision written inside a component is typechecked and never
  * run. Every rule here is a decision rather than a rendering choice.
  */

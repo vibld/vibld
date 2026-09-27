@@ -109,10 +109,10 @@ describe('the settings menu', () => {
   });
 
   it('closes when a section takes the reader somewhere else', async () => {
-    // The admin link (#184) left the menu standing open over the page it
+    // The admin link (internal issue 184) left the menu standing open over the page it
     // had just opened: the outside-click handler ignores a mousedown that
     // happened inside the panel, and an internal navigation changes
-    // nothing this component watches (#188 review). A section that moves
+    // nothing this component watches (internal PR 188 review). A section that moves
     // the reader has to close the menu itself, so it is given the means to.
     const view = await mount();
     await view.press();

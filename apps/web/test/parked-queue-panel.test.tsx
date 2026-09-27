@@ -7,7 +7,7 @@ import type { Root } from 'react-dom/client';
 import { ParkedQueuePanel } from '../src/components/ParkedQueuePanel.tsx';
 
 /**
- * The panel around the parked queue (#46).
+ * The panel around the parked queue (internal PR 46).
  *
  * `parked-queue-view.test.ts` covers the wording. What is left here is the
  * behaviour a view model cannot have: that opening it is what costs a query,

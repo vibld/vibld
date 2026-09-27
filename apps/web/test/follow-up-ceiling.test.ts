@@ -25,7 +25,7 @@ import {
 import { worstCaseMicroUsd } from '../worker/spend.ts';
 
 /**
- * A follow-up's ceiling, sized to the project it has to carry (#209).
+ * A follow-up's ceiling, sized to the project it has to carry (internal issue 209).
  *
  * A follow-up returns the complete set of files, so it spends its first
  * tokens re-emitting what already exists. The flat $1.60 reserve (now
@@ -248,7 +248,7 @@ describe('what a follow-up carries, read before it starts', () => {
 
   it('carries nothing for a revision that has moved on', async () => {
     // Another tab promoted since this one loaded. `runGeneration` refuses
-    // this as a conflict for free, before the model is asked (#210 review).
+    // this as a conflict for free, before the model is asked (internal PR 210 review).
     // Sizing it up could make `reserve` refuse it first, and the person
     // would be told they are out of budget instead of that their project
     // changed underneath them.
@@ -380,7 +380,7 @@ describe('reserving for a follow-up the caller may not be able to afford', () =>
 
   it('falls back to the ordinary size rather than refusing', async () => {
     // Approved as room a caller gets when they can afford it. A caller who
-    // cannot is no worse off than before #209: the ordinary reservation,
+    // cannot is no worse off than before internal issue 209: the ordinary reservation,
     // and the run gets to try.
     const { asked, reserve } = ledger([broke, { ok: true }]);
     const sized = await sizedReservation(40_000, sizeFor, reserve);

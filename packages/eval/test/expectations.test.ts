@@ -42,7 +42,7 @@ describe('what an app case accepts', () => {
   });
 
   it('does not count a README that repeats the brief', async () => {
-    // #234: every word of the brief is in a README that restates it.
+    // internal PR 234: every word of the brief is in a README that restates it.
     const result = await runCase(
       booking,
       project(

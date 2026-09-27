@@ -1,5 +1,5 @@
 /**
- * What the parked-payment queue looks like on screen (#46).
+ * What the parked-payment queue looks like on screen (internal PR 46).
  *
  * Separated from the component for the reason `github/panel-view.ts` gives:
  * the interesting part is the wording, and wording tested through a rendered

@@ -94,7 +94,7 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     if (existing.userId !== userId) {
       return json({ error: 'This project is published by another user.' }, 403);
     }
-    // #172. Publishing again is what clears an owner's own takedown, so an
+    // internal issue 172. Publishing again is what clears an owner's own takedown, so an
     // operator hold the owner could lift by pressing Publish would be no
     // hold at all. This is the refusal that makes it one.
     if (existing.state === 'held') {
@@ -215,7 +215,7 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
   if (existing.userId !== userId) {
     return json({ error: 'This project is published by another user.' }, 403);
   }
-  // #172, and the sharper half of the refusal `handlePublish` makes. An
+  // internal issue 172, and the sharper half of the refusal `handlePublish` makes. An
   // owner's takedown deletes the objects, which is right when it is their
   // decision and the site is theirs to empty. Under a hold it would erase
   // the bytes the hold exists to keep: an owner who disliked being held
@@ -242,7 +242,7 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
 }
 
 /**
- * Take somebody else's published site off the web, and put it back (#172).
+ * Take somebody else's published site off the web, and put it back (internal issue 172).
  *
  * Named by slug rather than by project, because that is what an operator has:
  * a report names an address. There is no ownership check here and that is the
@@ -428,7 +428,7 @@ function slugFromHost(
 
 export default {
   /**
-   * Nightly, and the only thing this Worker does without a request (#177).
+   * Nightly, and the only thing this Worker does without a request (internal issue 177).
    *
    * Everything else here keeps D1 ahead of R2 so no byte is ever
    * unreachable, and that holds against every race whose two sides are D1

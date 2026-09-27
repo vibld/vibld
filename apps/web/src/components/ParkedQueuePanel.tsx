@@ -10,7 +10,7 @@ type QueueState =
   | { phase: 'failed'; error: string };
 
 /**
- * Payments Stripe says moved that this deployment cannot yet name (#46).
+ * Payments Stripe says moved that this deployment cannot yet name (internal PR 46).
  *
  * `0010_unattributed_events.sql` describes the table as "a visible queue
  * with a count and an age, which is a thing somebody can act on, rather than

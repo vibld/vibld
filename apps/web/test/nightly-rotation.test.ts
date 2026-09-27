@@ -33,14 +33,14 @@ import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
 
 /**
- * Which phases of the nightly billing pass get to run, and on how much (#176).
+ * Which phases of the nightly billing pass get to run, and on how much (internal issue 176).
  *
  * The pass split its D1 allowance a flat quarter four ways, and at the
  * default of 40 a quarter bought no payout, no subscription and no page of
  * events. The split recurred every night, so three phases never ran and
  * every night reported success. Nothing noticed, because nothing asked
  * whether a share bought anything: the per-item costs were measured upward
- * (#174) and the default was never recomputed against them. These tests are
+ * (internal PR 174) and the default was never recomputed against them. These tests are
  * the thing that notices next time.
  */
 const SCHEMA = schemaSql();
@@ -157,7 +157,7 @@ async function worstNightFor(plan: NightPlan): Promise<number> {
 
 describe('the nightly pass on the default allowance', () => {
   it('retries the parked queue every night', async () => {
-    // Chris's choice for #176. A parked event is a payment already taken and
+    // Chris's choice for internal issue 176. A parked event is a payment already taken and
     // not credited, and its floor exists so that no night passes without
     // one being retried. Rotating it with the others made that one night in
     // four; it keeps its floor every night instead, over two laps so a
@@ -175,7 +175,7 @@ describe('the nightly pass on the default allowance', () => {
   });
 
   it('gives payout, reconcile and replay an item each within one lap of nights', async () => {
-    // The test #176 asked for. The default has to stay safe on Workers
+    // The test internal issue 176 asked for. The default has to stay safe on Workers
     // Free, which stops an invocation at 50 queries, so the fix is not a
     // bigger number: it is every phase getting a night on which its share
     // buys something. One lap is as many nights as there are rotating
@@ -268,7 +268,7 @@ describe('the nightly pass below the split', () => {
 
   it('rotates all four from 24 to 34 rather than starving the reconcile', async () => {
     // Below 35 the floor leaves less than a subscription on every night, so
-    // holding it would stop the reconcile for good: #176 again with a
+    // holding it would stop the reconcile for good: Internal issue 176 again with a
     // different victim. So the parked queue joins the rotation there, and
     // each phase gets the allowance less the turn one night in four. 24 is
     // the least allowance on which that still buys every phase an item.
@@ -308,7 +308,7 @@ describe('the nightly pass below the split', () => {
 describe('the nightly pass on the deployed allowance', () => {
   it('splits exactly as it did before rotation existed', async () => {
     // Production sets 500 (`VIBLD_REPLAY_QUERY_BUDGET` in wrangler.jsonc).
-    // The figures are literals on purpose, measured before #176 changed
+    // The figures are literals on purpose, measured before internal issue 176 changed
     // anything, so this fails if the split moves, not only if it stops
     // agreeing with itself.
     const budget = 500;

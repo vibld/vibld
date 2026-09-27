@@ -16,7 +16,7 @@ import { readConfig } from '../scripts/wrangler-var.ts';
  * on first use.
  *
  * Checked here rather than trusted because the failure is not local to the
- * change that causes it. `RUN_PROGRESS` (#183) is the second class this
+ * change that causes it. `RUN_PROGRESS` (internal issue 183) is the second class this
  * Worker has ever had, and adding it meant the first migration entry was no
  * longer the only one -- the shape that had been correct for one class by
  * accident rather than by rule.

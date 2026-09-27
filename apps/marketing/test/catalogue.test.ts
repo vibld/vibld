@@ -5,7 +5,7 @@ import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 import { catalogue, withPalettes } from '../app/catalogue.ts';
 
 /**
- * The catalogue of visual directions (#186).
+ * The catalogue of visual directions (internal issue 186).
  *
  * Two things these hold. That the page is the product's own list rather
  * than a second one written here, and that every colour shown is a pair the
