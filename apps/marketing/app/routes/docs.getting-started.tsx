@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'getting-started')!;
-const CHECKED = '2026-09-17';
+const CHECKED = '2026-09-27';
 
 export function meta() {
   return metaFor('/docs/getting-started');
@@ -28,10 +28,16 @@ export default function GettingStarted() {
         the part that would start spending money on your behalf.
       </p>
       <p>
-        A new account is granted <strong>$1.00 of model spend</strong> when it
-        is created. That is a one-time grant and it does not reset. It is enough
-        to build something small and see what the output looks like before
-        deciding whether to pay for anything.
+        vibld is in public beta, and anyone can sign up at{' '}
+        <a href={SITE.signUpUrl} rel="noopener noreferrer">
+          app.vibld.com/sign-up
+        </a>
+        . A new account can get <strong>$1.00 of model spend</strong> by adding
+        a card: the <strong>Add a card</strong> button above the composer opens
+        a Stripe page that saves the card and charges nothing. That is a
+        one-time grant, one per account and one per card, and it does not reset.
+        It is enough to build something small and see what the output looks like
+        before deciding whether to pay for anything.
       </p>
 
       <h2>2. Describe what you want</h2>

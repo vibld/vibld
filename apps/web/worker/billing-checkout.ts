@@ -1,7 +1,12 @@
 import type Stripe from 'stripe';
 import type { BillingStore } from './billing-store.ts';
 import type { PurchaseOption } from './stripe-client.ts';
-import { TOPUP_CREDIT_USD_CENTS, lookupKeyFor } from './stripe-client.ts';
+import {
+  PURPOSE_METADATA_KEY,
+  SIGNUP_CARD_PURPOSE,
+  TOPUP_CREDIT_USD_CENTS,
+  lookupKeyFor,
+} from './stripe-client.ts';
 
 /**
  * Stripe-hosted Checkout and Billing Portal (docs/decisions.md L12): card
@@ -91,6 +96,53 @@ export async function createCheckoutSession(
       : {
           subscription_data: { metadata: { [USER_ID_METADATA_KEY]: userId } },
         }),
+  });
+
+  if (!session.url) {
+    throw new Error('Stripe did not return a Checkout URL.');
+  }
+  return session.url;
+}
+
+/**
+ * Start a Checkout Session in `setup` mode: Stripe's hosted page saves a card
+ * to the customer and charges nothing (Chris, 2026-09-27: the welcome credit
+ * waits for a card on file).
+ *
+ * Hosted Checkout rather than a SetupIntent confirmed in the builder, for the
+ * reason every other card flow here is hosted (L12): card data never reaches
+ * this Worker, and the builder ships no Stripe.js.
+ *
+ * Card only, not whatever payment methods the account has enabled. The
+ * once-per-card rule reads Stripe's card `fingerprint`, which a bank debit
+ * or a wallet does not carry in the same form, so a method without one could
+ * not be limited and is not offered.
+ *
+ * The purpose and the user id go on the SetupIntent as well as the session,
+ * because `setup_intent.succeeded` carries only the SetupIntent. No Stripe
+ * Tax here: nothing is being sold.
+ */
+export async function createCardSetupSession(
+  stripe: Stripe,
+  store: BillingStore,
+  userId: string,
+  urls: CheckoutUrls,
+): Promise<string> {
+  const customer = await findOrCreateCustomer(stripe, store, userId);
+  const metadata = {
+    [USER_ID_METADATA_KEY]: userId,
+    [PURPOSE_METADATA_KEY]: SIGNUP_CARD_PURPOSE,
+  };
+
+  const session = await stripe.checkout.sessions.create({
+    customer,
+    client_reference_id: userId,
+    mode: 'setup',
+    payment_method_types: ['card'],
+    metadata,
+    setup_intent_data: { metadata },
+    success_url: urls.successUrl,
+    cancel_url: urls.cancelUrl,
   });
 
   if (!session.url) {

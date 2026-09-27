@@ -3,8 +3,8 @@
  * source rather than restated here.
  *
  * The figures live in `apps/web/worker`: what each tier includes in
- * `entitlement.ts`, the one-time grant a new account gets in
- * `signup-credit.ts`, and the prices and the top-up's credit beside the
+ * `entitlement.ts`, the one-time grant a new account gets (and whether it
+ * waits for a card) in `signup-credit.ts`, and the prices and the top-up's credit beside the
  * Stripe lookup keys in `stripe-client.ts`. They cannot be imported the way
  * `catalogue.ts` imports the style presets, because those files belong to a
  * Worker and type-check against Workers bindings (and, for the last, the
@@ -38,8 +38,15 @@ export interface Plan {
 
 export interface Plans {
   plans: Plan[];
-  /** The one-time grant on account creation, in US cents. */
+  /** The one-time grant a new account gets, in US cents. */
   signupCents: number;
+  /**
+   * Whether that grant waits for a card on file (a Stripe setup that charges
+   * nothing), read from `SIGNUP_CREDIT_REQUIRES_CARD` beside the amount. The
+   * copy states the condition from this rather than from memory, so the day
+   * the builder stops asking for a card the page stops saying it does.
+   */
+  signupRequiresCard: boolean;
   /** A one-time top-up: what it costs and the model spend it adds. */
   topup: { priceCents: number; creditCents: number };
 }
@@ -91,6 +98,14 @@ export function readPlans(sources: PlanSources): Plans {
     /DEFAULT_SIGNUP_CREDIT_USD_CENTS\s*=\s*([\d_]+)/,
     'the new-account grant',
   );
+  const requiresCard = /SIGNUP_CREDIT_REQUIRES_CARD\s*=\s*(true|false)/.exec(
+    sources.signupCredit,
+  )?.[1];
+  if (requiresCard === undefined) {
+    throw new Error(
+      "Could not read whether the new-account grant needs a card from the builder's source",
+    );
+  }
   const s = sources.stripeClient;
   const cents = (microUsd: number) => Math.round(microUsd / 10_000);
   return {
@@ -116,6 +131,7 @@ export function readPlans(sources: PlanSources): Plans {
       },
     ],
     signupCents: signup,
+    signupRequiresCard: requiresCard === 'true',
     topup: {
       priceCents: price(s, 'topup'),
       creditCents: find(

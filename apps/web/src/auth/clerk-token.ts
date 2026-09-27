@@ -35,6 +35,22 @@ export const PUBLISHABLE_KEY =
 export const clerkConfigured = PUBLISHABLE_KEY !== undefined;
 
 /**
+ * Where a signed-out visitor finds the sign-up form rather than the sign-in
+ * one. vibld.com's "Sign up" links here (`SITE.signUpUrl`), and so does the
+ * link under the sign-in form. The open beta (2026-09-27) is what made it
+ * worth a path of its own: until then nobody could sign up unprompted.
+ */
+export const SIGN_UP_PATH = '/sign-up';
+
+/**
+ * Whether this path shows the sign-up form. Anything below it counts too,
+ * because Clerk may carry the form's own steps in the path.
+ */
+export function isSignUpPath(pathname: string): boolean {
+  return pathname === SIGN_UP_PATH || pathname.startsWith(`${SIGN_UP_PATH}/`);
+}
+
+/**
  * `ClerkProvider` (in clerk.tsx) sets `window.Clerk` -- the SDK's own
  * documented escape hatch for code outside React. Only the slice each
  * function below actually reads is typed here; the rest of Clerk's `Clerk`

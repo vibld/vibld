@@ -28,7 +28,11 @@
  */
 import type Stripe from 'stripe';
 import { applyStripeEvent } from './billing-events.ts';
-import type { OnPurchaseReversed, ResolveCharge } from './billing-events.ts';
+import type {
+  OnPurchaseReversed,
+  ResolveCharge,
+  ResolveSetupIntent,
+} from './billing-events.ts';
 import { BillingStore } from './billing-store.ts';
 import type { EventReplayCursor } from './billing-store.ts';
 
@@ -69,6 +73,10 @@ const PAGE_SIZE_CAP = 100;
  * events per night than it did, so catching up from a backlog takes
  * proportionally longer. That is the price of a missed refund being
  * recovered at all, and losing one silently is what the alternative costs.
+ *
+ * A card saved for the welcome credit fits under it: a setup-mode Checkout
+ * links the customer twice, then claims (two inserts and a read), pays, and
+ * is marked processed. Seven.
  */
 const MAX_QUERIES_PER_EVENT = 9;
 
@@ -144,6 +152,10 @@ export const REPLAYED_EVENT_TYPES = [
   'invoice.payment_failed',
   'charge.refunded',
   'charge.dispute.closed',
+  // A card saved for the welcome credit. `checkout.session.completed` above
+  // reports it as well, and either one pays; this is the one that names the
+  // SetupIntent directly.
+  'setup_intent.succeeded',
 ];
 
 export interface ReplayResult {
@@ -213,6 +225,7 @@ export async function replayStripeEvents(
   queryBudget: number = DEFAULT_QUERY_BUDGET,
   onPurchaseReversed?: OnPurchaseReversed,
   resolveCharge?: ResolveCharge,
+  resolveSetupIntent?: ResolveSetupIntent,
 ): Promise<ReplayResult> {
   const pageSize = pageSizeFor(queryBudget);
   // What a page costs at its worst, which is what decides whether there is
@@ -339,6 +352,7 @@ export async function replayStripeEvents(
           undefined,
           onPurchaseReversed,
           resolveCharge,
+          resolveSetupIntent,
         );
         if (outcome === 'unresolved') {
           // Nothing was written, so it is not done, and marking it processed
@@ -700,6 +714,7 @@ export async function retryUnattributedEvents(
   now: () => string = () => new Date().toISOString(),
   onPurchaseReversed?: OnPurchaseReversed,
   resolveCharge?: ResolveCharge,
+  resolveSetupIntent?: ResolveSetupIntent,
 ): Promise<RetryResult> {
   // Least recently tried first, so a row that can never be attributed costs
   // one attempt a night rather than holding the front of the queue for ever.
@@ -727,6 +742,7 @@ export async function retryUnattributedEvents(
         undefined,
         onPurchaseReversed,
         resolveCharge,
+        resolveSetupIntent,
       );
       if (outcome === 'unresolved') {
         waiting += 1;

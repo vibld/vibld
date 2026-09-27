@@ -4,12 +4,10 @@ import {
   monthlyAllowanceMicroUsd,
   tierFor,
 } from './entitlement.ts';
-import { grantSignupCreditOnce } from './signup-credit.ts';
-import type { SignupCreditEnv } from './signup-credit.ts';
 import type { Principal } from './principal.ts';
 
 /** Only what deciding an allowance needs, so a test need not build a router. */
-export interface SpendableEnv extends SignupCreditEnv {
+export interface SpendableEnv {
   DB?: D1Database;
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
 }
@@ -31,17 +29,18 @@ function positiveInt(raw: string | undefined, fallback: number): number {
  * tier change that landed in one route and not the other would quietly let
  * somebody spend what their plan does not buy, or refuse them what it does.
  *
- * The signup credit is granted here, and not only in `handleBillingStatus`:
- * a client that never calls the status endpoint must not be refused its
- * first run for want of a credit it was promised. The deterministic id
- * means whichever path arrives first wins and the other is a no-op.
+ * The signup credit used to be granted here as well as in
+ * `handleBillingStatus`, so that a client that never called the status
+ * endpoint was not refused its first run for want of a credit it was
+ * promised. It is not granted on a request at all any more: it waits for a
+ * card on file and arrives on the Stripe webhook (`signup-credit.ts`), so
+ * by the time a run asks, it is either in the balance below or not owed.
  */
 export async function spendableFor(
   env: SpendableEnv,
   principal: Principal,
 ): Promise<{ monthlyAllowance: number; topupCeiling: number }> {
   const billing = new BillingStore(env.DB!);
-  await grantSignupCreditOnce(billing, principal, env);
   const subscription = await billing.findActiveSubscription(principal.userId);
   const freeAllowance = positiveInt(
     env.VIBLD_FREE_MONTHLY_MICRO_USD,

@@ -52,7 +52,7 @@ import {
   findClerkUserIdByEmail,
 } from './clerk-lookup.ts';
 import { decideModel, grantedFor } from './model-access.ts';
-import { grantSignupCreditOnce } from './signup-credit.ts';
+import { signupCreditStatus } from './signup-credit.ts';
 import {
   handleReferralClaim,
   handleReferralStatus,
@@ -110,10 +110,12 @@ import {
 } from './publish-client.ts';
 import {
   billingConfigured,
+  handleBillingCard,
   handleBillingCheckout,
   handleBillingPortal,
   handleStripeWebhook,
   handleUnattributedQueue,
+  readSetupIntent,
   reconcileSubscriptions,
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
@@ -219,8 +221,9 @@ export interface Env {
    */
   VIBLD_FREE_MONTHLY_MICRO_USD?: string;
   /**
-   * Cents of one-time credit a new account is granted on its first
-   * authenticated request. Defaults to 100 ($1.00); "0" stops the grant.
+   * Cents of one-time credit a new account is granted once it has a card on
+   * file (a Stripe setup-mode Checkout, which charges nothing). Defaults to
+   * 100 ($1.00); "0" stops new offers.
    *
    * Separate money from VIBLD_FREE_MONTHLY_MICRO_USD above, which resets
    * every month. This does not reset, and is spent from the same top-up
@@ -228,8 +231,8 @@ export interface Env {
    */
   VIBLD_SIGNUP_CREDIT_USD_CENTS?: string;
   /**
-   * ISO 8601. Only accounts created at or after this instant receive the
-   * credit above. Unset means no grants at all: any default early enough to
+   * ISO 8601. Only accounts created at or after this instant are offered
+   * the credit above. Unset means no grants at all: any default early enough to
    * catch new accounts also catches every account that already exists, and
    * this is money. See signup-credit.ts.
    */
@@ -505,22 +508,23 @@ async function handleBillingStatus(
   try {
     const now = Date.now();
     const billing = new BillingStore(env.DB);
-    // Before the balance is read, so a brand new account sees its welcome
-    // credit on the very first load rather than after a refresh. Idempotent
-    // on a deterministic id, so calling it on every status request is free.
+    // Where this account stands with the welcome credit, which since the
+    // card requirement is something the builder has to show rather than
+    // something that simply arrives: an account offered it sees how to
+    // claim it. Deciding may open the offer, so it is not free, but it is
+    // idempotent and asks Clerk at most once per account.
     //
     // Gated, even though the route is not. This route is ungated so that
     // somebody invited, who spent, and whose access was then revoked can
     // still see what happened to their money: refusing a balance read
-    // tells them nothing and looks like theft. But the route was described
-    // as read-only and it is not, and the grant is the exact thing the
-    // invite gate exists to protect: an uninvited account could call this
-    // directly and draw its $1 whatever the UI chose to render.
+    // tells them nothing and looks like theft. But opening an offer is the
+    // first half of a grant, and the grant is the exact thing the invite
+    // gate exists to protect.
     //
-    // So the read stays open to anyone signed in, and the money does not.
-    // The check is inside `grantSignupCreditOnce` rather than here, so that
-    // no caller can be the one that forgets it.
-    await grantSignupCreditOnce(billing, principal, env);
+    // So the read stays open to anyone signed in, and the offer does not.
+    // The check is inside `signupCreditStatus` rather than here, so that no
+    // caller can be the one that forgets it.
+    const signupCredit = await signupCreditStatus(billing, principal, env);
     const subscription = await billing.findActiveSubscription(principal.userId);
     const tier = tierFor(subscription);
     const freeAllowance = positiveInt(
@@ -558,6 +562,7 @@ async function handleBillingStatus(
       cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
       hasStripeCustomer,
       billingConfigured: billingConfigured(env),
+      signupCredit,
     });
   } catch (error) {
     console.error('billing status unavailable', error);
@@ -2258,6 +2263,10 @@ export default {
       // charge, so the replay needs the same lookup the webhook path has.
       const readCharge = (chargeId: string) =>
         stripe.charges.retrieve(chargeId);
+      // A card saved for the welcome credit, for the same reason: a missed
+      // delivery is only recovered if the replay can find the card's
+      // fingerprint the way the webhook does.
+      const readCard = readSetupIntent(stripe);
       const reversed = (
         userId: string,
         reason: string,
@@ -2288,6 +2297,7 @@ export default {
           replayBudgetFor(budget),
           reversed,
           readCharge,
+          readCard,
         )
           .then(
             (result) => {
@@ -2328,6 +2338,7 @@ export default {
               undefined,
               reversed,
               readCharge,
+              readCard,
             ),
           )
           .then(
@@ -2409,6 +2420,7 @@ export default {
             shares.replay,
             reversed,
             readCharge,
+            readCard,
           ).then(
             (result) =>
               console.log(
@@ -2424,6 +2436,7 @@ export default {
             undefined,
             reversed,
             readCharge,
+            readCard,
           ).then(
             (result) =>
               console.log(
@@ -2625,6 +2638,10 @@ async function route(
 
   if (pathname === '/api/billing/portal') {
     return handleBillingPortal(request, env, new URL(request.url).origin);
+  }
+
+  if (pathname === '/api/billing/card') {
+    return handleBillingCard(request, env, new URL(request.url).origin);
   }
 
   if (pathname === '/api/stripe/webhook') {

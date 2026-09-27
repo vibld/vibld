@@ -101,3 +101,16 @@ export function lookupKeyFor(option: PurchaseOption): string {
 
 /** L36's top-up: $20 for $8 of included model spend, expiring in 12 months. */
 export const TOPUP_CREDIT_USD_CENTS = 800;
+
+/**
+ * Stamped on the Checkout Session and the SetupIntent that save a card for
+ * the welcome credit (`billing-checkout.ts`), and read back by the webhook
+ * (`billing-events.ts`). A card saved any other way, through the Billing
+ * Portal say, carries no such mark and pays nothing: the credit is for the
+ * flow that offered it, not for every card that reaches Stripe.
+ *
+ * Stripe metadata can be written only with this deployment's secret key, so
+ * the mark is ours to trust in a way a browser-supplied value never is.
+ */
+export const PURPOSE_METADATA_KEY = 'vibld_purpose';
+export const SIGNUP_CARD_PURPOSE = 'signup_credit';

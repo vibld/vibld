@@ -81,9 +81,9 @@ export default function Styles() {
             <a className="button" href={SITE.appUrl}>
               Open the builder
             </a>
-            <Link className="lb-link" to="/#waitlist">
-              Join the waitlist
-            </Link>
+            <a className="lb-link" href={SITE.signUpUrl}>
+              Sign up
+            </a>
             <Link className="lb-link" to="/examples">
               See real output
             </Link>

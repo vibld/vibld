@@ -1,7 +1,6 @@
 import { Link } from 'react-router';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
-import { focusWaitlist } from '../components/SiteChrome';
 import {
   AskForm,
   Arrow,
@@ -17,10 +16,10 @@ import {
   PlanCards,
   PlanFacts,
   SectionHead,
+  SignupCreditLine,
 } from '../components/Sections';
 import { SiteMiniature } from '../components/SiteMiniature';
 import { UseCaseVisual } from '../components/UseCaseVisual';
-import { WaitlistForm } from '../components/WaitlistForm';
 import { catalogue } from '../catalogue';
 import { DEMO_SITES, DEMO_SITE_IDS } from '../demo-sites';
 import { lookById } from '../looks';
@@ -31,7 +30,7 @@ import { USE_CASES } from '../use-cases';
  * The home page, in the "Live Build" direction Chris approved (2026-09-27):
  * a hero whose builder assembles a small site in front of the reader, then
  * the flow, the styles, what you get, the kinds of project, the plans, and
- * the one waitlist form.
+ * the way in.
  *
  * What changed on the way in from the mockup, beyond its colours and type
  * becoming the brand's:
@@ -46,8 +45,9 @@ import { USE_CASES } from '../use-cases';
  *   `apps/web` (see `plans.ts`).
  * - Its step two said the builder "sketches three directions" for every
  *   request. Sketching is something you ask for; `flow.ts` says so.
- * - Its closing call linked to itself. It now holds the real waitlist form,
- *   the only one on the page.
+ * - Its closing call linked to itself. It held the real waitlist form until
+ *   the open beta (Chris, 2026-09-27), and now links to the builder's
+ *   sign-up form, since anybody can sign up.
  */
 
 export function meta() {
@@ -99,7 +99,7 @@ function Hero() {
         <div className="lb-hero__top">
           <p className="lb-kicker">
             <span className="lb-dot" aria-hidden="true" />
-            Invite-only for now
+            {SITE.stage}
           </p>
           <h1 id="hero-title">
             {words.join(' ')} <span className="lb-hl">{last}</span>
@@ -113,8 +113,8 @@ function Hero() {
           <p className="lb-ask__note">
             A demonstration of the flow, drawn in this page. It does not call a
             model.{' '}
-            <a className="lb-link" href="#waitlist" onClick={focusWaitlist}>
-              Join the waitlist
+            <a className="lb-link" href={SITE.signUpUrl}>
+              Sign up
             </a>{' '}
             to use the real thing.
           </p>
@@ -338,17 +338,19 @@ function Join() {
           </div>
           <p className="lb-kicker">
             <span className="lb-dot" aria-hidden="true" />
-            Invite-only for now
+            {SITE.stage}
           </p>
           <h2 id="join-title">
             Describe it. <span className="lb-hl">Watch it build.</span>
           </h2>
           <p className="lb-closing__p">
-            Invitations go out from the waitlist, one email when yours arrives.
+            Anyone can sign up. <SignupCreditLine />
           </p>
-          <div id="waitlist" className="lb-closing__form">
-            <WaitlistForm />
-          </div>
+          <p className="lb-closing__cta">
+            <a className="button" href={SITE.signUpUrl}>
+              Sign up
+            </a>
+          </p>
           <p className="lb-closing__row">
             Already have an account?{' '}
             <a href={SITE.appUrl} className="lb-link">

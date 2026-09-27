@@ -1,32 +1,8 @@
 import { useRef } from 'react';
-import type { MouseEvent } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CONSENT_OPEN_EVENT } from '../consent.ts';
 import { Lockup } from './Mark.tsx';
 import { DOC_TRACKS, LEGAL_DOCS, PRODUCT_PAGES, SITE } from '../site';
-
-/**
- * Moves to the waitlist form on the home page rather than repeating it.
- *
- * Two forms on one page would mean two Turnstile widgets, and `WaitlistForm`
- * resets every widget on the page after a failure on the assumption that it
- * is the only one. So every "Join the waitlist" on the site is a link to
- * `/#waitlist`, and on the home page itself this turns that link into a move
- * and a focus instead of a jump that leaves focus behind.
- */
-export function focusWaitlist(event: MouseEvent<HTMLAnchorElement>) {
-  const input = document.querySelector<HTMLInputElement>(
-    '#waitlist input[name="email"]',
-  );
-  if (!input) return;
-  event.preventDefault();
-  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  input.scrollIntoView({
-    behavior: reduce ? 'auto' : 'smooth',
-    block: 'center',
-  });
-  input.focus({ preventScroll: true });
-}
 
 /** The pages the header lists at full width. The menu lists them all. */
 const HEADER_PAGES = PRODUCT_PAGES.filter((page) => page.path !== '/use-cases');
@@ -96,16 +72,18 @@ export function SiteHeader() {
             <a href={SITE.appUrl} className="lb-nav__signin">
               Sign in
             </a>
-            <Link
-              to="/#waitlist"
-              className="button button--small"
-              onClick={pathname === '/' ? focusWaitlist : undefined}
-            >
-              <span className="lb-nav__cta-long">Join the waitlist</span>
+            {/*
+              The open beta's way in (2026-09-27). It used to be "Join the
+              waitlist", a link to the form on the home page; anybody can
+              sign up now, so it goes straight to the builder's sign-up form.
+              A plain anchor for the same reason as the one above.
+            */}
+            <a href={SITE.signUpUrl} className="button button--small">
+              <span className="lb-nav__cta-long">Sign up for the beta</span>
               <span className="lb-nav__cta-short" aria-hidden="true">
-                Waitlist
+                Sign up
               </span>
-            </Link>
+            </a>
             {/*
               A disclosure rather than a scripted drawer, so the menu opens
               before hydration and without JavaScript at all.
@@ -128,6 +106,9 @@ export function SiteHeader() {
                   </li>
                   <li>
                     <a href={SITE.appUrl}>Sign in</a>
+                  </li>
+                  <li>
+                    <a href={SITE.signUpUrl}>Sign up</a>
                   </li>
                 </ul>
               </nav>

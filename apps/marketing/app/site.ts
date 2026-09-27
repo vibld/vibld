@@ -15,6 +15,9 @@ export interface SiteRoute {
   description: string;
 }
 
+/** The builder's origin. Named once so the sign-in and sign-up links cannot drift apart. */
+const APP_URL = 'https://app.vibld.com';
+
 export const SITE = {
   /**
    * Lowercase, everywhere, with no exceptions (Chris, 2026-09-16). It is the
@@ -72,7 +75,21 @@ export const SITE = {
    * page carries it, since "the front door has no handle" is exactly the kind
    * of absence nobody notices by looking at the page.
    */
-  appUrl: 'https://app.vibld.com',
+  appUrl: APP_URL,
+  /**
+   * The builder's sign-up form (the open beta, Chris 2026-09-27). Every call
+   * to action that used to say "Join the waitlist" links here now: anybody
+   * can sign up, and the form is what signing up is. A path in the builder
+   * (`SIGN_UP_PATH` in apps/web/src/auth/clerk-token.ts) rather than Clerk's
+   * hosted page, so a visitor stays on vibld's own domain throughout;
+   * apps/web's `sign-up-path.test.ts` holds the two to the same address.
+   */
+  signUpUrl: `${APP_URL}/sign-up`,
+  /**
+   * What the product is called while it is in beta, in the one place every
+   * page reads it from. The label Chris chose (2026-09-27).
+   */
+  stage: 'Public beta',
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   /**
@@ -297,7 +314,7 @@ export const ROUTES: SiteRoute[] = [
     path: '/',
     title: `${SITE.name} | ${SITE.tagline}`,
     description:
-      'vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Join the waitlist.',
+      'vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Now in public beta: sign up and start building.',
   },
   {
     path: '/how-it-works',

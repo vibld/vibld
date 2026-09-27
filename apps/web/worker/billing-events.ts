@@ -1,6 +1,12 @@
 import type Stripe from 'stripe';
 import type { BillingStore, SubscriptionRecord } from './billing-store.ts';
-import { TOPUP_CREDIT_USD_CENTS, tierForLookupKey } from './stripe-client.ts';
+import {
+  PURPOSE_METADATA_KEY,
+  SIGNUP_CARD_PURPOSE,
+  TOPUP_CREDIT_USD_CENTS,
+  tierForLookupKey,
+} from './stripe-client.ts';
+import { grantSignupCreditForCard } from './signup-grant.ts';
 
 /**
  * Turn a verified Stripe event into a `BillingStore` write (docs/decisions.md
@@ -101,6 +107,20 @@ export type OnPurchaseReversed = (
 export type ResolveCharge = (chargeId: string) => Promise<Stripe.Charge>;
 
 /**
+ * Fetch a SetupIntent with its `payment_method` expanded.
+ *
+ * The welcome credit is limited to one per card, and the card is known only
+ * by its `fingerprint`, which lives on the PaymentMethod. Neither event that
+ * reports a saved card carries it: `checkout.session.completed` names the
+ * SetupIntent by id, and `setup_intent.succeeded` names the PaymentMethod by
+ * id. So both ask Stripe the same one question, injected for the same reason
+ * `ResolveCharge` is.
+ */
+export type ResolveSetupIntent = (
+  setupIntentId: string,
+) => Promise<Stripe.SetupIntent>;
+
+/**
  * Whether applying an event actually wrote what the event was about.
  *
  * `unresolved` means the handler could not work out whose money this is, so
@@ -137,6 +157,7 @@ async function applyCheckoutSessionCompleted(
   store: BillingStore,
   session: Stripe.Checkout.Session,
   onPurchaseCleared?: OnPurchaseCleared,
+  resolveSetupIntent?: ResolveSetupIntent,
 ): Promise<EventOutcome> {
   const userId =
     metadataUserId(session.metadata) ??
@@ -156,6 +177,19 @@ async function applyCheckoutSessionCompleted(
   // happened, so re-asserting the link here means a failed write at
   // creation time still gets corrected once the webhook lands.
   await store.linkCustomer(userId, stripeCustomerId);
+
+  // A card saved for the welcome credit. Nothing was sold, so nothing below
+  // applies; the grant is `applyCardSaved`'s, which `setup_intent.succeeded`
+  // reaches too. Either event arriving first pays, and the other is a no-op.
+  if (session.mode === 'setup') {
+    if (!isSignupCard(session.metadata)) return 'applied';
+    return await applyCardSaved(
+      store,
+      idsOf(session.setup_intent)[0],
+      userId,
+      resolveSetupIntent,
+    );
+  }
 
   // A subscription checkout is mirrored by the subscription events below.
   if (session.mode !== 'payment') return 'applied';
@@ -209,6 +243,113 @@ async function applyCheckoutSessionCompleted(
   );
 
   await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
+  return 'applied';
+}
+
+/** Whether a Stripe object was made by the welcome-credit card flow. */
+function isSignupCard(metadata: Stripe.Metadata | null | undefined): boolean {
+  return metadata?.[PURPOSE_METADATA_KEY] === SIGNUP_CARD_PURPOSE;
+}
+
+/**
+ * A card was saved through the welcome-credit flow, so pay the credit if the
+ * card and the account are both unclaimed.
+ *
+ * `unresolved` for the two failures that can change: Stripe could not be
+ * asked about the SetupIntent, or it answered without the card on it. The
+ * webhook then answers 5xx and Stripe retries, and the replay parks it.
+ * Everything else is `applied`, including a refusal: a card that already
+ * paid another account will have paid it on every retry too.
+ *
+ * The SetupIntent is re-read rather than trusted from the event, so the
+ * `setup_intent.succeeded` delivery and the Checkout one make the same
+ * decision from the same object.
+ */
+async function applyCardSaved(
+  store: BillingStore,
+  setupIntentId: string | undefined,
+  fallbackUserId: string | undefined,
+  resolveSetupIntent?: ResolveSetupIntent,
+): Promise<EventOutcome> {
+  if (!setupIntentId) {
+    // A setup-mode Checkout always creates one. Nothing a retry can supply.
+    console.error('stripe card-saved event with no SetupIntent');
+    return 'applied';
+  }
+  if (!resolveSetupIntent) {
+    console.error(
+      'stripe card-saved event with no way to read it',
+      setupIntentId,
+    );
+    return 'unresolved';
+  }
+
+  let intent: Stripe.SetupIntent;
+  try {
+    intent = await resolveSetupIntent(setupIntentId);
+  } catch (error) {
+    console.error('stripe SetupIntent could not be read', setupIntentId, error);
+    return 'unresolved';
+  }
+
+  // Checked again on the re-read object: the Checkout session's own mark is
+  // what let the event get this far, but the SetupIntent is what is paid on.
+  if (!isSignupCard(intent.metadata)) return 'applied';
+  if (intent.status !== 'succeeded') {
+    // No card was saved. The event that says one was will come separately.
+    console.log(
+      JSON.stringify({
+        event: 'billing.signup_card.unsettled',
+        setupIntent: intent.id,
+        status: intent.status,
+      }),
+    );
+    return 'applied';
+  }
+
+  const userId = metadataUserId(intent.metadata) ?? fallbackUserId;
+  if (!userId) {
+    console.error('stripe SetupIntent with no resolvable user id', intent.id);
+    return 'unresolved';
+  }
+
+  const method = intent.payment_method;
+  if (method === null || typeof method === 'string') {
+    // The resolver did not expand it, which is a bug on this side, and
+    // retrying with the bug fixed would find the card.
+    console.error('stripe SetupIntent read without its card', intent.id);
+    return 'unresolved';
+  }
+  const fingerprint = method.type === 'card' ? method.card?.fingerprint : null;
+  if (!fingerprint) {
+    // Card-only Checkout makes this unreachable in practice. Without a
+    // fingerprint the once-per-card limit cannot hold, so nothing is paid.
+    console.error('stripe saved payment method has no card fingerprint', {
+      setupIntent: intent.id,
+      type: method.type,
+    });
+    return 'applied';
+  }
+
+  const stripeCustomerId = customerId(intent.customer);
+  if (stripeCustomerId) await store.linkCustomer(userId, stripeCustomerId);
+
+  const { outcome, paid } = await grantSignupCreditForCard(store, {
+    userId,
+    setupIntentId: intent.id,
+    cardFingerprint: fingerprint,
+  });
+  // The fingerprint is left out on purpose: it identifies a card across
+  // every Stripe account that has seen it, and the outcome says enough.
+  console.log(
+    JSON.stringify({
+      event: 'billing.signup_card',
+      userId,
+      setupIntent: intent.id,
+      outcome,
+      paid,
+    }),
+  );
   return 'applied';
 }
 
@@ -456,6 +597,7 @@ export async function applyStripeEvent(
   onPurchaseCleared?: OnPurchaseCleared,
   onPurchaseReversed?: OnPurchaseReversed,
   resolveCharge?: ResolveCharge,
+  resolveSetupIntent?: ResolveSetupIntent,
 ): Promise<EventOutcome> {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -467,6 +609,17 @@ export async function applyStripeEvent(
         store,
         event.data.object,
         onPurchaseCleared,
+        resolveSetupIntent,
+      );
+    case 'setup_intent.succeeded':
+      // Every saved card fires this, the Billing Portal's included, so the
+      // mark is checked before Stripe is asked anything.
+      if (!isSignupCard(event.data.object.metadata)) return 'applied';
+      return await applyCardSaved(
+        store,
+        event.data.object.id,
+        undefined,
+        resolveSetupIntent,
       );
     case 'checkout.session.async_payment_failed':
       // Nothing to undo, which is the whole reason the grant is gated on

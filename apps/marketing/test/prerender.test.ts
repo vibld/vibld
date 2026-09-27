@@ -237,25 +237,6 @@ describe('accessibility basics', () => {
   });
 });
 
-describe('the waitlist form', () => {
-  it('degrades to a real form post without JavaScript', () => {
-    const html = read('/');
-    assert.match(html, /<form[^>]*action="\/api\/waitlist"/);
-    assert.match(html, /<form[^>]*method="post"/i);
-  });
-
-  it('labels the email field', () => {
-    const html = read('/');
-    // Attribute order follows JSX declaration order (id before name in
-    // WaitlistForm.tsx), so this matches the input tag first and pulls id
-    // out of it, rather than assuming a fixed attribute order.
-    const inputTag = /<input\b[^>]*name="email"[^>]*>/.exec(html)?.[0] ?? '';
-    const id = /\bid="([^"]+)"/.exec(inputTag)?.[1];
-    assert.ok(id, 'no id on the email input');
-    assert.ok(html.includes(`for="${id}"`), 'email input has no label');
-  });
-});
-
 describe('legal pages', () => {
   it('carries the entity name and mailing address on the Terms page', () => {
     const html = read('/legal/terms');
@@ -660,25 +641,58 @@ describe('the Live Build home page, at rest', () => {
   });
 });
 
-describe('one waitlist form per page', () => {
-  // Two forms would mean two Turnstile widgets, and WaitlistForm resets
-  // every widget on the page after a failure on the assumption it is alone.
-  it('renders at most one, and exactly one on the home page', () => {
-    for (const route of ROUTES) {
-      const forms = read(route.path).match(/action="\/api\/waitlist"/g) ?? [];
-      assert.ok(forms.length <= 1, `${route.path} has ${forms.length} forms`);
-    }
-    assert.equal(read('/').match(/action="\/api\/waitlist"/g)?.length, 1);
-    assert.match(read('/'), /id="waitlist"/);
-  });
+describe('the way in, now the beta is open', () => {
+  // Chris, 2026-09-27: an open paid beta. Anybody can sign up, so every call
+  // to action that said "Join the waitlist" is a link to the builder's
+  // sign-up form, and nothing outside the legal pages still promises an
+  // invitation. The legal pages are left as they are on purpose: their
+  // wording is Chris's to change, not a side effect of this one.
+  const isLegal = (path: string) =>
+    path === '/legal' || path.startsWith('/legal/');
 
-  it('gives every page a way to it', () => {
+  it('gives every page a link to the sign-up form', () => {
+    assert.equal(SITE.signUpUrl, `${SITE.appUrl}/sign-up`);
     for (const route of ROUTES) {
       assert.ok(
-        read(route.path).includes('href="/#waitlist"'),
-        `${route.path} has no way to the waitlist`,
+        read(route.path).includes(`href="${SITE.signUpUrl}"`),
+        `${route.path} has no way to sign up`,
       );
     }
+  });
+
+  it('renders no waitlist form and no link to one', () => {
+    for (const route of ROUTES) {
+      const html = read(route.path);
+      assert.doesNotMatch(html, /action="\/api\/waitlist"/, route.path);
+      assert.ok(!html.includes('href="/#waitlist"'), route.path);
+      assert.ok(!html.includes('id="waitlist"'), route.path);
+    }
+  });
+
+  it('no longer says the product is invite-only, outside the legal pages', () => {
+    for (const route of ROUTES) {
+      if (isLegal(route.path)) continue;
+      const text = read(route.path)
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ');
+      assert.doesNotMatch(
+        text,
+        /invite-only|join the waitlist|invitations go out|waitlist/i,
+        `${route.path} still describes a closed product`,
+      );
+    }
+  });
+
+  it('says it is a public beta where it used to say invite-only', () => {
+    const text = read('/').replace(/<[^>]+>/g, ' ');
+    assert.ok(text.includes(SITE.stage));
+    assert.equal(SITE.stage, 'Public beta');
+  });
+
+  it('tells assistants the same thing', () => {
+    const body = readFileSync(join(CLIENT, 'llms.txt'), 'utf8');
+    assert.ok(body.includes(SITE.signUpUrl));
+    assert.doesNotMatch(body, /no open signup|invitation-only/i);
   });
 });
 
@@ -701,7 +715,7 @@ describe('the product pages', () => {
         join(import.meta.dirname, '..', '..', 'web', 'worker', file),
         'utf8',
       );
-    const { plans, signupCents, topup } = readPlans({
+    const { plans, signupCents, signupRequiresCard, topup } = readPlans({
       entitlement: worker('entitlement.ts'),
       signupCredit: worker('signup-credit.ts'),
       stripeClient: worker('stripe-client.ts'),
@@ -732,6 +746,18 @@ describe('the product pages', () => {
         }
       }
       assert.ok(text.includes(dollars(signupCents)));
+      // The condition goes wherever the amount does. A dollar promised on
+      // sign-up alone, while the builder waits for a card, is a promise the
+      // product breaks on the first day (Chris, 2026-09-27).
+      if (signupRequiresCard) {
+        assert.ok(
+          text.includes(
+            `${dollars(signupCents)} once, when a new account adds a card`,
+          ),
+          `${path} states the new-account grant without its card condition`,
+        );
+        assert.match(text, /saved, not charged/);
+      }
       assert.ok(
         text.includes(
           `${priceLabel(topup.priceCents)} adds ${dollars(topup.creditCents)} of model spend`,

@@ -3377,14 +3377,10 @@
   color: var(--color-ink-muted);
   font-size: 1.125rem;
 }
-.lb-closing__form {
-  max-width: 36rem;
-  margin: 0 auto;
-  text-align: left;
-  scroll-margin-top: 120px;
-}
-.lb-closing__form form {
-  margin-top: 28px;
+/* The way in, now that it is a link to the builder's sign-up form rather
+   than the waitlist form this block used to hold (open beta, 2026-09-27). */
+.lb-closing__cta {
+  margin: 28px auto 0;
 }
 .lb-closing__row {
   margin-top: 18px;

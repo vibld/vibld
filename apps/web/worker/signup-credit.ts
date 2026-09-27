@@ -1,54 +1,76 @@
 /**
- * The one-time credit a new account starts with.
+ * The one-time welcome credit, and who may claim it.
  *
- * Two separate questions, and conflating them was the bug in the first
- * version of this file: "has this user already been granted it" and "is this
- * user a new account at all". The deterministic id answers the first
- * perfectly and says nothing about the second, so a grant keyed only on the
- * id would pay every pre-existing user the moment it shipped -- a credit
- * advertised for new accounts arriving instead as a retroactive payout to
- * everybody who came back.
+ * **Card first** (Chris, 2026-09-27). The credit used to arrive on the first
+ * authenticated request of a new account. With sign-up open to anybody, that
+ * is a dollar of model spend for every email address somebody can create,
+ * so it is now granted only once the account has a card on file: a Stripe
+ * Checkout Session in `setup` mode, which saves the card and charges
+ * nothing. The grant happens on the Stripe webhook that reports the card
+ * saved (`billing-events.ts`), and it is limited twice over: once per
+ * account, by the deterministic `signup:<user id>` id, and once per card, by
+ * the card's Stripe fingerprint (0029_card_first_signup_credit.sql).
  *
- * So eligibility is a cohort, defined by an explicit cutoff:
+ * Accounts that already received their dollar on creation keep it. Their
+ * row carries the same id, so they are "already granted" to the new path and
+ * are never offered or paid a second one.
+ *
+ * Two separate questions remain, and conflating them was the bug in the
+ * first version of this file: "has this user already been granted it" and
+ * "is this user a new account at all". The deterministic id answers the
+ * first perfectly and says nothing about the second, so an offer keyed only
+ * on the id would open to every pre-existing user the moment it shipped.
+ *
+ * So eligibility is still a cohort, defined by an explicit cutoff:
  * `VIBLD_SIGNUP_CREDIT_FROM`. Accounts created on or after it are new;
- * everyone else is not. Unset means nothing is granted, because a rollout
+ * everyone else is not. Unset means nothing is offered, because a rollout
  * that pays out cannot have a default.
  *
- * Granted lazily on the first authenticated request rather than from a Clerk
- * `user.created` webhook: that would be a second endpoint, a second signing
- * secret, and a new way for a signup to silently not get its credit.
- *
- * The write stays idempotent through `ON CONFLICT(id) DO NOTHING`, so
- * correctness never rests on the read below. That read exists only to avoid
- * asking Clerk the same question on every request forever.
+ * The cohort is decided on an authenticated request, where Clerk can be
+ * asked, and remembered: as an offer row for an account inside it, and as a
+ * zero-cent marker for one outside it. The webhook runs as Stripe, with no
+ * session, and reads the offer row rather than asking Clerk itself.
  */
 
 import { fetchClerkUserCreatedAt } from './clerk-lookup.ts';
 import type { ClerkLookupEnv } from './clerk-lookup.ts';
 import type { BillingStore } from './billing-store.ts';
+import { SIGNUP_GRANT_ACTOR, signupGrantId } from './signup-grant.ts';
 import { decideAccessFor } from './access-handlers.ts';
 import type { AccessEnv } from './access-handlers.ts';
 import type { Principal } from './principal.ts';
+
+// The grant's id and ledger labels live in `signup-grant.ts`, which the
+// Stripe webhook path imports without pulling in the Clerk and access
+// modules this one needs. Re-exported so there is one place to import the
+// welcome credit from.
+export {
+  SIGNUP_GRANT_ACTOR,
+  SIGNUP_GRANT_NOTE,
+  grantSignupCreditForCard,
+  signupGrantId,
+} from './signup-grant.ts';
 
 /** $1.00, as `grantAdminCredit` counts it. */
 export const DEFAULT_SIGNUP_CREDIT_USD_CENTS = 100;
 
 /**
- * Recorded as the granting actor. The column is an email because every other
- * row in this table was granted by a person; this one names the system that
- * granted it so an audit view can tell the two apart at a glance.
+ * Whether the credit waits for a card on file. Not a switch: nothing in this
+ * Worker reads it. It is here, beside the amount, because the pricing page on
+ * vibld.com reads this file's text (`apps/marketing/app/plans.ts`) to state
+ * the offer, and a test there fails if the page stops mentioning the card
+ * while this says one is required. Change the grant path and this together.
  */
-export const SIGNUP_GRANT_ACTOR = 'system@vibld.com';
-
-export const SIGNUP_GRANT_NOTE = 'Welcome credit on account creation';
+export const SIGNUP_CREDIT_REQUIRES_CARD = true;
 
 /**
  * Written, at zero cents, against an account that is not in the cohort.
  *
  * Without it every pre-offer account asks Clerk the same question on every
- * `/api/billing/status` and `/api/plan` request forever: an external call on
- * a hot path, for a decision that can never change, that during a Clerk
- * outage costs each of those requests the full 8-second timeout.
+ * `/api/billing/status` request forever: an external call on a hot path, for
+ * a decision that can never change, that during a Clerk outage costs each of
+ * those requests the full 8-second timeout. The offer row does the same job
+ * for an account inside the cohort.
  *
  * Zero cents, so it sums to nothing wherever credit is totalled, and a note
  * that says what it is, so the admin audit view is not left showing a
@@ -63,16 +85,16 @@ export const SIGNUP_DECLINED_NOTE = 'Not in the welcome-credit cohort';
 
 export interface SignupCreditEnv extends ClerkLookupEnv, AccessEnv {
   /**
-   * Cents. Defaults to 100. "0" stops the grant, which is the switch to reach
-   * for if accounts ever start being created faster than people are creating
-   * them.
+   * Cents. Defaults to 100. "0" stops new offers, which is the switch to
+   * reach for if cards ever start being saved faster than people are saving
+   * them. An offer already open keeps the amount it was opened at.
    */
   VIBLD_SIGNUP_CREDIT_USD_CENTS?: string | undefined;
   /**
-   * ISO 8601. Only accounts created at or after this instant are granted the
+   * ISO 8601. Only accounts created at or after this instant are offered the
    * credit. Set it to the moment the offer starts.
    *
-   * **Unset means no grants at all.** There is no safe default: any value
+   * **Unset means no offers and no grants at all.** There is no safe default: any value
    * early enough to catch genuinely new accounts also catches every account
    * that already exists, and this is money. An operator naming the date is
    * the only way this can be both correct and deliberate.
@@ -81,19 +103,31 @@ export interface SignupCreditEnv extends ClerkLookupEnv, AccessEnv {
 }
 
 /**
- * Why a request did or did not result in a grant. Returned rather than logged
- * so the tests can assert on it, and so a caller can say something useful
- * instead of failing silently.
+ * Why an account is not being offered the credit. Returned rather than
+ * logged so the tests can assert on it, and so a caller can say something
+ * useful instead of failing silently.
  */
-export type SignupGrantOutcome =
-  | 'granted'
+export type SignupOfferRefusal =
   | 'no-access'
-  | 'already-granted'
   | 'disabled'
   | 'no-cohort-configured'
   | 'not-in-cohort'
   | 'age-unknown'
   | 'error';
+
+/**
+ * Where an account stands with the welcome credit, as the builder shows it.
+ *
+ * - `granted`: it has the credit, however it came by it.
+ * - `needs-card`: it is offered the credit and has not claimed it. The
+ *   builder offers to save a card. `cardAlreadyUsed` says the last card it
+ *   saved had already claimed the credit on another account.
+ * - `none`: it is not offered the credit, for `reason`.
+ */
+export type SignupCreditStatus =
+  | { state: 'granted'; cents: number }
+  | { state: 'needs-card'; cents: number; cardAlreadyUsed: boolean }
+  | { state: 'none'; reason: SignupOfferRefusal };
 
 /**
  * A full ISO 8601 instant: calendar date, time, and an explicit zone.
@@ -170,59 +204,71 @@ export function signupCohortStart(env: SignupCreditEnv): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** One id per user, forever. The idempotency of the write rests on it. */
-export function signupGrantId(userId: string): string {
-  return `signup:${userId}`;
-}
-
 /**
- * Grant the welcome credit to a new account that has not had it.
+ * Where this account stands with the welcome credit, opening the offer to it
+ * if it is new and has not been decided yet.
  *
- * Never throws: a failed grant must not fail the request it rode in on. A
- * user who misses it on one request gets it on the next, because the id makes
- * retrying free.
+ * Never throws: a failed decision must not fail the request it rode in on. A
+ * user who is not decided on one request is decided on the next, because
+ * both writes are idempotent.
  *
  * **The access check lives here rather than at each call site.** This takes
- * the whole principal for that reason. The grant is the thing the invite
- * gate exists to protect, and one of its two callers is an ungated route:
+ * the whole principal for that reason. The credit is the thing the invite
+ * gate exists to protect, and the caller is an ungated route:
  * `/api/billing/status` is deliberately readable by somebody whose access
- * was revoked, so they can still see what happened to their money, and it
- * was handing out the dollar to anybody signed in. A rule that each caller
- * must remember to check is a rule that gets forgotten by the third caller;
- * asking here means there is no way to call this without the question being
- * asked.
+ * was revoked, so they can still see what happened to their money. An offer
+ * opened here is what the webhook later pays against, so an account that
+ * may not use the product must not be able to open one by reading its
+ * balance.
  */
-export async function grantSignupCreditOnce(
-  billing: Pick<BillingStore, 'grantAdminCredit' | 'findAdminCredit'>,
+export async function signupCreditStatus(
+  billing: Pick<
+    BillingStore,
+    | 'grantAdminCredit'
+    | 'findAdminCredit'
+    | 'openSignupOffer'
+    | 'findSignupOffer'
+    | 'latestSignupCardOutcome'
+  >,
   principal: Principal,
   env: SignupCreditEnv,
   fetchImpl: typeof fetch = fetch,
-): Promise<SignupGrantOutcome> {
+): Promise<SignupCreditStatus> {
   const userId = principal.userId;
-  const cents = signupCreditCents(env);
-  if (cents <= 0) return 'disabled';
-
-  const cohortStart = signupCohortStart(env);
-  if (cohortStart === null) return 'no-cohort-configured';
-
   try {
-    // Before anything is written, and before Clerk is asked. An account that
-    // may not use the product may not draw its welcome credit either.
-    if (!(await decideAccessFor(env, principal)).allowed) return 'no-access';
-
-    // Cheapest question first. Once a user has their grant this is the only
-    // work any later request does, so the Clerk lookup below happens at most
-    // once per account rather than on every request forever.
-    if (await billing.findAdminCredit(signupGrantId(userId))) {
-      return 'already-granted';
+    // Cheapest question first, and the one whose answer never changes. An
+    // account that got its dollar, on creation or for a card, has it
+    // whatever the configuration now says.
+    const existing = await billing.findAdminCredit(signupGrantId(userId));
+    if (existing) {
+      return existing.creditUsdCents > 0
+        ? { state: 'granted', cents: existing.creditUsdCents }
+        : { state: 'none', reason: 'not-in-cohort' };
     }
+
+    const cents = signupCreditCents(env);
+    if (cents <= 0) return { state: 'none', reason: 'disabled' };
+    const cohortStart = signupCohortStart(env);
+    if (cohortStart === null) {
+      return { state: 'none', reason: 'no-cohort-configured' };
+    }
+
+    // Before anything is written, and before Clerk is asked. An account that
+    // may not use the product may not be offered its welcome credit either.
+    if (!(await decideAccessFor(env, principal)).allowed) {
+      return { state: 'none', reason: 'no-access' };
+    }
+
+    const offered = await billing.findSignupOffer(userId);
+    if (offered !== undefined)
+      return await awaitingCard(billing, userId, offered);
 
     const createdAt = await fetchClerkUserCreatedAt(env, userId, fetchImpl);
     // An account whose age cannot be established is not a new account. The
-    // safe direction here is the stingy one: a genuinely new user gets their
-    // credit on a later request once Clerk answers, while the other choice
-    // pays out to everyone during any Clerk outage.
-    if (createdAt === null) return 'age-unknown';
+    // safe direction here is the stingy one: a genuinely new user is offered
+    // the credit on a later request once Clerk answers, while the other
+    // choice opens it to everyone during any Clerk outage.
+    if (createdAt === null) return { state: 'none', reason: 'age-unknown' };
     if (createdAt < cohortStart) {
       // Recorded, not merely returned. This decision is permanent, and the
       // marker is what stops the Clerk call above repeating forever. Only
@@ -234,18 +280,36 @@ export async function grantSignupCreditOnce(
         SIGNUP_GRANT_ACTOR,
         SIGNUP_DECLINED_NOTE,
       );
-      return 'not-in-cohort';
+      return { state: 'none', reason: 'not-in-cohort' };
     }
 
-    await billing.grantAdminCredit(
-      signupGrantId(userId),
+    await billing.openSignupOffer(userId, cents);
+    // Read back rather than assumed: a concurrent first request may have
+    // opened it a moment earlier, and the amount it opened at is the one
+    // that counts.
+    return await awaitingCard(
+      billing,
       userId,
-      cents,
-      SIGNUP_GRANT_ACTOR,
-      SIGNUP_GRANT_NOTE,
+      (await billing.findSignupOffer(userId)) ?? cents,
     );
-    return 'granted';
   } catch {
-    return 'error';
+    return { state: 'none', reason: 'error' };
   }
+}
+
+async function awaitingCard(
+  billing: Pick<BillingStore, 'latestSignupCardOutcome'>,
+  userId: string,
+  cents: number,
+): Promise<SignupCreditStatus> {
+  // An offer of nothing is not an offer. Only reachable if a deployment
+  // opened offers while the amount was misconfigured, and a button that
+  // saves a card for $0.00 would be a promise with nothing behind it.
+  if (cents <= 0) return { state: 'none', reason: 'disabled' };
+  return {
+    state: 'needs-card',
+    cents,
+    cardAlreadyUsed:
+      (await billing.latestSignupCardOutcome(userId)) === 'card-used',
+  };
 }

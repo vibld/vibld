@@ -9,6 +9,7 @@ import {
 } from '../billing/billing-client.ts';
 import type { BillingStatus, Tier } from '../billing/billing-client.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
+import { SignupCreditOffer } from './SignupCreditOffer.tsx';
 
 /**
  * The header's billing affordance: this caller's tier and usage, a picker to
@@ -85,7 +86,7 @@ export function BillingStatusPanel() {
          * allowance is exhausted, so a line that stops at the allowance says
          * somebody is finished for the month when they are not, and it never
          * shows back the balance they paid for or were granted (L4, and the
-         * dollar every new account starts with). The route has always sent
+         * dollar a new account gets for adding a card). The route has always sent
          * it; only the screen was missing.
          */}
         {status.topupRemainingMicroUsd > 0
@@ -93,6 +94,8 @@ export function BillingStatusPanel() {
           : ''}
         {status.cancelAtPeriodEnd ? ' · cancels at period end' : ''}
       </p>
+
+      <SignupCreditOffer status={status} />
 
       {status.tier === 'free' ? (
         <div className="billing__upgrade">

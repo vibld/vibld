@@ -1832,3 +1832,14 @@ body {
   padding: 0.25rem 0.55rem;
   font-size: 0.75rem;
 }
+
+/* --- Welcome credit ------------------------------------------------------
+ * The offer to save a card for the one-time credit. A `.banner` so it reads
+ * as information about this account rather than as a control panel, with
+ * the one button it needs under the sentence that explains it. */
+.signup-credit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}

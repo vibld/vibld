@@ -35,7 +35,7 @@
 - **It is open source.** The builder, the sandbox and the publish service in this repository are the ones running at [app.vibld.com](https://app.vibld.com), under Apache-2.0.
 
 > [!NOTE]
-> vibld is **early**. The hosted service is invite-only while it is tested, and the [status](#status) section below spells out what works and what does not yet. Join the waitlist at [vibld.com](https://vibld.com).
+> vibld is **early**. The hosted service is in public beta: anyone can [sign up](https://app.vibld.com/sign-up), and the [status](#status) section below spells out what works and what does not yet.
 
 <p align="center">
   <picture>
@@ -159,12 +159,12 @@ Two hand-built starter templates ship alongside, each under its own MIT licence:
 **Accounts and operations**
 
 - Sign-in with Clerk, projects and audit records in Cloudflare D1, R2 and a per-user Durable Object.
-- Plans and model-spend credit with Stripe, an invite-only access gate, referrals and operator takedown for abuse reports.
+- Plans and model-spend credit with Stripe, an access gate that is invite-only unless a deployment opens it, referrals and operator takedown for abuse reports.
 - An evaluation suite ([`packages/eval`](packages/eval)) and a model bakeoff workflow, so model choices are measured, not guessed.
 
 ## Status
 
-**What runs today.** Everything in the list above, deployed at [app.vibld.com](https://app.vibld.com) for invited testers.
+**What runs today.** Everything in the list above, deployed at [app.vibld.com](https://app.vibld.com) as a public beta. Paid plans are live, and a new account gets $1.00 of build credit once it adds a card, which is saved and not charged.
 
 **What does not exist yet.**
 
@@ -173,7 +173,7 @@ Two hand-built starter templates ship alongside, each under its own MIT licence:
 - Sandbox output in the builder's own panes. The console shows generation events, and install, build and type errors from a sandbox run are not reported under Problems.
 - A validated self-hosting path. The pieces are documented (see below), but nobody outside the project has deployed their own copy yet.
 
-**What to be careful of.** It is live for invited testing, not for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
+**What to be careful of.** It is a beta, not a place for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
 
 The [accepted decisions](docs/decisions.md), the [architecture decision records](docs/adr/README.md) and the [roadmap](ROADMAP.md) say where it is going and why.
 

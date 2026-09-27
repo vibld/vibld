@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'hosted-vs-self-hosted')!;
-const CHECKED = '2026-09-16';
+const CHECKED = '2026-09-27';
 
 export function meta() {
   return metaFor('/docs/hosted-vs-self-hosted');
@@ -87,7 +87,9 @@ export default function HostedVsSelfHosted() {
         <li>
           <strong>Billing and plans.</strong> Stripe integration exists in the
           source, but a self-hosted copy with no Stripe configuration simply has
-          no billing: everyone gets whatever Free-tier allowance you set.
+          no billing: everyone gets whatever Free-tier allowance you set, and no
+          one gets the welcome credit, which waits for a card saved through
+          Stripe.
         </li>
         <li>
           <strong>Publishing to a vibld URL.</strong> Self-hosted, this becomes

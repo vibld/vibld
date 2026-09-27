@@ -11,6 +11,7 @@ import { KnowledgePanel } from './components/KnowledgePanel.tsx';
 import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
 import { SettingsMenu } from './components/SettingsMenu.tsx';
 import { BillingStatusWidget } from './components/BillingStatus.tsx';
+import { SignupCreditBanner } from './components/SignupCreditOffer.tsx';
 import { GitHubPanel } from './components/GitHubPanel.tsx';
 import { describeMode } from './generation/labels.ts';
 import { ThemeToggle } from './components/ThemeToggle.tsx';
@@ -171,6 +172,13 @@ function Builder() {
         >
           <Conversation state={state} />
           <div className="composer">
+            {/*
+              First in the composer, because it is what stands between a
+              new account and its first run: the welcome credit waits for a
+              card (2026-09-27), and the settings menu is not where somebody
+              new looks.
+            */}
+            <SignupCreditBanner />
             <LifecycleBar status={state.status} />
             <KnowledgePanel
               knowledge={state.knowledge}

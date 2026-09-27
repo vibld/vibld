@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { BillingStore } from '../worker/billing-store.ts';
@@ -8,22 +6,17 @@ import {
   DEFAULT_SIGNUP_CREDIT_USD_CENTS,
   SIGNUP_DECLINED_NOTE,
   SIGNUP_GRANT_ACTOR,
-  grantSignupCreditOnce,
   signupCohortStart,
   signupCreditCents,
+  signupCreditStatus,
   signupGrantId,
 } from '../worker/signup-credit.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
-const SCHEMA =
-  readFileSync(
-    join(import.meta.dirname, '..', 'migrations', '0002_billing.sql'),
-    'utf8',
-  ) +
-  readFileSync(
-    join(import.meta.dirname, '..', 'migrations', '0004_admin_credits.sql'),
-    'utf8',
-  );
+// Every migration, not a named subset: the offer and the card claims live in
+// 0029, and a subset is a copy of the migration list that drifts.
+const SCHEMA = schemaSql();
 
 const newStore = () => new BillingStore(new SqliteD1Database(SCHEMA));
 
@@ -51,7 +44,7 @@ const ENV = {
   VIBLD_ACCESS_MODE: 'open',
 };
 
-/** A signed-in account, which is all `grantSignupCreditOnce` needs of one. */
+/** A signed-in account, which is all `signupCreditStatus` needs of one. */
 function who(userId: string) {
   return {
     userId,
@@ -169,143 +162,197 @@ describe('signupCohortStart', () => {
   });
 });
 
-describe('grantSignupCreditOnce', () => {
-  it('gives nothing to an account the access gate refuses', async () => {
+describe('signupCreditStatus', () => {
+  it('offers nothing to an account the access gate refuses', async () => {
     // The whole reason the invite gate exists. `/api/billing/status` is
     // deliberately ungated, so that somebody whose access was revoked can
-    // still see what happened to their money, and it calls this. Without
-    // the check here, one direct request drew the dollar for any signed-in
+    // still see what happened to their money, and it calls this. An offer
+    // opened here is what the webhook later pays a saved card against, so
+    // without the check one direct request would open it for any signed-in
     // account whatever the UI rendered.
     const store = newStore();
 
-    const outcome = await grantSignupCreditOnce(
+    const status = await signupCreditStatus(
       store,
       who('user_uninvited'),
+      // Unset: the deployed default, and the one the open beta keeps until
+      // the flip.
       { ...ENV, VIBLD_ACCESS_MODE: undefined },
       clerkSaying(AFTER),
     );
 
-    assert.equal(outcome, 'no-access');
+    assert.deepEqual(status, { state: 'none', reason: 'no-access' });
+    assert.equal(await store.findSignupOffer('user_uninvited'), undefined);
     assert.equal(
       await store.findAdminCredit(signupGrantId('user_uninvited')),
       undefined,
-      'wrote a grant for an account with no access',
     );
   });
 
-  it('grants a dollar to an account created after the offer started', async () => {
+  it('offers a new account a dollar for a card, and pays nothing yet', async () => {
+    // The decision this file was changed for (Chris, 2026-09-27): the credit
+    // waits for a card on file. Being new is what opens the offer, and the
+    // balance stays at nothing until the webhook reports a saved card.
     const store = newStore();
-    const outcome = await grantSignupCreditOnce(
+    const status = await signupCreditStatus(
       store,
       who('user_new'),
       ENV,
       clerkSaying(AFTER),
     );
-    assert.equal(outcome, 'granted');
-    // Asserted through the balance the rest of the app reads, not the row: a
-    // grant that does not reach spendable credit has given nobody anything.
-    assert.equal(
-      await store.totalSpendableCreditMicroUsd('user_new'),
-      1_000_000,
-    );
+    assert.deepEqual(status, {
+      state: 'needs-card',
+      cents: 100,
+      cardAlreadyUsed: false,
+    });
+    assert.equal(await store.findSignupOffer('user_new'), 100);
+    assert.equal(await store.totalSpendableCreditMicroUsd('user_new'), 0);
   });
 
-  it('asks Clerk once for an account outside the cohort, not every request', async () => {
-    // Without a recorded decision, findAdminCredit never matches for the
-    // whole pre-offer population, so every /api/billing/status and /api/plan
-    // request would call Clerk again for an answer that can never change,
-    // and during a Clerk outage would pay the full 8-second timeout each
-    // time, on a hot path.
-    const store = newStore();
-    let calls = 0;
-    const counting = (async () => {
-      calls += 1;
-      return new Response(JSON.stringify({ created_at: BEFORE }), {
-        status: 200,
-      });
-    }) as unknown as typeof fetch;
+  it('asks Clerk once per account, in or out of the cohort', async () => {
+    // Without a recorded decision every /api/billing/status request would
+    // call Clerk again for an answer that can never change, and during a
+    // Clerk outage would pay the full 8-second timeout each time, on a hot
+    // path. The offer row records "in"; the zero-cent marker records "out".
+    for (const [createdAt, expected] of [
+      [AFTER, 'needs-card'],
+      [BEFORE, 'none'],
+    ] as const) {
+      const store = newStore();
+      let calls = 0;
+      const counting = (async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ created_at: createdAt }), {
+          status: 200,
+        });
+      }) as unknown as typeof fetch;
 
-    assert.equal(
-      await grantSignupCreditOnce(store, who('user_repeat'), ENV, counting),
-      'not-in-cohort',
-    );
-    for (let i = 0; i < 4; i += 1) {
-      assert.equal(
-        await grantSignupCreditOnce(store, who('user_repeat'), ENV, counting),
-        'already-granted',
-      );
+      for (let i = 0; i < 5; i += 1) {
+        const status = await signupCreditStatus(
+          store,
+          who('user_repeat'),
+          ENV,
+          counting,
+        );
+        assert.equal(status.state, expected);
+      }
+      assert.equal(calls, 1, 'Clerk should be asked exactly once');
     }
-    assert.equal(calls, 1, 'Clerk should be asked exactly once');
-
-    // The marker must not be worth anything.
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_repeat'), 0);
-    const recorded = await store.listAdminCredits('user_repeat');
-    assert.equal(recorded.length, 1);
-    assert.equal(recorded[0]!.creditUsdCents, 0);
-    assert.equal(recorded[0]!.note, SIGNUP_DECLINED_NOTE);
   });
 
-  it('grants nothing to an account that already existed', async () => {
-    // The finding this file was rewritten for. Keyed only on the grant id,
-    // every pre-existing user would have been paid on the first request
-    // after this shipped: a credit advertised for new accounts arriving as a
-    // retroactive payout to everyone who came back.
+  it('offers nothing to an account that already existed, and says so once', async () => {
+    // The finding the cohort was written for. Keyed only on the grant id,
+    // every pre-existing user would be offered the dollar the moment this
+    // shipped: a credit advertised for new accounts arriving as a
+    // retroactive payout to everyone with a card.
     const store = newStore();
-    const outcome = await grantSignupCreditOnce(
+    const status = await signupCreditStatus(
       store,
       who('user_old'),
       ENV,
       clerkSaying(BEFORE),
     );
-    assert.equal(outcome, 'not-in-cohort');
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_old'), 0);
+    assert.deepEqual(status, { state: 'none', reason: 'not-in-cohort' });
+    assert.equal(await store.findSignupOffer('user_old'), undefined);
+
+    // The marker must not be worth anything.
+    const recorded = await store.listAdminCredits('user_old');
+    assert.equal(recorded.length, 1);
+    assert.equal(recorded[0]!.creditUsdCents, 0);
+    assert.equal(recorded[0]!.note, SIGNUP_DECLINED_NOTE);
+    assert.equal(recorded[0]!.grantedByEmail, SIGNUP_GRANT_ACTOR);
   });
 
   it('includes an account created exactly at the cutoff', async () => {
     const store = newStore();
-    const outcome = await grantSignupCreditOnce(
+    const status = await signupCreditStatus(
       store,
       who('user_edge'),
       ENV,
       clerkSaying(Date.parse(OFFER_START)),
     );
-    assert.equal(outcome, 'granted');
+    assert.equal(status.state, 'needs-card');
   });
 
-  it('grants nothing when no cohort is configured', async () => {
+  it('leaves an account that got its dollar on creation exactly as it is', async () => {
+    // Accounts granted before the card requirement keep their credit, and
+    // are never offered a second one: their row carries the same id, so to
+    // the new path they are already granted. Clerk is not asked.
+    const store = newStore();
+    await store.grantAdminCredit(
+      signupGrantId('user_early'),
+      'user_early',
+      100,
+      SIGNUP_GRANT_ACTOR,
+      'Welcome credit on account creation',
+    );
+    let asked = false;
+    const status = await signupCreditStatus(
+      store,
+      who('user_early'),
+      ENV,
+      (async () => {
+        asked = true;
+        return new Response('{}');
+      }) as unknown as typeof fetch,
+    );
+    assert.deepEqual(status, { state: 'granted', cents: 100 });
+    assert.equal(asked, false);
+    assert.equal(await store.findSignupOffer('user_early'), undefined);
+    assert.equal(
+      await store.totalSpendableCreditMicroUsd('user_early'),
+      1_000_000,
+    );
+  });
+
+  it('offers nothing when no cohort is configured', async () => {
     // No safe default exists: any cutoff early enough to catch new accounts
     // also catches every account that already exists.
     const store = newStore();
-    const outcome = await grantSignupCreditOnce(
+    const status = await signupCreditStatus(
       store,
       who('user_x'),
-      { CLERK_SECRET_KEY: 'sk_test' },
+      { CLERK_SECRET_KEY: 'sk_test', VIBLD_ACCESS_MODE: 'open' },
       clerkSaying(AFTER),
     );
-    assert.equal(outcome, 'no-cohort-configured');
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_x'), 0);
+    assert.deepEqual(status, { state: 'none', reason: 'no-cohort-configured' });
+    assert.equal(await store.findSignupOffer('user_x'), undefined);
   });
 
-  it('grants nothing when the account age cannot be established', async () => {
-    // The stingy direction on purpose. A genuinely new user gets their credit
-    // on a later request once Clerk answers; the other choice pays out to
-    // everyone for the duration of a Clerk outage.
+  it('offers nothing while the account age cannot be established, and decides nothing', async () => {
+    // The stingy direction on purpose, and retryable: nothing is written, so
+    // a genuinely new user is offered the credit once Clerk answers.
     const store = newStore();
     for (const unreachable of [clerkSaying(null), clerkSaying(AFTER, false)]) {
-      const outcome = await grantSignupCreditOnce(
+      const status = await signupCreditStatus(
         store,
         who('user_unknown'),
         ENV,
         unreachable,
       );
-      assert.equal(outcome, 'age-unknown');
+      assert.deepEqual(status, { state: 'none', reason: 'age-unknown' });
     }
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_unknown'), 0);
+    assert.equal(await store.findSignupOffer('user_unknown'), undefined);
+    assert.equal(
+      await store.findAdminCredit(signupGrantId('user_unknown')),
+      undefined,
+    );
+    assert.equal(
+      (
+        await signupCreditStatus(
+          store,
+          who('user_unknown'),
+          ENV,
+          clerkSaying(AFTER),
+        )
+      ).state,
+      'needs-card',
+    );
   });
 
-  it('grants nothing without a Clerk key, rather than falling open', async () => {
+  it('offers nothing without a Clerk key, rather than falling open', async () => {
     const store = newStore();
-    const outcome = await grantSignupCreditOnce(
+    const status = await signupCreditStatus(
       store,
       who('user_nokey'),
       // Open, so this test is about the missing Clerk key and not about the
@@ -314,50 +361,41 @@ describe('grantSignupCreditOnce', () => {
       { VIBLD_SIGNUP_CREDIT_FROM: OFFER_START, VIBLD_ACCESS_MODE: 'open' },
       clerkSaying(AFTER),
     );
-    assert.equal(outcome, 'age-unknown');
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_nokey'), 0);
+    assert.deepEqual(status, { state: 'none', reason: 'age-unknown' });
   });
 
-  it('grants exactly once however many times it is called', async () => {
+  it('opens one offer however many first requests race for it', async () => {
+    // Two tabs opening at once is the ordinary case.
     const store = newStore();
-    const outcomes: string[] = [];
-    for (let i = 0; i < 5; i += 1) {
-      outcomes.push(
-        await grantSignupCreditOnce(
-          store,
-          who('user_b'),
-          ENV,
-          clerkSaying(AFTER),
-        ),
-      );
-    }
-    assert.equal(outcomes[0], 'granted');
-    assert.deepEqual(outcomes.slice(1), Array(4).fill('already-granted'));
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_b'), 1_000_000);
-
-    const credits = await store.listAdminCredits('user_b');
-    assert.equal(credits.length, 1);
-    assert.equal(credits[0]!.id, signupGrantId('user_b'));
-    assert.equal(credits[0]!.grantedByEmail, SIGNUP_GRANT_ACTOR);
-  });
-
-  it('survives concurrent first requests without double-granting', async () => {
-    // Two tabs opening at once is the ordinary case. The read above is an
-    // optimisation, so correctness here rests on the insert's ON CONFLICT.
-    const store = newStore();
-    await Promise.all(
+    const statuses = await Promise.all(
       Array.from({ length: 8 }, () =>
-        grantSignupCreditOnce(store, who('user_c'), ENV, clerkSaying(AFTER)),
+        signupCreditStatus(store, who('user_c'), ENV, clerkSaying(AFTER)),
       ),
     );
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_c'), 1_000_000);
-    assert.equal((await store.listAdminCredits('user_c')).length, 1);
+    for (const status of statuses) assert.equal(status.state, 'needs-card');
+    assert.equal(await store.findSignupOffer('user_c'), 100);
   });
 
-  it('grants nothing when the amount is zero, without asking Clerk', async () => {
+  it('keeps the amount an offer opened at when the setting changes', async () => {
+    const store = newStore();
+    await signupCreditStatus(store, who('user_e'), ENV, clerkSaying(AFTER));
+    const later = await signupCreditStatus(
+      store,
+      who('user_e'),
+      { ...ENV, VIBLD_SIGNUP_CREDIT_USD_CENTS: '500' },
+      clerkSaying(AFTER),
+    );
+    assert.deepEqual(later, {
+      state: 'needs-card',
+      cents: 100,
+      cardAlreadyUsed: false,
+    });
+  });
+
+  it('offers nothing when the amount is zero, without asking Clerk', async () => {
     const store = newStore();
     let asked = false;
-    const outcome = await grantSignupCreditOnce(
+    const status = await signupCreditStatus(
       store,
       who('user_d'),
       { ...ENV, VIBLD_SIGNUP_CREDIT_USD_CENTS: '0' },
@@ -366,9 +404,50 @@ describe('grantSignupCreditOnce', () => {
         return new Response('{}');
       }) as unknown as typeof fetch,
     );
-    assert.equal(outcome, 'disabled');
+    assert.deepEqual(status, { state: 'none', reason: 'disabled' });
     assert.equal(asked, false);
-    assert.equal(await store.totalSpendableCreditMicroUsd('user_d'), 0);
+  });
+
+  it('says when the last card saved had already claimed the credit elsewhere', async () => {
+    const store = newStore();
+    for (const user of ['user_first', 'user_second']) {
+      await signupCreditStatus(store, who(user), ENV, clerkSaying(AFTER));
+    }
+    await store.claimSignupCardCredit({
+      setupIntentId: 'seti_1',
+      userId: 'user_first',
+      cardFingerprint: 'fp_shared',
+      grantId: signupGrantId('user_first'),
+      grantedByEmail: SIGNUP_GRANT_ACTOR,
+      note: 'test',
+    });
+    await store.claimSignupCardCredit({
+      setupIntentId: 'seti_2',
+      userId: 'user_second',
+      cardFingerprint: 'fp_shared',
+      grantId: signupGrantId('user_second'),
+      grantedByEmail: SIGNUP_GRANT_ACTOR,
+      note: 'test',
+    });
+
+    assert.deepEqual(
+      await signupCreditStatus(
+        store,
+        who('user_second'),
+        ENV,
+        clerkSaying(AFTER),
+      ),
+      { state: 'needs-card', cents: 100, cardAlreadyUsed: true },
+    );
+    assert.deepEqual(
+      await signupCreditStatus(
+        store,
+        who('user_first'),
+        ENV,
+        clerkSaying(AFTER),
+      ),
+      { state: 'granted', cents: 100 },
+    );
   });
 
   it('never throws when the store fails, so the request it rode in on survives', async () => {
@@ -377,15 +456,15 @@ describe('grantSignupCreditOnce', () => {
         throw new Error('D1 unavailable');
       },
       findAdminCredit: async () => undefined,
+      openSignupOffer: async () => {
+        throw new Error('D1 unavailable');
+      },
+      findSignupOffer: async () => undefined,
+      latestSignupCardOutcome: async () => undefined,
     };
-    assert.equal(
-      await grantSignupCreditOnce(
-        broken,
-        who('user_g'),
-        ENV,
-        clerkSaying(AFTER),
-      ),
-      'error',
+    assert.deepEqual(
+      await signupCreditStatus(broken, who('user_g'), ENV, clerkSaying(AFTER)),
+      { state: 'none', reason: 'error' },
     );
   });
 });

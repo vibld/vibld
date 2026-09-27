@@ -381,7 +381,7 @@ describe('the nightly pass on the deployed allowance', () => {
       'a night that can split no longer runs every phase',
     );
     for (const call of [
-      /replayStripeEvents\( stripe, billing, undefined, undefined, shares\.replay, reversed, readCharge, \)/,
+      /replayStripeEvents\( stripe, billing, undefined, undefined, shares\.replay, reversed, readCharge, readCard, \)/,
       /retryUnattributedEvents\( billing, retryBatchFor\(shares\.parked\),/,
       /resumeStrandedPayouts\(\s?payout, payoutBatchFor\(shares\.payout\),?\s?\)/,
       /reconcileSubscriptions\( stripe, billing, cleared, reconcileBatchFor\(shares\.reconcile\), \)/,

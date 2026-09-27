@@ -81,6 +81,10 @@ export const GATED_PATHS: readonly string[] = [
   '/api/github/diff',
   // Takes money, which an uninvited account has no reason to be able to do.
   '/api/billing/checkout',
+  // Saves a card, and the card is what the welcome credit is paid on. It
+  // also creates a Stripe customer, which is what `/api/billing/portal`
+  // below relies on an uninvited account never having.
+  '/api/billing/card',
 
   // Issues a referral code, which is a share link into a closed product.
   '/api/referral/status',
@@ -113,11 +117,13 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // who was invited, spent, and then had access revoked with no way to see
   // what happened to their money.
   //
-  // It is not quite read-only, and saying so here was wrong: it grants the
-  // sign-up credit on first read. That grant is now behind the access
-  // decision inside the handler, because an ungated route that hands out
-  // the $1 is the one thing this gate exists to prevent. A route listed
-  // here has to be read-only in fact, not in description.
+  // It is not quite read-only, and saying so here was wrong: it used to
+  // grant the sign-up credit on first read, and now it opens the offer of
+  // it, which is what a saved card is later paid against. That write is
+  // behind the access decision inside the handler, because an ungated
+  // route that leads to the $1 is the one thing this gate exists to
+  // prevent. A route listed here has to be read-only in fact, not in
+  // description.
   '/api/billing/status': 'a balance read, with its one write behind the gate',
   // A read of what this caller's own runs did. Same reason as the balance
   // above: somebody who was invited, generated, and then had access revoked
@@ -132,9 +138,9 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // in the product or out of it. That is not a gate, it is a trap.
   //
   // Safe to leave open because it grants nothing: it needs an existing
-  // Stripe customer and errors without one, and the only route that creates
-  // a customer is `/api/billing/checkout`, which stays gated. So an
-  // uninvited account finds nothing here.
+  // Stripe customer and errors without one, and the only routes that create
+  // a customer are `/api/billing/checkout` and `/api/billing/card`, which
+  // stay gated. So an uninvited account finds nothing here.
   '/api/billing/portal': 'the only way to stop being charged',
   // Withdrawing a grant this account already made. It writes nothing to
   // GitHub and mints no token; it only takes back what was given. Gating it

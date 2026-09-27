@@ -215,6 +215,38 @@ generated apps, a checkpoint history with one-step rollback, bring your own
 model key, comments on shared previews, and a command-line sync.
 `ROADMAP.md` places each one; none of them is scheduled.
 
+**vibld launches as an open paid beta.** Chris decided on 2026-09-27:
+anybody can sign up, with no invite. This replaces L6's Clerk waitlist mode
+and the invite list as the launch shape once it is switched on, and nothing
+in the repository switches it on. Opening is `VIBLD_ACCESS_MODE=open` on the
+`preview` environment and Clerk's sign-up mode set to Public, then a deploy,
+which Chris does himself after a live billing check. The steps are in
+`apps/web/README.md`, "Opening the beta". Until then the gate stays
+invite-only by default, and `apps/web/test/open-beta-gate.test.ts` fails if
+the Worker config or the deploy workflow's default opens it. The invite list
+and the admin panel stay, for a deployment that closes again.
+
+**The welcome credit waits for a card.** Chris chose card first on
+2026-09-27. The $1.00 a new account used to get on its first request is now
+granted only once the account has a card on file, saved through a Stripe
+Checkout Session in `setup` mode that charges nothing. It is paid on the
+Stripe webhook (`checkout.session.completed` in setup mode, or
+`setup_intent.succeeded`), once per account and once per card by the card's
+Stripe `fingerprint`, enforced by unique indexes in
+`0029_card_first_signup_credit.sql` and idempotent on the SetupIntent. The
+cohort cutoff (`VIBLD_SIGNUP_CREDIT_FROM`) still decides who is new.
+Accounts that already received their dollar keep it and are not paid again.
+A deployment with no Stripe offers the credit to nobody.
+
+**vibld.com says "Public beta" and links to sign-up.** Chris decided on
+2026-09-27 that the site moves from invite-only and the waitlist to the open
+beta. Every "Join the waitlist" call to action links to the builder's
+sign-up form (`https://app.vibld.com/sign-up`), and the waitlist form is gone
+from the site. The waitlist endpoint and the addresses in the Resend segment
+stay, since they are who the one launch email (`docs/launch-email.md`) goes
+to. The legal pages were not rewritten: the sentences the open beta makes
+inaccurate were listed for Chris to decide on.
+
 **The nightly billing pass rotates when its query budget is too small to
 split (internal issue 176).** Chris chose option 1, rotate, on 2026-09-27, in this form:
 the parked queue keeps its floor every night, and payout, reconcile and

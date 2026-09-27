@@ -75,7 +75,7 @@ function robots(): string {
 User-agent: *
 Allow: /
 
-# The waitlist endpoint is not a page.
+# The API is not a page.
 Disallow: /api/
 
 Sitemap: ${absolute('/sitemap.xml')}
@@ -108,9 +108,9 @@ related to Bible study software; the name is a contraction of "vibe" and
 
 ## Status
 
-Vibld has not launched publicly. ${absolute('/')} collects email addresses for
-a waitlist ahead of an invitation-only alpha. The builder itself is live at
-${SITE.appUrl} for accounts that already have access; there is no open signup.
+Vibld is in public beta. Anyone can sign up at ${SITE.signUpUrl}, and the
+builder itself is at ${SITE.appUrl}. Plans and prices are at
+${absolute('/pricing')}.
 
 ## What makes it different
 
@@ -126,7 +126,8 @@ ${pages}
 ## Source
 
 - [Source repository](${SITE.repoUrl}): the builder is open source.
-- [The builder](${SITE.appUrl}): the product itself, for existing accounts.
+- [The builder](${SITE.appUrl}): the product itself.
+- [Sign up](${SITE.signUpUrl}): create an account.
 
 ## Legal
 

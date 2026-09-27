@@ -48,9 +48,16 @@ export default function CreditsAndPlans() {
         than thirty days.
       </p>
       <p>
-        A new account is also granted <strong>$1.00 once</strong>, when it is
-        created. That grant does not reset and is separate from the monthly
-        allowance.
+        A new account can also get <strong>$1.00 once</strong>, by adding a
+        card. <strong>Plan and usage</strong> in the settings menu, and a note
+        above the composer, offer it with an <strong>Add a card</strong> button,
+        which opens a Stripe page that saves the card and charges nothing. The
+        credit arrives once Stripe confirms the card, usually within a minute.
+        It is granted once per account and once per card, so a card that has
+        already claimed it on another account does not claim it again. It does
+        not reset, is separate from the monthly allowance, and expires twelve
+        months after it is granted. Accounts that received it on creation,
+        before a card was required, keep it.
       </p>
 
       <h2>Top-up credit</h2>

@@ -11,15 +11,19 @@ import {
 import { clawBackReferral, payReferralIfEarned } from './referral-payout.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
+  createCardSetupSession,
   createCheckoutSession,
   createPortalSession,
 } from './billing-checkout.ts';
 import { createStripeClient, stripeConfigured } from './stripe-client.ts';
 import type { PurchaseOption } from './stripe-client.ts';
+import { signupCreditStatus } from './signup-credit.ts';
+import type { SignupCreditEnv } from './signup-credit.ts';
+import type { ResolveSetupIntent } from './billing-events.ts';
 
 /**
  * The Worker-facing half of Stripe billing (docs/decisions.md L12-L15):
- * three HTTP handlers wired into `index.ts`'s router, plus the nightly
+ * four HTTP handlers wired into `index.ts`'s router, plus the nightly
  * reconcile the scheduled export calls. Every real decision -- which price a
  * purchase maps to, how a webhook becomes a mirror row -- lives in
  * `stripe-client.ts`/`billing-checkout.ts`/`billing-events.ts`; this file
@@ -120,6 +124,80 @@ export async function handleBillingCheckout(
   }
 }
 
+/**
+ * The one way this deployment reads a SetupIntent: with its PaymentMethod
+ * expanded, since the card's fingerprint is the whole reason for asking.
+ * Shared by the webhook and the nightly replay, so the two cannot read the
+ * same saved card differently.
+ */
+export function readSetupIntent(stripe: Stripe): ResolveSetupIntent {
+  return (setupIntentId) =>
+    stripe.setupIntents.retrieve(setupIntentId, {
+      expand: ['payment_method'],
+    });
+}
+
+/**
+ * POST -> { url } for a Stripe-hosted page that saves a card and charges
+ * nothing, which is what the welcome credit waits for (Chris, 2026-09-27).
+ *
+ * Refused unless the caller is actually offered the credit. The webhook
+ * would pay nothing for anybody else anyway, since it pays only against an
+ * open offer; refusing here is so nobody is sent to enter a card for a
+ * credit they will not get.
+ */
+export async function handleBillingCard(
+  request: Request,
+  env: BillingEnv & SignupCreditEnv,
+  selfOrigin: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!billingConfigured(env)) {
+    return json(
+      { error: 'Billing is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  const store = new BillingStore(env.DB!);
+  const offer = await signupCreditStatus(store, principal, env, fetchImpl);
+  if (offer.state !== 'needs-card') {
+    return json(
+      {
+        error:
+          offer.state === 'granted'
+            ? 'This account already has its welcome credit.'
+            : 'This account is not offered the welcome credit.',
+      },
+      409,
+    );
+  }
+
+  try {
+    const url = await createCardSetupSession(
+      createStripeClient(env),
+      store,
+      principal.userId,
+      {
+        successUrl: `${selfOrigin}/billing/card-added`,
+        cancelUrl: `${selfOrigin}/billing/cancelled`,
+      },
+    );
+    return json({ url });
+  } catch (error) {
+    console.error('failed to create card setup session', error);
+    return json(
+      { error: 'Could not open the card form. Try again shortly.' },
+      502,
+    );
+  }
+}
+
 /** POST -> { url } for the Stripe-hosted Billing Portal (L12). */
 export async function handleBillingPortal(
   request: Request,
@@ -166,6 +244,12 @@ export async function handleBillingPortal(
 export async function handleStripeWebhook(
   request: Request,
   env: BillingEnv,
+  /**
+   * Injectable so a test can put a signed event through the real
+   * verification and answer the one lookup a saved card needs, without a
+   * network. Production always takes the default.
+   */
+  client?: Stripe,
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
   if (!billingConfigured(env)) {
@@ -180,7 +264,7 @@ export async function handleStripeWebhook(
     return json({ error: 'Missing Stripe-Signature header.' }, 400);
 
   const rawBody = await request.text();
-  const stripe = createStripeClient(env);
+  const stripe = client ?? createStripeClient(env);
   let event: Stripe.Event;
   try {
     event = await stripe.webhooks.constructEventAsync(
@@ -231,6 +315,9 @@ export async function handleStripeWebhook(
       // charge. One request, on the rarest event type this deployment
       // handles.
       (chargeId) => stripe.charges.retrieve(chargeId),
+      // A saved card is known only by its fingerprint, which is on the
+      // PaymentMethod and on neither event that reports the card.
+      readSetupIntent(stripe),
     );
 
     // `unresolved` means the handler wrote nothing, so the event is not

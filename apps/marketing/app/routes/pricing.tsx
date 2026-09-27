@@ -35,7 +35,7 @@ export default function Pricing() {
             which shows the total before anything is charged. Nothing is charged
             automatically past the allowance: once it and any top-up credit are
             spent, runs are refused until the month resets or you buy a top-up.
-            vibld is invite-only for now.
+            vibld is in public beta, and anyone can sign up.
           </p>
           <PlanFacts />
         </div>
@@ -136,9 +136,9 @@ export default function Pricing() {
             </article>
           </div>
           <p className="lb-after__cta">
-            <Link className="button" to="/#waitlist">
-              Join the waitlist
-            </Link>
+            <a className="button" href={SITE.signUpUrl}>
+              Sign up
+            </a>
             <a className="lb-link" href={SITE.appUrl}>
               Sign in
             </a>

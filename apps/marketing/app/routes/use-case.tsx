@@ -145,9 +145,9 @@ export default function UseCase() {
             ))}
           </ul>
           <p className="lb-after__cta">
-            <Link className="button" to="/#waitlist">
-              Join the waitlist
-            </Link>
+            <a className="button" href={SITE.signUpUrl}>
+              Sign up
+            </a>
             <a className="lb-link" href={SITE.appUrl}>
               Sign in
             </a>

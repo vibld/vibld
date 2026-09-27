@@ -133,10 +133,45 @@ Access instead if a deployment like that needs to stay gated.
 
 ## Invite-only access (the launch gate)
 
-The product grants model spend on sign-up, so "anyone who can reach the URL
-can have an account" is a faucet pointed at the provider bill. An account is
-still created freely (Clerk owns that) and can do nothing until its identity
-is on the invite list.
+An open deployment lets anybody with an email address spend model budget, so
+"anyone who can reach the URL can have an account" is a faucet pointed at the
+provider bill unless something else limits it. An account is still created
+freely (Clerk owns that) and, while the gate is closed, can do nothing until
+its identity is on the invite list. What limits an open deployment is the
+monthly allowance, the account-wide daily ceiling, and the welcome credit
+waiting for a saved card (see "The welcome credit" under Billing below).
+
+### Opening the beta (the flip)
+
+Decided 2026-09-27 (docs/decisions.md): vibld launches as an open paid beta.
+Everything else ships closed and ready; opening is these steps, in this
+order, after the live billing check:
+
+1. `VIBLD_ACCESS_MODE` on the **preview** environment of `vibld/vibld-internal`
+   (it is an environment secret, not a `wrangler.jsonc` var):
+   <https://github.com/vibld/vibld-internal/settings/environments> →
+   **preview** → **Environment secrets** → `VIBLD_ACCESS_MODE` → set the
+   value to exactly `open` (lowercase, no spaces). GitHub does not give the
+   environment page a URL that can be written down without its numeric id,
+   so the list above is the nearest link.
+2. Clerk sign-up mode, which is separate and also still closed:
+   <https://dashboard.clerk.com/~/user-authentication/access-mode> →
+   **Public** → **Save**. Left on **Waitlist**, nobody new can create an
+   account to reach the open gate.
+3. Run **Deploy web preview**:
+   <https://github.com/vibld/vibld-internal/actions/workflows/deploy-web-preview.yml>
+   → **Run workflow**. Its "Sync the access mode" step writes the Worker
+   secret; the run summary says `Access: OPEN`.
+4. Run **Deploy marketing site**, so vibld.com's sign-up links go live with
+   the door they lead to:
+   <https://github.com/vibld/vibld-internal/actions/workflows/deploy-marketing.yml>
+   → **Run workflow**.
+
+To close it again, set the secret to anything but `open` (or delete it), put
+Clerk back on **Waitlist**, and rerun step 3.
+
+Nothing in this repository sets the value, and `test/open-beta-gate.test.ts`
+fails if the Worker config or the workflow's default starts to.
 
 `VIBLD_ACCESS_MODE` decides. **Anything other than the exact string `open` is
 invite-only, including unset.** That is the opposite of the usual default and
@@ -473,7 +508,8 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
 - `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) is set on the
   deployment -- see "Admin: manual credit grants" below for its first
   consumer.
-- `VIBLD_SIGNUP_CREDIT_FROM` decides who gets the welcome credit, and
+- `VIBLD_SIGNUP_CREDIT_FROM` decides who is offered the welcome credit (paid
+  once they save a card; see "The welcome credit" under Billing), and
   **nobody gets it until this is set.** It names the instant the offer
   starts, as a full ISO instant with a timezone (`2026-09-13T00:00:00Z`);
   accounts created at or after it are in the cohort, and everyone else is
@@ -680,14 +716,19 @@ Dashboard needs no code change, only the amount to change.
 
 - `GET /api/billing/status` -- authenticated, no body. Returns the caller's
   own tier, this period's spend against their allowance, remaining top-up
-  credit, and whether a Stripe customer exists yet for them (see "Billing UI
-  in the builder shell" below).
+  credit, whether a Stripe customer exists yet for them, and where they
+  stand with the welcome credit (`signupCredit`; see "The welcome credit"
+  and "Billing UI in the builder shell" below).
 - `POST /api/billing/checkout` -- body `{ "tier": "build" | "ship", "interval": "monthly" | "annual" }`
   or `{ "topup": true }`. Authenticated the same way `/api/plan` is; returns
   `{ url }`, the Checkout Session to redirect the browser to.
 - `POST /api/billing/portal` -- authenticated, no body. Returns `{ url }` for
   the Stripe-hosted Billing Portal, where a customer manages or cancels
   their own subscription.
+- `POST /api/billing/card` -- authenticated, gated, no body. Returns `{ url }`
+  for a Stripe Checkout Session in `setup` mode, which saves a card and
+  charges nothing. Answers 409 unless the caller is offered the welcome
+  credit.
 - `POST /api/stripe/webhook` -- Stripe's own POST, not a browser's. No Clerk
   session exists to check; the `Stripe-Signature` header, verified against
   the raw body before anything is parsed (L30), is the entire
@@ -696,7 +737,16 @@ Dashboard needs no code change, only the amount to change.
   `customer.subscription.created` / `.updated` / `.deleted`, `invoice.paid`,
   `invoice.payment_failed` (the last is acknowledged but not separately
   mirrored -- `customer.subscription.updated` already carries the status
-  change it implies), `charge.refunded` and `charge.dispute.closed`.
+  change it implies), `charge.refunded`, `charge.dispute.closed` and
+  `setup_intent.succeeded`.
+
+  **`setup_intent.succeeded` pays the welcome credit** (see below), and so
+  does a `checkout.session.completed` in `setup` mode. Either one alone is
+  enough, and both arriving pays once. It is on the list so a saved card is
+  still paid if the Checkout event is ever dropped from the endpoint; add it
+  at <https://dashboard.stripe.com/workbench/webhooks>: open the existing
+  endpoint and add `setup_intent.succeeded` to the events it sends. Check
+  `checkout.session.completed` is still ticked while there.
 
   **The last two have to be ticked on the endpoint, or refunds only ever
   reach this deployment through the nightly replay.** They are what takes a
@@ -875,6 +925,48 @@ everyone, not each subscription's own billing-cycle anchor
 outright, not by tracking each purchase's own expiry against what was
 actually drawn from it first (`BillingStore.totalTopupCreditMicroUsd`).
 
+### The welcome credit (card first, 2026-09-27)
+
+A new account can get a one-time credit (`VIBLD_SIGNUP_CREDIT_USD_CENTS`,
+default $1.00) once it has a card on file. It used to arrive with the
+account; with sign-up open to anybody that is a dollar per email address,
+so it now waits for a card, saved through a Stripe Checkout Session in
+`setup` mode that charges nothing.
+
+End to end:
+
+1. `GET /api/billing/status` decides whether the caller is offered it
+   (`signupCreditStatus`, `worker/signup-credit.ts`): allowed through the
+   access gate, created on or after `VIBLD_SIGNUP_CREDIT_FROM` (Clerk is asked
+   once), and not already holding a `signup:<user id>` grant. A yes is
+   remembered as a row in `billing_signup_offers`; a no from the cohort, as the
+   zero-cent marker it always was.
+2. The builder shows "Add a card to get $1 of free build credit. You won't
+   be charged." above the composer and under **Plan and usage**, with an
+   **Add a card** button. That calls `POST /api/billing/card`, which creates
+   the setup-mode session with `vibld_purpose: signup_credit` and the user id
+   on both the session and its SetupIntent, card only.
+3. Stripe reports the saved card twice, as `checkout.session.completed`
+   (mode `setup`) and `setup_intent.succeeded`. Each is verified by the same
+   signature check as every other event, then `billing-events.ts` re-reads
+   the SetupIntent with its PaymentMethod expanded to get the card's
+   `fingerprint`, and `BillingStore.claimSignupCardCredit` pays it.
+4. The limits live in `billing_signup_cards`
+   (`migrations/0029_card_first_signup_credit.sql`), keyed on the SetupIntent
+   id: a partial unique index on `card_fingerprint` and another on `user_id`,
+   both over rows whose outcome is `granted`. One card pays one account,
+   and one account is paid once, whichever card and however the deliveries
+   race. The payment itself is a `billing_admin_credits` row under the same
+   `signup:<user id>` id as ever, so redeliveries, the two events for one
+   card, and the nightly replay all pay at most once. A refused card is
+   recorded too (`card-used`, `account-granted`, `no-offer`), and the builder
+   tells somebody whose card had already claimed the credit elsewhere.
+
+Accounts that got their dollar on creation, before this, keep it: their row
+has the id already, so they are never offered or paid a second. A deployment
+with no Stripe configured offers nobody the credit, since there is no way to
+save a card.
+
 ### Billing UI in the builder shell (L35)
 
 The header now shows the caller's tier and this period's spend against their
@@ -891,6 +983,8 @@ reserves against; nothing new is authoritative, `UserBudget` still is), plus:
   only once the status endpoint reports a Stripe customer exists
   (`hasStripeCustomer`), since the Portal 502s without one and a caller who
   has never checked out has nothing to manage yet.
+- **"Add a card"**, for an account offered the welcome credit
+  (`src/components/SignupCreditOffer.tsx`), here and above the composer.
 
 Every button redirects the whole page to a Stripe-hosted URL and back
 (`success_url`/`cancel_url`/the Portal's `return_url`), so there is no

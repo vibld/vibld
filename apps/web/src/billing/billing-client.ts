@@ -13,6 +13,15 @@ import { getClerkToken } from '../auth/clerk-token.ts';
 
 export type Tier = 'free' | 'build' | 'ship';
 
+/**
+ * Where the caller stands with the one-time welcome credit, which since
+ * 2026-09-27 waits for a card on file (`worker/signup-credit.ts`).
+ */
+export type SignupCredit =
+  | { state: 'granted'; cents: number }
+  | { state: 'needs-card'; cents: number; cardAlreadyUsed: boolean }
+  | { state: 'none'; reason: string };
+
 export interface BillingStatus {
   tier: Tier;
   allowanceMicroUsd: number;
@@ -22,6 +31,12 @@ export interface BillingStatus {
   cancelAtPeriodEnd: boolean;
   hasStripeCustomer: boolean;
   billingConfigured: boolean;
+  /**
+   * Optional because a Worker deployed before the card requirement does not
+   * send it, and a shell ahead of its Worker should show no offer rather
+   * than a wrong one.
+   */
+  signupCredit?: SignupCredit;
 }
 
 async function authHeaders(
@@ -149,6 +164,70 @@ export function openBillingPortal(
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<string> {
   return postForRedirect('/api/billing/portal', undefined, fetchImpl, getToken);
+}
+
+/**
+ * Open the Stripe-hosted page that saves a card for the welcome credit.
+ * Returns the URL to redirect the browser to. Nothing is charged there.
+ */
+export function startCardSetup(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<string> {
+  return postForRedirect('/api/billing/card', undefined, fetchImpl, getToken);
+}
+
+/** Where Stripe sends the browser back to once a card is saved. */
+export const CARD_ADDED_PATH = '/billing/card-added';
+
+/**
+ * "$1" for a whole-dollar amount of cents, "$2.50" otherwise: the offer is a
+ * round figure and reads as one, where a balance readout (`formatUsd`) wants
+ * every cent.
+ */
+export function formatCredit(cents: number): string {
+  return cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`;
+}
+
+/**
+ * What the builder says about the welcome credit, if anything.
+ *
+ * Pure, so the three things it can say are tested without a browser:
+ *
+ * - `offer`: the account is offered the credit. Saving a card claims it.
+ * - `card-used`: the last card it saved had already claimed the credit on
+ *   another account, which is why nothing arrived. A different card still
+ *   can.
+ * - `pending`: Stripe has just sent the browser back with a card saved, and
+ *   the webhook that pays has not landed yet. Saying so stops somebody
+ *   adding a second card because the first seemed to do nothing.
+ *
+ * `null` for everything else, including a deployment with no billing, where
+ * there is no way to save a card and so nothing honest to offer.
+ */
+export function signupCreditPrompt(
+  status: BillingStatus,
+  pathname: string,
+): { kind: 'offer' | 'card-used' | 'pending'; message: string } | null {
+  const credit = status.signupCredit;
+  if (!status.billingConfigured || credit?.state !== 'needs-card') {
+    return null;
+  }
+  const amount = formatCredit(credit.cents);
+  const offer = `Add a card to get ${amount} of free build credit. You won't be charged.`;
+  if (credit.cardAlreadyUsed) {
+    return {
+      kind: 'card-used',
+      message: `That card has already claimed the welcome credit on another account. ${offer}`,
+    };
+  }
+  if (pathname === CARD_ADDED_PATH) {
+    return {
+      kind: 'pending',
+      message: `Card saved. Your ${amount} of build credit appears here once Stripe confirms it, usually within a minute.`,
+    };
+  }
+  return { kind: 'offer', message: offer };
 }
 
 /** "$3.20" from 3_200_000 micro-USD -- a readout a human can parse at a glance. */

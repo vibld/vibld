@@ -313,6 +313,7 @@ describe('the export', () => {
     assert.deepEqual(EXCLUDE, [
       'docs/social-launch.md',
       'docs/pricing-routine.md',
+      'docs/launch-email.md',
       '.github/dependabot.yml',
     ]);
   });
@@ -335,6 +336,7 @@ describe('the export', () => {
       );
       writeFileSync(join(repo, 'docs', 'social-launch.md'), 'internal\n');
       writeFileSync(join(repo, 'docs', 'pricing-routine.md'), 'internal\n');
+      writeFileSync(join(repo, 'docs', 'launch-email.md'), 'internal\n');
       writeFileSync(join(repo, 'docs', 'brand.md'), 'public\n');
       writeFileSync(join(repo, 'logo.bin'), Buffer.from([0, 1, 2, 3]));
       const vcs = (...args) =>
@@ -360,6 +362,7 @@ describe('the export', () => {
 
       assert.equal(existsSync(join(out, 'docs', 'social-launch.md')), false);
       assert.equal(existsSync(join(out, 'docs', 'pricing-routine.md')), false);
+      assert.equal(existsSync(join(out, 'docs', 'launch-email.md')), false);
       assert.equal(
         readFileSync(join(out, 'docs', 'brand.md'), 'utf8'),
         'public\n',

@@ -52,7 +52,9 @@ import { pathToFileURL } from 'node:url';
 /**
  * Files the public copy leaves out. Chris chose the two documents as
  * internal operational notes (2026-09-27): the social launch plan and the
- * brief for the scheduled pricing routine. Everything else in docs/ is
+ * brief for the scheduled pricing routine. The open-beta launch email to the
+ * waitlist joined them the same day, as a draft addressed to people who
+ * signed up, not to readers of the source. Everything else in docs/ is
  * exported.
  *
  * The Dependabot config is left out too, by the same decision: version
@@ -63,6 +65,7 @@ import { pathToFileURL } from 'node:url';
 export const EXCLUDE = [
   'docs/social-launch.md',
   'docs/pricing-routine.md',
+  'docs/launch-email.md',
   '.github/dependabot.yml',
 ];
 

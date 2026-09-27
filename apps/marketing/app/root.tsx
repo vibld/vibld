@@ -74,8 +74,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
         {/*
           Cloudflare Turnstile (docs/decisions.md L29). Loaded site-wide,
-          async/defer so it never blocks rendering; WaitlistForm is the only
-          page that currently renders a `.cf-turnstile` div for it to find.
+          async/defer so it never blocks rendering. Since the open beta
+          (2026-09-27) no page renders a `.cf-turnstile` div for it to find:
+          the waitlist form was its only widget and is gone. Left loading
+          because the Privacy Policy and the Cookie Notice both say every page
+          contacts Cloudflare for it, and whether to drop the script and those
+          sentences together is a legal-copy decision for Chris, not a
+          side effect of a marketing change.
         */}
         <script
           src="https://challenges.cloudflare.com/turnstile/v0/api.js"

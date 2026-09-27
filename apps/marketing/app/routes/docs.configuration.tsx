@@ -104,7 +104,10 @@ export default function Configuration() {
           account, and the instant from which accounts count as new. The second
           has no default on purpose. Any default early enough to catch new
           accounts also catches every account that already exists, and this is
-          money.
+          money. The grant waits for a card saved through Stripe, so it needs
+          billing configured and the Stripe webhook subscribed to{' '}
+          <code>checkout.session.completed</code> or{' '}
+          <code>setup_intent.succeeded</code>; without Stripe nobody gets it.
         </li>
       </ul>
 

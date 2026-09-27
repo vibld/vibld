@@ -71,6 +71,21 @@ describe('the plans the pricing page states', () => {
     assert.equal(readPlans(sources).signupCents, Number(declared[1]));
   });
 
+  it('reads whether the grant waits for a card', () => {
+    // Chris, 2026-09-27: the dollar is granted once a card is on file. The
+    // copy states that condition from this flag, so the flag has to be read
+    // from the Worker's own source rather than assumed.
+    const declared = /SIGNUP_CREDIT_REQUIRES_CARD\s*=\s*(true|false)/.exec(
+      sources.signupCredit,
+    );
+    assert.ok(
+      declared,
+      'signup-credit.ts no longer says whether a card is needed',
+    );
+    assert.equal(readPlans(sources).signupRequiresCard, declared[1] === 'true');
+    assert.equal(readPlans(sources).signupRequiresCard, true);
+  });
+
   it('prints the prices and allowances docs/decisions.md recorded', () => {
     const { plans, topup } = readPlans(sources);
     const byId = new Map(plans.map((plan) => [plan.id, plan]));
@@ -129,6 +144,13 @@ describe('the plans the pricing page states', () => {
       );
     }
     assert.ok(guide.includes(`<strong>${dollars(signupCents)} once</strong>`));
+    if (readPlans(sources).signupRequiresCard) {
+      // The guide is what a customer is pointed to when they ask why their
+      // dollar has not arrived, so it has to say what the builder waits for.
+      assert.ok(guide.includes('by adding a card'));
+      assert.ok(guide.includes('charges nothing'));
+      assert.ok(guide.includes('once per account and once per card'));
+    }
     assert.ok(
       guide.includes(
         `A top-up costs ${priceLabel(topup.priceCents)} and adds ${dollars(topup.creditCents)} of model spend.`,
@@ -167,6 +189,15 @@ describe('the plans the pricing page states', () => {
     );
     assert.throws(() =>
       readPlans({ ...sources, stripeClient: 'export const X = 1;' }),
+    );
+    assert.throws(() =>
+      readPlans({
+        ...sources,
+        signupCredit: sources.signupCredit.replace(
+          /SIGNUP_CREDIT_REQUIRES_CARD/g,
+          'SOMETHING_ELSE',
+        ),
+      }),
     );
   });
 });

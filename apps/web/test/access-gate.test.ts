@@ -205,6 +205,10 @@ describe('what an ungated route is allowed to do', () => {
    * property hold for callers nobody has written yet. This rule guards that
    * arrangement rather than any individual call site: move the check back
    * out to the callers and it fails.
+   *
+   * Since the card requirement the route no longer pays the dollar, it
+   * opens the offer a saved card is paid against. That write is the one
+   * that matters now, so it is held to the same order.
    */
   it('leaves the signup grant to decide access for itself', async () => {
     const source = await readFile(
@@ -219,8 +223,13 @@ describe('what an ungated route is allowed to do', () => {
 
     const call = source.indexOf('decideAccessFor(');
     const write = source.indexOf('grantAdminCredit(');
-    assert.ok(call > 0 && write > 0, 'expected both calls in this module');
+    const offer = source.indexOf('openSignupOffer(');
+    assert.ok(
+      call > 0 && write > 0 && offer > 0,
+      'expected all three calls in this module',
+    );
     assert.ok(call < write, 'the grant is written before access is decided');
+    assert.ok(call < offer, 'the offer is opened before access is decided');
   });
 });
 

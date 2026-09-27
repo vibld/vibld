@@ -86,6 +86,13 @@ export const BILLABLE_STATUSES: readonly string[] = [
 /** The same list as a SQL literal, for embedding in an `IN (...)`. */
 const BILLABLE_STATUS_SQL = BILLABLE_STATUSES.map((s) => `'${s}'`).join(', ');
 
+/**
+ * What saving a card for the welcome credit came to. See
+ * 0029_card_first_signup_credit.sql for what each one means.
+ */
+export type SignupCardOutcome =
+  'granted' | 'card-used' | 'account-granted' | 'no-offer';
+
 export interface AdminCreditRecord {
   id: string;
   userId: string;
@@ -590,6 +597,166 @@ export class BillingStore {
       .bind(userId)
       .all<AdminCreditRow>();
     return result.results.map(toAdminCreditRecord);
+  }
+
+  /**
+   * Open the welcome-credit offer to an account (0029_card_first_signup_credit.sql).
+   *
+   * `ON CONFLICT DO NOTHING`, so the amount an account was first offered is
+   * the amount it keeps: a later change to the configured figure does not
+   * move an offer somebody has already been shown.
+   */
+  async openSignupOffer(userId: string, creditUsdCents: number): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_signup_offers (user_id, credit_usd_cents, opened_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(user_id) DO NOTHING`,
+      )
+      .bind(userId, creditUsdCents, new Date().toISOString())
+      .run();
+  }
+
+  /** The cents this account was offered, or undefined if it never was. */
+  async findSignupOffer(userId: string): Promise<number | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT credit_usd_cents FROM billing_signup_offers WHERE user_id = ?1`,
+      )
+      .bind(userId)
+      .first<{ credit_usd_cents: number }>();
+    return row?.credit_usd_cents;
+  }
+
+  /**
+   * What became of the most recent card this account saved for the offer,
+   * or undefined if it has saved none. Read by the status route, so the
+   * builder can say why a card that was added did not pay anything.
+   */
+  async latestSignupCardOutcome(
+    userId: string,
+  ): Promise<SignupCardOutcome | undefined> {
+    const row = await this.#db
+      .prepare(
+        `SELECT outcome FROM billing_signup_cards
+          WHERE user_id = ?1
+          ORDER BY created_at DESC
+          LIMIT 1`,
+      )
+      .bind(userId)
+      .first<{ outcome: SignupCardOutcome }>();
+    return row?.outcome;
+  }
+
+  /**
+   * Grant the welcome credit for a saved card, at most once per card and
+   * once per account.
+   *
+   * Three statements, deliberately ordered so that none of them needs the
+   * others to have run in the same transaction (D1 offers `batch`, and the
+   * test double this store is exercised against does not, so correctness is
+   * not allowed to rest on it):
+   *
+   * 1. Claim. A `granted` row is inserted only if the account was offered
+   *    the credit and has no `signup:` grant already. The two partial unique
+   *    indexes refuse a second `granted` row for the same card or the same
+   *    account, and `ON CONFLICT DO NOTHING` turns that refusal into a
+   *    no-op rather than an error.
+   * 2. Record a refusal, if the claim did not land, with the reason. The
+   *    primary key makes this a no-op when the claim did land, or when an
+   *    earlier delivery of the same SetupIntent already recorded either.
+   * 3. Pay, if this SetupIntent's row says `granted`. Keyed on the
+   *    `signup:` id, so it is a no-op when already paid.
+   *
+   * A delivery that dies between 1 and 3 leaves a `granted` claim and no
+   * credit. Stripe retries it (the webhook is not marked processed), 1 and 2
+   * are no-ops on the primary key, and 3 pays. That is the whole reason 3
+   * reads the claim rather than trusting what 1 reported.
+   */
+  async claimSignupCardCredit(claim: {
+    setupIntentId: string;
+    userId: string;
+    cardFingerprint: string;
+    grantId: string;
+    grantedByEmail: string;
+    note: string;
+  }): Promise<{ outcome: SignupCardOutcome; paid: boolean }> {
+    const now = new Date().toISOString();
+    const { setupIntentId, userId, cardFingerprint, grantId } = claim;
+
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_signup_cards
+           (stripe_setup_intent_id, user_id, card_fingerprint, outcome, created_at)
+         SELECT ?1, ?2, ?3, 'granted', ?4
+          WHERE EXISTS (SELECT 1 FROM billing_signup_offers
+                         WHERE user_id = ?2 AND credit_usd_cents > 0)
+            AND NOT EXISTS (SELECT 1 FROM billing_admin_credits WHERE id = ?5)
+         ON CONFLICT DO NOTHING`,
+      )
+      .bind(setupIntentId, userId, cardFingerprint, now, grantId)
+      .run();
+
+    // The order of the CASE is the order the reasons are worth telling
+    // somebody in. An account that already has its credit needs no second
+    // card, whichever route it came by (an account that got its dollar on
+    // creation, before this table, has no offer row and is still told the
+    // true thing). One never offered anything has nothing to try again
+    // with. "That card was used elsewhere" is said only when it is the
+    // whole answer, since it is the one that asks for a different card.
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_signup_cards
+           (stripe_setup_intent_id, user_id, card_fingerprint, outcome, created_at)
+         SELECT ?1, ?2, ?3,
+                CASE
+                  WHEN EXISTS (SELECT 1 FROM billing_admin_credits WHERE id = ?5)
+                    OR EXISTS (SELECT 1 FROM billing_signup_cards
+                                WHERE user_id = ?2 AND outcome = 'granted')
+                    THEN 'account-granted'
+                  WHEN NOT EXISTS (SELECT 1 FROM billing_signup_offers
+                                    WHERE user_id = ?2 AND credit_usd_cents > 0)
+                    THEN 'no-offer'
+                  ELSE 'card-used'
+                END,
+                ?4
+          WHERE 1
+         ON CONFLICT DO NOTHING`,
+      )
+      .bind(setupIntentId, userId, cardFingerprint, now, grantId)
+      .run();
+
+    const row = await this.#db
+      .prepare(
+        `SELECT user_id, outcome FROM billing_signup_cards
+          WHERE stripe_setup_intent_id = ?1`,
+      )
+      .bind(setupIntentId)
+      .first<{ user_id: string; outcome: SignupCardOutcome }>();
+    if (!row) {
+      // Both inserts are unconditional between them, so this means the
+      // database dropped a write it reported as done. Thrown so the webhook
+      // answers 5xx and Stripe tries again.
+      throw new Error(`no signup card claim recorded for ${setupIntentId}`);
+    }
+    if (row.outcome !== 'granted' || row.user_id !== userId) {
+      return { outcome: row.outcome, paid: false };
+    }
+
+    // The amount is the one the offer was opened at, read here rather than
+    // passed in, so nothing on the webhook path can decide it.
+    const paid = await this.#db
+      .prepare(
+        `INSERT INTO billing_admin_credits
+           (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
+         SELECT ?1, ?2, credit_usd_cents, ?3, ?4, ?5
+           FROM billing_signup_offers
+          WHERE user_id = ?2
+         ON CONFLICT(id) DO NOTHING`,
+      )
+      .bind(grantId, userId, claim.grantedByEmail, claim.note, now)
+      .run();
+    return { outcome: 'granted', paid: paid.meta.changes > 0 };
   }
 
   async recordTopup(

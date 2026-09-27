@@ -28,7 +28,7 @@ The "Live Build" design (approved 2026-09-27), in the brand's colours:
 - **Home** (`app/routes/home.tsx`): a hero whose builder window assembles a
   small invented site in front of the reader (`components/LiveBuild.tsx`),
   then the seven-step flow, the styles, what you get, use cases, the plans and
-  the one waitlist form. The builder is a demonstration drawn in the page and
+  a sign-up link into the builder (`SITE.signUpUrl`). The builder is a demonstration drawn in the page and
   says so; it calls nothing. Its prerendered state is the finished build, and
   it only replays after hydration, for a reader who has not asked for reduced
   motion.
@@ -98,6 +98,16 @@ criteria scope this to the public brand expression, not product UI.
 
 ## The waitlist
 
+**No page renders the waitlist form any more.** vibld launches as an open
+public beta (docs/decisions.md, resolved 2026-09-27), so every call to action
+links to the builder's sign-up form instead and `WaitlistForm.tsx` was
+removed. Deploy this site only once the builder is open (`apps/web/README.md`,
+"Opening the beta"): until then its sign-up links lead to a closed door. The
+endpoint below is left in place, unchanged, and the addresses already
+collected stay in the Resend segment; they are the recipient list for the
+launch email (`docs/launch-email.md`, which is not part of the public
+export).
+
 `/api/waitlist` (`worker/index.ts`) is a real endpoint, not a demonstration:
 it validates the submission (`worker/waitlist.ts`, tested without a Workers
 runtime -- the same pattern `apps/web/worker/spend.ts` uses) and adds the
@@ -114,9 +124,8 @@ defense caught it. Both defenses are additive: Turnstile is skipped
 entirely, not required, when `TURNSTILE_SECRET_KEY` isn't set (see
 "Deploying" below), so a deploy without it still has the honeypot.
 
-The form posts to a real `action`/`method`, so it degrades to a full-page
-submission without JavaScript; with it, `WaitlistForm.tsx` submits via
-`fetch` and shows the result inline.
+The form posted to a real `action`/`method`, so it degraded to a full-page
+submission without JavaScript, and the endpoint still accepts both shapes.
 
 Double opt-in (L18) is not implemented yet: it needs a verified sending
 domain (`notifications.vibld.com` or `mail.vibld.com`, per L17), which needs
@@ -147,7 +156,7 @@ Edit on the `vibld.com` zone, for the custom-domain routes),
 (`workflow_dispatch` only).
 
 `TURNSTILE_SECRET_KEY` is optional on the same environment: add it to turn
-on server-side verification of the widget already live in `WaitlistForm.tsx`
+on server-side verification of the Turnstile token on `/api/waitlist`
 (the public site key needs no secret handling -- it's a plain constant in
 `app/site.ts`). It's on the same Cloudflare Turnstile page the site key came
 from. Without it, the endpoint works exactly as before -- the honeypot

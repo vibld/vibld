@@ -1,6 +1,12 @@
-import { ClerkProvider, Show, SignIn, UserButton } from '@clerk/react';
+import { ClerkProvider, Show, SignIn, SignUp, UserButton } from '@clerk/react';
 import type { ReactNode } from 'react';
-import { PUBLISHABLE_KEY, clerkConfigured } from './clerk-token.ts';
+import {
+  PUBLISHABLE_KEY,
+  SIGN_UP_PATH,
+  clerkConfigured,
+  isSignUpPath,
+} from './clerk-token.ts';
+import { usePathname } from '../admin/use-pathname.ts';
 import { Mark, WORDMARK } from '../components/Mark.tsx';
 
 export {
@@ -13,7 +19,15 @@ export {
 export function ClerkRoot({ children }: { children: ReactNode }) {
   if (!PUBLISHABLE_KEY) return children;
   return (
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
+    <ClerkProvider
+      publishableKey={PUBLISHABLE_KEY}
+      afterSignOutUrl="/"
+      // Both forms live in this shell rather than on Clerk's hosted Account
+      // Portal, so "Sign up" on vibld.com and the link under the sign-in
+      // form land on the same page, on this domain.
+      signInUrl="/"
+      signUpUrl={SIGN_UP_PATH}
+    >
       {children}
     </ClerkProvider>
   );
@@ -44,6 +58,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
 }
 
 function SignInLanding() {
+  // A path rather than a toggle, so vibld.com can link straight to the
+  // sign-up form (`SITE.signUpUrl` in apps/marketing). The builder is
+  // unreachable signed out either way; which form shows is the only thing
+  // the path decides.
+  const signingUp = isSignUpPath(usePathname());
   return (
     <div className="auth-gate">
       <div className="auth-gate__brand">
@@ -55,7 +74,11 @@ function SignInLanding() {
           <p className="shell__tagline">Vibe. Build. Ship.</p>
         </div>
       </div>
-      <SignIn />
+      {signingUp ? (
+        <SignUp signInUrl="/" />
+      ) : (
+        <SignIn signUpUrl={SIGN_UP_PATH} />
+      )}
     </div>
   );
 }
