@@ -1,0 +1,128 @@
+/*
+ * The Vibld design system.
+ *
+ * The token architecture is a brand hue expressed as an alpha ramp, layered
+ * neutral surfaces, and semantic aliases on top, because it holds up well as
+ * a product grows.
+ *
+ * Dark-first. The builder is a workspace people sit in for a long time, and
+ * the thing that should hold the eye is the project being built, not the
+ * chrome around it.
+ */
+
+@import '@vibld/brand/brand.css';
+
+:root {
+  color-scheme: light dark;
+
+  /* --- Brand -------------------------------------------------------------
+   * Aliases onto @vibld/brand, not a second palette. This used to be its own
+   * hue (a purple, 262) while vibld.com ran a warm orange, so the two halves
+   * of one product shipped different colours and different logos. One
+   * definition now, shared, and BRAND-01 holds again.
+   *
+   * The ramp is alpha over whatever sits beneath, so a tint reads correctly
+   * at any depth without being re-picked per surface.
+   */
+  --brand: var(--vibld-accent);
+  --brand-4: color-mix(in oklch, var(--vibld-accent) 4%, transparent);
+  --brand-8: color-mix(in oklch, var(--vibld-accent) 8%, transparent);
+  --brand-16: color-mix(in oklch, var(--vibld-accent) 16%, transparent);
+  --brand-24: color-mix(in oklch, var(--vibld-accent) 24%, transparent);
+  --brand-40: color-mix(in oklch, var(--vibld-accent) 40%, transparent);
+  --brand-64: color-mix(in oklch, var(--vibld-accent) 64%, transparent);
+
+  /* The one place a second hue earns its keep: the moment a run is accepted. */
+  --signal: hsl(158 72% 52%);
+  --signal-dim: hsl(158 72% 52% / 0.14);
+  --warn: hsl(38 92% 62%);
+  --warn-dim: hsl(38 92% 62% / 0.14);
+  --danger: hsl(2 84% 68%);
+  --danger-dim: hsl(2 84% 68% / 0.14);
+
+  /* --- Surfaces ----------------------------------------------------------
+   * A stack, not a palette. Each step is a layer further forward; borders
+   * are alpha over the layer beneath so they read correctly at every depth.
+   */
+  --surface-0: var(--vibld-paper);
+  --surface-1: var(--vibld-surface);
+  --surface-2: var(--vibld-surface-strong);
+  --surface-3: color-mix(
+    in oklch,
+    var(--vibld-surface-strong) 88%,
+    var(--vibld-ink)
+  );
+  --edge: var(--vibld-edge);
+  --edge-strong: var(--vibld-edge-strong);
+
+  /*
+   * The translucent surface behind the sticky header and footer. A token
+   * rather than a literal because it has to flip with the theme -- a
+   * hard-coded near-black veil puts dark text on a dark bar in light mode.
+   */
+  --surface-veil: color-mix(in oklch, var(--vibld-paper) 78%, transparent);
+
+  --text: var(--vibld-ink);
+  --text-muted: var(--vibld-ink-muted);
+  --text-faint: color-mix(
+    in oklch,
+    var(--vibld-ink-muted) 78%,
+    var(--vibld-paper)
+  );
+
+  /* --- Type --------------------------------------------------------------- */
+  --font-sans:
+    'Inter var', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'JetBrains Mono', 'Fira Code', Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.875rem;
+
+  /* --- Shape and depth ---------------------------------------------------- */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  --shadow-sm: 0 1px 2px hsl(250 40% 2% / 0.4);
+  --shadow: 0 8px 24px -8px hsl(250 40% 2% / 0.6);
+  --shadow-lg: 0 24px 60px -20px hsl(250 40% 2% / 0.7);
+
+  /* --- Motion ------------------------------------------------------------
+   * Fast enough to feel immediate, slow enough to be legible. One easing so
+   * everything in the product moves the same way.
+   */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --fast: 120ms;
+  --moderate: 220ms;
+}
+
+/*
+ * No light block here any more. Every surface and text token above is an
+ * alias onto @vibld/brand, which varies by `prefers-color-scheme` itself, so
+ * a second media query here would be a copy of that decision waiting to
+ * disagree with it. Light is no longer secondary either: the brand's ground
+ * is chalk, and the builder now matches the site rather than inverting it.
+ *
+ * `--signal` and `--danger` still need a light value of their own, because
+ * they are the builder's own status colours rather than brand ones.
+ */
+@media (prefers-color-scheme: light) {
+  :root {
+    --signal: hsl(158 62% 32%);
+    --danger: hsl(2 68% 48%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+    --moderate: 0ms;
+  }
+}

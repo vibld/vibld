@@ -1,0 +1,23 @@
+-- Two columns that make the hold protocol decidable by one D1 write each.
+--
+-- **`hold_token`**, because a timestamp is not an identity. A release names
+-- the hold it is answering so that a second admin re-holding the site in
+-- between keeps their hold. That comparison was on `held_at`, and two holds
+-- in the same millisecond share one: `Date` has millisecond resolution and
+-- two admins acting on the same report are exactly the case this is for. A
+-- token is unique per hold, so the comparison means what it says.
+--
+-- **`deleting_at`**, because a check in D1 followed by a delete in R2 is not
+-- an order. The owner's takedown refuses while a hold is set, which settles
+-- a hold that is already there; it did nothing about one arriving between
+-- that check and the deletion it authorises, and the deletion would then
+-- remove bytes a hold had just claimed. There is no write that spans the two
+-- stores, so the fix is not a better check: it is to make the tombstone
+-- itself the claim on those bytes. One conditional UPDATE both takes the
+-- site down and says the content is going, and a hold after it is honestly
+-- late rather than silently overridden.
+--
+-- Cleared when the deletion finishes, and by a republish, which is what
+-- makes a takedown that died partway repeatable.
+ALTER TABLE published_projects ADD COLUMN hold_token TEXT;
+ALTER TABLE published_projects ADD COLUMN deleting_at TEXT;

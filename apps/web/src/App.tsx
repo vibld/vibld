@@ -1,0 +1,258 @@
+import { AccessGate } from './components/AccessGate.tsx';
+import { AdminSettings } from './components/AdminSettings.tsx';
+import { MockupChooser } from './components/MockupChooser.tsx';
+import { ADMIN_PATH, isAdminPath } from './admin/route.ts';
+import { useRef } from 'react';
+import { navigate, usePathname } from './admin/use-pathname.ts';
+import { useFocusOnChange } from './admin/use-focus-on-change.ts';
+import { Mark, WORDMARK } from './components/Mark.tsx';
+import { Conversation } from './components/Conversation.tsx';
+import { KnowledgePanel } from './components/KnowledgePanel.tsx';
+import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
+import { SettingsMenu } from './components/SettingsMenu.tsx';
+import { BillingStatusWidget } from './components/BillingStatus.tsx';
+import { GitHubPanel } from './components/GitHubPanel.tsx';
+import { describeMode } from './generation/labels.ts';
+import { ThemeToggle } from './components/ThemeToggle.tsx';
+import { footerNote } from './generation/pane-gaps.ts';
+import { saveStyleDna } from './generation/style-dna-store.ts';
+import { saveKnowledge } from './generation/knowledge-store.ts';
+import { LifecycleBar } from './components/LifecycleBar.tsx';
+import { PromptPanel } from './components/PromptPanel.tsx';
+import { Workspace } from './components/Workspace.tsx';
+import { useBuilderSession } from './useBuilderSession.ts';
+import { AuthGate, AuthStatus } from './auth/clerk.tsx';
+
+/**
+ * `AuthGate` is the outermost piece deliberately: `Builder` -- and the
+ * `useBuilderSession` probe it mounts -- must not exist at all while signed
+ * out, not just render behind a gate. Splitting it out of `App` is what
+ * makes that mount conditional instead of the gate wrapping an
+ * already-running session.
+ *
+ * `AccessGate` sits inside it for the same reason and answers the next
+ * question: signed in, but is this account on the invite list. Two gates
+ * rather than one, because "not signed in" is something the reader can fix
+ * in ten seconds and "not on the list" is not.
+ */
+export function App() {
+  return (
+    <AuthGate>
+      <AccessGate>
+        <Builder />
+      </AccessGate>
+    </AuthGate>
+  );
+}
+
+function Builder() {
+  const { session, state } = useBuilderSession();
+  const usage = state.budget.used;
+  // Which of the two views this is. The session above it stays mounted
+  // across the change, which is the whole reason this is a state and not a
+  // link to another document: a run takes minutes, and an admin who
+  // stepped into settings during one would otherwise come back to an empty
+  // shell (#184).
+  const pathname = usePathname();
+  const onAdminPage = isAdminPath(pathname);
+  // Where focus goes when the view changes under a reader who never left
+  // the document. See `useFocusOnChange`.
+  const body = useRef<HTMLElement | null>(null);
+  useFocusOnChange(pathname, body);
+
+  return (
+    <div className="shell">
+      {/*
+        The bar carries what somebody looks at while building, and nothing
+        else. It used to carry the brand, a sentence describing the
+        deployment, a billing readout with three buttons, the whole GitHub
+        connection panel and the account button, all competing for the same
+        row. All of that except the brand and the account is configuration:
+        read once, changed rarely, and now behind the gear.
+      */}
+      <header className="shell__header">
+        <div className="shell__brand">
+          <span className="shell__logo">
+            <Mark size={22} />
+          </span>
+          <div>
+            <p className="shell__name">{WORDMARK}</p>
+            <p className="shell__tagline">Vibe. Build. Ship.</p>
+          </div>
+        </div>
+        <div className="shell__controls">
+          <ThemeToggle />
+          <SettingsMenu>
+            {(closeSettings) => (
+              <>
+                <section className="settings__section">
+                  <h2 className="settings__heading">Plan and usage</h2>
+                  <BillingStatusWidget />
+                </section>
+                <section className="settings__section">
+                  <h2 className="settings__heading">GitHub</h2>
+                  {/*
+                Still mounted on every page load, which is why the panel it
+                sits in is hidden rather than unmounted when the menu is
+                closed: the OAuth callback puts its code in the fragment and
+                redirects here, and whatever claims that has to be running.
+              */}
+                  <GitHubPanel />
+                </section>
+                {/*
+              The only way into the admin page, and it exists only for an
+              admin. `isAdmin` is `null` until `/api/config` answers, so
+              this is absent during the probe rather than briefly wrong in
+              either direction. It is not a permission: `/api/admin/*`
+              checks the caller itself (ADR-0006).
+            */}
+                {state.isAdmin === true ? (
+                  <section className="settings__section">
+                    <h2 className="settings__heading">Platform admin</h2>
+                    <a
+                      className="settings__link"
+                      href={ADMIN_PATH}
+                      onClick={(event) => {
+                        if (
+                          event.defaultPrevented ||
+                          event.metaKey ||
+                          event.ctrlKey ||
+                          event.shiftKey ||
+                          event.altKey ||
+                          event.button !== 0
+                        ) {
+                          return;
+                        }
+                        event.preventDefault();
+                        // Closed as part of the same action. The popover's
+                        // outside-click handler deliberately ignores a
+                        // mousedown that happened inside the panel, and an
+                        // internal navigation changes nothing it watches, so
+                        // without this the admin page opened underneath a menu
+                        // still standing over it (#188 review).
+                        closeSettings();
+                        navigate(ADMIN_PATH);
+                      }}
+                    >
+                      Credit, invites, payments and takedowns
+                    </a>
+                  </section>
+                ) : null}
+                <section className="settings__section">
+                  <h2 className="settings__heading">This deployment</h2>
+                  {/*
+                Reports what actually served the last run, and claims nothing
+                before there has been one. It used to say the same thing
+                across the header on every screen.
+              */}
+                  <p className="settings__note">
+                    {describeMode(state.providerId)}
+                  </p>
+                </section>
+              </>
+            )}
+          </SettingsMenu>
+          <AuthStatus />
+        </div>
+      </header>
+
+      <main
+        className={
+          onAdminPage ? 'shell__body shell__body--page' : 'shell__body'
+        }
+        ref={body}
+        tabIndex={-1}
+      >
+        {onAdminPage ? <AdminSettings isAdmin={state.isAdmin} /> : null}
+        <section
+          className="column column--left"
+          aria-label="Conversation"
+          hidden={onAdminPage}
+        >
+          <Conversation state={state} />
+          <div className="composer">
+            <LifecycleBar status={state.status} />
+            <KnowledgePanel
+              knowledge={state.knowledge}
+              disabled={state.running}
+              onChange={(value) => {
+                session.setKnowledge(value);
+                saveKnowledge(value);
+              }}
+            />
+            <StyleDnaPanel
+              styleDna={state.styleDna}
+              disabled={state.running}
+              onChange={(value) => {
+                session.setStyleDna(value);
+                saveStyleDna(value);
+              }}
+            />
+            {/*
+              Above the composer, because it is what the next click is
+              about. Every mockup is model output and renders in a fully
+              restricted frame -- see `MockupChooser`.
+            */}
+            <MockupChooser
+              mockups={state.mockups}
+              onChoose={(mockup) => session.chooseMockup(mockup)}
+              onDiscard={() => session.discardMockups()}
+              disabled={state.running}
+            />
+            <PromptPanel
+              state={state}
+              onSubmit={(prompt, mode, style, referenceUrl) => {
+                void session.submit(prompt, mode, style, referenceUrl);
+              }}
+              onExplore={(prompt, style, referenceUrl) => {
+                void session.explore(prompt, style, referenceUrl);
+              }}
+              onReset={() => session.reset()}
+              onCancel={() => session.cancel()}
+              onCancelExplore={() => session.cancelExplore()}
+              onModelChange={(model) => session.setModel(model)}
+            />
+          </div>
+        </section>
+
+        {/*
+          Hidden rather than unmounted, both of these. The preview iframe
+          and the workspace carry live state -- a sandbox that has loaded,
+          a scroll position, a file selection -- and a trip to settings
+          should cost none of it. `hidden` is also what tells assistive
+          technology the builder is not on screen; `hidden-attribute.test`
+          holds the stylesheet to honouring it.
+        */}
+        <Workspace state={state} hidden={onAdminPage} />
+      </main>
+
+      {/*
+        Folded away by default. The run count and the token figures are
+        reference, not news: worth having, not worth a permanent band across
+        the bottom of every screen competing with the work. `details` rather
+        than a button and a state, because the browser already knows how to
+        do a disclosure and does it accessibly.
+      */}
+      <footer className="shell__footer">
+        <details className="runstats">
+          <summary className="runstats__summary">Run stats</summary>
+          <span className="runstats__figures">
+            Runs: {state.runCount} · Provider:{' '}
+            {state.providerId ?? 'not run yet'} · Model tokens:{' '}
+            {usage.modelInputTokens} in / {usage.modelOutputTokens} out
+          </span>
+        </details>
+        {/*
+          This used to say that sandbox execution, real providers, Git export
+          and deployment were not implemented. All four shipped, and the line
+          stayed, so the app spent weeks denying the features somebody was
+          using while reading it. Then it was corrected twice and still left
+          claiming Problems was wired. It is now assembled from the same list
+          the panes state their own gaps from (generation/pane-gaps.ts), so
+          there is nothing here to correct separately.
+        */}
+        <span>{footerNote()}</span>
+      </footer>
+    </div>
+  );
+}

@@ -1,0 +1,19 @@
+-- A referral whose funding payment went back out.
+--
+-- Recorded durably because the absence of a payout is not proof that no
+-- payout can still happen, and the clawback treated it as one. Two ways that
+-- is wrong, both real:
+--
+--   * The nightly replay descends newest pages first, so a refund can be
+--     applied in one run before the older purchase that earned the reward is
+--     recovered. The clawback read paid_at as NULL, found nothing to take
+--     back, and discarded the reversal; resumeStrandedPayouts then paid the
+--     referral on the recorded payment afterwards.
+--   * A payout that fails after one grant but before markPaid leaves paid_at
+--     NULL with money already handed out, and a refund arriving before
+--     Stripe's retry hit exactly the same branch.
+--
+-- So the reversal is written whether or not there was anything to reverse,
+-- and decidePayout refuses a row that carries one. A reward cannot be paid
+-- after its payment has been returned, in either order.
+ALTER TABLE referral_attributions ADD COLUMN reversed_at TEXT;

@@ -1,0 +1,213 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { MODEL_CATALOGUE } from '@vibld/ai/model-catalogue';
+import { decideModel, grantedFor } from '../worker/model-access.ts';
+
+/** Every provider keyed, so "everything configured" really means everything. */
+const ALL_KEYED = {
+  ANTHROPIC_API_KEY: 'a',
+  DEEPSEEK_API_KEY: 'd',
+  OPENAI_API_KEY: 'o',
+};
+const POLICY = JSON.stringify({
+  default: ['deepseek-flash'],
+  users: { 'sam@example.com': ['claude-opus-5', 'deepseek-v4-pro'] },
+});
+
+describe('grantedFor', () => {
+  it('offers everything configured when no policy is set', () => {
+    const granted = grantedFor(ALL_KEYED, 'anyone@example.com');
+    // Asserted against the catalogue rather than a literal: the count moves
+    // whenever a model is added, and a hard-coded number turns that into a
+    // failure that says nothing about what actually changed.
+    assert.equal(granted.length, MODEL_CATALOGUE.length);
+    assert.ok(granted.length >= 6);
+  });
+
+  it('applies both filters: deployable, then granted', () => {
+    // A policy naming Opus on a DeepSeek-only deployment must not offer it.
+    const granted = grantedFor(
+      {
+        DEEPSEEK_API_KEY: 'd',
+        VIBLD_MODEL_POLICY: JSON.stringify({
+          default: ['claude-opus-5', 'deepseek-flash'],
+        }),
+      },
+      'a@b.com',
+    );
+    assert.deepEqual(
+      granted.map((m) => m.id),
+      ['deepseek-flash'],
+    );
+  });
+});
+
+describe('decideModel', () => {
+  const env = { ...ALL_KEYED, VIBLD_MODEL_POLICY: POLICY };
+
+  it('honours a choice the principal is granted', () => {
+    const decision = decideModel(
+      env,
+      'sam@example.com',
+      'claude-opus-5',
+      'deepseek-flash',
+    );
+    assert.equal(decision.ok, true);
+    if (decision.ok) assert.equal(decision.model, 'claude-opus-5');
+  });
+
+  it('refuses a real, deployable model the principal is not granted', () => {
+    // This is the whole feature. The picker hides it; this is what stops it
+    // being used by anyone who edits the request.
+    const decision = decideModel(
+      env,
+      'stranger@x.com',
+      'claude-opus-5',
+      'deepseek-flash',
+    );
+    assert.equal(decision.ok, false);
+    if (!decision.ok) {
+      assert.equal(decision.status, 403);
+      // The identity is named: a policy keyed on the wrong address is the
+      // likeliest way to lock yourself out, and the error has to say which
+      // address it matched on.
+      assert.match(decision.error, /stranger@x\.com/);
+    }
+  });
+
+  it('never falls back to a default the principal may not use', () => {
+    // The deployment default is Opus here, but this person is only granted
+    // Flash. Falling back to the default would hand them what the policy
+    // withheld -- the exact failure this exists to prevent.
+    const decision = decideModel(env, 'stranger@x.com', null, 'claude-opus-5');
+    assert.equal(decision.ok, true);
+    if (decision.ok) assert.equal(decision.model, 'deepseek-flash');
+  });
+
+  it('falls back within the default family before anything else (#214 review)', () => {
+    // A policy from when Opus 5 was the default: Opus 5 and Fable, not 5.5.
+    // Fable is first in the catalogue, and is not what the default meant.
+    const policy = JSON.stringify({
+      default: ['claude-fable-5-1', 'claude-opus-5'],
+    });
+    const decision = decideModel(
+      { ...ALL_KEYED, VIBLD_MODEL_POLICY: policy },
+      'anyone@example.com',
+      null,
+      'claude-opus-5-5',
+    );
+    assert.equal(decision.ok, true);
+    if (decision.ok) assert.equal(decision.model, 'claude-opus-5');
+  });
+
+  it('uses the deployment default when the principal is granted it', () => {
+    const decision = decideModel(
+      env,
+      'sam@example.com',
+      null,
+      'deepseek-v4-pro',
+    );
+    assert.equal(decision.ok, true);
+    if (decision.ok) assert.equal(decision.model, 'deepseek-v4-pro');
+  });
+
+  it('refuses everything when the principal is granted nothing', () => {
+    const decision = decideModel(
+      { ...ALL_KEYED, VIBLD_MODEL_POLICY: JSON.stringify({ default: [] }) },
+      'nobody@x.com',
+      null,
+      'claude-opus-5',
+    );
+    assert.equal(decision.ok, false);
+    if (!decision.ok) {
+      assert.equal(decision.status, 403);
+      assert.match(decision.error, /No model is available to nobody@x\.com/);
+      assert.match(decision.error, /Check the policy/);
+    }
+  });
+
+  it('degrades a malformed policy to the cheapest, for everyone', () => {
+    // Escalating on a typo would hand Opus to every caller.
+    const broken = { ...ALL_KEYED, VIBLD_MODEL_POLICY: '{not json' };
+    // Which model is cheapest moves whenever the catalogue does, so this
+    // computes it the way allowedModels does rather than pinning an id.
+    const lowestOutput = Math.min(
+      ...MODEL_CATALOGUE.map((m) => m.outputMicroUsd),
+    );
+    const cheapest = MODEL_CATALOGUE.filter(
+      (m) => m.outputMicroUsd === lowestOutput,
+    ).sort((a, b) => a.inputMicroUsd - b.inputMicroUsd)[0]!;
+    for (const who of ['sam@example.com', 'stranger@x.com']) {
+      const decision = decideModel(broken, who, null, 'claude-opus-5');
+      assert.equal(decision.ok, true, who);
+      if (decision.ok) assert.equal(decision.model, cheapest.id);
+    }
+    // And a chosen expensive model is still refused under a broken policy.
+    const refused = decideModel(
+      broken,
+      'sam@example.com',
+      'claude-opus-5',
+      'x',
+    );
+    assert.equal(refused.ok, false);
+  });
+
+  it('is unaffected by how the caller cases their identity', () => {
+    for (const who of ['SAM@EXAMPLE.COM', ' sam@example.com ']) {
+      const decision = decideModel(env, who, 'claude-opus-5', 'deepseek-flash');
+      assert.equal(decision.ok, true, who);
+    }
+  });
+
+  it('treats the unknown-identity bucket as an ordinary unnamed caller', () => {
+    // resolvePrincipal falls back to 'unknown' for a token with no verified
+    // email. That must land on the default grant, never on a named user's.
+    const decision = decideModel(
+      env,
+      'unknown',
+      'claude-opus-5',
+      'deepseek-flash',
+    );
+    assert.equal(decision.ok, false);
+  });
+});
+
+describe('a renamed model id reaching the endpoint', () => {
+  it('grants and runs it, resolved to the id the provider has', () => {
+    // Two failures in one: a deployment whose policy still names the old id
+    // would 403 on every request, and a saved or bookmarked request naming it
+    // would otherwise be sent to DeepSeek as a model that does not exist.
+    const legacyPolicy = JSON.stringify({ default: ['deepseek-v4-flash'] });
+    const env = { ...ALL_KEYED, VIBLD_MODEL_POLICY: legacyPolicy };
+
+    const granted = grantedFor(env, 'sam@example.com');
+    assert.deepEqual(
+      granted.map((model) => model.id),
+      ['deepseek-flash'],
+    );
+
+    const decision = decideModel(
+      env,
+      'sam@example.com',
+      'deepseek-v4-flash',
+      'deepseek-flash',
+    );
+    assert.ok(decision.ok);
+    assert.equal(decision.model, 'deepseek-flash');
+  });
+
+  it('still refuses a model the policy does not grant', () => {
+    // The alias resolves ids; it must not widen what anyone may spend on.
+    const env = {
+      ...ALL_KEYED,
+      VIBLD_MODEL_POLICY: JSON.stringify({ default: ['deepseek-v4-flash'] }),
+    };
+    const decision = decideModel(
+      env,
+      'sam@example.com',
+      'claude-opus-5',
+      'deepseek-flash',
+    );
+    assert.equal(decision.ok, false);
+  });
+});

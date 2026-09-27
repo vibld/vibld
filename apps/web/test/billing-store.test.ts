@@ -1,0 +1,389 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { BillingStore } from '../worker/billing-store.ts';
+import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
+
+const SCHEMA = schemaSql();
+
+function newStore(): BillingStore {
+  return new BillingStore(new SqliteD1Database(SCHEMA));
+}
+
+/** For tests that need to reach past `BillingStore`'s own writers -- an old top-up's `created_at`, say. */
+function newStoreWithDb(): { store: BillingStore; db: SqliteD1Database } {
+  const db = new SqliteD1Database(SCHEMA);
+  return { store: new BillingStore(db), db };
+}
+
+describe('BillingStore.hasBegunAPurchase', () => {
+  /** A mirrored subscription, at whatever status the case needs. */
+  function subscriptionAt(status: string) {
+    return {
+      stripeSubscriptionId: `sub_${status}`,
+      userId: 'user_1',
+      stripeCustomerId: 'cus_1',
+      tier: 'build' as const,
+      status,
+      priceId: 'price_build_monthly',
+      currentPeriodEnd: '2026-10-16T00:00:00.000Z',
+      cancelAtPeriodEnd: false,
+    };
+  }
+
+  it('says no for an account that has never paid for anything', async () => {
+    const store = newStore();
+    assert.equal(await store.hasBegunAPurchase('user_1'), false);
+  });
+
+  it('says yes once a top-up has been recorded', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 500);
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+
+  it('says yes from the moment a Checkout exists, before it is paid', async () => {
+    // The barrier has to precede the charge or it is not a barrier: a claim
+    // submitted while a Checkout is in flight would otherwise see no
+    // purchase. The customer row is written at Checkout creation, which is
+    // the earliest point there is.
+    const store = newStore();
+    await store.linkCustomer('user_1', 'cus_1');
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+
+  it('asks about this account only', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 500);
+    assert.equal(await store.hasBegunAPurchase('user_2'), false);
+  });
+
+  it('counts a live subscription, and a trial, but not one Stripe never charged', async () => {
+    // A trial counts because the referral payout fires the moment that
+    // subscription turns active, and arranging a referral in between is the
+    // move being refused. An `incomplete` subscription is a checkout that
+    // never took a payment, which is not a purchase by any reading.
+    for (const status of ['active', 'trialing', 'past_due', 'canceled']) {
+      const store = newStore();
+      await store.upsertSubscription(subscriptionAt(status));
+      assert.equal(
+        await store.hasBegunAPurchase('user_1'),
+        true,
+        `${status} should count as having purchased`,
+      );
+    }
+
+    for (const status of ['incomplete', 'incomplete_expired']) {
+      const store = newStore();
+      await store.upsertSubscription(subscriptionAt(status));
+      assert.equal(
+        await store.hasBegunAPurchase('user_1'),
+        false,
+        `${status} should not count as having purchased`,
+      );
+    }
+  });
+
+  it('does not depend on the credit still being there', async () => {
+    // The question is whether this account has ever paid, not what it has
+    // left, so the 12-month window the credit readers apply is not applied
+    // here. An old top-up still means the account is not a new signup.
+    const { store, db } = newStoreWithDb();
+    await store.recordTopup('cs_old', 'user_1', 'cus_1', 500);
+    await db
+      .prepare(
+        `UPDATE billing_topups SET created_at = '2020-01-01T00:00:00.000Z'
+          WHERE stripe_checkout_session_id = 'cs_old'`,
+      )
+      .run();
+
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 0);
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+});
+
+describe('BillingStore.linkCustomer / findCustomerId / findUserIdForCustomer', () => {
+  it('round-trips a user-to-customer mapping in both directions', async () => {
+    const store = newStore();
+    await store.linkCustomer('user_1', 'cus_1');
+
+    assert.equal(await store.findCustomerId('user_1'), 'cus_1');
+    assert.equal(await store.findUserIdForCustomer('cus_1'), 'user_1');
+    assert.equal(await store.findCustomerId('user_missing'), undefined);
+  });
+
+  it('keeps the first mapping once one exists', async () => {
+    const store = newStore();
+    await store.linkCustomer('user_1', 'cus_1');
+    await store.linkCustomer('user_1', 'cus_2');
+
+    assert.equal(
+      await store.findCustomerId('user_1'),
+      'cus_1',
+      'a redelivered or racing webhook must not reassign an existing mapping',
+    );
+  });
+});
+
+describe('BillingStore subscriptions', () => {
+  const RECORD = {
+    stripeSubscriptionId: 'sub_1',
+    userId: 'user_1',
+    stripeCustomerId: 'cus_1',
+    tier: 'build' as const,
+    status: 'active',
+    priceId: 'price_1',
+    currentPeriodEnd: '2026-10-01T00:00:00.000Z',
+    cancelAtPeriodEnd: false,
+  };
+
+  it('upserts and reads a subscription record', async () => {
+    const store = newStore();
+    await store.upsertSubscription(RECORD);
+
+    assert.deepEqual(await store.getSubscription('sub_1'), {
+      ...RECORD,
+    });
+    assert.equal(await store.getSubscription('sub_missing'), undefined);
+  });
+
+  it('overwrites every field on a later upsert for the same subscription', async () => {
+    const store = newStore();
+    await store.upsertSubscription(RECORD);
+    await store.upsertSubscription({
+      ...RECORD,
+      status: 'past_due',
+      cancelAtPeriodEnd: true,
+    });
+
+    const updated = await store.getSubscription('sub_1');
+    assert.equal(updated?.status, 'past_due');
+    assert.equal(updated?.cancelAtPeriodEnd, true);
+  });
+
+  it('lists every mirrored subscription id, for the nightly reconcile', async () => {
+    const store = newStore();
+    await store.upsertSubscription(RECORD);
+    await store.upsertSubscription({
+      ...RECORD,
+      stripeSubscriptionId: 'sub_2',
+    });
+
+    const ids = await store.listSubscriptionIds();
+    assert.deepEqual([...ids].sort(), ['sub_1', 'sub_2']);
+  });
+});
+
+describe('BillingStore.recordTopup', () => {
+  it('records a top-up once, keyed by checkout session id', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 800);
+    // A redelivered checkout.session.completed for the same session must not
+    // double-count the credit.
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 800);
+
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 8_000_000);
+  });
+});
+
+describe('BillingStore.findActiveSubscription', () => {
+  const RECORD = {
+    stripeSubscriptionId: 'sub_1',
+    userId: 'user_1',
+    stripeCustomerId: 'cus_1',
+    tier: 'ship' as const,
+    status: 'active',
+    priceId: 'price_1',
+    currentPeriodEnd: '2026-10-01T00:00:00.000Z',
+    cancelAtPeriodEnd: false,
+  };
+
+  it('finds an active subscription for a user', async () => {
+    const store = newStore();
+    await store.upsertSubscription(RECORD);
+
+    assert.deepEqual(await store.findActiveSubscription('user_1'), {
+      ...RECORD,
+    });
+  });
+
+  it('finds a trialing subscription too', async () => {
+    const store = newStore();
+    await store.upsertSubscription({ ...RECORD, status: 'trialing' });
+
+    assert.equal(
+      (await store.findActiveSubscription('user_1'))?.status,
+      'trialing',
+    );
+  });
+
+  it('is undefined for a canceled subscription -- it must not still grant a tier', async () => {
+    const store = newStore();
+    await store.upsertSubscription({ ...RECORD, status: 'canceled' });
+
+    assert.equal(await store.findActiveSubscription('user_1'), undefined);
+  });
+
+  it('is undefined for a user with no subscription at all', async () => {
+    const store = newStore();
+    assert.equal(await store.findActiveSubscription('user_nobody'), undefined);
+  });
+});
+
+describe('BillingStore.totalTopupCreditMicroUsd', () => {
+  it('is zero with no top-ups', async () => {
+    const store = newStore();
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 0);
+  });
+
+  it('sums every top-up for the user, converting cents to micro-USD', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 800);
+    await store.recordTopup('cs_2', 'user_1', 'cus_1', 800);
+    await store.recordTopup('cs_3', 'user_2', 'cus_2', 800);
+
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 16_000_000);
+    assert.equal(await store.totalTopupCreditMicroUsd('user_2'), 8_000_000);
+  });
+
+  it('excludes a top-up older than 12 months (L36)', async () => {
+    const { store, db } = newStoreWithDb();
+    await store.recordTopup('cs_recent', 'user_1', 'cus_1', 800);
+    // Older than 12 months: not reachable through recordTopup, which always
+    // stamps "now" -- inserted directly to exercise the boundary.
+    await db
+      .prepare(
+        `INSERT INTO billing_topups
+           (stripe_checkout_session_id, user_id, stripe_customer_id, credit_usd_cents, created_at)
+         VALUES ('cs_old', 'user_1', 'cus_1', 800, datetime('now', '-13 months'))`,
+      )
+      .run();
+
+    assert.equal(await store.totalTopupCreditMicroUsd('user_1'), 8_000_000);
+  });
+});
+
+describe('BillingStore.grantAdminCredit / totalAdminCreditMicroUsd', () => {
+  it('is zero with no grants', async () => {
+    const store = newStore();
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 0);
+  });
+
+  it('sums every grant for the user, converting cents to micro-USD', async () => {
+    const store = newStore();
+    await store.grantAdminCredit('g1', 'user_1', 500, 'admin@vibld.com', null);
+    await store.grantAdminCredit(
+      'g2',
+      'user_1',
+      300,
+      'admin@vibld.com',
+      'goodwill',
+    );
+    await store.grantAdminCredit('g3', 'user_2', 500, 'admin@vibld.com', null);
+
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 8_000_000);
+    assert.equal(await store.totalAdminCreditMicroUsd('user_2'), 5_000_000);
+  });
+
+  it('keeps the first grant if the same id is somehow reused', async () => {
+    const store = newStore();
+    await store.grantAdminCredit('g1', 'user_1', 500, 'admin@vibld.com', null);
+    await store.grantAdminCredit('g1', 'user_1', 999, 'admin@vibld.com', null);
+
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 5_000_000);
+  });
+
+  it('excludes a grant older than 12 months, the same window top-ups use', async () => {
+    const { store, db } = newStoreWithDb();
+    await store.grantAdminCredit(
+      'g_recent',
+      'user_1',
+      500,
+      'admin@vibld.com',
+      null,
+    );
+    await db
+      .prepare(
+        `INSERT INTO billing_admin_credits
+           (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
+         VALUES ('g_old', 'user_1', 500, 'admin@vibld.com', NULL, datetime('now', '-13 months'))`,
+      )
+      .run();
+
+    assert.equal(await store.totalAdminCreditMicroUsd('user_1'), 5_000_000);
+  });
+});
+
+describe('BillingStore.totalSpendableCreditMicroUsd', () => {
+  it('combines Stripe top-ups and admin grants', async () => {
+    const store = newStore();
+    await store.recordTopup('cs_1', 'user_1', 'cus_1', 800);
+    await store.grantAdminCredit('g1', 'user_1', 500, 'admin@vibld.com', null);
+
+    assert.equal(
+      await store.totalSpendableCreditMicroUsd('user_1'),
+      13_000_000,
+    );
+  });
+
+  it('is zero for a user with neither', async () => {
+    const store = newStore();
+    assert.equal(await store.totalSpendableCreditMicroUsd('user_1'), 0);
+  });
+});
+
+describe('BillingStore.listAdminCredits', () => {
+  it("returns this user's grants only, newest first", async () => {
+    const { store, db } = newStoreWithDb();
+    await db
+      .prepare(
+        `INSERT INTO billing_admin_credits
+           (id, user_id, credit_usd_cents, granted_by_email, note, created_at)
+         VALUES ('g_old', 'user_1', 500, 'admin@vibld.com', 'first', datetime('now', '-2 days'))`,
+      )
+      .run();
+    await store.grantAdminCredit(
+      'g_new',
+      'user_1',
+      300,
+      'admin@vibld.com',
+      'second',
+    );
+    await store.grantAdminCredit(
+      'g_other',
+      'user_2',
+      999,
+      'admin@vibld.com',
+      null,
+    );
+
+    const grants = await store.listAdminCredits('user_1');
+    assert.equal(grants.length, 2);
+    assert.equal(grants[0]!.id, 'g_new');
+    assert.equal(grants[0]!.note, 'second');
+    assert.equal(grants[1]!.id, 'g_old');
+  });
+
+  it('is empty for a user with no grants', async () => {
+    const store = newStore();
+    assert.deepEqual(await store.listAdminCredits('user_1'), []);
+  });
+});
+
+describe('BillingStore webhook event dedup', () => {
+  it('reports an unseen event as unprocessed, then as processed once marked', async () => {
+    const store = newStore();
+    assert.equal(await store.wasEventProcessed('evt_1'), false);
+
+    await store.markEventProcessed('evt_1', 'checkout.session.completed');
+    assert.equal(await store.wasEventProcessed('evt_1'), true);
+  });
+
+  it('marking the same event twice does not throw', async () => {
+    const store = newStore();
+    await store.markEventProcessed('evt_1', 'checkout.session.completed');
+    await store.markEventProcessed('evt_1', 'checkout.session.completed');
+    assert.equal(await store.wasEventProcessed('evt_1'), true);
+  });
+});
