@@ -207,6 +207,14 @@ exactly this path.
 
 ### Resolved 2026-09-27
 
+**Roadmap additions.** Chris added, on 2026-09-27: Figma import (out of the
+deferred list), screenshot and image import, existing GitHub repository
+import, a starter template gallery, custom domains for published sites,
+authentication, forms and email capture, payments and editable content for
+generated apps, a checkpoint history with one-step rollback, bring your own
+model key, comments on shared previews, and a command-line sync.
+`ROADMAP.md` places each one; none of them is scheduled.
+
 **The nightly billing pass rotates when its query budget is too small to
 split (internal issue 176).** Chris chose option 1, rotate, on 2026-09-27, in this form:
 the parked queue keeps its floor every night, and payout, reconcile and

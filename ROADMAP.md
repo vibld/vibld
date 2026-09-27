@@ -44,19 +44,41 @@ Track: M1 milestone and Hello Vibld tracker.
 
 ## M2: Reliable iteration
 
-Conversation-driven changes to saved projects, persistent conversation history, targeted patches, regression checks, visible repair/recovery, change summaries and rollback. Reuse the M1 writer, indexing and checkpoint boundaries. M1 plus M2 proves the first usable build/edit loop. Validate a non-Cloudflare execution path and self-hosting instructions before claiming a complete independent OSS builder.
+Conversation-driven changes to saved projects, persistent conversation history, targeted patches, regression checks, visible repair/recovery, change summaries and rollback, with a history view that lists every accepted checkpoint and restores one in a single step. Reuse the M1 writer, indexing and checkpoint boundaries. M1 plus M2 proves the first usable build/edit loop. Validate a non-Cloudflare execution path and self-hosting instructions before claiming a complete independent OSS builder.
 
 ## M3: Publish
 
-Ship to an approved Cloudflare target, with deployment status, logs, rollback and environment/secret handling behind an adapter. Verify an independent static-hosting path. GitHub branch and PR support is already part of M1; broader existing-repository workflows follow as scoped developer use cases.
+Ship to an approved Cloudflare target, with deployment status, logs, rollback and environment/secret handling behind an adapter. Published sites can use the owner's own domain as well as a `vibld-preview.dev` name. Verify an independent static-hosting path. GitHub branch and PR support is already part of M1; broader existing-repository workflows follow as scoped developer use cases.
 
 ## M4: One full-stack integration
 
 Evaluate Supabase first for generated-app data, auth and storage. Keep customer application resources and credentials separate from Vibld platform resources. Deliver one complete flow with migrations, environment setup, authorization tests and export instructions before expanding providers.
 
+The capabilities generated projects most often need follow on the same rules, each exportable and each behind an adapter:
+
+- Authentication for the generated app's own users
+- Working forms and email capture without the owner setting up a backend
+- Payments in generated apps, starting with Stripe Checkout
+- Content collections, such as a blog, that someone who does not write code can edit
+
 ## M5: Visual iteration
 
 Element selection, source mapping, text/style changes and responsive inspection. Changes continue to modify portable source code and use the validated patch workflow.
+
+## M6: Start from anything
+
+More ways to begin than a sentence. Each produces the same conventional project and the same spec (`DESIGN.md`), so everything after the first run is unchanged.
+
+- Figma import: frames, components and variables become pages, components and design tokens
+- Screenshot and image import: a mockup or a picture of a page, measured the way a reference URL already is
+- Existing GitHub repositories, building on revision-scoped repository search
+- A gallery of starter templates in the builder, beginning with `templates/marketing` and `templates/luminous`
+
+## M7: Working your way
+
+- Bring your own model API key, for cost control and for self-hosted deployments
+- Comments on shared previews, the first step toward working as a team
+- A command-line tool that pulls a project into a local editor and pushes changes back as a checkpoint
 
 ## Later: Broader use cases and managed teams
 
@@ -64,4 +86,4 @@ Expand to business apps, existing-repository editing, designers/marketing workfl
 
 ## Not on the critical path
 
-Marketplace, native mobile generation, enterprise governance, Figma import, AI image generation, extensive branding and a full visual site editor remain deferred. Milestone numbers in the archived blueprint and initial repository plan are historical; use this sequence for new work.
+Marketplace, native mobile generation, enterprise governance, AI image generation, extensive branding and a full visual site editor remain deferred. Milestone numbers in the archived blueprint and initial repository plan are historical; use this sequence for new work.
