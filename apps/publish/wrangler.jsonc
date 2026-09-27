@@ -1,0 +1,45 @@
+{
+  "name": "vibld-publish",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-09-07",
+
+  // Same D1 database and R2 bucket apps/web already binds -- ADR-0010
+  // deliberately reuses the control plane's existing storage rather than
+  // provisioning a second database/bucket for one more table and one more
+  // key prefix. Cloudflare allows the same database_id/bucket_name to be
+  // bound into more than one Worker; nothing here needs an operator to create
+  // anything new in the Cloudflare dashboard.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vibld-control-plane",
+      "database_id": "4d3190b8-9093-4dfe-8f88-58b4f9c61c73",
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "PROJECT_CONTENT", "bucket_name": "vibld-control-plane" },
+  ],
+
+  // No route of its own. Published sites are `<slug>.vibld-preview.dev`, one
+  // label under apps/preview's domain, because the zone's free Universal SSL
+  // certificate covers one level only (the earlier
+  // `<slug>.published.vibld-preview.dev` needed a paid certificate).
+  // apps/preview owns the zone's wildcard route and forwards every host
+  // that is not a preview or a share here over its PUBLISH service binding
+  // (apps/preview/worker/publish-route.ts); slug.ts refuses those shapes.
+  // Still its own registrable domain, so a published site never shares
+  // cookie scope with app.vibld.com. No workers.dev address either: both
+  // callers reach this Worker over service bindings.
+  "workers_dev": false,
+
+  "vars": {
+    "PUBLISH_HOSTNAME": "vibld-preview.dev",
+  },
+
+  // The orphan sweep (#177), nightly. Offset from apps/web's own 09:17 run
+  // so the two are not drawing on the same D1 database at the same minute.
+  "triggers": { "crons": ["43 9 * * *"] },
+
+  // PUBLISH_INTERNAL_SECRET is a Worker secret, set out of band -- see
+  // internal-auth.ts / README.md.
+}

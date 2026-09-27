@@ -1,0 +1,487 @@
+name: Deploy web preview
+
+# Manual only. An automatic deploy on every push to main would redeploy on
+# every merge; the builder shell is a review aid, not something users depend
+# on being current. Run this from the Actions tab to refresh the preview.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy the builder shell
+    # Runs only in the private working repository. The public copy
+    # (vibld/vibld) has none of the secrets or deployment environments this
+    # job reads, so there it could only fail.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    # Credentials live on this environment rather than the repository, so they
+    # are reachable only from a job that names it, and any protection rule
+    # configured on it (a required reviewer) gates the run before a single
+    # step executes. Repository-level secrets of the same name still work as a
+    # fallback, so moving them is not a breaking change.
+    environment:
+      name: preview
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::CLOUDFLARE_API_TOKEN is not set"; missing=1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not set"; missing=1; }
+          if [ "$missing" -ne 0 ]; then
+            echo "Add both to the \"preview\" environment (Settings -> Environments)." >&2
+            echo "The token needs \"Workers Scripts: Edit\" and nothing more." >&2
+            exit 1
+          fi
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # The invite gate (apps/web/worker/access-gate.ts). Unset means
+      # invite-only, which is the launch state and the safe default, and the
+      # Worker opens only on the exact string `open`.
+      #
+      # This decides; "Sync the access mode" below writes. They are two steps
+      # because `wrangler secret put` creates a new Worker version and
+      # deploys it immediately, and the very first secret this job syncs is
+      # VIBLD_PLATFORM_ADMINS itself. A check that ran alongside the write
+      # would publish a broken admin list, lock out the admins who could
+      # have fixed it, and only then fail the run: a refusal that arrives
+      # after the damage is not a refusal.
+      #
+      # The decision lives in apps/web/scripts/access-preflight.ts rather
+      # than here, and imports the Worker's own `parseAccessMode`,
+      # `parsePlatformAdmins` and `normaliseEmail`. Written as shell it was a
+      # second implementation of those three rules in a language with
+      # different semantics, and every time the two disagreed the deploy was
+      # the more generous one, which is the direction that ships the outage.
+      #
+      # Placed after Setup Node because it needs the pinned Node 22 to strip
+      # types, and before Install dependencies because both modules it reaches
+      # are dependency-free. It needs no Cloudflare credentials and writes
+      # nothing.
+      - name: Check who can get in, before any secret is written
+        shell: bash
+        working-directory: apps/web
+        env:
+          VIBLD_ACCESS_MODE: ${{ secrets.VIBLD_ACCESS_MODE }}
+          VIBLD_PLATFORM_ADMINS: ${{ secrets.VIBLD_PLATFORM_ADMINS }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+        run: node --experimental-strip-types scripts/access-preflight.ts
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # CLERK_PUBLISHABLE_KEY is not sensitive -- Clerk designs it to ship in
+      # the client bundle -- but it lives alongside CLERK_SECRET_KEY on this
+      # environment rather than as a repository var, so both are set in one
+      # place. Vite only inlines VITE_-prefixed env vars into the build, and
+      # only at build time; an unset key here means ClerkRoot renders nothing
+      # rather than the app failing to build or boot (see src/auth/clerk.tsx).
+      - name: Build
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+        run: pnpm --filter @vibld/web build
+
+      # Model keys are Worker secrets, not build inputs, so they are pushed
+      # separately from the deploy. Doing it here rather than by hand means
+      # the key is pasted in exactly one place -- the `preview` environment --
+      # instead of once for CI and again in a terminal.
+      #
+      # Only a key that is actually configured is pushed: an unset secret is
+      # an empty string here, and writing that would replace a working Worker
+      # secret with nothing.
+      - name: Sync model credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VIBLD_MODEL_POLICY: ${{ secrets.VIBLD_MODEL_POLICY }}
+        run: |
+          set -euo pipefail
+
+          # The provider the deployment selects, read from the committed
+          # config rather than guessed, so this fails before a deploy that
+          # would leave the live site without the key it needs.
+          provider="$(node --experimental-strip-types scripts/wrangler-var.ts VIBLD_PROVIDER anthropic)"
+          echo "wrangler.jsonc selects: $provider"
+
+          put() {
+            # The value goes in on stdin so it never appears in a command line
+            # or in the run log.
+            printf '%s' "$2" | pnpm dlx wrangler@4.137.0 secret put "$1"
+          }
+
+          case "$provider" in
+            deepseek) required=DEEPSEEK_API_KEY ;;
+            openai)   required=OPENAI_API_KEY ;;
+            *)        required=ANTHROPIC_API_KEY ;;
+          esac
+          if [ -z "${!required}" ]; then
+            echo "::error::$required is not set on the 'preview' environment, but wrangler.jsonc selects $provider. Add it before deploying, or the live site falls back to the deterministic fake."
+            exit 1
+          fi
+
+          # `[ -n "$x" ] && put ...` would abort the whole step under `set -e`
+          # the moment one key is unconfigured, which is the normal case.
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            put ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+          fi
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            put DEEPSEEK_API_KEY "$DEEPSEEK_API_KEY"
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then
+            put OPENAI_API_KEY "$OPENAI_API_KEY"
+          fi
+          # Who may use which model. A secret rather than a var because it
+          # names people and this repository is public. Unset means no policy:
+          # everyone may use whatever the deployment can serve.
+          if [ -n "$VIBLD_MODEL_POLICY" ]; then
+            put VIBLD_MODEL_POLICY "$VIBLD_MODEL_POLICY"
+          fi
+          echo "Synced the model credentials that are configured." >> "$GITHUB_STEP_SUMMARY"
+
+      # Shared with @vibld/preview's own copy of the same value (see
+      # deploy-sandbox-service.yml) -- apps/web's /api/preview uses it to
+      # authenticate to that Worker over the PREVIEW service binding.
+      # Optional here: an unset value means /api/preview answers "not
+      # configured" rather than the whole deploy failing (docs/decisions.md
+      # L7-L11 is additive to a deployment that already works without it).
+      - name: Sync the preview service secret to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW_INTERNAL_SECRET: ${{ secrets.PREVIEW_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PREVIEW_INTERNAL_SECRET" ]; then
+            printf '%s' "$PREVIEW_INTERNAL_SECRET" | pnpm dlx wrangler@4.137.0 secret put PREVIEW_INTERNAL_SECRET
+            echo "Synced PREVIEW_INTERNAL_SECRET." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "PREVIEW_INTERNAL_SECRET not set -- /api/preview stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ADR-0010. Shared with @vibld/publish's own copy of the same value --
+      # apps/web's /api/publish uses it to authenticate to that Worker over
+      # the PUBLISH service binding. Optional, same rule as the preview
+      # secret above: unset means /api/publish answers "not configured"
+      # rather than the whole deploy failing.
+      - name: Sync the publish service secret to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PUBLISH_INTERNAL_SECRET: ${{ secrets.PUBLISH_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PUBLISH_INTERNAL_SECRET" ]; then
+            printf '%s' "$PUBLISH_INTERNAL_SECRET" | pnpm dlx wrangler@4.137.0 secret put PUBLISH_INTERNAL_SECRET
+            echo "Synced PUBLISH_INTERNAL_SECRET." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "PUBLISH_INTERNAL_SECRET not set -- /api/publish stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Stripe billing (docs/decisions.md L12-L15). Optional, same as
+      # PREVIEW_INTERNAL_SECRET above: unset means handlePlan's budget gate
+      # and /api/billing/* answer "not configured" rather than the whole
+      # deploy failing -- billing is additive to a deployment that already
+      # works without it.
+      - name: Sync Stripe credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$STRIPE_SECRET_KEY" ]; then
+            printf '%s' "$STRIPE_SECRET_KEY" | pnpm dlx wrangler@4.137.0 secret put STRIPE_SECRET_KEY
+            echo "Synced STRIPE_SECRET_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "STRIPE_SECRET_KEY not set -- billing stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$STRIPE_WEBHOOK_SECRET" ]; then
+            printf '%s' "$STRIPE_WEBHOOK_SECRET" | pnpm dlx wrangler@4.137.0 secret put STRIPE_WEBHOOK_SECRET
+            echo "Synced STRIPE_WEBHOOK_SECRET." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "STRIPE_WEBHOOK_SECRET not set -- /api/stripe/webhook stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The GitHub App that pushes a checkpoint to a user's repository
+      # (issue #13). Optional, same rule as every secret above: unset means
+      # /api/github/* answers "not configured" rather than the deploy
+      # failing.
+      #
+      # VIBLD_GITHUB_PRIVATE_KEY is the .pem GitHub generated for the App,
+      # pasted whole into the environment secret (BEGIN/END lines and all).
+      # It never travels any other way: not by email, not through a chat, and
+      # not into this repository. `printf %s` rather than a heredoc so the
+      # newlines inside it survive, and it is piped straight into wrangler so
+      # it is never an argument any process listing could show.
+      # Before anything replaces a live secret, not after.
+      #
+      # `wrangler secret put` writes straight to the running Worker, so a
+      # malformed or mismatched pair checked afterwards is already installed:
+      # the deploy then fails and looks safely blocked while every push on the
+      # live site is broken by the credentials this run just wrote. Checking
+      # first means a bad pair stops the run having changed nothing, and only
+      # credentials that answered GitHub are synced.
+      #
+      # It also says what the App may do, which the key being present does
+      # not: a read-only App looks configured from every angle the rest of
+      # this workflow can see and answers 422 on every push.
+      #
+      # Skipped when there is no App to ask about, like every other optional
+      # secret here.
+      - name: Check the GitHub App before syncing its credentials
+        working-directory: apps/web
+        env:
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+        run: node --experimental-strip-types scripts/check-github-app.ts
+
+      - name: Sync the GitHub App credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+          VIBLD_GITHUB_CLIENT_ID: ${{ secrets.VIBLD_GITHUB_CLIENT_ID }}
+          VIBLD_GITHUB_CLIENT_SECRET: ${{ secrets.VIBLD_GITHUB_CLIENT_SECRET }}
+          VIBLD_GITHUB_WEBHOOK_SECRET: ${{ secrets.VIBLD_GITHUB_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VIBLD_GITHUB_APP_ID" ] && [ -n "$VIBLD_GITHUB_PRIVATE_KEY" ]; then
+            printf '%s' "$VIBLD_GITHUB_APP_ID" | pnpm dlx wrangler@4.137.0 secret put VIBLD_GITHUB_APP_ID
+            printf '%s' "$VIBLD_GITHUB_PRIVATE_KEY" | pnpm dlx wrangler@4.137.0 secret put VIBLD_GITHUB_PRIVATE_KEY
+            echo "Synced the GitHub App credentials." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_GITHUB_APP_ID/VIBLD_GITHUB_PRIVATE_KEY not both set -- pushing to GitHub stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # The OAuth half, which is what lets somebody connect a repository
+          # in the first place. Synced separately because it gates a
+          # different thing: without it a deployment can still push on a
+          # binding it already has, it just cannot make new ones.
+          if [ -n "$VIBLD_GITHUB_CLIENT_ID" ] && [ -n "$VIBLD_GITHUB_CLIENT_SECRET" ]; then
+            printf '%s' "$VIBLD_GITHUB_CLIENT_ID" | pnpm dlx wrangler@4.137.0 secret put VIBLD_GITHUB_CLIENT_ID
+            printf '%s' "$VIBLD_GITHUB_CLIENT_SECRET" | pnpm dlx wrangler@4.137.0 secret put VIBLD_GITHUB_CLIENT_SECRET
+            echo "Synced the GitHub OAuth credentials." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_GITHUB_CLIENT_ID/VIBLD_GITHUB_CLIENT_SECRET not both set -- connecting a repository stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # The webhook secret, which is the whole of the authentication on
+          # /api/github/webhook: no session reaches that route. Unset means
+          # the route answers 503 and a merged pull request goes on being
+          # reported as open, which is a stale readout rather than a broken
+          # push.
+          if [ -n "$VIBLD_GITHUB_WEBHOOK_SECRET" ]; then
+            printf '%s' "$VIBLD_GITHUB_WEBHOOK_SECRET" | pnpm dlx wrangler@4.137.0 secret put VIBLD_GITHUB_WEBHOOK_SECRET
+            echo "Synced the GitHub webhook secret." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_GITHUB_WEBHOOK_SECRET not set -- pull request state stays unreported on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # L44's nightly provider-balance check. Optional, same rule as every
+      # secret above: unset means the check still runs and logs, it just
+      # cannot send. A separate copy from apps/marketing's own
+      # RESEND_API_KEY -- Cloudflare Secrets are per-Worker, not shared.
+      - name: Sync the Resend key to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RESEND_API_KEY" ]; then
+            printf '%s' "$RESEND_API_KEY" | pnpm dlx wrangler@4.137.0 secret put RESEND_API_KEY
+            echo "Synced RESEND_API_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "RESEND_API_KEY not set -- the L44 balance check still runs but cannot send an alert." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The welcome credit's cohort cutoff (signup-credit.ts). Not secret, but
+      # synced the same way as the values above so it is configured in one
+      # place rather than by hand against a live Worker after every deploy.
+      #
+      # Without it the credit is granted to nobody: there is no safe default,
+      # because any cutoff early enough to catch genuinely new accounts also
+      # catches every account that already exists. So "not set" is reported
+      # loudly here rather than passed over, since a silent no-op is exactly
+      # what it would otherwise look like.
+      #
+      # Format is a full ISO instant with a timezone, e.g.
+      # 2026-09-13T00:00:00Z. Anything else is refused by signupCohortStart
+      # and grants nobody anything, so it is checked here too rather than
+      # discovered as an absence of credits later.
+      - name: Sync the signup credit cutoff to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIBLD_SIGNUP_CREDIT_FROM: ${{ secrets.VIBLD_SIGNUP_CREDIT_FROM }}
+          VIBLD_SIGNUP_CREDIT_USD_CENTS: ${{ secrets.VIBLD_SIGNUP_CREDIT_USD_CENTS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$VIBLD_SIGNUP_CREDIT_FROM" ]; then
+            echo "::warning::VIBLD_SIGNUP_CREDIT_FROM is not set on the 'preview' environment, so no new account will receive the welcome credit. Set it to the ISO instant the offer starts, e.g. 2026-09-13T00:00:00Z."
+            echo "Signup credit: OFF (no cohort cutoff configured)." >> "$GITHUB_STEP_SUMMARY"
+          elif ! printf '%s' "$VIBLD_SIGNUP_CREDIT_FROM" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]{1,3})?)?(Z|[+-][0-9]{2}:[0-9]{2})$'; then
+            echo "::error::VIBLD_SIGNUP_CREDIT_FROM is not a full ISO instant with a timezone. The Worker would refuse it and grant nobody anything. Expected something like 2026-09-13T00:00:00Z."
+            exit 1
+          elif ! day="$(date -u -d "${VIBLD_SIGNUP_CREDIT_FROM:0:10}" +%Y-%m-%d 2>/dev/null)" \
+            || [ "$day" != "${VIBLD_SIGNUP_CREDIT_FROM:0:10}" ]; then
+            # The shape can be right and the day still not exist. The Worker
+            # checks this too, but only after the value is already deployed:
+            # catching it here is the difference between a failed deploy and
+            # a green one that silently grants nobody anything.
+            echo "::error::VIBLD_SIGNUP_CREDIT_FROM names a day that does not exist (${VIBLD_SIGNUP_CREDIT_FROM:0:10}). The Worker would refuse it and grant nobody anything."
+            exit 1
+          else
+            printf '%s' "$VIBLD_SIGNUP_CREDIT_FROM" | pnpm dlx wrangler@4.137.0 secret put VIBLD_SIGNUP_CREDIT_FROM
+            echo "Signup credit: accounts created from $VIBLD_SIGNUP_CREDIT_FROM." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Optional. Unset means the default of 100 cents; "0" turns the
+          # grant off without touching the cutoff.
+          if [ -n "$VIBLD_SIGNUP_CREDIT_USD_CENTS" ]; then
+            printf '%s' "$VIBLD_SIGNUP_CREDIT_USD_CENTS" | pnpm dlx wrangler@4.137.0 secret put VIBLD_SIGNUP_CREDIT_USD_CENTS
+            echo "Signup credit amount: ${VIBLD_SIGNUP_CREDIT_USD_CENTS}c." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Platform admins (docs/decisions.md L4) and the Clerk secret key
+      # `/api/admin/*` uses to resolve an admin-typed email into the Clerk
+      # user id the ledger keys on (clerk-lookup.ts). Optional, same rule as
+      # every secret above: unset means `/api/admin/*` answers "not
+      # configured" rather than the whole deploy failing -- the admin credit
+      # tool is additive to a deployment that already works without it.
+      - name: Sync admin credentials to the Worker
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIBLD_PLATFORM_ADMINS: ${{ secrets.VIBLD_PLATFORM_ADMINS }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VIBLD_PLATFORM_ADMINS" ]; then
+            printf '%s' "$VIBLD_PLATFORM_ADMINS" | pnpm dlx wrangler@4.137.0 secret put VIBLD_PLATFORM_ADMINS
+            echo "Synced VIBLD_PLATFORM_ADMINS." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "VIBLD_PLATFORM_ADMINS not set -- no admin grants on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -n "$CLERK_SECRET_KEY" ]; then
+            printf '%s' "$CLERK_SECRET_KEY" | pnpm dlx wrangler@4.137.0 secret put CLERK_SECRET_KEY
+            echo "Synced CLERK_SECRET_KEY." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "CLERK_SECRET_KEY not set -- /api/admin/* stays unconfigured on this deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The write. Its refusal moved out to a check before any secret is
+      # touched (see "Check who can get in" above): `wrangler secret put`
+      # deploys a new Worker version immediately, so a step that validated
+      # here would have already published the value it then refused.
+      - name: Sync the access mode
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VIBLD_ACCESS_MODE: ${{ secrets.VIBLD_ACCESS_MODE }}
+        run: |
+          set -euo pipefail
+          if [ "${VIBLD_ACCESS_MODE:-}" = "open" ]; then
+            printf 'open' | pnpm dlx wrangler@4.137.0 secret put VIBLD_ACCESS_MODE
+            echo "Access: OPEN. Anybody who signs up can use the builder." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          printf 'invite' | pnpm dlx wrangler@4.137.0 secret put VIBLD_ACCESS_MODE
+          echo "Access: INVITE ONLY. Admins can issue invites from the builder." >> "$GITHUB_STEP_SUMMARY"
+
+      # Idempotent -- wrangler tracks applied migrations in the database's own
+      # `d1_migrations` table and only runs what is new. Runs before the
+      # deploy itself so a Worker never goes live expecting a table a
+      # migration this same push added hasn't created yet. This step's own
+      # absence was a real production bug: 0002_billing.sql and
+      # 0003_publish.sql sat unapplied for two days after their PRs merged,
+      # and every /api/plan call failed with "Usage accounting is
+      # unavailable" until this was caught and applied by hand.
+      - name: Apply D1 migrations
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm dlx wrangler@4.137.0 d1 migrations apply vibld-control-plane --remote
+
+      - name: Deploy to Cloudflare Workers
+        id: deploy
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          log="$RUNNER_TEMP/wrangler-deploy.log"
+          pnpm dlx wrangler@4.137.0 deploy | tee "$log"
+
+          # A custom domain route (apps/web/wrangler.jsonc's "routes") makes
+          # wrangler disable the workers.dev preview URL by default -- its
+          # output then lists the domain under "Deployed ... triggers" as
+          # "  app.vibld.com (custom domain)" instead of printing a
+          # https://*.workers.dev line at all. Prefer that when present;
+          # fall back to the workers.dev line for a deployment with no
+          # custom domain configured.
+          url="$(sed -n 's/^[[:space:]]*\([A-Za-z0-9.-]*\) (custom domain)$/https:\/\/\1/p' "$log" | head -n 1 || true)"
+          if [ -z "$url" ]; then
+            url="$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$log" | head -n 1 || true)"
+          fi
+          if [ -n "$url" ]; then
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            echo "Deployed the builder shell to $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Deploy succeeded but the URL could not be read from wrangler output"
+          fi
+
+      # A green deploy only says the upload worked. This asserts what the
+      # running Worker actually does over HTTP, which is the layer where the
+      # "Load failed" bug lived while every source check stayed green.
+      - name: Smoke test the deployment
+        env:
+          VIBLD_SMOKE_ORIGIN: ${{ steps.deploy.outputs.url }}
+        run: node scripts/smoke.mjs

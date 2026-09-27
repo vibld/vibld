@@ -1,0 +1,22 @@
+{
+  "name": "@vibld/publish",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "deploy": "pnpm dlx wrangler@4.137.0 deploy",
+    "dev": "pnpm dlx wrangler@4.137.0 dev",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vibld/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260923.1",
+    "@types/node": "26.6.2",
+    "typescript": "7.0.2"
+  }
+}

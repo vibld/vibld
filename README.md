@@ -1,0 +1,105 @@
+# Vibld
+
+**Vibe. Build. Ship.**
+
+Vibld is an open-source AI application builder for creating, editing, and shipping real web applications from natural language.
+
+Generated applications should be conventional, portable software projects that keep working without Vibld or Vibld Cloud. Users can inspect and export the complete project, subject to its third-party license obligations.
+
+## Status
+
+Vibld is early, and the honest summary is narrower than the ambition above.
+
+**What runs today.** `apps/web` is a builder shell that takes a prompt through planning, staged files, validation and an accepted checkpoint. From there a checkpoint can be run in a real sandbox, previewed at a shareable URL, published to Cloudflare, exported, or pushed to a connected GitHub repository as a branch and pull request. Accounts are Clerk; projects, budgets and audit records live in D1, R2 and a per-user Durable Object; billing is Stripe, with a spend ceiling enforced before each run rather than after it. `packages/core` owns the generation contracts, the state machine and the run budget; `packages/ai` puts a model provider behind them. It is deployed and live at [app.vibld.com](https://app.vibld.com).
+
+**What does not exist yet.** Repository search (issue #12), and the measured model bakeoff that would let us recommend one model over another with evidence rather than by reputation. Sandbox output is not wired into the builder's own panes: the console shows generation events only, and install, build and type errors from a sandbox run are not reported under Problems.
+
+**What to be careful of.** Live for invited testing, not for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
+
+A local checkout runs a deterministic fake provider by default, so nothing you see from `pnpm dev` implies a model wrote it.
+
+The [accepted decisions D1-D30](docs/decisions.md) define an invitation-only, Cloudflare-first hosted alpha for technical founders and small agencies creating marketing sites.
+
+## The first loop
+
+The MVP will prove one workflow:
+
+> Describe, plan, build, preview, modify, and preserve changes in Git.
+
+M1: Hello Vibld covers:
+
+> Prompt, prerendered React site, private working preview, bounded repair, saved checkpoint, and portable export.
+
+Hosted identity, tenant isolation, GitHub branches/PRs, repository search, permissions and budgets are part of M1. M2 adds dependable conversational editing. See the [implementation plan](docs/implementation-plan.md) for sequencing and release gates.
+
+## Principles
+
+- Users own and can export their code.
+- Git is the canonical project history.
+- The complete single-user OSS builder must work without Vibld Cloud; its alternate runtime and self-hosting path still need validation.
+- AI, sandbox, database, authentication, and deployment providers are replaceable.
+- Generated code is conventional, readable, and minimally dependent on Vibld.
+- Significant changes are explained before they are applied.
+- AI edits preserve user work through targeted, Git-aware patches.
+- Generated code runs as untrusted code inside an isolated sandbox.
+- Complexity is progressive: approachable by default, inspectable throughout.
+
+See [VIBLD.md](VIBLD.md) for the product and architecture charter, [ROADMAP.md](ROADMAP.md) for milestone scope, and the [archived blueprint](docs/archive/README.md) for the original proposal.
+
+## Repository layout
+
+```text
+apps/           Product applications (web and API)
+packages/       Reusable domain and platform packages
+examples/       Generated-app fixtures and demonstrations
+docs/           Decisions, implementation plan, ADRs and blueprint archive
+infrastructure/ Deployment and runtime configuration
+scripts/        Repository automation
+tests/          Cross-package and end-to-end tests
+```
+
+Directories that have not reached their implementation milestone contain a short README rather than a speculative package.
+
+## Development
+
+Prerequisites:
+
+- Node.js 24 (the LTS release CI runs on; 22.15 or newer also works)
+- pnpm
+
+```bash
+pnpm install --frozen-lockfile
+pnpm format:check
+pnpm check        # type-check and test every workspace
+```
+
+Format, type and test checks run for real across `packages/core`, `packages/ai` and `apps/web`, and CI runs them on every pull request alongside CodeQL. A green `pnpm check` still is not product validation: it says the code compiles and its unit tests pass, not that a generated site is any good. Issue #2 tracks what is still missing -- human-review and DCO enforcement through repository protections.
+
+## Running it yourself
+
+Self-hosting is possible and still needs validation (see Principles above). The documentation pages below are the source of truth for it; this section only says what you are signing up for.
+
+What a deployment needs:
+
+- **Cloudflare**, for three Workers (the builder, the sandbox Worker and the publish Worker), plus D1, R2, a Durable Object and a Workflow behind the builder. The sandbox Worker runs generated code in a container; [`apps/preview/README.md`](apps/preview/README.md) covers what that needs.
+- **A model provider API key.** Without one, generation refuses rather than degrading.
+- **Clerk**, for sign-in. There is no mode without authentication, because the endpoints spend money.
+- **Stripe** only if you intend to charge anybody, and **a GitHub App** only if you want push-to-repository. Each optional piece left unset reports itself unavailable rather than running without its check.
+
+Where to read next:
+
+- [What self-hosting involves](https://vibld.com/docs/self-hosting) ([source](apps/marketing/app/routes/docs.self-hosting.tsx)): the moving parts, the state behind them and the accounts you need.
+- [Settings and secrets](https://vibld.com/docs/configuration) ([source](apps/marketing/app/routes/docs.configuration.tsx)): every value the Worker reads, which provider each key belongs to, and what happens without each one.
+- [Deploying your own copy](https://vibld.com/docs/deploying) ([source](apps/marketing/app/routes/docs.deploying.tsx)): the order that works and the parts that bite. The exact commands are in [`apps/web/README.md`](apps/web/README.md), beside the code they deploy.
+
+The GitHub Actions workflows that deploy vibld's own hosted service run only in the private working repository, since a copy has none of their secrets. A self-hosted deployment brings its own.
+
+## Contributing
+
+Vibld is early and its interfaces will change. Read [CONTRIBUTING.md](CONTRIBUTING.md), review the accepted [architecture decisions](docs/adr/README.md), and start with a scoped issue.
+
+## License
+
+The core is licensed under Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The starter templates in `templates/marketing` and `templates/luminous` each carry their own MIT `LICENSE` file at their own boundary; this does not relicense existing core files. See [ADR-0008](docs/adr/0008-portable-marketing-site-template.md).
+
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists projects whose material is adapted in this repository, with the licence text each one publishes.

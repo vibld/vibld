@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      Lowercase, because the wordmark is lowercase everywhere (docs/brand.md).
+      This said "Vibld Builder", which is the one form the brand reserves for
+      SITE.legalName, and it sat in the browser tab next to vibld.com's own
+      lowercase titles.
+
+      The separator matches what the marketing site already emits for every
+      page, "Page | vibld", so the two halves read as one product in a tab
+      strip rather than as two applications that happen to share a name.
+    -->
+    <title>Builder | vibld</title>
+    <!--
+      A second copy of the `x-robots-tag` header this host sends, for
+      anything that reads the document rather than the response.
+
+      The first version of this comment claimed robots.txt and this tag
+      failed independently. They do not, and it had the dependency the
+      wrong way round (#192 review): a `Disallow` stops the fetch, so the
+      tag is never read, and a URL found from a shared link stays listed
+      with no description. See public/robots.txt and src/crawling.ts.
+
+      Correct for every page on this host, because every page on this host
+      needs an account.
+    -->
+    <meta name="robots" content="noindex, nofollow" />
+    <!--
+      This shell shipped no icon at all, so the tab showed the mark on
+      vibld.com and a blank page glyph on app.vibld.com. Both files are
+      generated from @vibld/brand by apps/marketing/scripts/brand-assets.ts,
+      which writes them here as well, so they cannot drift from the mark.
+    -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

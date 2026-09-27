@@ -1,0 +1,23 @@
+{
+  "name": "@vibld/preview",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "deploy": "pnpm dlx wrangler@4.137.0 deploy",
+    "dev": "pnpm dlx wrangler@4.137.0 dev",
+    "test": "node --test --experimental-strip-types --import ./test/harness/cloudflare-workers.mjs test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "0.12.9",
+    "@vibld/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260923.1",
+    "@types/node": "26.6.2",
+    "typescript": "7.0.2"
+  }
+}

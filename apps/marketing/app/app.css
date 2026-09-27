@@ -1,0 +1,374 @@
+@import 'tailwindcss';
+@import '@vibld/brand/brand.css';
+@import './styles/live.css';
+@import './styles/miniature.css';
+
+/*
+ * Three typefaces, self-hosted from this site's own origin (public/fonts/,
+ * copied from the Fontsource packages with each family's licence file beside
+ * it), rather than linked from a font service. The Cookie Notice enumerates
+ * every third party the site contacts and says it loads no external fonts;
+ * serving the files from vibld.com keeps both statements true, where a
+ * Google Fonts link would have added a third party to that page.
+ *
+ * Latin subset only, with the `unicode-range` the packages declare for it,
+ * so a browser downloads a file only for a page that uses its characters.
+ * `swap` shows the fallback at once and swaps when the file arrives: the
+ * words are readable from the first paint, which matters more on a
+ * prerendered page than avoiding one reflow. The display and body files are
+ * preloaded in root.tsx; the mono one is not, because on most pages it sets
+ * a few small labels.
+ *
+ * Each filename carries the package version, which is what lets the Worker
+ * cache these for a year (worker/index.ts): a new version is a new URL.
+ */
+@font-face {
+  font-family: 'Bricolage Grotesque Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('/fonts/bricolage-grotesque-5.3.0-latin-opsz-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Hanken Grotesk Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('/fonts/hanken-grotesk-5.3.0-latin-wght-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('/fonts/jetbrains-mono-5.3.0-latin-wght-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+@theme {
+  /*
+   * Each family first, then the nearest thing most systems already have, so
+   * the fallback shown before a swap (or instead of one, if the file never
+   * arrives) is the same shape of letter rather than whatever the default
+   * happens to be.
+   */
+  --font-sans:
+    'Hanken Grotesk Variable', 'Helvetica Neue', Arial, ui-sans-serif,
+    system-ui, sans-serif;
+  --font-display:
+    'Bricolage Grotesque Variable', 'Avenir Next', 'Segoe UI', ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono:
+    'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Courier New', monospace;
+
+  /*
+   * Aliases onto the brand tokens (@vibld/brand), not a second palette. The
+   * names below are the ones this site's rules already use; what they resolve
+   * to is decided in one place, shared with the builder, so the two cannot
+   * ship different colours again.
+   */
+  --color-ink: var(--vibld-ink);
+  --color-ink-muted: var(--vibld-ink-muted);
+  --color-paper: var(--vibld-paper);
+  --color-surface: var(--vibld-surface);
+  --color-surface-strong: var(--vibld-surface-strong);
+  --color-edge: var(--vibld-edge);
+  --color-edge-strong: var(--vibld-edge-strong);
+  --color-accent: var(--vibld-accent);
+  --color-accent-ink: var(--vibld-accent-ink);
+  --color-on-accent: var(--vibld-on-accent);
+
+  /*
+   * Marketing-local tokens, which the brand does not have and this site's
+   * design does: six pale tints for cards, the dark ground code is shown on,
+   * the colours code is highlighted in, and one green for "passed". Aliases
+   * again, onto the --mk-* values below, which is where light and dark are
+   * decided.
+   */
+  --color-tint-peach: var(--mk-tint-peach);
+  --color-tint-mint: var(--mk-tint-mint);
+  --color-tint-sun: var(--mk-tint-sun);
+  --color-tint-sky: var(--mk-tint-sky);
+  --color-tint-rose: var(--mk-tint-rose);
+  --color-tint-sand: var(--mk-tint-sand);
+  --color-ok: var(--mk-ok);
+  --color-code: var(--mk-code);
+  --color-code-ink: var(--mk-code-ink);
+  --color-code-dim: var(--mk-code-dim);
+  --color-code-key: var(--mk-code-key);
+  --color-code-str: var(--mk-code-str);
+  --color-code-tag: var(--mk-code-tag);
+  --color-code-num: var(--mk-code-num);
+  --color-code-ok: var(--mk-code-ok);
+  --color-code-bad: var(--mk-code-bad);
+}
+
+/*
+ * The values behind the marketing-local tokens, one block per theme.
+ *
+ * Hex, not oklch, because test/tokens.test.ts reads this file and measures
+ * every text pair these take part in with the repository's own checker
+ * (@vibld/ai/contrast), which reads hex, against the brand's ink from
+ * @vibld/brand/palette. A tint here that stops clearing 4.5:1 against the
+ * brand's ink, including after the brand is recoloured, fails that test
+ * rather than shipping.
+ *
+ * Plain custom properties rather than a second `@theme`: Tailwind resolves
+ * `@theme` at build time whatever media query wraps it, so a dark `@theme`
+ * would replace the light values everywhere. The three blocks follow the
+ * brand's own convention (packages/brand/src/brand.css): the system's
+ * preference unless the reader chose light, and an explicit dark choice.
+ */
+:root {
+  color-scheme: light dark;
+  --mk-tint-peach: #ffeadf;
+  --mk-tint-mint: #ddf4ea;
+  --mk-tint-sun: #fff2c8;
+  --mk-tint-sky: #e2edfb;
+  --mk-tint-rose: #ffe4ea;
+  --mk-tint-sand: #efebe2;
+  --mk-ok: #136f40;
+  --mk-code: #15171b;
+  --mk-code-ink: #e6e7e2;
+  --mk-code-dim: #8b9098;
+  --mk-code-key: #ff8a66;
+  --mk-code-str: #9fd8b4;
+  --mk-code-tag: #8fc3ff;
+  --mk-code-num: #f2c66d;
+  --mk-code-ok: #4fd08a;
+  --mk-code-bad: #ff7a7a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --mk-tint-peach: #2a1b14;
+    --mk-tint-mint: #13261f;
+    --mk-tint-sun: #29240f;
+    --mk-tint-sky: #131e2c;
+    --mk-tint-rose: #2b161c;
+    --mk-tint-sand: #211f1a;
+    --mk-ok: #4fd08a;
+    --mk-code: #0a0b0d;
+    --mk-code-ink: #e6e7e2;
+    --mk-code-dim: #8b9098;
+    --mk-code-key: #ff8a66;
+    --mk-code-str: #9fd8b4;
+    --mk-code-tag: #8fc3ff;
+    --mk-code-num: #f2c66d;
+    --mk-code-ok: #4fd08a;
+    --mk-code-bad: #ff7a7a;
+  }
+}
+
+:root[data-theme='dark'] {
+  --mk-tint-peach: #2a1b14;
+  --mk-tint-mint: #13261f;
+  --mk-tint-sun: #29240f;
+  --mk-tint-sky: #131e2c;
+  --mk-tint-rose: #2b161c;
+  --mk-tint-sand: #211f1a;
+  --mk-ok: #4fd08a;
+  --mk-code: #0a0b0d;
+  --mk-code-ink: #e6e7e2;
+  --mk-code-dim: #8b9098;
+  --mk-code-key: #ff8a66;
+  --mk-code-str: #9fd8b4;
+  --mk-code-tag: #8fc3ff;
+  --mk-code-num: #f2c66d;
+  --mk-code-ok: #4fd08a;
+  --mk-code-bad: #ff7a7a;
+}
+
+/*
+ * `@theme` only has to run once, at the top of the file: it registers each
+ * token and its default (light) value, and generates the utilities that
+ * reference it. The brand's aliases need no dark block here, because
+ * brand.css varies the tokens they point at by `prefers-color-scheme`
+ * itself; the marketing-local ones are varied just above.
+ */
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+/*
+ * A visible focus ring on every interactive element. Removing it is the most
+ * common way a site becomes unusable by keyboard while still looking fine.
+ */
+/*
+ * The accent ink, not the accent: vermilion against chalk measures 3.05,
+ * clearing the 3:1 bar a focus indicator has to clear by five hundredths,
+ * and against the raised surface it measures 2.86, under it.
+ */
+:focus-visible {
+  outline: 3px solid var(--color-accent-ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * Plain semantic HTML inside every legal document, styled from here rather
+ * than with a utility class on every tag -- eight documents' worth of
+ * <h2>/<p>/<ul> would otherwise repeat the same handful of classes hundreds
+ * of times for no benefit over one rule each.
+ */
+.prose-legal h2 {
+  margin-top: 2.5rem;
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.prose-legal h2:first-child {
+  margin-top: 0;
+}
+.prose-legal p {
+  margin-top: 1rem;
+  line-height: 1.75;
+  color: var(--color-ink-muted);
+}
+.prose-legal ul,
+.prose-legal ol {
+  margin-top: 1rem;
+  padding-left: 1.25rem;
+  color: var(--color-ink-muted);
+}
+.prose-legal ul {
+  list-style: disc;
+}
+.prose-legal ol {
+  list-style: decimal;
+}
+.prose-legal li + li {
+  margin-top: 0.5rem;
+}
+.prose-legal a {
+  color: var(--color-accent-ink);
+  text-underline-offset: 3px;
+}
+.prose-legal a:hover {
+  text-decoration: underline;
+}
+.prose-legal strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.prose-legal code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.prose-legal table {
+  margin-top: 1.5rem;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+.prose-legal th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid
+    color-mix(in oklch, var(--color-ink) 15%, transparent);
+  color: var(--color-ink);
+}
+.prose-legal td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid
+    color-mix(in oklch, var(--color-ink) 10%, transparent);
+  color: var(--color-ink-muted);
+  vertical-align: top;
+}
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--color-ink);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--color-edge-strong);
+  text-underline-offset: 4px;
+}
+
+/*
+ * The one filled button. Vermilion is a fill here and the text on it is
+ * --color-on-accent, the only ink the brand allows on it (5.81).
+ */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding-inline: 1.25rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease-out),
+    transform 120ms var(--ease-out);
+}
+.button:active {
+  transform: scale(0.97);
+}
+.button--small {
+  min-height: 2.5rem;
+  padding-inline: 1rem;
+  font-size: 0.9375rem;
+}
+.button--secondary {
+  border-color: var(--color-edge-strong);
+  background-color: transparent;
+  color: var(--color-ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .text-link:hover {
+    color: var(--color-accent-ink);
+    text-decoration-color: currentColor;
+  }
+  .button:hover {
+    background-color: color-mix(in oklch, var(--color-accent) 88%, white);
+  }
+  .button--secondary:hover {
+    background-color: var(--color-surface);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button:active {
+    transform: none;
+  }
+}

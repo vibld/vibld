@@ -1,0 +1,11 @@
+node_modules
+.turbo
+dist
+build
+coverage
+pnpm-lock.yaml
+package-lock.json
+.react-router
+# Generated projects, kept exactly as vibld wrote them. Formatting them would
+# make the examples page show the formatter's work as the generator's.
+examples/generated
