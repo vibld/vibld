@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Emberline">
+  <defs>
+    <radialGradient id="ember" cx=".36" cy=".36" r=".72">
+      <stop offset="0" stop-color="#ffe6b0" />
+      <stop offset=".38" stop-color="#f5a524" />
+      <stop offset=".86" stop-color="#e2572a" />
+    </radialGradient>
+    <radialGradient id="teal" cx=".76" cy=".76" r=".5">
+      <stop offset="0" stop-color="#13a394" />
+      <stop offset="1" stop-color="#13a394" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <circle cx="16" cy="16" r="14" fill="url(#ember)" />
+  <circle cx="16" cy="16" r="14" fill="url(#teal)" />
+</svg>

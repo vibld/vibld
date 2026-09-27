@@ -1,0 +1,6 @@
+{
+  "$comment": "Optional provenance. Nothing in this project reads this file: delete it and the site still installs, builds, typechecks, tests and runs. It exists so a project can say where it came from, not so Vibld can require anything of it.",
+  "template": "marketing",
+  "templateVersion": "1.0.0",
+  "generatedBy": "vibld"
+}
