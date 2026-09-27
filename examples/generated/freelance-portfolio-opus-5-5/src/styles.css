@@ -1,0 +1,193 @@
+@import url("https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;1,6..96,400&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #f4efe6;
+  --foreground: #1b1712;
+  --card: #faf6ee;
+  --card-foreground: #1b1712;
+  --popover: #faf6ee;
+  --popover-foreground: #1b1712;
+  --primary: #a8341a;
+  --primary-foreground: #fbf7f0;
+  --secondary: #e8e0d2;
+  --secondary-foreground: #1b1712;
+  --muted: #e8e0d2;
+  --muted-foreground: #5c5347;
+  --accent: #ece3d3;
+  --accent-foreground: #1b1712;
+  --border: #cfc3ae;
+  --input: #cfc3ae;
+  --ring: #a8341a;
+  --scrim: rgba(20,16,12,.72);
+  --grain: rgba(27,23,18,.05);
+  --shadow-color: rgba(20,16,12,.45);
+  --inverse-muted: #c9c0b1;
+  --inverse-border: #4a4236;
+
+  --art-night: #1f2747;
+  --art-deep: #34406e;
+  --art-moon: #f2e3b3;
+  --art-ochre: #d69a3a;
+  --art-rust: #b5532c;
+  --art-teal: #2f6464;
+  --art-sage: #93a585;
+  --art-rose: #d9927f;
+  --art-cream: #efe3c8;
+  --art-leaf: #4f6b3a;
+  --art-sky: #b9cfd4;
+
+  --page-margin: clamp(1.25rem, 4vw, 4rem);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-scrim: var(--scrim);
+  --color-grain: var(--grain);
+  --color-shadow-color: var(--shadow-color);
+  --color-inverse-muted: var(--inverse-muted);
+  --color-inverse-border: var(--inverse-border);
+  --color-art-night: var(--art-night);
+  --color-art-deep: var(--art-deep);
+  --color-art-moon: var(--art-moon);
+  --color-art-ochre: var(--art-ochre);
+  --color-art-rust: var(--art-rust);
+  --color-art-teal: var(--art-teal);
+  --color-art-sage: var(--art-sage);
+  --color-art-rose: var(--art-rose);
+  --color-art-cream: var(--art-cream);
+  --color-art-leaf: var(--art-leaf);
+  --color-art-sky: var(--art-sky);
+}
+
+@theme {
+  --font-display: "Bodoni Moda", "Bodoni 72", Didot, Georgia, serif;
+  --font-body: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  --text-numeral: clamp(6rem, 2rem + 12vw, 15rem);
+  --text-numeral--line-height: 0.8;
+  --text-numeral--letter-spacing: -0.04em;
+  --text-display: clamp(3.25rem, 1.4rem + 7.6vw, 8rem);
+  --text-display--line-height: 0.92;
+  --text-display--letter-spacing: -0.035em;
+  --text-headline: clamp(2.25rem, 1.6rem + 2.6vw, 4rem);
+  --text-headline--line-height: 1.02;
+  --text-headline--letter-spacing: -0.025em;
+  --text-quote: clamp(1.75rem, 1.2rem + 2.4vw, 3.25rem);
+  --text-quote--line-height: 1.14;
+  --text-quote--letter-spacing: -0.02em;
+  --text-title: 1.5rem;
+  --text-title--line-height: 1.2;
+  --text-title--letter-spacing: -0.01em;
+  --text-deck: 1.3125rem;
+  --text-deck--line-height: 1.5;
+  --text-deck--letter-spacing: -0.005em;
+  --text-body: 1.125rem;
+  --text-body--line-height: 1.65;
+  --text-body--letter-spacing: 0em;
+  --text-caption: 0.875rem;
+  --text-caption--line-height: 1.5;
+  --text-caption--letter-spacing: 0.01em;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.4;
+  --text-label--letter-spacing: 0.12em;
+
+  --container-page: 90rem;
+  --radius-plate: 0px;
+  --radius-control: 2px;
+  --shadow-plate: 0 30px 80px -20px var(--shadow-color);
+}
+
+@utility page-x {
+  padding-inline: var(--page-margin);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    overflow-x: clip;
+    background-color: var(--background);
+    background-image: radial-gradient(var(--grain) 0.6px, transparent 0.8px);
+    background-size: 4px 4px;
+    color: var(--foreground);
+    font-family: var(--font-body);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-weight: 400;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+  }
+
+  .inverse :focus-visible {
+    outline-color: var(--background);
+  }
+}
+
+@layer components {
+  .dropcap::first-letter {
+    float: left;
+    margin: 0.06em 0.1em 0 0;
+    font-family: var(--font-display);
+    font-size: 4.6em;
+    line-height: 0.78;
+    color: var(--primary);
+  }
+}

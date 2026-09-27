@@ -1,0 +1,50 @@
+-- One retry before the reconcile walks past a subscription that threw.
+--
+-- 0017_reconcile_cursor.sql advanced the cursor past the whole slice
+-- whatever happened inside it. A subscription that failed -- a transient
+-- Stripe error, a D1 blip -- was therefore not looked at again until the
+-- walk lapped, which on a deployment sized for the Workers Free default is
+-- one subscription a night and so a very long time to leave an entitlement
+-- uncorrected or a missed payment unrecovered.
+--
+-- Holding the cursor at the failure instead would trade that for something
+-- worse, and the codebase has already been bitten by it once: a row that
+-- fails every night holds the front of the queue and starves every one
+-- behind it. That is the exact failure `resumeStrandedPayouts` stamps each
+-- attempt to avoid ("a row that fails every night moves to the back of the
+-- queue instead of holding the front of it").
+--
+-- So a run that parks records the ids it attempted, and the next run treats
+-- a failure among them as one that has had its second chance and walks
+-- past, and any other failure as one that has not had a first.
+--
+-- Three earlier cuts were wrong, and each looked right after the one before
+-- it, which is why they are all written down.
+--
+-- A boolean, first. During a retry run, a different subscription failing
+-- for the first time found the flag already set, so it was walked past with
+-- no retry of its own: the delay the retry exists to remove, moved one
+-- subscription along.
+--
+-- Then the single id of the earliest failure. With two failures in a slice,
+-- the second was on its own second attempt but its id differed from the one
+-- named, so it read as first-time, parked the cursor again and took a
+-- third. A slice of failing subscriptions advanced one id a night.
+--
+-- Then a watermark: the last id attempted, with everything at or below it
+-- taken as attempted. That is true of the ids that were there, and the set
+-- of subscriptions changes between runs. Stripe ids are random, so a
+-- subscription created overnight can sort anywhere, including below the
+-- mark; failing on its first appearance, it would be read as a retry and
+-- walked past. A range cannot express membership, and membership is what
+-- the question is.
+--
+-- Hence the ids themselves, as a JSON array. The list is the slice the run
+-- attempted, which `reconcileBatchFor` bounds by the nightly query
+-- allowance: 1 id at the default budget of 40, 22 at 1000. It cannot grow
+-- to a size worth worrying about, because a budget large enough to make it
+-- big is a run that would exceed D1's own per-invocation query limit long
+-- before the column noticed.
+--
+-- NULL means nothing is outstanding.
+ALTER TABLE billing_reconcile_cursor ADD COLUMN attempted TEXT;

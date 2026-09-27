@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    // No "DOM" lib and no browser code in this package at all -- unlike
+    // apps/web, which hand-rolls its own narrow Workers types precisely to
+    // avoid colliding with the DOM lib its browser bundle also needs. This
+    // package is Worker-only, so it can safely use the real
+    // @cloudflare/workers-types ambient globals instead.
+    "types": ["node", "@cloudflare/workers-types"]
+  },
+  "include": ["worker/**/*.ts", "test/**/*.ts"]
+}

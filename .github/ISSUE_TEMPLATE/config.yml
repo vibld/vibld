@@ -1,0 +1,12 @@
+# blank_issues_enabled: false forces every new issue through a template --
+# specifically so a reporter with a security concern is routed to the
+# private advisory form below by the picker itself, rather than free-typing
+# a blank public issue that happens to contain vulnerability details.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/vibld/vibld/security/advisories/new
+    about: >-
+      Do not open a public issue for a vulnerability. Use GitHub's private
+      vulnerability reporting instead -- see SECURITY.md for what to
+      include and what maintainer response to expect.

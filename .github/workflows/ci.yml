@@ -1,0 +1,178 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        # Frozen: a lockfile that does not match package.json is a failure, not
+        # something to paper over. The permissive install hid real drift --
+        # packages/core was missing from the lockfile across four merges and
+        # CI stayed green throughout.
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: House style
+        run: pnpm check:style
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      # The repository scripts are not a workspace package, so turbo's test
+      # task never reaches them. Their tests run here instead.
+      - name: Script tests
+        run: pnpm test:scripts
+
+      # Every app's production build, which nothing above runs: typecheck
+      # passes on code Vite then refuses to bundle, and until this step a
+      # break like that reached main and was first seen by a deploy.
+      #
+      # The Clerk key is a placeholder. The build only embeds it, and a real
+      # one would put an instance identifier in logs for no gain.
+      - name: Build
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
+        run: pnpm build
+
+  # The eval stub reported a project accepted that stopped at
+  # "vite: not found" (#59). Writing one case out and building it is the
+  # only check that sees that. One case: they share a manifest, and each
+  # build is a registry install. In a container, as the bakeoff runs
+  # candidates, so the path a model's code takes is exercised on every pull
+  # request.
+  #
+  # A job of its own, with its own time: one candidate may take up to 13
+  # minutes at its worst (install, build, and the container's start and
+  # removal), more than the quality job's limit allows after everything
+  # else it runs (#237 review). The script is given what is left of the
+  # job's time, less a reserve, so a slow registry is reported as a
+  # candidate it had no time for, not cut off without a word.
+  eval-build:
+    name: Build what the eval stub accepts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Note when the job started
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pull the build image
+        run: docker pull node:24-bookworm-slim
+
+      - name: Write one case out and build it
+        run: |
+          VIBLD_EVAL_OUT="$RUNNER_TEMP/eval-stub" pnpm --filter @vibld/eval run eval --case coffee-roaster
+          minutes=$(( (25 * 60 - ($(date +%s) - JOB_STARTED)) / 60 - 2 ))
+          [ "$minutes" -ge 1 ] || minutes=1
+          node --experimental-strip-types packages/eval/bin/build-candidates.ts "$RUNNER_TEMP/eval-stub" "$minutes" --container node:24-bookworm-slim
+
+  # The marketing template is deliberately outside the pnpm workspace: it has
+  # to install and build on its own, with npm and no Vibld packages, because
+  # that is what a user who exports it will do. Building it here is the only
+  # way that claim stays true.
+  template:
+    name: Marketing template
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: templates/marketing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: templates/marketing/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # A user who exports the template runs this next, so it has to work.
+      - name: Build
+        run: npm run build
+
+  # The Luminous template sits outside the workspace for the same reason as
+  # the marketing template: a user who exports it installs and builds it with
+  # npm alone, so that is how CI builds it too.
+  luminous-template:
+    name: Luminous template
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: templates/luminous
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: templates/luminous/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # A user who exports the template runs this next, so it has to work.
+      - name: Build
+        run: npm run build

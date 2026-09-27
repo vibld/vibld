@@ -1,0 +1,90 @@
+name: Publish examples
+
+# Builds every example in examples/catalogue.json and publishes it with vibld's
+# own publish service, at example-<slug>.vibld-preview.dev. The
+# examples page on vibld.com links there.
+#
+# Manual, like every deploy here: publishing replaces what is live.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-examples
+  cancel-in-progress: false
+
+jobs:
+  # An example's package.json and build config are code a model wrote, and
+  # they run here. So this job has no environment, and no secret within reach;
+  # scripts/examples.mjs also builds each example in its own container, hands
+  # npm only what it needs to reach the registry, installs with
+  # --ignore-scripts, and refuses a link in what a build wrote.
+  build:
+    name: Build the examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The build runs code a model wrote. A persisted credential would
+          # sit on disk where that code can read it.
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Each example installs and builds in its own container, so one
+      # example's build cannot reach another's source or output, or the
+      # runner. The same image the eval's build step uses (ci.yml).
+      - name: Pull the build image
+        run: docker pull node:24-bookworm-slim
+
+      - name: Install and build each example
+        run: node scripts/examples.mjs build "$RUNNER_TEMP/examples" --container node:24-bookworm-slim
+
+      - name: Upload the built sites
+        uses: actions/upload-artifact@v7
+        with:
+          name: built-examples
+          path: ${{ runner.temp }}/examples
+          if-no-files-found: error
+
+  # Holds the publish service's internal secret, and runs no example code:
+  # it reads the built files and posts them.
+  publish:
+    name: Publish the examples
+    needs: build
+    # Runs only in the private working repository. The public copy
+    # (vibld/vibld) has none of the secrets or deployment environments this
+    # job reads, so there it could only fail.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Download the built sites
+        uses: actions/download-artifact@v7
+        with:
+          name: built-examples
+          path: ${{ runner.temp }}/examples
+
+      - name: Publish each example
+        # `shell: bash` runs with pipefail. The default shell does not, so a
+        # failed publish piped through tee would still pass the step.
+        shell: bash
+        env:
+          PUBLISH_INTERNAL_SECRET: ${{ secrets.PUBLISH_INTERNAL_SECRET }}
+        run: node scripts/examples.mjs publish "$RUNNER_TEMP/examples" | tee -a "$GITHUB_STEP_SUMMARY"

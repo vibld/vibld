@@ -1,0 +1,42 @@
+-- A revision says when something started collecting it, before a byte goes.
+--
+-- 0021 made promotion conditional on the revision still being catalogued,
+-- on the stated ground that "every way of removing a revision removes that
+-- row, so asking whether the row is there is asking whether the bytes are
+-- there". The first half of that was not true of the code that had to
+-- uphold it. `discard` deleted the objects and then the row, in that order
+-- and deliberately: a row with no objects wastes a retention slot, and
+-- objects with no row are storage nothing can ever name again.
+--
+-- So the claim was retracted after the act it was meant to guard. A publish
+-- whose upload ran long could be selected as stale by pruning, have its
+-- objects deleted, and then promote successfully against the row that
+-- deletion had not got to yet. The pointer moves to an emptied prefix and
+-- both requests report success, which is the same 404-with-two-successes
+-- that 0021 was written to remove, reached by the collector instead of the
+-- publisher.
+--
+-- Ordering alone does not fix it. Deleting the row first retracts the claim
+-- in time but reintroduces exactly the leak the old order avoided: a
+-- deletion that dies partway leaves objects with nothing naming them, for
+-- ever. And it still loses the other direction, where promotion commits
+-- first and the collector goes on to delete what is now live.
+--
+-- A marker does both. `collecting_at` is written before any object is
+-- deleted, in an UPDATE that refuses when the revision is the one serving,
+-- so a promotion that got there first wins and the collection stops; and
+-- promotion requires it to be NULL, so a collection that got there first
+-- wins and the promotion is refused. Whoever writes first wins and the
+-- loser is told, which is the same compare-and-set the rest of the publish
+-- path settled on.
+--
+-- The row outliving the objects is the point rather than the cost. A marked
+-- revision still names its prefix, so a deletion interrupted halfway is one
+-- the next prune or takedown finishes: enumeration deliberately does not
+-- skip marked revisions, because resuming the collection is the thing that
+-- has to happen. What must never happen is serving from one, and that is
+-- what promotion's condition is for.
+--
+-- NULL means nothing has begun collecting this revision, which is every
+-- revision until one does.
+ALTER TABLE published_generations ADD COLUMN collecting_at TEXT;

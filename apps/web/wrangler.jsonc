@@ -1,0 +1,269 @@
+{
+  "name": "vibld-web-preview",
+  "compatibility_date": "2026-09-07",
+  // enable_request_signal makes request.signal fire on client disconnect, which
+  // is how /api/plan learns to abort its model call. The flag has no "default
+  // as of" date in Cloudflare's table, so no compatibility_date turns it on.
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
+
+  // docs/decisions.md L20: app.vibld.com serves the builder. Also the fix for
+  // a real bug: CLERK_FRONTEND_API_URL above is a *live* Clerk instance, and
+  // a live instance's Frontend API refuses any request whose Origin isn't
+  // vibld.com or a subdomain of it (confirmed directly against Clerk's own
+  // API -- "The Request HTTP Origin header must be equal to or a subdomain of
+  // the requesting URL"). Every *.workers.dev URL this Worker has ever been
+  // reachable at, Clerk itself has silently refused to load on.
+  //
+  // A custom domain route provisions its own DNS record on deploy -- no
+  // separate DNS step -- but only if the deploying token can manage it: the
+  // documented CLOUDFLARE_API_TOKEN scope for this workflow is "Workers
+  // Scripts: Edit" only (README.md, deploy-web-preview.yml), which is not
+  // enough. Needs DNS edit (or the "Cloudflare Workers Custom Domains"
+  // permission group) added on the vibld.com zone before this can deploy --
+  // see the PR this shipped in for the exact one-time step.
+  "routes": [{ "pattern": "app.vibld.com", "custom_domain": true }],
+
+  // Workers Logs, on, because production was unreadable without it (#201).
+  //
+  // A generation failed live with Cloudflare's own
+  // `WorkflowInternalError: Attempt failed due to internal workflows error`
+  // and a null step output. Everything this service records itself said the
+  // run reached its own failure path and wrote the stage two seconds
+  // earlier, so the cause was in the runtime rather than in the code, and
+  // there was no way to read it: no logs, and the instance API reports only
+  // that generic message. Three candidate causes were ruled out by
+  // measurement (the persisted payload is 64KB against a 1MiB step limit,
+  // the step ran 10m24s against a 30m timeout, and the script recorded no
+  // `exceededCpu`) and the real one could not be reached at all.
+  //
+  // A deployment nobody can read is a deployment nobody can fix, which
+  // costs a test cycle per hypothesis. This is what turns the next failure
+  // into one line instead of an afternoon.
+  "observability": { "enabled": true },
+
+  // CPU, not wall time: streaming a long generation and parsing it is real
+  // compute, and the default ceiling is thirty seconds (#201).
+  //
+  // A run streams tens of thousands of output tokens over several minutes
+  // and then parses and validates the whole thing against an existing
+  // project. Thirty seconds of CPU for that is a bound this workload was
+  // never measured against, and a Workflow that crosses it is killed with
+  // no message of its own, which is exactly the shape of the failure above.
+  // Not established as the cause: the Workers metrics dataset does not
+  // attribute a Workflow instance's CPU to this script, so it could be
+  // neither confirmed nor ruled out from outside.
+  //
+  // Five minutes is the documented maximum. CPU is billed on what is
+  // actually used, so raising the ceiling costs nothing on a run that does
+  // not need it, and the runs that need it are the ones failing.
+  "limits": { "cpu_ms": 300000 },
+
+  // The Worker handles /api/* only; everything else is served straight from
+  // the built SPA. Explicit routing is used rather than the implicit
+  // Sec-Fetch-Mode heuristic so an API path can never fall through to
+  // index.html.
+  "main": "./worker/index.ts",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+
+  // ANTHROPIC_API_KEY is a Worker secret, set out of band and never committed.
+  //
+  // docs/decisions.md L5: Cloudflare Access is off. CLERK_FRONTEND_API_URL is
+  // the only identity setting left -- a public identifier, not a secret.
+  // /api/plan and /api/config both verify each request's Clerk token against
+  // it, and refuse every request unless it and a provider key are present.
+  "vars": {
+    // Which model service answers /api/plan. "anthropic" or "deepseek".
+    // The deploy workflow reads this to decide which key must be present
+    // before it will deploy.
+    "VIBLD_PROVIDER": "deepseek",
+
+    // Clerk's Frontend API URL -- a public identifier, not a secret. Used as
+    // both the JWT issuer to match and the base for the JWKS fetch
+    // (clerk-auth.ts appends /.well-known/jwks.json). CLERK_SECRET_KEY and
+    // CLERK_PUBLISHABLE_KEY are Worker/build secrets set out of band.
+    "CLERK_FRONTEND_API_URL": "https://clerk.vibld.com",
+
+    // D1 queries the nightly billing pass may spend in one invocation: all
+    // four of its phases between them, not each.
+    //
+    // D1 meters queries per Worker invocation and stops the invocation at
+    // the limit by throwing: 1000 on Workers Paid, 50 on Workers Free
+    // (developers.cloudflare.com/d1/platform/limits). This deployment is on
+    // Workers Paid, which is a fact about the account that nothing in the
+    // runtime reports, so it is written down here rather than guessed at.
+    //
+    // All four phases of the nightly pass are bounded by it, and it is split
+    // between them off the top rather than left over: a quarter each for
+    // parked events, stranded referral payouts and the subscription
+    // reconcile, the rest for the replay. The first three hand over money
+    // already established as owed or correct what somebody may spend, so
+    // they are served before the one that goes looking for more.
+    //
+    // 500 rather than anything near 1000. It was chosen while the reconcile
+    // was bounded by nothing and the other half was its room. That is no
+    // longer so, and raising it is a separate decision not taken here.
+    //
+    // The reconcile used to be bounded by nothing, reading every
+    // subscription Stripe knows about. Since #47 it takes a quarter like the
+    // others, sized by `reconcileBatchFor` at its measured worst case per
+    // subscription, and walks the list from a saved cursor
+    // (0017_reconcile_cursor.sql), so a lap takes several nights instead of
+    // one unbounded run. Below 92 the split would starve phases and the pass
+    // rotates instead (#176); 500 is well above that, so it splits.
+    "VIBLD_REPLAY_QUERY_BUDGET": "500",
+
+    // A run reserves its worst case up front -- with a 64000-token output
+    // ceiling that is about $1.61 -- and is reconciled to what it actually
+    // cost once it finishes.
+    //
+    // What one user may spend now comes from their subscribed tier
+    // (docs/decisions.md L35-L39: Free $1/mo, Build $10/mo, Ship $40/mo,
+    // plus top-up credit), not a flat env var -- see worker/entitlement.ts.
+    // No VIBLD_FREE_MONTHLY_MICRO_USD here on purpose: its $1.00 default
+    // already matches L36, and Build/Ship are not operator-configurable at
+    // all (their included spend is fixed by the accepted price table). Set
+    // it only to correct the Free tier's own figure.
+    "VIBLD_MAX_IN_FLIGHT": "2",
+    // No VIBLD_USD_MICRO_PER_* here on purpose. An explicit price overrides
+    // the chosen model's own rate, so pinning Anthropic's 5/25 while running
+    // DeepSeek ceilinged every run at roughly forty times what it cost --
+    // about two generations a day out of a budget that affords forty. Set
+    // these only to correct a rate the catalogue has wrong.
+
+    // List prices in micro-USD per token. They decide what the ceiling above
+    // actually means, so they live here to be corrected without a code change
+    // -- and they must be corrected if VIBLD_MODEL changes.
+  },
+
+  // Per-location and permissive by design: a burst gate in front of the
+  // ledger, never the ceiling itself. No resource is provisioned -- the
+  // namespace_id is an identifier chosen here, and it is account-global, so
+  // two bindings sharing an id would share counters.
+  "ratelimits": [
+    {
+      "name": "PLAN_BURST",
+      "namespace_id": "1001",
+      "simple": { "limit": 2, "period": 10 },
+    },
+    {
+      "name": "PLAN_SUSTAINED",
+      "namespace_id": "1002",
+      "simple": { "limit": 10, "period": 60 },
+    },
+    // docs/decisions.md L29: "a per-IP WAF rate limit" required before
+    // Cloudflare Access comes off. PLAN_BURST/PLAN_SUSTAINED above are keyed
+    // on the caller's Clerk user id -- real protection once someone is
+    // signed in, but no defense at all against a flood of requests that
+    // never gets that far (garbage/expired tokens still cost a JWKS
+    // verification each). This is the same Workers Rate Limiting mechanism,
+    // just keyed on CF-Connecting-IP instead, and checked before identity is
+    // resolved -- an actual zone-level WAF rule would need Cloudflare
+    // account/zone permissions this deployment's token doesn't have (see
+    // apps/web/README.md's Deploying section), so this is the equivalent
+    // control achievable from inside the Worker itself.
+    {
+      "name": "IP_BURST",
+      "namespace_id": "1003",
+      "simple": { "limit": 20, "period": 60 },
+    },
+    // ADR-0010: publishing runs a real sandbox build and a real R2 write,
+    // priced per caller rather than per flood -- keyed on the caller's
+    // Clerk user id like PLAN_BURST, checked after identity, not before.
+    {
+      "name": "PUBLISH_BURST",
+      "namespace_id": "1004",
+      "simple": { "limit": 3, "period": 60 },
+    },
+    // Issue #13: a push mints an installation token and writes commits and a
+    // branch into somebody's repository. Same reasoning as PUBLISH_BURST,
+    // keyed on the Clerk user id and checked after identity: the cost of a
+    // flood here lands on GitHub's API quota and on a real repository, not on
+    // model spend.
+    {
+      "name": "GITHUB_BURST",
+      "namespace_id": "1005",
+      "simple": { "limit": 5, "period": 60 },
+    },
+    // Uploads to the media library (media-handlers.ts), keyed on the Clerk
+    // user id and checked after identity. The account quota bounds what is
+    // stored; this bounds how fast it can be churned.
+    {
+      "name": "MEDIA_BURST",
+      "namespace_id": "1006",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
+
+  // The spend ceiling. Also not provisioned: the object is created on first
+  // access. SQLite storage is required rather than preferred -- it is the only
+  // backend available on the Workers Free plan, and the only one whose storage
+  // is not billed there.
+  //
+  // RUN_PROGRESS is the live channel between a running Workflow step and the
+  // poll loop that serves /api/plan's SSE stream (#183, worker/run-progress
+  // .ts). Named per run, holds nothing in storage, and is created on first
+  // access like the ledger above.
+  "durable_objects": {
+    "bindings": [
+      { "name": "USER_BUDGET", "class_name": "UserBudget" },
+      { "name": "RUN_PROGRESS", "class_name": "RunProgress" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["UserBudget"] },
+    { "tag": "v2", "new_sqlite_classes": ["RunProgress"] },
+  ],
+
+  // Durable generation (docs/decisions.md L26). A Workflow binding is
+  // declared independently of durable_objects above -- Workflows are built
+  // on Durable Objects internally, but that is Cloudflare's implementation
+  // detail, not something this binding needs a migrations entry for.
+  "workflows": [
+    {
+      "name": "vibld-generation",
+      "binding": "GENERATION_WORKFLOW",
+      "class_name": "GenerationWorkflow",
+    },
+  ],
+
+  // The control plane (docs/decisions.md L24/L25): D1 for generation
+  // metadata, R2 for the file content it points at. Provisioned already --
+  // see apps/web/migrations/ for the schema. Wired into request handling by
+  // GenerationWorkflow (worker/generation-workflow.ts), the only thing that
+  // constructs worker/generation-store.ts now.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vibld-control-plane",
+      "database_id": "4d3190b8-9093-4dfe-8f88-58b4f9c61c73",
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "PROJECT_CONTENT", "bucket_name": "vibld-control-plane" },
+  ],
+
+  // Sandbox execution (docs/decisions.md L7-L11) -- see
+  // apps/preview/README.md for why it lives in its own Worker.
+  // PREVIEW_INTERNAL_SECRET is a Worker secret, set out of band and shared
+  // with @vibld/preview's copy of the same value.
+  //
+  // ADR-0010's serving Worker. PUBLISH_INTERNAL_SECRET is a Worker secret,
+  // set out of band and shared with @vibld/publish's copy of the same
+  // value -- deliberately not PREVIEW_INTERNAL_SECRET, since a leak of one
+  // must not compromise the other.
+  "services": [
+    { "binding": "PREVIEW", "service": "vibld-preview" },
+    { "binding": "PUBLISH", "service": "vibld-publish" },
+  ],
+
+  // Stripe billing (docs/decisions.md L12-L15). STRIPE_SECRET_KEY and
+  // STRIPE_WEBHOOK_SECRET are Worker secrets, set out of band -- see
+  // apps/web/README.md's "Billing" section. Off-peak UTC time, arbitrarily;
+  // nothing about the reconcile depends on when it runs.
+  "triggers": { "crons": ["17 9 * * *"] },
+}

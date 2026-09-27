@@ -1,0 +1,40 @@
+{
+  "name": "@vibld/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style-presets": "./src/style-presets.ts",
+    "./mockup-schema": "./src/mockup-schema.ts",
+    "./patterns": "./src/patterns.ts",
+    "./limits": "./src/limits.ts",
+    "./contrast": "./src/contrast.ts",
+    "./design-spec": "./src/design-spec.ts",
+    "./color-space": "./src/color-space.ts",
+    "./style-dna": "./src/style-dna.ts",
+    "./model-catalogue": "./src/model-catalogue.ts",
+    "./model-families": "./src/model-families.ts",
+    "./select-client": "./src/select-client.ts",
+    "./stack": "./src/stack.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "check": "pnpm run typecheck && pnpm run test",
+    "mockups": "node --experimental-strip-types bin/mockups.ts",
+    "plan": "node --experimental-strip-types bin/plan.ts",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.128.0",
+    "@babel/parser": "7.29.9",
+    "@vibld/core": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "typescript": "7.0.2"
+  }
+}

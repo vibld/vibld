@@ -1,0 +1,39 @@
+{
+  "name": "@vibld/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "vite build",
+    "check": "pnpm run typecheck && pnpm run test",
+    "deploy": "pnpm run migrate && pnpm dlx wrangler@4.137.0 deploy",
+    "deploy:preview": "pnpm run deploy",
+    "dev": "vite",
+    "headers": "node --experimental-strip-types scripts/write-headers.ts",
+    "migrate": "pnpm dlx wrangler@4.137.0 d1 migrations apply vibld-control-plane --remote",
+    "preview": "vite preview",
+    "test": "node --test --experimental-strip-types --import ./test/harness/components.mjs test/*.test.ts test/*.test.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clerk/react": "6.16.1",
+    "@vibld/ai": "workspace:*",
+    "@vibld/brand": "workspace:*",
+    "@vibld/core": "workspace:*",
+    "@vibld/security-headers": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "stripe": "22.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "esbuild": "0.28.2",
+    "happy-dom": "20.14.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

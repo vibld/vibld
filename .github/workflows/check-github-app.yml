@@ -1,0 +1,36 @@
+# What the Vibld GitHub App is actually allowed to do.
+#
+# Separate from the deploy so the question can be answered without shipping
+# anything: it reads, it does not write, and it touches no Cloudflare
+# resource. The deploy runs the same script, so a misconfigured App is caught
+# there too rather than only when somebody remembers to ask.
+name: Check the GitHub App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    # Runs only in the private working repository. The public copy
+    # (vibld/vibld) has none of the secrets or deployment environments this
+    # job reads, so there it could only fail.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    # The App credentials live on this environment, next to every other
+    # secret the builder needs.
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Ask GitHub what the App may do
+        working-directory: apps/web
+        env:
+          VIBLD_GITHUB_APP_ID: ${{ secrets.VIBLD_GITHUB_APP_ID }}
+          VIBLD_GITHUB_PRIVATE_KEY: ${{ secrets.VIBLD_GITHUB_PRIVATE_KEY }}
+        run: node --experimental-strip-types scripts/check-github-app.ts

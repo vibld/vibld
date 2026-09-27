@@ -1,0 +1,7 @@
+# Vibld security disclosure contact. See https://vibld.com/legal/security
+# for our full policy and safe harbor terms.
+Contact: mailto:security@vibld.com
+Expires: 2027-09-10T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://vibld.com/.well-known/security.txt
+Policy: https://vibld.com/legal/security

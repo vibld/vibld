@@ -1,0 +1,321 @@
+{
+  "readOn": "2026-09-26",
+  "prices": [
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5-1",
+      "rates": {
+        "input": 10,
+        "output": 50,
+        "cache-read": 0.25,
+        "cache-write": 12.5
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "rates": {
+        "input": 4,
+        "output": 20,
+        "cache-read": 0.2,
+        "cache-write": 5
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "rates": {
+        "input": 2,
+        "output": 10,
+        "cache-read": 0.2,
+        "cache-write": 2.5
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "rates": {
+        "input": 1,
+        "output": 5,
+        "cache-read": 0.1,
+        "cache-write": 1.25
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-5-1",
+      "rates": {
+        "input": 10,
+        "output": 50,
+        "cache-read": 0.25,
+        "cache-write": 12.5
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5",
+      "rates": {
+        "input": 10,
+        "output": 50,
+        "cache-read": 1,
+        "cache-write": 12.5
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-5",
+      "rates": {
+        "input": 10,
+        "output": 50,
+        "cache-read": 1,
+        "cache-write": 12.5
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "rates": {
+        "input": 5,
+        "output": 25,
+        "cache-read": 0.5,
+        "cache-write": 6.25
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "rates": {
+        "input": 5,
+        "output": 25,
+        "cache-read": 0.5,
+        "cache-write": 6.25
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "rates": {
+        "input": 5,
+        "output": 25,
+        "cache-read": 0.5,
+        "cache-write": 6.25
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "rates": {
+        "input": 5,
+        "output": 25,
+        "cache-read": 0.5,
+        "cache-write": 6.25
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-5",
+      "rates": {
+        "input": 5,
+        "output": 25,
+        "cache-read": 0.5,
+        "cache-write": 6.25
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-1",
+      "rates": {
+        "input": 15,
+        "output": 75,
+        "cache-read": 1.5,
+        "cache-write": 18.75
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-0",
+      "rates": {
+        "input": 15,
+        "output": 75,
+        "cache-read": 1.5,
+        "cache-write": 18.75
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "rates": {
+        "input": 3,
+        "output": 15,
+        "cache-read": 0.3,
+        "cache-write": 3.75
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5",
+      "rates": {
+        "input": 3,
+        "output": 15,
+        "cache-read": 0.3,
+        "cache-write": 3.75
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-0",
+      "rates": {
+        "input": 3,
+        "output": 15,
+        "cache-read": 0.3,
+        "cache-write": 3.75
+      },
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "rates": {
+        "input": 10,
+        "output": 50,
+        "cache-read": 1,
+        "cache-write": 12.5
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-sol",
+      "rates": {
+        "input": 2,
+        "output": 10,
+        "cache-read": 0.2,
+        "cache-write": 2.5
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "rates": {
+        "input": 0.1,
+        "output": 0.5,
+        "cache-read": 0.01,
+        "cache-write": 0.125
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "rates": {
+        "input": 4,
+        "output": 20,
+        "cache-read": 0.4,
+        "cache-write": 5
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "rates": {
+        "input": 2,
+        "output": 12,
+        "cache-read": 0.2,
+        "cache-write": 2.5
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "rates": {
+        "input": 0.2,
+        "output": 1.2,
+        "cache-read": 0.02,
+        "cache-write": 0.25
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-cyber",
+      "rates": {
+        "input": 12.5,
+        "output": 75,
+        "cache-read": 1.25,
+        "cache-write": 15.625
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "chat-latest",
+      "rates": {
+        "input": 5,
+        "output": 30,
+        "cache-read": 0.5
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.3-codex",
+      "rates": {
+        "input": 1.75,
+        "output": 14,
+        "cache-read": 0.175
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-rosalind-research",
+      "rates": {
+        "input": 5,
+        "output": 25,
+        "cache-read": 0.5
+      },
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "rates": {
+        "input": 0.3,
+        "output": 1.2,
+        "cache-read": 0.006,
+        "cache-write": 0.3
+      },
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "rates": {
+        "input": 1.32,
+        "output": 3.96,
+        "cache-read": 0.044,
+        "cache-write": 1.32
+      },
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    }
+  ]
+}

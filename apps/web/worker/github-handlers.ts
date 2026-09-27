@@ -1,0 +1,1236 @@
+/**
+ * The routes behind "push this to GitHub" (issue #13).
+ *
+ * Kept out of `index.ts` for the same reason `billing-handlers.ts` is: the
+ * router should read as a list of paths, not as the bodies of the things
+ * they call.
+ *
+ * The order here is the point, and it is the order ADR-0007 asks for. The
+ * base commit is resolved and written down *before* the first call that can
+ * succeed without saying so, so a retry has the parent the first attempt
+ * used rather than whatever the branch points at now. Everything after that
+ * is `pushCheckpoint`'s reconciliation, which was built to be re-entered.
+ */
+
+import { mediaObjectKey } from '@vibld/core';
+import type { ProjectFile } from '@vibld/core';
+import { MediaStore } from './media-store.ts';
+import { mediaPathsToKeep, planMediaExport } from './media-export.ts';
+import { parsePreviewRequest } from './request-guard.ts';
+import {
+  githubAppCredentials,
+  mintInstallationToken,
+  type GitHubAppEnv,
+  type GitHubFailure,
+  type InstallationToken,
+} from './github-app.ts';
+import {
+  branchForRevision,
+  previewPush,
+  pushCheckpoint,
+  resolveBase,
+  type PushConflict,
+  type PushTarget,
+} from './github-push.ts';
+import { GitHubStore, type BindingState } from './github-store.ts';
+import { isSignedByGitHub, pullRequestFrom } from './github-webhook.ts';
+import {
+  authorizeUrl,
+  exchangeCode,
+  githubOAuthCredentials,
+  connectableRepositories,
+  signChoice,
+  signState,
+  userInstallations,
+  verifyChoice,
+  verifyState,
+  type GitHubOAuthEnv,
+} from './github-connect.ts';
+import type { Principal } from './principal.ts';
+
+/** How long a grant lasts before it has to be approved again (ADR-0006). */
+const GRANT_DAYS = 90;
+
+export interface GitHubHandlerEnv extends GitHubAppEnv, GitHubOAuthEnv {
+  DB?: D1Database;
+  /** The media library's bytes, read when a push carries uploaded media. */
+  PROJECT_CONTENT?: R2Bucket;
+  /**
+   * The webhook secret configured on the GitHub App.
+   *
+   * Absent means no webhook endpoint: deliveries are refused rather than
+   * trusted, because on this one route the signature is the whole of the
+   * authentication.
+   */
+  VIBLD_GITHUB_WEBHOOK_SECRET?: string;
+  GITHUB_BURST?: {
+    limit(options: { key: string }): Promise<{ success: boolean }>;
+  };
+}
+
+export function githubConfigured(env: GitHubHandlerEnv): boolean {
+  return Boolean(env.DB && githubAppCredentials(env));
+}
+
+/**
+ * Connecting needs the OAuth half as well as the App half, and is reported
+ * separately: a deployment can be able to push on a binding it already has
+ * while being unable to make new ones.
+ */
+export function githubConnectConfigured(env: GitHubHandlerEnv): boolean {
+  return Boolean(env.DB && githubOAuthCredentials(env));
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/**
+ * What to tell someone whose binding cannot be used.
+ *
+ * The failure-mode table asks for a re-connect rather than a 401, so a
+ * revoked or expired grant is a 409 with a sentence and a flag the UI can
+ * act on, not an authentication error the browser will try to fix by
+ * reloading.
+ */
+function bindingProblem(
+  state: Extract<BindingState, { usable: false }>,
+): Response {
+  // A switch rather than a chain ending in a bare `return`. With the chain,
+  // a fourth reason added to `BindingState` would silently be reported as
+  // expired, which is the one failure in this feature the compiler can
+  // actually prevent: every instance of it here has otherwise had to be
+  // found by review or by breaking the code to watch a test fail.
+  switch (state.reason) {
+    case 'none':
+      return json(
+        { error: 'No GitHub repository is connected yet.', reconnect: true },
+        409,
+      );
+    case 'revoked':
+      return json(
+        {
+          error: "vibld's access to that repository was revoked.",
+          reconnect: true,
+        },
+        409,
+      );
+    case 'expired':
+      return json(
+        {
+          error: 'The GitHub connection has expired and needs approving again.',
+          reconnect: true,
+        },
+        409,
+      );
+  }
+}
+
+/**
+ * What to tell someone whose push could not get a token.
+ *
+ * Only a lost grant is worth re-approving. `github-app.ts` is careful to
+ * tell a rate limit apart from revoked access, and collapsing every failure
+ * into one 409 with `reconnect: true` throws that away and sends someone off
+ * to reinstall a working App because GitHub was briefly unreachable. So the
+ * reason picks the status, and `reconnect` is set only when reconnecting is
+ * actually the fix.
+ */
+function statusFor(reason: GitHubFailure): number {
+  switch (reason) {
+    case 'invalid':
+      return 400;
+    // Something is there that this push would overwrite, or the grant is
+    // gone. Both need a person, not a retry.
+    case 'conflict':
+    case 'access':
+    case 'missing':
+    case 'forbidden':
+      return 409;
+    case 'rate-limited':
+      return 429;
+    case 'config':
+      return 503;
+    // Unreachable, refused, or a reply that could not be read: GitHub's
+    // problem or a passing one, and retrying is the thing to do rather than
+    // asking the user to fix anything.
+    case 'unreachable':
+    case 'refused':
+    case 'unreadable':
+      return 502;
+  }
+}
+
+/**
+ * Only a lost grant is worth reconnecting for.
+ *
+ * `forbidden` deliberately does not set it. A refusal by an organisation
+ * policy and an instruction to sign in again are contradictory advice, and
+ * following the flag sends somebody round a loop that ends where it started.
+ */
+function githubProblem(failure: {
+  error: string;
+  reason: GitHubFailure;
+  conflict?: PushConflict;
+}): Response {
+  return json(
+    {
+      error: failure.error,
+      ...(failure.reason === 'access' ? { reconnect: true } : {}),
+      ...(failure.conflict ? { conflict: failure.conflict } : {}),
+    },
+    statusFor(failure.reason),
+  );
+}
+
+function mintProblem(token: Extract<InstallationToken, { ok: false }>) {
+  return githubProblem(token);
+}
+
+/**
+ * A revision from the browser, checked before it names anything.
+ *
+ * `branchForRevision` already refuses what git would, and this is the same
+ * rule applied one step earlier so the answer is a 400 about the request
+ * rather than a failure part-way through a push.
+ */
+function parseRevision(body: unknown): string | null {
+  const { revision } = (body ?? {}) as { revision?: unknown };
+  if (typeof revision !== 'string') return null;
+  return branchForRevision(revision) ? revision.trim() : null;
+}
+
+/**
+ * Where the caller believes it is pushing. Required.
+ *
+ * It was optional for one commit, so that a browser holding the previous
+ * bundle through a deploy could still push. That is the wrong trade: a tab
+ * old enough to be sending the previous bundle is the tab most likely to be
+ * holding a binding that has since moved, which is the whole of what this
+ * check exists to catch. An optional guard is skipped by exactly the
+ * requests that most need it, and a push nobody constrained is worse than a
+ * push that fails until the tab is reloaded.
+ *
+ * Both halves and both non-empty. An owner with no repository has not said
+ * where it meant to go, and choosing which half to believe would be
+ * inventing the other.
+ */
+function parseExpectedRepository(
+  body: unknown,
+): { owner: string; repo: string } | null {
+  const { owner, repo } = (body ?? {}) as { owner?: unknown; repo?: unknown };
+  if (typeof owner !== 'string' || typeof repo !== 'string') return null;
+  if (!owner.trim() || !repo.trim()) return null;
+  return { owner: owner.trim(), repo: repo.trim() };
+}
+
+/**
+ * What a push would do to the connected repository, before it does it.
+ *
+ * #13 asks for the destination and the diff to be reviewable, and the push is
+ * the irreversible half of this integration. The answer nobody can get today
+ * is the one that matters most: a push writes the accepted snapshot and
+ * nothing else, so a file the repository has and vibld does not is gone from
+ * the branch. That is correct behaviour and it is not visible from a button
+ * marked "push".
+ *
+ * A read, and only a read. Nothing here writes to GitHub, to D1 or to the
+ * push ledger, so asking twice is free and asking at all commits the caller
+ * to nothing.
+ *
+ * It shares the push rate limiter deliberately. Both spend the same thing,
+ * one installation's GitHub quota, and one gate over that quota is easier to
+ * reason about than two that can each be under their own limit while the
+ * quota is gone. The cost is real and accepted: somebody who has just spent
+ * the burst on previews waits a moment before they can push. Waiting to push
+ * is a smaller harm than an unmetered read path against somebody else's API
+ * allowance.
+ */
+export async function handleGitHubDiff(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  doFetch: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env)) {
+    return json(
+      { error: 'Pushing to GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+  const credentials = githubAppCredentials(env)!;
+  const store = new GitHubStore(env.DB!);
+
+  if (env.GITHUB_BURST) {
+    try {
+      const allowed = await env.GITHUB_BURST.limit({
+        key: `github:${principal.userId}`,
+      });
+      if (!allowed.success) {
+        return json({ error: 'Too many requests. Try again shortly.' }, 429);
+      }
+    } catch (error) {
+      console.error('github rate limiter unavailable', error);
+    }
+  }
+
+  const state = await store.usableBinding(principal.userId, now);
+  if (!state.usable) return bindingProblem(state);
+  const { binding } = state;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const files = parsePreviewRequest(body);
+  if (!files.ok) return json({ error: files.error }, files.status);
+
+  const token = await mintInstallationToken(
+    credentials,
+    binding.installationId,
+    { owner: binding.owner, repo: binding.repo },
+    doFetch,
+    now.getTime(),
+  );
+  if (!token.ok) return mintProblem(token);
+
+  // The media a push of these files would carry, so the preview lists it
+  // as the push will: added, changed, or already there.
+  const media = await exportedMedia(env, principal.userId, files.value);
+  const preview = await previewPush(
+    token.token,
+    {
+      owner: binding.owner,
+      repo: binding.repo,
+      baseBranch: binding.defaultBranch,
+    },
+    files.value,
+    doFetch,
+    media.binaries.map(({ path, gitSha }) => ({ path, gitSha })),
+    media.keep,
+  );
+  if (!preview.ok) return githubProblem(preview);
+
+  // The destination travels with the diff. A caller holding a preview has to
+  // be able to tell whether it describes the repository it is about to push
+  // to: the binding can move between this call and the button, and a diff
+  // labelled with nothing would be read as being about wherever it is
+  // pointing now.
+  return json({
+    owner: binding.owner,
+    repo: binding.repo,
+    ...preview.preview,
+  });
+}
+
+/**
+ * Push an accepted checkpoint to the connected repository.
+ *
+ * The caller has already been identified; this takes the principal rather
+ * than resolving it, so the identity rules stay in one place in `index.ts`
+ * and this file stays testable without a Clerk session.
+ */
+export async function handleGitHubPush(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  doFetch: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env)) {
+    return json(
+      { error: 'Pushing to GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+  const credentials = githubAppCredentials(env)!;
+  const store = new GitHubStore(env.DB!);
+
+  // Its own gate, like publishing has: a push is several GitHub calls and a
+  // write to somebody's repository, priced per caller rather than per flood,
+  // so it is checked after identity rather than before it.
+  if (env.GITHUB_BURST) {
+    try {
+      const allowed = await env.GITHUB_BURST.limit({
+        key: `github:${principal.userId}`,
+      });
+      if (!allowed.success) {
+        return json({ error: 'Too many pushes. Try again shortly.' }, 429);
+      }
+    } catch (error) {
+      console.error('github rate limiter unavailable', error);
+    }
+  }
+
+  const state = await store.usableBinding(principal.userId, now);
+  if (!state.usable) return bindingProblem(state);
+  const { binding } = state;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  const files = parsePreviewRequest(body);
+  if (!files.ok) return json({ error: files.error }, files.status);
+
+  const revision = parseRevision(body);
+  if (!revision) {
+    return json(
+      { error: '"revision" must name a checkpoint that can become a branch.' },
+      400,
+    );
+  }
+
+  // The binding is read here, and the button that offered this push read it
+  // whenever it last looked. In between, another tab or the panel in the
+  // header can rebind, and without this the click lands on whatever is
+  // connected now: a button labelled one repository writing to another.
+  // ADR-0007 is about not doing things to somebody's repository that they
+  // did not ask for, and a push to a repository they were not looking at is
+  // one of those, however briefly the two disagreed.
+  //
+  // It also keeps `(user, owner, repo, revision)` meaning what it says. Two
+  // clicks either side of a rebind both resolve to the repository bound last
+  // and become one operation on one key, so the first click's destination
+  // never receives its push and nothing reports that.
+  const expected = parseExpectedRepository(body);
+  if (!expected) {
+    return json(
+      {
+        error: '"owner" and "repo" must say which repository this push is for.',
+      },
+      400,
+    );
+  }
+  if (!sameRepository(expected, binding)) {
+    return json(
+      {
+        // Only the binding is named. The other half of this sentence would
+        // be a string out of the request body, reflected into a message the
+        // browser then draws, and nothing here has any reason to repeat a
+        // caller's own input back at it.
+        error:
+          `vibld is connected to ${binding.owner}/${binding.repo}, which is not where this push was for. ` +
+          `Nothing was pushed. Check where vibld is pointing, then push again.`,
+        // Said apart from the sentence, because it comes with something to
+        // do rather than something to read: whatever asked for this push is
+        // holding a destination that has moved, and the answer is to read
+        // the connection again. Without it a tab that missed the change
+        // repeats the same rejected push forever, since nothing in a 409
+        // tells it that what it believes is the thing that is wrong.
+        //
+        // The destination itself rather than a flag saying one moved. The
+        // sentence above is about this repository, and a caller that knows
+        // which one can tell whether that sentence is still worth drawing
+        // by the time it has read the connection again. A bare flag leaves
+        // it describing a repository it can no longer name.
+        movedTo: { owner: binding.owner, repo: binding.repo },
+      },
+      409,
+    );
+  }
+
+  const token = await mintInstallationToken(
+    credentials,
+    binding.installationId,
+    { owner: binding.owner, repo: binding.repo },
+    doFetch,
+    now.getTime(),
+  );
+  if (!token.ok) return mintProblem(token);
+
+  const target: PushTarget = {
+    owner: binding.owner,
+    repo: binding.repo,
+    baseBranch: binding.defaultBranch,
+  };
+
+  // Resolve the parent, then write it down, then push. An attempt that
+  // resolves its own parent and loses the reply to the commit call leaves
+  // nothing to pin, and its retry reads a branch that may have moved: the
+  // same files then commit onto a different parent and become a second
+  // commit. `beginPush` inserts or does nothing, so the first attempt's
+  // parent is the one every retry gets back.
+  // The destination is part of which push this is, not a detail of it: a sha
+  // from one repository names nothing in another, so a user who reconnects
+  // elsewhere and pushes the same checkpoint resolves a fresh parent there.
+  const key = {
+    userId: principal.userId,
+    owner: binding.owner,
+    repo: binding.repo,
+    revision,
+  };
+  const recorded = await store.push(key);
+  let baseSha = recorded?.baseSha;
+  if (!baseSha) {
+    const base = await resolveBase(token.token, target, doFetch);
+    if (!base.ok) return githubProblem(base);
+    baseSha = base.sha;
+  }
+
+  const attempt = await store.beginPush({
+    ...key,
+    baseSha,
+    branch: branchForRevision(revision)!,
+    startedAt: now.toISOString(),
+  });
+
+  // The uploaded media this checkpoint references, so the pushed project
+  // shows the same images and video without Vibld (`media-export.ts`). A
+  // library that cannot be listed pushes the code without it (and keeps
+  // what the repository has); a file that cannot be read stops the push,
+  // so every attempt at it builds the same tree.
+  const media = await exportedMedia(env, principal.userId, files.value);
+
+  const pushed = await pushCheckpoint(
+    token.token,
+    {
+      target,
+      files: files.value,
+      ...(media.binaries.length > 0 ? { binaries: media.binaries } : {}),
+      ...(media.keep.length > 0 ? { keep: media.keep } : {}),
+      revision,
+      // The recorded parent, not the one just resolved: on a retry they are
+      // the same, and where they differ the recorded one is right.
+      baseSha: attempt.baseSha,
+      message: `vibld checkpoint ${revision}`,
+      // Fixed from the attempt's own start time, so the commit object is the
+      // same on every try.
+      committer: {
+        name: 'Vibld',
+        email: 'noreply@vibld.com',
+        date: attempt.startedAt,
+      },
+      pullRequest: {
+        title: `vibld: ${revision}`,
+        body: `Generated by vibld from checkpoint \`${revision}\`.`,
+      },
+    },
+    doFetch,
+  );
+
+  if (!pushed.ok) return githubProblem(pushed);
+
+  await store.finishPush(key, {
+    commitSha: pushed.pushed.commitSha,
+    treeSha: pushed.pushed.treeSha,
+    ...(pushed.pushed.pullRequestUrl
+      ? { pullRequestUrl: pushed.pushed.pullRequestUrl }
+      : {}),
+    finishedAt: new Date().toISOString(),
+  });
+
+  return json({
+    branch: pushed.pushed.branch,
+    commitSha: pushed.pushed.commitSha,
+    // False when the branch was already there carrying this tree, which is
+    // what a retry of a push whose reply was lost looks like.
+    created: pushed.pushed.created,
+    ...(pushed.pushed.pullRequestUrl
+      ? { pullRequestUrl: pushed.pushed.pullRequestUrl }
+      : {}),
+    // Referenced media that did not go with the push: over the size bound,
+    // by size. Named so the person knows which file to add by hand.
+    ...(media.skipped.length > 0 ? { skippedMedia: media.skipped } : {}),
+  });
+}
+
+/**
+ * What the builder needs to show the GitHub panel: the connected repository,
+ * or why there is not one.
+ */
+export async function handleGitHubStatus(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+
+  // Two capabilities, reported separately, because they are configured
+  // separately and a panel that conflates them offers a button that cannot
+  // work. A deployment with the App key but no OAuth credentials can push on
+  // a binding it already has and cannot make new ones; one with the OAuth
+  // half and no App key is the other way round.
+  const canPush = githubConfigured(env);
+  const canConnect = githubConnectConfigured(env);
+  if (!canPush && !canConnect) {
+    return json({ configured: false, canPush: false, canConnect: false });
+  }
+
+  const store = new GitHubStore(env.DB!);
+  const state = await store.usableBinding(principal.userId, now);
+  if (!state.usable) {
+    return json({
+      configured: true,
+      canPush,
+      canConnect,
+      connected: false,
+      reason: state.reason,
+    });
+  }
+  // What became of the last pull request vibld opened for this user, if a
+  // webhook has said. Reported here rather than only in a push reply,
+  // because the push that opened it may have been in a session that is over:
+  // after a reload the link was all that survived, and a link cannot say
+  // whether there is anything left to do.
+  //
+  // Only when it is about the repository that is connected now. A pull
+  // request in a repository this user has since disconnected is not news
+  // about the destination on screen, and drawing it there would attach it to
+  // the wrong name.
+  const last = await store.lastPullRequest(principal.userId);
+  const here =
+    last &&
+    last.pullRequestUrl &&
+    last.owner === state.binding.owner &&
+    last.repo === state.binding.repo;
+
+  return json({
+    configured: true,
+    canPush,
+    canConnect,
+    connected: true,
+    owner: state.binding.owner,
+    repo: state.binding.repo,
+    defaultBranch: state.binding.defaultBranch,
+    expiresAt: state.binding.expiresAt,
+    ...(here
+      ? {
+          pullRequest: {
+            url: last.pullRequestUrl,
+            branch: last.branch,
+            // Null until a delivery has arrived. Reported as null rather
+            // than guessed as open: "open" is a claim, and the only thing
+            // that knows is GitHub.
+            state: last.pullRequestState,
+          },
+        }
+      : {}),
+  });
+}
+
+/**
+ * A pull request changed on GitHub.
+ *
+ * The one route in this integration nobody is signed in for. A delivery
+ * arrives from GitHub's infrastructure with no session, so the signature is
+ * the whole of the authentication and an unverified body is treated as
+ * something a stranger wrote.
+ *
+ * Answers 2xx for everything it has decided not to act on, and only fails a
+ * delivery it genuinely could not process. GitHub retries a non-2xx and
+ * eventually disables an endpoint that keeps failing, so answering "no" to a
+ * delivery about an event this does not handle would spend that budget on
+ * nothing.
+ */
+export async function handleGitHubWebhook(
+  request: Request,
+  env: GitHubHandlerEnv,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  // No secret, no endpoint. An unsigned delivery is not a delivery.
+  if (!env.DB || !env.VIBLD_GITHUB_WEBHOOK_SECRET) {
+    return json({ error: 'Webhooks are not configured.' }, 503);
+  }
+
+  const delivery = request.headers.get('x-github-delivery');
+  const event = request.headers.get('x-github-event');
+  if (!delivery || !event) {
+    return json({ error: 'Not a GitHub delivery.' }, 400);
+  }
+
+  // Read as text, then verified, then parsed. The signature is over these
+  // bytes: re-serializing parsed JSON produces different ones and would
+  // reject every genuine delivery.
+  const body = await request.text();
+  const signed = await isSignedByGitHub(
+    env.VIBLD_GITHUB_WEBHOOK_SECRET,
+    body,
+    request.headers.get('x-hub-signature-256'),
+  );
+  if (!signed) {
+    // Nothing about which part was wrong: that would tell a forger where to
+    // work. The same sentence for a missing header and a bad digest.
+    return json({ error: 'Invalid signature.' }, 401);
+  }
+
+  const store = new GitHubStore(env.DB);
+  // Before anything is applied, because GitHub redelivers and a redelivery
+  // can be triggered by hand from the App's settings page.
+  if (await store.wasDelivered(delivery)) return json({ received: true });
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    payload = null;
+  }
+
+  const pull = pullRequestFrom(event, payload);
+  if (pull) {
+    await store.recordPullRequest({
+      owner: pull.owner,
+      repo: pull.repo,
+      branch: pull.branch,
+      number: pull.number,
+      url: pull.url,
+      state: pull.state,
+      updatedAt: pull.updatedAt,
+    });
+  }
+
+  // Marked after the work, so a delivery whose write threw is retried rather
+  // than recorded as done. Marked even when there was nothing to do, so a
+  // redelivery of an event this ignores is not re-read.
+  await store.markDelivered(delivery, event, now.toISOString());
+  return json({ received: true });
+}
+
+/** When a grant approved now should stop being usable. */
+export function grantExpiry(now: Date = new Date()): string {
+  return new Date(
+    now.getTime() + GRANT_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+}
+
+/**
+ * Where GitHub sends the browser back to. Derived from the request rather
+ * than configured, so preview and production each come back to themselves.
+ */
+function callbackUrl(request: Request): string {
+  return new URL(
+    '/api/github/callback',
+    new URL(request.url).origin,
+  ).toString();
+}
+
+/**
+ * Step one: hand the browser somewhere to go.
+ *
+ * Deliberately does not redirect. The caller is an authenticated `fetch`
+ * from the builder carrying a bearer token, and a 302 to GitHub would be
+ * followed by that fetch rather than by the person, sending the
+ * Authorization header somewhere it does not belong. The URL goes back as
+ * data and the page navigates.
+ */
+export async function handleGitHubConnect(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+  const state = await signState(credentials, principal.userId, now.getTime());
+  // The state goes back to the caller as well as into the URL. The browser
+  // keeps it and compares it on the way back, which is what stops somebody
+  // pairing their own `code` with a link they send to a signed-in user: a
+  // state the browser did not issue does not match the one it stored.
+  return json({
+    url: authorizeUrl(credentials, state, callbackUrl(request)),
+    state,
+  });
+}
+
+/**
+ * Where GitHub lands, and the only route here that cannot be authenticated.
+ *
+ * GitHub returns through a top-level browser navigation, which carries no
+ * `Authorization` header, so there is no Clerk session to resolve: a route
+ * that demanded one would reject every real callback before it did anything.
+ *
+ * So this one does no work and holds no authority. It hands the `code` and
+ * `state` to the app, in the fragment, and the app completes the exchange
+ * with a request that *can* be authenticated. The fragment is not sent to
+ * any server, which keeps a single-use code out of request logs on the way
+ * through.
+ *
+ * The redirect target is built here rather than taken from the request,
+ * because a callback that forwarded to a URL somebody else chose would be an
+ * open redirect with an OAuth code attached to it.
+ */
+export function handleGitHubCallback(request: Request): Response {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code') ?? '';
+  const state = url.searchParams.get('state') ?? '';
+  // Forwarded because the bounded read below needs it, not because it is
+  // trusted: it only moves an installation to the front of a list GitHub
+  // gave us for this user, and one that is not in that list changes nothing.
+  const installation = url.searchParams.get('installation_id') ?? '';
+  const target = new URL('/', url.origin);
+  target.hash =
+    `github=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}` +
+    (installation ? `&installation=${encodeURIComponent(installation)}` : '');
+  if (!code || !state) target.hash = 'github=incomplete';
+  return new Response(null, {
+    status: 302,
+    headers: { location: target.toString(), 'cache-control': 'no-store' },
+  });
+}
+
+/**
+ * Step three: find out who came back, and what they may choose.
+ *
+ * Authenticated, unlike the redirect that precedes it, because the app calls
+ * it with a `fetch` that carries the Clerk token. The `state` must verify
+ * *and* name that caller: verifying alone would let somebody else's
+ * authorization be completed inside this session.
+ *
+ * Nothing from GitHub's redirect is treated as permission. The user token is
+ * what decides, and `userInstallations` answers, from GitHub, which
+ * installations this account can actually reach.
+ */
+export async function handleGitHubComplete(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  doFetch: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { code, state, installation } = (body ?? {}) as {
+    code?: unknown;
+    state?: unknown;
+    installation?: unknown;
+  };
+  const hinted = Number(installation);
+  if (
+    typeof code !== 'string' ||
+    typeof state !== 'string' ||
+    !code ||
+    !state
+  ) {
+    return json({ error: 'That connection link is incomplete.' }, 400);
+  }
+
+  // Checked against the signed-in caller, not merely checked. A state that
+  // verifies but names somebody else is somebody else's authorization being
+  // walked into this session, which is the thing it exists to stop.
+  const startedBy = await verifyState(credentials, state, now.getTime());
+  if (!startedBy || startedBy !== principal.userId) {
+    return json(
+      { error: 'That connection attempt has expired. Start again.' },
+      400,
+    );
+  }
+
+  // The same callback URL the authorization was started with, rebuilt from
+  // this request's origin exactly as `handleGitHubConnect` built it from
+  // its own. GitHub refuses the exchange when the two differ.
+  const token = await exchangeCode(
+    credentials,
+    code,
+    callbackUrl(request),
+    doFetch,
+  );
+  if (!token.ok) return githubProblem(token);
+
+  const installations = await userInstallations(token.token, doFetch);
+  if (!installations.ok) return githubProblem(installations);
+
+  // Everything this person could connect, across every installation they
+  // reach. Reading them all is a call each, so it is bounded, and the
+  // installation named on the way back is handled specially so that bound
+  // cannot strand it:
+  //
+  //   in the list -> it goes first, costing what it always would;
+  //   not in the list -> it is read as its own probe, outside the bound.
+  //
+  // Reading it directly rather than looking for it is what makes it
+  // reachable wherever GitHub's list happens to put it, or page it. That
+  // gives up nothing, because reading an installation's repositories *as the
+  // user* is itself the authorization check: GitHub answers 404 for one they
+  // cannot reach, and a forged id gets exactly that.
+  const listed = installations.value.items;
+  const named = Number.isInteger(hinted) && hinted > 0;
+
+  // The installation named on the way back is always the probe, whether or
+  // not GitHub's list mentions it. Being the probe is what makes its own
+  // failure distinguishable from an unrelated one, and that matters most in
+  // the ordinary case where it *is* listed: reading it as one of the crowd
+  // meant a transient error on exactly the installation somebody chose was
+  // indistinguishable from one on an installation they had never heard of,
+  // and so was discarded the moment any other succeeded.
+  //
+  // It also stays outside the budget. A forged or stale id answers 404, and
+  // charging that to the budget would let a made-up id in a link cost a real
+  // installation its place in the read. The loop below skips it either way,
+  // so nothing is read twice.
+  const probe = named
+    ? (listed.find((candidate) => candidate.id === hinted) ?? {
+        id: hinted,
+        account: 'unknown',
+      })
+    : null;
+
+  const repositories = await connectableRepositories(
+    token.token,
+    listed,
+    doFetch,
+    probe,
+  );
+  // Asked after the read, not before it. GitHub's list of a brand-new
+  // installation is not always current the instant it redirects, so checking
+  // first would tell somebody to install the App they had this second
+  // installed. The probe answers that case directly.
+  //
+  // It also wins over the probe's own failure. With no installations listed,
+  // a probe that 404s is confirming there is nothing there, and "that
+  // installation is not available to your account" is a true sentence that
+  // helps nobody: the thing to say is that the App needs installing.
+  // `missing` only, never any failure and not `access` either. A probe that
+  // 404s alongside an empty list is confirming there is nothing there. A
+  // rate limit or an unreachable GitHub says nothing of the kind. Nor does a
+  // 403, which is an organisation policy or an ungranted authorization: that
+  // person has an App they cannot reach, and telling them to install it is
+  // advice they cannot act on. `github-app.ts` separates these reasons
+  // precisely so this branch does not have to guess, and collapsing them
+  // here is the mistake this feature has already made twice.
+  // "Nothing was read", not "nothing was offered". A probe that succeeds and
+  // finds an installation with no pushable repositories in it has proved the
+  // App is installed, and telling that person to install it is both wrong
+  // and impossible to act on. What they need is the empty picker, which says
+  // there is nothing they can push to.
+  const nothingThere = repositories.ok
+    ? repositories.value.read === 0
+    : repositories.reason === 'missing';
+  if (nothingThere && listed.length === 0) {
+    return json(
+      {
+        error:
+          'The vibld GitHub App is not installed on any account you can reach. Install it, then connect again.',
+        install: true,
+      },
+      409,
+    );
+  }
+  if (!repositories.ok) return githubProblem(repositories);
+
+  const offered = [...repositories.value.repositories].sort((a, b) =>
+    `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`),
+  );
+
+  return json({
+    installations: listed,
+    repositories: offered,
+    // The accounts the read budget did not reach, so the panel can say so
+    // rather than presenting a short list as the whole truth. Omitted from
+    // the body when there are none, which is almost always.
+    ...(repositories.value.omitted.length > 0
+      ? { omitted: repositories.value.omitted }
+      : {}),
+    // Two different shortfalls, kept apart. `omitted` names accounts that
+    // can still be reached by installing again, which returns an id read
+    // outside the budget. `truncated` is a page bound inside a list, which
+    // installing again cannot move: the same bound applies on the next read.
+    // Collapsing them would offer a remedy that does not work.
+    ...(repositories.value.truncated || installations.value.more
+      ? { truncated: true }
+      : {}),
+    // What the bind call may choose from, signed. See `signChoice`.
+    ticket: await signChoice(
+      credentials,
+      principal.userId,
+      offered,
+      now.getTime(),
+    ),
+  });
+}
+
+/**
+ * The same repository, by GitHub's reckoning rather than by string equality.
+ *
+ * GitHub resolves an owner and a name without regard to case, so `acme/Site`
+ * and `acme/site` are one repository. Used by the bind, to match a choice
+ * against the list the callback signed, and by the push, to refuse one whose
+ * destination has moved: there, comparing exactly would refuse a push whose
+ * destination had not moved at all, and that is a refusal with nothing the
+ * person can do about it.
+ */
+function sameRepository(
+  a: { owner: string; repo: string },
+  b: { owner: string; repo: string },
+) {
+  return (
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase()
+  );
+}
+
+/**
+ * Step three: write the binding the user picked.
+ *
+ * The repository is not taken from the request. It is matched against the
+ * list the callback signed, and the binding is written from the matched
+ * entry, so the destination and its default branch are the ones GitHub
+ * reported rather than the ones the browser sent.
+ */
+export async function handleGitHubBind(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConnectConfigured(env)) {
+    return json(
+      { error: 'Connecting a GitHub repository is not configured here.' },
+      503,
+    );
+  }
+  const credentials = githubOAuthCredentials(env)!;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const { ticket, owner, repo } = (body ?? {}) as {
+    ticket?: unknown;
+    owner?: unknown;
+    repo?: unknown;
+  };
+  if (
+    typeof ticket !== 'string' ||
+    typeof owner !== 'string' ||
+    typeof repo !== 'string'
+  ) {
+    return json(
+      { error: '"ticket", "owner" and "repo" are all required.' },
+      400,
+    );
+  }
+
+  const verified = await verifyChoice(credentials, ticket, now.getTime());
+  if (!verified || verified.userId !== principal.userId) {
+    return json(
+      { error: 'That connection attempt has expired. Start again.' },
+      400,
+    );
+  }
+
+  const match = verified.repositories.find((candidate) =>
+    sameRepository(candidate, { owner, repo }),
+  );
+  if (!match) {
+    return json(
+      { error: 'That repository was not one of the ones you were offered.' },
+      403,
+    );
+  }
+
+  const store = new GitHubStore(env.DB!);
+  await store.bind({
+    userId: principal.userId,
+    // The installation the matched entry came from, so a repository is
+    // always pushed through the installation it was actually read from.
+    installationId: match.installationId,
+    owner: match.owner,
+    repo: match.repo,
+    defaultBranch: match.defaultBranch,
+    grantedAt: now.toISOString(),
+    grantedByEmail: principal.policyIdentity,
+    expiresAt: grantExpiry(now),
+  });
+
+  return json({
+    owner: match.owner,
+    repo: match.repo,
+    defaultBranch: match.defaultBranch,
+    expiresAt: grantExpiry(now),
+  });
+}
+
+/**
+ * Stop pushing to the connected repository.
+ *
+ * Marks the grant revoked rather than deleting it, and says nothing about
+ * whether there was one: "disconnected" is the same answer either way, so
+ * this cannot be used to ask whether somebody has connected something.
+ */
+export async function handleGitHubDisconnect(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env) && !githubConnectConfigured(env)) {
+    return json(
+      { error: 'GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+
+  // The same guard the push has, for the same reason and with the same
+  // shape. This route used to act on whatever was bound when the request
+  // arrived, and the panel that offers it reads the connection whenever it
+  // last looked: somebody reading `acme/site` and pressing Disconnect
+  // disconnected `acme/other` if the binding had moved in another tab or on
+  // another device in between. Undoing a connection they meant to keep and
+  // keeping one they meant to end, in a single click, with nothing saying
+  // so.
+  //
+  // Required rather than optional, on the reasoning the push settled: a
+  // caller old enough to be sending no destination is the one most likely
+  // to be holding a binding that has moved.
+  const expected = parseExpectedRepository(body);
+  if (!expected) {
+    return json(
+      {
+        error: '"owner" and "repo" must say which repository this disconnects.',
+      },
+      400,
+    );
+  }
+
+  // One statement rather than a read and then a write. Apart, a bind landing
+  // in between would have the revocation take the newly bound repository,
+  // which is the outcome naming one exists to prevent.
+  const store = new GitHubStore(env.DB!);
+  if (await store.revokeRepository(principal.userId, expected, now)) {
+    return json({ connected: false });
+  }
+
+  // Nothing changed, and the statement does not say why. Reading now only
+  // decides what to report, so a binding that moves again while this runs
+  // costs an out-of-date sentence rather than a wrong write.
+  //
+  // `usableBinding` rather than the raw row, and by the same rule the status
+  // route answers on. A grant that has expired is one the status calls
+  // disconnected, so reporting a conflict with it would have the panel
+  // saying "No repository connected" beside an error naming the repository
+  // it is connected to, and would put a name in front of somebody that the
+  // status route does not give them.
+  const state = await store.usableBinding(principal.userId, now);
+
+  // Nothing to disconnect, or nothing left of it. The end state asked for is
+  // the state already in place, so this is a success rather than a quarrel
+  // about a destination that is not there: refusing here would leave a
+  // second click on a slow first one reporting a failure for work that is
+  // done.
+  if (!state.usable) return json({ connected: false });
+
+  const { binding } = state;
+
+  // The read found the repository the request named, which the update did
+  // not. Something bound it in between, so the row that refused the update
+  // is gone and this one cannot explain it: saying this repository "is not
+  // what this would have disconnected" would name the one that was asked
+  // for as the reason for refusing to disconnect it. Say what actually
+  // happened instead, and leave the retry to a second click rather than
+  // opening another window inside this request.
+  if (sameRepository(expected, binding)) {
+    return json(
+      {
+        error:
+          'The connection changed while this was running. Nothing was ' +
+          'disconnected. Try again.',
+        movedTo: { owner: binding.owner, repo: binding.repo },
+      },
+      409,
+    );
+  }
+
+  return json(
+    {
+      error:
+        `vibld is connected to ${binding.owner}/${binding.repo}, which is not what this would have disconnected. ` +
+        `Nothing was changed. Check where vibld is pointing, then try again.`,
+      movedTo: { owner: binding.owner, repo: binding.repo },
+    },
+    409,
+  );
+}
+
+/**
+ * The media a push should carry, planned from the library. Never throws: a
+ * library that cannot be listed pushes the code without media, and a file
+ * that cannot be read when its turn comes is left out and named.
+ *
+ * Nothing is read here. Each file's bytes are read by `pushCheckpoint` as
+ * its blob is sent, one at a time, so a push never holds more than one.
+ * `skipped` is filled as that happens: read it after the push.
+ */
+async function exportedMedia(
+  env: GitHubHandlerEnv,
+  userId: string,
+  files: readonly ProjectFile[],
+): Promise<{
+  binaries: {
+    path: string;
+    gitSha: string;
+    read: () => Promise<Uint8Array | undefined>;
+  }[];
+  skipped: string[];
+  /** Referenced media the push keeps as the repository has it, if it does. */
+  keep: string[];
+}> {
+  const keep = mediaPathsToKeep(files);
+  const bucket = env.PROJECT_CONTENT;
+  if (!env.DB || !bucket) return { binaries: [], skipped: [], keep };
+  let plan: ReturnType<typeof planMediaExport>;
+  try {
+    const library = await new MediaStore(env.DB, bucket).list(userId);
+    plan = planMediaExport(files, library);
+  } catch (error) {
+    console.error('media library unavailable for push', error);
+    return { binaries: [], skipped: [], keep };
+  }
+  const skipped = plan.skipped;
+  const binaries = plan.include.map(({ entry, path }) => ({
+    path,
+    gitSha: entry.gitSha,
+    read: async () => {
+      try {
+        const object = await bucket.get(mediaObjectKey(userId, entry.id));
+        if (object) return new Uint8Array(await object.arrayBuffer());
+      } catch (error) {
+        console.error('media unreadable for push', error);
+      }
+      return undefined;
+    },
+  }));
+  return { binaries, skipped, keep };
+}

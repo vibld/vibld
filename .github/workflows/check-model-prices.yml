@@ -1,0 +1,90 @@
+# Whether what vibld bills for model use still covers what it costs.
+#
+# Every credit is a cent of model spend at the catalogue's rates, and each
+# plan's margin is the gap between its price and the model spend it includes
+# (docs/decisions.md L36). This compares the catalogue with two things: the
+# published prices the pricing routine last read from each provider's pricing
+# page (packages/ai/published-prices.json), and what Anthropic and OpenAI
+# actually billed per token over the last week, through their admin APIs.
+#
+# It reports and never edits. A finding lands on one tracking issue, and the
+# issue is closed when a run comes back clean. The catalogue is changed by a
+# pull request, which is what the pricing routine opens.
+name: Check model prices
+
+on:
+  schedule:
+    # After midnight UTC, so yesterday's cost report is complete.
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-model-prices
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # Runs only in the private working repository. The public copy
+    # (vibld/vibld) has none of the secrets or deployment environments this
+    # job reads, so there it could only fail.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The admin keys live beside the provider keys the builder uses.
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compare billed rates with published and billed costs
+        id: check
+        working-directory: apps/web
+        env:
+          ANTHROPIC_ADMIN_KEY: ${{ secrets.ANTHROPIC_ADMIN_KEY }}
+          OPENAI_ADMIN_KEY: ${{ secrets.OPENAI_ADMIN_KEY }}
+        run: node --experimental-strip-types scripts/check-model-prices.ts
+
+      # One open issue at a time: a finding that persists is a comment on the
+      # same thread, so the thread is the history of the rates drifting and
+      # being corrected.
+      - name: Report what it found
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title='Model pricing check found differences'
+          report=apps/web/price-report.md
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file "$report"
+          else
+            gh issue create --title "$title" --body-file "$report"
+          fi
+
+      - name: Close the issue once the rates agree again
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title='Model pricing check found differences'
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file apps/web/price-report.md
+            gh issue close "$number" --reason completed
+          fi

@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    // Worker-only, same reasoning as apps/preview's tsconfig: no DOM lib
+    // needed or wanted, so the real @cloudflare/workers-types globals are
+    // safe to use directly.
+    "types": ["node", "@cloudflare/workers-types"]
+  },
+  "include": ["worker/**/*.ts", "test/**/*.ts"]
+}

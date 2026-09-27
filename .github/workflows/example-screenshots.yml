@@ -1,0 +1,103 @@
+name: Example screenshots
+
+# Builds every example in examples/catalogue.json and takes the 1440x900
+# first-screen screenshot vibld.com/examples shows for it, as the
+# `example-screenshots` artifact. It publishes nothing: the screenshots are
+# committed to apps/marketing/public/examples/ by hand, like the examples.
+#
+# It runs on a pull request that changes an example, so the screenshots are
+# ready to commit before anyone reviews the page, and by hand from a branch.
+on:
+  pull_request:
+    paths:
+      - 'examples/**'
+      - 'scripts/examples.mjs'
+      - 'scripts/example-screenshots.mjs'
+      - '.github/workflows/example-screenshots.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: example-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The same build the Publish examples workflow runs, and for the same
+  # reason with no environment and no secret: an example's package.json and
+  # build config are code a model wrote. scripts/examples.mjs builds each one
+  # in its own container.
+  build:
+    name: Build the examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The build runs code a model wrote. A persisted credential would
+          # sit on disk where that code can read it.
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Pull the build image
+        run: docker pull node:24-bookworm-slim
+
+      - name: Install and build each example
+        run: node scripts/examples.mjs build "$RUNNER_TEMP/examples" --container node:24-bookworm-slim
+
+      - name: Upload the built sites
+        uses: actions/upload-artifact@v7
+        with:
+          name: built-examples
+          path: ${{ runner.temp }}/examples
+          if-no-files-found: error
+
+  # Loads each built site in a browser, which runs the site's own script, so
+  # this job holds no secret either.
+  screenshot:
+    name: Screenshot the first screen
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Download the built sites
+        uses: actions/download-artifact@v7
+        with:
+          name: built-examples
+          path: ${{ runner.temp }}/examples
+
+      # Outside the workspace and not in the lockfile: nothing else in the
+      # repository uses them.
+      - name: Install Playwright and sharp
+        run: |
+          mkdir -p "$RUNNER_TEMP/shoot"
+          cd "$RUNNER_TEMP/shoot"
+          echo '{"private":true}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts playwright@1.63.0 sharp@0.35.4
+          npx playwright install --with-deps chromium
+
+      - name: Take the screenshots
+        run: node scripts/example-screenshots.mjs "$RUNNER_TEMP/examples" "$RUNNER_TEMP/screenshots" "$RUNNER_TEMP/shoot"
+
+      - name: Upload the screenshots
+        uses: actions/upload-artifact@v7
+        with:
+          name: example-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: error

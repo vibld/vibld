@@ -1,0 +1,1023 @@
+import {
+  BudgetExceededError,
+  DurableGenerationRunner,
+  FakeModelProvider,
+  InMemoryGenerationStore,
+  RunBudgetLedger,
+} from '@vibld/core';
+import type {
+  GenerationPlan,
+  GenerationState,
+  ProjectFile,
+  ProjectSnapshot,
+  RunUsageReport,
+} from '@vibld/core';
+import type { ModelProvider } from '@vibld/core';
+import type { StylePresetId } from '@vibld/ai/style-presets';
+import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
+import type { ModelOption } from './remote-provider.ts';
+import type { ProjectBrief } from './brief.ts';
+import { deriveBrief } from './brief.ts';
+import type { PlanMode } from './plan-builder.ts';
+import { buildPlan } from './plan-builder.ts';
+import type { StyleDna } from '@vibld/ai/style-dna';
+import type { ParsedMockup } from '@vibld/ai/mockup-schema';
+import { requestMockups } from './mockups-client.ts';
+import { createValidator } from './validator.ts';
+import {
+  ObservingGenerationStore,
+  ObservingModelProvider,
+  withValidationDelay,
+} from './observers.ts';
+import {
+  RemoteModelProvider,
+  detectGenerationMode,
+} from './remote-provider.ts';
+import type { GenerationMode } from './remote-provider.ts';
+
+export type BuilderStatus =
+  | 'idle'
+  | 'planning'
+  | 'staging'
+  | 'validating'
+  | 'accepted'
+  | 'failed'
+  | 'cancelled';
+
+export interface TimelineEntry {
+  id: number;
+  at: number;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+}
+
+export interface BuilderState {
+  status: BuilderStatus;
+  running: boolean;
+  runId: string | null;
+  prompt: string | null;
+  planSummary: string | null;
+  stagedFiles: ProjectFile[];
+  acceptedSnapshot: ProjectSnapshot | null;
+  acceptedBrief: ProjectBrief | null;
+  problems: string[];
+  timeline: TimelineEntry[];
+  runCount: number;
+  budget: RunUsageReport;
+  /** Which provider produced the last plan, so the UI never implies AI. */
+  providerId: string | null;
+  /**
+   * How far the in-flight generation has got. Null when nothing is running.
+   *
+   * A real project takes minutes to write. Without this the shell shows the
+   * same frozen "Generating..." for the whole wait, which reads as a hang --
+   * and did, for two days.
+   */
+  progress: GenerationProgress | null;
+  /**
+   * The conversation so far, oldest first.
+   *
+   * Building an application is a conversation, not a single request: the
+   * second prompt is where the value is. The run history used to survive
+   * only as flat log lines in a tab nobody opened, so each run visually
+   * replaced the last and the shell read as one-shot even though the engine
+   * has always iterated.
+   */
+  transcript: TranscriptTurn[];
+  /**
+   * Standing instructions for this project, applied to every turn.
+   *
+   * They exist so nobody has to retype "keep it dark, no rounded corners" on
+   * every prompt. Kept out of the transcript deliberately: they are not
+   * something that was said once, they are a condition on everything said.
+   */
+  knowledge: string;
+  styleDna: StyleDna;
+  /** The chosen model id, or null for the deployment's default. */
+  model: string | null;
+  /** What this deployment can serve. Empty until the probe answers. */
+  models: ModelOption[];
+  /**
+   * Whether the signed-in caller is a platform admin (docs/decisions.md
+   * L4) -- decides only what the shell draws, never what it may do. Every
+   * `/api/admin/*` route checks the caller itself (ADR-0006).
+   *
+   * `null` until the `/api/config` probe answers, which `models` above
+   * expresses as an empty list because an empty picker is the right thing
+   * to show while nobody has answered. There is no such luck here: the
+   * admin page has to tell "not an admin" apart from "not asked yet", or
+   * it reports that an admin's own page does not exist for as long as a
+   * fetch takes, and then replaces it under them.
+   */
+  isAdmin: boolean | null;
+  /**
+   * What this deployment can actually generate with, from `/api/config`.
+   *
+   * Null until the probe answers. It decides one thing: whether to offer
+   * directions (#189 review). `explore` always calls the real
+   * `/api/mockups`, while a build in `fake` mode is served by
+   * `FakeModelProvider`, so the button was offering something that could
+   * only 503 in exactly the modes the fake exists to keep usable.
+   *
+   * Hidden rather than faked, and the reason is this feature's own
+   * argument. `defaultResolveProvider` already says the fake "has no visual
+   * vocabulary at all, so a preset cannot change what it produces. Nothing
+   * here pretends otherwise." Three invented pages would be precisely the
+   * promise the generator has not made that rendered-not-drawn exists to
+   * avoid: a reader would choose between sketches nothing built.
+   */
+  generation: GenerationMode | null;
+  /**
+   * Directions to choose between, when the caller asked to look before
+   * building (#185). Empty is the ordinary case: most runs never ask.
+   */
+  mockups: ParsedMockup[];
+  /** A mockup run is in flight. Separate from `running`, which is a build. */
+  exploring: boolean;
+}
+
+/** One prompt and what became of it. */
+export interface TranscriptTurn {
+  id: number;
+  runId: string;
+  prompt: string;
+  at: number;
+  status: 'running' | 'accepted' | 'failed' | 'cancelled';
+  /** The model's own description of what it built. Null until the plan lands. */
+  summary: string | null;
+  fileCount: number;
+  revision: string | null;
+  /** The first problem, when the run failed. Cancellation is not a problem. */
+  problem: string | null;
+  providerId: string | null;
+}
+
+/**
+ * Where a run has got to, as coarsely as the Worker can actually tell.
+ *
+ * `running` and not `writing` (#188 review). A Workflow instance reports
+ * `running` for the whole of its work, and writing the project is only the
+ * first of its three steps: settling the budget and recording the trace
+ * follow, each with its own retries. A word that named the writing would go
+ * on claiming it for as long as those take.
+ */
+export type GenerationStage = 'queued' | 'running' | 'thinking';
+
+export interface GenerationProgress {
+  /**
+   * Characters the model has produced, when that is known.
+   *
+   * Optional, and absent means unknown rather than none. The Worker reports
+   * a count only once a run has produced one (#183): before the first
+   * report, and on a reasoning model for as long as it is still thinking,
+   * there is no honest number to send. The wording says nothing rather than
+   * saying zero, because a counter frozen at 0 is the frozen line this whole
+   * component exists to replace.
+   */
+  characters?: number;
+  elapsedMs: number;
+  stage?: GenerationStage;
+}
+
+export interface SessionOptions {
+  /** Pause between lifecycle stages. Tests pass a no-op for determinism. */
+  delay?: (ms: number) => Promise<void>;
+  /** Injected so timeline entries are deterministic under test. */
+  now?: () => number;
+  stageDelayMs?: number;
+  projectId?: string;
+  budget?: ConstructorParameters<typeof RunBudgetLedger>[0];
+  /**
+   * Resolve the provider for a run. Defaults to asking the deployment: the
+   * hosted Worker when it is configured, the deterministic fake otherwise.
+   */
+  /** Ask for directions. Injectable so tests need no network. */
+  requestMockupsImpl?: typeof requestMockups;
+  resolveProvider?: (
+    plan: GenerationPlan,
+    signal: AbortSignal,
+    onProgress?: (progress: GenerationProgress) => void,
+    style?: StylePresetId | null,
+    knowledge?: string | null,
+    model?: string | null,
+    referenceUrl?: string | null,
+    styleDna?: StyleDna | null,
+    // Appended rather than placed beside the other request-shaped options,
+    // for the reason `buildUserPrompt` now carries in its own signature: a
+    // parameter added to the middle of a positional list silently re-points
+    // every existing caller at the wrong argument.
+    mockup?: { label: string; html: string } | null,
+  ) => Promise<ModelProvider>;
+}
+
+const DEFAULT_BUDGET = {
+  modelInputTokens: 50_000,
+  modelOutputTokens: 200_000,
+  toolCalls: 100,
+};
+
+/** Rough, deterministic token estimate. No tokenizer is involved. */
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+/** The same estimate for a length already counted. Zero stays zero. */
+function estimateTokensForChars(chars: number): number {
+  return chars > 0 ? Math.ceil(chars / 4) : 0;
+}
+
+const RESERVED_OUTPUT_TOKENS = 32_000;
+
+function initialState(budget: RunUsageReport): BuilderState {
+  return {
+    status: 'idle',
+    running: false,
+    runId: null,
+    prompt: null,
+    planSummary: null,
+    stagedFiles: [],
+    acceptedSnapshot: null,
+    acceptedBrief: null,
+    problems: [],
+    timeline: [],
+    runCount: 0,
+    budget,
+    providerId: null,
+    progress: null,
+    transcript: [],
+    knowledge: '',
+    styleDna: {},
+    model: null,
+    models: [],
+    isAdmin: null,
+    generation: null,
+    mockups: [],
+    exploring: false,
+  };
+}
+
+/**
+ * Ask the deployment which provider to use. A hosted Worker with credentials
+ * and Access configured serves real generation; anything else -- local dev,
+ * the static-only deploy -- gets the deterministic fake. The shell never
+ * carries a provider credential itself (ADR-0006).
+ */
+async function defaultResolveProvider(
+  plan: GenerationPlan,
+  signal: AbortSignal,
+  onProgress?: (progress: GenerationProgress) => void,
+  style?: StylePresetId | null,
+  knowledge?: string | null,
+  model?: string | null,
+  referenceUrl?: string | null,
+  styleDna?: StyleDna | null,
+  mockup?: { label: string; html: string } | null,
+): Promise<ModelProvider> {
+  const mode = await detectGenerationMode();
+  return mode === 'model'
+    ? new RemoteModelProvider({
+        signal,
+        ...(onProgress ? { onProgress } : {}),
+        ...(style ? { style } : {}),
+        ...(knowledge ? { knowledge } : {}),
+        ...(model ? { model } : {}),
+        ...(referenceUrl ? { referenceUrl } : {}),
+        ...(styleDna && Object.keys(styleDna).length > 0 ? { styleDna } : {}),
+        ...(mockup ? { mockup } : {}),
+      })
+    : // The deterministic fake has no visual vocabulary at all, so a preset
+      // cannot change what it produces. Nothing here pretends otherwise.
+      new FakeModelProvider([plan]);
+}
+
+function isFakeProvider(provider: ModelProvider): boolean {
+  return provider.id === 'fake';
+}
+
+const STATUS_FROM_STAGE: Partial<Record<GenerationState, BuilderStatus>> = {
+  planning: 'planning',
+  staging: 'staging',
+  validating: 'validating',
+  accepted: 'accepted',
+  failed: 'failed',
+};
+
+/**
+ * Framework-free controller for the builder shell.
+ *
+ * React binds to it through `useSyncExternalStore`, which keeps every
+ * ordering rule in one testable place: a reset or a new submission
+ * invalidates the in-flight run (`#epoch`), and a disposed session drops
+ * every pending write, so no result from an abandoned run can land in the UI.
+ */
+export class BuilderSession {
+  #state: BuilderState;
+  #listeners = new Set<() => void>();
+  #store = new InMemoryGenerationStore();
+  #ledger: RunBudgetLedger;
+  #epoch = 0;
+  #runSeq = 0;
+  #entrySeq = 0;
+  #turnSeq = 0;
+  #disposed = false;
+  readonly #projectId: string;
+  readonly #delay: (ms: number) => Promise<void>;
+  readonly #now: () => number;
+  readonly #stageDelayMs: number;
+  readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
+  readonly #requestMockups: typeof requestMockups;
+  #mockupContext: {
+    prompt: string;
+    style: StylePresetId | null;
+    referenceUrl: string | null;
+  } | null = null;
+  /**
+   * The look's own controller, separate from the build's `#abort` (#189
+   * review). A mockup run is about a minute and is billed; without this the
+   * only way to stop one was to leave the page, and it kept spending either
+   * way.
+   */
+  #exploreAbort: AbortController | null = null;
+  readonly #resolveProvider: (
+    plan: GenerationPlan,
+    signal: AbortSignal,
+    onProgress?: (progress: GenerationProgress) => void,
+    style?: StylePresetId | null,
+    knowledge?: string | null,
+    model?: string | null,
+    referenceUrl?: string | null,
+    styleDna?: StyleDna | null,
+    mockup?: { label: string; html: string } | null,
+  ) => Promise<ModelProvider>;
+  #abort: AbortController | null = null;
+
+  constructor(options: SessionOptions = {}) {
+    this.#delay =
+      options.delay ??
+      ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    this.#now = options.now ?? (() => Date.now());
+    this.#stageDelayMs = options.stageDelayMs ?? 420;
+    this.#projectId = options.projectId ?? 'local-project';
+    this.#budgetLimits = options.budget ?? DEFAULT_BUDGET;
+    this.#ledger = new RunBudgetLedger(this.#budgetLimits);
+    this.#resolveProvider = options.resolveProvider ?? defaultResolveProvider;
+    this.#requestMockups = options.requestMockupsImpl ?? requestMockups;
+    this.#state = initialState(this.#ledger.report());
+  }
+
+  getState = (): BuilderState => this.#state;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
+
+  /**
+   * Shut the session down and stop what it is paying for.
+   *
+   * The epoch and the listeners are about what gets *shown*; the
+   * controllers are about what gets *spent*, and this used to do only the
+   * first (#189 review). A non-React owner -- the documented consumer of
+   * this method -- could dispose a session mid-run and leave about a minute
+   * of billed model time going, with the answer thrown away.
+   *
+   * Both controllers, not only the look's. The finding named the look,
+   * because that is the one this PR added; the build's `#abort` was never
+   * cleared here either. That is the third time in this review I have fixed
+   * the case that was reported without asking which sibling had the same
+   * shape, so this one asks: `reset`, `cancel`, `cancelExplore` and this
+   * are the four places that end work, and all four now abort what they
+   * end.
+   *
+   * No state is written, unlike `cancel`. There is nobody left to show it
+   * to, and `#disposed` already refuses every later mutation.
+   */
+  dispose(): void {
+    this.#disposed = true;
+    this.#epoch += 1;
+    this.#abort?.abort();
+    this.#abort = null;
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
+    this.#listeners.clear();
+  }
+
+  /** Choose the model, or null for the deployment's default. */
+  setModel(model: string | null): void {
+    if (this.#disposed || model === this.#state.model) return;
+    this.#state = { ...this.#state, model };
+    this.#emit();
+  }
+
+  /** Record what the deployment can serve, once the probe answers. */
+  setModels(models: ModelOption[]): void {
+    if (this.#disposed) return;
+    this.#state = { ...this.#state, models };
+    this.#emit();
+  }
+
+  /** Record whether the signed-in caller is a platform admin, once the probe answers. */
+  /** What the deployment can generate with, once the probe answers. */
+  setGeneration(generation: GenerationMode | null): void {
+    if (this.#disposed || generation === this.#state.generation) return;
+    this.#state = { ...this.#state, generation };
+    this.#emit();
+  }
+
+  setIsAdmin(isAdmin: boolean | null): void {
+    if (this.#disposed || isAdmin === this.#state.isAdmin) return;
+    this.#state = { ...this.#state, isAdmin };
+    this.#emit();
+  }
+
+  /**
+   * Replace the project's standing visual preferences.
+   *
+   * Stored as the selection, not as prose: the same choice produces the same
+   * guidance every turn, which is the whole reason this is not more text in
+   * the knowledge field.
+   */
+  setStyleDna(styleDna: StyleDna): void {
+    if (this.#disposed) return;
+    this.#state = { ...this.#state, styleDna };
+    this.#emit();
+  }
+
+  /** Replace the project's standing instructions. */
+  setKnowledge(knowledge: string): void {
+    if (this.#disposed || knowledge === this.#state.knowledge) return;
+    this.#state = { ...this.#state, knowledge };
+    this.#emit();
+  }
+
+  /**
+   * Discard the whole session: accepted checkpoint, history and budget.
+   *
+   * Preferences survive it, and so does what the deployment can serve.
+   * Standing instructions and the chosen model are how someone wants things
+   * built rather than part of the thing that was built, and the model list
+   * came from a probe that only runs once a page load -- clearing it would
+   * make the picker disappear after "Start over" until a reload.
+   */
+  reset(): void {
+    if (this.#disposed) return;
+    const { knowledge, model, models, isAdmin, generation } = this.#state;
+    this.#epoch += 1;
+    this.#store = new InMemoryGenerationStore();
+    this.#ledger = new RunBudgetLedger(this.#budgetLimits);
+    this.#entrySeq = 0;
+    this.#turnSeq = 0;
+    this.#state = {
+      ...initialState(this.#ledger.report()),
+      knowledge,
+      model,
+      models,
+      isAdmin,
+      generation,
+    };
+    // Directions are about a request, and "Start over" discards the
+    // request. Carrying them would leave three sketches of a project that
+    // no longer exists, with a Build button that would rebuild it.
+    //
+    // Aborted, not merely forgotten (#189 review). Clearing the context
+    // and bumping the epoch stops the result being *shown*; it does not
+    // stop the run, which is about a minute of billed model time whose
+    // answer is then thrown away. Start over is reachable while a look is
+    // in flight -- the same failed-first-build state that made the
+    // directions button visible again -- so this is a path a reader
+    // actually takes.
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
+    this.#mockupContext = null;
+    this.#emit();
+  }
+
+  /**
+   * Ask for three directions rather than a build (#185).
+   *
+   * Its own flag rather than reusing `running`: a build and a look are
+   * different spends, they read differently on screen, and a chooser that
+   * appeared because a build was in flight would be lying about what it
+   * was waiting for.
+   *
+   * The prompt and style that produced the set are kept, because choosing
+   * one has to submit the same request it was drawn from. Asking the reader
+   * to retype it would be asking them to remember what they already said.
+   */
+  async explore(
+    prompt: string,
+    style: StylePresetId | null = null,
+    // Kept so choosing can resubmit the request the set was drawn from
+    // (#189 review). Without it a reference page the reader had filled in
+    // was silently dropped on the build, while still sitting in the
+    // composer looking like it had been used.
+    referenceUrl: string | null = null,
+  ): Promise<void> {
+    const trimmed = prompt.trim();
+    if (
+      this.#disposed ||
+      this.#state.running ||
+      this.#state.exploring ||
+      trimmed.length === 0
+    ) {
+      return;
+    }
+    const epoch = this.#epoch;
+    const controller = new AbortController();
+    this.#exploreAbort = controller;
+    this.#mockupContext = { prompt: trimmed, style, referenceUrl };
+    this.#patch(epoch, (state) => ({
+      ...state,
+      exploring: true,
+      mockups: [],
+      progress: null,
+      problems: [],
+    }));
+
+    try {
+      const mockups = await this.#requestMockups({
+        prompt: trimmed,
+        style,
+        model: this.#state.model,
+        signal: controller.signal,
+        onProgress: (progress) => {
+          this.#patch(epoch, (state) => ({ ...state, progress }));
+        },
+      });
+      this.#forgetExplore(controller);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        exploring: false,
+        progress: null,
+        mockups,
+      }));
+    } catch (error) {
+      this.#forgetExplore(controller);
+      // A run the reader stopped is not a run that failed. `cancelStop`
+      // has already put the session back; reporting the abort on top of
+      // that would show an error for something they chose.
+      if (controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        exploring: false,
+        progress: null,
+        mockups: [],
+        problems: [message],
+      }));
+    }
+  }
+
+  /**
+   * Drop the reference to a look that has finished, if it is still ours.
+   *
+   * The check is the point (#189 review). `explore` used to clear
+   * `#exploreAbort` unconditionally when its promise settled, so an
+   * abandoned run landing after Start over -- or after a second look had
+   * begun -- cleared the *new* run's controller. Nothing then held it, and
+   * Cancel had nothing left to abort: a billed run with no way to stop it,
+   * created by the code whose whole job is stopping runs.
+   */
+  #forgetExplore(controller: AbortController): void {
+    if (this.#exploreAbort === controller) this.#exploreAbort = null;
+  }
+
+  /**
+   * Stop a look that is still running (#189 review).
+   *
+   * Aborting the fetch drops the connection, which is what tells the
+   * endpoint to stop its own model call -- so this stops the spending
+   * rather than only the waiting, the same contract `cancel` has for a
+   * build.
+   */
+  cancelExplore(): void {
+    if (this.#disposed || !this.#state.exploring) return;
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
+    this.#state = {
+      ...this.#state,
+      exploring: false,
+      progress: null,
+      mockups: [],
+    };
+    this.#mockupContext = null;
+    this.#emit();
+  }
+
+  /**
+   * Build the direction that was picked, from the request it was drawn
+   * from. The set is cleared first: the other two are not alternatives any
+   * more, and leaving them on screen beside a running build would invite a
+   * second click that the run in flight would refuse anyway.
+   */
+  chooseMockup(mockup: ParsedMockup): void {
+    if (this.#disposed || this.#state.running) return;
+    const context = this.#mockupContext;
+    if (!context) return;
+    this.#state = { ...this.#state, mockups: [] };
+    this.#emit();
+    void this.submit(
+      context.prompt,
+      'succeed',
+      context.style,
+      context.referenceUrl,
+      { label: mockup.label, html: mockup.html },
+    );
+  }
+
+  /** None of them. Clears the set without spending anything further. */
+  discardMockups(): void {
+    if (this.#disposed || this.#state.mockups.length === 0) return;
+    this.#mockupContext = null;
+    this.#state = { ...this.#state, mockups: [] };
+    this.#emit();
+  }
+
+  async submit(
+    prompt: string,
+    mode: PlanMode = 'succeed',
+    style: StylePresetId | null = null,
+    referenceUrl: string | null = null,
+    mockup: { label: string; html: string } | null = null,
+  ): Promise<void> {
+    const trimmed = prompt.trim();
+    if (this.#disposed || this.#state.running || trimmed.length === 0) return;
+
+    // Any build invalidates the directions, not only choosing one
+    // (#189 review). Pressing Generate with a set on screen used to leave
+    // it there; once that build was accepted the chooser came back enabled,
+    // and clicking a tile then submitted its *pre-build* request against
+    // the project that had just been created -- a follow-up nobody asked
+    // for, at the price of a full build.
+    //
+    // Here rather than in the two callers, because the callers are the
+    // composer and `chooseMockup`, and the rule is about what a build does
+    // to a set, not about who started it. `chooseMockup` reads the context
+    // into locals before it calls this, so clearing it here is safe.
+    this.#mockupContext = null;
+    if (this.#state.mockups.length > 0) {
+      this.#state = { ...this.#state, mockups: [] };
+    }
+
+    const epoch = this.#epoch;
+    this.#runSeq += 1;
+    const runId = `run-${this.#runSeq}`;
+    const brief = deriveBrief(trimmed);
+    const plan = buildPlan(trimmed, mode);
+
+    // The accepted project is sent with the request, so it is part of what
+    // this run spends. Counting the typed prompt alone made every follow-up
+    // look as cheap as the first request.
+    const baseChars = (this.#state.acceptedSnapshot?.files ?? []).reduce(
+      (sum, file) => sum + file.path.length + file.content.length,
+      0,
+    );
+    // A reference URL's actual content is not known until the Worker fetches
+    // it, so this counts the worst case (`MAX_REFERENCE_CHARS`) rather than
+    // zero -- the same reasoning as `baseChars`: an estimate that ignores a
+    // real cost is not an estimate a budget can be checked against.
+    const inputTokens =
+      estimateTokens(trimmed) +
+      estimateTokensForChars(baseChars) +
+      estimateTokensForChars(this.#state.knowledge.length) +
+      (referenceUrl ? estimateTokensForChars(MAX_REFERENCE_CHARS) : 0) +
+      // A chosen direction is sent with the request too (#185), so it is
+      // part of what this run spends. Counted from the document actually
+      // being sent rather than from its cap, because unlike a reference URL
+      // this content is already in hand.
+      (mockup ? estimateTokensForChars(mockup.html.length) : 0);
+    let reservation;
+    try {
+      reservation = this.#ledger.reserve({
+        modelInputTokens: inputTokens,
+        modelOutputTokens: RESERVED_OUTPUT_TOKENS,
+        toolCalls: 1,
+      });
+    } catch (error) {
+      const message =
+        error instanceof BudgetExceededError
+          ? `Run budget exceeded for ${error.resource}: ${error.requested} requested, ${error.remaining} remaining`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        status: 'failed',
+        runId,
+        prompt: trimmed,
+        problems: [message],
+        transcript: this.#openTurn(state.transcript, runId, trimmed, {
+          status: 'failed',
+          problem: message,
+        }),
+        timeline: this.#append(state.timeline, 'error', message),
+      }));
+      return;
+    }
+
+    const controller = new AbortController();
+    this.#abort = controller;
+
+    this.#patch(epoch, (state) => ({
+      ...state,
+      status: 'planning',
+      running: true,
+      runId,
+      prompt: trimmed,
+      planSummary: null,
+      stagedFiles: [],
+      problems: [],
+      transcript: this.#openTurn(state.transcript, runId, trimmed),
+      timeline: this.#append(
+        state.timeline,
+        'info',
+        `Run ${runId} started: "${trimmed}"`,
+      ),
+    }));
+
+    const pause = () => this.#delay(this.#stageDelayMs);
+    const observer = {
+      onStage: (record: { runId: string; state: GenerationState }) => {
+        const status = STATUS_FROM_STAGE[record.state];
+        if (!status || status === 'accepted' || status === 'failed') return;
+        this.#patch(epoch, (state) => ({
+          ...state,
+          status,
+          timeline: this.#append(
+            state.timeline,
+            'info',
+            `${record.runId}: ${record.state}`,
+          ),
+        }));
+      },
+      onPromotion: () => {},
+      onPlan: (generated: { summary: string; files: ProjectFile[] }) => {
+        this.#patch(epoch, (state) => ({
+          ...state,
+          status: 'staging',
+          planSummary: generated.summary,
+          stagedFiles: generated.files.map((file) => ({ ...file })),
+          transcript: this.#closeTurn(state.transcript, {
+            summary: generated.summary,
+            fileCount: generated.files.length,
+          }),
+          timeline: this.#append(
+            state.timeline,
+            'info',
+            `Plan ready: ${generated.files.length} files staged`,
+          ),
+        }));
+      },
+    };
+
+    const store = new ObservingGenerationStore(this.#store, observer);
+
+    let resolved: ModelProvider;
+    try {
+      resolved = await this.#resolveProvider(
+        plan,
+        controller.signal,
+        (progress) => {
+          this.#patch(epoch, (state) => ({ ...state, progress }));
+        },
+        style,
+        this.#state.knowledge,
+        this.#state.model,
+        referenceUrl,
+        this.#state.styleDna,
+        mockup,
+      );
+    } catch (error) {
+      reservation.release();
+      const message = error instanceof Error ? error.message : String(error);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        status: 'failed',
+        running: false,
+        progress: null,
+        problems: [message],
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'failed',
+          problem: message,
+        }),
+        timeline: this.#append(state.timeline, 'error', message),
+      }));
+      return;
+    }
+
+    const provider = new ObservingModelProvider(resolved, observer, pause);
+    const validator = withValidationDelay(createValidator(), pause);
+    const runner = new DurableGenerationRunner(store);
+
+    let result;
+    try {
+      result = await runner.run(
+        { prompt: trimmed, projectId: this.#projectId, runId },
+        provider,
+        validator,
+      );
+    } catch (error) {
+      reservation.release();
+      const message = error instanceof Error ? error.message : String(error);
+      this.#patch(epoch, (state) => ({
+        ...state,
+        status: 'failed',
+        running: false,
+        progress: null,
+        problems: [message],
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'failed',
+          problem: message,
+        }),
+        timeline: this.#append(state.timeline, 'error', message),
+      }));
+      return;
+    }
+
+    const outputTokens = Math.min(
+      RESERVED_OUTPUT_TOKENS,
+      estimateTokens(plan.files.map((file) => file.content).join('')),
+    );
+    reservation.commit({
+      modelInputTokens: inputTokens,
+      modelOutputTokens: outputTokens,
+      toolCalls: 1,
+    });
+    const budget = this.#ledger.report();
+
+    if (result.state === 'accepted' && result.accepted) {
+      const accepted = result.accepted;
+      this.#patch(epoch, (state) => ({
+        ...state,
+        status: 'accepted',
+        running: false,
+        progress: null,
+        acceptedSnapshot: accepted,
+        // The mock preview is rendered from this brief. It only describes the
+        // deterministic fake's own output, so a model-generated project must
+        // not reuse it -- that would show a preview of files nobody generated.
+        acceptedBrief: isFakeProvider(resolved) ? brief : null,
+        providerId: resolved.id,
+        stagedFiles: accepted.files.map((file) => ({ ...file })),
+        problems: [],
+        runCount: state.runCount + 1,
+        budget,
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'accepted',
+          summary: state.planSummary,
+          fileCount: accepted.files.length,
+          revision: accepted.revision,
+          providerId: resolved.id,
+        }),
+        // Warnings belong on the accepted path, which is the point of them:
+        // the project works and still has something worth looking at. They
+        // follow the acceptance line so the run reads as a success first.
+        timeline: (result.warnings ?? []).reduce(
+          (timeline, warning) => this.#append(timeline, 'warn', warning),
+          this.#append(
+            state.timeline,
+            'info',
+            `Checkpoint accepted at revision ${accepted.revision}`,
+          ),
+        ),
+      }));
+      return;
+    }
+
+    const problems =
+      result.errors.length > 0
+        ? result.errors
+        : ['Generation did not produce an accepted checkpoint'];
+    this.#patch(epoch, (state) => ({
+      ...state,
+      status: 'failed',
+      running: false,
+      progress: null,
+      problems,
+      runCount: state.runCount + 1,
+      budget,
+      providerId: resolved.id,
+      transcript: this.#closeTurn(state.transcript, {
+        status: 'failed',
+        problem: problems[0] ?? null,
+        providerId: resolved.id,
+      }),
+      timeline: problems.reduce(
+        (timeline, problem) => this.#append(timeline, 'error', problem),
+        this.#append(
+          state.timeline,
+          'error',
+          `Run ${runId} failed; the previous accepted checkpoint is unchanged`,
+        ),
+      ),
+    }));
+  }
+
+  /**
+   * Stop the active run and keep the accepted checkpoint.
+   *
+   * Aborting the request drops the connection, and the endpoint treats that
+   * as its signal to abort its own model call -- so this stops the spending,
+   * not merely the waiting.
+   *
+   * The abandoned run still settles its budget reservation at the full
+   * estimate. That over-charges a run cut short, which is the safe direction
+   * for a ceiling; the figure in the footer catches up on the next run, since
+   * the epoch bump below drops every later write from the run being left.
+   */
+  cancel(): void {
+    if (this.#disposed || !this.#state.running) return;
+
+    this.#abort?.abort();
+    this.#abort = null;
+    this.#epoch += 1;
+
+    this.#state = {
+      ...this.#state,
+      status: 'cancelled',
+      running: false,
+      progress: null,
+      problems: [],
+      transcript: this.#closeTurn(this.#state.transcript, {
+        status: 'cancelled',
+      }),
+      timeline: this.#append(
+        this.#state.timeline,
+        'info',
+        `Run ${this.#state.runId ?? ''} cancelled; the accepted checkpoint is unchanged`.trim(),
+      ),
+    };
+    this.#emit();
+  }
+
+  /** Start a turn. Its outcome is filled in later by `#closeTurn`. */
+  #openTurn(
+    transcript: TranscriptTurn[],
+    runId: string,
+    prompt: string,
+    patch: Partial<TranscriptTurn> = {},
+  ): TranscriptTurn[] {
+    this.#turnSeq += 1;
+    return [
+      ...transcript,
+      {
+        id: this.#turnSeq,
+        runId,
+        prompt,
+        at: this.#now(),
+        status: 'running',
+        summary: null,
+        fileCount: 0,
+        revision: null,
+        problem: null,
+        providerId: null,
+        ...patch,
+      },
+    ];
+  }
+
+  /**
+   * Update the turn still in flight.
+   *
+   * Only a running turn is touched. `cancel()` closes a turn and then bumps
+   * the epoch, but the abandoned run is still unwinding: without this guard a
+   * late failure from it would rewrite a cancellation as an error the user
+   * has to read.
+   */
+  #closeTurn(
+    transcript: TranscriptTurn[],
+    patch: Partial<TranscriptTurn>,
+  ): TranscriptTurn[] {
+    const last = transcript.at(-1);
+    if (!last || last.status !== 'running') return transcript;
+    return [...transcript.slice(0, -1), { ...last, ...patch }];
+  }
+
+  #append(
+    timeline: TimelineEntry[],
+    level: TimelineEntry['level'],
+    message: string,
+  ): TimelineEntry[] {
+    this.#entrySeq += 1;
+    return [
+      ...timeline,
+      { id: this.#entrySeq, at: this.#now(), level, message },
+    ];
+  }
+
+  /**
+   * Apply a state update only if it belongs to the current epoch. A run
+   * abandoned by `reset()` or `dispose()` cannot overwrite newer state.
+   */
+  #patch(epoch: number, update: (state: BuilderState) => BuilderState): void {
+    if (this.#disposed || epoch !== this.#epoch) return;
+    this.#state = update(this.#state);
+    this.#emit();
+  }
+
+  #emit(): void {
+    for (const listener of this.#listeners) listener();
+  }
+}

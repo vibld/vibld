@@ -1,0 +1,1252 @@
+/*
+ * The miniature site (components/SiteMiniature.tsx), in every direction.
+ *
+ * Every colour below is one of the look's own custom properties, written
+ * inline by `lookVars` in looks.ts, and every one of those is measured in
+ * test/looks.test.ts. The rules here decide which surface a piece of text
+ * sits on and nothing else: text on the page reads --s-ink or --s-soft, text
+ * on a card reads --s-card-ink or --s-card-soft, and so on. A rule that puts
+ * one surface's ink on another's fill is the mistake the test cannot see,
+ * so there are none, and the few places that swap a surface do it by
+ * swapping the fill and its inks together (--s-copy-*, --s-nav-*).
+ *
+ * Sizes are in container units, so one drawing reads the same at the width
+ * of a hero and the width of a catalogue tile.
+ */
+
+.ms {
+  --s-radius: 10px;
+  --s-border: 1px solid var(--s-line);
+  --s-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  --s-fh: var(--font-display);
+  --s-fb: var(--font-sans);
+  --s-hw: 700;
+  --s-hls: -0.03em;
+  --s-htt: none;
+  --s-hstyle: normal;
+  --s-hshadow: none;
+  --s-blur: none;
+  --s-btn-radius: calc(var(--s-radius) * 0.8);
+  --s-btn-border: 0;
+  --s-btn-shadow: none;
+  /* The surfaces text sits on, swapped as a set by treatments below. */
+  --s-nav-bg: transparent;
+  --s-nav-ink: var(--s-ink);
+  --s-nav-soft: var(--s-soft);
+  --s-copy-bg: transparent;
+  --s-copy-ink: var(--s-ink);
+  --s-copy-soft: var(--s-soft);
+  --s-copy-border: 0;
+  --s-cards-bg: transparent;
+  --s-card-bg: var(--s-card);
+  --s-card-fg: var(--s-card-ink);
+  --s-card-fg-soft: var(--s-card-soft);
+
+  position: relative;
+  container-type: inline-size;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--s-page);
+  color: var(--s-ink);
+  font-family: var(--s-fb);
+  line-height: 1.35;
+  text-align: left;
+  transition:
+    background-color 0.5s ease,
+    color 0.5s ease;
+}
+
+.ms-fx {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.ms-in {
+  display: grid;
+  gap: 3.2cqi;
+  padding: 3cqi 4cqi 4cqi;
+}
+
+.ms-nav {
+  display: flex;
+  align-items: center;
+  gap: 2.4cqi;
+  padding: 1.4cqi 1.8cqi;
+  border: var(--s-border);
+  border-radius: var(--s-radius);
+  background: var(--s-nav-bg);
+  color: var(--s-nav-ink);
+  -webkit-backdrop-filter: var(--s-blur);
+  backdrop-filter: var(--s-blur);
+  transition: all 0.5s ease;
+}
+.ms-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-family: var(--s-fh);
+  font-size: 2.1cqi;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.ms-logo::before {
+  content: '';
+  width: 1.05em;
+  height: 1.05em;
+  flex: none;
+  border-radius: 50%;
+  background: var(--s-accent);
+}
+.ms-links {
+  display: flex;
+  gap: 2.2cqi;
+  margin-left: auto;
+  color: var(--s-nav-soft);
+  font-size: 1.5cqi;
+}
+
+.ms-hero {
+  display: grid;
+  grid-template-columns: 1.12fr 0.88fr;
+  gap: 3.6cqi;
+  align-items: stretch;
+}
+.ms-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.8cqi;
+  padding: 2.2cqi;
+  border: var(--s-copy-border);
+  border-radius: var(--s-radius);
+  background: var(--s-copy-bg);
+  color: var(--s-copy-ink);
+  -webkit-backdrop-filter: var(--s-blur);
+  backdrop-filter: var(--s-blur);
+  transition: all 0.5s ease;
+}
+.ms-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 1.35cqi;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--s-copy-soft);
+}
+.ms-h {
+  font-family: var(--s-fh);
+  font-size: 5.4cqi;
+  font-weight: var(--s-hw);
+  font-style: var(--s-hstyle);
+  line-height: 0.98;
+  letter-spacing: var(--s-hls);
+  text-transform: var(--s-htt);
+  text-shadow: var(--s-hshadow);
+  text-wrap: balance;
+}
+.ms-p {
+  max-width: 40ch;
+  font-size: 1.7cqi;
+  line-height: 1.45;
+  color: var(--s-copy-soft);
+}
+.ms-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2cqi;
+}
+.ms-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.75em 1.3em;
+  border: var(--s-btn-border);
+  border-radius: var(--s-btn-radius);
+  background: var(--s-primary);
+  color: var(--s-on-primary);
+  box-shadow: var(--s-btn-shadow);
+  font-size: 1.6cqi;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.5s ease;
+}
+.ms-btn--nav {
+  font-size: 1.45cqi;
+  padding: 0.6em 1.1em;
+}
+/* The one button that is not a fill: it takes the ink of what it sits on. */
+.ms-btn--ghost {
+  border: 1px solid var(--s-line);
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+.ms-media {
+  position: relative;
+  display: grid;
+  min-height: 24cqi;
+  place-items: center;
+  overflow: hidden;
+  border: var(--s-border);
+  border-radius: var(--s-radius);
+  background: linear-gradient(160deg, var(--s-deco-1), var(--s-deco-2));
+  box-shadow: var(--s-shadow);
+  transition: all 0.5s ease;
+}
+.ms-media svg {
+  width: 78%;
+  height: auto;
+}
+.ms-media .a-soft {
+  fill: var(--s-deco-4);
+}
+.ms-media .a-strong {
+  fill: var(--s-deco-3);
+  opacity: 0.9;
+}
+.ms-media .a-line {
+  stroke: var(--s-deco-3);
+  opacity: 0.55;
+}
+.ms-media .a-top {
+  fill: var(--s-page);
+  opacity: 0.6;
+}
+.ms-media .a-sun {
+  fill: var(--s-accent);
+  opacity: 0.25;
+}
+.ms-media .a-cross {
+  stroke: var(--s-page);
+}
+
+.ms-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2cqi;
+  background: var(--s-cards-bg);
+}
+.ms-card {
+  display: grid;
+  gap: 0.6cqi;
+  padding: 1.8cqi;
+  border: var(--s-border);
+  border-radius: var(--s-radius);
+  background: var(--s-card-bg);
+  color: var(--s-card-fg);
+  box-shadow: var(--s-shadow);
+  -webkit-backdrop-filter: var(--s-blur);
+  backdrop-filter: var(--s-blur);
+  transition: all 0.5s ease;
+}
+.ms-card b {
+  font-family: var(--s-fh);
+  font-size: 2.3cqi;
+  font-weight: var(--s-hw);
+  letter-spacing: -0.02em;
+}
+.ms-card span {
+  font-size: 1.35cqi;
+  color: var(--s-card-fg-soft);
+}
+.ms-card .ms-bar {
+  display: block;
+  height: 0.5cqi;
+  min-height: 3px;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--s-line);
+}
+.ms-bar i {
+  display: block;
+  height: 100%;
+  background: var(--s-accent);
+}
+
+/* Narrow: one column, and sizes that stay legible at a phone's width. */
+@container (max-width: 430px) {
+  .ms-hero {
+    grid-template-columns: 1fr;
+  }
+  .ms-media {
+    min-height: 30cqi;
+  }
+  .ms-links {
+    display: none;
+  }
+  .ms-btn--nav {
+    margin-left: auto;
+    font-size: 2.8cqi;
+  }
+  .ms-h {
+    font-size: 8.4cqi;
+  }
+  .ms-p {
+    font-size: 3.3cqi;
+  }
+  .ms-eyebrow {
+    font-size: 2.6cqi;
+  }
+  .ms-btn {
+    font-size: 3cqi;
+  }
+  .ms-logo {
+    font-size: 3.6cqi;
+  }
+  .ms-card b {
+    font-size: 4.2cqi;
+  }
+  .ms-card span {
+    font-size: 2.6cqi;
+  }
+  .ms-in {
+    gap: 4cqi;
+    padding: 4cqi;
+  }
+  .ms-copy {
+    gap: 3cqi;
+    padding: 3.4cqi;
+  }
+  .ms-card {
+    padding: 3cqi;
+  }
+}
+
+/*
+ * The build, as the demonstration stages it. Only ever set by script after
+ * hydration: the prerendered page draws the finished site.
+ */
+.ms[data-building] [data-el]:not([data-on]) {
+  opacity: 0;
+  transform: translateY(6px) scale(0.985);
+}
+.ms[data-building] [data-el][data-on] {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.25s ease,
+    transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ms[data-wire] {
+  background: var(--color-surface);
+}
+.ms[data-wire] .ms-fx,
+.ms[data-wire] .ms-media svg {
+  opacity: 0 !important;
+}
+.ms[data-wire] [data-el] {
+  position: relative;
+  border: 1px dashed var(--color-accent) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.ms[data-wire] .ms-hero {
+  border-color: transparent !important;
+}
+.ms[data-wire]
+  :is(
+    .ms-h,
+    .ms-p,
+    .ms-eyebrow,
+    .ms-card b,
+    .ms-card span,
+    .ms-links span,
+    .ms-logo
+  ) {
+  color: transparent !important;
+  text-shadow: none !important;
+  background: linear-gradient(
+      color-mix(in oklch, var(--color-ink) 12%, transparent),
+      color-mix(in oklch, var(--color-ink) 12%, transparent)
+    )
+    0 30% / 100% 44% no-repeat;
+  border-radius: 3px;
+}
+.ms[data-wire] .ms-btn {
+  background: transparent !important;
+  color: transparent !important;
+  border: 1px solid color-mix(in oklch, var(--color-ink) 30%, transparent) !important;
+  box-shadow: none !important;
+}
+.ms[data-wire] .ms-logo::before,
+.ms[data-wire] .ms-bar i {
+  background: color-mix(in oklch, var(--color-ink) 20%, transparent);
+}
+.ms[data-wire] .ms-media {
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 10px,
+    color-mix(in oklch, var(--color-ink) 6%, transparent) 10px 11px
+  ) !important;
+}
+/* The label is the brand's link ink on the brand's surface, both measured. */
+.ms[data-wire] [data-el]::after {
+  content: attr(data-el);
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: var(--color-surface);
+  color: var(--color-accent-ink);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.ms[data-wire] [data-el='Section']::after {
+  content: attr(data-name);
+}
+
+/* ------------------------------------------------------------------ */
+/* Surface treatments, drawn in the demonstration palette.            */
+/* ------------------------------------------------------------------ */
+
+/* Frosted glass: translucent panels over a saturated backdrop. */
+.ms[data-look='glassmorphism'] {
+  --s-radius: 16px;
+  --s-border: 1px solid color-mix(in srgb, white 60%, transparent);
+  --s-shadow: 0 8px 28px rgb(0 0 0 / 0.12);
+  --s-blur: blur(14px) saturate(170%);
+  --s-nav-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-nav-ink: var(--s-card-ink);
+  --s-nav-soft: var(--s-card-soft);
+  --s-copy-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+  --s-copy-border: var(--s-border);
+  --s-card-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+}
+.ms[data-look='glassmorphism'] .ms-fx {
+  opacity: 1;
+  background:
+    radial-gradient(28% 40% at 18% 30%, var(--s-deco-1) 0, transparent 70%),
+    radial-gradient(30% 45% at 80% 22%, var(--s-deco-2) 0, transparent 70%),
+    radial-gradient(35% 50% at 60% 88%, var(--s-deco-3) 0, transparent 70%),
+    radial-gradient(25% 35% at 10% 92%, var(--s-deco-4) 0, transparent 70%),
+    var(--s-page);
+  background-size: 200% 200%;
+  animation: ms-drift 14s ease-in-out infinite alternate;
+}
+.ms[data-look='glassmorphism'] .ms-media {
+  background: color-mix(in srgb, var(--s-card) 30%, transparent);
+  -webkit-backdrop-filter: var(--s-blur);
+  backdrop-filter: var(--s-blur);
+}
+
+/* Soft extruded surfaces in a single tone. */
+.ms[data-look='neumorphism'] {
+  --s-radius: 18px;
+  --s-border: 0;
+  --s-raise:
+    7px 7px 16px color-mix(in srgb, var(--s-page) 82%, black),
+    -7px -7px 16px color-mix(in srgb, var(--s-page) 40%, white);
+  --s-press:
+    inset 4px 4px 10px color-mix(in srgb, var(--s-page) 84%, black),
+    inset -4px -4px 10px color-mix(in srgb, var(--s-page) 40%, white);
+  --s-shadow: var(--s-raise);
+  --s-card-bg: var(--s-page);
+  --s-card-fg: var(--s-ink);
+  --s-card-fg-soft: var(--s-soft);
+  --s-btn-shadow:
+    4px 4px 10px color-mix(in srgb, var(--s-page) 82%, black),
+    -4px -4px 10px color-mix(in srgb, var(--s-page) 40%, white);
+}
+.ms[data-look='neumorphism'] :is(.ms-nav, .ms-copy) {
+  box-shadow: var(--s-press);
+}
+.ms[data-look='neumorphism'] .ms-media {
+  background: var(--s-page);
+}
+.ms[data-look='neumorphism'] .ms-btn:not(.ms-btn--ghost) {
+  animation: ms-press 2.6s ease-out infinite;
+}
+
+/* Heavy rules, flat loud blocks, hard shadows, no radius, no easing. */
+.ms[data-look='brutalism'] {
+  --s-radius: 0px;
+  --s-border: 3px solid var(--s-ink);
+  --s-shadow: 5px 5px 0 var(--s-ink);
+  --s-hw: 800;
+  --s-hls: -0.045em;
+  --s-htt: uppercase;
+  --s-btn-border: 3px solid var(--s-ink);
+  --s-btn-shadow: 4px 4px 0 var(--s-ink);
+  --s-btn-radius: 0px;
+}
+.ms[data-look='brutalism'],
+.ms[data-look='brutalism'] * {
+  transition: none !important;
+}
+.ms[data-look='brutalism'] .ms-media {
+  background: var(--s-deco-2);
+}
+.ms[data-look='brutalism'] .ms-eyebrow {
+  align-self: flex-start;
+  padding: 2px 6px;
+  border: 2px solid var(--s-ink);
+  background: var(--s-accent);
+  color: var(--s-on-accent);
+}
+
+/* Whitespace, one accent, almost nothing else. */
+.ms[data-look='minimalist'] {
+  --s-radius: 4px;
+  --s-border: 0;
+  --s-shadow: none;
+  --s-hw: 500;
+  --s-hls: -0.035em;
+  --s-card-bg: transparent;
+  --s-card-fg: var(--s-ink);
+  --s-card-fg-soft: var(--s-soft);
+}
+.ms[data-look='minimalist'] .ms-card {
+  padding-left: 0;
+  border-top: 1px solid var(--s-line);
+  border-radius: 0;
+}
+.ms[data-look='minimalist'] .ms-media {
+  background: var(--s-panel);
+  filter: grayscale(1);
+}
+
+/* Layered near-black surfaces, graded emphasis, one bright accent. */
+.ms[data-look='dark'] {
+  --s-shadow: none;
+  --s-nav-bg: var(--s-panel);
+  --s-nav-ink: var(--s-panel-ink);
+  --s-nav-soft: var(--s-panel-ink);
+}
+.ms[data-look='dark'] .ms-media {
+  background: linear-gradient(160deg, var(--s-card), var(--s-panel));
+}
+.ms[data-look='dark'] .ms-media .a-sun {
+  opacity: 0.6;
+}
+
+/* Gradients across the large surfaces; text stays on solid panels. */
+.ms[data-look='gradient'] {
+  --s-radius: 14px;
+  --s-border: 0;
+  --s-shadow: 0 10px 30px rgb(0 0 0 / 0.12);
+  --s-nav-bg: var(--s-card);
+  --s-nav-ink: var(--s-card-ink);
+  --s-nav-soft: var(--s-card-soft);
+  --s-copy-bg: var(--s-card);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+}
+.ms[data-look='gradient'] .ms-fx {
+  opacity: 1;
+  background: linear-gradient(
+    120deg,
+    var(--s-deco-1),
+    var(--s-deco-2),
+    var(--s-deco-3),
+    var(--s-deco-4),
+    var(--s-deco-1)
+  );
+  background-size: 300% 300%;
+  animation: ms-drift 16s linear infinite alternate;
+}
+.ms[data-look='gradient'] .ms-media {
+  background: linear-gradient(
+    135deg,
+    var(--s-deco-4),
+    var(--s-deco-1) 55%,
+    var(--s-deco-2)
+  );
+}
+
+/* Overlapping layers at several elevations. */
+.ms[data-look='depth'] {
+  --s-radius: 14px;
+  --s-border: 0;
+  --s-shadow: 0 24px 40px -18px rgb(0 0 0 / 0.35), 0 2px 6px rgb(0 0 0 / 0.08);
+  --s-copy-bg: var(--s-card);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+  perspective: 900px;
+}
+.ms[data-look='depth'] .ms-copy {
+  position: relative;
+  z-index: 2;
+  margin-right: -6cqi;
+  box-shadow: var(--s-shadow);
+}
+.ms[data-look='depth'] .ms-media {
+  transform: rotateY(-10deg) translateZ(-20px);
+}
+.ms[data-look='depth'] .ms-card:nth-child(2) {
+  transform: translateY(-1.6cqi);
+}
+.ms[data-look='depth'] .ms-card:nth-child(3) {
+  transform: translateY(-3.2cqi);
+}
+
+/* Eighties neon on near-black: a sunset, a horizon grid, a glow. */
+.ms[data-look='retrowave'] {
+  --s-radius: 4px;
+  --s-border: 1px solid var(--s-deco-1);
+  --s-shadow: 0 0 14px color-mix(in srgb, var(--s-deco-1) 40%, transparent);
+  --s-hw: 800;
+  --s-htt: uppercase;
+  --s-hls: -0.01em;
+  --s-hstyle: italic;
+  --s-hshadow:
+    0 0 6px var(--s-deco-2),
+    0 0 22px color-mix(in srgb, var(--s-deco-2) 70%, transparent);
+}
+.ms[data-look='retrowave'] .ms-nav {
+  border-color: transparent;
+  border-bottom-color: var(--s-deco-1);
+}
+.ms[data-look='retrowave'] .ms-media {
+  background: linear-gradient(
+    180deg,
+    var(--s-page) 0,
+    color-mix(in srgb, var(--s-deco-2) 55%, var(--s-page)) 58%,
+    var(--s-deco-3) 100%
+  );
+}
+.ms[data-look='retrowave'] .ms-media svg {
+  display: none;
+}
+.ms[data-look='retrowave'] .ms-media::before {
+  content: '';
+  position: absolute;
+  top: 16%;
+  left: 50%;
+  width: 36%;
+  aspect-ratio: 1;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--s-deco-3), var(--s-deco-2));
+  -webkit-mask: linear-gradient(
+    #000 0 52%,
+    transparent 52% 58%,
+    #000 58% 68%,
+    transparent 68% 72%,
+    #000 72% 80%,
+    transparent 80% 83%,
+    #000 83%
+  );
+  mask: linear-gradient(
+    #000 0 52%,
+    transparent 52% 58%,
+    #000 58% 68%,
+    transparent 68% 72%,
+    #000 72% 80%,
+    transparent 80% 83%,
+    #000 83%
+  );
+  animation: ms-glow 2.6s ease-in-out infinite alternate;
+}
+.ms[data-look='retrowave'] .ms-media::after {
+  content: '';
+  position: absolute;
+  right: -60%;
+  bottom: 0;
+  left: -60%;
+  height: 40%;
+  background:
+    linear-gradient(var(--s-deco-2) 1.5px, transparent 1.5px) 0 0 / 100% 14px,
+    linear-gradient(90deg, var(--s-deco-1) 1.5px, transparent 1.5px) 0 0 / 22px
+      100%;
+  transform: perspective(120px) rotateX(55deg);
+  transform-origin: bottom;
+  animation: ms-grid 1.4s linear infinite;
+}
+
+/* Puffy, moulded, soft matte. */
+.ms[data-look='claymorphism'] {
+  --s-radius: 26px;
+  --s-border: 0;
+  --s-shadow:
+    inset -5px -6px 12px rgb(0 0 0 / 0.08),
+    inset 6px 6px 12px rgb(255 255 255 / 0.9), 10px 14px 26px rgb(0 0 0 / 0.14);
+  --s-btn-radius: 999px;
+  --s-btn-shadow:
+    inset -3px -4px 8px rgb(0 0 0 / 0.18),
+    inset 3px 3px 6px rgb(255 255 255 / 0.35), 6px 8px 16px rgb(0 0 0 / 0.16);
+  --s-copy-bg: var(--s-card);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+  --s-nav-bg: var(--s-card);
+  --s-nav-ink: var(--s-card-ink);
+  --s-nav-soft: var(--s-card-soft);
+}
+.ms[data-look='claymorphism'] :is(.ms-copy, .ms-nav) {
+  box-shadow: var(--s-shadow);
+}
+.ms[data-look='claymorphism'] .ms-media {
+  background: color-mix(in srgb, var(--s-deco-3) 35%, var(--s-card));
+}
+.ms[data-look='claymorphism'] .ms-media svg {
+  animation: ms-boing 2.2s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+
+/* Drifting light behind glass. */
+.ms[data-look='aurora'] {
+  --s-radius: 18px;
+  --s-border: 1px solid color-mix(in srgb, var(--s-ink) 18%, transparent);
+  --s-shadow: none;
+  --s-blur: blur(18px) saturate(140%);
+  --s-nav-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-nav-ink: var(--s-card-ink);
+  --s-nav-soft: var(--s-card-soft);
+  --s-copy-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+  --s-copy-border: var(--s-border);
+  --s-card-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+}
+.ms[data-look='aurora'] .ms-fx {
+  opacity: 1;
+  background:
+    radial-gradient(40% 60% at 20% 20%, var(--s-deco-1), transparent 70%),
+    radial-gradient(45% 55% at 85% 30%, var(--s-deco-2), transparent 70%),
+    radial-gradient(50% 60% at 50% 100%, var(--s-deco-3), transparent 70%),
+    var(--s-page);
+  background-size: 180% 180%;
+  filter: blur(8px);
+  animation: ms-drift 16s ease-in-out infinite alternate;
+}
+.ms[data-look='aurora'] .ms-media {
+  background: color-mix(in srgb, var(--s-card) 35%, transparent);
+  -webkit-backdrop-filter: var(--s-blur);
+  backdrop-filter: var(--s-blur);
+}
+
+/* Asymmetric tiles of one radius and one gutter. */
+.ms[data-look='bentoGrid'] {
+  --s-radius: 18px;
+  --s-border: 0;
+  --s-shadow: none;
+  --s-copy-bg: var(--s-card);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+  --s-nav-bg: var(--s-card);
+  --s-nav-ink: var(--s-card-ink);
+  --s-nav-soft: var(--s-card-soft);
+}
+.ms[data-look='bentoGrid'] .ms-in {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1.6cqi;
+}
+.ms[data-look='bentoGrid'] :is(.ms-hero, .ms-cards) {
+  display: contents;
+}
+.ms[data-look='bentoGrid'] .ms-nav {
+  grid-column: 1 / -1;
+}
+.ms[data-look='bentoGrid'] .ms-copy {
+  grid-column: span 4;
+}
+.ms[data-look='bentoGrid'] .ms-media {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+.ms[data-look='bentoGrid'] .ms-card {
+  grid-column: span 2;
+  animation: ms-tile 3.6s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+.ms[data-look='bentoGrid'] .ms-card:nth-child(2) {
+  animation-delay: 0.06s;
+}
+.ms[data-look='bentoGrid'] .ms-card:nth-child(3) {
+  grid-column: 1 / -1;
+  --s-card-bg: var(--s-primary);
+  --s-card-fg: var(--s-on-primary);
+  --s-card-fg-soft: var(--s-on-primary);
+  animation-delay: 0.12s;
+}
+.ms[data-look='bentoGrid'] .ms-card:nth-child(3) .ms-bar {
+  background: color-mix(in srgb, var(--s-on-primary) 30%, transparent);
+}
+
+/* A magazine grid: a serif headline, rules, full-bleed photography. */
+.ms[data-look='editorial'] {
+  --s-radius: 0px;
+  --s-border: 0;
+  --s-shadow: none;
+  --s-fh: Georgia, 'Times New Roman', serif;
+  --s-hw: 400;
+  --s-hls: -0.02em;
+  --s-hstyle: italic;
+  --s-card-bg: transparent;
+  --s-card-fg: var(--s-ink);
+  --s-card-fg-soft: var(--s-soft);
+  --s-btn-radius: 0px;
+}
+.ms[data-look='editorial'] .ms-h {
+  font-size: 6.6cqi;
+  animation: ms-settle 5s cubic-bezier(0.2, 0, 0, 1) infinite alternate;
+  transform-origin: left;
+}
+.ms[data-look='editorial'] .ms-nav {
+  padding-inline: 0;
+  border-bottom: 2px solid var(--s-ink);
+}
+.ms[data-look='editorial'] .ms-copy {
+  padding-left: 0;
+}
+.ms[data-look='editorial'] .ms-card {
+  padding: 1.2cqi 0 0;
+  border-top: 2px solid var(--s-ink);
+}
+.ms[data-look='editorial'] .ms-media {
+  filter: grayscale(1) contrast(1.05);
+}
+
+/* Soft irregular shapes that breathe. */
+.ms[data-look='organic'] {
+  --s-radius: 22px;
+  --s-border: 0;
+  --s-shadow: none;
+  --s-btn-radius: 999px;
+}
+.ms[data-look='organic'] .ms-media {
+  border-radius: 42% 58% 55% 45% / 48% 42% 58% 52%;
+  background: linear-gradient(160deg, var(--s-panel), var(--s-line));
+  animation: ms-breathe 3.6s ease-in-out infinite alternate;
+}
+.ms[data-look='organic'] .ms-card:nth-child(1) {
+  border-radius: 28px 12px 28px 12px;
+}
+.ms[data-look='organic'] .ms-card:nth-child(2) {
+  border-radius: 12px 28px 12px 28px;
+}
+.ms[data-look='organic'] .ms-card:nth-child(3) {
+  border-radius: 28px 28px 12px 28px;
+}
+
+/* A conversation at the centre, and a glow only while it thinks. */
+.ms[data-look='aiNative'] {
+  --s-radius: 18px;
+  --s-border: 1px solid var(--s-line);
+  --s-shadow: none;
+  --s-btn-radius: 999px;
+  --s-copy-bg: var(--s-card);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+  --s-copy-border: var(--s-border);
+}
+.ms[data-look='aiNative'] .ms-copy {
+  border-bottom-left-radius: 4px;
+}
+.ms[data-look='aiNative'] .ms-media {
+  border: 0;
+  background: var(--s-page);
+}
+.ms[data-look='aiNative'] .ms-media svg {
+  display: none;
+}
+.ms[data-look='aiNative'] .ms-media::before {
+  content: '';
+  width: 56%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, var(--s-deco-2), transparent 60%),
+    radial-gradient(circle at 70% 60%, var(--s-deco-4), transparent 60%),
+    radial-gradient(circle at 40% 75%, var(--s-deco-3), transparent 60%),
+    var(--s-accent);
+  filter: blur(6px);
+  animation: ms-think 2s ease-in-out infinite alternate;
+}
+.ms[data-look='aiNative'] .ms-card {
+  border-radius: 18px 18px 18px 4px;
+}
+
+/* Flat saturated blocks, snapping in. Text only on fills with a measured ink. */
+.ms[data-look='vibrantBlocks'] {
+  --s-radius: 14px;
+  --s-border: 0;
+  --s-shadow: none;
+  --s-hw: 800;
+  --s-hls: -0.04em;
+  --s-btn-radius: 999px;
+  --s-nav-bg: var(--s-primary);
+  --s-nav-ink: var(--s-on-primary);
+  --s-nav-soft: var(--s-on-primary);
+}
+.ms[data-look='vibrantBlocks'] .ms-logo::before {
+  background: var(--s-deco-2);
+}
+.ms[data-look='vibrantBlocks'] .ms-nav .ms-btn {
+  background: var(--s-accent);
+  color: var(--s-on-accent);
+}
+.ms[data-look='vibrantBlocks'] .ms-media {
+  background: var(--s-deco-3);
+}
+.ms[data-look='vibrantBlocks'] .ms-media svg {
+  animation: ms-snap 3.2s cubic-bezier(0.3, 1.5, 0.5, 1) infinite;
+}
+.ms[data-look='vibrantBlocks'] .ms-card:nth-child(1) {
+  --s-card-bg: var(--s-accent);
+  --s-card-fg: var(--s-on-accent);
+  --s-card-fg-soft: var(--s-on-accent);
+}
+.ms[data-look='vibrantBlocks'] .ms-card:nth-child(2) {
+  --s-card-bg: var(--s-primary);
+  --s-card-fg: var(--s-on-primary);
+  --s-card-fg-soft: var(--s-on-primary);
+}
+.ms[data-look='vibrantBlocks'] .ms-card .ms-bar {
+  background: color-mix(in srgb, currentColor 25%, transparent);
+}
+.ms[data-look='vibrantBlocks'] .ms-bar i {
+  background: var(--s-deco-2);
+}
+
+/* Glass that bends what is behind it. */
+.ms[data-look='liquidGlass'] {
+  --s-radius: 22px;
+  --s-border: 1px solid color-mix(in srgb, white 30%, transparent);
+  --s-blur: blur(6px) saturate(200%) brightness(1.05);
+  --s-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.55),
+    inset 0 -1px 0 rgb(255 255 255 / 0.18),
+    inset 0 0 18px rgb(255 255 255 / 0.1), 0 10px 26px rgb(0 0 0 / 0.3);
+  --s-nav-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-nav-ink: var(--s-card-ink);
+  --s-nav-soft: var(--s-card-soft);
+  --s-copy-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-copy-ink: var(--s-card-ink);
+  --s-copy-soft: var(--s-card-soft);
+  --s-copy-border: var(--s-border);
+  --s-card-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-btn-radius: 999px;
+}
+.ms[data-look='liquidGlass'] :is(.ms-nav, .ms-copy) {
+  box-shadow: var(--s-shadow);
+}
+.ms[data-look='liquidGlass'] .ms-fx {
+  opacity: 1;
+  background: repeating-linear-gradient(
+    115deg,
+    var(--s-deco-1) 0 22px,
+    var(--s-deco-2) 22px 44px,
+    var(--s-deco-3) 44px 66px,
+    var(--s-page) 66px 90px
+  );
+  background-size: 200% 200%;
+  animation: ms-drift 18s linear infinite alternate;
+}
+.ms[data-look='liquidGlass'] .ms-media {
+  background: color-mix(in srgb, var(--s-card) 25%, transparent);
+  -webkit-backdrop-filter: var(--s-blur);
+  backdrop-filter: var(--s-blur);
+}
+
+/* ------------------------------------------------------------------ */
+/* Directions with their own palettes. Their own pairs, nothing else. */
+/* ------------------------------------------------------------------ */
+
+.ms[data-look='warmTerminal'] {
+  --s-radius: 4px;
+  --s-shadow: none;
+  --s-fh: var(--font-mono);
+  --s-hw: 500;
+  --s-hls: -0.04em;
+}
+.ms[data-look='warmTerminal'] .ms-h::after {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 0.9em;
+  margin-left: 0.15em;
+  vertical-align: -0.08em;
+  background: var(--s-accent);
+  animation: ms-blink 1s steps(1) infinite;
+}
+.ms[data-look='warmTerminal'] .ms-media {
+  background: var(--s-card);
+}
+
+.ms[data-look='layeredVoid'] {
+  --s-radius: 14px;
+  --s-shadow: none;
+  --s-nav-bg: var(--s-panel);
+  --s-nav-ink: var(--s-panel-ink);
+  --s-nav-soft: var(--s-panel-ink);
+}
+.ms[data-look='layeredVoid'] .ms-copy .ms-btn:not(.ms-btn--ghost) {
+  background: var(--s-accent);
+  color: var(--s-on-accent);
+}
+.ms[data-look='layeredVoid'] .ms-media {
+  background: linear-gradient(160deg, var(--s-card), var(--s-panel));
+}
+
+.ms[data-look='acidDark'] {
+  --s-radius: 6px;
+  --s-shadow: none;
+  --s-hls: -0.05em;
+}
+.ms[data-look='acidDark'] .ms-media {
+  background: var(--s-card);
+}
+.ms[data-look='acidDark'] .ms-media .a-sun {
+  fill: var(--s-primary);
+  opacity: 0.9;
+  animation: ms-fade 1.8s ease-out infinite alternate;
+}
+
+.ms[data-look='nightIndigo'] {
+  --s-radius: 12px;
+  --s-shadow: none;
+  --s-nav-bg: var(--s-panel);
+  --s-nav-ink: var(--s-panel-ink);
+  --s-nav-soft: var(--s-panel-ink);
+}
+.ms[data-look='nightIndigo'] .ms-media {
+  background: linear-gradient(160deg, var(--s-panel), var(--s-card));
+}
+.ms[data-look='nightIndigo'] .ms-media .a-sun {
+  opacity: 0.8;
+}
+
+.ms[data-look='warmPaper'] {
+  --s-radius: 16px;
+  --s-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  --s-fh: Georgia, 'Times New Roman', serif;
+  --s-hw: 600;
+  --s-hls: -0.02em;
+}
+
+.ms[data-look='monoPress'] {
+  --s-radius: 0px;
+  --s-border: 0;
+  --s-shadow: none;
+  --s-hw: 800;
+  --s-hls: -0.05em;
+  --s-btn-radius: 0px;
+}
+.ms[data-look='monoPress'] .ms-nav {
+  padding-inline: 0;
+  border-bottom: 2px solid var(--s-ink);
+}
+/* Blue means "this is a link", and only ever as the underline. */
+.ms[data-look='monoPress'] .ms-links span {
+  text-decoration: underline;
+  text-decoration-color: var(--s-accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+.ms[data-look='monoPress'] .ms-card {
+  padding-inline: 0;
+  border-top: 2px solid var(--s-ink);
+}
+.ms[data-look='monoPress'] .ms-media {
+  background: var(--s-panel);
+  filter: grayscale(1);
+}
+.ms[data-look='monoPress'] .ms-bar i {
+  background: var(--s-ink);
+}
+
+/* The cards' band inverts the one above it: the primary fill and its ink. */
+.ms[data-look='polarityBands'] {
+  --s-radius: 4px;
+  --s-shadow: none;
+  --s-fh: Georgia, 'Times New Roman', serif;
+  --s-hw: 400;
+  --s-cards-bg: var(--s-primary);
+  --s-card-bg: transparent;
+  --s-card-fg: var(--s-on-primary);
+  --s-card-fg-soft: var(--s-on-primary);
+}
+.ms[data-look='polarityBands'] .ms-in {
+  padding-bottom: 0;
+}
+.ms[data-look='polarityBands'] .ms-cards {
+  margin-inline: -4cqi;
+  padding: 3cqi 4cqi 4cqi;
+}
+.ms[data-look='polarityBands'] .ms-card {
+  border-color: color-mix(in srgb, var(--s-on-primary) 25%, transparent);
+}
+.ms[data-look='polarityBands'] .ms-card .ms-bar {
+  background: color-mix(in srgb, var(--s-on-primary) 25%, transparent);
+}
+
+/* One full-bleed hero under a glow, a glass pill, a serif and one action. */
+.ms[data-look='cinematic'] {
+  --s-radius: 14px;
+  --s-shadow: none;
+  --s-fh: Georgia, 'Times New Roman', serif;
+  --s-hw: 400;
+  --s-hls: -0.05em;
+  --s-btn-radius: 999px;
+  --s-blur: blur(18px);
+  --s-nav-bg: color-mix(in srgb, var(--s-card) var(--s-glass), transparent);
+  --s-nav-ink: var(--s-card-ink);
+  --s-nav-soft: var(--s-card-ink);
+}
+.ms[data-look='cinematic'] .ms-fx {
+  opacity: 1;
+  background:
+    radial-gradient(
+      60% 55% at 30% 20%,
+      color-mix(in srgb, var(--s-deco-4) var(--s-glow), transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      50% 60% at 80% 40%,
+      color-mix(in srgb, var(--s-deco-1) var(--s-glow), transparent),
+      transparent 70%
+    ),
+    var(--s-page);
+}
+.ms[data-look='cinematic'] .ms-nav {
+  justify-self: center;
+  width: min(100%, 72cqi);
+  border-radius: 999px;
+}
+.ms[data-look='cinematic'] .ms-hero {
+  grid-template-columns: 1fr;
+  min-height: 34cqi;
+  text-align: center;
+}
+.ms[data-look='cinematic'] .ms-copy {
+  align-items: center;
+}
+.ms[data-look='cinematic'] .ms-h {
+  font-size: 7.6cqi;
+}
+.ms[data-look='cinematic'] :is(.ms-media, .ms-btn--ghost, .ms-eyebrow) {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+
+@keyframes ms-drift {
+  from {
+    background-position: 0% 0%;
+  }
+  to {
+    background-position: 100% 100%;
+  }
+}
+@keyframes ms-press {
+  0%,
+  40%,
+  78%,
+  100% {
+    box-shadow: var(--s-btn-shadow);
+  }
+  48%,
+  70% {
+    box-shadow: var(--s-press);
+  }
+}
+@keyframes ms-glow {
+  from {
+    filter: drop-shadow(0 0 4px var(--s-deco-2));
+  }
+  to {
+    filter: drop-shadow(0 0 14px var(--s-deco-2));
+  }
+}
+@keyframes ms-grid {
+  to {
+    background-position:
+      0 14px,
+      0 0;
+  }
+}
+@keyframes ms-boing {
+  0%,
+  55% {
+    transform: translateY(0) scale(1);
+  }
+  62% {
+    transform: translateY(4px) scale(1.06, 0.92);
+  }
+  75%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes ms-tile {
+  0% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  12%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ms-settle {
+  from {
+    opacity: 0.75;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ms-breathe {
+  from {
+    transform: scale(0.98);
+  }
+  to {
+    transform: scale(1.02);
+  }
+}
+@keyframes ms-think {
+  from {
+    transform: scale(0.94);
+    opacity: 0.75;
+  }
+  to {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+@keyframes ms-snap {
+  0% {
+    transform: translateY(-120%);
+  }
+  12%,
+  100% {
+    transform: none;
+  }
+}
+@keyframes ms-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes ms-fade {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.95;
+  }
+}
+
+/*
+ * Every loop above is ambient. A reader who asked for less motion gets the
+ * finished frame of each one, which is also what the page is designed
+ * around: nothing here carries meaning only while it moves.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ms,
+  .ms * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

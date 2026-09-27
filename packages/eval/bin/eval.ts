@@ -1,0 +1,219 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { FakeModelProvider } from '@vibld/core';
+import { CASES, stubPlan } from '../src/cases.ts';
+import { runCase } from '../src/harness.ts';
+import type { CaseResult } from '../src/harness.ts';
+import {
+  acceptedProject,
+  createLiveRun,
+  liveProblems,
+  planWrites,
+  readLiveOptions,
+  runCostCents,
+  selectCaseIds,
+} from '../src/live.ts';
+import {
+  formatReport,
+  formatStability,
+  stability,
+  summarise,
+} from '../src/report.ts';
+import { SCENARIOS, runScenario } from '../src/scenarios.ts';
+
+/**
+ * Run the versioned set and the injected failures, then print what happened.
+ *
+ * Exits non-zero when a case or a scenario fails, so this is usable as a gate
+ * rather than only as a thing someone reads.
+ *
+ * Against the deterministic stub by default. `VIBLD_EVAL_LIVE=1` with
+ * `VIBLD_EVAL_MODELS` runs the same cases against real models instead, which
+ * spends real money and so is never reached by a key merely being present.
+ */
+
+/**
+ * Write a generated project out so it can be read, run and ported.
+ *
+ * Planned in full before anything happens, so a snapshot that cannot be
+ * written truthfully (an escaping path, or two paths that are the same file on
+ * a case-insensitive volume) is refused while the previous candidate is still
+ * intact. Clearing first and discovering the problem halfway through would
+ * destroy the run it was meant to be compared against.
+ *
+ * The directory is cleared once the plan holds. Overwriting in place would
+ * leave files from a previous run that this generation did not produce, so the
+ * directory would stop matching the project being reported and could build or
+ * render from a stale config absent from the snapshot.
+ *
+ * `alsoClear` is for the first write of a repeated set, which has a second
+ * directory to answer for. Repeats write into `run-N` below the case
+ * directory, and clearing only the leaf leaves whatever the case directory
+ * held before: a previous single-run invocation's project files sitting beside
+ * the run directories, or `run-4` and `run-5` from a larger count. Either way
+ * the candidate tree stops matching the stability report that describes it,
+ * which is the same defect clearing the leaf exists to prevent, one level up.
+ *
+ * It is cleared here rather than before the loop so it is still governed by
+ * the plan: a first run that cannot be written truthfully must destroy
+ * nothing, including the previous candidate it would have replaced.
+ */
+async function writeProject(
+  root: string,
+  files: { path: string; content: string }[],
+  alsoClear?: string,
+): Promise<void> {
+  const plan = planWrites(root, files);
+  if (!plan.ok) throw new Error(plan.error);
+
+  if (alsoClear) await rm(alsoClear, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
+  const byTarget = new Map(
+    plan.writes.map((write) => [write.path, write.target]),
+  );
+  for (const file of files) {
+    const target = byTarget.get(file.path)!;
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, file.content, 'utf8');
+  }
+}
+
+async function main(): Promise<number> {
+  const env = process.env;
+  const live = readLiveOptions(env);
+  const selection = selectCaseIds(process.argv.slice(2));
+  if (!selection.ok) {
+    console.error(selection.error);
+    return 1;
+  }
+  const wanted = selection.ids;
+  const cases =
+    wanted.length > 0 ? CASES.filter((c) => wanted.includes(c.id)) : CASES;
+
+  if (wanted.length > 0 && cases.length !== wanted.length) {
+    const known = CASES.map((c) => c.id).join(', ');
+    console.error(`No such case. The set contains: ${known}`);
+    return 1;
+  }
+
+  const problems = liveProblems(live, env);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(problem);
+    return 1;
+  }
+
+  if (!live.enabled) {
+    // Said rather than silently ignored. The stub returns the same plan every
+    // time, so repeating a case against it would print N identical rows and
+    // measure nothing, but someone who set the variable and saw one run each
+    // would reasonably conclude the flag does not work.
+    if (env.VIBLD_EVAL_RUNS && env.VIBLD_EVAL_RUNS.trim() !== '1') {
+      console.log(
+        'VIBLD_EVAL_RUNS is ignored without VIBLD_EVAL_LIVE: the stub is deterministic, so repeating a case against it measures nothing.',
+      );
+    }
+    const results: CaseResult[] = [];
+    for (const testCase of cases) {
+      const plan = stubPlan(testCase);
+      const provider = new FakeModelProvider([plan]);
+      const result = await runCase(testCase, provider);
+      results.push(result);
+      // Written out like a live candidate, so CI can build what the stub
+      // says it accepted (bin/build-candidates.ts). Until #59 nothing did,
+      // and the stub's project could not build.
+      if (live.outDir && result.outcome === 'accepted') {
+        const root = join(live.outDir, 'stub', testCase.id);
+        await writeProject(root, plan.files);
+        console.log(`  wrote ${plan.files.length} files to ${root}`);
+      }
+    }
+    console.log(formatReport(summarise(results, 'stub')));
+    return (await runScenarios()) &&
+      results.every((r) => r.outcome === 'accepted')
+      ? 0
+      : 1;
+  }
+
+  // Live. One report per model, so the comparison is readable side by side
+  // rather than as one pooled score that hides which model earned what.
+  //
+  // Repeats are the inner loop, so each case is run its full number of times
+  // before the next one starts. That keeps a case's runs adjacent in the
+  // report, and it means an interrupted run has finished answering the
+  // reliability question for the cases it got to rather than having one
+  // sample of everything.
+  let allAccepted = true;
+  let totalCents = 0;
+  const repeated = live.runs > 1;
+  for (const model of live.models) {
+    const results: CaseResult[] = [];
+    for (const testCase of cases) {
+      // Whether this case's directory has been dealt with yet. Tracked rather
+      // than keyed on the first attempt, because a first run that produced
+      // nothing writes nothing, and the clearing is owed to whichever run
+      // writes first. A single run needs none of this: it writes to the case
+      // directory itself, which `writeProject` already clears.
+      let caseRootCleared = live.runs === 1;
+      for (let attempt = 1; attempt <= live.runs; attempt += 1) {
+        const projectId = repeated
+          ? `${model}:${testCase.id}#${attempt}`
+          : `${model}:${testCase.id}`;
+        const run = createLiveRun(env, model, projectId, testCase.style);
+        const result = await runCase(testCase, run.provider, {
+          store: run.store,
+          projectId,
+        });
+        results.push(result);
+        if (result.outcome !== 'accepted') allAccepted = false;
+
+        const cents = runCostCents(model, run.usage);
+        if (cents !== null) totalCents += cents;
+
+        if (live.outDir) {
+          const project = await acceptedProject(run);
+          if (project) {
+            // Each repeat gets its own directory. Without that the last run
+            // would clear and replace the ones before it, so the variance the
+            // repeats were paid for would exist only in the printed tally and
+            // the directory would hold one arbitrary sample of it. A single
+            // run keeps the original path, since there is nothing to separate.
+            const caseRoot = join(live.outDir, model, testCase.id);
+            const root = repeated ? join(caseRoot, `run-${attempt}`) : caseRoot;
+            await writeProject(
+              root,
+              project.files,
+              caseRootCleared ? undefined : caseRoot,
+            );
+            caseRootCleared = true;
+            console.log(`  wrote ${project.files.length} files to ${root}`);
+          }
+        }
+      }
+    }
+    console.log(formatReport(summarise(results, model)));
+    const table = formatStability(stability(results));
+    if (table) console.log(table);
+  }
+  console.log(`\nMeasured spend across all models: ${totalCents.toFixed(3)}c`);
+
+  const scenariosOk = await runScenarios();
+  return allAccepted && scenariosOk ? 0 : 1;
+}
+
+async function runScenarios(): Promise<boolean> {
+  console.log('\nInjected failures');
+  let passed = 0;
+  for (const scenario of SCENARIOS) {
+    const result = await runScenario(scenario);
+    if (result.passed) passed += 1;
+    console.log(
+      `  ${result.id}: ${result.passed ? 'behaved correctly' : 'MISBEHAVED'} -- ${result.detail}`,
+    );
+  }
+  console.log(
+    `${passed}/${SCENARIOS.length} injected failures behaved correctly`,
+  );
+  return passed === SCENARIOS.length;
+}
+
+process.exitCode = await main();

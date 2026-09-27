@@ -1,0 +1,124 @@
+/*
+ * The Vibld brand tokens, for both sites.
+ *
+ * Imported by apps/marketing and apps/web, which each keep their own alias
+ * layer mapping their existing vocabulary onto these. That indirection is
+ * deliberate: it means neither app had to be rewritten to adopt the brand,
+ * and it means there is exactly one place a colour is decided.
+ *
+ * The values are generated from packages/brand/src/palette.ts and a test
+ * (test/css.test.ts) re-parses this file and fails if the two disagree, so
+ * this cannot quietly drift from the palette the contrast tests measure.
+ *
+ * Direction: "Signal". One vermilion signal on graphite and chalk. The mark
+ * is still one chevron printed twice out of register; vermilion is its ghost.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* The three inks the direction is built from. */
+  --vibld-vermilion: oklch(0.666 0.224 34.3);
+  --vibld-graphite: oklch(0.191 0.009 264);
+  --vibld-chalk: oklch(0.966 0.004 106);
+
+  --vibld-paper: oklch(0.966 0.004 106);
+  --vibld-surface: oklch(1 0 0);
+  --vibld-surface-strong: oklch(0.944 0.007 116);
+  --vibld-ink: oklch(0.191 0.009 264);
+  --vibld-ink-muted: oklch(0.426 0.015 260);
+
+  /*
+   * Vermilion is a fill and a mark, never a text colour: against chalk it
+   * measures 3.05, which clears the large-text bar by five hundredths and
+   * fails body text, and against the raised surface it is 2.86. Text set on a
+   * vermilion fill is --vibld-on-accent, which measures 5.81.
+   */
+  --vibld-accent: oklch(0.666 0.224 34.3);
+  --vibld-on-accent: oklch(0.158 0.02 46);
+  /* What a link or the wordmark is set in. 5.10 on paper. */
+  --vibld-accent-ink: oklch(0.537 0.187 33.7);
+
+  /* The mark's two strokes. Vermilion is always the ghost; the ink changes. */
+  --vibld-mark-ink: oklch(0.191 0.009 264);
+  --vibld-mark-offset: oklch(0.666 0.224 34.3);
+  /* Overprinting ink on paper darkens. See palette.ts for why this flips. */
+  --vibld-mark-blend: multiply;
+
+  --vibld-edge: color-mix(in oklch, var(--vibld-ink) 14%, transparent);
+  --vibld-edge-strong: color-mix(in oklch, var(--vibld-ink) 26%, transparent);
+}
+
+/*
+ * Dark, when the reader's system asks for it and they have not said
+ * otherwise. The `:not([data-theme='light'])` guard is what lets an explicit
+ * light choice win over a dark OS; without it the toggle would work in one
+ * direction only.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --vibld-paper: oklch(0.168 0.004 264);
+    --vibld-surface: oklch(0.208 0.007 258);
+    --vibld-surface-strong: oklch(0.242 0.009 256);
+    --vibld-ink: oklch(0.948 0.007 107);
+    --vibld-ink-muted: oklch(0.746 0.01 258);
+
+    /*
+     * The accent does not change: the mark is the constant, and an accent
+     * that differed by theme would put the two sites back to looking like two
+     * products. What changes is the ink a link is set in, because the light
+     * theme's deepened vermilion measures 3.41 on a dark ground.
+     */
+    --vibld-accent-ink: oklch(0.742 0.16 36);
+
+    /* They swap: the light ink carries the shape, vermilion stays the ghost. */
+    --vibld-mark-ink: oklch(0.948 0.007 107);
+    --vibld-mark-offset: oklch(0.666 0.224 34.3);
+    /* multiply here would give the ground back and erase the mark. */
+    --vibld-mark-blend: screen;
+  }
+}
+
+/*
+ * Dark, because the reader chose it, whatever their system says.
+ *
+ * The same declarations as the media query above, and deliberately so: CSS
+ * has no way to name one set of values and apply it from two conditions
+ * without a preprocessor. `test/css.test.ts` checks every block that claims
+ * to be dark against the palette, so the two cannot drift apart quietly.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --vibld-paper: oklch(0.168 0.004 264);
+  --vibld-surface: oklch(0.208 0.007 258);
+  --vibld-surface-strong: oklch(0.242 0.009 256);
+  --vibld-ink: oklch(0.948 0.007 107);
+  --vibld-ink-muted: oklch(0.746 0.01 258);
+
+  /*
+   * The accent does not change: the mark is the constant, and an accent
+   * that differed by theme would put the two sites back to looking like two
+   * products. What changes is the ink a link is set in, because the light
+   * theme's deepened vermilion measures 3.41 on a dark ground.
+   */
+  --vibld-accent-ink: oklch(0.742 0.16 36);
+
+  /* They swap: the light ink carries the shape, vermilion stays the ghost. */
+  --vibld-mark-ink: oklch(0.948 0.007 107);
+  --vibld-mark-offset: oklch(0.666 0.224 34.3);
+  /* multiply here would give the ground back and erase the mark. */
+  --vibld-mark-blend: screen;
+}
+
+/*
+ * The two impressions of the mark. A class rather than an inline style,
+ * because the blend has to follow the ground and a value baked in at render
+ * time cannot: `multiply` is right on chalk and erases the mark on a dark
+ * ground.
+ */
+.vibld-mark__inks {
+  mix-blend-mode: var(--vibld-mark-blend);
+}

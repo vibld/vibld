@@ -1,0 +1,89 @@
+# Whether each provider still serves every model the catalogue offers, at
+# the limits it records, and whether it serves a newer version of a family
+# offered here.
+#
+# A retired id is a 404 on the next run that asks for it; a changed limit
+# sizes runs wrongly; a newer version left out is a choice nobody made. The
+# rules are in packages/ai/src/served-check.ts. Prices are the other
+# workflow's business (check-model-prices.yml).
+#
+# It reports and never edits. A finding lands on one tracking issue, and the
+# issue is closed when a run comes back clean. The catalogue is changed by a
+# pull request.
+name: Check model catalogue
+
+on:
+  schedule:
+    - cron: '41 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-model-catalogue
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # Runs only in the private working repository. The public copy
+    # (vibld/vibld) has none of the secrets or deployment environments this
+    # job reads, so there it could only fail.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The same keys the builder uses; listing models spends nothing.
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compare the catalogue with what each provider serves
+        id: check
+        working-directory: apps/web
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: node --experimental-strip-types scripts/check-model-catalogue.ts
+
+      # One open issue at a time: a finding that persists is a comment on the
+      # same thread.
+      - name: Report what it found
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title='Model catalogue check found differences'
+          report=apps/web/catalogue-report.md
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file "$report"
+          else
+            gh issue create --title "$title" --body-file "$report"
+          fi
+
+      - name: Close the issue once the catalogue agrees again
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title='Model catalogue check found differences'
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file apps/web/catalogue-report.md
+            gh issue close "$number" --reason completed
+          fi
