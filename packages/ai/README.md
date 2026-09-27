@@ -134,11 +134,10 @@ MIT-licensed design skills. What was taken, and from where:
 
 One licensing question was decided by the project owner rather than here.
 [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md)
-catalogues about seventy real companies' design languages. MIT is a copyright
-grant and conveys no trademark rights, which the cataloguer does not hold; on
-that basis the owner directed that the archetypes drawn from it ship
-de-named, which is what `style-presets.ts` does. A test enforces it on the id,
-chip name and caption.
+catalogues about seventy real companies' design languages. The owner directed
+that the archetypes drawn from it ship without the companies' names, which is
+what `style-presets.ts` does. A test enforces it on the id, chip name and
+caption.
 
 ### The generated stack
 
@@ -221,9 +220,8 @@ meant getting no colour tokens at all. Their token names are identical to
 `ProductPalette.colors`, so the `:root` block the prompt receives has one
 shape whichever source produced it.
 
-Every hex is authored here, not copied, and `contrast.ts` verifies all eight
-text pairs per archetype at 4.5:1 in the test suite. That check is not
-ceremony: several of the source corpus's own declared pairs fail it, because
+`contrast.ts` verifies all eight text pairs per archetype at 4.5:1 in the
+test suite. That check is not ceremony: several of the source corpus's own declared pairs fail it, because
 it records real brands faithfully rather than vetting them.
 
 Naming them after the companies is deliberately not done, and a test enforces
