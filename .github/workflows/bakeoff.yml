@@ -9,6 +9,23 @@ name: Model bakeoff
 # Manual only, and every run spends real money. The credentials live on the
 # "preview" environment, so any protection rule configured there gates the run
 # before a single step executes.
+#
+# A project is accepted only if it passes the eval's checks and installs and
+# builds (Chris, 2026-09-27), and each model gets two figures: accepted as
+# generated, and accepted after one repair turn, the product's own repair,
+# sent the exact build error (packages/eval/README.md). That takes five jobs,
+# split by one rule that has no exceptions: code a model wrote only ever runs
+# in a job that holds no secrets, and a job that holds keys only ever reads a
+# candidate's files as text.
+#
+#   bakeoff         keys     generates the candidates and eval-results.json
+#   build           no keys  installs and builds each candidate
+#   repair          keys     one repair turn for each that passed the checks
+#                            and did not build
+#   build-repaired  no keys  installs and builds what the repair wrote
+#   report          no keys  joins the four result files into one table
+#
+# Only files cross between them, as artifacts.
 on:
   workflow_dispatch:
     inputs:
@@ -171,7 +188,9 @@ jobs:
 
       # Uploaded even when the run failed its expectations. Looking at what a
       # model got wrong is most of the reason to write any of this out, and a
-      # failed case still cost what it cost.
+      # failed case still cost what it cost. eval-results.json is written into
+      # the same directory: which run passed which checks, and what it cost,
+      # which is what the repair and the report read.
       #
       # include-hidden-files because upload-artifact has excluded dotfiles by
       # default since v4.4, and a conventional project has a .gitignore. A
@@ -205,6 +224,13 @@ jobs:
     # bakeoff ends by naming the candidates it never reached rather than
     # being killed part way through.
     timeout-minutes: 180
+    # Not the gate any more. With --results a candidate that does not build
+    # is a result, written to the file for the repair and then the report,
+    # and this job fails only when it could not produce trustworthy results
+    # (a container that would not start or be removed, a snapshot that
+    # changed). Failing it for every broken candidate would mark it failed
+    # on the ordinary path of a bakeoff whose repair then fixes them. The
+    # report job is the gate.
 
     steps:
       # The job's clock starts here, not when the build step does: checkout,
@@ -242,4 +268,206 @@ jobs:
           docker pull node:24-bookworm-slim
           minutes=$(( (180 * 60 - ($(date +%s) - JOB_STARTED)) / 60 - 5 ))
           [ "$minutes" -ge 1 ] || minutes=1
-          node --experimental-strip-types packages/eval/bin/build-candidates.ts "$RUNNER_TEMP/candidates" "$minutes" --container node:24-bookworm-slim
+          node --experimental-strip-types packages/eval/bin/build-candidates.ts "$RUNNER_TEMP/candidates" "$minutes" --container node:24-bookworm-slim --results "$RUNNER_TEMP/build-results/build-results.json"
+
+      # Written by this script on the runner, outside every candidate's
+      # container, so no candidate can reach it. The repair job still reads
+      # it as untrusted data, because what a build printed is in it.
+      - name: Upload the build results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bakeoff-build-results
+          path: ${{ runner.temp }}/build-results
+          if-no-files-found: warn
+
+  # One repair turn for every candidate that passed the eval's checks and
+  # then did not install or build, sent the way the product sends it: the
+  # exact build error, in the product's repair prompt, with the candidate's
+  # files as the project to edit (packages/eval/src/repair.ts). It holds the
+  # model keys, as the bakeoff job does, and so it never builds, installs or
+  # runs anything a model wrote: the candidates are read as text, the build
+  # results are read as data, and the repaired projects are written as text
+  # for the next job to build.
+  repair:
+    name: Repair what did not build
+    needs: [bakeoff, build]
+    # !cancelled() rather than always(), which also runs after the workflow
+    # is cancelled, and this job spends money. It still runs after a failed
+    # bakeoff job, because one rejected run fails that job, and after a
+    # failed build job, whose results are uploaded either way.
+    if: ${{ !cancelled() && needs.bakeoff.result != 'skipped' && needs.build.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    # One model call per repaired candidate, each as long as a generation.
+    timeout-minutes: 60
+    environment: preview
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Nothing here runs a model's code, but nothing here needs to push
+          # either, and a job holding keys keeps no more than it uses.
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Before the downloads, so nothing a model wrote is on disk while
+      # dependencies install, and never inside the checkout: the candidates
+      # go to the runner's temporary directory, where no pnpm or npm command
+      # in this job looks for configuration.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the candidates
+        uses: actions/download-artifact@v7
+        with:
+          name: bakeoff-candidates
+          path: ${{ runner.temp }}/candidates
+
+      - name: Download the build results
+        uses: actions/download-artifact@v7
+        with:
+          name: bakeoff-build-results
+          path: ${{ runner.temp }}/build-results
+
+      - name: Repair each candidate that did not build
+        shell: bash
+        env:
+          VIBLD_EVAL_LIVE: '1'
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: pnpm --filter @vibld/eval run repair "$RUNNER_TEMP/candidates" "$RUNNER_TEMP/build-results/build-results.json" "$RUNNER_TEMP/repaired"
+
+      # include-hidden-files for the reason the candidates upload gives: a
+      # repaired project missing its .gitignore is not the project that was
+      # checked.
+      - name: Upload the repaired candidates
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bakeoff-repaired
+          path: ${{ runner.temp }}/repaired
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  # The repaired projects, built exactly as the first ones were, and for the
+  # same reason in a job of its own: a repair is code a model wrote.
+  build-repaired:
+    name: Build what the repair wrote
+    needs: repair
+    if: always() && needs.repair.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    # As in the build job, a candidate that does not build is a result for
+    # the report, not a failure of this job.
+
+    steps:
+      - name: Note when the job started
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The build runs code a model wrote. A persisted credential would sit
+          # on disk where that code can read it, whatever the environment says.
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Download the repaired candidates
+        uses: actions/download-artifact@v7
+        with:
+          name: bakeoff-repaired
+          path: ${{ runner.temp }}/repaired
+
+      - name: Install and build each repaired candidate
+        run: |
+          docker pull node:24-bookworm-slim
+          minutes=$(( (180 * 60 - ($(date +%s) - JOB_STARTED)) / 60 - 5 ))
+          [ "$minutes" -ge 1 ] || minutes=1
+          node --experimental-strip-types packages/eval/bin/build-candidates.ts "$RUNNER_TEMP/repaired" "$minutes" --container node:24-bookworm-slim --results "$RUNNER_TEMP/rebuild-results/rebuild-results.json"
+
+      - name: Upload the build results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bakeoff-repaired-build-results
+          path: ${{ runner.temp }}/rebuild-results
+          if-no-files-found: warn
+
+  # Two figures per model, and what every rejected run was rejected for.
+  # No keys and no dependencies: it reads four JSON files with Node alone.
+  #
+  # This job is the bakeoff's gate. It fails unless every run was accepted
+  # after at most one repair, which is how the bakeoff has always reported a
+  # rejected run, now applied to the final answer: a run the repair rescued
+  # no longer fails it, and a run that passed its checks and did not build
+  # now does.
+  report:
+    name: Report
+    needs: [bakeoff, build, repair, build-repaired]
+    if: always() && needs.bakeoff.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Each may be missing, when the job that writes it did not run. The
+      # report then names what it did not find and rejects the runs that
+      # depended on it, so a missing file can never read as a pass.
+      - name: Download the candidates
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: bakeoff-candidates
+          path: ${{ runner.temp }}/candidates
+
+      - name: Download the build results
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: bakeoff-build-results
+          path: ${{ runner.temp }}/build-results
+
+      - name: Download the repaired candidates
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: bakeoff-repaired
+          path: ${{ runner.temp }}/repaired
+
+      - name: Download the repaired build results
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: bakeoff-repaired-build-results
+          path: ${{ runner.temp }}/rebuild-results
+
+      - name: Report
+        run: >-
+          node --experimental-strip-types packages/eval/bin/bakeoff-report.ts
+          --eval "$RUNNER_TEMP/candidates/eval-results.json"
+          --build "$RUNNER_TEMP/build-results/build-results.json"
+          --repair "$RUNNER_TEMP/repaired/repair-results.json"
+          --rebuild "$RUNNER_TEMP/rebuild-results/rebuild-results.json"

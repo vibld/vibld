@@ -13,6 +13,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
+  RESULT_DETAIL_CHARS,
   carriesCredentials,
   candidateWorstCaseMs,
   canStart,
@@ -24,6 +25,7 @@ import {
   readArguments,
   run,
 } from '../bin/build-candidates.ts';
+import { parseBuildResults } from '../src/bakeoff.ts';
 
 const SCRIPT = fileURLToPath(
   new URL('../bin/build-candidates.ts', import.meta.url),
@@ -369,5 +371,159 @@ describe('a container that is not removed (#237 review)', () => {
     );
     assert.equal(result.status, 0, result.stdout);
     assert.match(result.stdout, /2\/2 projects build/);
+  });
+});
+
+describe('--results, for the bakeoff to repair from (2026-09-27)', () => {
+  /**
+   * Runs the script with `--results` and a stand-in `docker` whose install
+   * fails for the second candidate and whose build fails for the first,
+   * each saying why, and returns the exit code and the results file.
+   */
+  function withResults(
+    options: { rm?: string; projects?: string[]; say?: string } = {},
+  ) {
+    const root = mkdtempSync(join(tmpdir(), 'results-'));
+    const bin = mkdtempSync(join(tmpdir(), 'docker-'));
+    const file = join(mkdtempSync(join(tmpdir(), 'out-')), 'nested', 'r.json');
+    try {
+      for (const name of options.projects ?? ['a', 'b']) {
+        mkdirSync(join(root, name), { recursive: true });
+        writeFileSync(join(root, name, 'package.json'), '{}');
+      }
+      writeFileSync(
+        join(bin, 'docker'),
+        [
+          '#!/bin/sh',
+          `if [ "$1" = rm ]; then ${options.rm ?? 'exit 0'}; fi`,
+          // The install: `docker exec <name> sh -c ...`.
+          'if [ "$1" = exec ] && [ "$3" = sh ]; then',
+          '  case "$2" in *-1) echo "npm error 404 \'nope@1.0.0\' is not in this registry." >&2; exit 1;; esac',
+          'fi',
+          // The build: `docker exec --workdir <dir> <name> npm run build`.
+          'if [ "$1" = exec ] && [ "$2" = --workdir ]; then',
+          `  ${options.say ?? 'echo "> tsc --noEmit && vite build"'}`,
+          '  echo "src/App.tsx(3,10): error TS1484: \'ReactNode\' is a type" >&2',
+          '  exit 2',
+          'fi',
+          'exit 0',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          '--experimental-strip-types',
+          SCRIPT,
+          root,
+          '--container',
+          'img',
+          '--results',
+          file,
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
+        },
+      );
+      let written: unknown;
+      try {
+        written = JSON.parse(readFileSync(file, 'utf8'));
+      } catch {
+        written = undefined;
+      }
+      return { ...result, written };
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }
+
+  it('records each project, the stage it failed at and the end of what it said', () => {
+    const result = withResults();
+    const written = parseBuildResults(JSON.stringify(result.written));
+    const [a, b] = written.projects;
+    assert.equal(a!.name, 'a');
+    assert.equal(a!.ok, false);
+    assert.equal(a!.stage, 'build');
+    assert.equal(a!.exitCode, 2);
+    assert.equal(a!.timedOut, false);
+    // stdout and stderr both: tsc writes its diagnostics to stdout.
+    assert.match(a!.detail, /tsc --noEmit && vite build/);
+    assert.match(a!.detail, /error TS1484: 'ReactNode' is a type/);
+    assert.equal(b!.stage, 'install');
+    assert.equal(b!.exitCode, 1);
+    assert.match(b!.detail, /npm error 404 'nope@1\.0\.0'/);
+  });
+
+  it('treats a project that does not build as a result, not a failed run', () => {
+    // The bakeoff goes on to repair these, and its report is the gate.
+    const result = withResults();
+    assert.equal(result.status, 0, result.stdout);
+    // The log and the summary are what they were.
+    assert.match(result.stdout, /FAIL {2}a \(build failed\)/);
+    assert.match(result.stdout, /FAIL {2}b \(install failed\)/);
+    assert.match(result.stdout, /0\/2 projects build/);
+  });
+
+  it('keeps as much of the error as the product sends its own repair', () => {
+    // apps/preview hands its repair the last 2000 characters, and the log's
+    // twelve lines are often less than one type error with its import chain.
+    assert.equal(RESULT_DETAIL_CHARS, 2000);
+    const result = withResults({
+      projects: ['a'],
+      say: "printf '%05000d\\n' 0; echo 'the reason'",
+    });
+    const [a] = parseBuildResults(JSON.stringify(result.written)).projects;
+    assert.equal(a!.detail.length, RESULT_DETAIL_CHARS);
+    assert.match(a!.detail, /error TS1484/);
+    assert.match(a!.detail, /the reason/);
+  });
+
+  it('still fails when the run itself went wrong, and says which', () => {
+    const result = withResults({ rm: 'echo stuck >&2; exit 1' });
+    assert.equal(result.status, 1);
+    const stages = parseBuildResults(
+      JSON.stringify(result.written),
+    ).projects.map((project) => project.stage);
+    assert.deepEqual(stages, ['cleanup', 'halted']);
+  });
+
+  it('records no projects, and succeeds, when there was nothing to build', () => {
+    const result = withResults({ projects: [] });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.written, { schema: 1, projects: [] });
+  });
+
+  it('records a candidate it had no time for', () => {
+    const root = mkdtempSync(join(tmpdir(), 'budget-'));
+    const file = join(root, 'r.json');
+    try {
+      mkdirSync(join(root, 'a'));
+      writeFileSync(join(root, 'a', 'package.json'), '{}');
+      const result = spawnSync(
+        process.execPath,
+        ['--experimental-strip-types', SCRIPT, root, '1', '--results', file],
+        { encoding: 'utf8' },
+      );
+      assert.equal(result.status, 0, result.stdout);
+      const [a] = parseBuildResults(readFileSync(file, 'utf8')).projects;
+      assert.equal(a!.stage, 'time');
+      assert.equal(a!.ok, false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the option, and refuses an empty one', () => {
+    assert.deepEqual(readArguments(['out', '--results', 'r.json']), {
+      ok: true,
+      root: 'out',
+      minutes: undefined,
+      container: undefined,
+      results: 'r.json',
+    });
+    assert.equal(readArguments(['out', '--results', '']).ok, false);
   });
 });

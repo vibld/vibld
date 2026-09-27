@@ -1,6 +1,41 @@
+export {
+  BUILD_STAGES,
+  EVAL_RESULTS_FILE,
+  REPAIR_RESULTS_FILE,
+  buildErrorFor,
+  forLog,
+  formatBakeoff,
+  joinBakeoff,
+  parseBuildResults,
+  parseEvalResults,
+  parseRepairResults,
+  repairable,
+  selectForRepair,
+  verdictFor,
+} from './bakeoff.ts';
+export type {
+  BakeoffReport,
+  BuildRecord,
+  BuildResults,
+  BuildStage,
+  CandidateRecord,
+  EvalResults,
+  ModelRow,
+  RepairJob,
+  RepairRecord,
+  RepairResults,
+  RunRow,
+  Verdict,
+} from './bakeoff.ts';
 export { CASES, PROMPT_SET_VERSION, stubPlan } from './cases.ts';
-export type { EvalCase } from './cases.ts';
-export { runCase } from './harness.ts';
+export type { EvalCase, Expectation } from './cases.ts';
+export {
+  expectationProblems,
+  expectationText,
+  meetsExpectation,
+  projectCode,
+  runCase,
+} from './harness.ts';
 export type { CaseOutcome, CaseResult, HarnessOptions } from './harness.ts';
 export {
   MAX_RUNS,
@@ -13,6 +48,7 @@ export {
   readLiveOptions,
   runCostCents,
   selectCaseIds,
+  writeProject,
 } from './live.ts';
 export type {
   CaseSelection,
@@ -31,6 +67,8 @@ export {
   summarise,
 } from './report.ts';
 export type { CaseStability, EvalReport } from './report.ts';
+export { repairCandidate, repairPrompt } from './repair.ts';
+export type { RepairInput, RepairOutput } from './repair.ts';
 export { SCENARIOS, runScenario } from './scenarios.ts';
 export type { Scenario, ScenarioResult } from './scenarios.ts';
 export { createEvalValidator, pathProblem } from './validator.ts';

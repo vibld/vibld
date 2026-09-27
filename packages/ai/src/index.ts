@@ -66,6 +66,7 @@ export type {
   DesignReport,
   FindingSeverity,
 } from './design-checks.ts';
+export { keepingRecordOf, repairPromptFor, withRecordOf } from './repair.ts';
 export type { ParsedGenerationPlan } from './plan-schema.ts';
 export {
   MAX_MOCKUP_LABEL_CHARS,

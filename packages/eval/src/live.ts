@@ -1,3 +1,4 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { InMemoryGenerationStore } from '@vibld/core';
 import { PlanProvider, createPlanClient, findModel } from '@vibld/ai';
@@ -382,4 +383,50 @@ export function planWrites(
   }
 
   return { ok: true, writes };
+}
+
+/**
+ * Write a generated project out so it can be read, run and ported.
+ *
+ * Planned in full before anything happens, so a snapshot that cannot be
+ * written truthfully (an escaping path, or two paths that are the same file on
+ * a case-insensitive volume) is refused while the previous candidate is still
+ * intact. Clearing first and discovering the problem halfway through would
+ * destroy the run it was meant to be compared against.
+ *
+ * The directory is cleared once the plan holds. Overwriting in place would
+ * leave files from a previous run that this generation did not produce, so the
+ * directory would stop matching the project being reported and could build or
+ * render from a stale config absent from the snapshot.
+ *
+ * `alsoClear` is for the first write of a repeated set, which has a second
+ * directory to answer for. Repeats write into `run-N` below the case
+ * directory, and clearing only the leaf leaves whatever the case directory
+ * held before: a previous single-run invocation's project files sitting beside
+ * the run directories, or `run-4` and `run-5` from a larger count. Either way
+ * the candidate tree stops matching the stability report that describes it,
+ * which is the same defect clearing the leaf exists to prevent, one level up.
+ *
+ * It is cleared here rather than before the loop so it is still governed by
+ * the plan: a first run that cannot be written truthfully must destroy
+ * nothing, including the previous candidate it would have replaced.
+ */
+export async function writeProject(
+  root: string,
+  files: { path: string; content: string }[],
+  alsoClear?: string,
+): Promise<void> {
+  const plan = planWrites(root, files);
+  if (!plan.ok) throw new Error(plan.error);
+
+  if (alsoClear) await rm(alsoClear, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true });
+  const byTarget = new Map(
+    plan.writes.map((write) => [write.path, write.target]),
+  );
+  for (const file of files) {
+    const target = byTarget.get(file.path)!;
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, file.content, 'utf8');
+  }
 }

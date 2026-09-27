@@ -11,7 +11,7 @@ import { tokenCss } from '@vibld/ai';
  * the number, so `PROMPT_SET_VERSION` moves with it and every report carries
  * it. Comparing runs across versions is comparing different exams.
  */
-export const PROMPT_SET_VERSION = '1.7.0';
+export const PROMPT_SET_VERSION = '1.8.0';
 
 export interface EvalCase {
   id: string;
@@ -31,10 +31,19 @@ export interface EvalCase {
      * Text that must appear in the project's code: every file except
      * Markdown, with comments removed. A README that repeats the brief, or
      * a comment that does, is not the project doing what was asked.
+     *
+     * An entry that is a list is one expectation with several wordings, any
+     * one of which meets it. For a claim a page can make in more than one
+     * way, a single word fails the page that made the claim in other words,
+     * and that is the eval measuring its own vocabulary rather than the
+     * model's work.
      */
-    content: string[];
+    content: Expectation[];
   };
 }
+
+/** One thing the project must say, in one wording or any of several. */
+export type Expectation = string | readonly string[];
 
 export const CASES: EvalCase[] = [
   {
@@ -116,10 +125,37 @@ export const CASES: EvalCase[] = [
         'DESIGN.md',
         'src/styles.css',
       ],
-      // "portable" is the claim the whole page exists to make. A generated
+      // Portability is the claim the whole page exists to make. A generated
       // page that sells an AI builder without it has missed the brief, not
       // the styling.
-      content: ['Vibld', 'waitlist', 'portable'],
+      //
+      // Any of these wordings makes it. Until 1.8.0 this was the one word
+      // "portable", and in the 2026-09-27 bakeoff every model lost a run to
+      // a page that made the claim in other words ("no lock-in", "take it
+      // with you"). Each wording still has to mean the claim: a bare
+      // "export" is not here because every component file says `export`,
+      // and a bare "lock in" is not here because Tailwind's `block inset-0`
+      // contains it. Both would pass a page that never made the claim.
+      content: [
+        'Vibld',
+        'waitlist',
+        [
+          'portable',
+          'portability',
+          'lock-in',
+          'locked in',
+          'take it with you',
+          'take with you',
+          'take your code',
+          'take the code',
+          'walk away with',
+          'yours to keep',
+          'export your code',
+          'export your project',
+          'export the code',
+          'proprietary format',
+        ],
+      ],
     },
   },
   // The three apps below exist for the examples catalogue on vibld.com
@@ -193,7 +229,7 @@ export function stubPlan(testCase: EvalCase): GenerationPlan {
   // description. A stub
   // meets a case's expectations by construction: what it exercises is the
   // harness, and a stub that failed the set would say nothing about it.
-  const subject = [testCase.prompt, ...testCase.expects.content]
+  const subject = [testCase.prompt, ...testCase.expects.content.flat()]
     .join(' ')
     .toLowerCase();
   const files: ProjectFile[] = [

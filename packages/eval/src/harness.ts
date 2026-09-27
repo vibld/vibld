@@ -4,7 +4,7 @@ import {
   RunBudgetLedger,
 } from '@vibld/core';
 import type { GenerationStore, ModelProvider } from '@vibld/core';
-import type { EvalCase } from './cases.ts';
+import type { EvalCase, Expectation } from './cases.ts';
 import { createEvalValidator } from './validator.ts';
 
 /**
@@ -39,6 +39,15 @@ export interface HarnessOptions {
   store?: GenerationStore;
   projectId?: string;
   budget?: ConstructorParameters<typeof RunBudgetLedger>[0];
+  /**
+   * What to ask in place of the case's own prompt, and the run id to ask it
+   * under. The bakeoff's repair turn (`src/repair.ts`) is the one caller: it
+   * sends the repair prompt against a store that already holds the project,
+   * and is held to the same checks as the run that produced it, because
+   * that is the only way its result means the same thing.
+   */
+  prompt?: string;
+  runId?: string;
 }
 
 const DEFAULT_BUDGET = {
@@ -89,7 +98,8 @@ export async function runCase(
   const ledger = new RunBudgetLedger(options.budget ?? DEFAULT_BUDGET);
   const started = now();
 
-  const inputTokens = estimateTokens(testCase.prompt);
+  const prompt = options.prompt ?? testCase.prompt;
+  const inputTokens = estimateTokens(prompt);
   let reservation;
   try {
     reservation = ledger.reserve({
@@ -112,9 +122,9 @@ export async function runCase(
   try {
     result = await runner.run(
       {
-        prompt: testCase.prompt,
+        prompt,
         projectId: options.projectId ?? testCase.id,
-        runId: `${testCase.id}-run`,
+        runId: options.runId ?? `${testCase.id}-run`,
       },
       provider,
       createEvalValidator(),
@@ -157,20 +167,7 @@ export async function runCase(
 
   // Accepted is not the same as correct. A project that builds but ignores
   // what was asked for is a failure the compiler cannot see.
-  const accepted = result.accepted;
-  const paths = new Set(accepted.files.map((file) => file.path));
-  const code = projectCode(accepted.files);
-  const haystack = code.toLowerCase();
-
-  const problems: string[] = [];
-  for (const path of testCase.expects.files) {
-    if (!paths.has(path)) problems.push(`expected file ${path} is missing`);
-  }
-  for (const text of testCase.expects.content) {
-    if (!haystack.includes(text.toLowerCase())) {
-      problems.push(`the project never mentions "${text}"`);
-    }
-  }
+  const problems = expectationProblems(testCase, result.accepted.files);
 
   return {
     id: testCase.id,
@@ -179,4 +176,74 @@ export async function runCase(
     problems,
     estimatedTokens,
   };
+}
+
+/**
+ * Hyphens a page may set in place of "-": U+2010 to U+2015 and the minus
+ * sign. Built from code points, the way `scripts/no-em-dash.mjs` builds its
+ * own, because one of them is the character that script rejects.
+ */
+const TYPESET_HYPHENS = new RegExp(
+  `[${String.fromCharCode(0x2010)}-${String.fromCharCode(0x2015)}${String.fromCharCode(0x2212)}]`,
+  'g',
+);
+
+/**
+ * The project's code as expectations read it: lower-cased, with typeset
+ * hyphens and non-breaking spaces read as the plain ones.
+ *
+ * A page that writes "no lock-in" with a non-breaking hyphen, so that the
+ * phrase never wraps, has made the same claim as one that types it, and a
+ * check that could not see it would be grading the keyboard.
+ */
+export function expectationText(
+  files: readonly { path: string; content: string }[],
+): string {
+  return projectCode(files)
+    .toLowerCase()
+    .replace(TYPESET_HYPHENS, '-')
+    .replace(/\u00a0/g, ' ');
+}
+
+/** Whether `text` (from `expectationText`) meets one expectation. */
+export function meetsExpectation(
+  text: string,
+  expectation: Expectation,
+): boolean {
+  const wordings =
+    typeof expectation === 'string' ? [expectation] : expectation;
+  return wordings.some((wording) => text.includes(wording.toLowerCase()));
+}
+
+/**
+ * Every way `files` fall short of what `testCase` asked for: a required
+ * file missing, or a thing the project never says in any accepted wording.
+ *
+ * Its own function so the bakeoff's repair (`src/repair.ts`) holds a
+ * repaired project to exactly the checks the first attempt was held to.
+ */
+export function expectationProblems(
+  testCase: EvalCase,
+  files: readonly { path: string; content: string }[],
+): string[] {
+  const paths = new Set(files.map((file) => file.path));
+  const text = expectationText(files);
+  const problems: string[] = [];
+  for (const path of testCase.expects.files) {
+    if (!paths.has(path)) problems.push(`expected file ${path} is missing`);
+  }
+  for (const expectation of testCase.expects.content) {
+    if (meetsExpectation(text, expectation)) continue;
+    if (typeof expectation === 'string') {
+      problems.push(`the project never mentions "${expectation}"`);
+    } else {
+      // The first wording is the one the case is about, so it leads; the
+      // rest are listed so a reader can see what else would have passed.
+      const [first, ...rest] = expectation;
+      problems.push(
+        `the project never mentions "${first}", nor says it as ${rest.map((wording) => `"${wording}"`).join(', ')}`,
+      );
+    }
+  }
+  return problems;
 }

@@ -11,14 +11,14 @@ import {
 } from '@vibld/core';
 import {
   DEFAULT_MAX_TOKENS,
-  DESIGN_MD_PATH,
   ProviderError,
   RUN_STEP_TIMEOUT_MS,
   checkDesign,
-  describeFindings,
   findModel,
+  keepingRecordOf,
+  repairPromptFor,
+  withRecordOf,
 } from '@vibld/ai';
-import type { DesignReport } from '@vibld/ai';
 import {
   MAX_BASE_CONTENT_CHARS,
   outputTokensToRewrite,
@@ -387,17 +387,6 @@ export function canPayForRepair(
 }
 
 /**
- * What to ask the model for, when its own project will not build.
- *
- * The compiler's words verbatim and nothing paraphrased: the whole reason
- * this is worth a second call is that the error names the file and the line,
- * and a summary would throw away the part that makes it fixable.
- *
- * Says what not to do as well as what to do. Left to itself a model asked to
- * "fix the build" will happily rewrite the project, and the reader asked for
- * the project, not for a second draft of it.
- */
-/**
  * What the verify-and-repair step is given before it is considered hung.
  *
  * A build, a model call and a second build. The first version of this said
@@ -466,31 +455,6 @@ export const REPAIR_STEP_TIMEOUT_MS =
  * asking when there is not enough left to wait and still build.
  * `repair-timeout.test.ts` adds that up against the allowance.
  */
-
-export function repairPromptFor(
-  error: string | undefined,
-  design?: DesignReport,
-  /** Whether the project is known to build; false when nothing judged it. */
-  built = true,
-): string {
-  const findings = design ? describeFindings(design) : '';
-  const parts: string[] = [];
-  if (error !== undefined) {
-    parts.push(`The project you just wrote does not build. This is the exact output:
-
-${error}`);
-  }
-  if (findings) {
-    parts.push(`${error !== undefined ? 'It also' : built ? 'The project you just wrote builds, but it' : 'The project you just wrote'} does not match its own spec (DESIGN.md) or the rules every page must hold. These checks failed:
-
-${findings}`);
-  }
-  parts.push(`Fix ${parts.length > 1 ? 'all of it' : 'it'}, and change nothing else. Keep every file that is not implicated, keep
-the design, the copy and the structure exactly as they are, and do not rename
-or reorganise anything. Return the complete set of files for the project as
-it should now be.`);
-  return parts.join('\n\n');
-}
 
 export interface GenerationWorkflowEnv {
   DB: D1Database;
@@ -1585,34 +1549,6 @@ export async function verifyAndRepair(
     result: heldInstead
       ? { ...outcome.result, accepted: heldInstead }
       : outcome.result,
-  };
-}
-
-/**
- * `files` with the design record (`DESIGN.md`) of `original`, so they are
- * checked against the spec `original` was held to. When `original` had
- * none, `files` are checked as they are.
- */
-function withRecordOf(
-  original: readonly ProjectFile[],
-  files: ProjectFile[],
-): ProjectFile[] {
-  const record = original.find((file) => file.path === DESIGN_MD_PATH);
-  if (!record) return files;
-  return [...files.filter((file) => file.path !== DESIGN_MD_PATH), record];
-}
-
-/** `provider`, with every plan it returns carrying `original`'s design record. */
-export function keepingRecordOf(
-  original: readonly ProjectFile[],
-  provider: ModelProvider,
-): ModelProvider {
-  return {
-    id: provider.id,
-    generate: async (request) => {
-      const plan = await provider.generate(request);
-      return { ...plan, files: withRecordOf(original, plan.files) };
-    },
   };
 }
 

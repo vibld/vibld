@@ -1,17 +1,20 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { FakeModelProvider } from '@vibld/core';
-import { CASES, stubPlan } from '../src/cases.ts';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join, posix } from 'node:path';
+import { FakeModelProvider, InMemoryGenerationStore } from '@vibld/core';
+import type { ProjectSnapshot } from '@vibld/core';
+import { EVAL_RESULTS_FILE } from '../src/bakeoff.ts';
+import type { CandidateRecord, EvalResults } from '../src/bakeoff.ts';
+import { CASES, PROMPT_SET_VERSION, stubPlan } from '../src/cases.ts';
 import { runCase } from '../src/harness.ts';
 import type { CaseResult } from '../src/harness.ts';
 import {
   acceptedProject,
   createLiveRun,
   liveProblems,
-  planWrites,
   readLiveOptions,
   runCostCents,
   selectCaseIds,
+  writeProject,
 } from '../src/live.ts';
 import {
   formatReport,
@@ -33,48 +36,55 @@ import { SCENARIOS, runScenario } from '../src/scenarios.ts';
  */
 
 /**
- * Write a generated project out so it can be read, run and ported.
+ * Every run so far, as `src/bakeoff.ts` describes them, kept in step with
+ * what is on disk.
  *
- * Planned in full before anything happens, so a snapshot that cannot be
- * written truthfully (an escaping path, or two paths that are the same file on
- * a case-insensitive volume) is refused while the previous candidate is still
- * intact. Clearing first and discovering the problem halfway through would
- * destroy the run it was meant to be compared against.
- *
- * The directory is cleared once the plan holds. Overwriting in place would
- * leave files from a previous run that this generation did not produce, so the
- * directory would stop matching the project being reported and could build or
- * render from a stale config absent from the snapshot.
- *
- * `alsoClear` is for the first write of a repeated set, which has a second
- * directory to answer for. Repeats write into `run-N` below the case
- * directory, and clearing only the leaf leaves whatever the case directory
- * held before: a previous single-run invocation's project files sitting beside
- * the run directories, or `run-4` and `run-5` from a larger count. Either way
- * the candidate tree stops matching the stability report that describes it,
- * which is the same defect clearing the leaf exists to prevent, one level up.
- *
- * It is cleared here rather than before the loop so it is still governed by
- * the plan: a first run that cannot be written truthfully must destroy
- * nothing, including the previous candidate it would have replaced.
+ * Rewritten after each run rather than once at the end, so a run that is
+ * stopped part way (the job's time limit, a provider that hangs) leaves a
+ * record of the runs it did finish and paid for. The bakeoff's later jobs
+ * read this rather than the log: which candidate passed which checks, and
+ * what it cost, is what decides which of them get a repair turn and how the
+ * final table adds up.
  */
-async function writeProject(
-  root: string,
-  files: { path: string; content: string }[],
-  alsoClear?: string,
-): Promise<void> {
-  const plan = planWrites(root, files);
-  if (!plan.ok) throw new Error(plan.error);
+class ResultsFile {
+  readonly #path: string | undefined;
+  readonly #results: EvalResults;
 
-  if (alsoClear) await rm(alsoClear, { recursive: true, force: true });
-  await rm(root, { recursive: true, force: true });
-  const byTarget = new Map(
-    plan.writes.map((write) => [write.path, write.target]),
-  );
-  for (const file of files) {
-    const target = byTarget.get(file.path)!;
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, file.content, 'utf8');
+  constructor(outDir: string | undefined, provider: EvalResults['provider']) {
+    this.#path = outDir ? join(outDir, EVAL_RESULTS_FILE) : undefined;
+    this.#results = {
+      schema: 1,
+      promptSetVersion: PROMPT_SET_VERSION,
+      provider,
+      candidates: [],
+    };
+  }
+
+  async add(
+    record: Omit<CandidateRecord, 'dir' | 'revision' | 'files'>,
+    written?: { dir: string; project: ProjectSnapshot },
+  ): Promise<void> {
+    this.#results.candidates.push({
+      ...record,
+      dir: written?.dir ?? null,
+      ...(written
+        ? {
+            revision: written.project.revision,
+            files: written.project.files.map((file) => file.path),
+          }
+        : {}),
+    });
+    await this.save();
+  }
+
+  async save(): Promise<void> {
+    if (!this.#path) return;
+    await mkdir(dirname(this.#path), { recursive: true });
+    await writeFile(
+      this.#path,
+      `${JSON.stringify(this.#results, null, 2)}\n`,
+      'utf8',
+    );
   }
 }
 
@@ -113,18 +123,34 @@ async function main(): Promise<number> {
       );
     }
     const results: CaseResult[] = [];
+    const recorded = new ResultsFile(live.outDir, 'stub');
+    await recorded.save();
     for (const testCase of cases) {
       const plan = stubPlan(testCase);
       const provider = new FakeModelProvider([plan]);
-      const result = await runCase(testCase, provider);
+      const store = new InMemoryGenerationStore();
+      const result = await runCase(testCase, provider, { store });
       results.push(result);
+      const record = {
+        model: 'stub',
+        case: testCase.id,
+        run: 1,
+        outcome: result.outcome,
+        problems: result.problems,
+        costCents: null,
+      };
       // Written out like a live candidate, so CI can build what the stub
       // says it accepted (bin/build-candidates.ts). Until internal PR 59 nothing did,
       // and the stub's project could not build.
-      if (live.outDir && result.outcome === 'accepted') {
-        const root = join(live.outDir, 'stub', testCase.id);
-        await writeProject(root, plan.files);
-        console.log(`  wrote ${plan.files.length} files to ${root}`);
+      const project = await store.loadAccepted(testCase.id);
+      if (live.outDir && result.outcome === 'accepted' && project) {
+        const dir = posix.join('stub', testCase.id);
+        const root = join(live.outDir, dir);
+        await writeProject(root, project.files);
+        console.log(`  wrote ${project.files.length} files to ${root}`);
+        await recorded.add(record, { dir, project });
+      } else {
+        await recorded.add(record);
       }
     }
     console.log(formatReport(summarise(results, 'stub')));
@@ -145,6 +171,8 @@ async function main(): Promise<number> {
   let allAccepted = true;
   let totalCents = 0;
   const repeated = live.runs > 1;
+  const recorded = new ResultsFile(live.outDir, 'live');
+  await recorded.save();
   for (const model of live.models) {
     const results: CaseResult[] = [];
     for (const testCase of cases) {
@@ -168,25 +196,38 @@ async function main(): Promise<number> {
 
         const cents = runCostCents(model, run.usage);
         if (cents !== null) totalCents += cents;
+        const record = {
+          model,
+          case: testCase.id,
+          run: attempt,
+          outcome: result.outcome,
+          problems: result.problems,
+          costCents: cents,
+        };
 
-        if (live.outDir) {
-          const project = await acceptedProject(run);
-          if (project) {
-            // Each repeat gets its own directory. Without that the last run
-            // would clear and replace the ones before it, so the variance the
-            // repeats were paid for would exist only in the printed tally and
-            // the directory would hold one arbitrary sample of it. A single
-            // run keeps the original path, since there is nothing to separate.
-            const caseRoot = join(live.outDir, model, testCase.id);
-            const root = repeated ? join(caseRoot, `run-${attempt}`) : caseRoot;
-            await writeProject(
-              root,
-              project.files,
-              caseRootCleared ? undefined : caseRoot,
-            );
-            caseRootCleared = true;
-            console.log(`  wrote ${project.files.length} files to ${root}`);
-          }
+        const project = live.outDir ? await acceptedProject(run) : undefined;
+        if (live.outDir && project) {
+          // Each repeat gets its own directory. Without that the last run
+          // would clear and replace the ones before it, so the variance the
+          // repeats were paid for would exist only in the printed tally and
+          // the directory would hold one arbitrary sample of it. A single
+          // run keeps the original path, since there is nothing to separate.
+          const caseDir = posix.join(model, testCase.id);
+          const dir = repeated
+            ? posix.join(caseDir, `run-${attempt}`)
+            : caseDir;
+          const caseRoot = join(live.outDir, caseDir);
+          const root = join(live.outDir, dir);
+          await writeProject(
+            root,
+            project.files,
+            caseRootCleared ? undefined : caseRoot,
+          );
+          caseRootCleared = true;
+          console.log(`  wrote ${project.files.length} files to ${root}`);
+          await recorded.add(record, { dir, project });
+        } else {
+          await recorded.add(record);
         }
       }
     }

@@ -218,6 +218,21 @@ a subscription at all). The default stays 40,
 safe on Workers Free. At 92 and above, including the deployed 500, the pass
 is unchanged.
 
+**The bakeoff counts a failed build as a rejection, and reports a figure
+after one repair.** Chris decided on 2026-09-27, after a three-run bakeoff of
+`vibld-marketing` scored models on "accepted" when accepted projects were never
+required to build: GPT-6 Sol had 2/3 accepted and only one of them built, and
+DeepSeek V4 Pro's one accepted run did not build. A project is now accepted
+only if it passes the eval's checks and `npm install` and `npm run build`
+succeed. Each model gets two figures: accepted as generated, and accepted after
+one repair turn, the product's own repair (`repairPromptFor`, now shared from
+`@vibld/ai`) sent the exact build error. Cost includes the repair. The same
+bakeoff lost one run per model to the `portable` check on pages that made the
+claim in other words, so that expectation now accepts any of a list of
+wordings, and the prompt set is 1.8.0. The keyed and keyless jobs stay
+separate: model-written code only runs in a job with no secrets. See
+`packages/eval/README.md`.
+
 **L9 -- previews and builds share the container budget (internal issue 197).** Since internal PR 196, builds run in the same container class as previews, whose `max_instances` is 25, and the budget was split statically: 20 for previews and 5 for builds, so the 21st preview queued even when nothing was building. Chris chose the shared budget: previews and builds count against one budget of 25, with builds bounded at 5 of it. Previews get all 25 whenever nothing is building, and a preview queues behind a build only when every container is taken. L9 holds again and its wording is unchanged; `max_instances` is unchanged. See `apps/preview/worker/capacity.ts`.
 
 ### Resolved 2026-09-19

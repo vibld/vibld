@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { repairPromptFor, worthRepairing } from '../worker/generation-run.ts';
+import { repairPromptFor } from '@vibld/ai';
+
+import { worthRepairing } from '../worker/generation-run.ts';
 import type { BuildFailureReason } from '../worker/publish-client.ts';
 
 /**

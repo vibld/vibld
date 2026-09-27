@@ -12,6 +12,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { EVAL_RESULTS_FILE, parseEvalResults } from '../src/bakeoff.ts';
+import { PROMPT_SET_VERSION } from '../src/cases.ts';
+
 /**
  * The live loop, run as the command actually runs it.
  *
@@ -96,6 +99,47 @@ describe('a live run with repeats', () => {
       // Non-zero because one run failed. A gate that passed here would report
       // an unreliable model as a good one.
       assert.equal(status, 1, stdout);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it('records every run, what it cost and where it was written, for the later jobs', () => {
+    // The bakeoff's repair and report read this file, not the log.
+    const out = mkdtempSync(join(tmpdir(), 'vibld-eval-'));
+    try {
+      const { stdout } = runEval(out);
+      const results = parseEvalResults(
+        readFileSync(join(out, EVAL_RESULTS_FILE), 'utf8'),
+      );
+      assert.equal(results.provider, 'live');
+      assert.equal(results.promptSetVersion, PROMPT_SET_VERSION);
+      assert.deepEqual(
+        results.candidates.map((c) => [c.model, c.case, c.run, c.outcome]),
+        [
+          ['deepseek-flash', 'vibld-marketing', 1, 'accepted'],
+          ['deepseek-flash', 'vibld-marketing', 2, 'accepted'],
+          ['deepseek-flash', 'vibld-marketing', 3, 'failed-expectations'],
+        ],
+        stdout,
+      );
+      for (const candidate of results.candidates) {
+        // The directory the build job will name it by, relative and with
+        // forward slashes, and holding exactly the files recorded.
+        assert.equal(
+          candidate.dir,
+          `deepseek-flash/vibld-marketing/run-${candidate.run}`,
+        );
+        for (const path of candidate.files!) {
+          assert.ok(existsSync(join(out, candidate.dir!, path)), path);
+        }
+        assert.match(candidate.revision!, /^r[0-9a-f]{8}$/);
+        // Measured from the usage the fake reported, failures included.
+        assert.ok(candidate.costCents! > 0);
+      }
+      assert.deepEqual(results.candidates[2]!.problems, [
+        'expected file DESIGN.md is missing',
+      ]);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }

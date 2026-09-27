@@ -11,6 +11,7 @@
     "build": "tsc --noEmit",
     "check": "pnpm run typecheck && pnpm run test",
     "eval": "node --experimental-strip-types bin/eval.ts",
+    "repair": "node --experimental-strip-types bin/repair-candidates.ts",
     "test": "node --test --experimental-strip-types test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

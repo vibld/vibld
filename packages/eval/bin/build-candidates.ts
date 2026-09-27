@@ -8,11 +8,13 @@ import {
   chmodSync,
   readFileSync,
   readdirSync,
+  mkdirSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -51,12 +53,26 @@ import { parseArgs } from 'node:util';
  * killed when it ends; but a process that leaves its group escapes that.
  *
  * Usage: node --experimental-strip-types bin/build-candidates.ts <dir>
- *   [minutes] [--container <image>]
+ *   [minutes] [--container <image>] [--results <file>]
  * `<dir>` is the VIBLD_EVAL_OUT of an eval run. `[minutes]` is the time the
  * whole run may take: a candidate that could not finish inside it is not
  * started, and is reported as not built, so a job that runs out of time
  * fails saying which candidates it never checked rather than being killed
  * part way through with no word about the rest.
+ *
+ * `--results <file>` also writes what happened to each project as JSON
+ * (`BuildResults` in `src/bakeoff.ts`), including the end of the failing
+ * command's output, which is what the bakeoff's repair turn sends the model.
+ * It changes what the exit code means. Without it, any project that does
+ * not build fails the run, which is how CI uses this as a gate. With it, a
+ * project that does not build is a result like any other, written to the
+ * file for the bakeoff's report to judge after the repair has had its turn,
+ * and the run fails only when it could not produce trustworthy results: a
+ * container that would not start or could not be removed, or a snapshot
+ * that changed before its turn. Failing the job for every broken candidate
+ * would mark it failed on the ordinary path of a bakeoff whose repair then
+ * fixes them, and a red job that means nothing teaches people to ignore
+ * the one that does.
  */
 
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
@@ -119,6 +135,19 @@ function tail(text: string, lines = 12): string {
   return text.trim().split('\n').slice(-lines).join('\n');
 }
 
+/**
+ * How much of a failing command's output `--results` keeps: the last 2000
+ * characters, the same bound the product's build service puts on the error
+ * it hands its own repair turn (`apps/preview/worker/preview-sandbox.ts`).
+ * Twelve lines is enough for a person reading the log, and often not for a
+ * type error with a long import chain above it.
+ */
+export const RESULT_DETAIL_CHARS = 2000;
+
+function errorTail(text: string): string {
+  return text.trim().slice(-RESULT_DETAIL_CHARS);
+}
+
 /** Most output kept from one command, from its end: the reason is there. */
 const MAX_OUTPUT_CHARS = 1_000_000;
 
@@ -136,7 +165,13 @@ export function run(
   cwd: string,
   timeout: number,
   env: Record<string, string> = passedEnv(),
-): Promise<{ ok: boolean; output: string }> {
+): Promise<{
+  ok: boolean;
+  output: string;
+  /** Null when it was stopped or never started, rather than exiting. */
+  code: number | null;
+  timedOut: boolean;
+}> {
   return new Promise((done) => {
     let output = '';
     // A rolling suffix: a verbose install or build puts its reason last.
@@ -173,7 +208,12 @@ export function run(
     child.on('error', (error) => {
       clearTimeout(timer);
       killGroup();
-      done({ ok: false, output: `${error.message}\n${output}` });
+      done({
+        ok: false,
+        output: `${error.message}\n${output}`,
+        code: null,
+        timedOut: false,
+      });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
@@ -183,8 +223,10 @@ export function run(
           ? {
               ok: false,
               output: `timed out after ${timeout / 1000}s\n${output}`,
+              code: null,
+              timedOut: true,
             }
-          : { ok: code === 0, output },
+          : { ok: code === 0, output, code, timedOut: false },
       );
     });
   });
@@ -254,6 +296,8 @@ export function readArguments(argv: string[]):
       root: string;
       minutes: number | undefined;
       container: string | undefined;
+      /** Present only when asked for, so the plain invocation reads as before. */
+      results?: string;
     }
   | { ok: false; error: string } {
   let parsed;
@@ -261,7 +305,10 @@ export function readArguments(argv: string[]):
     parsed = parseArgs({
       args: argv,
       allowPositionals: true,
-      options: { container: { type: 'string' } },
+      options: {
+        container: { type: 'string' },
+        results: { type: 'string' },
+      },
     });
   } catch (error) {
     return {
@@ -273,7 +320,8 @@ export function readArguments(argv: string[]):
   if (!root)
     return {
       ok: false,
-      error: 'Usage: build-candidates.ts <dir> [minutes] [--container <image>]',
+      error:
+        'Usage: build-candidates.ts <dir> [minutes] [--container <image>] [--results <file>]',
     };
   if (rest.length > 0)
     return { ok: false, error: `Unexpected argument "${rest[0]}".` };
@@ -285,7 +333,17 @@ export function readArguments(argv: string[]):
   if (container !== undefined && !/^[\w.\/:@-]+$/.test(container)) {
     return { ok: false, error: `"${container}" is not an image name.` };
   }
-  return { ok: true, root, minutes: budget, container };
+  const results = parsed.values.results;
+  if (results !== undefined && results.trim() === '') {
+    return { ok: false, error: '--results needs a file.' };
+  }
+  return {
+    ok: true,
+    root,
+    minutes: budget,
+    container,
+    ...(results !== undefined ? { results } : {}),
+  };
 }
 
 /**
@@ -469,14 +527,7 @@ async function buildInNamedContainer(
     INSTALL_TIMEOUT_MS,
     docker,
   );
-  if (!install.ok) {
-    return {
-      project,
-      ok: false,
-      stage: 'install',
-      detail: tail(install.output),
-    };
-  }
+  if (!install.ok) return commandFailed(project, 'install', install);
   const built = await run(
     'docker',
     ['exec', '--workdir', CONTAINER_WORK, name, 'npm', 'run', 'build'],
@@ -484,11 +535,25 @@ async function buildInNamedContainer(
     BUILD_TIMEOUT_MS,
     docker,
   );
+  return built.ok
+    ? { project, ok: true, stage: 'done', detail: '' }
+    : commandFailed(project, 'build', built);
+}
+
+/** A failed install or build, with what `--results` records of it. */
+function commandFailed(
+  project: string,
+  stage: 'install' | 'build',
+  said: Awaited<ReturnType<typeof run>>,
+): Built {
   return {
     project,
-    ok: built.ok,
-    stage: built.ok ? 'done' : 'build',
-    detail: built.ok ? '' : tail(built.output),
+    ok: false,
+    stage,
+    detail: tail(said.output),
+    error: errorTail(said.output),
+    exitCode: said.code,
+    timedOut: said.timedOut,
   };
 }
 
@@ -504,7 +569,12 @@ interface Built {
     | 'cleanup'
     | 'halted'
     | 'done';
+  /** What the log shows: the last few lines. */
   detail: string;
+  /** What `--results` records, when a command failed: the last 2000 characters. */
+  error?: string;
+  exitCode?: number | null;
+  timedOut?: boolean;
 }
 
 /**
@@ -542,14 +612,7 @@ async function build(
       INSTALL_TIMEOUT_MS,
       env,
     );
-    if (!install.ok) {
-      return {
-        project,
-        ok: false,
-        stage: 'install',
-        detail: tail(install.output),
-      };
-    }
+    if (!install.ok) return commandFailed(project, 'install', install);
     const built = await run(
       'npm',
       ['run', 'build'],
@@ -557,12 +620,9 @@ async function build(
       BUILD_TIMEOUT_MS,
       env,
     );
-    return {
-      project,
-      ok: built.ok,
-      stage: built.ok ? 'done' : 'build',
-      detail: built.ok ? '' : tail(built.output),
-    };
+    return built.ok
+      ? { project, ok: true, stage: 'done', detail: '' }
+      : commandFailed(project, 'build', built);
   } finally {
     rmSync(work, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -575,7 +635,7 @@ async function main(): Promise<number> {
     console.error(args.error);
     return 1;
   }
-  const { root, minutes, container } = args;
+  const { root, minutes, container, results: resultsFile } = args;
   if (!existsSync(root)) {
     console.error(`${root} does not exist.`);
     return 1;
@@ -588,7 +648,15 @@ async function main(): Promise<number> {
   if (projects.length === 0) {
     // Nothing to build is a failure, not a pass: a run that was meant to
     // write candidates and wrote none has not shown that anything builds.
+    // With `--results` it is recorded instead, as no projects, and the
+    // bakeoff's report fails every run that should have written one: a run
+    // whose every candidate failed the eval's checks is a result, and the
+    // report is where results are judged.
     console.error(`No project with a package.json under ${root}.`);
+    if (resultsFile) {
+      writeResults(resultsFile, []);
+      return 0;
+    }
     return 1;
   }
   // Every candidate copied and hashed before any of them runs.
@@ -651,7 +719,41 @@ async function main(): Promise<number> {
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
   }
+  if (resultsFile) {
+    writeResults(resultsFile, results);
+    return results.some((result) => INFRASTRUCTURE.includes(result.stage))
+      ? 1
+      : 0;
+  }
   return failed.length === 0 ? 0 : 1;
+}
+
+/**
+ * The stages that say the run itself went wrong rather than a candidate: a
+ * container that did not start or could not be removed, one not started
+ * because of that, or a snapshot that changed before its turn. Out of time
+ * is not among them; the report names those candidates, and the job's clock
+ * is a limit this run was given, not a fault in it.
+ */
+const INFRASTRUCTURE: Built['stage'][] = [
+  'container',
+  'cleanup',
+  'halted',
+  'tampered',
+];
+
+/** The `--results` file: `BuildResults` in `src/bakeoff.ts`. */
+function writeResults(file: string, results: (Built & { name: string })[]) {
+  const projects = results.map((result) => ({
+    name: result.name,
+    ok: result.ok,
+    stage: result.stage,
+    detail: result.error ?? result.detail,
+    ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+    ...(result.timedOut !== undefined ? { timedOut: result.timedOut } : {}),
+  }));
+  mkdirSync(dirname(resolve(file)), { recursive: true });
+  writeFileSync(file, `${JSON.stringify({ schema: 1, projects }, null, 2)}\n`);
 }
 
 /** How a failed stage reads in the log and the summary. */
