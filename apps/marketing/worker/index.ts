@@ -7,6 +7,12 @@ import {
 } from './analytics.ts';
 import { secured } from '@vibld/security-headers';
 import {
+  handleRoadmapVote,
+  handleRoadmapVotes,
+  methodNotAllowed,
+} from './roadmap-api.ts';
+import { type RoadmapD1Database, sweep } from './roadmap-store.ts';
+import {
   isTurnstileVerified,
   parseWaitlistSubmission,
   resendContactRequest,
@@ -51,6 +57,12 @@ export interface Env {
    * copy that can outrank the original is worse than having no preview.
    */
   VIBLD_NOINDEX?: string;
+  /**
+   * The roadmap's votes (worker/roadmap-api.ts), bound by wrangler.jsonc.
+   * Deliberately absent on the preview deployment, where /api/roadmap/*
+   * answers 503: a vote cast while reviewing a change is not a vote.
+   */
+  ROADMAP_DB?: RoadmapD1Database;
 }
 
 /**
@@ -87,6 +99,16 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     return secured(await route(request, env));
   },
+
+  /**
+   * wrangler.jsonc's cron: deletes rate-limit rows whose window has closed
+   * and salts from earlier days, so a hashed address is not kept longer than
+   * the window it was counted in when nobody votes to trigger the same
+   * cleanup (worker/roadmap-store.ts).
+   */
+  async scheduled(_controller: unknown, env: Env): Promise<void> {
+    if (env.ROADMAP_DB) await sweep(env.ROADMAP_DB, Date.now());
+  },
 };
 
 async function route(request: Request, env: Env): Promise<Response> {
@@ -113,6 +135,16 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
   if (url.pathname === '/api/hit' && request.method === 'POST') {
     return handleHit(request, env);
+  }
+  if (url.pathname === '/api/roadmap/votes') {
+    return request.method === 'GET'
+      ? handleRoadmapVotes(request, env)
+      : methodNotAllowed('GET');
+  }
+  if (url.pathname === '/api/roadmap/vote') {
+    return request.method === 'POST'
+      ? handleRoadmapVote(request, env)
+      : methodNotAllowed('POST');
   }
 
   // Last, so an `/api/` route is never served as a page. `VIBLD_NOINDEX` is

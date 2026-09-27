@@ -67,6 +67,27 @@
     { "binding": "ANALYTICS", "dataset": "vibld_marketing" },
   ],
 
+  // Votes on /roadmap (worker/roadmap-api.ts). Its own database rather than a
+  // table in apps/web's vibld-control-plane: this Worker serves the public
+  // front door, and nothing it holds should be one bad query away from
+  // accounts and billing. Migrations are in ./migrations and are applied by
+  // .github/workflows/deploy-marketing.yml before each deploy.
+  "d1_databases": [
+    {
+      "binding": "ROADMAP_DB",
+      "database_name": "vibld-marketing-roadmap",
+      "database_id": "7e6d90f0-46af-4521-b081-f02c01853ff7",
+    },
+  ],
+
+  // Deletes the roadmap's rate-limit rows once their ten-minute window has
+  // closed, and salts from earlier days. A vote does the same cleanup, but
+  // only when somebody votes; this is what keeps a hashed address from
+  // lingering through a quiet night (worker/roadmap-store.ts's sweep).
+  "triggers": {
+    "crons": ["*/10 * * * *"],
+  },
+
   // RESEND_API_KEY is a Worker secret, set out of band by the deploy
   // workflow and never committed. Without it, /api/waitlist answers 503
   // rather than silently discarding a signup -- see worker/index.ts.

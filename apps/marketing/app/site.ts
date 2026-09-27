@@ -358,6 +358,12 @@ export const ROUTES: SiteRoute[] = [
       'Sites and apps vibld built, each shown exactly as generated from the prompt beside it, with a live copy and the source to download; then the hand-built starter templates, marked as templates.',
   },
   {
+    path: '/roadmap',
+    title: `Roadmap | ${SITE.name}`,
+    description:
+      'What vibld is building now, what comes next, what is being considered and what has shipped, with a vote on anything not yet built.',
+  },
+  {
     path: '/legal',
     title: `Legal | ${SITE.name}`,
     description: 'Every policy governing vibld and this site, in one place.',
@@ -393,6 +399,7 @@ export const PRODUCT_PAGES: { path: string; label: string }[] = [
   { path: '/use-cases', label: 'Use cases' },
   { path: '/examples', label: 'Examples' },
   { path: '/pricing', label: 'Pricing' },
+  { path: '/roadmap', label: 'Roadmap' },
 ];
 
 export function routeFor(path: string): SiteRoute {

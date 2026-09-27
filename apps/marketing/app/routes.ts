@@ -31,6 +31,7 @@ export default [
   ),
   route('styles', 'routes/styles.tsx'),
   route('examples', 'routes/examples.tsx'),
+  route('roadmap', 'routes/roadmap.tsx'),
   route('docs', 'routes/docs.index.tsx'),
   route('docs/getting-started', 'routes/docs.getting-started.tsx'),
   route('docs/the-builder', 'routes/docs.the-builder.tsx'),

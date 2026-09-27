@@ -1,0 +1,187 @@
+/*
+ * The roadmap (/roadmap): item cards and the vote button.
+ *
+ * Every colour is a token the brand or app.css already measures, used in a
+ * pairing that is measured: ink and muted ink on the surface, the accent
+ * only as a fill with --color-on-accent on it (5.81 in both themes), and the
+ * accent ink for anything that has to be seen as a line. Vermilion is never
+ * a text colour here (docs/brand.md).
+ */
+
+.lb-rm-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+  margin: 36px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lb-rm-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 20px 22px;
+  border: 1px solid var(--color-edge);
+  border-radius: 18px;
+  background: var(--color-surface);
+}
+.lb-rm-item__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.lb-rm-item h3 {
+  min-width: 0;
+  padding-top: 6px;
+  font-family: var(--font-display);
+  font-size: 1.1875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.lb-rm-item > p {
+  color: var(--color-ink-muted);
+  text-wrap: pretty;
+}
+
+/*
+ * The error sits in the card it belongs to, in the ink rather than a red the
+ * brand has not measured, and marked by the accent as a bar: a fill, which
+ * is the one job vermilion is trusted with.
+ */
+.lb-rm-item .lb-rm-item__err {
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 4px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-size: 0.9375rem;
+}
+
+/*
+ * A real button, 44px tall so it is an easy target on a phone. Unpressed it
+ * is an outline in the ink; pressed it is filled with the accent, with the
+ * only ink the brand allows on that fill.
+ */
+.lb-vote {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 5.25rem;
+  min-height: 44px;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--color-edge-strong);
+  border-radius: 999px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 160ms var(--ease-out),
+    border-color 160ms var(--ease-out),
+    transform 120ms var(--ease-out);
+}
+.lb-vote__i {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lb-vote__n {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.lb-vote[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.lb-vote[aria-pressed='true'] .lb-vote__i {
+  fill: currentColor;
+}
+.lb-vote[data-pending='true'] {
+  cursor: progress;
+}
+.lb-vote[data-error='true'] {
+  border-color: var(--color-accent-ink);
+  box-shadow: inset 0 0 0 1px var(--color-accent-ink);
+}
+.lb-vote:active {
+  transform: scale(0.96);
+}
+@media (hover: hover) and (pointer: fine) {
+  .lb-vote:hover {
+    border-color: var(--color-ink);
+  }
+  .lb-vote[aria-pressed='true']:hover {
+    border-color: var(--color-accent);
+    background: color-mix(in oklch, var(--color-accent) 88%, white);
+  }
+}
+
+.lb-rm-done {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  color: var(--color-ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+.lb-rm-done svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--color-ok);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lb-rm-status {
+  max-width: 70ch;
+  margin-top: 8px;
+  color: var(--color-ink-muted);
+  font-size: 0.9375rem;
+}
+
+/*
+ * Turnstile, while a first vote waits on it. Fixed to the foot of the view
+ * because the button pressed can be anywhere on a long page, and the check
+ * has to be where it can be seen if Cloudflare asks for a click.
+ */
+.lb-rm-check {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 45;
+  max-width: 420px;
+  margin-inline: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--color-edge-strong);
+  border-radius: 14px;
+  background: var(--color-surface);
+  box-shadow: 0 18px 44px -22px rgb(0 0 0 / 0.35);
+  font-size: 0.9375rem;
+}
+.lb-rm-check div:not(:empty) {
+  margin-top: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-vote:active {
+    transform: none;
+  }
+}

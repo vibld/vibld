@@ -41,6 +41,13 @@
     "VIBLD_NOINDEX": "1",
   },
 
+  // No d1_databases, deliberately, and so no roadmap votes: /api/roadmap/*
+  // answers 503 here and /roadmap shows its items without counts. Binding
+  // the production database would let a review pass vote for real, and a
+  // separate preview database would show counts nobody real cast, which is
+  // worse than none. Without the database there is nothing for a cron to
+  // sweep either, so there is no "triggers" block.
+  //
   // RESEND_API_KEY is deliberately not synced to this Worker. Without it
   // /api/waitlist answers 503 rather than writing to the real waitlist
   // segment, which is what a preview should do: a signup from a review pass

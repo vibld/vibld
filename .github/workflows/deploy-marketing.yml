@@ -46,7 +46,7 @@ jobs:
           [ -n "$RESEND_API_KEY" ] || { echo "::error::RESEND_API_KEY is not set"; missing=1; }
           if [ "$missing" -ne 0 ]; then
             echo "Add all three to the \"marketing\" environment (Settings -> Environments)." >&2
-            echo "The Cloudflare token needs \"Workers Scripts: Edit\" and \"DNS: Edit\" on the vibld.com zone -- the routes in wrangler.jsonc create that zone's records on first deploy." >&2
+            echo "The Cloudflare token needs \"Workers Scripts: Edit\" and \"DNS: Edit\" on the vibld.com zone -- the routes in wrangler.jsonc create that zone's records on first deploy -- and \"D1: Edit\" on the account, for the roadmap's migrations." >&2
             exit 1
           fi
 
@@ -93,8 +93,22 @@ jobs:
             printf '%s' "$TURNSTILE_SECRET_KEY" | pnpm dlx wrangler@4.137.0 secret put TURNSTILE_SECRET_KEY
             echo "Synced TURNSTILE_SECRET_KEY." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "TURNSTILE_SECRET_KEY not set -- Turnstile verification stays disabled on this deploy." >> "$GITHUB_STEP_SUMMARY"
+            echo "TURNSTILE_SECRET_KEY not set -- Turnstile verification stays disabled on the waitlist, and /roadmap refuses a browser's first vote, on this deploy." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # Idempotent -- wrangler tracks applied migrations in the database's own
+      # `d1_migrations` table and only runs what is new. Runs before the
+      # deploy itself so a Worker never goes live expecting a table a
+      # migration this same push added hasn't created yet: the same step, for
+      # the same reason, as deploy-web-preview.yml's for apps/web. The job's
+      # `if: github.repository == 'vibld/vibld-internal'` guard covers it.
+      - name: Apply D1 migrations
+        shell: bash
+        working-directory: apps/marketing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm dlx wrangler@4.137.0 d1 migrations apply vibld-marketing-roadmap --remote
 
       - name: Deploy to Cloudflare Workers
         id: deploy

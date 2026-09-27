@@ -19,6 +19,7 @@ import { LOG } from '../app/demo-script.ts';
 import { dollars, priceLabel, readPlans } from '../app/plans.ts';
 import { USE_CASES } from '../app/use-cases.ts';
 import { TEMPLATES } from '../app/templates.ts';
+import { ROADMAP_GROUPS, ROADMAP_ITEMS, VOTABLE_IDS } from '../app/roadmap.ts';
 
 /**
  * These tests read the built site, not the source -- see
@@ -604,6 +605,42 @@ describe('the docs index', () => {
     for (const guide of DOC_GUIDES) {
       assert.ok(tracks.has(guide.track), `${guide.slug} is in no known track`);
     }
+  });
+});
+
+describe('the roadmap, at rest', () => {
+  // What a crawler and a reader without JavaScript get, and what everyone
+  // sees before the counts arrive: every group and every item, and buttons
+  // that say "Vote" rather than a number nobody has fetched yet.
+  it('prerenders every group and every item, with no counts', () => {
+    const html = read('/roadmap');
+    const text = html.replace(/<[^>]+>/g, ' ');
+    for (const group of ROADMAP_GROUPS) {
+      assert.ok(text.includes(group.label), `no group ${group.label}`);
+      assert.ok(html.includes(`id="roadmap-${group.status}"`));
+    }
+    for (const item of ROADMAP_ITEMS) {
+      // React escapes the apostrophe in "app’s" as itself, so the title is
+      // matched as written.
+      assert.ok(html.includes(item.title), `no item ${item.title}`);
+      assert.ok(html.includes(item.description), `no text for ${item.id}`);
+    }
+    const buttons = html.match(/<button[^>]*class="lb-vote"[^>]*>/g) ?? [];
+    assert.equal(buttons.length, VOTABLE_IDS.length);
+    for (const button of buttons) {
+      assert.match(button, /aria-pressed="false"/);
+      assert.match(button, /aria-label="Vote for [^",]+"/);
+    }
+    assert.doesNotMatch(html, /\d+ votes?"/, 'a count was prerendered');
+  });
+
+  it('says the counts are indicative', () => {
+    assert.match(read('/roadmap'), /Counts are indicative/);
+  });
+
+  it('is in the sitemap at its canonical URL', () => {
+    const body = readFileSync(join(CLIENT, 'sitemap.xml'), 'utf8');
+    assert.ok(body.includes(`<loc>${new URL('/roadmap', SITE.url)}</loc>`));
   });
 });
 

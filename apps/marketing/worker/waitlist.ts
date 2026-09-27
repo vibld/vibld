@@ -139,13 +139,17 @@ interface TurnstileSiteverifyResponse {
  * `success` alone is not enough: it is also what Turnstile returns for a
  * token issued to a *different* site or action, so a leaked or replayed
  * token from elsewhere would otherwise pass.
+ *
+ * `action` is the widget's, so a token issued for the roadmap's vote widget
+ * (worker/roadmap.ts) cannot be spent on a signup, or the other way round.
  */
 export function isTurnstileVerified(
   result: TurnstileSiteverifyResponse,
+  action: string = WAITLIST_TURNSTILE_ACTION,
 ): boolean {
   return (
     result.success &&
-    result.action === WAITLIST_TURNSTILE_ACTION &&
+    result.action === action &&
     typeof result.hostname === 'string' &&
     WAITLIST_HOSTNAMES.has(result.hostname)
   );
