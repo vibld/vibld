@@ -226,7 +226,7 @@ jobs:
           node-version: 24
 
       - name: Download the candidates
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-candidates
           path: ${{ runner.temp }}/candidates
