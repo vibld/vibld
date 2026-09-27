@@ -1,0 +1,174 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Figtree:wght@400;500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #f3efe6;
+  --foreground: #2b2a22;
+  --card: #faf7f0;
+  --card-foreground: #2b2a22;
+  --popover: #faf7f0;
+  --popover-foreground: #2b2a22;
+  --primary: #4f6446;
+  --primary-foreground: #f6f3ea;
+  --primary-hover: #3f5238;
+  --secondary: #e4dccb;
+  --secondary-foreground: #3b3a2f;
+  --muted: #e9e3d6;
+  --muted-foreground: #5f5b4c;
+  --accent: #c9d2bb;
+  --accent-foreground: #2f3b2a;
+  --destructive: #9b3b2e;
+  --border: #d8cfbd;
+  --input: #8f8570;
+  --ring: #4f6446;
+  --sage: #a9b79a;
+  --clay: #8f5b3e;
+  --bark: #6b5443;
+  --forest: #2f3b2a;
+  --forest-foreground: #eef0e6;
+  --forest-muted: #bfc6b4;
+  --glow: rgba(169, 183, 154, 0.45);
+  --scrim: rgba(43, 42, 34, 0.45);
+  --mesh-sage: rgba(169, 183, 154, 0.35);
+  --mesh-clay: rgba(143, 91, 62, 0.14);
+  --shadow-ink: rgba(59, 52, 36, 0.28);
+  --radius: 1.25rem;
+  --soft-shadow: 0 24px 48px -24px var(--shadow-ink);
+  --hero-mesh: radial-gradient(60% 50% at 20% 30%, var(--mesh-sage), transparent 70%), radial-gradient(50% 45% at 80% 70%, var(--mesh-clay), transparent 70%);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.16 0 0 0 0 0.13 0 0 0 0.14 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sage: var(--sage);
+  --color-clay: var(--clay);
+  --color-bark: var(--bark);
+  --color-forest: var(--forest);
+  --color-forest-foreground: var(--forest-foreground);
+  --color-forest-muted: var(--forest-muted);
+  --color-glow: var(--glow);
+  --color-scrim: var(--scrim);
+  --shadow-soft: var(--soft-shadow);
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+}
+
+@theme {
+  --text-display: clamp(2.75rem, 1.5rem + 5.4vw, 6.5rem);
+  --text-display--line-height: 0.98;
+  --text-display--letter-spacing: -0.03em;
+  --text-heading: clamp(2.25rem, 1.6rem + 2.6vw, 4rem);
+  --text-heading--line-height: 1.04;
+  --text-heading--letter-spacing: -0.025em;
+  --text-numeral: clamp(5.5rem, 2rem + 10vw, 11rem);
+  --text-numeral--line-height: 0.85;
+  --text-numeral--letter-spacing: -0.05em;
+  --text-title: 1.5rem;
+  --text-title--line-height: 1.2;
+  --text-title--letter-spacing: -0.01em;
+  --text-lede: 1.25rem;
+  --text-lede--line-height: 1.6;
+  --text-lede--letter-spacing: -0.005em;
+  --text-body: 1.0625rem;
+  --text-body--line-height: 1.65;
+  --text-body--letter-spacing: 0em;
+  --text-small: 0.9375rem;
+  --text-small--line-height: 1.5;
+  --text-small--letter-spacing: 0.01em;
+
+  --radius-blob: 62% 38% 54% 46% / 48% 58% 42% 52%;
+  --radius-organic: 2.5rem 1.5rem 2.75rem 1.75rem;
+  --radius-organic-alt: 1.5rem 2.75rem 1.75rem 2.5rem;
+  --radius-organic-lg: 4.5rem 2.5rem 5rem 3rem;
+
+  --ease-organic: cubic-bezier(0.23, 1, 0.32, 1);
+
+  --animate-drift: drift 32s ease-in-out infinite alternate;
+
+  @keyframes drift {
+    0% {
+      background-position: 0% 0%;
+    }
+    100% {
+      background-position: 100% 100%;
+    }
+  }
+}
+
+@utility grain {
+  background-image: var(--grain);
+  background-repeat: repeat;
+}
+
+@utility hero-mesh {
+  background-image: var(--hero-mesh);
+  background-size: 200% 200%;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background-color: var(--background);
+    background-image: var(--grain);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+  }
+
+  section[id] {
+    scroll-margin-top: 7.5rem;
+  }
+}

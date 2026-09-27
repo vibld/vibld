@@ -1,0 +1,108 @@
+import {
+  allowedModels,
+  availableModels,
+  canonicalModelId,
+  configuredProviders,
+  familyOf,
+  groupByFamily,
+  parseModelPolicy,
+} from '@vibld/ai';
+import type { ModelChoice } from '@vibld/ai';
+
+/**
+ * Decide which model a request may run on.
+ *
+ * Pure, and separate from the Worker that applies it, for the same reason
+ * `spend.ts` is: this is the rule about who may spend what, and a rule that
+ * can only be exercised by deploying is a rule nobody checks. The object owns
+ * the request; this file owns the reasoning.
+ *
+ * ADR-0006 asks for grants to be checked at the trusted boundary and on each
+ * action rather than once at sign-in, which is why the endpoint re-decides
+ * this per request instead of trusting what the picker offered.
+ */
+
+export interface ModelAccessEnv {
+  ANTHROPIC_API_KEY?: string | undefined;
+  DEEPSEEK_API_KEY?: string | undefined;
+  OPENAI_API_KEY?: string | undefined;
+  VIBLD_PROVIDER?: string | undefined;
+  VIBLD_MODEL?: string | undefined;
+  VIBLD_MODEL_POLICY?: string | undefined;
+}
+
+export type ModelDecision =
+  | { ok: true; model: string; granted: ModelChoice[] }
+  | { ok: false; status: number; error: string };
+
+/** Everything this principal may use here, after both filters. */
+export function grantedFor(
+  env: ModelAccessEnv,
+  principal: string,
+): ModelChoice[] {
+  return allowedModels(
+    parseModelPolicy(env.VIBLD_MODEL_POLICY),
+    principal,
+    availableModels(configuredProviders(env)),
+  );
+}
+
+/**
+ * Resolve the model a run will use, or refuse.
+ *
+ * `fallback` is the deployment's configured default. It is only used when
+ * this principal is granted it -- otherwise the default would quietly hand
+ * someone a model the policy withheld, which is the whole failure this
+ * exists to prevent.
+ */
+export function decideModel(
+  env: ModelAccessEnv,
+  principal: string,
+  chosen: string | null,
+  fallback: string,
+): ModelDecision {
+  const granted = grantedFor(env, principal);
+
+  if (granted.length === 0) {
+    // Names the identity it matched on. A policy keyed on the wrong address
+    // is the likeliest way to be locked out of your own deployment, and
+    // "no model is available to you" gives no way to find out which "you"
+    // was meant. Disclosing a caller their own identity costs nothing.
+    return {
+      ok: false,
+      status: 403,
+      error: `No model is available to ${principal} on this deployment. Check the policy grants something to that identity.`,
+    };
+  }
+
+  if (chosen) {
+    // Canonicalised before it is checked or returned, so a saved request or a
+    // stale client naming a renamed model still runs, and so the id that
+    // reaches the provider is one the provider actually has.
+    const wanted = canonicalModelId(chosen);
+    // A hidden option is still a reachable one: the picker not offering it
+    // is not what stops it being used.
+    if (!granted.some((model) => model.id === wanted)) {
+      return {
+        ok: false,
+        status: 403,
+        error: `That model is not available to ${principal}.`,
+      };
+    }
+    return { ok: true, model: wanted, granted };
+  }
+
+  const wanted = canonicalModelId(fallback);
+  const preferred =
+    granted.find((model) => model.id === wanted)?.id ??
+    // Not granted the default itself, then the newest version of its family
+    // that is (#214 review). A policy written when Opus 5 was the default
+    // grants Opus 5 and not 5.5; falling straight to the first grant would
+    // hand that person whatever the catalogue lists first, which may be a
+    // different model at twice the price.
+    groupByFamily(granted).find(
+      (group) =>
+        group.family.key === familyOf({ id: wanted, label: wanted }).key,
+    )?.defaultId;
+  return { ok: true, model: preferred ?? granted[0]!.id, granted };
+}

@@ -1,0 +1,27 @@
+{
+  "name": "vibld",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The open-source AI builder for portable, Git-native web applications.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "build": "turbo run build",
+    "check": "turbo run check",
+    "check:style": "node scripts/no-em-dash.mjs",
+    "dev": "turbo run dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "turbo run test",
+    "test:scripts": "node --test scripts/*.test.mjs",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "prettier": "3.9.8",
+    "turbo": "2.11.3",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=22.15"
+  }
+}

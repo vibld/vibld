@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Nunito:wght@400;600;700&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #FFF8E7;
+  --foreground: #1A1A1A;
+  --card: #FFFFFF;
+  --card-foreground: #1A1A1A;
+  --popover: #FFFFFF;
+  --popover-foreground: #1A1A1A;
+  --primary: #FF5A1F;
+  --primary-foreground: #FFFFFF;
+  --secondary: #0057FF;
+  --secondary-foreground: #FFFFFF;
+  --muted: #F0E6D2;
+  --muted-foreground: #5A4A3A;
+  --accent: #FFD600;
+  --accent-foreground: #1A1A1A;
+  --destructive: #D32F2F;
+  --destructive-foreground: #FFFFFF;
+  --border: #1A1A1A;
+  --input: #FFFFFF;
+  --ring: #FF5A1F;
+  --radius: 0;
+
+  --block-orange: #FF5A1F;
+  --block-blue: #0057FF;
+  --block-yellow: #FFD600;
+  --block-green: #00C853;
+  --block-pink: #FF2E92;
+  --block-purple: #7C3AED;
+  --block-teal: #00B8A9;
+
+  --spacing-gutter: 24px;
+  --spacing-section-y: 64px;
+}
+
+.dark {
+  --background: #1A1A1A;
+  --foreground: #FFF8E7;
+  --card: #2A2A2A;
+  --card-foreground: #FFF8E7;
+  --popover: #2A2A2A;
+  --popover-foreground: #FFF8E7;
+  --primary: #FF5A1F;
+  --primary-foreground: #FFFFFF;
+  --secondary: #0057FF;
+  --secondary-foreground: #FFFFFF;
+  --muted: #2A2A2A;
+  --muted-foreground: #C0B8A8;
+  --accent: #FFD600;
+  --accent-foreground: #1A1A1A;
+  --destructive: #FF6B6B;
+  --destructive-foreground: #1A1A1A;
+  --border: #FFF8E7;
+  --input: #2A2A2A;
+  --ring: #FF5A1F;
+  --block-orange: #FF5A1F;
+  --block-blue: #0057FF;
+  --block-yellow: #FFD600;
+  --block-green: #00C853;
+  --block-pink: #FF2E92;
+  --block-purple: #7C3AED;
+  --block-teal: #00B8A9;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-block-orange: var(--block-orange);
+  --color-block-blue: var(--block-blue);
+  --color-block-yellow: var(--block-yellow);
+  --color-block-green: var(--block-green);
+  --color-block-pink: var(--block-pink);
+  --color-block-purple: var(--block-purple);
+  --color-block-teal: var(--block-teal);
+}
+
+@theme {
+  --text-display: clamp(3rem, 8vw, 5.5rem);
+  --text-heading: clamp(2rem, 4vw, 3rem);
+  --text-title: 1.5rem;
+  --text-body: 1rem;
+  --text-small: 0.875rem;
+
+  --spacing-gutter: 24px;
+  --spacing-section-y: 64px;
+
+  --radius-sharp: 0;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Nunito', sans-serif;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Fredoka', sans-serif;
+    letter-spacing: -0.02em;
+  }
+}

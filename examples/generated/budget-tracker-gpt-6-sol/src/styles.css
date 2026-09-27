@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:wght@500;600&display=swap');
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #f4f2ec;
+  --foreground: #1e2824;
+  --card: #fffefa;
+  --card-foreground: #1e2824;
+  --primary: #263d34;
+  --primary-foreground: #fffefa;
+  --secondary: #e9eee7;
+  --secondary-foreground: #263d34;
+  --muted: #eeeee7;
+  --muted-foreground: #5b6760;
+  --accent: #dce7db;
+  --accent-foreground: #263d34;
+  --border: #d9ded5;
+  --input: #d9ded5;
+  --ring: #426b58;
+  --income: #23694e;
+  --expense: #a34431;
+  --chart-2: #89651f;
+  --chart-4: #555b91;
+  --track: #e3e9df;
+  --hero-glow: #3c5d4a;
+  --hero-line: rgba(255, 254, 250, 0.16);
+  --shadow-ink: rgba(33, 48, 38, 0.09);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-income: var(--income);
+  --color-expense: var(--expense);
+  --color-chart-2: var(--chart-2);
+  --color-chart-4: var(--chart-4);
+  --color-track: var(--track);
+  --color-hero-glow: var(--hero-glow);
+  --color-hero-line: var(--hero-line);
+  --color-shadow-ink: var(--shadow-ink);
+  --font-sans: "DM Sans", "Helvetica Neue", sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --text-display: clamp(3.1rem, 6vw, 5.5rem);
+  --text-display--line-height: 1;
+  --text-display--letter-spacing: -0.055em;
+  --text-heading: clamp(2.25rem, 4vw, 3.5rem);
+  --text-heading--line-height: 1.08;
+  --text-heading--letter-spacing: -0.045em;
+  --text-section: 1.5rem;
+  --text-section--line-height: 1.2;
+  --text-section--letter-spacing: -0.03em;
+  --text-stat: clamp(2rem, 3vw, 2.75rem);
+  --text-stat--line-height: 1.1;
+  --text-stat--letter-spacing: -0.04em;
+  --text-body: 1rem;
+  --text-body--line-height: 1.6;
+  --text-body--letter-spacing: 0em;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.5;
+  --text-small--letter-spacing: 0.005em;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.4;
+  --text-label--letter-spacing: 0.09em;
+  --spacing-gutter: 18px;
+  --radius-tile: 26px;
+  --radius-field: 14px;
+  --radius-pill: 999px;
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { min-width: 320px; }
+  body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); font-size: 1rem; line-height: 1.6; }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  ::selection { background: var(--accent); color: var(--accent-foreground); }
+}
+
+.tile { transition: box-shadow 180ms ease-out; }
+.tile:hover { box-shadow: 0 18px 42px var(--shadow-ink); }
+.balance-card { background: radial-gradient(circle at 88% 8%, var(--hero-glow), transparent 36%), var(--primary); }
+.balance-orbit { position: absolute; right: -100px; top: -130px; width: 370px; height: 370px; border: 1px solid var(--hero-line); border-radius: 50%; pointer-events: none; }
+.balance-orbit::after { content: ''; position: absolute; inset: 58px; border: 1px solid var(--hero-line); border-radius: 50%; }
+.field-label { display: block; margin-bottom: 8px; font-size: 0.875rem; line-height: 1.5; font-weight: 600; }
+.field-error { margin-top: 6px; color: var(--expense); font-size: 0.875rem; line-height: 1.5; }
+.entry-kind:has(input:checked) { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.entry-kind:has(input:focus-visible) { outline: 3px solid var(--ring); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile, .entry-kind { transition-duration: 0ms; }
+}

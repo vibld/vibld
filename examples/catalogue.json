@@ -1,0 +1,84 @@
+{
+  "$comment": "The examples on vibld.com/examples. Each entry's source is examples/generated/<slug>/, exactly as generated. See examples/README.md.",
+  "examples": [
+    {
+      "slug": "coffee-roaster-opus-5-5",
+      "case": "coffee-roaster",
+      "title": "An indie coffee roaster",
+      "kind": "site",
+      "model": "claude-opus-5-5",
+      "run": 36285003110,
+      "generatedOn": "2026-09-27",
+      "prompt": "A marketing site for an indie coffee roaster with features and testimonials",
+      "notes": []
+    },
+    {
+      "slug": "security-saas-opus-5-5",
+      "case": "security-saas",
+      "title": "A cybersecurity SaaS",
+      "kind": "site",
+      "model": "claude-opus-5-5",
+      "run": 36285003110,
+      "generatedOn": "2026-09-27",
+      "prompt": "A landing page for a cybersecurity SaaS with pricing, FAQ and a contact form",
+      "notes": []
+    },
+    {
+      "slug": "dental-practice-opus-5-5",
+      "case": "dental-practice",
+      "title": "A dental practice",
+      "kind": "site",
+      "model": "claude-opus-5-5",
+      "run": 36285003110,
+      "generatedOn": "2026-09-27",
+      "prompt": "A site for a dental practice with opening hours, services and directions",
+      "notes": []
+    },
+    {
+      "slug": "freelance-portfolio-opus-5-5",
+      "case": "freelance-portfolio",
+      "title": "An illustrator's portfolio",
+      "kind": "site",
+      "model": "claude-opus-5-5",
+      "run": 36285003110,
+      "generatedOn": "2026-09-27",
+      "prompt": "A portfolio for a freelance illustrator with a gallery and a short bio",
+      "notes": []
+    },
+    {
+      "slug": "conference-gpt-6-sol",
+      "case": "conference",
+      "title": "A developer conference",
+      "kind": "site",
+      "model": "gpt-6-sol",
+      "run": 36293086323,
+      "generatedOn": "2026-09-27",
+      "prompt": "A one-page site for a two-day developer conference with a schedule and speakers",
+      "notes": []
+    },
+    {
+      "slug": "budget-tracker-gpt-6-sol",
+      "case": "budget-tracker",
+      "title": "A personal budget tracker",
+      "kind": "app",
+      "model": "gpt-6-sol",
+      "run": 36293086323,
+      "generatedOn": "2026-09-27",
+      "prompt": "A personal budget tracker. Add income and expenses with an amount, a category and a date; see the month's balance and a breakdown by category; switch between months; and export the month as CSV. Everything is stored in the browser, and the app says so plainly.",
+      "notes": []
+    },
+    {
+      "slug": "recipe-box-deepseek-v4-pro",
+      "case": "recipe-box",
+      "title": "A recipe box",
+      "kind": "app",
+      "model": "deepseek-v4-pro",
+      "run": 36293089855,
+      "generatedOn": "2026-09-27",
+      "prompt": "A recipe box. Save recipes with ingredients and numbered steps, search by name or ingredient, scale the servings up or down with the quantities following, and mark favourites. Everything is stored in the browser, and the app says so plainly.",
+      "notes": [
+        "It keeps recipes in the browser's storage and reads it without a fallback, so with site data blocked, or a stored value it cannot parse, the page stays blank."
+      ]
+    }
+  ]
+}
