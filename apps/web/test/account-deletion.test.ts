@@ -36,6 +36,8 @@ import { BillingStore } from '../worker/billing-store.ts';
 import { GitHubStore } from '../worker/github-store.ts';
 import { ReferralStore } from '../worker/referral-store.ts';
 import { CONFIRMATION_PHRASE as BROWSER_PHRASE } from '../src/account/deletion-client.ts';
+import { liveSiteProjects } from '../worker/project-store.ts';
+import { sharePreviewKey } from '../worker/share-link.ts';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
@@ -1511,6 +1513,136 @@ describe('the purge budget', () => {
     assert.equal(
       AccountDeletionStore.BILLING_ROW_QUERIES,
       KEPT_BILLING_TABLES.length,
+    );
+  });
+});
+
+/**
+ * An account now has a site per project it published, and share links
+ * whose live previews run in sandboxes named for the link
+ * (docs/decisions.md, "Resolved 2026-09-28"). Deleting the account has to
+ * reach all of them.
+ */
+describe('every site and every share link the account has', () => {
+  it('is not done with sites while any one of them is still serving', async () => {
+    const w = world();
+    await seed(w, { siteLive: true });
+    // A second project's site, published since sites became per project.
+    await exec(
+      w.db,
+      `INSERT INTO published_projects
+         (slug, project_id, user_id, created_at, updated_at, generation)
+       VALUES ('leaver-second', 'proj_cus_leaver', ?1, ?2, ?2, 'g2')`,
+      USER,
+      REQUESTED,
+    );
+    // By slug: 'leaver-second' sorts before 'leaver-site'.
+    assert.deepEqual(await liveSiteProjects(w.db, USER), [
+      'proj_cus_leaver',
+      USER,
+    ]);
+
+    // A takedown that only reached the first site, the way the account's
+    // one site used to be taken down.
+    const onlyTheFirst = async () => {
+      await exec(
+        w.db,
+        `UPDATE published_projects SET unpublished_at = ?1, generation = NULL
+          WHERE slug = 'leaver-site'`,
+        REQUESTED,
+      );
+    };
+    const { result } = await requestAccountDeletion(w.deps, USER, {
+      takeDown: onlyTheFirst,
+    });
+    assert.ok(!result.done.includes('sites'));
+    assert.equal(await w.store.liveSite(USER), 'leaver-second');
+
+    // The router's takedown goes through every live site's project
+    // (`handleUnpublish` with `forDeletion`); this stands in for the publish
+    // service answering each one.
+    const everyOne = async () => {
+      for (const projectId of await liveSiteProjects(w.db, USER)) {
+        await exec(
+          w.db,
+          `UPDATE published_projects SET unpublished_at = ?1, generation = NULL
+            WHERE project_id = ?2`,
+          REQUESTED,
+          projectId,
+        );
+      }
+    };
+    await runImmediateSteps(w.deps, (await w.store.find(USER))!, {
+      takeDown: everyOne,
+    });
+    assert.notEqual((await w.store.find(USER))!.done.sites, null);
+    assert.deepEqual(await liveSiteProjects(w.db, USER), []);
+  });
+
+  it("stops the live previews the account's share links started", async () => {
+    const w = world();
+    await seed(w);
+    const token = 'A'.repeat(43);
+    await exec(
+      w.db,
+      `UPDATE projects SET share_token = ?2, shared_at = ?3 WHERE id = ?1`,
+      'proj_cus_leaver',
+      token,
+      REQUESTED,
+    );
+    const { result } = await requestAccountDeletion(w.deps, USER);
+    assert.ok(result.done.includes('preview'));
+    assert.deepEqual(w.preview.stopped, [USER, await sharePreviewKey(token)]);
+  });
+
+  it('retries the preview step when a share preview could not be stopped', async () => {
+    const w = world();
+    await seed(w);
+    const token = 'B'.repeat(43);
+    await exec(
+      w.db,
+      `UPDATE projects SET share_token = ?2, shared_at = ?3 WHERE id = ?1`,
+      USER,
+      token,
+      REQUESTED,
+    );
+    const shared = await sharePreviewKey(token);
+    const stopPreview = w.deps.stopPreview!;
+    w.deps.stopPreview = async (name) =>
+      name === shared
+        ? { ok: false, error: 'preview service down' }
+        : stopPreview(name);
+    const { result } = await requestAccountDeletion(w.deps, USER);
+    assert.ok(!result.done.includes('preview'));
+
+    w.deps.stopPreview = stopPreview;
+    await runImmediateSteps(w.deps, (await w.store.find(USER))!);
+    assert.notEqual((await w.store.find(USER))!.done.preview, null);
+  });
+
+  it('costs the nightly pass no more than it declares with share links on', async () => {
+    const w = world();
+    await seed(w);
+    await exec(
+      w.db,
+      `UPDATE projects SET share_token = ?2 WHERE id = ?1`,
+      USER,
+      'C'.repeat(43),
+    );
+    await exec(
+      w.db,
+      `INSERT INTO account_deletions (user_id, tombstone, requested_at, purge_after)
+       VALUES (?1, 'deleted-x', ?2, ?3)`,
+      USER,
+      REQUESTED,
+      PURGE_AT,
+    );
+    const record = (await w.store.find(USER))!;
+    const before = w.statements();
+    await runImmediateSteps(w.deps, record);
+    assert.ok(
+      w.statements() - before <= QUERIES_PER_RETRY,
+      `${w.statements() - before} > ${QUERIES_PER_RETRY}`,
     );
   });
 });

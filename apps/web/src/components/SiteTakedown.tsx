@@ -10,10 +10,17 @@ type Phase =
   /** The decision, held open until somebody takes it. See below. */
   | { phase: 'confirming'; act: 'hold' | 'release'; slug: string }
   | { phase: 'working' }
-  | { phase: 'done'; slug: string; state: SiteState }
+  | { phase: 'done'; slug: string; state: SiteState; share: boolean }
   | { phase: 'failed'; error: string };
 
-function describe(state: SiteState, slug: string): string {
+function describe(state: SiteState, slug: string, share: boolean): string {
+  if (share) {
+    if (state === 'held') return 'The share link is off the web and held.';
+    if (state === 'down') {
+      return 'The share link is no longer held. Its owner had turned it off, so it stays off.';
+    }
+    return 'The share link works again.';
+  }
   if (state === 'held') return `${slug} is off the web and held.`;
   if (state === 'down') {
     return `${slug} is no longer held. Its owner had already taken it down, so it stays off the web.`;
@@ -29,7 +36,9 @@ function describe(state: SiteState, slug: string): string {
  * time pressure and is easy to do half of.
  *
  * Named by slug because that is what a report carries: somebody sends an
- * address. The reason is required rather than optional, which is the half of
+ * address. A project's share link (`/s/<token>`) is named the same way, in
+ * the same field, and held on the same terms: while it is held the link
+ * serves nothing, and its owner cannot turn it on again. The reason is required rather than optional, which is the half of
  * "auditable" that costs nothing now and cannot be added afterwards.
  *
  * Two presses, like publishing (ADR-0013), and for a stronger version of the
@@ -69,7 +78,12 @@ export function SiteTakedown() {
           : await releaseSite(named);
       setState(
         result.ok
-          ? { phase: 'done', slug: result.slug, state: result.state }
+          ? {
+              phase: 'done',
+              slug: result.slug,
+              state: result.state,
+              share: result.share === true,
+            }
           : { phase: 'failed', error: result.error },
       );
     } catch (error) {
@@ -92,12 +106,12 @@ export function SiteTakedown() {
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="knowledge__summary">
-        Admin: take a published site down
+        Admin: take a published site or share link down
         <span className="pill pill--on">admin</span>
       </summary>
 
       <label className="prompt__label" htmlFor={slugId}>
-        Slug
+        Slug or share link
       </label>
       <input
         id={slugId}
@@ -179,7 +193,9 @@ export function SiteTakedown() {
       )}
 
       {state.phase === 'done' ? (
-        <p className="pane-note">{describe(state.state, state.slug)}</p>
+        <p className="pane-note">
+          {describe(state.state, state.slug, state.share)}
+        </p>
       ) : null}
       {state.phase === 'failed' ? (
         <p className="pane-note pane-note--error" role="alert">

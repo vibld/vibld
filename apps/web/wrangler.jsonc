@@ -202,6 +202,37 @@
       "namespace_id": "1006",
       "simple": { "limit": 10, "period": 60 },
     },
+    // A project's share link (share-handlers.ts): the public view and its
+    // live preview, which nobody signs in for, so keyed on CF-Connecting-IP
+    // and checked before the database is read, like IP_BURST. Sixty a
+    // minute because the page polls a starting preview every three seconds;
+    // a person reading one link stays well inside it, and guessing tokens at
+    // this rate against 256 bits is not a strategy.
+    {
+      "name": "SHARE_BURST",
+      "namespace_id": "1007",
+      "simple": { "limit": 60, "period": 60 },
+    },
+    // Remixing a shared project copies its code and the media it uses into
+    // the caller's library: R2 writes of up to the whole library's size.
+    // Keyed on the Clerk user id and checked after identity, like
+    // MEDIA_BURST.
+    {
+      "name": "REMIX_BURST",
+      "namespace_id": "1008",
+      "simple": { "limit": 5, "period": 60 },
+    },
+    // Starting a shared project's live preview, which only a signed-in
+    // viewer can do (docs/decisions.md, 2026-09-28): keyed on the Clerk user
+    // id, checked after identity and on top of SHARE_BURST's per-address
+    // count. A start for a link whose sandbox is already running reports it
+    // rather than starting another, so ten a minute is far past what one
+    // person reading links needs.
+    {
+      "name": "SHARE_PREVIEW_BURST",
+      "namespace_id": "1009",
+      "simple": { "limit": 10, "period": 60 },
+    },
   ],
 
   // The spend ceiling. Also not provisioned: the object is created on first

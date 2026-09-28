@@ -35,6 +35,14 @@ userId}` mapping in D1, and a project's built file content in R2, keyed
   host that is not a preview or a share here over its `PUBLISH` service
   binding (`apps/preview/worker/publish-route.ts`), one label deep because
   the zone's free Universal SSL certificate covers one level only.
+  A site belongs to a project, one per project (`project_id` is UNIQUE),
+  and a slug to one site across every account. apps/web sends the
+  project's own id, so each project an account publishes has a site of its
+  own and publishing one can never replace another's; until
+  2026-09-28 it sent the caller's user id, which made one site per
+  account, and every site published then is keyed by the id of the project
+  apps/web's `0033` made from that account's work, so it is found at the
+  same slug (`test/site-per-project.test.ts`).
 - **`worker/slug.ts`** -- slug validation: a published slug becomes a DNS
   label, so it is checked as one (RFC 1035 shape, lowercase, a short
   reserved list) rather than accepted as free text.

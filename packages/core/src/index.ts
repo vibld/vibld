@@ -93,6 +93,7 @@ export {
   mediaResponse,
   parseRange,
   referencedMedia,
+  renameMediaReferences,
   serveLibraryMedia,
   sniffMedia,
   unsatisfiableRange,
@@ -113,6 +114,7 @@ export {
   cleanProjectName,
   clipTranscriptTurn,
   copyName,
+  remixName,
   parseTranscript,
   settledTranscript,
 } from './project.ts';

@@ -202,7 +202,8 @@ describe('the backfill', () => {
     const db = new SqliteD1Database(schemaSqlBetween('', '0033'));
     const w = world(db);
     await build(w, ALICE, 'r7');
-    db.exec(schemaSqlBetween('0033', '0034'));
+    // 0033 and everything after it, since the routes read today's schema.
+    db.exec(schemaSqlBetween('0033', '￿'));
 
     const listed = await w.call(ALICE, 'GET', '/api/projects');
     assert.equal(listed.status, 200);

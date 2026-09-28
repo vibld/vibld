@@ -163,13 +163,49 @@ export function referencedMedia(
 ): string[] {
   const found = new Set<string>();
   for (const file of files) {
-    for (const match of file.content.matchAll(
-      /(?<![\w./-])\/?(media\/[a-z0-9]+(?:-[a-z0-9]+)*\.(?:jpg|png|gif|webp|avif|mp4|webm))(?![\w-]|\.\w)/g,
-    )) {
-      found.add(match[1]!);
+    for (const match of file.content.matchAll(MEDIA_REFERENCE)) {
+      found.add(match[2]!);
     }
   }
   return [...found].sort();
+}
+
+/**
+ * A media path as a page names it: `/media/<slug>.<ext>` or `media/...`,
+ * standing alone rather than inside a longer path or name. One pattern for
+ * reading references and for rewriting them, so a rename can never touch a
+ * string `referencedMedia` would not have counted, or miss one it would.
+ */
+const MEDIA_REFERENCE =
+  /(?<![\w./-])(\/?)(media\/[a-z0-9]+(?:-[a-z0-9]+)*\.(?:jpg|png|gif|webp|avif|mp4|webm))(?![\w-]|\.\w)/g;
+
+/**
+ * The same files, with every reference to a renamed media path pointing at
+ * its new name.
+ *
+ * For copying a project into another account (a remix), whose library may
+ * already hold a different file under a name the copied code uses: the
+ * copy is stored under a free name instead, and the code is told. Only
+ * whole references move, read by the pattern `referencedMedia` reads, so
+ * `media/hero.jpg` renamed does not change `media/hero.jpg.bak` or
+ * `social-media/hero.jpg`. A file whose content has no reference to rename
+ * is returned as it was.
+ */
+export function renameMediaReferences<T extends { content: string }>(
+  files: readonly T[],
+  renames: ReadonlyMap<string, string>,
+): T[] {
+  if (renames.size === 0) return [...files];
+  return files.map((file) => {
+    const content = file.content.replace(
+      MEDIA_REFERENCE,
+      (whole, slash: string, path: string) => {
+        const renamed = renames.get(path);
+        return renamed === undefined ? whole : `${slash}${renamed}`;
+      },
+    );
+    return content === file.content ? file : { ...file, content };
+  });
 }
 
 /**

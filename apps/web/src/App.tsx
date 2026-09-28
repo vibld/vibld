@@ -27,6 +27,11 @@ import { useBuilderSession } from './useBuilderSession.ts';
 import { isProjectsPath } from './projects/project-route.ts';
 import { useProjects } from './projects/use-projects.ts';
 import { AuthGate, AuthStatus } from './auth/clerk.tsx';
+import { SharedProjectPage } from './components/SharedProjectPage.tsx';
+import { shareIntentPath, shareTokenFromPath } from './projects/share-route.ts';
+import { peekPendingIntent, shareStorage } from './projects/share-client.ts';
+import { useEffect } from 'react';
+import type { ReactNode } from 'react';
 
 /**
  * `AuthGate` is the outermost piece deliberately: `Builder` -- and the
@@ -41,13 +46,40 @@ import { AuthGate, AuthStatus } from './auth/clerk.tsx';
  * in ten seconds and "not on the list" is not.
  */
 export function App() {
+  // A shared project (`/s/<token>`) is the one page anybody can open, signed
+  // in or not, so it is decided before either gate. It carries none of the
+  // builder's state and mounts no session.
+  const shareToken = shareTokenFromPath(usePathname());
+  if (shareToken)
+    return <SharedProjectPage key={shareToken} token={shareToken} />;
   return (
     <AuthGate>
-      <AccessGate>
-        <Builder />
-      </AccessGate>
+      <PendingShareIntent>
+        <AccessGate>
+          <Builder />
+        </AccessGate>
+      </PendingShareIntent>
     </AuthGate>
   );
+}
+
+/**
+ * Back to a shared project whose remix, or live preview, was asked for
+ * before signing in, when the sign-in ended here rather than on the link (a
+ * sign-up that finished on its own page). Before the builder mounts,
+ * because the builder opens or makes a project on arrival, and a new
+ * account's first project should be the remix it came for rather than an
+ * empty one made on the way.
+ */
+function PendingShareIntent({ children }: { children: ReactNode }) {
+  const pending = peekPendingIntent(shareStorage());
+  const target = pending
+    ? shareIntentPath(pending.token, pending.intent)
+    : null;
+  useEffect(() => {
+    if (target) navigate(target, { replace: true });
+  }, [target]);
+  return pending ? null : children;
 }
 
 function Builder() {
@@ -277,7 +309,11 @@ function Builder() {
           technology the builder is not on screen; `hidden-attribute.test`
           holds the stylesheet to honouring it.
         */}
-        <Workspace state={state} hidden={onPage} />
+        <Workspace
+          state={state}
+          hidden={onPage}
+          project={projects.mode === 'server' ? projects.current : null}
+        />
       </main>
 
       {/*

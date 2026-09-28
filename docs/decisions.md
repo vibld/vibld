@@ -384,6 +384,46 @@ from any project replaces the account's one site; and a project also
 remembers its standing instructions and visual preferences. See
 `apps/web/README.md`, "Projects".
 
+**A project can be shared by link and remixed, publishes to a site of its
+own, and keeps using the account's one media library.** Chris decided on
+2026-09-28 that an owner can turn on an unlisted link for a project and turn
+it off again, which kills that link; anybody with the link sees the
+project's live preview and its code, read-only; and somebody signed in can
+remix it, copying its accepted code and settings into a new project in
+their own account, held to the free tier's limit. The link carries an
+unguessable token, never the project id, and reveals nothing about the
+owner beyond what they chose to share. The public view is rate-limited, and
+the operator's takedown and hold can stop a link as they stop a site;
+deleting or archiving the project, deleting the account and a suspension
+all stop it too. He also decided that each project publishes to its own
+`<slug>.vibld-preview.dev` site: existing sites stay at their addresses as
+the site of the project each account already had, deleting a project takes
+its site down and deleting the account takes all of them down, publishing
+one project never replaces another's site, and slugs stay unique across
+every site. And the media library stays one per account: a remix into
+another account copies the media its code uses into the remixer's library,
+so it depends on nothing of the original owner's, and duplicating within an
+account copies nothing. Chris then decided, the same day, that only a
+signed-in viewer can start a link's live preview: anybody may still see
+the project's name and code without signing in, and somebody signed out is
+offered "Sign in to run the live preview" in place of the button, which
+signs them in and then starts it; each start is counted against the
+account as well as the address. Where the implementation reads this in a
+particular way, not yet confirmed by Chris: the live preview runs in one
+sandbox per link, started when a signed-in viewer asks and shown to every
+viewer of that link, signed in or not, rather than a sandbox per viewer or
+a static render (a generated project is a Vite and React app that shows
+nothing until it runs); starting it needs an account but not an invite, and
+is refused to an account that is suspended or leaving; a remix does not
+copy the conversation, which the link never showed; a remix is named
+"Remix of" the original; an archived project's link comes back when it is
+unarchived; a media file whose name the remixer already uses for different
+bytes is copied under a free name and the remix's code rewritten to match,
+and a remix whose media does not fit is refused whole; a project whose site
+is still serving is not deleted until the takedown succeeds; and a site that
+had no project gets one, so its owner can reach it. See `apps/web/README.md`,
+"Projects" and "Cloudflare auto-publish".
+
 ### Resolved 2026-09-27
 
 **L15 stands: Stripe Tax is off, and the code now matches.** Chris confirmed

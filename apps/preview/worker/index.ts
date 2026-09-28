@@ -3,7 +3,6 @@ import {
   getSandbox,
   proxyToSandbox,
 } from '@cloudflare/sandbox';
-import type { ProjectFile } from '@vibld/core';
 import { previewMediaRoute } from './media-route.ts';
 import { isAuthorizedInternalCaller } from './internal-auth.ts';
 import { PreviewFleet } from './preview-fleet.ts';
@@ -17,6 +16,7 @@ import {
 } from './share-route.ts';
 import { isPublishedHost } from './publish-route.ts';
 import { signShare, verifyShare } from './share-token.ts';
+import { isProjectFileArray, parseStartRequest } from './start-request.ts';
 
 /** Re-exported so Wrangler can find these classes from the entrypoint. */
 export { ContainerProxy, PreviewFleet, PreviewSandbox };
@@ -65,19 +65,6 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 }
 
-function isProjectFileArray(value: unknown): value is ProjectFile[] {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (entry): entry is ProjectFile =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        typeof (entry as ProjectFile).path === 'string' &&
-        typeof (entry as ProjectFile).content === 'string',
-    )
-  );
-}
-
 /** Every internal handler needs both the caller identified and the public hostname configured. */
 function requireConfigured(
   env: Env,
@@ -100,24 +87,16 @@ async function handleStart(request: Request, env: Env): Promise<Response> {
   } catch {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
-  const { userId, label, files } = (body ?? {}) as {
-    userId?: unknown;
-    label?: unknown;
-    files?: unknown;
-  };
-  if (typeof userId !== 'string' || userId.length === 0) {
-    return json({ error: '"userId" is required.' }, 400);
-  }
-  if (!isProjectFileArray(files)) {
-    return json({ error: '"files" must be a list of {path, content}.' }, 400);
-  }
+  const parsed = parseStartRequest(body);
+  if (!parsed.ok) return json({ error: parsed.error }, 400);
+  const { userId, label, files, mediaOwner } = parsed.value;
 
   const sandbox = getSandbox(env.Sandbox, userId, { normalizeId: true });
   const result = await sandbox.startPreview(
     files,
     configured.hostname,
-    typeof label === 'string' ? label : userId,
-    userId,
+    label,
+    mediaOwner,
   );
   return json(result);
 }

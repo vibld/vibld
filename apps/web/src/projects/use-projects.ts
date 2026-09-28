@@ -28,6 +28,7 @@ import {
   listProjects,
   openProject,
   saveProject,
+  setProjectShared,
 } from './projects-client.ts';
 import type {
   ProjectFailure,
@@ -81,6 +82,8 @@ export interface ProjectsController {
   duplicate(id: string): Promise<void>;
   setArchived(id: string, archived: boolean): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Turn a project's share link on or off (`/api/projects/:id/share`). */
+  setShared(id: string, on: boolean): Promise<void>;
 }
 
 const idleSubscribe = () => () => undefined;
@@ -402,6 +405,22 @@ export function useProjects(
         const result = await saveProject(id, { archived });
         if (!result.ok) setNotice(result.failure);
         else setNotice(null);
+        await refreshList();
+      });
+    },
+    async setShared(id, on) {
+      await withBusy(id, async () => {
+        const result = await setProjectShared(id, on);
+        if (!result.ok) {
+          setNotice(result.failure);
+          return;
+        }
+        setNotice(null);
+        // The name shown is kept, for the reason `persist` gives: a rename
+        // typed a moment ago may not have been saved yet.
+        setCurrent((shown) =>
+          shown?.id === id ? { ...result.value, name: shown.name } : shown,
+        );
         await refreshList();
       });
     },

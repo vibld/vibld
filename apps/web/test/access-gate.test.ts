@@ -11,6 +11,7 @@ import {
   isGated,
   projectIdInPath,
   routeKeyFor,
+  shareTokenInPath,
 } from '../worker/access-gate.ts';
 
 /**
@@ -255,6 +256,70 @@ describe("a project's routes", () => {
     const gate = source.indexOf('if (isGated(pathname, request.method))');
     assert.ok(named > 0, 'the router does not name project routes');
     assert.ok(named < gate, 'the gate runs on the raw path');
+  });
+});
+
+describe("a project's share link", () => {
+  const TOKEN = 'a'.repeat(43);
+
+  it('is named by pattern, by its token, like a project by its id', () => {
+    assert.equal(
+      routeKeyFor('/api/projects/abc-123/share'),
+      '/api/projects/:id/share',
+    );
+    assert.equal(projectIdInPath('/api/projects/abc-123/share'), 'abc-123');
+    assert.equal(routeKeyFor(`/api/share/${TOKEN}`), '/api/share/:token');
+    assert.equal(
+      routeKeyFor(`/api/share/${TOKEN}/preview`),
+      '/api/share/:token/preview',
+    );
+    assert.equal(
+      routeKeyFor(`/api/share/${TOKEN}/remix`),
+      '/api/share/:token/remix',
+    );
+    for (const path of [
+      `/api/share/${TOKEN}/remix/again`,
+      '/api/share/',
+      `/api/share/${TOKEN}/other`,
+    ]) {
+      assert.equal(routeKeyFor(path), path, path);
+    }
+    for (const path of [
+      `/api/share/${TOKEN}`,
+      `/api/share/${TOKEN}/preview`,
+      `/api/share/${TOKEN}/remix`,
+    ]) {
+      assert.equal(shareTokenInPath(path), TOKEN, path);
+    }
+    assert.equal(shareTokenInPath('/api/projects/abc'), null);
+  });
+
+  it('gates turning a link on, and never turning it off', () => {
+    // Turning one on puts work in front of strangers and lets them start a
+    // preview: new exposure, which an invite buys. Turning it off only ever
+    // makes less public, and a revoked owner must always be able to.
+    assert.equal(isGated('/api/projects/abc-123/share', 'POST'), true);
+    assert.equal(isGated('/api/projects/abc-123/share', 'DELETE'), false);
+  });
+
+  it('leaves the link itself open to anybody, signed in or not', () => {
+    // The token is the grant. A link that needed an invite would only reach
+    // people who could already see the work some other way.
+    for (const method of ['GET', 'POST']) {
+      assert.equal(isGated(`/api/share/${TOKEN}`, method), false, method);
+      assert.equal(
+        isGated(`/api/share/${TOKEN}/preview`, method),
+        false,
+        method,
+      );
+    }
+    assert.ok('/api/share/:token' in UNGATED_PATHS);
+    assert.ok('/api/share/:token/preview' in UNGATED_PATHS);
+  });
+
+  it("gates making a copy of it, which is new work in the copier's account", () => {
+    assert.equal(isGated(`/api/share/${TOKEN}/remix`, 'POST'), true);
+    assert.ok(GATED_PATHS.includes('/api/share/:token/remix'));
   });
 });
 

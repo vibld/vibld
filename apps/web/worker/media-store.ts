@@ -26,6 +26,19 @@ export interface MediaEntry {
   createdAt: string;
 }
 
+/** A library file as copying it into another account reads it. */
+export interface CopyableMedia {
+  id: string;
+  path: string;
+  kind: MediaKind;
+  contentType: string;
+  bytes: number;
+  sha256: string;
+  gitSha: string;
+  alt: string;
+  posterId: string | null;
+}
+
 interface MediaRow {
   id: string;
   path: string;
@@ -77,6 +90,45 @@ export class MediaStore {
       .bind(userId)
       .all<MediaRow>();
     return results.map(entryOf);
+  }
+
+  /**
+   * Every file this account has, with what copying one into another
+   * account needs and `list` leaves out: the hash that says whether two
+   * files are the same bytes, and the poster by id rather than by path.
+   * For a remix (`media-copy.ts`).
+   */
+  async copyable(userId: string): Promise<CopyableMedia[]> {
+    const { results } = await this.#db
+      .prepare(
+        `SELECT id, path, kind, content_type, bytes, sha256, git_sha, alt,
+                poster_id
+           FROM project_media WHERE user_id = ?1
+          ORDER BY created_at, id`,
+      )
+      .bind(userId)
+      .all<{
+        id: string;
+        path: string;
+        kind: MediaKind;
+        content_type: string;
+        bytes: number;
+        sha256: string;
+        git_sha: string;
+        alt: string;
+        poster_id: string | null;
+      }>();
+    return results.map((row) => ({
+      id: row.id,
+      path: row.path,
+      kind: row.kind,
+      contentType: row.content_type,
+      bytes: row.bytes,
+      sha256: row.sha256,
+      gitSha: row.git_sha,
+      alt: row.alt,
+      posterId: row.poster_id,
+    }));
   }
 
   /** How much this account stores: files and bytes. */

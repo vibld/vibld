@@ -37,8 +37,20 @@ import {
 import { fetchReferenceContext } from './reference-fetch.ts';
 import { handleMedia } from './media-handlers.ts';
 import { handleChat } from './chat-handler.ts';
-import { handleProjects } from './project-handlers.ts';
-import { ProjectStore, resolveRunProject } from './project-store.ts';
+import {
+  DEFAULT_PUBLISH_HOSTNAME,
+  handleProjects,
+} from './project-handlers.ts';
+import type { ProjectLinks } from './project-handlers.ts';
+import {
+  ProjectStore,
+  liveSiteProjects,
+  resolveRunProject,
+  resolveSiteProject,
+} from './project-store.ts';
+import type { SiteProject } from './project-store.ts';
+import { handleShare, handleShareHold } from './share-handlers.ts';
+import { sharePreviewKey } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
 import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
@@ -330,6 +342,28 @@ export interface Env {
   PUBLISH_BURST?: RateLimit;
   /** Uploads to the media library, per caller (`media-handlers.ts`). */
   MEDIA_BURST?: RateLimit;
+  /**
+   * A project's share link, per address (`share-handlers.ts`): the view,
+   * and the live preview's state and start. Keyed on the address rather
+   * than a user, because nobody signs in to follow a link, and checked
+   * before the database is read.
+   */
+  SHARE_BURST?: RateLimit;
+  /** Remixing a shared project, per caller: code and media copied into R2. */
+  REMIX_BURST?: RateLimit;
+  /**
+   * Starting a shared project's live preview, per signed-in caller: a
+   * sandbox's time, counted against the account on top of `SHARE_BURST`'s
+   * count against the address (docs/decisions.md, 2026-09-28).
+   */
+  SHARE_PREVIEW_BURST?: RateLimit;
+  /**
+   * The domain published sites are served under, for the address a
+   * project's view shows. apps/publish's own `PUBLISH_HOSTNAME`, which is
+   * what actually serves them; unset here means `vibld-preview.dev`, its
+   * value there.
+   */
+  PUBLISH_HOSTNAME?: string;
   /**
    * The GitHub App this deployment pushes with (internal issue 13). Both are Worker
    * secrets and both are Vibld's own infrastructure credential, never a
@@ -2109,6 +2143,14 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
     return json({ error: '"slug" must be a non-empty string.' }, 400);
   }
 
+  // Which project's site this is (docs/decisions.md, "Resolved 2026-09-28",
+  // one site per project). Settled before anything is built, so a request
+  // for a project that is not the caller's costs no build.
+  const site = await siteProjectFor(env, principal.userId, body, {
+    allowArchived: false,
+  });
+  if (!site.ok) return json({ error: site.error }, site.status);
+
   // Asked again while the workspace is busy, on the same budget the
   // repair's rebuild uses (internal PR 196 review). A verification build returns as
   // soon as it has an answer and tears its container down afterwards, on
@@ -2139,20 +2181,18 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   }
   if (!built.ok) return json({ error: built.error }, 422);
 
-  // One site per account, whichever project it is published from. The
-  // publish service keys a site's slug on this id (`published_projects.
-  // project_id`), and it stays the account's user id rather than becoming
-  // the project's: every site published before projects existed is keyed
-  // that way, the owner's takedown below and the account purge both find
-  // the site by it, and a slug per project would be a second site per
-  // project, which is a product decision this change does not make.
-  // Publishing another project replaces what the site serves. The files
-  // are the builder's, from the project it has open.
-  const projectId = principal.userId;
+  // One site per project. The publish service keys a site's slug on this id
+  // (`published_projects.project_id`, UNIQUE), so publishing one project can
+  // only ever claim or replace that project's own site, never another's,
+  // and a slug is still unique across every site there is. Every site
+  // published before this was keyed by its owner's user id, which is the id
+  // of the project 0033 made from that owner's work, so that project finds
+  // its site at the same slug (`0035_site_per_project.sql`). The files are
+  // the builder's, from the project it names.
   const published = await publishProject(
     env,
     principal.userId,
-    projectId,
+    site.projectId,
     slug,
     built.files,
   );
@@ -2167,17 +2207,26 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
 }
 
 /**
- * Take the caller's published site off the web (ADR-0013).
+ * Take one of the caller's published sites off the web (ADR-0013).
  *
- * The other half of publishing, and the half that was missing: until this
- * existed nothing could remove a published site, not the person who put it
- * there and not an operator. There is no build and no body: what comes down
- * is whatever this caller has up, which is the only site they are allowed
- * to name.
+ * The other half of publishing. There is no build: what comes down is the
+ * site of the project named, which has to be the caller's
+ * (`resolveSiteProject`), and the publish service checks again that the
+ * site is theirs. The builder names the project in a JSON body; a builder
+ * older than one site per project sends none and means the site it always
+ * meant, the account's first project's.
+ *
+ * Two callers inside this Worker, both with the owner present and asking,
+ * and neither able to name anybody else's site: deleting a project takes
+ * that project's site down first (`project-handlers.ts`), and deleting the
+ * account takes every site it has down. Both come through here rather than
+ * calling the service themselves, so this stays the one place a takedown
+ * is made (`publish-authorisation.test.ts`).
  *
  * `PUBLISH_BURST` again rather than a gate of its own. It is the same
  * caller, the same service, and a takedown is cheaper than the publish that
- * preceded it.
+ * preceded it. Once per request, not once per site: an account deletion
+ * taking five sites down is one person asking once.
  */
 async function handleUnpublish(
   request: Request,
@@ -2185,12 +2234,17 @@ async function handleUnpublish(
   options: {
     /**
      * Set only by the account deletion route, for the account that is
-     * asking to be deleted: its site comes down as part of the request, and
-     * by then the request is recorded, so the ordinary refusal of such an
-     * account (`principal.ts`) would stop its own takedown. Nothing a caller
-     * sends can set it.
+     * asking to be deleted: every site it has comes down as part of the
+     * request, and by then the request is recorded, so the ordinary refusal
+     * of such an account (`principal.ts`) would stop its own takedown.
+     * Nothing a caller sends can set it.
      */
     forDeletion?: boolean;
+    /**
+     * Set only by the project deletion route, for the project being
+     * deleted, which that route has already found to be the caller's.
+     */
+    projectId?: string;
   } = {},
 ): Promise<Response> {
   // Not `autoPublishConfigured`: that also wants the build service, which a
@@ -2225,16 +2279,65 @@ async function handleUnpublish(
     }
   }
 
-  // The account's one site, keyed as `handlePublish` keys it.
-  const removed = await unpublishProject(
-    env,
-    principal.userId,
-    principal.userId,
-  );
-  if (!removed.ok) {
-    return json({ error: removed.error }, removed.status);
+  // Which sites. For the account's deletion, every one it has serving,
+  // read the way the deletion's own check reads it, so the step that asks
+  // "is anything still up" and this list cannot disagree. A site that is
+  // held or already down is not on it: it is not serving, and a takedown
+  // under a hold is refused anyway.
+  let targets: string[];
+  if (options.forDeletion) {
+    targets = env.DB
+      ? await liveSiteProjects(env.DB, principal.userId)
+      : [principal.userId];
+  } else if (options.projectId !== undefined) {
+    targets = [options.projectId];
+  } else {
+    // An older builder sends no body at all, which is not an error here.
+    const body: unknown = await request.json().catch(() => null);
+    const site = await siteProjectFor(env, principal.userId, body, {
+      allowArchived: true,
+    });
+    if (!site.ok) return json({ error: site.error }, site.status);
+    targets = [site.projectId];
   }
-  return json({ slug: removed.slug });
+
+  const slugs: string[] = [];
+  const errors: string[] = [];
+  for (const projectId of targets) {
+    const removed = await unpublishProject(env, principal.userId, projectId);
+    if (!removed.ok) {
+      // One site the caller asked about: its answer is the answer.
+      if (targets.length === 1 && !options.forDeletion) {
+        return json({ error: removed.error }, removed.status);
+      }
+      // Several: the rest are still taken down. The deletion's own check
+      // is what decides whether that was all of them.
+      errors.push(removed.error);
+      continue;
+    }
+    slugs.push(removed.slug);
+  }
+  return options.forDeletion
+    ? json({ slugs, errors })
+    : json({ slug: slugs[0] });
+}
+
+/**
+ * The project a publish or takedown request names, checked against the
+ * caller (`resolveSiteProject`).
+ */
+function siteProjectFor(
+  env: Env,
+  userId: string,
+  body: unknown,
+  options: { allowArchived: boolean },
+): Promise<SiteProject> {
+  const store =
+    env.DB && env.PROJECT_CONTENT
+      ? new ProjectStore(env.DB, env.PROJECT_CONTENT)
+      : null;
+  const { projectId } = (body ?? {}) as { projectId?: unknown };
+  return resolveSiteProject(store, userId, projectId, options);
 }
 
 /**
@@ -2246,10 +2349,12 @@ async function handleUnpublish(
  * reach for under time pressure and is easy to do half of.
  *
  * Named by slug rather than by project or account, because that is what a
- * report carries: somebody sends an address. `requireAdmin` is the whole of
- * the authorisation, and it is stricter than the ownership check the owner's
- * own takedown makes -- which is the point, since this route exists to act
- * on sites the caller does not own.
+ * report carries: somebody sends an address. A project's share link is
+ * held the same way, named by the link (`share` in place of `slug`), since
+ * that is the address a report about one carries. `requireAdmin` is the
+ * whole of the authorisation, and it is stricter than the ownership check
+ * the owner's own takedown makes -- which is the point, since this route
+ * exists to act on sites the caller does not own.
  *
  * Only the publish service is required, not the build one, for the reason
  * `handleUnpublish` gives: a fail-closed check has to fail closed on its own
@@ -2267,23 +2372,48 @@ async function handleAdminHold(
   const guard = await requireAdmin(request, env);
   if (guard.denied) return guard.denied;
 
-  if (!publishServiceConfigured(env)) {
-    return json(
-      { error: 'Publishing is not configured for this deployment.' },
-      503,
-    );
-  }
-
   let body: unknown;
   try {
     body = await request.json();
   } catch {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
-  const { slug, reason } = (body ?? {}) as {
+  const { slug, reason, share } = (body ?? {}) as {
     slug?: unknown;
     reason?: unknown;
+    share?: unknown;
   };
+
+  // A project's share link, named by the link a report carried, instead of
+  // a site by its slug. The same lever for the same kind of report: what a
+  // stranger was sent is reachable, and it should not be. It needs the
+  // database rather than the publish service, which is why it is decided
+  // before the publish service is asked for.
+  if (share !== undefined) {
+    return handleShareHold(env, {
+      link: share,
+      reason,
+      by: guard.adminEmail,
+      release,
+      now: new Date().toISOString(),
+      stopPreview: previewConfigured(env)
+        ? async (token) => {
+            const stopped = await stopPreview(
+              env,
+              await sharePreviewKey(token),
+            );
+            if (!stopped.ok) throw new Error(stopped.error);
+          }
+        : null,
+    });
+  }
+
+  if (!publishServiceConfigured(env)) {
+    return json(
+      { error: 'Publishing is not configured for this deployment.' },
+      503,
+    );
+  }
   if (typeof slug !== 'string' || slug.trim().length === 0) {
     return json({ error: '"slug" is required.' }, 400);
   }
@@ -2876,10 +3006,33 @@ async function route(
     return handleRuns(request, env);
   }
 
-  // The caller's projects (`project-handlers.ts`). Three literal routes,
+  // The caller's projects (`project-handlers.ts`). Four literal routes,
   // one handler: the handler reads the id from the request's own path.
+  const links: ProjectLinks = {
+    origin: new URL(request.url).origin,
+    publishHostname: env.PUBLISH_HOSTNAME ?? DEFAULT_PUBLISH_HOSTNAME,
+  };
+  const stopSharePreview = previewConfigured(env)
+    ? async (token: string) => {
+        const stopped = await stopPreview(env, await sharePreviewKey(token));
+        if (!stopped.ok) throw new Error(stopped.error);
+      }
+    : undefined;
   const projectDeps = {
     resolvePrincipal: (req: Request) => resolvePrincipal(req, env),
+    links,
+    // Deleting a project takes its site down through the owner's own
+    // takedown, the one path allowed to (ADR-0013), with the person present
+    // and asking. Only where publishing exists: without it there is no
+    // site, and D1 says so.
+    ...(publishServiceConfigured(env)
+      ? {
+          takeDownSite: async (projectId: string) => {
+            await handleUnpublish(request, env, { projectId });
+          },
+        }
+      : {}),
+    ...(stopSharePreview ? { stopSharePreview } : {}),
   };
   if (pathname === '/api/projects') {
     return handleProjects(request, env, projectDeps);
@@ -2889,6 +3042,36 @@ async function route(
   }
   if (pathname === '/api/projects/:id/duplicate') {
     return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id/share') {
+    return handleProjects(request, env, projectDeps);
+  }
+
+  // A project's share link, from the side of whoever holds it
+  // (`share-handlers.ts`). The view and the preview identify nobody: the
+  // token is the grant (`access-gate.ts`). The remix is behind the gate.
+  const shareDeps = {
+    resolvePrincipal: (req: Request) => resolvePrincipal(req, env),
+    links,
+    preview: previewConfigured(env)
+      ? {
+          start: (
+            key: string,
+            files: { path: string; content: string }[],
+            mediaOwner: string,
+          ) => startPreview(env, key, files, mediaOwner),
+          status: (key: string) => previewStatus(env, key),
+        }
+      : null,
+  };
+  if (pathname === '/api/share/:token') {
+    return handleShare(request, env, shareDeps);
+  }
+  if (pathname === '/api/share/:token/preview') {
+    return handleShare(request, env, shareDeps);
+  }
+  if (pathname === '/api/share/:token/remix') {
+    return handleShare(request, env, shareDeps);
   }
 
   if (pathname === '/api/billing/status') {
@@ -2991,10 +3174,11 @@ async function route(
   // was withdrawn, can still leave.
   if (pathname === '/api/account/delete') {
     return handleAccountDelete(request, env, {
-      // The site comes down through the owner's own takedown, the one path
-      // allowed to do that (ADR-0013), with the person present and asking.
-      // Only when publishing exists here: without it there is no site, and
-      // the step is settled by D1 saying so.
+      // Every site the account has, one per project it published, comes
+      // down through the owner's own takedown, the one path allowed to do
+      // that (ADR-0013), with the person present and asking. Only when
+      // publishing exists here: without it there is no site, and the step
+      // is settled by D1 saying so.
       takeDown: async () => {
         if (publishServiceConfigured(env)) {
           await handleUnpublish(request, env, { forDeletion: true });

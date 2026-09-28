@@ -1,4 +1,5 @@
 import { getClerkToken } from '../auth/clerk-token.ts';
+import { shareTokenFromLink } from '../projects/share-route.ts';
 
 /**
  * The operator's takedown, from the browser (internal issue 172).
@@ -16,7 +17,15 @@ import { getClerkToken } from '../auth/clerk-token.ts';
 export type SiteState = 'live' | 'down' | 'held';
 
 export type TakedownResult =
-  { ok: true; slug: string; state: SiteState } | { ok: false; error: string };
+  | {
+      ok: true;
+      /** The site's slug, or for a share link, the link as it was named. */
+      slug: string;
+      state: SiteState;
+      /** Whether what was acted on is a project's share link. */
+      share?: true;
+    }
+  | { ok: false; error: string };
 
 async function authHeaders(
   getToken: () => Promise<string | null>,
@@ -55,9 +64,21 @@ async function call(
   if (!response.ok) return { ok: false, error: await errorMessage(response) };
   try {
     const parsed: unknown = await response.json();
-    const record = (parsed ?? {}) as { slug?: unknown; state?: unknown };
+    const record = (parsed ?? {}) as {
+      slug?: unknown;
+      share?: unknown;
+      state?: unknown;
+    };
     if (typeof record.slug === 'string' && isSiteState(record.state)) {
       return { ok: true, slug: record.slug, state: record.state };
+    }
+    if (typeof record.share === 'string' && isSiteState(record.state)) {
+      return {
+        ok: true,
+        slug: body.share ?? record.share,
+        state: record.state,
+        share: true,
+      };
     }
     // Reporting a takedown that the server never confirmed is the one
     // outcome worth guarding: somebody stops checking.
@@ -73,14 +94,35 @@ async function call(
   }
 }
 
-/** Take a published site off the web. The reason is required. */
+/**
+ * What was named: a published site's slug, or a project's share link.
+ *
+ * One field for both in the panel, because an abuse report carries one
+ * address and the operator should not have to work out which kind it is
+ * first. A share link is read the way the Worker reads it
+ * (`shareTokenFromLink`): the whole address, or the token alone. Anything
+ * else is a slug.
+ */
+function target(named: string): Record<string, string> {
+  return shareTokenFromLink(named) ? { share: named } : { slug: named };
+}
+
+/**
+ * Take a published site, or a project's share link, off the web. The
+ * reason is required.
+ */
 export function holdSite(
   slug: string,
   reason: string,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<TakedownResult> {
-  return call('/api/admin/publish/hold', { slug, reason }, fetchImpl, getToken);
+  return call(
+    '/api/admin/publish/hold',
+    { ...target(slug), reason },
+    fetchImpl,
+    getToken,
+  );
 }
 
 /**
@@ -93,5 +135,5 @@ export function releaseSite(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<TakedownResult> {
-  return call('/api/admin/publish/release', { slug }, fetchImpl, getToken);
+  return call('/api/admin/publish/release', target(slug), fetchImpl, getToken);
 }

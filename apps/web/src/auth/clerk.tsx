@@ -1,4 +1,11 @@
-import { ClerkProvider, Show, SignIn, SignUp, UserButton } from '@clerk/react';
+import {
+  ClerkProvider,
+  Show,
+  SignIn,
+  SignUp,
+  UserButton,
+  useAuth,
+} from '@clerk/react';
 import type { ReactNode } from 'react';
 import {
   PUBLISHABLE_KEY,
@@ -98,5 +105,41 @@ export function AuthStatus() {
         <UserButton />
       </Show>
     </div>
+  );
+}
+
+/**
+ * Whether somebody is signed in: `null` until Clerk knows.
+ *
+ * For the one page that renders for everybody, a shared project's
+ * (`SharedProjectPage`), which shows the same project either way and only
+ * asks when somebody presses Remix. An unconfigured deployment has no
+ * sessions and counts as signed in, as `AuthGate` treats it. Which of the
+ * two functions this is is fixed when the module loads, so a component
+ * calls the same hooks on every render.
+ */
+export const useSignedIn: () => boolean | null = clerkConfigured
+  ? () => {
+      const { isLoaded, isSignedIn } = useAuth();
+      return isLoaded ? Boolean(isSignedIn) : null;
+    }
+  : () => true;
+
+/**
+ * Sign in without leaving the page, and come back to `returnTo` after,
+ * whether the person signs in or signs up from here.
+ *
+ * Hash routing, because the page it sits on has an address of its own
+ * (`/s/<token>`) and Clerk's steps must not replace it.
+ */
+export function SignInToContinue({ returnTo }: { returnTo: string }) {
+  if (!clerkConfigured) return null;
+  return (
+    <SignIn
+      routing="hash"
+      forceRedirectUrl={returnTo}
+      signUpForceRedirectUrl={returnTo}
+      signUpUrl={SIGN_UP_PATH}
+    />
   );
 }

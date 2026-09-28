@@ -5,6 +5,7 @@ import {
   unpublishProject,
 } from '../generation/publish-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
+import type { ProjectSite } from '../projects/projects-client.ts';
 
 /**
  * A decision that has been raised and not yet taken.
@@ -57,6 +58,12 @@ type PublishState =
   /** Off the web, and the name still ours. Publishing again puts it back. */
   | { phase: 'taken-down'; slug: string }
   /**
+   * An operator has taken this site down (internal issue 172). Publishing again would be
+   * refused, and so would the owner's own takedown, so neither is offered:
+   * the site is off the web, and only an operator can change that.
+   */
+  | { phase: 'held'; slug: string }
+  /**
    * Something went wrong, and the site is wherever it already was.
    *
    * `publishedSlug` is carried through on purpose. Dropping it hid the
@@ -83,27 +90,48 @@ type PublishState =
  * public, does.
  *
  * A slug is required on first publish (it becomes
- * `<slug>.vibld-preview.dev`) and reused on every later one; this
- * component only remembers a slug across clicks within the same page load --
- * there is no endpoint yet to ask "what slug does this project already have"
- * on a fresh page load, so a returning visitor re-enters it. That is also
- * why the takedown is only offered once something has been published from
- * this page: it is the only time the builder knows there is anything to take
- * down. Worth a small follow-up, not a reason to hold this back.
+ * `<slug>.vibld-preview.dev`) and reused on every later one.
+ *
+ * **One site per project** (docs/decisions.md, "Resolved 2026-09-28").
+ * `projectId` names whose site this is, on every publish and takedown, so
+ * publishing one project can never replace another's. `site` is that
+ * project's site as the project was opened with it, which is how a fresh
+ * page load knows the slug already chosen and whether there is anything up
+ * to take down; before projects carried it, a returning visitor had to
+ * re-enter the slug and could not take down what they had not published
+ * from that page. The caller mounts one of these per project (a `key`), so
+ * nothing one project's button learned is shown against another.
+ *
+ * Without a project (a deployment that builds in the browser and has no
+ * server projects) neither is passed, and the Worker reads the request as
+ * it always did.
  */
-export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
-  const [state, setState] = useState<PublishState>({ phase: 'idle' });
+export function PublishButton({
+  snapshot,
+  projectId = null,
+  site = null,
+}: {
+  snapshot: ProjectSnapshot;
+  projectId?: string | null;
+  site?: ProjectSite | null;
+}) {
+  const [state, setState] = useState<PublishState>(() => initialState(site));
   const [slugInput, setSlugInput] = useState('');
   const publishes = useRef(createStatusGate());
 
   const knownSlug =
-    state.phase === 'published' || state.phase === 'taken-down'
+    state.phase === 'published' ||
+    state.phase === 'taken-down' ||
+    state.phase === 'held'
       ? state.slug
       : state.phase === 'idle' || state.phase === 'failed'
         ? state.publishedSlug
         : undefined;
   /** Whether there is something up that could be taken down. */
-  const live = knownSlug !== undefined && state.phase !== 'taken-down';
+  const live =
+    knownSlug !== undefined &&
+    state.phase !== 'taken-down' &&
+    state.phase !== 'held';
 
   // What is live is the checkpoint that was published, and a later one has
   // not been. Leaving "Live at ..." up beside a project that has moved on
@@ -198,7 +226,7 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     if (decision.act === 'takedown') {
       setState({ phase: 'removing', slug: decision.slug });
       try {
-        const result = await unpublishProject();
+        const result = await unpublishProject(undefined, undefined, projectId);
         if (!current()) return;
         setState(
           result.ok
@@ -229,7 +257,13 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
         : { phase: 'publishing', publishedSlug: decision.publishedSlug },
     );
     try {
-      const result = await publishProject(decision.files, decision.slug);
+      const result = await publishProject(
+        decision.files,
+        decision.slug,
+        undefined,
+        undefined,
+        projectId,
+      );
       if (!current()) return;
       setState(
         result.ok
@@ -310,6 +344,18 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
 
   const busy = state.phase === 'publishing' || state.phase === 'removing';
 
+  if (state.phase === 'held') {
+    return (
+      <div className="publish-button">
+        <p className="pane-note pane-note--error" role="status">
+          <strong>{state.slug}</strong> has been taken down by the operator and
+          cannot be published again until that is lifted. Write to the abuse
+          address if you think this is a mistake.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="publish-button">
       {!knownSlug ? (
@@ -375,4 +421,16 @@ export function PublishButton({ snapshot }: { snapshot: ProjectSnapshot }) {
       ) : null}
     </div>
   );
+}
+
+/**
+ * Where the button starts, from the site the project was opened with: the
+ * name to republish under when it is live, "publish again" when its owner
+ * took it down, and nothing to offer when an operator did.
+ */
+function initialState(site: ProjectSite | null): PublishState {
+  if (!site) return { phase: 'idle' };
+  if (site.state === 'held') return { phase: 'held', slug: site.slug };
+  if (site.state === 'down') return { phase: 'taken-down', slug: site.slug };
+  return { phase: 'idle', publishedSlug: site.slug };
 }

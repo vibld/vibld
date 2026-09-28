@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { ProjectFile } from '@vibld/core';
 import type { BuilderState } from '../generation/session.ts';
+import type { ProjectSummary } from '../projects/projects-client.ts';
 import {
   servingOlderThan,
   usePreviewSandbox,
@@ -50,8 +51,14 @@ function sameFiles(listed: ProjectFile[], accepted: ProjectFile[]): boolean {
 export function Workspace({
   state,
   hidden = false,
+  project = null,
 }: {
   state: BuilderState;
+  /**
+   * The open server project, whose site the publish button acts on. Null
+   * where there are no server projects, or while one is opening.
+   */
+  project?: ProjectSummary | null;
   /**
    * Off screen without being taken apart. The preview sandbox, the chosen
    * tab and the selected file are all live state this component owns, and
@@ -207,7 +214,17 @@ export function Workspace({
                     </p>
                   ) : null}
                   <ExportButton snapshot={state.acceptedSnapshot} />
-                  <PublishButton snapshot={state.acceptedSnapshot} />
+                  {/*
+                   * One per project, by key: each project has its own site,
+                   * and a slug or a "taken down" learned in one must never
+                   * be shown against another.
+                   */}
+                  <PublishButton
+                    key={project?.id ?? 'local'}
+                    snapshot={state.acceptedSnapshot}
+                    projectId={project?.id ?? null}
+                    site={project?.site ?? null}
+                  />
                   <GitHubPushButton snapshot={state.acceptedSnapshot} />
                 </>
               ) : null}

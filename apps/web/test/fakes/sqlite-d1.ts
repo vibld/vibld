@@ -73,6 +73,31 @@ export class SqliteD1Database implements D1Database {
   }
 
   /**
+   * All of them or none, which is what D1 gives a batch.
+   *
+   * A transaction rather than a loop that stops early, for the reason
+   * apps/publish's copy of this fake gives: one that committed the
+   * statements it got through before a failure would let a test pass
+   * against the half-written state a batch is used to prevent.
+   */
+  async batch<T = Record<string, unknown>>(
+    statements: D1PreparedStatement[],
+  ): Promise<D1Result<T>[]> {
+    this.#db.exec('BEGIN');
+    try {
+      const results: D1Result<T>[] = [];
+      for (const statement of statements) {
+        results.push(await statement.run<T>());
+      }
+      this.#db.exec('COMMIT');
+      return results;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /**
    * Run a script of several statements, the way `wrangler d1 migrations
    * apply` runs a migration file. For a test that has to put rows in place
    * between two migrations, which is the only way to test a backfill.

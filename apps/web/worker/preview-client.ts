@@ -172,6 +172,14 @@ export function startPreview(
   env: PreviewServiceEnv,
   userId: string,
   files: PreviewFile[],
+  /**
+   * Whose media library the preview's `/media/` serves from, when that is
+   * not the sandbox's own name. Only a shared project's preview passes it:
+   * its sandbox is named for the link (`share-link.ts`), and its media is
+   * the project owner's. Omitted, the service uses `userId`, as it always
+   * has.
+   */
+  mediaOwner?: string,
 ): Promise<PreviewStatus> {
   // A start has to answer the person who pressed the button, so an
   // unreadable reply becomes a failure here rather than nothing. The status
@@ -180,7 +188,12 @@ export function startPreview(
   return call(env, '/internal/preview/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ userId, label: userId, files }),
+    body: JSON.stringify({
+      userId,
+      label: userId,
+      files,
+      ...(mediaOwner === undefined ? {} : { mediaOwner }),
+    }),
   }).then((status) => status ?? UNREADABLE_PREVIEW);
 }
 

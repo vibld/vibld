@@ -13,6 +13,7 @@ import type { TranscriptTurn } from '@vibld/core';
 import {
   PROJECT_DUPLICATE_ROUTE,
   PROJECT_ITEM_ROUTE,
+  PROJECT_SHARE_ROUTE,
   projectIdInPath,
   routeKeyFor,
 } from './access-gate.ts';
@@ -31,6 +32,7 @@ import {
   parseReferenceUrl,
 } from './request-guard.ts';
 import type { GuardResult } from './request-guard.ts';
+import { newShareToken, shareUrl } from './share-link.ts';
 
 /**
  * `/api/projects`: the caller's own projects (docs/decisions.md, "Resolved
@@ -42,8 +44,10 @@ import type { GuardResult } from './request-guard.ts';
  *                                          conversation and its accepted code
  *     PATCH  /api/projects/:id             rename, archive or unarchive, save
  *                                          settings and conversation
- *     DELETE /api/projects/:id             delete it, code and all
+ *     DELETE /api/projects/:id             delete it, code, site and all
  *     POST   /api/projects/:id/duplicate   copy it (held to the limit)
+ *     POST   /api/projects/:id/share       turn its share link on
+ *     DELETE /api/projects/:id/share       turn it off, for good
  *
  * Every route that names a project answers 404 for one that is not the
  * caller's, never 403: "that exists, and it is not yours" is a fact about
@@ -71,7 +75,38 @@ export interface ProjectsDeps {
    * allowance can never be decided from two different answers.
    */
   tierOf?: (userId: string) => Promise<Tier>;
+  /** Where the links in a project's view point. */
+  links?: ProjectLinks;
+  /** A share token. Defaults to 32 random bytes (`share-link.ts`). */
+  newToken?: () => string;
+  /**
+   * Take this project's published site down, as its owner, before the
+   * project is deleted. Supplied by the router, which is the one place
+   * allowed to reach the takedown (ADR-0013, `publish-authorisation.test.
+   * ts`), and only where publishing is configured. Absent, a project with a
+   * live site is not deleted: see the DELETE below.
+   */
+  takeDownSite?: (projectId: string) => Promise<void>;
+  /**
+   * Stop the live preview a share link may have started (`share-handlers.
+   * ts`). Called when the link stops for a reason somebody is present for,
+   * so a viewer already watching it does not keep a sandbox for the rest of
+   * its lifetime. Absent where there is no preview service.
+   */
+  stopSharePreview?: (token: string) => Promise<void>;
 }
+
+/**
+ * The two addresses a project's view links to: the builder's own origin,
+ * which a share link is on, and the domain published sites are served
+ * under (`apps/publish`'s `PUBLISH_HOSTNAME`).
+ */
+export interface ProjectLinks {
+  origin: string;
+  publishHostname: string;
+}
+
+export const DEFAULT_PUBLISH_HOSTNAME = 'vibld-preview.dev';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -110,8 +145,18 @@ function limitRefusal(limit: number): Response {
   );
 }
 
-/** A project as the builder reads it. */
-export function projectView(project: ProjectRecord) {
+/**
+ * A project as its owner's builder reads it.
+ *
+ * `share.url` is the link itself, since it is the owner's to copy; it is
+ * null while the link is off. `share.held` says an operator has stopped
+ * it, which the owner is told plainly rather than finding out from a
+ * friend. `site` is the project's published site, by the state the publish
+ * service would report, with its address.
+ */
+export function projectView(project: ProjectRecord, links?: ProjectLinks) {
+  const origin = links?.origin ?? '';
+  const hostname = links?.publishHostname ?? DEFAULT_PUBLISH_HOSTNAME;
   return {
     id: project.id,
     name: project.name,
@@ -123,6 +168,18 @@ export function projectView(project: ProjectRecord) {
     hasCode: project.acceptedRevision !== null,
     turns: project.transcriptTurns,
     settings: project.settings,
+    share: {
+      on: project.share.token !== null,
+      url: project.share.token ? shareUrl(origin, project.share.token) : null,
+      held: project.share.heldAt !== null,
+    },
+    site: project.site
+      ? {
+          slug: project.site.slug,
+          state: project.site.state,
+          url: `https://${project.site.slug}.${hostname}/`,
+        }
+      : null,
   };
 }
 
@@ -262,6 +319,7 @@ const ALLOWED: Record<string, readonly string[]> = {
   '/api/projects': ['GET', 'POST'],
   [PROJECT_ITEM_ROUTE]: ['GET', 'PATCH', 'DELETE'],
   [PROJECT_DUPLICATE_ROUTE]: ['POST'],
+  [PROJECT_SHARE_ROUTE]: ['POST', 'DELETE'],
 };
 
 export async function handleProjects(
@@ -307,6 +365,20 @@ export async function handleProjects(
     (async (who: string) =>
       tierFor(await new BillingStore(db).findActiveSubscription(who)));
   const store = new ProjectStore(db, env.PROJECT_CONTENT);
+  const links: ProjectLinks = deps.links ?? {
+    origin: new URL(request.url).origin,
+    publishHostname: DEFAULT_PUBLISH_HOSTNAME,
+  };
+  const view = (project: ProjectRecord) => projectView(project, links);
+  const stopSharePreview = async (token: string | null) => {
+    if (!token || !deps.stopSharePreview) return;
+    // Best effort, and never a reason to refuse what was asked: the link is
+    // already dead by the time this runs, and a preview nobody can reach
+    // any more ends at its own lifetime anyway.
+    await deps.stopSharePreview(token).catch((error: unknown) => {
+      console.error('share preview could not be stopped', error);
+    });
+  };
 
   if (route === '/api/projects') {
     if (method === 'GET') {
@@ -315,7 +387,7 @@ export async function handleProjects(
         tierOf(userId),
       ]);
       return json({
-        projects: projects.map(projectView),
+        projects: projects.map(view),
         limits: {
           tier,
           active: projects.filter((project) => project.archivedAt === null)
@@ -358,7 +430,7 @@ export async function handleProjects(
     );
     if (!created) return limitRefusal(limit!);
     const project = await store.find(userId, id);
-    return json({ project: projectView(project!) }, 201);
+    return json({ project: view(project!) }, 201);
   }
 
   const id = projectIdInPath(pathname);
@@ -375,7 +447,41 @@ export async function handleProjects(
       limit,
     );
     if (!copy) return limitRefusal(limit!);
-    return json({ project: projectView(copy) }, 201);
+    return json({ project: view(copy) }, 201);
+  }
+
+  if (route === PROJECT_SHARE_ROUTE) {
+    if (method === 'DELETE') {
+      await store.disableShare(userId, project.id);
+      await stopSharePreview(project.share.token);
+    } else {
+      const outcome = await store.enableShare(
+        userId,
+        project.id,
+        (deps.newToken ?? newShareToken)(),
+        now(),
+      );
+      if (outcome === 'missing') return NOT_FOUND();
+      if (outcome === 'held') {
+        return json(
+          {
+            error:
+              'This link has been turned off by the operator and cannot be turned on again. Write to the abuse address if you think this is a mistake.',
+          },
+          409,
+        );
+      }
+      if (outcome === 'archived') {
+        return json(
+          {
+            error: 'This project is archived. Unarchive it to share it.',
+          },
+          409,
+        );
+      }
+    }
+    const shared = await store.find(userId, project.id);
+    return shared ? json({ project: view(shared) }) : NOT_FOUND();
   }
 
   if (method === 'GET') {
@@ -388,7 +494,7 @@ export async function handleProjects(
       store.accepted(project.id),
     ]);
     return json({
-      project: projectView({ ...project, lastOpenedAt: at }),
+      project: view({ ...project, lastOpenedAt: at }),
       transcript,
       // The accepted code, which is what the preview and the code view are
       // restored from. The revision comes with it because the next build
@@ -410,6 +516,39 @@ export async function handleProjects(
         },
         409,
       );
+    }
+    // The published site first, and the project only once it is down.
+    //
+    // The site is the project's, and deleting the project is the owner
+    // saying the work should be gone; a site left serving would be the one
+    // copy of it still in public, with nothing left in the builder that
+    // reaches it. So a project whose site is live is not deleted until the
+    // site is down, and if the takedown could not be done the owner is told
+    // and nothing is deleted. A site that is held or already down is not
+    // serving, and does not stand in the way. The slug itself is never
+    // released (ADR-0010), so the name stays with this account.
+    if (project.site?.state === 'live') {
+      if (deps.takeDownSite) {
+        await deps.takeDownSite(project.id).catch((error: unknown) => {
+          console.error('project deletion: takedown failed', error);
+        });
+      }
+      const after = await store.find(userId, project.id);
+      if (after?.site?.state === 'live') {
+        return json(
+          {
+            error: `This project's site at ${project.site.slug} is still online and could not be taken down. Take it down from the project, then delete it.`,
+          },
+          409,
+        );
+      }
+    }
+    // The link goes before the bytes, so a deletion that only gets part way
+    // (a large project, below) does not leave a stranger looking at half of
+    // it. The owner asked for all of it to go, the link included.
+    if (project.share.token !== null) {
+      await store.disableShare(userId, project.id);
+      await stopSharePreview(project.share.token);
     }
     const removed = await store.remove(project.id);
     if (!removed) {
@@ -441,6 +580,9 @@ export async function handleProjects(
   }
   if (patch.value.archived === true) {
     await store.archive(userId, project.id, at);
+    // An archived project's link does not serve (`findShared`), so a live
+    // preview a viewer started from it stops with it.
+    await stopSharePreview(project.share.token);
   }
   if (patch.value.name !== undefined) {
     await store.rename(userId, project.id, patch.value.name, at);
@@ -452,5 +594,5 @@ export async function handleProjects(
     await store.saveTranscript(userId, project.id, patch.value.transcript, at);
   }
   const saved = await store.find(userId, project.id);
-  return saved ? json({ project: projectView(saved) }) : NOT_FOUND();
+  return saved ? json({ project: view(saved) }) : NOT_FOUND();
 }

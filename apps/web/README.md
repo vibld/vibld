@@ -621,31 +621,59 @@ a share only ever makes sense against a preview that is actually running.
 ## Cloudflare auto-publish (ADR-0010, docs/decisions.md L40)
 
 `POST /api/publish` -- body `{ "files": [{ "path", "content" }, ...],
-"slug"? }` (the same file shape `/api/preview` already takes). Builds the
-caller's own project for real (`@vibld/preview`'s `buildProject`, over the
-same service binding `/api/preview` uses) and, if that succeeds, publishes
-the result (`@vibld/publish`'s `/internal/publish`, a second Worker --
-see `apps/publish/README.md`). `slug` is required on a project's first
-publish and optional after (the existing slug is reused). Returns
-`{ slug, url, skipped }` on success -- `skipped` lists any binary asset
-paths the build produced that could not be published yet (see
-`apps/publish/README.md`'s own text-only limitation). Answers `503` when
-any of `PREVIEW`, `PREVIEW_INTERNAL_SECRET`, `PUBLISH` or
+"slug"?, "projectId"? }` (the same file shape `/api/preview` already
+takes). Builds the project for real (`@vibld/preview`'s `buildProject`,
+over the same service binding `/api/preview` uses) and, if that succeeds,
+publishes the result as **that project's** site (`@vibld/publish`'s
+`/internal/publish`, a second Worker -- see `apps/publish/README.md`).
+`slug` is required on a project's first publish and optional after (the
+existing slug is reused). Returns `{ slug, url, skipped }` on success --
+`skipped` lists any binary asset paths the build produced that could not be
+published yet (see `apps/publish/README.md`'s own text-only limitation).
+Answers `503` when any of `PREVIEW`, `PREVIEW_INTERNAL_SECRET`, `PUBLISH` or
 `PUBLISH_INTERNAL_SECRET` is unset, the same fail-closed rule
 `isConfigured` already applies to `/api/plan`.
+
+**One site per project** (resolved 2026-09-28). `projectId` names the
+project, which has to be the caller's (404 otherwise) and not archived
+(409); it is checked before anything is built. The publish service keys a
+site by project (`published_projects.project_id`, unique), so publishing
+one project can only ever claim or replace that project's own site, and a
+slug is still unique across every site there is. A request with no
+`projectId` comes from a builder older than this and publishes to the site
+it always did, the account's first project's (below); if the account no
+longer has that project it is refused and asked to reload. Every site
+published before this was keyed by its owner's user id, which is the id of
+the project `0033_projects.sql` made from that owner's work, so that project
+finds its site at the same slug and nothing moves;
+`0035_site_per_project.sql` gives a project to any site that had none, so
+every site has one its owner can reach. A project's view
+(`GET /api/projects/:id` and the list) carries its site as
+`site: { slug, state, url }`, `state` being `live`, `down` or `held` as the
+publish service reads it.
 
 Gated by its own `PUBLISH_BURST` rate limit, keyed on the caller's Clerk
 user id (checked after identity, unlike `IP_BURST`) -- publishing runs a
 real sandbox build and a real R2 write, priced per caller rather than per
 flood, so it does not ride `PLAN_BURST`'s ceiling.
 
-`DELETE /api/publish` -- authenticated, no body. Takes the caller's
-published site off the web (ADR-0013). There is no build step and nothing
-to name: what comes down is whatever this caller has up, which is the only
-site they are allowed to name. Shares `PUBLISH_BURST` with the POST, and
-answers `503` under the same fail-closed rule. Returns `{ slug }`; a `403`
-means the project belongs to somebody else and a `404` means it was never
-published.
+`DELETE /api/publish` -- authenticated, body `{ "projectId" }`. Takes that
+project's published site off the web (ADR-0013). There is no build step. The
+project has to be the caller's; an archived one's site can still be taken
+down, because taking something off the web is never refused. With no body
+(an older builder) it takes down the account's first project's site, as it
+always did. Shares `PUBLISH_BURST` with the POST, and answers `503` under the
+same fail-closed rule. Returns `{ slug }`; a `403` means the project belongs
+to somebody else and a `404` means it was never published.
+
+**Deleting a project takes its site down first**, through this same
+takedown with the owner present, and the project is not deleted while its
+site is still serving: if the takedown fails the delete is refused with 409
+and nothing is removed. A site that is held or already down does not stand
+in the way. **Deleting the account takes every site down**: the takedown the
+deletion request makes goes through each project whose site is live, and the
+deletion's `sites` step is done only once none of them is serving. The slug
+is never released in either case.
 
 The two verbs share a path and are told apart by method, deliberately: a
 link, an image, a prefetch and a form can all issue a `GET` or a `POST`,
@@ -670,15 +698,14 @@ way and names what stops working. These are the only controls in the
 builder whose result a stranger can see, which is what earns the extra
 press; a generic "are you sure" would not.
 
-A slug is required on first publish; the component remembers the slug its
-own successful publish returned for the rest of the page's lifetime, so a
-later click in the same session republishes without asking again -- there
-is no endpoint yet to ask "what slug does this project already have" on a
-fresh page load, so a returning visitor re-enters it once. That is also why
-"Take it down" only appears after a publish in the same page load: it is
-the only time the builder knows there is anything up. On success, shows the
-live URL (and which binary asset paths, if any, were skipped); on failure,
-the error inline.
+The button is per project: it names the open project on every publish and
+takedown, and starts from that project's site as the project was opened
+with it, so a returning visitor is not asked for a slug the project already
+has, "Take it down" is there whenever the site is live, a site its owner
+took down offers "Publish again", and a site an operator holds says so and
+offers nothing. A slug is required on a project's first publish. On success,
+shows the live URL (and which binary asset paths, if any, were skipped); on
+failure, the error inline.
 
 **Not built yet:** the opt-in custom-domain step ADR-0010 describes, and
 rolling back to a _previous_ published checkpoint rather than taking the
@@ -1227,8 +1254,10 @@ other `/api/*` route, and a project that is not the caller's is 404:
 | `POST /api/projects`               | Create (held to the limit)                                                                 | gated       |
 | `GET /api/projects/:id`            | Open: settings, conversation, accepted code                                                | open        |
 | `PATCH /api/projects/:id`          | Rename, archive, unarchive (held to the limit), save settings and conversation             | open        |
-| `DELETE /api/projects/:id`         | Delete: everything under its prefix, then its rows                                         | open        |
+| `DELETE /api/projects/:id`         | Delete: its published site first, then everything under its prefix, then its rows          | open        |
 | `POST /api/projects/:id/duplicate` | Copy the accepted code, settings and conversation into "<name> (copy)" (held to the limit) | gated       |
+| `POST /api/projects/:id/share`     | Turn its share link on (below)                                                             | gated       |
+| `DELETE /api/projects/:id/share`   | Turn it off, for good                                                                      | open        |
 
 The gate's reasons are in `access-gate.ts`: making or copying a project is
 starting new work, and reading, tidying or deleting your own is not.
@@ -1247,14 +1276,18 @@ reason and an upgrade button that starts Checkout.
 as 404 for another account's and 409 for an archived one. A request with no
 `projectId` comes from a builder older than projects and builds in the
 caller's most recently opened active project, or a new one if there is none.
-`/api/runs?project=<id>` reads one project's history. Everything else stays
-per account, deliberately:
+`/api/runs?project=<id>` reads one project's history.
 
-- **Publishing.** One site per account, keyed by the user id as before.
-  Publishing from another project replaces what the site serves.
-- **The media library.** Shared by every project the account has. Moving it
-  per project would change `project_media`, the published site's media
-  serving in apps/publish and the GitHub push, which is a change of its own.
+**Publishing is per project**: each project publishes to its own
+`<slug>.vibld-preview.dev` site, deleting a project takes its site down, and
+the sites published when there was one per account kept their addresses
+(see "Cloudflare auto-publish" above). Everything else stays per account,
+deliberately:
+
+- **The media library.** Shared by every project the account has (decided
+  2026-09-28). A remix into another account copies what its code uses into
+  the remixer's library (below); a duplicate within one account copies
+  nothing.
 - **The preview sandbox.** One per account; opening another project stops
   it.
 - **GitHub.** One connected repository per account; pushing from any
@@ -1284,11 +1317,94 @@ the builder works in memory exactly as it did before projects, with no list
 and nothing saved. A model deployment whose projects cannot be read falls
 back the same way and says the session is not being saved.
 
+### Sharing and remixing (resolved 2026-09-28)
+
+An owner can turn on an unlisted link for a project, copy it, and turn it
+off again. Anybody with the link sees the project's name, a live preview
+and its code, read-only, and somebody signed in can **Remix** it: copy it
+into a new project of their own.
+
+**The link** (`migrations/0034_project_share.sql`, `worker/share-link.ts`)
+is `https://app.vibld.com/s/<token>`, where the token is 32 random bytes in
+base64url, stored on the project's row. It is never the project id, which
+for a backfilled project is the owner's Clerk user id. Turning the link on
+twice keeps the same token; turning it off forgets the token, so that link
+is dead for good, and turning it on again makes a new one. The owner's view
+of a project carries `share: { on, url, held }`.
+
+**What a stranger gets** (`worker/share-handlers.ts`):
+
+| Route                            | Does                                                                      | Who                        |
+| -------------------------------- | ------------------------------------------------------------------------- | -------------------------- |
+| `GET /api/share/:token`          | The project's name, its accepted code, and whether a live preview can run | anybody with the link      |
+| `GET /api/share/:token/preview`  | The live preview's state                                                  | anybody with the link      |
+| `POST /api/share/:token/preview` | Start the live preview                                                    | signed in                  |
+| `POST /api/share/:token/remix`   | Copy it into the caller's account (held to the limit)                     | signed in, behind the gate |
+
+Nothing about the owner is in any answer: not their id, name or email, not
+the project's id, dates, settings or conversation. Every dead link answers
+the same 404, whichever of these made it dead: turned off, the project
+archived (unarchiving brings it back) or deleted, an operator's hold, the
+owner suspended by a lost dispute, or the owner having asked for the
+account to be deleted. All of them are one statement
+(`ProjectStore.findShared`). The view and the preview are counted per
+address by `SHARE_BURST` before the database is read; starting the preview
+is also counted per caller by `SHARE_PREVIEW_BURST`, and a remix per caller
+by `REMIX_BURST`. All three are declared in `wrangler.jsonc`.
+
+**The live preview runs in one sandbox per link**, started when somebody
+signed in presses "Run live preview" and then shown to every viewer of that
+link, signed in or not. Starting it needs an account (decided 2026-09-28),
+though not an invite: a sandbox is the one thing a link lets a stranger
+spend, and an account is something a start can be counted against, refused
+while it is suspended or leaving, and traced to. Somebody not signed in sees
+"Sign in to run the live preview" instead, and a preview another viewer
+started. It is one sandbox per link:
+not one per viewer, and not a static render, because a generated project is
+a Vite and React app that draws nothing until it runs. The sandbox is named
+by a hash of the token, never by the project or the owner, since its name
+is in the preview's address; it serves the owner's media, restricted to the
+files the code references, as the owner's own preview does
+(`apps/preview`'s `mediaOwner`). It lives the usual thirty minutes in the
+usual container budget, spends no model money, and is stopped when the
+owner turns the link off, archives or deletes the project, when an operator
+holds the link, and when the account is deleted.
+
+**A remix** copies the accepted code and the settings (style, reference
+page, model, instructions, visual preferences) into a new project named
+"Remix of <name>", and not the conversation, which the link never showed.
+Into another account it also copies the media the code uses into the
+remixer's library (`worker/media-copy.ts`), so the remix depends on nothing
+of the original owner's: a file the remixer already has byte for byte is
+reused, a different file under the same name is stored under the next free
+name and the copied code is rewritten to use it, and a library without room
+refuses the remix whole with 409 and `code: "media-room"`. Within one
+account nothing is copied.
+
+**Operator holds.** `POST /api/admin/publish/hold` and `/release` take
+`{ "share": "<link or token>" }` in place of `{ "slug" }`, and hold a share
+link the way they hold a site: the link serves nothing, its live preview is
+stopped, the owner can still turn it off but cannot turn it on, and who and
+why are kept in `project_share_holds`. Releasing puts the link back only if
+the owner left it on. The admin panel's takedown field takes a slug or a
+share link.
+
+**In the builder.** The header's "Share" control shows whether the link is
+on, what it gives away (said before it is turned on), the link to copy, and
+the switch. `/s/<token>` is the share page (`SharedProjectPage`), which
+renders signed in or not and carries none of the builder's state. Remix,
+or "Sign in to run the live preview", signed out shows the sign-in form in
+place and carries on once signed in (`?remix=1` or `?preview=1`, and the
+tab's session storage for a sign-up that ends elsewhere): a remix then opens
+the new project, and a preview starts.
+
 ### Setup
 
-`migrations/0033_projects.sql` is applied by the **Deploy web preview**
-workflow like every other migration. Nothing else: the routes use the D1
-and R2 bindings generation already has.
+`migrations/0033_projects.sql`, `0034_project_share.sql` and
+`0035_site_per_project.sql` are applied by the **Deploy web preview**
+workflow like every other migration. The two rate limits are declared in
+`wrangler.jsonc` and need nothing provisioned. Nothing else: the routes use
+the D1, R2 and service bindings the Worker already has.
 
 ## Account deletion (docs/decisions.md L32)
 

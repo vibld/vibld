@@ -268,3 +268,15 @@ export function copyName(name: string): string {
   const room = PROJECT_NAME_MAX_CHARS - suffix.length;
   return `${name.length > room ? name.slice(0, room).trimEnd() : name}${suffix}`;
 }
+
+/**
+ * What a remix is called: somebody else's shared project, copied into the
+ * caller's account. Named for where it came from rather than as a copy,
+ * because in the remixer's list there is no original beside it for "(copy)"
+ * to be a copy of.
+ */
+export function remixName(name: string): string {
+  const prefix = 'Remix of ';
+  const room = PROJECT_NAME_MAX_CHARS - prefix.length;
+  return `${prefix}${name.length > room ? name.slice(0, room).trimEnd() : name}`;
+}

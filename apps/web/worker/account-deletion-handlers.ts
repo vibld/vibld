@@ -82,7 +82,8 @@ function describeRequest(
 
 export interface AccountDeleteOptions {
   /**
-   * Takes the caller's published site down as its owner. The router's to
+   * Takes every site the caller published down as their owner, one per
+   * project that has one. The router's to
    * supply, because the owner's takedown route is the one path allowed to
    * do that and it lives there (`publish-authorisation.test.ts`).
    */

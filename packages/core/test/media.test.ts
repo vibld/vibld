@@ -10,6 +10,7 @@ import {
   sniffMedia,
   unsatisfiableRange,
   referencedMedia,
+  renameMediaReferences,
 } from '../src/media.ts';
 
 const bytes = (...parts: (number[] | string)[]): Uint8Array => {
@@ -129,6 +130,61 @@ describe('which media a project uses', () => {
       ]),
       [],
     );
+  });
+});
+
+describe('renaming what a project uses', () => {
+  it('moves every reference to a renamed file, however it is written', () => {
+    const files = [
+      { path: 'src/App.tsx', content: '<img src="/media/hero.jpg">' },
+      {
+        path: 'src/styles.css',
+        content: '.a{background:url(/media/hero.jpg)}',
+      },
+      { path: 'src/data.ts', content: 'const src = "media/hero.jpg";' },
+      { path: 'README.md', content: 'Nothing here.' },
+    ];
+    const renamed = renameMediaReferences(
+      files,
+      new Map([['media/hero.jpg', 'media/hero-2.jpg']]),
+    );
+    assert.deepEqual(
+      renamed.map((file) => file.content),
+      [
+        '<img src="/media/hero-2.jpg">',
+        '.a{background:url(/media/hero-2.jpg)}',
+        'const src = "media/hero-2.jpg";',
+        'Nothing here.',
+      ],
+    );
+    // A file with nothing to rename is the same object, untouched.
+    assert.equal(renamed[3], files[3]);
+    assert.deepEqual(referencedMedia(renamed), ['media/hero-2.jpg']);
+  });
+
+  it('touches nothing that only resembles a reference', () => {
+    const content = [
+      '/assets/media/hero.jpg',
+      '/social-media/hero.jpg',
+      '/media/hero.jpg.map',
+      '/media/hero.jpgx',
+    ].join(' ');
+    const [file] = renameMediaReferences(
+      [{ path: 'a', content }],
+      new Map([['media/hero.jpg', 'media/hero-2.jpg']]),
+    );
+    assert.equal(file!.content, content);
+  });
+
+  it('renames all at once, so two renames never chain', () => {
+    const [file] = renameMediaReferences(
+      [{ path: 'a', content: '/media/a.jpg /media/b.jpg' }],
+      new Map([
+        ['media/a.jpg', 'media/b.jpg'],
+        ['media/b.jpg', 'media/c.jpg'],
+      ]),
+    );
+    assert.equal(file!.content, '/media/b.jpg /media/c.jpg');
   });
 });
 

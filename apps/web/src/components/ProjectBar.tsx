@@ -3,6 +3,7 @@ import { PROJECT_NAME_MAX_CHARS } from '@vibld/core';
 
 import { PROJECTS_PATH } from '../projects/project-route.ts';
 import type { SaveStatus } from '../projects/autosave.ts';
+import type { ProjectSummary } from '../projects/projects-client.ts';
 import type { ProjectsController } from '../projects/use-projects.ts';
 
 /**
@@ -76,9 +77,124 @@ export function ProjectBar({ projects }: { projects: ProjectsController }) {
           >
             {STATUS_LABEL[projects.saveStatus]}
           </span>
+          <ShareControl
+            key={`share-${current.id}`}
+            project={current}
+            busy={projects.busy === current.id}
+            onChange={(on) => void projects.setShared(current.id, on)}
+          />
         </>
       ) : null}
     </nav>
+  );
+}
+
+/**
+ * The open project's share link: whether it is on, the link to copy, and
+ * the switch.
+ *
+ * A disclosure rather than a dialog, like the run stats: it is looked at
+ * now and then, not worked in. What the link gives away is said before it
+ * is turned on, in the terms a stranger gets it in, because that is the
+ * decision being made; turning it off says that the link it gave out stops
+ * working for good, because that is the part that cannot be undone.
+ */
+export function ShareControl({
+  project,
+  busy,
+  onChange,
+}: {
+  project: ProjectSummary;
+  busy: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const field = useRef<HTMLInputElement | null>(null);
+  const share = project.share ?? { on: false, url: null, held: false };
+  const label = share.held ? 'Link off' : share.on ? 'Shared' : 'Share';
+
+  async function copy(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      // No clipboard (an insecure context, or a browser that refused):
+      // select the link so the person can copy it themselves.
+      field.current?.select();
+    }
+  }
+
+  return (
+    <details className="projectbar__share">
+      <summary
+        className={`projectbar__sharebutton${share.on && !share.held ? ' projectbar__sharebutton--on' : ''}`}
+      >
+        {label}
+      </summary>
+      <div className="projectbar__sharepanel">
+        {share.held ? (
+          <p className="pane-note pane-note--error" role="status">
+            This project&apos;s link has been turned off by the operator, and
+            cannot be turned on again. Write to the abuse address if you think
+            this is a mistake.
+          </p>
+        ) : share.on && share.url ? (
+          <>
+            <p className="pane-note">
+              Anyone with this link can see the project&apos;s preview and code,
+              and copy it into their own account.
+            </p>
+            <div className="projectbar__sharerow">
+              <input
+                ref={field}
+                className="projectbar__sharelink"
+                readOnly
+                value={share.url}
+                aria-label="Share link"
+                onFocus={(event) => event.currentTarget.select()}
+              />
+              <button
+                type="button"
+                className="chip"
+                onClick={() => void copy(share.url!)}
+              >
+                {copied ? 'Copied' : 'Copy link'}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={() => onChange(false)}
+            >
+              Turn off link
+            </button>
+            <p className="pane-note">
+              Turning it off stops this link working for good. Turning it on
+              again makes a new one.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="pane-note">
+              Anyone with the link will see this project&apos;s live preview and
+              its code, and can copy it into their own account with its style,
+              reference page, model, instructions and visual preferences. Your
+              conversation with the agent, your name and your email are not
+              shared.
+            </p>
+            <button
+              type="button"
+              className="chip chip--on"
+              disabled={busy || project.archived}
+              onClick={() => onChange(true)}
+            >
+              {busy ? 'Turning on…' : 'Turn on link'}
+            </button>
+          </>
+        )}
+      </div>
+    </details>
   );
 }
 

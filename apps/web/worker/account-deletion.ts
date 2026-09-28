@@ -51,6 +51,7 @@ import { GitHubStore } from './github-store.ts';
 import { previewConfigured, stopPreview } from './preview-client.ts';
 import type { PreviewServiceEnv, ServiceOutcome } from './preview-client.ts';
 import { topupKeyFor } from './reserve.ts';
+import { sharePreviewKey } from './share-link.ts';
 import { createStripeClient, stripeConfigured } from './stripe-client.ts';
 import type { StripeEnv } from './stripe-client.ts';
 import {
@@ -253,9 +254,10 @@ async function cancelSubscriptions(
 
 export interface ImmediateOptions {
   /**
-   * Take the account's published site down, as its owner. Present only
-   * while the person is asking: see this file's header for why the nightly
-   * pass never has it.
+   * Take every site the account has published down, as its owner: an
+   * account has one per project it published. Present only while the
+   * person is asking: see this file's header for why the nightly pass never
+   * has it.
    */
   takeDown?: () => Promise<unknown>;
 }
@@ -277,10 +279,22 @@ const STEPS: Record<
   // No preview service means no sandbox can be running, and one that was
   // started before the service was removed has outlived the 30-minute hard
   // lifetime anyway (docs/decisions.md, "Values set").
+  //
+  // And the live previews the account's share links started
+  // (`share-handlers.ts`), one sandbox per link, named for the link rather
+  // than the account. The links themselves stopped working when the request
+  // was recorded (`ProjectStore.findShared` refuses an account that is
+  // leaving), but a stranger already watching one would otherwise keep it
+  // for the rest of its lifetime.
   preview: async (deps, userId) => {
     if (!deps.stopPreview) return true;
     const outcome = await deps.stopPreview(userId);
-    return outcome.ok ? true : STEP_FAILED.preview;
+    if (!outcome.ok) return STEP_FAILED.preview;
+    for (const token of await deps.store.shareTokens(userId)) {
+      const shared = await deps.stopPreview(await sharePreviewKey(token));
+      if (!shared.ok) return STEP_FAILED.preview;
+    }
+    return true;
   },
 
   // Done when D1 says nothing of this account's is serving, whatever took
@@ -320,7 +334,9 @@ const STEPS: Record<
 export const QUERIES_PER_RETRY =
   // The customer mapping, then the mirror when there is no mapping.
   2 +
-  // Preview: none. Sites: the live-site read. GitHub: the revoke.
+  // Preview: the share links whose previews to stop. Sites: the live-site
+  // read. GitHub: the revoke.
+  1 +
   1 +
   1 +
   // Referrals: the reversal and the code.

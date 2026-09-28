@@ -115,6 +115,7 @@ function controller(
     duplicate: note('duplicate'),
     setArchived: note('setArchived'),
     remove: note('remove'),
+    setShared: note('setShared'),
     ...over,
   };
 }

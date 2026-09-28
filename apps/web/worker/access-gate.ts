@@ -20,6 +20,12 @@
  *   It carries no secret and grants nothing; the write is behind `/bind`,
  *   which is gated.
  *
+ * And a share link's two public routes, `/api/share/:token` and its
+ * `/preview`, are browser routes that resolve no principal to be read, on
+ * purpose: the token in the path is the grant, given out by an owner who
+ * was invited when they gave it. Starting the preview is the exception and
+ * does resolve one. Their entries below say why each is safe open.
+ *
  * Worth stating rather than leaving implied, because this comment is what
  * the next route classification will be read against, and a rule with two
  * unmentioned exceptions is a rule somebody will apply to a third.
@@ -68,6 +74,14 @@ export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
   // Copies a project's code and conversation into a new one: storage, and
   // a new project, for the reason POST on `/api/projects` is gated.
   '/api/projects/:id/duplicate': ['POST'],
+  // POST turns a project's share link on, which puts somebody's generated
+  // code in front of anybody holding the link, and lets them start a live
+  // preview of it (`share-handlers.ts`): new exposure, and new sandbox time
+  // on this deployment's containers. DELETE turns it off again, and is
+  // open for the reason DELETE on `/api/preview/share` is: a revoked owner
+  // who could not pull their own link would be left with their work in
+  // front of strangers and no control that stops it.
+  '/api/projects/:id/share': ['POST'],
 };
 
 /** Routes an uninvited caller must not reach, whatever the method. */
@@ -92,6 +106,13 @@ export const GATED_PATHS: readonly string[] = [
   // uses is the one `/api/github/bind` creates, and bind is gated: an
   // account that may not create the grant may not spend it either.
   '/api/github/diff',
+  // Copies somebody's shared project into the caller's account: a new
+  // project, its code and its media in storage the caller then holds. The
+  // same act as duplicating one's own project, which is gated, pointed at
+  // somebody else's. An uninvited account that follows a link still sees
+  // the project (`/api/share/:token` below); making it theirs is starting
+  // new work, which is what an invite buys.
+  '/api/share/:token/remix',
   // Takes money, which an uninvited account has no reason to be able to do.
   '/api/billing/checkout',
   // Saves a card, and the card is what the welcome credit is paid on. It
@@ -159,6 +180,52 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // The routes that do start work in a project (`/api/plan`, `/api/chat`)
   // stay gated, and that is where an invite is spent.
   '/api/projects/:id': "the caller's own project: read, tidy or delete it",
+  // A shared project, as the stranger its owner sent the link to sees it:
+  // its name and its accepted code, read-only. Not gated, and not
+  // authenticated either, which makes it the third entry here that
+  // resolves no principal, after the two webhooks-and-redirects named at
+  // the top of this file. It has to be: the link is how an owner shows
+  // their work to somebody who may have no account at all, and a link that
+  // demanded an invite would only ever reach people who could already see
+  // it some other way.
+  //
+  // Safe to leave open because the token is the whole of the grant, and it
+  // is the owner's to give: 256 random bits, minted only by an invited
+  // owner (POST on `/api/projects/:id/share` is gated), forgotten when they
+  // turn it off, and refused whenever the project is archived, deleted or
+  // held, or its owner is suspended or leaving (`ProjectStore.findShared`).
+  // It is read-only in fact: it writes nothing, and it reveals nothing about
+  // the owner. Every request is counted against the caller's address before
+  // the database is read (`SHARE_BURST`).
+  '/api/share/:token':
+    'a public link its owner chose to give out; the token is the grant',
+  // The shared project's live preview: its state (GET), and starting it
+  // (POST). The one route here that is not read-only, and the reason is
+  // worth stating rather than hiding behind the entry above. Starting it
+  // spends sandbox time, and spending is what the gate exists to guard.
+  //
+  // Starting it needs a signed-in account (docs/decisions.md, 2026-09-28):
+  // the handler resolves a principal before it starts anything, refuses an
+  // account that is suspended or leaving, and counts starts per account
+  // (`SHARE_PREVIEW_BURST`) as well as per address. Signed in, because a
+  // sandbox is the one thing a link lets a stranger spend, and an account is
+  // something a start can be counted against, refused, and traced to if a
+  // link is used to keep containers busy; an address is none of those.
+  // Reading its state stays open to anybody holding the link, like the view,
+  // and a stranger who is not signed in can still watch a preview somebody
+  // else started.
+  //
+  // Not behind the invite, though, and that is the decision this entry is
+  // for. The spending is the owner's: they turned the link on behind the
+  // gate, and it is bounded by the link rather than by who opens it: one
+  // sandbox per link however many people do (`sharePreviewKey`), the
+  // preview's usual lifetime, the same container budget every preview
+  // queues in, and no model spend. A viewer who was never invited can start,
+  // at most, what the owner could have started for them, and demanding an
+  // invite of the people an owner shows their work to would make the link
+  // useful only to those who could already build.
+  '/api/share/:token/preview':
+    "the owner's shared preview: starting it needs an account, not an invite",
   // Revocation does not cancel a subscription in Stripe, and this and
   // `/api/billing/cancel` below are the only ways to cancel one. Gating it
   // would take a customer's access away while their card kept being
@@ -245,25 +312,57 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
  */
 export const PROJECT_ITEM_ROUTE = '/api/projects/:id';
 export const PROJECT_DUPLICATE_ROUTE = '/api/projects/:id/duplicate';
+export const PROJECT_SHARE_ROUTE = '/api/projects/:id/share';
+/**
+ * A share link's routes carry its token rather than a project id, and are
+ * named the same way for the same reason (`share-handlers.ts`).
+ */
+export const SHARE_VIEW_ROUTE = '/api/share/:token';
+export const SHARE_PREVIEW_ROUTE = '/api/share/:token/preview';
+export const SHARE_REMIX_ROUTE = '/api/share/:token/remix';
 
 const PROJECT_ITEM = /^\/api\/projects\/([^/]+)$/;
 const PROJECT_DUPLICATE = /^\/api\/projects\/([^/]+)\/duplicate$/;
+const PROJECT_SHARE = /^\/api\/projects\/([^/]+)\/share$/;
+const SHARE_VIEW = /^\/api\/share\/([^/]+)$/;
+const SHARE_PREVIEW = /^\/api\/share\/([^/]+)\/preview$/;
+const SHARE_REMIX = /^\/api\/share\/([^/]+)\/remix$/;
 
 export function routeKeyFor(pathname: string): string {
   if (PROJECT_DUPLICATE.test(pathname)) return PROJECT_DUPLICATE_ROUTE;
+  if (PROJECT_SHARE.test(pathname)) return PROJECT_SHARE_ROUTE;
   if (PROJECT_ITEM.test(pathname)) return PROJECT_ITEM_ROUTE;
+  if (SHARE_PREVIEW.test(pathname)) return SHARE_PREVIEW_ROUTE;
+  if (SHARE_REMIX.test(pathname)) return SHARE_REMIX_ROUTE;
+  if (SHARE_VIEW.test(pathname)) return SHARE_VIEW_ROUTE;
   return pathname;
 }
 
-/** The id in a project route's path, still to be checked for shape. */
-export function projectIdInPath(pathname: string): string | null {
-  const match = PROJECT_DUPLICATE.exec(pathname) ?? PROJECT_ITEM.exec(pathname);
+function segment(match: RegExpExecArray | null): string | null {
   if (!match) return null;
   try {
     return decodeURIComponent(match[1]!);
   } catch {
     return null;
   }
+}
+
+/** The id in a project route's path, still to be checked for shape. */
+export function projectIdInPath(pathname: string): string | null {
+  return segment(
+    PROJECT_DUPLICATE.exec(pathname) ??
+      PROJECT_SHARE.exec(pathname) ??
+      PROJECT_ITEM.exec(pathname),
+  );
+}
+
+/** The token in a share route's path, still to be checked for shape. */
+export function shareTokenInPath(pathname: string): string | null {
+  return segment(
+    SHARE_PREVIEW.exec(pathname) ??
+      SHARE_REMIX.exec(pathname) ??
+      SHARE_VIEW.exec(pathname),
+  );
 }
 
 export function isGated(pathname: string, method: string): boolean {

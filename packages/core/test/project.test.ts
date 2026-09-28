@@ -10,6 +10,7 @@ import {
   clipTranscriptTurn,
   copyName,
   parseTranscript,
+  remixName,
   settledTranscript,
 } from '../src/project.ts';
 import type { TranscriptTurn } from '../src/project.ts';
@@ -148,5 +149,12 @@ describe('project names', () => {
     const long = copyName('x'.repeat(PROJECT_NAME_MAX_CHARS));
     assert.equal(long.length, PROJECT_NAME_MAX_CHARS);
     assert.ok(long.endsWith(' (copy)'));
+  });
+
+  it('names a remix for where it came from, within the bound', () => {
+    assert.equal(remixName('Bakery'), 'Remix of Bakery');
+    const long = remixName('x'.repeat(PROJECT_NAME_MAX_CHARS));
+    assert.equal(long.length, PROJECT_NAME_MAX_CHARS);
+    assert.ok(long.startsWith('Remix of '));
   });
 });

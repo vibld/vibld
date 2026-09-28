@@ -719,3 +719,98 @@ describe('taking a published site down', () => {
     view.unmount();
   });
 });
+
+/**
+ * One site per project (docs/decisions.md, "Resolved 2026-09-28"). The
+ * button now knows, from the project it was opened with, whether that
+ * project has a site and under what name, and it names the project on
+ * every request, so publishing one project can only ever touch its own.
+ */
+describe('the publish button, per project', () => {
+  const siteReply = () =>
+    reply({
+      slug: 'bakery',
+      url: 'https://bakery.vibld-preview.dev/',
+      skipped: [],
+    });
+
+  it('names the project on a publish and on a takedown', async () => {
+    let answer = siteReply;
+    const calls = serving(() => answer());
+    const view = await mount(
+      <PublishButton snapshot={snapshot('r1')} projectId="project-7" />,
+    );
+    await view.type('bakery');
+    await view.click();
+    assert.equal(calls[0]?.body?.projectId, 'project-7');
+
+    answer = () => reply({ slug: 'bakery' });
+    await view.askToTakeDown();
+    await view.confirm();
+    assert.equal(calls[1]?.method, 'DELETE');
+    assert.deepEqual(calls[1]?.body, { projectId: 'project-7' });
+    view.unmount();
+  });
+
+  it("starts from the project's live site: no slug to type, and a way to take it down", async () => {
+    const calls = serving(siteReply);
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r1')}
+        projectId="project-7"
+        site={{
+          slug: 'bakery',
+          state: 'live',
+          url: 'https://bakery.vibld-preview.dev/',
+        }}
+      />,
+    );
+    assert.equal(view.slug(), null, 'asked for a slug it already has');
+    assert.equal(view.label(), 'Republish');
+    assert.ok(view.takeDownButton(), 'no way to take the site down');
+
+    await view.click();
+    assert.equal(calls[0]?.body?.slug, 'bakery');
+    view.unmount();
+  });
+
+  it('starts from a site its owner took down as one to publish again', async () => {
+    serving(siteReply);
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r1')}
+        projectId="project-7"
+        site={{
+          slug: 'bakery',
+          state: 'down',
+          url: 'https://bakery.vibld-preview.dev/',
+        }}
+      />,
+    );
+    assert.equal(view.label(), 'Publish again');
+    assert.equal(view.takeDownButton(), undefined);
+    view.unmount();
+  });
+
+  it('offers nothing for a site an operator took down, and says so', async () => {
+    const calls = serving(siteReply);
+    const view = await mount(
+      <PublishButton
+        snapshot={snapshot('r1')}
+        projectId="project-7"
+        site={{
+          slug: 'bakery',
+          state: 'held',
+          url: 'https://bakery.vibld-preview.dev/',
+        }}
+      />,
+    );
+    assert.equal(view.container.querySelector('button'), null);
+    assert.match(
+      view.container.textContent ?? '',
+      /taken down by the operator/,
+    );
+    assert.equal(calls.length, 0);
+    view.unmount();
+  });
+});

@@ -39,6 +39,28 @@ export interface ProjectSummary {
   hasCode: boolean;
   turns: number;
   settings: ProjectSettings;
+  /**
+   * The project's share link. `url` is null while it is off; `held` is an
+   * operator's hold, which the owner cannot lift. Absent from a Worker
+   * older than sharing, which reads as off.
+   */
+  share?: ProjectShare;
+  /** The project's published site, or null for one never published. */
+  site?: ProjectSite | null;
+}
+
+export interface ProjectShare {
+  on: boolean;
+  url: string | null;
+  held: boolean;
+}
+
+export type SiteState = 'live' | 'down' | 'held';
+
+export interface ProjectSite {
+  slug: string;
+  state: SiteState;
+  url: string;
 }
 
 export interface ProjectLimits {
@@ -286,6 +308,24 @@ export async function duplicateProject(
     await call(
       `/api/projects/${encodeURIComponent(id)}/duplicate`,
       { method: 'POST', body: {} },
+      deps,
+    ),
+  );
+}
+
+/**
+ * Turn the project's share link on, or off. Off is for good: the link that
+ * was sent stops working, and turning it on again makes a new one.
+ */
+export async function setProjectShared(
+  id: string,
+  on: boolean,
+  deps: ClientDeps = {},
+): Promise<ProjectResult<ProjectSummary>> {
+  return project(
+    await call(
+      `/api/projects/${encodeURIComponent(id)}/share`,
+      on ? { method: 'POST', body: {} } : { method: 'DELETE' },
       deps,
     ),
   );

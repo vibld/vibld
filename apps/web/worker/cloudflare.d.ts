@@ -71,6 +71,14 @@ interface D1PreparedStatement {
 
 interface D1Database {
   prepare(query: string): D1PreparedStatement;
+  /**
+   * Several statements in one transaction, in order: all of them or none.
+   * For a state change and the record of who made it, which must not land
+   * apart (`ProjectStore.holdShare`), the same use apps/publish makes of it.
+   */
+  batch<T = Record<string, unknown>>(
+    statements: D1PreparedStatement[],
+  ): Promise<D1Result<T>[]>;
 }
 
 /** The `r2_buckets` binding, narrowed to plain text get/put. */

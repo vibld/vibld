@@ -69,6 +69,9 @@ describe('the rate limit bindings', () => {
       'IP_BURST',
       'PUBLISH_BURST',
       'GITHUB_BURST',
+      'SHARE_BURST',
+      'REMIX_BURST',
+      'SHARE_PREVIEW_BURST',
     ]) {
       assert.ok(names.has(required), `${required} is not declared`);
     }

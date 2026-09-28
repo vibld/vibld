@@ -6,6 +6,7 @@ import { isStylePresetId } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
 import { D1GenerationStore, snapshotKey } from './generation-store.ts';
+import { isProjectId } from './request-guard.ts';
 import { assertPrefixSafe, deletePrefix } from './storage-purge.ts';
 
 /**
@@ -65,6 +66,35 @@ export interface ProjectRecord {
   settings: ProjectSettings;
   transcriptKey: string | null;
   transcriptTurns: number;
+  share: ProjectShare;
+  /** The project's published site, or null for one never published. */
+  site: ProjectSite | null;
+}
+
+/**
+ * The project's share link (`0034_project_share.sql`).
+ *
+ * `token` is the secret the link carries, null while the link is off.
+ * `heldAt` is an operator's hold, which the owner cannot clear: while it
+ * stands the link serves nothing whatever `token` says.
+ */
+export interface ProjectShare {
+  token: string | null;
+  sharedAt: string | null;
+  heldAt: string | null;
+}
+
+/**
+ * What the project's published site is doing, read the way the publish
+ * service reads it (`apps/publish`'s `stateOf`): an operator's hold
+ * outranks everything, a slug with no revision behind it serves nothing,
+ * and a takedown is down.
+ */
+export type SiteState = 'live' | 'down' | 'held';
+
+export interface ProjectSite {
+  slug: string;
+  state: SiteState;
 }
 
 interface ProjectRow {
@@ -84,20 +114,49 @@ interface ProjectRow {
   style_dna: string | null;
   transcript_key: string | null;
   transcript_turns: number;
+  share_token: string | null;
+  shared_at: string | null;
+  share_held_at: string | null;
+  site_slug: string | null;
+  site_unpublished_at: string | null;
+  site_held_at: string | null;
+  site_generation: string | null;
 }
 
 /**
  * The columns every read selects, with the accepted revision and the later
  * of the two edit times from the generation store's row beside them. A
  * LEFT JOIN, because a project nobody has built in yet has no row there.
+ *
+ * The published site is joined the same way, by the key the publish
+ * service has always used for it (`published_projects.project_id`, UNIQUE,
+ * so at most one row). Read here rather than asked of the publish service,
+ * because the builder needs it for every project in the list and a round
+ * trip per row would be the list's whole cost; the table is in this
+ * database already, and `account-deletion-store.ts` reads it the same way.
  */
 const SELECT = `SELECT p.id, p.user_id, p.name, p.archived_at, p.created_at,
        p.updated_at, p.last_opened_at, p.style_preset, p.reference_url,
        p.model, p.knowledge, p.style_dna, p.transcript_key,
-       p.transcript_turns, g.accepted_revision,
-       MAX(p.updated_at, COALESCE(g.updated_at, p.updated_at)) AS edited_at
+       p.transcript_turns, p.share_token, p.shared_at, p.share_held_at,
+       g.accepted_revision,
+       MAX(p.updated_at, COALESCE(g.updated_at, p.updated_at)) AS edited_at,
+       s.slug AS site_slug, s.unpublished_at AS site_unpublished_at,
+       s.held_at AS site_held_at, s.generation AS site_generation
   FROM projects AS p
-  LEFT JOIN generation_projects AS g ON g.id = p.id`;
+  LEFT JOIN generation_projects AS g ON g.id = p.id
+  LEFT JOIN published_projects AS s ON s.project_id = p.id`;
+
+function siteOf(row: ProjectRow): ProjectSite | null {
+  if (row.site_slug === null) return null;
+  const state: SiteState =
+    row.site_held_at !== null
+      ? 'held'
+      : row.site_generation === null || row.site_unpublished_at !== null
+        ? 'down'
+        : 'live';
+  return { slug: row.site_slug, state };
+}
 
 function styleDnaOf(raw: string | null): StyleDna | null {
   if (raw === null) return null;
@@ -131,6 +190,12 @@ function recordOf(row: ProjectRow): ProjectRecord {
     },
     transcriptKey: row.transcript_key,
     transcriptTurns: row.transcript_turns,
+    share: {
+      token: row.share_token,
+      sharedAt: row.shared_at,
+      heldAt: row.share_held_at,
+    },
+    site: siteOf(row),
   };
 }
 
@@ -475,27 +540,34 @@ export class ProjectStore {
 
   /**
    * Copy a project into a new one, owned by `ownerId`, unless that would
-   * take the owner past `limit`: its accepted code, its settings and its
-   * conversation, under the name given.
+   * take the owner past `limit`: its accepted code, its settings and, unless
+   * `transcript` is false, its conversation, under the name given.
    *
    * Only the accepted revision is copied, not the history of revisions
    * behind it, and not the run history either: a copy is a new project that
    * starts where the original stands, and the runs were the original's.
    *
    * The owner is a parameter rather than the source's own because copying
-   * somebody's shared project into your account is this same operation
-   * with a different owner, and the caller is what decides whether that is
-   * allowed. Today the only caller copies within one account.
+   * somebody's shared project into your account (a remix,
+   * `share-handlers.ts`) is this same operation with a different owner, and
+   * the caller is what decides whether that is allowed. A remix leaves the
+   * conversation behind and passes `prepare`, which copies the media the
+   * code uses into the new owner's library and hands back the code to
+   * store, with any reference it had to rename renamed in it.
    *
-   * `null` when the limit refused it. A copy that fails part way is removed
-   * again before the error is thrown, so a refused or broken duplicate
-   * never leaves a half-made project in somebody's list.
+   * `null` when the limit refused it. A copy that fails part way, `prepare`
+   * included, is removed again before the error is thrown, so a refused or
+   * broken copy never leaves a half-made project in somebody's list.
    */
   async duplicate(
     source: ProjectRecord,
     ownerId: string,
     copy: { id: string; name: string; now: string },
     limit: ActiveLimit,
+    options: {
+      transcript?: boolean;
+      prepare?: (snapshot: ProjectSnapshot) => Promise<ProjectSnapshot>;
+    } = {},
   ): Promise<ProjectRecord | null> {
     const created = await this.create(
       ownerId,
@@ -504,7 +576,11 @@ export class ProjectStore {
     );
     if (!created) return null;
     try {
-      const snapshot = await this.accepted(source.id);
+      const accepted = await this.accepted(source.id);
+      const snapshot =
+        accepted && options.prepare
+          ? await options.prepare(accepted)
+          : accepted;
       if (snapshot) {
         await this.#bucket.put(
           snapshotKey(copy.id, snapshot.revision),
@@ -519,15 +595,253 @@ export class ProjectStore {
           .bind(copy.id, snapshot.revision, copy.now)
           .run();
       }
-      const turns = await this.readTranscript(source);
-      if (turns.length > 0) {
-        await this.saveTranscript(ownerId, copy.id, turns, copy.now);
+      if (options.transcript !== false) {
+        const turns = await this.readTranscript(source);
+        if (turns.length > 0) {
+          await this.saveTranscript(ownerId, copy.id, turns, copy.now);
+        }
       }
     } catch (error) {
       await this.remove(copy.id).catch(() => undefined);
       throw error;
     }
     return this.find(ownerId, copy.id);
+  }
+
+  // -----------------------------------------------------------------------
+  // The share link (`0034_project_share.sql`).
+  // -----------------------------------------------------------------------
+
+  /**
+   * Turn the link on, with `token` if it has none, and say what happened.
+   *
+   * A link that is already on keeps its token: pressing "Share" twice must
+   * not break the link that was sent after the first press. An archived
+   * project is refused, because an archived project's link does not serve
+   * (`findShared`), and turning on a link that cannot work would tell the
+   * owner something untrue. An operator's hold is refused, because the
+   * hold is on the project and the owner turning the link on again is
+   * exactly what it exists to stop.
+   *
+   * Decided in the UPDATE, so a hold landing between a read and this write
+   * cannot be beaten by timing: the shape `claimSlug` and `unpublish` in
+   * apps/publish settled on for the same reason.
+   */
+  async enableShare(
+    userId: string,
+    id: string,
+    token: string,
+    now: string,
+  ): Promise<'on' | 'held' | 'archived' | 'missing'> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE projects
+            SET share_token = COALESCE(share_token, ?3),
+                shared_at = COALESCE(shared_at, ?4)
+          WHERE id = ?1 AND user_id = ?2
+            AND share_held_at IS NULL AND archived_at IS NULL`,
+      )
+      .bind(id, userId, token, now)
+      .run();
+    if ((result.meta?.changes ?? 0) > 0) return 'on';
+    const current = await this.find(userId, id);
+    if (!current) return 'missing';
+    return current.share.heldAt !== null ? 'held' : 'archived';
+  }
+
+  /**
+   * Turn the link off. The token is forgotten, so the link that was sent is
+   * dead for good, and turning it on again makes a different one.
+   *
+   * Never refused, held or not: taking something off the web is the one
+   * thing an owner must always be able to do (`access-gate.ts`).
+   */
+  async disableShare(userId: string, id: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE projects SET share_token = NULL, shared_at = NULL
+          WHERE id = ?1 AND user_id = ?2`,
+      )
+      .bind(id, userId)
+      .run();
+  }
+
+  /**
+   * The project a share link names, if the link may be served.
+   *
+   * Every reason a link stops working is a condition here, in one
+   * statement, so there is no order of reads in which one of them is
+   * missed:
+   *
+   * - the link is off: no project has the token;
+   * - an operator holds it (`share_held_at`);
+   * - the project is archived: an owner who put a project away has put its
+   *   link away with it, and unarchiving brings the link back;
+   * - the project is deleted: the row, and the token with it, is gone;
+   * - the owner is suspended (`billing_clawbacks`, the reading
+   *   `BillingStore.isSuspended` makes): a suspension stops what an account
+   *   offers to others as well as what it spends;
+   * - the owner has asked for the account to be deleted (`account_deletions`,
+   *   the reading `AccountDeletionStore.pending` makes): from the request
+   *   on, the account is refused everything, and its work staying viewable
+   *   by strangers would be the one exception.
+   *
+   * `null` for every one of them alike, so what a stranger is told does not
+   * say which: "held" or "suspended" is a fact about somebody else.
+   */
+  async findShared(token: string): Promise<ProjectRecord | null> {
+    const row = await this.#db
+      .prepare(
+        `${SELECT}
+          WHERE p.share_token = ?1
+            AND p.share_held_at IS NULL AND p.archived_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM billing_clawbacks AS c
+               WHERE c.user_id = p.user_id AND c.suspends = 1
+                 AND c.lifted_at IS NULL)
+            AND NOT EXISTS (
+              SELECT 1 FROM account_deletions AS d
+               WHERE d.user_id = p.user_id AND d.cancelled_at IS NULL
+                 AND d.purged_at IS NULL)`,
+      )
+      .bind(token)
+      .first<ProjectRow>();
+    return row ? recordOf(row) : null;
+  }
+
+  /**
+   * The share links this account has on, for stopping the live previews
+   * they may have started when the account is being deleted.
+   */
+  async shareTokens(userId: string): Promise<string[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT share_token FROM projects
+          WHERE user_id = ?1 AND share_token IS NOT NULL`,
+      )
+      .bind(userId)
+      .all<{ share_token: string }>();
+    return (result.results ?? []).map((row) => row.share_token);
+  }
+
+  /**
+   * The project an operator means by a share link: the one that has it now
+   * or, failing that, the last one it was held on.
+   *
+   * The second reading is for a release. An owner can turn a held link off,
+   * which forgets the token, and the operator releasing the hold still only
+   * has the link the report carried.
+   */
+  async #shareTarget(token: string): Promise<string | null> {
+    const current = await this.#db
+      .prepare(`SELECT id FROM projects WHERE share_token = ?1`)
+      .bind(token)
+      .first<{ id: string }>();
+    if (current) return current.id;
+    const held = await this.#db
+      .prepare(
+        `SELECT h.project_id FROM project_share_holds AS h
+           JOIN projects AS p ON p.id = h.project_id
+          WHERE h.share_token = ?1 AND h.action = 'held'
+          ORDER BY h.id DESC LIMIT 1`,
+      )
+      .bind(token)
+      .first<{ project_id: string }>();
+    return held?.project_id ?? null;
+  }
+
+  /**
+   * An operator stopping a share link, and saying who and why.
+   *
+   * The flag and its record in one batch, as `PublishStore.hold` writes
+   * them, so the one cannot land without the other. Holding a held link
+   * again overwrites the reason, for the reason that method gives.
+   *
+   * The project's id, or null when no project has or had this link.
+   */
+  async holdShare(
+    token: string,
+    by: string,
+    reason: string,
+    now: string,
+  ): Promise<string | null> {
+    const id = await this.#shareTarget(token);
+    if (!id) return null;
+    await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE projects
+              SET share_held_at = ?2, share_held_by = ?3,
+                  share_held_reason = ?4
+            WHERE id = ?1`,
+        )
+        .bind(id, now, by, reason),
+      this.#db
+        .prepare(
+          `INSERT INTO project_share_holds
+             (project_id, share_token, action, actor, reason, at)
+           VALUES (?1, ?2, 'held', ?3, ?4, ?5)`,
+        )
+        .bind(id, token, by, reason, now),
+    ]);
+    return id;
+  }
+
+  /**
+   * Lift a hold on a share link. The link serves again only if the owner
+   * has not turned it off meanwhile, the rule a published site's release
+   * keeps: releasing hands the decision back rather than making it.
+   *
+   * The record is written only when there is a hold to lift, in the same
+   * batch as the clear and conditioned on the same row, so a release that
+   * found nothing leaves no entry saying it lifted something.
+   */
+  async releaseShare(
+    token: string,
+    by: string,
+    now: string,
+  ): Promise<{ id: string; on: boolean } | 'missing' | 'not-held'> {
+    const id = await this.#shareTarget(token);
+    if (!id) return 'missing';
+    const [recorded] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `INSERT INTO project_share_holds
+             (project_id, share_token, action, actor, reason, at)
+           SELECT ?1, ?2, 'released', ?3, NULL, ?4
+            WHERE EXISTS (SELECT 1 FROM projects
+                           WHERE id = ?1 AND share_held_at IS NOT NULL)`,
+        )
+        .bind(id, token, by, now),
+      this.#db
+        .prepare(
+          `UPDATE projects
+              SET share_held_at = NULL, share_held_by = NULL,
+                  share_held_reason = NULL
+            WHERE id = ?1`,
+        )
+        .bind(id),
+    ]);
+    if ((recorded?.meta?.changes ?? 0) === 0) return 'not-held';
+    const row = await this.#db
+      .prepare(`SELECT share_token FROM projects WHERE id = ?1`)
+      .bind(id)
+      .first<{ share_token: string | null }>();
+    return { id, on: (row?.share_token ?? null) !== null };
+  }
+
+  /** What an operator has done to this project's link, oldest first. */
+  async shareHoldHistory(
+    projectId: string,
+  ): Promise<{ action: string; actor: string; reason: string | null }[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT action, actor, reason FROM project_share_holds
+          WHERE project_id = ?1 ORDER BY id`,
+      )
+      .bind(projectId)
+      .all<{ action: string; actor: string; reason: string | null }>();
+    return (result.results ?? []).map((row) => ({ ...row }));
   }
 }
 
@@ -597,4 +911,96 @@ export async function resolveRunProject(
     null,
   );
   return { ok: true, projectId: id };
+}
+
+/**
+ * Which project's site a publish or a takedown is about (docs/decisions.md,
+ * "Resolved 2026-09-28", one site per project).
+ *
+ * The builder names the project it has open. A project the caller names
+ * has to be theirs, and is "not found" otherwise, for the reason
+ * `resolveRunProject` gives. An archived project cannot be published,
+ * because it cannot be built in either and publishing it would put up work
+ * its owner put away; its site can still be taken down, because taking
+ * something off the web is never refused (`access-gate.ts`).
+ *
+ * A request that names no project comes from a builder older than this
+ * change, which published the account's one site under the caller's user
+ * id. That id is also the id of the project 0033 made from the account's
+ * work, so it is read as that project, and an old tab keeps publishing and
+ * taking down the site it always did. If the account no longer has that
+ * project, an old tab's publish is refused and asked to reload, rather than
+ * guessed onto some other project's site; its takedown still goes to the
+ * publish service under the old key, which answers for whatever is there.
+ *
+ * Without a database there are no projects to check, and the id is taken
+ * as named.
+ */
+export type SiteProject =
+  | { ok: true; projectId: string }
+  | { ok: false; status: number; error: string };
+
+export async function resolveSiteProject(
+  store: ProjectStore | null,
+  userId: string,
+  requested: unknown,
+  options: { allowArchived: boolean },
+): Promise<SiteProject> {
+  if (
+    requested !== undefined &&
+    requested !== null &&
+    !isProjectId(requested)
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error: '"projectId" is not a project id.',
+    };
+  }
+  const named = typeof requested === 'string' ? requested : null;
+  if (!store) return { ok: true, projectId: named ?? userId };
+
+  const project = await store.find(userId, named ?? userId);
+  if (!project) {
+    if (named === null && options.allowArchived) {
+      return { ok: true, projectId: userId };
+    }
+    return named === null
+      ? {
+          ok: false,
+          status: 400,
+          error: 'This page is out of date. Reload it to publish.',
+        }
+      : { ok: false, status: 404, error: 'That project does not exist.' };
+  }
+  if (project.archivedAt !== null && !options.allowArchived) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'This project is archived. Unarchive it to publish it.',
+    };
+  }
+  return { ok: true, projectId: project.id };
+}
+
+/**
+ * Every project of this account's that has a site serving, for taking all
+ * of them down when the account is deleted. Read the way `liveSite` in
+ * `account-deletion-store.ts` reads it, so "all down" here and "nothing
+ * serving" there are the same fact.
+ */
+export async function liveSiteProjects(
+  db: D1Database,
+  userId: string,
+): Promise<string[]> {
+  const result = await db
+    .prepare(
+      `SELECT project_id FROM published_projects
+        WHERE user_id = ?1 AND unpublished_at IS NULL
+          AND held_at IS NULL AND generation IS NOT NULL
+        ORDER BY slug`,
+    )
+    .bind(userId)
+    .all<{ project_id: string }>();
+  return (result.results ?? []).map((row) => row.project_id);
 }

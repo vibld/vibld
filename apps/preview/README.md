@@ -63,6 +63,14 @@ pnpm --filter @vibld/preview test
   (see `internal-auth.ts`).
 - **`worker/share-token.ts`** -- the "signed" half of L10: a pure,
   storage-free HMAC-SHA256 sign/verify pair for share links.
+- **`worker/start-request.ts`** -- what `/internal/preview/start` accepts.
+  A sandbox is named for its user, except a shared project's live preview
+  (apps/web's `share-handlers.ts`), which runs in one sandbox per project
+  share link, named for the link, so a stranger's viewing never costs more
+  than one sandbox per link. That sandbox serves its project owner's media,
+  so apps/web names the owner as `mediaOwner`; still only the files the
+  code references are served. Absent, the media owner is the sandbox's own
+  name, as it always was.
 
 ## Why a separate package, not a folder in apps/web
 

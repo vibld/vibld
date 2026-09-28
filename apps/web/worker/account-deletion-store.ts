@@ -384,7 +384,25 @@ export class AccountDeletionStore {
   // ---------------------------------------------------------------------
 
   /**
-   * Whether this account still has a site anybody can reach.
+   * The share links this account's projects have on (`0034_project_share.
+   * sql`), for stopping the live previews they started. The links stopped
+   * serving the moment the request was recorded; this is only for the
+   * sandboxes a viewer may still be watching.
+   */
+  async shareTokens(userId: string): Promise<string[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT share_token FROM projects
+          WHERE user_id = ?1 AND share_token IS NOT NULL`,
+      )
+      .bind(userId)
+      .all<{ share_token: string }>();
+    return (result.results ?? []).map((row) => row.share_token);
+  }
+
+  /**
+   * Whether this account still has a site anybody can reach: any of them,
+   * since an account has one per project it published.
    *
    * The same reading of a row `publish-store.ts`'s `stateOf` makes: held is
    * not serving, no revision is not serving, and a takedown is not serving.
