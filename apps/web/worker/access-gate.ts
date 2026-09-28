@@ -59,6 +59,15 @@ export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
   // library and DELETE removes a file from it: a revoked account must still
   // be able to see what it uploaded and take it down.
   '/api/media': ['POST'],
+  // POST makes a project, which is starting new work and storage an
+  // uninvited account has no reason to hold. GET lists the caller's own,
+  // which a revoked account must still be able to see: the projects are
+  // what it made while it was invited, and a list it cannot open reads as
+  // the work being taken away.
+  '/api/projects': ['POST'],
+  // Copies a project's code and conversation into a new one: storage, and
+  // a new project, for the reason POST on `/api/projects` is gated.
+  '/api/projects/:id/duplicate': ['POST'],
 };
 
 /** Routes an uninvited caller must not reach, whatever the method. */
@@ -136,6 +145,20 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // description -- the writes happen in the Workflow, behind `/api/plan`,
   // which stays gated.
   '/api/runs': "a read of the caller's own run history",
+  // One of the caller's own projects: open it (GET), rename, archive,
+  // unarchive or save its settings and conversation (PATCH), or delete it
+  // (DELETE). The same rule as the media library and the published site:
+  // revocation is not deletion, and an account that lost its invite still
+  // owns what it made, so it can still read it, tidy it and take it away.
+  //
+  // None of it spends. Opening reads what is stored; a save rewrites one
+  // bounded object the project already has, and there is nothing to save
+  // for an account that was never invited, since every route that would
+  // have produced a conversation or code is gated. Unarchiving is held to
+  // the free tier's limit like creating is, so it is not a way around it.
+  // The routes that do start work in a project (`/api/plan`, `/api/chat`)
+  // stay gated, and that is where an invite is spent.
+  '/api/projects/:id': "the caller's own project: read, tidy or delete it",
   // Revocation does not cancel a subscription in Stripe, and this and
   // `/api/billing/cancel` below are the only ways to cancel one. Gating it
   // would take a customer's access away while their card kept being
@@ -209,8 +232,45 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/admin/publish/release': 'behind the platform-admin check instead',
 };
 
+/**
+ * The routes with an id in the path, by the name the lists above use.
+ *
+ * Every other route is one fixed path, which is what lets the lists be
+ * plain strings and the test read the router's own `pathname === '...'`
+ * comparisons. A project's routes carry its id, so the router turns the
+ * path it was given into one of these names first (`routeKeyFor`) and
+ * compares against that, and both the gate and the test see a fixed string
+ * again. A path that only resembles one (an empty id, or one more segment)
+ * is left as it was, so it matches nothing and is answered 404.
+ */
+export const PROJECT_ITEM_ROUTE = '/api/projects/:id';
+export const PROJECT_DUPLICATE_ROUTE = '/api/projects/:id/duplicate';
+
+const PROJECT_ITEM = /^\/api\/projects\/([^/]+)$/;
+const PROJECT_DUPLICATE = /^\/api\/projects\/([^/]+)\/duplicate$/;
+
+export function routeKeyFor(pathname: string): string {
+  if (PROJECT_DUPLICATE.test(pathname)) return PROJECT_DUPLICATE_ROUTE;
+  if (PROJECT_ITEM.test(pathname)) return PROJECT_ITEM_ROUTE;
+  return pathname;
+}
+
+/** The id in a project route's path, still to be checked for shape. */
+export function projectIdInPath(pathname: string): string | null {
+  const match = PROJECT_DUPLICATE.exec(pathname) ?? PROJECT_ITEM.exec(pathname);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return null;
+  }
+}
+
 export function isGated(pathname: string, method: string): boolean {
-  if (GATED_PATHS.includes(pathname)) return true;
-  const gatedMethods = GATED_METHODS[pathname];
+  // Named here as well as by the router, so a caller that passes the path
+  // as it arrived cannot slip a project route past the lists above.
+  const route = routeKeyFor(pathname);
+  if (GATED_PATHS.includes(route)) return true;
+  const gatedMethods = GATED_METHODS[route];
   return gatedMethods ? gatedMethods.includes(method.toUpperCase()) : false;
 }

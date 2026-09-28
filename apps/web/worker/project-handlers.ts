@@ -1,0 +1,456 @@
+import { canonicalModelId, isKnownModel } from '@vibld/ai';
+import { sanitizeStyleDna } from '@vibld/ai/style-dna';
+import { isStylePresetId } from '@vibld/ai/style-presets';
+import {
+  DEFAULT_PROJECT_NAME,
+  MAX_TRANSCRIPT_BYTES,
+  cleanProjectName,
+  copyName,
+  parseTranscript,
+} from '@vibld/core';
+import type { TranscriptTurn } from '@vibld/core';
+
+import {
+  PROJECT_DUPLICATE_ROUTE,
+  PROJECT_ITEM_ROUTE,
+  projectIdInPath,
+  routeKeyFor,
+} from './access-gate.ts';
+import { BillingStore } from './billing-store.ts';
+import { ACTIVE_PROJECT_LIMIT, tierFor } from './entitlement.ts';
+import type { Tier } from './entitlement.ts';
+import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
+import { ProjectStore } from './project-store.ts';
+import type { ProjectRecord, ProjectSettings } from './project-store.ts';
+import {
+  DEFAULT_LIMITS,
+  checkBodySize,
+  checkRequestOrigin,
+  isProjectId,
+  parseKnowledge,
+  parseReferenceUrl,
+} from './request-guard.ts';
+import type { GuardResult } from './request-guard.ts';
+
+/**
+ * `/api/projects`: the caller's own projects (docs/decisions.md, "Resolved
+ * 2026-09-28", projects).
+ *
+ *     GET    /api/projects                 every project, active and archived
+ *     POST   /api/projects                 make one (held to the tier's limit)
+ *     GET    /api/projects/:id             open one: its settings, its
+ *                                          conversation and its accepted code
+ *     PATCH  /api/projects/:id             rename, archive or unarchive, save
+ *                                          settings and conversation
+ *     DELETE /api/projects/:id             delete it, code and all
+ *     POST   /api/projects/:id/duplicate   copy it (held to the limit)
+ *
+ * Every route that names a project answers 404 for one that is not the
+ * caller's, never 403: "that exists, and it is not yours" is a fact about
+ * somebody else's account.
+ *
+ * In its own module rather than in `index.ts`, which cannot be loaded under
+ * `node --test`, so the ownership rule, the limit and the deletion are
+ * exercised by `projects.test.ts` against the real schema.
+ */
+
+export interface ProjectsEnv {
+  DB?: D1Database;
+  PROJECT_CONTENT?: R2Bucket;
+}
+
+export interface ProjectsDeps {
+  resolvePrincipal: (
+    request: Request,
+  ) => Promise<PrincipalDenied | PrincipalGranted>;
+  now?: () => Date;
+  newId?: () => string;
+  /**
+   * The caller's tier. Defaults to the reading every paid route makes,
+   * `tierFor` over the mirrored subscription, so the limit and the
+   * allowance can never be decided from two different answers.
+   */
+  tierOf?: (userId: string) => Promise<Tier>;
+}
+
+const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+}
+
+const NOT_FOUND = () => json({ error: 'That project does not exist.' }, 404);
+
+/**
+ * A save carries the whole conversation, so its body is allowed the
+ * transcript's own bound plus room for the settings beside it, rather than
+ * the 256 KiB a build request is held to.
+ */
+export const MAX_PROJECT_BODY_BYTES = MAX_TRANSCRIPT_BYTES + 64 * 1024;
+
+/** The code the builder matches on to offer an upgrade rather than retry. */
+export const PROJECT_LIMIT_CODE = 'project-limit';
+
+/**
+ * Refuse a create, a duplicate or an unarchive that would pass the limit.
+ *
+ * Not a `RunRefusal` (`run-outcome.ts`): that vocabulary names why a run
+ * did not start, and this is not a run. It keeps the same convention, a
+ * sentence for the person and an identifier for the code, under `code` so
+ * nothing that reads `reason` as a run refusal mistakes it for one.
+ */
+function limitRefusal(limit: number): Response {
+  return json(
+    {
+      error: `A free account can have ${limit} active projects. Archive one to start another, or upgrade for unlimited projects.`,
+      code: PROJECT_LIMIT_CODE,
+      limit,
+    },
+    403,
+  );
+}
+
+/** A project as the builder reads it. */
+export function projectView(project: ProjectRecord) {
+  return {
+    id: project.id,
+    name: project.name,
+    archived: project.archivedAt !== null,
+    archivedAt: project.archivedAt,
+    createdAt: project.createdAt,
+    editedAt: project.editedAt,
+    lastOpenedAt: project.lastOpenedAt,
+    hasCode: project.acceptedRevision !== null,
+    turns: project.transcriptTurns,
+    settings: project.settings,
+  };
+}
+
+function fail(status: number, error: string): GuardResult<never> {
+  return { ok: false, status, error };
+}
+
+/**
+ * The settings the builder sent, field by field. A field that is absent is
+ * not changed; one that is present and null is cleared.
+ *
+ * The two closed sets, the style preset and the model, are sanitised
+ * rather than refused, the rule `parseStyleDna` already applies to values
+ * carried from one request to the next: a preset or a model renamed since
+ * the builder last saved should cost that one choice, not the whole save.
+ * The two free-text fields are held to the bounds their own parsers apply
+ * on `/api/plan`, so a saved setting is always one a build would accept.
+ */
+export function parseProjectSettings(
+  value: unknown,
+): GuardResult<Partial<ProjectSettings>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return fail(400, '"settings" must be an object.');
+  }
+  const raw = value as Record<string, unknown>;
+  const settings: Partial<ProjectSettings> = {};
+  if ('style' in raw) {
+    settings.style = isStylePresetId(raw.style) ? raw.style : null;
+  }
+  if ('model' in raw) {
+    const wanted =
+      typeof raw.model === 'string' ? canonicalModelId(raw.model) : null;
+    settings.model = isKnownModel(wanted) ? wanted : null;
+  }
+  if ('referenceUrl' in raw) {
+    const parsed = parseReferenceUrl({ referenceUrl: raw.referenceUrl });
+    if (!parsed.ok) return parsed;
+    settings.referenceUrl = parsed.value;
+  }
+  // Null and empty are different answers for the two standing
+  // preferences, and both are kept. Null is "this project never said",
+  // which the builder fills from what the browser last chose; empty is
+  // "this project said none", which it must not.
+  if ('knowledge' in raw) {
+    const parsed = parseKnowledge({ knowledge: raw.knowledge });
+    if (!parsed.ok) return parsed;
+    settings.knowledge =
+      parsed.value ?? (typeof raw.knowledge === 'string' ? '' : null);
+  }
+  if ('styleDna' in raw) {
+    settings.styleDna =
+      raw.styleDna === null || raw.styleDna === undefined
+        ? null
+        : sanitizeStyleDna(raw.styleDna);
+  }
+  return { ok: true, value: settings };
+}
+
+interface ProjectPatch {
+  name?: string;
+  archived?: boolean;
+  settings?: Partial<ProjectSettings>;
+  transcript?: TranscriptTurn[];
+}
+
+/** Everything a PATCH may carry, all of it checked before any of it is written. */
+export function parseProjectPatch(body: unknown): GuardResult<ProjectPatch> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const raw = body as Record<string, unknown>;
+  const patch: ProjectPatch = {};
+  if ('name' in raw) {
+    const name = cleanProjectName(raw.name);
+    if (name === null) return fail(400, 'A project needs a name.');
+    patch.name = name;
+  }
+  if ('archived' in raw) {
+    if (typeof raw.archived !== 'boolean') {
+      return fail(400, '"archived" must be true or false.');
+    }
+    patch.archived = raw.archived;
+  }
+  if ('settings' in raw) {
+    const settings = parseProjectSettings(raw.settings);
+    if (!settings.ok) return settings;
+    patch.settings = settings.value;
+  }
+  if ('transcript' in raw) {
+    const transcript = parseTranscript(raw.transcript);
+    if (!transcript.ok) return fail(400, transcript.error);
+    if (JSON.stringify(transcript.turns).length > MAX_TRANSCRIPT_BYTES) {
+      return fail(413, 'This conversation is too long to save.');
+    }
+    patch.transcript = transcript.turns;
+  }
+  return { ok: true, value: patch };
+}
+
+async function readJson(request: Request): Promise<GuardResult<unknown>> {
+  try {
+    return { ok: true, value: await request.json() };
+  } catch {
+    return fail(400, 'Body must be valid JSON.');
+  }
+}
+
+/** The checks every write makes before identity, cheapest first. */
+function writeGuard(request: Request): Response | null {
+  const origin = checkRequestOrigin(
+    request.headers,
+    new URL(request.url).origin,
+  );
+  if (!origin.ok) return json({ error: origin.error }, origin.status);
+  const size = checkBodySize(request.headers, {
+    ...DEFAULT_LIMITS,
+    maxBodyBytes: MAX_PROJECT_BODY_BYTES,
+  });
+  if (!size.ok) return json({ error: size.error }, size.status);
+  return null;
+}
+
+/**
+ * A DELETE carries no body, so there is no content type to insist on, and
+ * only the origin is checked: a cross-site page that could reach this would
+ * be deleting somebody's work.
+ */
+function deleteGuard(request: Request): Response | null {
+  const origin = request.headers.get('origin');
+  if (origin !== null && origin !== new URL(request.url).origin) {
+    return json({ error: 'Cross-site requests are not allowed.' }, 403);
+  }
+  return null;
+}
+
+const ALLOWED: Record<string, readonly string[]> = {
+  '/api/projects': ['GET', 'POST'],
+  [PROJECT_ITEM_ROUTE]: ['GET', 'PATCH', 'DELETE'],
+  [PROJECT_DUPLICATE_ROUTE]: ['POST'],
+};
+
+export async function handleProjects(
+  request: Request,
+  env: ProjectsEnv,
+  deps: ProjectsDeps,
+): Promise<Response> {
+  if (!env.DB || !env.PROJECT_CONTENT) {
+    return json(
+      { error: 'Projects are not configured for this deployment.' },
+      503,
+    );
+  }
+  const db = env.DB;
+  const { pathname } = new URL(request.url);
+  const route = routeKeyFor(pathname);
+  const method = request.method.toUpperCase();
+  const allowed = ALLOWED[route];
+  if (!allowed) return json({ error: 'Not found.' }, 404);
+  if (!allowed.includes(method)) {
+    return json({ error: `Use ${allowed.join(', ')}.` }, 405);
+  }
+
+  // Shape before identity, so a hostile request is refused before it costs
+  // a token verification.
+  const guarded =
+    method === 'POST' || method === 'PATCH'
+      ? writeGuard(request)
+      : method === 'DELETE'
+        ? deleteGuard(request)
+        : null;
+  if (guarded) return guarded;
+
+  const resolved = await deps.resolvePrincipal(request);
+  if (resolved.denied) return resolved.denied;
+  const { userId } = resolved.principal;
+
+  const clock = deps.now ?? (() => new Date());
+  const now = () => clock().toISOString();
+  const newId = deps.newId ?? (() => crypto.randomUUID());
+  const tierOf =
+    deps.tierOf ??
+    (async (who: string) =>
+      tierFor(await new BillingStore(db).findActiveSubscription(who)));
+  const store = new ProjectStore(db, env.PROJECT_CONTENT);
+
+  if (route === '/api/projects') {
+    if (method === 'GET') {
+      const [projects, tier] = await Promise.all([
+        store.list(userId),
+        tierOf(userId),
+      ]);
+      return json({
+        projects: projects.map(projectView),
+        limits: {
+          tier,
+          active: projects.filter((project) => project.archivedAt === null)
+            .length,
+          maxActive: ACTIVE_PROJECT_LIMIT[tier],
+        },
+      });
+    }
+
+    const body = await readJson(request);
+    if (!body.ok) return json({ error: body.error }, body.status);
+    const raw = (body.value ?? {}) as Record<string, unknown>;
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      return json({ error: 'Body must be a JSON object.' }, 400);
+    }
+    let settings: ProjectSettings | undefined;
+    if (raw.settings !== undefined) {
+      const parsed = parseProjectSettings(raw.settings);
+      if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
+      settings = {
+        style: null,
+        referenceUrl: null,
+        model: null,
+        knowledge: null,
+        styleDna: null,
+        ...parsed.value,
+      };
+    }
+    const limit = ACTIVE_PROJECT_LIMIT[await tierOf(userId)];
+    const id = newId();
+    const created = await store.create(
+      userId,
+      {
+        id,
+        name: cleanProjectName(raw.name) ?? DEFAULT_PROJECT_NAME,
+        now: now(),
+        ...(settings ? { settings } : {}),
+      },
+      limit,
+    );
+    if (!created) return limitRefusal(limit!);
+    const project = await store.find(userId, id);
+    return json({ project: projectView(project!) }, 201);
+  }
+
+  const id = projectIdInPath(pathname);
+  if (!isProjectId(id)) return NOT_FOUND();
+  const project = await store.find(userId, id);
+  if (!project) return NOT_FOUND();
+
+  if (route === PROJECT_DUPLICATE_ROUTE) {
+    const limit = ACTIVE_PROJECT_LIMIT[await tierOf(userId)];
+    const copy = await store.duplicate(
+      project,
+      userId,
+      { id: newId(), name: copyName(project.name), now: now() },
+      limit,
+    );
+    if (!copy) return limitRefusal(limit!);
+    return json({ project: projectView(copy) }, 201);
+  }
+
+  if (method === 'GET') {
+    // Opening is what orders the list, and what a builder with no project
+    // in its address opens next time.
+    const at = now();
+    await store.touchOpened(userId, project.id, at);
+    const [transcript, snapshot] = await Promise.all([
+      store.readTranscript(project),
+      store.accepted(project.id),
+    ]);
+    return json({
+      project: projectView({ ...project, lastOpenedAt: at }),
+      transcript,
+      // The accepted code, which is what the preview and the code view are
+      // restored from. The revision comes with it because the next build
+      // asserts it as its base (`handlePlan`), and a builder that restored
+      // the files without it would have its first follow-up refused as a
+      // conflict with its own project.
+      snapshot: snapshot
+        ? { revision: snapshot.revision, files: snapshot.files }
+        : null,
+    });
+  }
+
+  if (method === 'DELETE') {
+    if (await store.runInFlight(project.id, clock())) {
+      return json(
+        {
+          error:
+            'A build is still running in this project. Wait for it to finish, then delete it.',
+        },
+        409,
+      );
+    }
+    const removed = await store.remove(project.id);
+    if (!removed) {
+      return json(
+        {
+          error:
+            'This project is large and was only partly deleted. Delete it again to finish.',
+        },
+        503,
+      );
+    }
+    return json({ deleted: true });
+  }
+
+  // PATCH.
+  const body = await readJson(request);
+  if (!body.ok) return json({ error: body.error }, body.status);
+  const patch = parseProjectPatch(body.value);
+  if (!patch.ok) return json({ error: patch.error }, patch.status);
+  const at = now();
+
+  // The one change that can be refused, first, so a refused unarchive
+  // writes nothing else either and the builder is told plainly why.
+  if (patch.value.archived === false && project.archivedAt !== null) {
+    const limit = ACTIVE_PROJECT_LIMIT[await tierOf(userId)];
+    const outcome = await store.unarchive(userId, project.id, at, limit);
+    if (outcome === 'missing') return NOT_FOUND();
+    if (outcome === 'limit') return limitRefusal(limit!);
+  }
+  if (patch.value.archived === true) {
+    await store.archive(userId, project.id, at);
+  }
+  if (patch.value.name !== undefined) {
+    await store.rename(userId, project.id, patch.value.name, at);
+  }
+  if (patch.value.settings !== undefined) {
+    await store.saveSettings(userId, project.id, patch.value.settings, at);
+  }
+  if (patch.value.transcript !== undefined) {
+    await store.saveTranscript(userId, project.id, patch.value.transcript, at);
+  }
+  const saved = await store.find(userId, project.id);
+  return saved ? json({ project: projectView(saved) }) : NOT_FOUND();
+}

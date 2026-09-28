@@ -53,6 +53,17 @@ import type { PreviewServiceEnv, ServiceOutcome } from './preview-client.ts';
 import { topupKeyFor } from './reserve.ts';
 import { createStripeClient, stripeConfigured } from './stripe-client.ts';
 import type { StripeEnv } from './stripe-client.ts';
+import {
+  R2_PAGES_PER_STEP,
+  assertPrefixSafe,
+  deletePrefix,
+} from './storage-purge.ts';
+import type { PurgeBucket } from './storage-purge.ts';
+
+// Where they have always been imported from. The functions moved to
+// `storage-purge.ts` when deleting one project needed them too.
+export { R2_PAGES_PER_STEP };
+export type { PurgeBucket };
 
 /**
  * The phrase a person types to confirm. Checked here as well as in the
@@ -80,15 +91,6 @@ export interface StripeSubscriptions {
       params: { invoice_now: boolean; prorate: boolean },
     ): PromiseLike<unknown>;
   };
-}
-
-/** The slice of an R2 binding the purge needs: list a prefix, delete keys. */
-export interface PurgeBucket {
-  list(options: { prefix: string; limit?: number }): Promise<{
-    objects: { key: string }[];
-    truncated: boolean;
-  }>;
-  delete(keys: string | string[]): Promise<void>;
 }
 
 export type ClerkDeletion = { ok: true } | { ok: false; error: string };
@@ -389,50 +391,32 @@ export async function requestAccountDeletion(
 // The purge.
 // -------------------------------------------------------------------------
 
-/** R2 list pages one prefix may take in a night, at up to 1000 keys each. */
-export const R2_PAGES_PER_STEP = 2;
-
 /**
- * Delete everything under a prefix, a bounded number of pages at a time.
+ * What one run of a step achieved.
  *
- * Listed from the start every page rather than by cursor, because what the
- * last page listed has just been deleted and the start is where the rest
- * now begins. True once nothing is left.
+ * - `done`: the step is finished, and the purge moves on.
+ * - `more`: there is more to do and tonight has done what it should, so the
+ *   purge stops here and resumes at this step tomorrow.
+ * - `again`: one piece of the step is finished and there are more pieces,
+ *   each as big as the one just done. The step runs again at once if the
+ *   night's share can pay for it, and otherwise tomorrow, from where it is.
+ *   Nothing is saved between pieces, because the step itself finds the next
+ *   one from what is left.
  */
-async function deletePrefix(
-  bucket: PurgeBucket,
-  prefix: string,
-): Promise<boolean> {
-  for (let page = 0; page < R2_PAGES_PER_STEP; page += 1) {
-    const listed = await bucket.list({ prefix, limit: 1000 });
-    const keys = listed.objects
-      .map((object) => object.key)
-      // Belt and braces: a prefix listing returns only keys under it, and
-      // a delete that ever reached past it would be deleting somebody else.
-      .filter((key) => key.startsWith(prefix));
-    if (keys.length > 0) await bucket.delete(keys);
-    if (!listed.truncated) return true;
-  }
-  return false;
-}
-
-/**
- * A user id that is safe to build a storage prefix from. Clerk's are
- * `user_` and base62; anything with a slash in it could name another
- * account's prefix, and an empty one would name everybody's.
- */
-function assertPrefixSafe(userId: string): void {
-  if (userId.length === 0 || /[/\\]/.test(userId)) {
-    throw new Error('refusing to build a storage prefix from this user id');
-  }
-}
-
-type PurgeOutcome = 'done' | 'more' | { error: string };
+type PurgeOutcome = 'done' | 'more' | 'again' | { error: string };
 
 interface PurgeStep {
   name: string;
-  /** D1 queries the step makes, not counting the progress save after it. */
+  /**
+   * D1 queries one run of the step makes, not counting the progress save
+   * after it. For a step that `repeats`, that is one pass.
+   */
   queries: number;
+  /**
+   * Whether the step answers `again`: one pass per project the account
+   * owns, and a last pass that finds none left.
+   */
+  repeats?: true;
   run(deps: DeletionDeps, record: DeletionRecord): Promise<PurgeOutcome>;
 }
 
@@ -455,17 +439,45 @@ export const PURGE_STEPS: readonly PurgeStep[] = [
     },
   },
   {
-    // Project snapshots (`generation-store.ts`'s
-    // `projects/{projectId}/snapshots/{revision}.json`). One project per
-    // Clerk user, keyed by the user id.
+    // Every project's stored content, and then its rows: the snapshots
+    // (`generation-store.ts`'s `projects/{projectId}/snapshots/{revision}.json`)
+    // and the saved conversation beside them (`project-store.ts`'s
+    // `projects/{projectId}/transcript.json`), which one prefix covers.
+    //
+    // One project a pass, repeated while the night's share allows
+    // (`again`). An account used to have one project, keyed by its user id,
+    // and this step deleted that one prefix. Now it can have any number,
+    // and listing them all and deleting prefix after prefix would either be
+    // unbounded or, with a bound, stop making progress at an account whose
+    // projects outnumber it: an empty prefix still costs a list call, and
+    // it would be listed again every night. Deleting each project's rows
+    // as soon as its bytes are gone takes it out of the next pass's list,
+    // so every pass either deletes bytes or retires a project.
+    //
+    // When no project is left, the prefix keyed by the user id itself is
+    // checked last. That is where the account's one project lived before
+    // there were several; the migration gave it a row, so it is normally
+    // gone by now, and this is the belt to that brace.
     name: 'snapshots',
-    queries: 0,
+    queries:
+      AccountDeletionStore.NEXT_PROJECT_QUERIES +
+      AccountDeletionStore.ONE_PROJECT_QUERIES,
+    repeats: true,
     async run(deps, record) {
       if (!deps.bucket) return 'done';
       assertPrefixSafe(record.userId);
-      return (await deletePrefix(deps.bucket, `projects/${record.userId}/`))
-        ? 'done'
-        : 'more';
+      const next = await deps.store.nextProjectToPurge(record.userId);
+      if (next === null) {
+        return (await deletePrefix(deps.bucket, `projects/${record.userId}/`))
+          ? 'done'
+          : 'more';
+      }
+      assertPrefixSafe(next);
+      if (!(await deletePrefix(deps.bucket, `projects/${next}/`))) {
+        return 'more';
+      }
+      await deps.store.deleteOneProject(next);
+      return 'again';
     },
   },
   {
@@ -563,12 +575,27 @@ export const QUERIES_TO_CHECK_PURGE = 2;
 /** The last write, which turns the request into the audit record. */
 const QUERIES_TO_FINISH = 1;
 
-/** D1 queries the rest of a purge can cost from where this record stands. */
-export function purgeQueriesLeft(record: DeletionRecord): number {
+/**
+ * D1 queries the rest of a purge can cost from where this record stands,
+ * for an account with `projects` projects still to purge.
+ *
+ * The nightly pass plans with the default of none, because the lookup that
+ * finds tonight's work does not count anybody's projects, and one more
+ * query per request every night to count them would be paid whether or
+ * not there was a purge to plan. So for an account with several projects
+ * the planned figure is what one night needs to make progress rather than
+ * to finish. That is safe: every query is still taken from the share
+ * before it is made, so a purge that needs more than it was given stops
+ * between two statements and resumes tomorrow, and the share is never
+ * exceeded.
+ */
+export function purgeQueriesLeft(record: DeletionRecord, projects = 0): number {
   return (
     QUERIES_TO_CHECK_PURGE +
     PURGE_STEPS.slice(record.purgeStep).reduce(
-      (sum, step) => sum + step.queries + QUERIES_PER_SAVE,
+      (sum, step) =>
+        sum +
+        (step.queries + QUERIES_PER_SAVE) * (step.repeats ? projects + 1 : 1),
       0,
     ) +
     QUERIES_TO_FINISH
@@ -654,6 +681,13 @@ export async function purgeAccount(
       outcome = { error: `The purge could not finish its ${step.name} step.` };
     }
     if (outcome === 'more') return { state: 'partial', step: index };
+    // The same step once more, paid for from the share like any other run
+    // of it. Its progress needs no save: the step finds its next piece from
+    // what the last one left behind.
+    if (outcome === 'again') {
+      index -= 1;
+      continue;
+    }
     if (outcome !== 'done') {
       // The allowance for this was taken with `QUERIES_TO_CHECK_PURGE`.
       await deps.store.recordPurgeBlocked(

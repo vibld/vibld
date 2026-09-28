@@ -96,10 +96,17 @@ function isTrace(value: unknown): value is RunTrace {
 export async function fetchRuns(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
+  /**
+   * The project whose runs to read. Absent reads the one the Worker falls
+   * back to, the caller's most recently opened, which is what a deployment
+   * without projects in the builder has always shown.
+   */
+  projectId: string | null = null,
 ): Promise<RunTrace[] | null> {
   let response: Response;
   try {
-    response = await fetchImpl('/api/runs', {
+    const query = projectId ? `?project=${encodeURIComponent(projectId)}` : '';
+    response = await fetchImpl(`/api/runs${query}`, {
       headers: await authHeaders(getToken),
     });
   } catch {

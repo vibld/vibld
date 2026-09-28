@@ -2248,3 +2248,238 @@ body {
   font-size: var(--text-xs);
   color: var(--text-faint);
 }
+
+/* --- Projects -------------------------------------------------------------
+ * The open project in the header, and the page that lists them all
+ * (docs/decisions.md, 2026-09-28, projects). The bar takes the room between
+ * the brand and the controls and gives it up first when the header wraps,
+ * so a long name is cut rather than pushing the account button off the
+ * row. The page shares the admin page's measure and scroller
+ * (`.shell__body--page`). */
+.projectbar {
+  flex: 1 1 12rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--text-sm);
+}
+
+.projectbar__all {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.projectbar__all:hover {
+  color: var(--text);
+}
+
+.projectbar__sep {
+  color: var(--text-faint);
+}
+
+.projectbar__name {
+  min-width: 0;
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  cursor: text;
+}
+
+.projectbar__name:hover {
+  border-color: var(--edge);
+}
+
+.projectbar__field {
+  min-width: 0;
+  width: 18rem;
+  max-width: 100%;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--edge-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Quiet on purpose: a save is not news. Only a failure takes a colour. */
+.projectbar__status {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.projectbar__status--error {
+  color: var(--danger);
+}
+
+.projectbar__offline {
+  flex: 1 1 12rem;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.projectspage {
+  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.projectspage__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1.5rem;
+}
+
+.projectspage__title {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-lg);
+}
+
+.projectspage__subtitle {
+  margin: 0.75rem 0 0;
+  font-size: var(--text-base);
+  color: var(--text-muted);
+}
+
+.projectspage__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.projectnotice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--brand-40);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+
+.projectnotice--error {
+  border-color: var(--danger);
+  background: var(--danger-dim);
+}
+
+.projectnotice__text {
+  margin: 0;
+}
+
+.projectnotice__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.projectlist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+}
+
+.projectlist__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 0.9rem;
+  border-top: 1px solid var(--edge);
+}
+
+.projectlist__item:first-child {
+  border-top: 0;
+}
+
+.projectlist__item--open {
+  box-shadow: inset 2px 0 0 var(--brand);
+}
+
+.projectlist__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.projectlist__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text);
+}
+
+a.projectlist__name:hover {
+  color: var(--accent);
+}
+
+.projectlist__meta {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.projectlist__actions,
+.projectlist__rename,
+.projectlist__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.projectlist__rename,
+.projectlist__confirm {
+  flex: 1 1 100%;
+}
+
+.projectlist__rename .prompt__input {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.projectlist__question {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+/* Deleting is the one act on this page that cannot be undone, so it is the
+   one that takes the danger colour, on its chip and on the button that
+   confirms it. */
+.chip--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button--danger {
+  border-color: var(--danger);
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+.button--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-dim);
+  filter: brightness(1.05);
+}

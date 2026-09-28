@@ -362,6 +362,28 @@ only when the subscription's price is `vibld_build_monthly` or
 retention setting stays empty, since it would offer the coupon to annual
 plans too. See `apps/web/README.md`, "Billing".
 
+**An account has projects, and each one remembers everything.** Chris
+decided on 2026-09-28, after a refresh of the builder lost what he was
+building, that the first version of projects has autosave, a list of
+projects, reopening one, renaming, archiving (hiding a paused project
+without deleting it), deleting (permanent, after a confirmation) and
+duplicating one into a new project; a version history screen is not part of
+it, and every revision is still kept as before. A free account may have
+three active projects and any number of archived ones, and the Build and
+Ship plans have no limit; creating, duplicating or unarchiving past the
+limit is refused with the reason and a way to upgrade. A project remembers
+its code (the accepted snapshot), the whole conversation with the agent,
+its style preset, reference page and model, and its media, and opening it
+restores all of it. Sharing a project and copying one into another account
+come separately and later. Each account's one existing project became its
+first project, named "Untitled project". Where the implementation reads
+this in a particular way, not yet confirmed by Chris: the media library,
+the published site, the preview sandbox and the GitHub connection stay one
+per account, so a project's media is the account's library and publishing
+from any project replaces the account's one site; and a project also
+remembers its standing instructions and visual preferences. See
+`apps/web/README.md`, "Projects".
+
 ### Resolved 2026-09-27
 
 **L15 stands: Stripe Tax is off, and the code now matches.** Chris confirmed

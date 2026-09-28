@@ -145,6 +145,11 @@ if (entry.endsWith('.test.tsx')) {
     'MouseEvent',
     'KeyboardEvent',
     'CustomEvent',
+    // `navigate` (admin/use-pathname.ts) announces a change of address
+    // with one, and opening a project changes the address. Without it any
+    // test that opens a project dies in the router rather than in what it
+    // is testing.
+    'PopStateEvent',
     'getComputedStyle',
     'requestAnimationFrame',
     'cancelAnimationFrame',

@@ -25,7 +25,22 @@ export function Conversation({ state }: { state: BuilderState }) {
 
   return (
     <div className="conversation">
-      {turns.length === 0 && state.status === 'idle' ? (
+      {turns.length === 0 &&
+      state.status === 'idle' &&
+      state.acceptedSnapshot ? (
+        // A project that has code and no conversation: one built before
+        // projects kept what was said, reopened. The code is what matters
+        // and it is back, which is the thing to say, rather than asking
+        // what to build as though there were nothing here.
+        <div className="banner" role="status">
+          <p className="banner__message">Your project is back.</p>
+          <p className="banner__detail">
+            Its code is restored ({state.acceptedSnapshot.files.length} files),
+            with no conversation saved beside it. Describe a change below to
+            keep building.
+          </p>
+        </div>
+      ) : turns.length === 0 && state.status === 'idle' ? (
         // The empty state is an invitation, not a status: there is nothing
         // to report yet, and a bordered status card said so loudly.
         <div className="welcome">

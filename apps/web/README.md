@@ -47,12 +47,10 @@ into newer state.
   failure as a whole (see "Sandbox previews" below), but nothing pipes a
   running preview's live process output or build diagnostics into these
   panels yet.
-- **No Git export or deployment beyond the sandbox preview.** A real
-  generation (see "Durable generation" below) is now persisted server-side in
-  D1/R2, one project per Clerk user, but there is still no UI for browsing
-  history, renaming a project, or starting a second one -- "the project" is
-  still exactly one thing per account, the same as when it lived only in the
-  browser tab's memory.
+- **No version history.** An account has projects now (see "Projects"
+  below), each kept server-side with its conversation and settings, and every
+  accepted revision is still stored in R2, but nothing in the builder browses
+  or restores an earlier one.
 
 ## Hosted preview (optional)
 
@@ -387,9 +385,9 @@ Workflow instance, against the D1/R2-backed `GenerationStore`
 scope. `handlePlan` creates one instance per run (its id doubling as the
 Workflow instance id) and polls `WorkflowInstance.status()` over the same SSE
 connection it already holds open, so `remote-provider.ts`'s client contract
-(`event: plan` / `event: error`) is unchanged. One project per Clerk user for
-now: there is no multi-project UI, so the D1 project id is just the user's own
-id (`worker/generation-run.ts`'s `WorkflowParams.projectId` comment).
+(`event: plan` / `event: error`) is unchanged. The run builds in the project
+the builder names (`projectId` in the body), checked as the caller's first;
+see "Projects" below.
 
 Two things this costs, both accepted rather than solved here:
 
@@ -405,16 +403,12 @@ Two things this costs, both accepted rather than solved here:
   one call from finishing (or being billed for). `budget.ts`'s existing
   abandoned-reservation reclaim is the backstop either way -- the same one a
   Worker dying mid-request already relied on before this change.
-- **The browser still keeps its own working copy.** `BuilderSession` sends
-  its whole `base` snapshot with every request rather than asking the server
-  to look one up, so `D1GenerationStore.loadAccepted` is never actually
-  reached in this path yet -- the client remains the thing every other part
-  of the shell (preview, zip export, the next turn's `base`) reads from. What
-  changed is that D1/R2 also durably record every run alongside it, and a
-  Workflow, not a request handler, is what drives the model call and the
-  promotion. Making the server copy authoritative -- so a reload could resume
-  a project the browser tab never saw start -- is a real next step, not this
-  one.
+- **The browser still keeps its own working copy.** `BuilderSession` runs
+  the lifecycle against an in-memory store and sends the revision it
+  believes it is editing; the Worker reads the files from D1/R2 (internal issue 181) and
+  refuses a build whose base has moved. Opening a project seeds that
+  in-memory store from the server's accepted snapshot, so a reload resumes
+  the project where the server has it rather than starting empty.
 
 ### Setup
 
@@ -1205,6 +1199,97 @@ clears it. See "Refunds and disputes" above.
    preview" → "Deploying" above) picks up any pending migration
    automatically on the next deploy.
 
+## Projects (resolved 2026-09-28)
+
+An account has projects, and each one remembers everything about itself:
+its accepted code, the whole conversation with the agent, its style preset,
+reference page and model, its standing instructions and visual preferences.
+Opening one puts all of it back. Before this an account had exactly one
+project, keyed by its Clerk user id, and the builder restored nothing on
+load, so a refresh lost the conversation and every setting.
+
+**Storage** (`migrations/0033_projects.sql`, `worker/project-store.ts`). A
+`projects` row per project (owner, name, archive state, when it was created,
+changed and last opened, and the settings) beside the generation store's own
+`generation_projects` row, which shares its id and still holds the accepted
+revision. The conversation is JSON in R2 at `projects/<id>/transcript.json`,
+under the same prefix as the snapshots, with its key in the row. The
+migration turns each account's one project into its first, named "Untitled
+project" and keeping its id, which is how work from before projects comes
+back.
+
+**Routes** (`worker/project-handlers.ts`), all behind Clerk like every
+other `/api/*` route, and a project that is not the caller's is 404:
+
+| Route                              | Does                                                                                       | Invite gate |
+| ---------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
+| `GET /api/projects`                | List, active and archived, with the tier's limit                                           | open        |
+| `POST /api/projects`               | Create (held to the limit)                                                                 | gated       |
+| `GET /api/projects/:id`            | Open: settings, conversation, accepted code                                                | open        |
+| `PATCH /api/projects/:id`          | Rename, archive, unarchive (held to the limit), save settings and conversation             | open        |
+| `DELETE /api/projects/:id`         | Delete: everything under its prefix, then its rows                                         | open        |
+| `POST /api/projects/:id/duplicate` | Copy the accepted code, settings and conversation into "<name> (copy)" (held to the limit) | gated       |
+
+The gate's reasons are in `access-gate.ts`: making or copying a project is
+starting new work, and reading, tidying or deleting your own is not.
+Deleting refuses with 409 while a build is still running in the project,
+because the run would otherwise recreate its rows with no owner.
+
+**The limit.** A free account may have three active projects; archived
+ones are unlimited, and Build and Ship have no limit
+(`ACTIVE_PROJECT_LIMIT` in `entitlement.ts`, read through the same `tierFor`
+as the allowance). A create, duplicate or unarchive past it is refused with
+403 and `code: "project-limit"`, checked inside the SQL statement so two
+requests racing cannot both take the last slot. The builder shows the
+reason and an upgrade button that starts Checkout.
+
+**Runs.** `/api/plan` builds in the project named by `projectId`, refused
+as 404 for another account's and 409 for an archived one. A request with no
+`projectId` comes from a builder older than projects and builds in the
+caller's most recently opened active project, or a new one if there is none.
+`/api/runs?project=<id>` reads one project's history. Everything else stays
+per account, deliberately:
+
+- **Publishing.** One site per account, keyed by the user id as before.
+  Publishing from another project replaces what the site serves.
+- **The media library.** Shared by every project the account has. Moving it
+  per project would change `project_media`, the published site's media
+  serving in apps/publish and the GitHub push, which is a change of its own.
+- **The preview sandbox.** One per account; opening another project stops
+  it.
+- **GitHub.** One connected repository per account; pushing from any
+  project pushes there.
+- **Spend, rate limits, `/api/chat` and `/api/mockups`.** Neither route
+  reads a project, and the allowance is the account's.
+
+**In the builder** (`src/projects/`). `/p/<id>` is a project and `/projects`
+is the list; any other address shows the open project, or on a fresh load
+the one opened last, and is corrected to its `/p/<id>`. The header shows the
+open project's name, editable in place, a "Projects" link, and a quiet
+"Saving…", "Saved" or "Couldn't save". The list offers open, rename,
+duplicate, archive and delete (confirmed in the page), and unarchive and
+delete for archived projects. "Start over" becomes "New project".
+
+**Autosave** (`src/projects/autosave.ts`) sends settings whenever they
+change and the conversation whenever a turn settles (an accepted build, a
+reply, a failure), debounced by a second, one save in the air at a time, a
+failed one kept and retried, and flushed before another project is opened
+and when the page goes away. Opening a project restores its own model,
+instructions and preferences where it chose them, and fills the rest from
+this browser's last choice, which is also what a new project starts with.
+
+**Without a server.** Where the deployment generates in the browser
+(`generation: "fake"`), there is no server copy of the code to restore, so
+the builder works in memory exactly as it did before projects, with no list
+and nothing saved. A model deployment whose projects cannot be read falls
+back the same way and says the session is not being saved.
+
+### Setup
+
+`migrations/0033_projects.sql` is applied by the **Deploy web preview**
+workflow like every other migration. Nothing else: the routes use the D1
+and R2 bindings generation already has.
+
 ## Account deletion (docs/decisions.md L32)
 
 Anybody signed in can delete their account from the gear menu ("Account",
@@ -1240,9 +1325,11 @@ and by the nightly pass. The nightly pass never takes a site down
 operator takes it down, and the admin panel says which.
 
 **After 30 days** the nightly pass purges the account, in steps that each
-save their place: the subscription is checked once more, R2 snapshots
-(`projects/<user>/`) and media (`media/<user>/`) are deleted, then the
-project, run, trace and media rows, the published site's catalogue (its
+save their place: the subscription is checked once more, then every project
+the account owns is deleted one at a time (everything under
+`projects/<id>/`, its snapshots and its saved conversation, and then its
+rows, so each pass takes a project out of the next pass's list), then the
+media (`media/<user>/`), then any project, run, trace and media rows left, the published site's catalogue (its
 bytes are collected by apps/publish's orphan sweep; the slug is kept, never
 released, under the tombstone), the GitHub grant and push history, the
 referral code and the redeemed invite, both spend-ledger Durable Objects,

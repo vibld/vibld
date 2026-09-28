@@ -21,22 +21,31 @@ import {
  * run started this morning is still here this afternoon, and a run this tab
  * never watched is here too.
  */
-export function RunHistory({ runCount }: { runCount: number }) {
+export function RunHistory({
+  runCount,
+  projectId = null,
+}: {
+  runCount: number;
+  /** The project on screen; the list is that project's runs. */
+  projectId?: string | null;
+}) {
   const [runs, setRuns] = useState<RunTrace[] | null | 'loading'>('loading');
 
   // Re-fetched when the session's own run count changes, which is how a run
   // that just finished appears without a reload. The count rather than the
   // status, because a status passes through the same value twice and a
   // finished run increments exactly once.
+  //
+  // And when another project is opened, whose history is a different list.
   useEffect(() => {
     let cancelled = false;
-    void fetchRuns().then((result) => {
+    void fetchRuns(undefined, undefined, projectId).then((result) => {
       if (!cancelled) setRuns(result);
     });
     return () => {
       cancelled = true;
     };
-  }, [runCount]);
+  }, [runCount, projectId]);
 
   if (runs === 'loading') return null;
 

@@ -9,6 +9,8 @@ import {
   GATED_PATHS,
   UNGATED_PATHS,
   isGated,
+  projectIdInPath,
+  routeKeyFor,
 } from '../worker/access-gate.ts';
 
 /**
@@ -205,6 +207,54 @@ describe('the invite gate', () => {
     );
     assert.match(gate, /resolvePrincipal/);
     assert.match(gate, /decideAccessFor/);
+  });
+});
+
+describe("a project's routes", () => {
+  it('are named by pattern, so the lists and the router compare fixed strings', () => {
+    assert.equal(routeKeyFor('/api/projects'), '/api/projects');
+    assert.equal(routeKeyFor('/api/projects/abc-123'), '/api/projects/:id');
+    assert.equal(
+      routeKeyFor('/api/projects/abc-123/duplicate'),
+      '/api/projects/:id/duplicate',
+    );
+    // Something that only resembles one names nothing, and is answered 404.
+    for (const path of [
+      '/api/projects/',
+      '/api/projects/a/b',
+      '/api/projects/a/duplicate/again',
+    ]) {
+      assert.equal(routeKeyFor(path), path, path);
+    }
+    assert.equal(projectIdInPath('/api/projects/abc-123/duplicate'), 'abc-123');
+    assert.equal(projectIdInPath('/api/runs'), null);
+  });
+
+  it('gate making a project and copying one, and nothing an owner does to their own', () => {
+    // Starting new work is what an invite buys. Reading, tidying and
+    // deleting what an account already made is not, for the reason every
+    // undoing method above is open.
+    assert.equal(isGated('/api/projects', 'POST'), true);
+    assert.equal(isGated('/api/projects', 'GET'), false);
+    assert.equal(isGated('/api/projects/:id/duplicate', 'POST'), true);
+    for (const method of ['GET', 'PATCH', 'DELETE']) {
+      assert.equal(isGated('/api/projects/:id', method), false, method);
+    }
+  });
+
+  it('are gated the same whether the path arrives named or as it was sent', () => {
+    assert.equal(isGated('/api/projects/abc-123/duplicate', 'POST'), true);
+    assert.equal(isGated('/api/projects/abc-123', 'PATCH'), false);
+  });
+
+  it('are named before the gate runs, so the gate sees the name', async () => {
+    const source = await readFile(join(WORKER, 'index.ts'), 'utf8');
+    const named = source.indexOf(
+      'const pathname = routeKeyFor(new URL(request.url).pathname)',
+    );
+    const gate = source.indexOf('if (isGated(pathname, request.method))');
+    assert.ok(named > 0, 'the router does not name project routes');
+    assert.ok(named < gate, 'the gate runs on the raw path');
   });
 });
 

@@ -35,9 +35,20 @@ export function usePathname(): string {
   return pathname;
 }
 
-/** Go somewhere in the same document. Safe to call before the DOM exists. */
-export function navigate(to: string): void {
+/**
+ * Go somewhere in the same document. Safe to call before the DOM exists.
+ *
+ * `replace` rewrites the current history entry instead of adding one: for
+ * an address that is being corrected rather than left, such as `/` becoming
+ * the address of the project it opened, where Back should not return to an
+ * address that only ever meant "whichever project was last".
+ */
+export function navigate(
+  to: string,
+  options: { replace?: boolean } = {},
+): void {
   if (typeof window === 'undefined') return;
-  window.history.pushState(null, '', to);
+  if (options.replace) window.history.replaceState(null, '', to);
+  else window.history.pushState(null, '', to);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }

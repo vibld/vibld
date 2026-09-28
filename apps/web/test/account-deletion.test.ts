@@ -262,6 +262,51 @@ async function seed(w: World, { siteLive = false } = {}) {
     );
     await bucket.put(`projects/${user}/snapshots/r1.json`, '{}');
     await bucket.put(`media/${user}/m_${customer}`, 'png');
+
+    // The project the migration made of that one (0033's backfill), and a
+    // second one made since, with its own id, code, conversation and runs:
+    // what an account looks like now that it can have several.
+    await exec(
+      db,
+      `INSERT INTO projects (id, user_id, name, created_at, updated_at, last_opened_at)
+       VALUES (?1, ?1, 'Untitled project', ?2, ?2, ?2)`,
+      user,
+      at,
+    );
+    const second = `proj_${customer}`;
+    await exec(
+      db,
+      `INSERT INTO projects
+         (id, user_id, name, created_at, updated_at, last_opened_at,
+          transcript_key, transcript_turns)
+       VALUES (?1, ?2, 'Second', ?3, ?3, ?3, ?4, 1)`,
+      second,
+      user,
+      at,
+      `projects/${second}/transcript.json`,
+    );
+    await exec(
+      db,
+      `INSERT INTO generation_projects VALUES (?1, 'r2', ?2, ?2)`,
+      second,
+      at,
+    );
+    await exec(
+      db,
+      `INSERT INTO generation_stages VALUES (?1, ?2, NULL, 'accepted', 'r2', ?3, ?3)`,
+      `run2_${customer}`,
+      second,
+      at,
+    );
+    await exec(
+      db,
+      `INSERT INTO generation_run_traces VALUES (?1, ?2, 'accepted', 'm', 1, 0, 1, 100, 5, 10, ?3)`,
+      `run2_${customer}`,
+      second,
+      at,
+    );
+    await bucket.put(`projects/${second}/snapshots/r2.json`, '{}');
+    await bucket.put(`projects/${second}/transcript.json`, '[]');
   }
 
   await exec(
@@ -834,6 +879,7 @@ describe('the purge', () => {
       ['generation_projects', 'id'],
       ['generation_stages', 'project_id'],
       ['generation_run_traces', 'project_id'],
+      ['projects', 'user_id'],
       ['project_media', 'user_id'],
       ['github_bindings', 'user_id'],
       ['github_pushes', 'user_id'],
@@ -847,6 +893,24 @@ describe('the purge', () => {
         ),
         0,
         table,
+      );
+    }
+    // The second project, which is keyed by its own id and names its owner
+    // only in `projects`: its rows go with it.
+    for (const [table, column] of [
+      ['projects', 'id'],
+      ['generation_projects', 'id'],
+      ['generation_stages', 'project_id'],
+      ['generation_run_traces', 'project_id'],
+    ] as const) {
+      assert.equal(
+        await count(
+          w.db,
+          `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?1`,
+          'proj_cus_leaver',
+        ),
+        0,
+        `${table} of the second project`,
       );
     }
     assert.equal(
@@ -871,6 +935,8 @@ describe('the purge', () => {
     await purged(w);
     assert.deepEqual(w.bucket.keys().sort(), [
       `media/${OTHER}/m_cus_stays`,
+      'projects/proj_cus_stays/snapshots/r2.json',
+      'projects/proj_cus_stays/transcript.json',
       `projects/${OTHER}/snapshots/r1.json`,
     ]);
   });
@@ -972,6 +1038,22 @@ describe('the purge', () => {
         w.db,
         `SELECT COUNT(*) AS n FROM generation_projects WHERE id = ?1`,
         OTHER,
+      ),
+      1,
+    );
+    assert.equal(
+      await count(
+        w.db,
+        `SELECT COUNT(*) AS n FROM projects WHERE user_id = ?1`,
+        OTHER,
+      ),
+      2,
+    );
+    assert.equal(
+      await count(
+        w.db,
+        `SELECT COUNT(*) AS n FROM generation_projects WHERE id = ?1`,
+        'proj_cus_stays',
       ),
       1,
     );
@@ -1113,8 +1195,45 @@ describe('the purge', () => {
       state: 'purged',
     });
     const measured = w.statements() - before;
-    assert.ok(measured <= purgeQueriesLeft(record), `${measured}`);
+    // Two projects: the one the migration made of the account's old work
+    // and one made since. The snapshots step takes a pass for each.
+    assert.ok(measured <= purgeQueriesLeft(record, 2), `${measured}`);
     assert.ok(measured <= allowance.spent, `${measured} > ${allowance.spent}`);
+  });
+
+  it('purges an account with more projects than one night can pay for, over several nights', async () => {
+    // The step repeats one project at a time, and each pass retires the
+    // project it deleted, so a small share still makes progress every
+    // night instead of relisting the same prefixes for ever.
+    const w = world();
+    await requestAccountDeletion(w.deps, USER);
+    const at = '2026-08-01T00:00:00.000Z';
+    for (let n = 0; n < 12; n += 1) {
+      const id = `proj_many_${String(n).padStart(2, '0')}`;
+      await exec(
+        w.db,
+        `INSERT INTO projects (id, user_id, name, created_at, updated_at, last_opened_at)
+         VALUES (?1, ?2, 'Many', ?3, ?3, ?3)`,
+        id,
+        USER,
+        at,
+      );
+      await w.bucket.put(`projects/${id}/snapshots/r1.json`, '{}');
+    }
+    w.clock.now = new Date(PURGE_AT);
+    let nights = 0;
+    while (w.clerk.deleted.length === 0) {
+      nights += 1;
+      assert.ok(nights < 20, 'the purge never finished');
+      const before = w.statements();
+      await runDeletionNight(w.deps, await findDeletionWork(w.deps), 20);
+      const spent = w.statements() - before - QUERIES_TO_FIND_DELETIONS;
+      assert.ok(spent <= 20, `night ${nights}: ${spent}`);
+      w.clock.now = new Date(w.clock.now.getTime() + 86_400_000);
+    }
+    assert.ok(nights > 2, 'twelve projects fit in one small share');
+    assert.deepEqual(w.bucket.keys(), []);
+    assert.deepEqual(await whereIs(w.db, USER), []);
   });
 
   it('deletes a large prefix a bounded number of pages a night', async () => {
@@ -1142,6 +1261,9 @@ describe('the purge', () => {
     const handled = new Set([
       ...KEPT_BILLING_TABLES.map((table) => `${table}.user_id`),
       'account_deletions.user_id',
+      // Deleted by the purge: each project in the `snapshots` step, as its
+      // stored content goes, and any left in `deleteProjectRows`.
+      'projects.user_id',
       'project_media.user_id',
       'github_bindings.user_id',
       'github_pushes.user_id',

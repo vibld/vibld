@@ -623,6 +623,44 @@ export function parseReferenceUrl(
   return { ok: true, value: referenceUrl };
 }
 
+/**
+ * What a project id may look like: a UUID for a project made since there
+ * could be several, or a Clerk user id for the one an account had before.
+ *
+ * Checked by shape before it is looked up, because a project id becomes an
+ * R2 prefix (`projects/{id}/`), and a slash in one would be a prefix that
+ * reaches somewhere else. Ownership is a separate question, answered by the
+ * lookup that follows; this only keeps a malformed id from being asked.
+ */
+export const PROJECT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+export function isProjectId(value: unknown): value is string {
+  return typeof value === 'string' && PROJECT_ID_PATTERN.test(value);
+}
+
+/**
+ * The project a run is for, when the builder names one.
+ *
+ * Optional, because a builder older than projects sends none and is given
+ * the caller's most recent project instead (`resolveRunProject`). A value
+ * that is present and malformed is refused rather than treated as absent:
+ * running somebody's prompt against a different project from the one they
+ * named is worse than telling them it failed.
+ */
+export function parseProjectId(body: unknown): GuardResult<string | null> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { projectId } = body as { projectId?: unknown };
+  if (projectId === undefined || projectId === null) {
+    return { ok: true, value: null };
+  }
+  if (!isProjectId(projectId)) {
+    return fail(400, '"projectId" is not a project id.');
+  }
+  return { ok: true, value: projectId };
+}
+
 export interface AdminTopupRequest {
   email: string;
   amountUsdCents: number;

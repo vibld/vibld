@@ -39,6 +39,26 @@ export function tierFor(
   return 'free';
 }
 
+/**
+ * Active projects a tier may have at once (docs/decisions.md, "Resolved
+ * 2026-09-28", projects), or `null` for no limit.
+ *
+ * Active means not archived. Archived projects are unlimited on every
+ * tier, so the limit is on how many things somebody is working on, not on
+ * how much they have ever made: archiving one is always a way to start
+ * another, and nothing a free account made has to be deleted to stay free.
+ *
+ * Beside the allowances because it is the same kind of fact, what a plan
+ * buys, and is decided by the same `tierFor` reading of the same
+ * subscription. A suspension does not change it: a project costs nothing
+ * to hold, and the suspension already refuses every run that would.
+ */
+export const ACTIVE_PROJECT_LIMIT: Record<Tier, number | null> = {
+  free: 3,
+  build: null,
+  ship: null,
+};
+
 export function monthlyAllowanceMicroUsd(
   tier: Tier,
   freeIncludedMicroUsd: number,

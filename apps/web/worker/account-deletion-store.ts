@@ -6,7 +6,15 @@
  * lives here, so what is deleted and what is kept is one list somebody can
  * read rather than a set of queries spread across the files that own each
  * table. `account-deletion.ts` decides when; this decides what.
+ *
+ * One list is borrowed rather than written here: the rows a single project
+ * is made of (`PROJECT_ROW_DELETIONS`), which deleting a project from the
+ * builder uses too. The purge deleting every project and the builder
+ * deleting one are the same statements, and a table added to a project
+ * later is added to both by being added once.
  */
+
+import { PROJECT_ROW_DELETIONS } from './project-store.ts';
 
 /** L32: project content is purged 30 days after the request. */
 export const PURGE_AFTER_DAYS = 30;
@@ -444,23 +452,63 @@ export class AccountDeletionStore {
   }
 
   /**
-   * Project content (L32): the project, its runs and their traces, and the
-   * media library's rows. One project per Clerk user, keyed by the user id,
-   * the convention `handlePlan` uses. The bytes are R2's and go separately.
+   * The next of this account's projects whose content has not been purged
+   * yet, or null once there are none. One read; see the `snapshots` step in
+   * `account-deletion.ts` for why the purge takes projects one at a time.
+   */
+  async nextProjectToPurge(userId: string): Promise<string | null> {
+    const row = await this.#db
+      .prepare(`SELECT id FROM projects WHERE user_id = ?1 ORDER BY id LIMIT 1`)
+      .bind(userId)
+      .first<{ id: string }>();
+    return row?.id ?? null;
+  }
+
+  static readonly NEXT_PROJECT_QUERIES = 1;
+
+  /**
+   * One project's rows, once its stored content is gone: the same
+   * statements deleting a single project from the builder makes
+   * (`PROJECT_ROW_DELETIONS` in `project-store.ts`), so the two cannot come
+   * to disagree about what a project is made of.
+   */
+  async deleteOneProject(projectId: string): Promise<void> {
+    for (const sql of PROJECT_ROW_DELETIONS) {
+      await this.#db.prepare(sql).bind(projectId).run();
+    }
+  }
+
+  static readonly ONE_PROJECT_QUERIES = PROJECT_ROW_DELETIONS.length;
+
+  /**
+   * Project content (L32): the projects, their runs and their traces, and
+   * the media library's rows. The bytes are R2's and go separately.
+   *
+   * Keyed two ways. A project made before an account could have several
+   * has the account's user id as its own id, and a project made since has
+   * a row in `projects` naming its owner. By the time this runs the
+   * `snapshots` step has already deleted every owned project one by one,
+   * so the subqueries find nothing in the ordinary case; they are here so
+   * that a deployment with no R2 bucket, where that step has nothing to do
+   * and returns at once, still leaves no row behind.
    */
   async deleteProjectRows(userId: string): Promise<void> {
+    const owned = `SELECT id FROM projects WHERE user_id = ?1`;
     for (const sql of [
-      `DELETE FROM generation_run_traces WHERE project_id = ?1`,
-      `DELETE FROM generation_stages WHERE project_id = ?1`,
-      `DELETE FROM generation_projects WHERE id = ?1`,
+      `DELETE FROM generation_run_traces
+        WHERE project_id = ?1 OR project_id IN (${owned})`,
+      `DELETE FROM generation_stages
+        WHERE project_id = ?1 OR project_id IN (${owned})`,
+      `DELETE FROM generation_projects WHERE id = ?1 OR id IN (${owned})`,
       `DELETE FROM project_media WHERE user_id = ?1`,
+      `DELETE FROM projects WHERE user_id = ?1`,
     ]) {
       await this.#db.prepare(sql).bind(userId).run();
     }
   }
 
   /** Statements `deleteProjectRows` makes, for the nightly allowance. */
-  static readonly PROJECT_ROW_QUERIES = 4;
+  static readonly PROJECT_ROW_QUERIES = 5;
 
   /**
    * Everything else keyed to the person that is not kept: the GitHub grant

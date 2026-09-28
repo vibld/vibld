@@ -91,8 +91,21 @@ describe('asking a session for directions', () => {
     const asked: unknown[] = [];
     const session = createSession({
       requestMockupsImpl: (async () => [mockup()]) as never,
-      resolveProvider: async (plan, _signal, ...rest) => {
-        asked.push(rest[rest.length - 1]);
+      resolveProvider: async (
+        plan,
+        _signal,
+        _onProgress,
+        _style,
+        _knowledge,
+        _model,
+        _referenceUrl,
+        _styleDna,
+        chosen,
+      ) => {
+        // By name rather than as the last argument: the project id is
+        // appended after it now, and a positional read of "the last one"
+        // is exactly how a list like this re-points a caller silently.
+        asked.push(chosen);
         return new FakeModelProvider([plan]);
       },
     });

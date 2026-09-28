@@ -70,7 +70,15 @@ export async function applyDeploymentConfig(
   }
 }
 
-/** What this tab has chosen, or failing that what this browser remembers. */
+/**
+ * What this tab has chosen, or failing that what this browser remembers.
+ *
+ * Once a project is open, what this tab has chosen is that project's model:
+ * opening one puts its choice into the session (`use-projects.ts`), and a
+ * re-probe then keeps it rather than putting the browser's back. The
+ * browser's choice is what a project that never chose one, and every new
+ * project, starts from.
+ */
 function currentOrStoredModel(session: BuilderSession): string | null {
   return session.getState().model ?? loadModelChoice();
 }

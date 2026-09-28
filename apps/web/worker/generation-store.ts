@@ -27,7 +27,12 @@ import type {
   RunTrace,
 } from '@vibld/core';
 
-function snapshotKey(projectId: string, revision: string): string {
+/**
+ * Where one revision of a project is stored. Exported for the one other
+ * writer of this layout, duplicating a project (`project-store.ts`), which
+ * puts the copy exactly where this store will look for it.
+ */
+export function snapshotKey(projectId: string, revision: string): string {
   return `projects/${projectId}/snapshots/${revision}.json`;
 }
 

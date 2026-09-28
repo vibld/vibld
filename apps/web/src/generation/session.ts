@@ -4,6 +4,7 @@ import {
   FakeModelProvider,
   InMemoryGenerationStore,
   RunBudgetLedger,
+  settledTranscript,
 } from '@vibld/core';
 import type {
   GenerationPlan,
@@ -11,6 +12,7 @@ import type {
   ProjectFile,
   ProjectSnapshot,
   RunUsageReport,
+  TranscriptTurn,
 } from '@vibld/core';
 import type { ModelProvider } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
@@ -149,32 +151,53 @@ export interface BuilderState {
    * yet, and a reply may mean nothing will be.
    */
   chatting: boolean;
+  /**
+   * The server project this session is building in, or null when there is
+   * none: a deployment without model generation, or a builder that has not
+   * opened one yet. Sent with every build so the run lands in the project
+   * on screen rather than in whichever one the Worker would guess.
+   */
+  projectId: string | null;
+  /**
+   * The composer's style preset and reference page, held here rather than
+   * in the composer so that they are part of what a project remembers
+   * (docs/decisions.md, 2026-09-28, projects) and come back when it is
+   * opened. The composer still owns what happens to them on send: the
+   * reference is for one message and is cleared once used.
+   */
+  style: StylePresetId | null;
+  referenceUrl: string;
+  /**
+   * A project is being opened. The composer waits for it, so nothing typed
+   * in the moment before is sent against the project being left.
+   */
+  opening: boolean;
 }
 
-/** One prompt and what became of it. */
-export interface TranscriptTurn {
-  id: number;
-  runId: string;
-  prompt: string;
-  at: number;
-  /**
-   * `replied`: the agent answered in words and nothing was built (the
-   * decision recorded in docs/decisions.md, 2026-09-28).
-   */
-  status: 'running' | 'accepted' | 'failed' | 'cancelled' | 'replied';
-  /**
-   * What the agent said in the conversation: the whole reply for a
-   * `replied` turn, or its one line about the change it is making for a
-   * build. Null for a turn that went straight to a build.
-   */
-  agentMessage?: string | null;
-  /** The model's own description of what it built. Null until the plan lands. */
-  summary: string | null;
-  fileCount: number;
-  revision: string | null;
-  /** The first problem, when the run failed. Cancellation is not a problem. */
-  problem: string | null;
-  providerId: string | null;
+// Where it has always been imported from. The shape moved to @vibld/core
+// when the Worker started storing it, so the two cannot drift apart.
+export type { TranscriptTurn };
+
+/** What `restore` puts back when a project is opened. */
+export interface RestoredProject {
+  id: string;
+  transcript: TranscriptTurn[];
+  /** The accepted code, or null for a project nobody has built in yet. */
+  snapshot: ProjectSnapshot | null;
+  style: StylePresetId | null;
+  referenceUrl: string;
+  model: string | null;
+  knowledge: string;
+  styleDna: StyleDna;
+}
+
+/** What a project remembers besides its code and its conversation. */
+export interface SessionSettings {
+  style: StylePresetId | null;
+  referenceUrl: string | null;
+  model: string | null;
+  knowledge: string;
+  styleDna: StyleDna;
 }
 
 /**
@@ -233,6 +256,8 @@ export interface SessionOptions {
     // parameter added to the middle of a positional list silently re-points
     // every existing caller at the wrong argument.
     mockup?: { label: string; html: string } | null,
+    // Last for the same reason: the server project the build is for.
+    projectId?: string | null,
   ) => Promise<ModelProvider>;
 }
 
@@ -280,6 +305,10 @@ function initialState(budget: RunUsageReport): BuilderState {
     mockups: [],
     exploring: false,
     chatting: false,
+    projectId: null,
+    style: null,
+    referenceUrl: '',
+    opening: false,
   };
 }
 
@@ -299,11 +328,13 @@ async function defaultResolveProvider(
   referenceUrl?: string | null,
   styleDna?: StyleDna | null,
   mockup?: { label: string; html: string } | null,
+  projectId?: string | null,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
     ? new RemoteModelProvider({
         signal,
+        ...(projectId ? { projectId } : {}),
         ...(onProgress ? { onProgress } : {}),
         ...(style ? { style } : {}),
         ...(knowledge ? { knowledge } : {}),
@@ -347,7 +378,12 @@ export class BuilderSession {
   #entrySeq = 0;
   #turnSeq = 0;
   #disposed = false;
-  readonly #projectId: string;
+  /**
+   * The key the in-memory store holds this session's project under. The
+   * server project's id once one is opened, and a placeholder before that,
+   * which is all a deployment without a server ever has.
+   */
+  #projectId: string;
   readonly #delay: (ms: number) => Promise<void>;
   readonly #now: () => number;
   readonly #stageDelayMs: number;
@@ -386,6 +422,7 @@ export class BuilderSession {
     referenceUrl?: string | null,
     styleDna?: StyleDna | null,
     mockup?: { label: string; html: string } | null,
+    projectId?: string | null,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
 
@@ -493,6 +530,132 @@ export class BuilderSession {
     this.#emit();
   }
 
+  /** The composer's style preset, or null for none. */
+  setStyle(style: StylePresetId | null): void {
+    if (this.#disposed || style === this.#state.style) return;
+    this.#state = { ...this.#state, style };
+    this.#emit();
+  }
+
+  /** What is in the composer's reference field. */
+  setReferenceUrl(referenceUrl: string): void {
+    if (this.#disposed || referenceUrl === this.#state.referenceUrl) return;
+    this.#state = { ...this.#state, referenceUrl };
+    this.#emit();
+  }
+
+  /** Whether a project is being opened, which holds the composer. */
+  setOpening(opening: boolean): void {
+    if (this.#disposed || opening === this.#state.opening) return;
+    this.#state = { ...this.#state, opening };
+    this.#emit();
+  }
+
+  /**
+   * What this project should remember about how it is being built, for the
+   * autosave.
+   *
+   * The reference page is the one the next build will read: what is in the
+   * field, or, when the agent answered a message instead of building, the
+   * one that message carried and the next build will reuse. The second is
+   * otherwise held only in this object, out of sight, and would be lost on
+   * a reload; saved here, it comes back into the field, where it can be
+   * seen and removed.
+   */
+  settings(): SessionSettings {
+    const typed = this.#state.referenceUrl.trim();
+    return {
+      style: this.#state.style,
+      referenceUrl:
+        typed.length > 0
+          ? typed
+          : (this.#pendingBuildOptions?.referenceUrl ?? null),
+      model: this.#state.model,
+      knowledge: this.#state.knowledge,
+      styleDna: this.#state.styleDna,
+    };
+  }
+
+  /**
+   * Open a project: put back its conversation, its accepted code and its
+   * settings, and build in it from now on.
+   *
+   * Everything in flight is stopped first, as `reset` stops it, because it
+   * belongs to the project being left: a build that finished after this
+   * would otherwise land in the new project's screen, and a chat reply
+   * would be answering a conversation nobody can see any more. The Worker
+   * stops the run itself when its request is dropped.
+   *
+   * The accepted code is put into the in-memory store as the project's
+   * accepted revision, not only onto the screen. The next build asserts
+   * that revision as its base, and the Worker compares it with what it has
+   * stored: a session that showed the code without holding its revision
+   * would have its first follow-up refused as a conflict with its own
+   * project.
+   *
+   * What the deployment can serve, and whether this is an admin, are not
+   * the project's and survive, as they survive `reset`.
+   */
+  async restore(project: RestoredProject): Promise<void> {
+    if (this.#disposed) return;
+    const { models, isAdmin, generation } = this.#state;
+    this.#epoch += 1;
+    const epoch = this.#epoch;
+    this.#abort?.abort();
+    this.#abort = null;
+    this.#exploreAbort?.abort();
+    this.#exploreAbort = null;
+    this.#chatAbort?.abort();
+    this.#chatAbort = null;
+    this.#pendingBuildOptions = null;
+    this.#mockupContext = null;
+
+    const store = new InMemoryGenerationStore();
+    if (project.snapshot) {
+      await store.saveStage({
+        runId: 'restored',
+        projectId: project.id,
+        baseRevision: null,
+        state: 'validating',
+        snapshot: project.snapshot,
+      });
+      await store.promote(project.id, 'restored', null, project.snapshot);
+    }
+    // Another project was opened while this one was being put back: the
+    // later request wins, and this one leaves nothing behind.
+    if (this.#disposed || epoch !== this.#epoch) return;
+
+    this.#store = store;
+    this.#projectId = project.id;
+    this.#ledger = new RunBudgetLedger(this.#budgetLimits);
+    this.#entrySeq = 0;
+    const transcript = settledTranscript(project.transcript);
+    // New turns and runs are numbered after the ones already in the
+    // conversation, so no two turns share an id.
+    this.#turnSeq = transcript.reduce((max, turn) => Math.max(max, turn.id), 0);
+    this.#runSeq = transcript.reduce((max, turn) => {
+      const sequence = Number(/-(\d+)$/.exec(turn.runId)?.[1] ?? 0);
+      return Number.isFinite(sequence) ? Math.max(max, sequence) : max;
+    }, 0);
+    const snapshot = project.snapshot;
+    this.#state = {
+      ...initialState(this.#ledger.report()),
+      models,
+      isAdmin,
+      generation,
+      projectId: project.id,
+      transcript,
+      acceptedSnapshot: snapshot,
+      stagedFiles: snapshot ? snapshot.files.map((file) => ({ ...file })) : [],
+      style: project.style,
+      referenceUrl: project.referenceUrl,
+      model: project.model,
+      knowledge: project.knowledge,
+      styleDna: project.styleDna,
+    };
+    this.#emit();
+  }
+
   /**
    * Discard the whole session: accepted checkpoint, history and budget.
    *
@@ -504,7 +667,8 @@ export class BuilderSession {
    */
   reset(): void {
     if (this.#disposed) return;
-    const { knowledge, model, models, isAdmin, generation } = this.#state;
+    const { knowledge, model, models, isAdmin, generation, projectId } =
+      this.#state;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
@@ -517,6 +681,7 @@ export class BuilderSession {
       models,
       isAdmin,
       generation,
+      projectId,
     };
     // Directions are about a request, and "Start over" discards the
     // request. Carrying them would leave three sketches of a project that
@@ -1022,6 +1187,7 @@ export class BuilderSession {
         referenceUrl,
         this.#state.styleDna,
         mockup,
+        this.#state.projectId,
       );
     } catch (error) {
       reservation.release();

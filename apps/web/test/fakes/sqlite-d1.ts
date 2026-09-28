@@ -71,4 +71,13 @@ export class SqliteD1Database implements D1Database {
   prepare(query: string): D1PreparedStatement {
     return new SqliteD1Statement(this.#db, query);
   }
+
+  /**
+   * Run a script of several statements, the way `wrangler d1 migrations
+   * apply` runs a migration file. For a test that has to put rows in place
+   * between two migrations, which is the only way to test a backfill.
+   */
+  exec(script: string): void {
+    this.#db.exec(script);
+  }
 }

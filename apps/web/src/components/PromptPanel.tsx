@@ -68,6 +68,23 @@ export interface PromptPanelProps {
   onKnowledgeChange?: (value: string) => void;
   styleDna?: StyleDna;
   onStyleDnaChange?: (value: StyleDna) => void;
+  /**
+   * The style preset and reference page, when something above the composer
+   * holds them. The session does, since a project remembers both
+   * (docs/decisions.md, 2026-09-28, projects) and has to be able to put
+   * them back when it is opened. Without these the composer keeps them
+   * itself, as it always did.
+   */
+  style?: StylePresetId | null;
+  onStyleChange?: (style: StylePresetId | null) => void;
+  referenceUrl?: string;
+  onReferenceUrlChange?: (value: string) => void;
+  /**
+   * What the button beside the label says. "Start over" discards the
+   * conversation in place; where the conversation is a saved project, the
+   * same place offers a new project instead, which leaves this one intact.
+   */
+  resetLabel?: string;
 }
 
 /**
@@ -100,11 +117,24 @@ export function PromptPanel({
   onKnowledgeChange,
   styleDna,
   onStyleDnaChange,
+  style: heldStyle,
+  onStyleChange,
+  referenceUrl: heldReferenceUrl,
+  onReferenceUrlChange,
+  resetLabel = 'Start over',
 }: PromptPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [failNext, setFailNext] = useState(false);
-  const [style, setStyle] = useState<StylePresetId | null>(null);
-  const [referenceUrl, setReferenceUrl] = useState('');
+  const [ownStyle, setOwnStyle] = useState<StylePresetId | null>(null);
+  const [ownReferenceUrl, setOwnReferenceUrl] = useState('');
+  // Held above when a handler is given, and here otherwise. One of the two,
+  // never both, so there is no copy to fall out of step with the other.
+  const style = onStyleChange ? (heldStyle ?? null) : ownStyle;
+  const setStyle = onStyleChange ?? setOwnStyle;
+  const referenceUrl = onReferenceUrlChange
+    ? (heldReferenceUrl ?? '')
+    : ownReferenceUrl;
+  const setReferenceUrl = onReferenceUrlChange ?? setOwnReferenceUrl;
   const [open, setOpen] = useState<OptionId | null>(null);
   // Set when the browser refuses the form over the reference field while
   // its panel is closed, so the panel can open and then show why.
@@ -114,7 +144,10 @@ export function PromptPanel({
   const referenceId = useId();
   const panelId = useId();
   const referenceRef = useRef<HTMLInputElement | null>(null);
-  const disabled = state.running || state.exploring || state.chatting;
+  // Opening a project holds the composer too: a message sent in that
+  // moment would go to the project being left.
+  const disabled =
+    state.running || state.exploring || state.chatting || state.opening;
   // Once there is a conversation, the examples are noise: what to type next
   // comes from what was just built, not from a generic starting point.
   const started = state.transcript.length > 0;
@@ -327,7 +360,7 @@ export function PromptPanel({
             onClick={onReset}
             disabled={!started && !state.running}
           >
-            Start over
+            {resetLabel}
           </button>
         ) : null}
       </div>

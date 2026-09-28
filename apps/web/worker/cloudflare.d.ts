@@ -94,8 +94,10 @@ interface R2Bucket {
    */
   delete(keys: string | string[]): Promise<void>;
   /**
-   * Keys under a prefix, a page at a time. Only the account purge lists, to
-   * find an account's snapshots and media without a row naming each one.
+   * Keys under a prefix, a page at a time. Only deletion lists: the account
+   * purge, to find an account's snapshots and media without a row naming
+   * each one, and deleting one project, to find everything under its
+   * prefix (`storage-purge.ts`).
    */
   list(options: { prefix: string; limit?: number }): Promise<{
     objects: { key: string }[];

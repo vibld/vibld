@@ -139,6 +139,13 @@ export interface RemoteModelProviderOptions {
    */
   mockup?: { label: string; html: string } | null;
   /**
+   * The project this build is for (docs/decisions.md, 2026-09-28,
+   * projects). The Worker checks that it is the caller's; without one it
+   * builds in the caller's most recently opened project, which is what a
+   * builder older than projects gets.
+   */
+  projectId?: string | null;
+  /**
    * Returns the caller's current Clerk session token, or `null` when signed
    * out. Injectable so tests do not need a real Clerk instance; defaults to
    * reading the live one via `window.Clerk`.
@@ -158,6 +165,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #referenceUrl: string | null;
   readonly #model: string | null;
   readonly #mockup: { label: string; html: string } | null;
+  readonly #projectId: string | null;
   readonly #getToken: () => Promise<string | null>;
 
   constructor(options: RemoteModelProviderOptions = {}) {
@@ -172,6 +180,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#referenceUrl = options.referenceUrl ?? null;
     this.#model = options.model ?? null;
     this.#mockup = options.mockup ?? null;
+    this.#projectId = options.projectId ?? null;
     this.#getToken = options.getToken ?? getClerkToken;
   }
 
@@ -203,6 +212,7 @@ export class RemoteModelProvider implements ModelProvider {
         ...(this.#referenceUrl ? { referenceUrl: this.#referenceUrl } : {}),
         ...(this.#model ? { model: this.#model } : {}),
         ...(this.#mockup ? { mockup: this.#mockup } : {}),
+        ...(this.#projectId ? { projectId: this.#projectId } : {}),
       }),
       signal: this.#signal,
     });

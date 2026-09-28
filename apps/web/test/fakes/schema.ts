@@ -18,8 +18,18 @@ const MIGRATIONS = join(import.meta.dirname, '..', '..', 'migrations');
  * `wrangler d1 migrations apply` orders by.
  */
 export function schemaSql(): string {
+  return schemaSqlBetween('', '￿');
+}
+
+/**
+ * The migrations whose file names sort at or after `from` and before
+ * `until`, in order: `schemaSqlBetween('', '0033')` is the schema as it
+ * stood before 0033, and `schemaSqlBetween('0033', '0034')` is 0033 alone.
+ * For a backfill test, which needs rows in place between the two.
+ */
+export function schemaSqlBetween(from: string, until: string): string {
   return readdirSync(MIGRATIONS)
-    .filter((name) => name.endsWith('.sql'))
+    .filter((name) => name.endsWith('.sql') && name >= from && name < until)
     .sort()
     .map((name) => readFileSync(join(MIGRATIONS, name), 'utf8'))
     .join('\n');

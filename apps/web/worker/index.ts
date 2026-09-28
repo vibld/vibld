@@ -5,7 +5,7 @@ import {
   resolveModel,
 } from '@vibld/ai';
 import type { MediaManifestEntry, PlanUsage } from '@vibld/ai';
-import { sleep } from '@vibld/core';
+import { DEFAULT_PROJECT_NAME, sleep } from '@vibld/core';
 import type { RunRefusal } from '@vibld/core';
 
 import {
@@ -25,8 +25,10 @@ import {
   parseKnowledge,
   parseChosenMockup,
   parseMockupRequest,
+  isProjectId,
   parseModel,
   parsePreviewRequest,
+  parseProjectId,
   parseAdminTopupRequest,
   parseReferenceUrl,
   parseStyleDna,
@@ -35,6 +37,8 @@ import {
 import { fetchReferenceContext } from './reference-fetch.ts';
 import { handleMedia } from './media-handlers.ts';
 import { handleChat } from './chat-handler.ts';
+import { handleProjects } from './project-handlers.ts';
+import { ProjectStore, resolveRunProject } from './project-store.ts';
 import { MediaStore } from './media-store.ts';
 import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
@@ -161,7 +165,7 @@ import type {
   NightWithDeletion,
 } from './billing-replay.ts';
 import { createStripeClient } from './stripe-client.ts';
-import { isGated } from './access-gate.ts';
+import { isGated, routeKeyFor } from './access-gate.ts';
 import {
   QUERIES_TO_FIND_DELETIONS,
   accountDeletionConfigured,
@@ -472,11 +476,14 @@ function isConfigured(env: Env): boolean {
  * readout and drive its checkout/portal buttons (L35).
  */
 /**
- * This project's finished runs, newest first (internal issue 167).
+ * One project's finished runs, newest first (internal issue 167).
  *
- * Read-only, and scoped to the caller's own project by construction: the
- * project id is the principal's user id, so there is no identifier on the
- * request that could name somebody else's runs.
+ * Read-only, and scoped to the caller's own projects: the builder names the
+ * project in `?project=`, and a project that is not the caller's is "not
+ * found", the same answer `/api/projects/:id` gives. A request that names
+ * none is from a builder older than projects and reads the caller's most
+ * recently opened project, which is the one it was showing. An archived
+ * project's history can still be read; only building in one is refused.
  *
  * Deliberately not gated behind the invite check, for the same reason
  * `/api/billing/status` is not: somebody whose access was revoked can still
@@ -497,10 +504,28 @@ async function handleRuns(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  // One project per Clerk user, the same convention `handlePlan` uses.
+  const requested = new URL(request.url).searchParams.get('project');
+  if (requested !== null && !isProjectId(requested)) {
+    return json({ error: 'That project does not exist.' }, 404);
+  }
   const store = new D1GenerationStore(env.DB, env.PROJECT_CONTENT);
   try {
-    return json({ runs: await store.tracesForProject(principal.userId) });
+    const chosen = await resolveRunProject(
+      new ProjectStore(env.DB, env.PROJECT_CONTENT),
+      principal.userId,
+      requested,
+      {
+        // A read makes nothing: an account with no project has no runs.
+        create: false,
+        allowArchived: true,
+        newId: () => crypto.randomUUID(),
+        now: () => new Date().toISOString(),
+        name: DEFAULT_PROJECT_NAME,
+      },
+    );
+    if (!chosen.ok) return json({ error: chosen.error }, chosen.status);
+    if (chosen.projectId === null) return json({ runs: [] });
+    return json({ runs: await store.tracesForProject(chosen.projectId) });
   } catch (error) {
     // The history is not the run. A database that will not answer must not
     // turn into a builder that looks broken, so this says what failed and
@@ -899,7 +924,9 @@ async function handlePlan(
   }
 
   // What the caller has uploaded, so the build can use it and must not
-  // invent anything else (`mediaSection`). A library that cannot be read is
+  // invent anything else (`mediaSection`). The library is the account's,
+  // shared by every project it has, not the project's: see the README's
+  // "Projects" for why media stayed per account. A library that cannot be read is
   // left unknown rather than taken as empty: the build still runs with no
   // media to use, and the design checks skip the media check instead of
   // flagging every /media/ path in a library that does exist.
@@ -930,6 +957,15 @@ async function handlePlan(
   const chosenModel = parseModel(body, configuredProviders(env));
   if (!chosenModel.ok) {
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
+  }
+
+  const requestedProject = parseProjectId(body);
+  if (!requestedProject.ok) {
+    return refuse(
+      'request-invalid',
+      requestedProject.error,
+      requestedProject.status,
+    );
   }
 
   // The picker only offers what this person may use, but the picker is a
@@ -967,6 +1003,42 @@ async function handlePlan(
     console.error('rate limiter unavailable', error);
   }
 
+  // Which project this run builds in, established before anything is
+  // reserved so that a project that is not the caller's is refused for
+  // free. The builder names it; a builder older than projects names none
+  // and is given the caller's most recently opened project, or a new one
+  // if they have none, so a tab left open across the deploy keeps working
+  // on what it was showing (`resolveRunProject`).
+  //
+  // Refused as `request-invalid` rather than with a reason of its own: the
+  // request named something it may not use, which is what that reason
+  // already means, and the status says which way (404 for a project that
+  // is not theirs, 409 for one they archived).
+  let projectId: string;
+  try {
+    const chosen = await resolveRunProject(
+      new ProjectStore(env.DB!, env.PROJECT_CONTENT!),
+      principal.userId,
+      requestedProject.value,
+      {
+        create: true,
+        newId: () => crypto.randomUUID(),
+        now: () => new Date().toISOString(),
+        name: DEFAULT_PROJECT_NAME,
+      },
+    );
+    if (!chosen.ok) {
+      return refuse('request-invalid', chosen.error, chosen.status);
+    }
+    projectId = chosen.projectId!;
+  } catch (error) {
+    console.error('project lookup unavailable', error);
+    return json(
+      { error: 'Generation could not be started. Try again shortly.' },
+      503,
+    );
+  }
+
   // Layer two: the ceiling. The worst case is charged before the run, because
   // charging afterwards gives an accurate ledger and no limit -- concurrent
   // callers would all read the same balance and all find headroom.
@@ -979,13 +1051,12 @@ async function handlePlan(
   //
   // A follow-up is sized to carry the project it edits as well (internal issue 209): it
   // returns the complete set of files, so a reservation sized for building
-  // something new left a large project no room for the change itself. One
-  // project per Clerk user, the convention the run itself uses.
+  // something new left a large project no room for the change itself.
   const carry =
     env.DB && env.PROJECT_CONTENT
       ? await carryTokensFor(
           new D1GenerationStore(env.DB, env.PROJECT_CONTENT),
-          principal.userId,
+          projectId,
           parsed.value.baseRevision,
         )
       : 0;
@@ -1083,10 +1154,6 @@ async function handlePlan(
   // mid-request already relied on.
 
   const runId = crypto.randomUUID();
-  // One project per Clerk user -- there is no multi-project UI yet, so the
-  // user id is the whole of "which project" for now. See WorkflowParams's
-  // own comment.
-  const projectId = principal.userId;
 
   /**
    * Give a caller who left back what was reserved for them.
@@ -2072,8 +2139,15 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   }
   if (!built.ok) return json({ error: built.error }, 422);
 
-  // One project per Clerk user, same convention `handlePlan` already uses --
-  // there is no multi-project UI yet.
+  // One site per account, whichever project it is published from. The
+  // publish service keys a site's slug on this id (`published_projects.
+  // project_id`), and it stays the account's user id rather than becoming
+  // the project's: every site published before projects existed is keyed
+  // that way, the owner's takedown below and the account purge both find
+  // the site by it, and a slug per project would be a second site per
+  // project, which is a product decision this change does not make.
+  // Publishing another project replaces what the site serves. The files
+  // are the builder's, from the project it has open.
   const projectId = principal.userId;
   const published = await publishProject(
     env,
@@ -2151,7 +2225,7 @@ async function handleUnpublish(
     }
   }
 
-  // One project per Clerk user, the same convention `handlePublish` uses.
+  // The account's one site, keyed as `handlePublish` keys it.
   const removed = await unpublishProject(
     env,
     principal.userId,
@@ -2680,7 +2754,10 @@ async function route(
   env: Env,
   ctx: ExecutionContext,
 ): Promise<Response> {
-  const { pathname } = new URL(request.url);
+  // A project's routes carry its id, so they are named by pattern
+  // (`/api/projects/:id`) before anything compares against them. Every
+  // other path is its own name and comes through unchanged.
+  const pathname = routeKeyFor(new URL(request.url).pathname);
 
   /*
    * The invite gate, before dispatch rather than inside each handler.
@@ -2797,6 +2874,21 @@ async function route(
 
   if (pathname === '/api/runs') {
     return handleRuns(request, env);
+  }
+
+  // The caller's projects (`project-handlers.ts`). Three literal routes,
+  // one handler: the handler reads the id from the request's own path.
+  const projectDeps = {
+    resolvePrincipal: (req: Request) => resolvePrincipal(req, env),
+  };
+  if (pathname === '/api/projects') {
+    return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id') {
+    return handleProjects(request, env, projectDeps);
+  }
+  if (pathname === '/api/projects/:id/duplicate') {
+    return handleProjects(request, env, projectDeps);
   }
 
   if (pathname === '/api/billing/status') {

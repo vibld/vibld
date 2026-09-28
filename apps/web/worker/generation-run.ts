@@ -57,9 +57,14 @@ import { OUT_OF_TIME, retrying, sleep, withinDeadline } from '@vibld/core';
 
 export interface WorkflowParams {
   /**
-   * One project per Clerk user (`index.ts` sets this to `principal.userId`)
-   * -- there is no multi-project UI yet, so this is the whole of "which
-   * project" for now. Revisit this the day that changes.
+   * The project this run builds in, already established as the caller's by
+   * `handlePlan` (`resolveRunProject`), which is why nothing here checks it
+   * again. A UUID for a project made since an account could have several,
+   * or the owner's Clerk user id for the one it had before.
+   *
+   * Everything else the run does stays per account and reads `userId`
+   * instead: the spend ledger, the verification build's sandbox, and the
+   * media library the build may place.
    */
   projectId: string;
   runId: string;

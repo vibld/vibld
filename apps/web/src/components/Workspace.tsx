@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { ProjectFile } from '@vibld/core';
 import type { BuilderState } from '../generation/session.ts';
@@ -68,6 +68,24 @@ export function Workspace({
   // tab switch hides PreviewPanel, so a running sandbox survives switching
   // to Code and back (see use-preview-sandbox.ts's own doc comment).
   const sandbox = usePreviewSandbox();
+
+  // A sandbox is a live copy of one project's checkpoint, and there is one
+  // per account. Opening another project stops it, rather than leaving the
+  // last project running under the new one's name and its share links
+  // serving code the person has moved away from.
+  const shownProject = useRef(state.projectId);
+  const stopSandbox = useRef(sandbox.stop);
+  stopSandbox.current = sandbox.stop;
+  const sandboxRunning = sandbox.status !== null;
+  const runningRef = useRef(sandboxRunning);
+  runningRef.current = sandboxRunning;
+  useEffect(() => {
+    const left = shownProject.current;
+    shownProject.current = state.projectId;
+    if (left !== null && left !== state.projectId && runningRef.current) {
+      stopSandbox.current();
+    }
+  }, [state.projectId]);
 
   // Derive the selection instead of storing it: when a run replaces the file
   // set, a selection that no longer exists falls back to the first file
@@ -226,7 +244,9 @@ export function Workspace({
           </div>
         ) : null}
 
-        {activeTab === 'runs' ? <RunHistory runCount={state.runCount} /> : null}
+        {activeTab === 'runs' ? (
+          <RunHistory runCount={state.runCount} projectId={state.projectId} />
+        ) : null}
 
         {activeTab === 'problems' ? (
           <div className="problems">

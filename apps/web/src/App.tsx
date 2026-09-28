@@ -20,8 +20,12 @@ import { saveStyleDna } from './generation/style-dna-store.ts';
 import { saveKnowledge } from './generation/knowledge-store.ts';
 import { saveModelChoice } from './generation/model-choice-store.ts';
 import { PromptPanel } from './components/PromptPanel.tsx';
+import { ProjectBar } from './components/ProjectBar.tsx';
+import { ProjectsView } from './components/ProjectsView.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
+import { isProjectsPath } from './projects/project-route.ts';
+import { useProjects } from './projects/use-projects.ts';
 import { AuthGate, AuthStatus } from './auth/clerk.tsx';
 
 /**
@@ -56,6 +60,14 @@ function Builder() {
   // shell (internal issue 184).
   const pathname = usePathname();
   const onAdminPage = isAdminPath(pathname);
+  // Projects live on the Worker where the deployment generates with a
+  // model, and not at all where it runs the in-browser fake: see
+  // `use-projects.ts` for why, and for what each address means.
+  const projects = useProjects(session, state, pathname);
+  const onProjectsPage = projects.mode === 'server' && isProjectsPath(pathname);
+  // Either page replaces the builder's two columns, which stay mounted
+  // underneath with everything they hold.
+  const onPage = onAdminPage || onProjectsPage;
   // Where focus goes when the view changes under a reader who never left
   // the document. See `useFocusOnChange`.
   const body = useRef<HTMLElement | null>(null);
@@ -87,6 +99,13 @@ function Builder() {
             <p className="shell__tagline">Vibe. Build. Ship.</p>
           </div>
         </div>
+        {/*
+          What is being worked on, not how the product is configured: the
+          open project's name and whether it is saved, and the way back to
+          the list. Nothing here is configuration, which stays behind the
+          gear.
+        */}
+        <ProjectBar projects={projects} />
         <div className="shell__controls">
           <ThemeToggle />
           <SettingsMenu>
@@ -174,17 +193,16 @@ function Builder() {
       </header>
 
       <main
-        className={
-          onAdminPage ? 'shell__body shell__body--page' : 'shell__body'
-        }
+        className={onPage ? 'shell__body shell__body--page' : 'shell__body'}
         ref={body}
         tabIndex={-1}
       >
         {onAdminPage ? <AdminSettings isAdmin={state.isAdmin} /> : null}
+        {onProjectsPage ? <ProjectsView projects={projects} /> : null}
         <section
           className="column column--left"
           aria-label="Conversation"
-          hidden={onAdminPage}
+          hidden={onPage}
         >
           <Conversation state={state} />
           <div className="composer">
@@ -216,7 +234,21 @@ function Builder() {
               onExplore={(prompt, style, referenceUrl) => {
                 void session.explore(prompt, style, referenceUrl);
               }}
-              onReset={() => session.reset()}
+              // A saved project is not discarded in place: the same
+              // button starts a new project and leaves this one in the
+              // list. Without projects it still starts over, as before.
+              onReset={() =>
+                projects.mode === 'server'
+                  ? void projects.create()
+                  : session.reset()
+              }
+              resetLabel={
+                projects.mode === 'server' ? 'New project' : 'Start over'
+              }
+              style={state.style}
+              onStyleChange={(style) => session.setStyle(style)}
+              referenceUrl={state.referenceUrl}
+              onReferenceUrlChange={(value) => session.setReferenceUrl(value)}
               onCancel={() => session.cancel()}
               onCancelExplore={() => session.cancelExplore()}
               onModelChange={(model) => {
@@ -245,7 +277,7 @@ function Builder() {
           technology the builder is not on screen; `hidden-attribute.test`
           holds the stylesheet to honouring it.
         */}
-        <Workspace state={state} hidden={onAdminPage} />
+        <Workspace state={state} hidden={onPage} />
       </main>
 
       {/*
