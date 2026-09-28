@@ -258,10 +258,9 @@ export default function Terms() {
         identifies the copyrighted work, the material you claim is infringing
         and where it is located, your contact information, and a statement,
         under penalty of perjury, that you are authorized to act and that the
-        information in your notice is accurate. Our registration of a designated
-        DMCA agent with the U.S. Copyright Office is pending. Until an agent is
-        registered, notices to the address above will be treated as a DMCA
-        notice.
+        information in your notice is accurate. Our designated agent is
+        registered with the U.S. Copyright Office&apos;s DMCA Designated Agent
+        Directory under registration number DMCA-1081350.
       </p>
 
       <h2>12. Disclaimers</h2>
