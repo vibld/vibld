@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   CONSENT_KEY,
+  gtagCommand,
   analyticsCookieNames,
   cookieDomainsFor,
   expiredCookie,
@@ -597,5 +598,23 @@ describe('mustForgetCookies', () => {
       assert.equal(mustForgetCookies(analyticsAction('denied', running)), true);
       assert.equal(mustForgetCookies(analyticsAction(null, running)), true);
     }
+  });
+});
+
+describe('gtagCommand', () => {
+  it('pushes an arguments object, which is the only shape gtag.js reads', () => {
+    // A plain array with the same contents is ignored by gtag.js without an
+    // error. That is how the site sent GA4 nothing at all until 2026-09-28.
+    const queue: unknown[] = [];
+    gtagCommand(queue, ['config', 'G-TEST', { cookie_domain: 'none' }]);
+    assert.equal(queue.length, 1);
+    const item = queue[0];
+    assert.equal(Array.isArray(item), false, 'pushed a plain array');
+    assert.equal(Object.prototype.toString.call(item), '[object Arguments]');
+    assert.deepEqual(Array.from(item as ArrayLike<unknown>), [
+      'config',
+      'G-TEST',
+      { cookie_domain: 'none' },
+    ]);
   });
 });

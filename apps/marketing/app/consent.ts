@@ -431,3 +431,24 @@ export function measuresHost(
   const host = hostname.trim().toLowerCase();
   return allowed.some((candidate) => candidate.trim().toLowerCase() === host);
 }
+
+/**
+ * Push one gtag command onto `dataLayer` the way gtag.js reads it.
+ *
+ * gtag.js only acts on entries that are a function's `arguments` object,
+ * which is what the official snippet's `function gtag(){dataLayer.push(
+ * arguments);}` pushes. A plain array with the same contents is ignored
+ * without an error. The site pushed arrays from the day GA4 was added, so
+ * the tag loaded, consent was recorded, and not one page view ever reached
+ * Google (found 2026-09-28, when Chris saw no traffic in GA4).
+ */
+export function gtagCommand(
+  queue: { push(item: unknown): unknown },
+  command: readonly unknown[],
+): void {
+  const gtag = function () {
+    // eslint-disable-next-line prefer-rest-params
+    queue.push(arguments);
+  } as (...args: unknown[]) => void;
+  gtag(...command);
+}

@@ -23,6 +23,7 @@ import {
   cookieDomainsFor,
   expiredCookie,
   gaDisableFlag,
+  gtagCommand,
   recordAnswer,
   bannerVisible,
   consentSignals,
@@ -270,17 +271,15 @@ function GoogleAnalytics() {
 }
 
 /**
- * Push onto gtag's queue.
- *
- * `dataLayer.push(arguments)` is what the official snippet's `gtag` does, and
- * doing it directly avoids defining a global function that only this file
- * calls. Guarded because a blocked script, a sandboxed frame or a missing
- * `window` must never throw out of an effect.
+ * Push onto gtag's queue, as an `arguments` object (see `gtagCommand`: a
+ * plain array is silently ignored, which is why GA4 recorded nothing until
+ * 2026-09-28). Guarded because a blocked script, a sandboxed frame or a
+ * missing `window` must never throw out of an effect.
  */
 function tell(...args: unknown[]) {
   try {
     const queue = (window as unknown as { dataLayer?: unknown[] }).dataLayer;
-    queue?.push(args);
+    if (queue) gtagCommand(queue, args);
   } catch {
     // Nothing was going to be measured anyway.
   }
