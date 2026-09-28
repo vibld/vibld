@@ -5,6 +5,7 @@ import {
   fetchBillingStatus,
   formatUsd,
   openBillingPortal,
+  openCancelPlan,
   startCheckout,
 } from '../billing/billing-client.ts';
 import type { BillingStatus, Tier } from '../billing/billing-client.ts';
@@ -13,10 +14,10 @@ import { SignupCreditOffer } from './SignupCreditOffer.tsx';
 
 /**
  * The header's billing affordance: this caller's tier and usage, a picker to
- * upgrade off the free tier, and buttons for the two things Stripe already
- * hosts for us (docs/decisions.md L12) -- the Checkout page and the Billing
- * Portal. `/api/billing/*` has worked since it shipped; nothing in the shell
- * called it until now.
+ * upgrade off the free tier, and buttons for the things Stripe already
+ * hosts for us (docs/decisions.md L12) -- the Checkout page, the Billing
+ * Portal, and the portal's cancel page opened directly. `/api/billing/*` has
+ * worked since it shipped; nothing in the shell called it until now.
  *
  * Wrapped in `Show when="signed-in"` the same way `AuthStatus` is: mounting
  * only while signed in means a fresh mount is always a fresh fetch, so
@@ -164,6 +165,26 @@ export function BillingStatusPanel() {
           onClick={() => void redirect(() => openBillingPortal())}
         >
           Manage billing
+        </button>
+      ) : null}
+
+      {/*
+       * Only for a plan that is live and not already ending. The tier is
+       * what the status route reads from an active subscription, so "free"
+       * means there is nothing here to cancel, and a plan already set to
+       * end says so in the readout above and is managed from the portal.
+       * Cancelling goes through vibld rather than the portal's own page so
+       * that a monthly plan is offered its retention coupon and an annual
+       * one is not (`/api/billing/cancel`).
+       */}
+      {status.tier !== 'free' && !status.cancelAtPeriodEnd ? (
+        <button
+          type="button"
+          className="chip"
+          disabled={pending}
+          onClick={() => void redirect(() => openCancelPlan())}
+        >
+          Cancel plan
         </button>
       ) : null}
 

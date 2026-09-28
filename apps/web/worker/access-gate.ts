@@ -136,16 +136,29 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // description -- the writes happen in the Workflow, behind `/api/plan`,
   // which stays gated.
   '/api/runs': "a read of the caller's own run history",
-  // Revocation does not cancel a subscription in Stripe, and this is the
-  // only way to cancel one. Gating it would take a customer's access away
-  // while their card kept being charged and leave them no way to stop it,
-  // in the product or out of it. That is not a gate, it is a trap.
+  // Revocation does not cancel a subscription in Stripe, and this and
+  // `/api/billing/cancel` below are the only ways to cancel one. Gating it
+  // would take a customer's access away while their card kept being
+  // charged and leave them no way to stop it, in the product or out of it.
+  // That is not a gate, it is a trap.
   //
   // Safe to leave open because it grants nothing: it needs an existing
   // Stripe customer and errors without one, and the only routes that create
   // a customer are `/api/billing/checkout` and `/api/billing/card`, which
   // stay gated. So an uninvited account finds nothing here.
   '/api/billing/portal': 'the only way to stop being charged',
+  // The same cancellation, opened directly and with the retention offer for
+  // a monthly plan. Open for the portal's reason: a route that stops
+  // charges must not be one a revoked account is refused.
+  //
+  // The offer is the part worth checking, since a discount is something
+  // granted. An uninvited account never reaches it, because it has no
+  // subscription (checkout is gated). A revoked one normally does not
+  // either: the revoke schedules the subscription's end itself
+  // (`access-billing.ts`), and a subscription already ending is sent to the
+  // plain portal rather than the offer. The exception is a revoke whose
+  // wind-down failed, which the operator who revoked is shown as failed.
+  '/api/billing/cancel': 'stopping charges, like the portal',
   // Withdrawing a grant this account already made. It writes nothing to
   // GitHub and mints no token; it only takes back what was given. Gating it
   // left a revoked account able to see its binding through the status route

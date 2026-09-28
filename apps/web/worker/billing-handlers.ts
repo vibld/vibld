@@ -12,6 +12,7 @@ import {
 import { clawBackReferral, payReferralIfEarned } from './referral-payout.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
+  createCancelSession,
   createCardSetupSession,
   createCheckoutSession,
   createPortalSession,
@@ -310,6 +311,55 @@ export async function handleBillingPortal(
     console.error('failed to create billing portal session', error);
     return json(
       { error: 'Could not open the billing portal. Try again shortly.' },
+      502,
+    );
+  }
+}
+
+/**
+ * POST -> { url } for the Stripe-hosted page that cancels this account's
+ * subscription, carrying the retention offer when the plan is monthly
+ * (`createCancelSession`). Authenticated, answered and failed the way the
+ * portal above is, and open to the same callers for the same reason
+ * (`access-gate.ts`).
+ */
+export async function handleBillingCancel(
+  request: Request,
+  env: BillingEnv,
+  selfOrigin: string,
+  /**
+   * Injectable so a test can put a request through the real handler without
+   * a network, the same seam `handleStripeWebhook` has. Production always
+   * takes the default.
+   */
+  client?: Stripe,
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!billingConfigured(env)) {
+    return json(
+      { error: 'Billing is not configured for this deployment.' },
+      503,
+    );
+  }
+
+  const resolved = await resolvePrincipal(request, env);
+  if (resolved.denied) return resolved.denied;
+  const { principal } = resolved;
+
+  try {
+    const stripe = client ?? createStripeClient(env);
+    const store = new BillingStore(env.DB!);
+    const url = await createCancelSession(
+      stripe,
+      store,
+      principal.userId,
+      `${selfOrigin}/`,
+    );
+    return json({ url });
+  } catch (error) {
+    console.error('failed to create billing cancel session', error);
+    return json(
+      { error: 'Could not open the cancellation page. Try again shortly.' },
       502,
     );
   }

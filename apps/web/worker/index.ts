@@ -117,6 +117,7 @@ import {
   handleLiftSuspension,
   handleBillingCheckout,
   handleBillingPortal,
+  handleBillingCancel,
   handleStripeWebhook,
   handleUnattributedQueue,
   readSetupIntent,
@@ -2808,6 +2809,13 @@ async function route(
 
   if (pathname === '/api/billing/portal') {
     return handleBillingPortal(request, env, new URL(request.url).origin);
+  }
+
+  // Cancelling through vibld rather than the portal's own page, so that a
+  // monthly plan can be offered the retention coupon and an annual one is
+  // not (docs/decisions.md, 2026-09-28).
+  if (pathname === '/api/billing/cancel') {
+    return handleBillingCancel(request, env, new URL(request.url).origin);
   }
 
   if (pathname === '/api/billing/card') {

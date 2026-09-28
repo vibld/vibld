@@ -350,6 +350,18 @@ issues as a partial refund in Stripe; top-ups are never refunded; and
 cancelling from the billing portal takes effect at the end of the paid
 period. See `apps/web/README.md`, "Refunds and disputes".
 
+**Cancelling a monthly plan offers 50% off one month, once; an annual plan
+is offered nothing.** Chris decided this on 2026-09-28. Stripe keeps each
+tier's monthly and annual prices on the same product, so the coupon
+(`vibld-retention-50-1mo`, 50% off, duration once) cannot be limited to
+the monthly price by product and applies to any product. The offer is
+instead made only through vibld's own cancel flow (the builder's "Cancel
+plan" button and `POST /api/billing/cancel` behind it), which attaches it
+only when the subscription's price is `vibld_build_monthly` or
+`vibld_ship_monthly` and bills by the month. The Stripe portal's own
+retention setting stays empty, since it would offer the coupon to annual
+plans too. See `apps/web/README.md`, "Billing".
+
 ### Resolved 2026-09-27
 
 **L15 stands: Stripe Tax is off, and the code now matches.** Chris confirmed

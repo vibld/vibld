@@ -172,6 +172,18 @@ export function openBillingPortal(
 }
 
 /**
+ * Open the Stripe-hosted page that cancels this account's subscription,
+ * which for a monthly plan first offers half off the next month. Returns
+ * the URL to redirect the browser to.
+ */
+export function openCancelPlan(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<string> {
+  return postForRedirect('/api/billing/cancel', undefined, fetchImpl, getToken);
+}
+
+/**
  * Open the Stripe-hosted page that saves a card for the welcome credit.
  * Returns the URL to redirect the browser to. Nothing is charged there.
  */

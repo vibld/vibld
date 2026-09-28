@@ -3,13 +3,18 @@
 //
 // Run by .github/workflows/configure-accounts.yml, which holds the keys.
 // `inspect` only reads and prints; `apply` writes, and is safe to repeat:
-// every write sets a value rather than adding one, and the coupon is created
-// under a fixed id only when it does not exist yet.
+// every write sets a value rather than adding one, the coupon is created
+// under a fixed id only when it does not exist yet, and the webhook
+// endpoint's events are only ever added to.
 //
 // What the APIs do not reach (Stripe's own-account branding, public details
-// and statement descriptor, the portal's retention-coupon drop-down, Clerk's
-// logo and application name) is a Dashboard step, and the run summary lists
-// each one with its URL.
+// and statement descriptor, Clerk's logo and application name) is a
+// Dashboard step, and the run summary lists each one with its URL.
+//
+// The portal's own retention-coupon drop-down is deliberately not one of
+// them and stays empty. It offers one coupon to every subscription, and the
+// offer is for monthly plans only (Chris, 2026-09-28), which the Worker's
+// own cancel flow (`/api/billing/cancel`) decides instead.
 
 const STRIPE_API = 'https://api.stripe.com/v1';
 const CLERK_API = 'https://api.clerk.com/v1';
@@ -22,7 +27,17 @@ export const PRICE_LOOKUP_KEYS = [
   'vibld_topup',
 ];
 
-/** The offer made to somebody cancelling a monthly plan: half off one month. */
+/**
+ * The offer made to somebody cancelling a monthly plan: half off one month.
+ *
+ * Deliberately not limited to any product. Stripe keeps each tier's monthly
+ * and annual prices on one product, so `applies_to` cannot tell them apart,
+ * and this coupon would take half off a year if it were ever attached to an
+ * annual invoice. It never is: the only place it is offered is the Worker's
+ * cancel flow, which offers it only for a monthly price (`stripe-client.ts`'s
+ * `RETENTION_COUPON_ID` and `isMonthlyPlanPrice`). The id is pinned to that
+ * constant by this script's test.
+ */
 export const RETENTION_COUPON = {
   id: 'vibld-retention-50-1mo',
   name: '50% off your next month',
@@ -77,32 +92,42 @@ export function formPairs(value, prefix = '') {
   return [[prefix, String(value)]];
 }
 
+/** Where Stripe delivers this deployment's webhooks (`/api/stripe/webhook`). */
+export const WEBHOOK_URL = 'https://app.vibld.com/api/stripe/webhook';
+
 /**
- * Which products the retention coupon may discount: the monthly plans'
- * products, and only when no annual price shares one. A coupon on a product
- * that also carries an annual price would take half off a whole year, which
- * is not the offer, so that case returns an error rather than a scope.
+ * Every event type the Worker acts on, which is every `case` in
+ * `apps/web/worker/billing-events.ts`'s `applyStripeEvent` and the same list
+ * as `billing-replay.ts`'s `REPLAYED_EVENT_TYPES`. The test reads both files
+ * and fails if either drifts from this one.
+ *
+ * An endpoint missing one of these does not fail loudly: the nightly replay
+ * still finds the event, a day late. A refund that takes a day to remove
+ * what it paid for, or a saved card whose credit arrives tomorrow, is the
+ * failure this list is here to prevent.
  */
-export function retentionScope(prices) {
-  const monthly = new Set();
-  const annual = new Set();
-  for (const price of prices) {
-    const product =
-      typeof price.product === 'string' ? price.product : price.product?.id;
-    if (!product || price.recurring == null) continue;
-    if (price.recurring.interval === 'month') monthly.add(product);
-    if (price.recurring.interval === 'year') annual.add(product);
-  }
-  const shared = [...monthly].filter((product) => annual.has(product));
-  if (monthly.size === 0) {
-    return { error: 'No monthly plan price was found by lookup key.' };
-  }
-  if (shared.length > 0) {
-    return {
-      error: `Monthly and annual prices share product ${shared.join(', ')}, so a percentage coupon cannot be limited to one month.`,
-    };
-  }
-  return { products: [...monthly].sort() };
+export const REQUIRED_WEBHOOK_EVENTS = [
+  'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
+  'checkout.session.async_payment_failed',
+  'customer.subscription.created',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+  'invoice.paid',
+  'invoice.payment_failed',
+  'charge.refunded',
+  'charge.dispute.closed',
+  'setup_intent.succeeded',
+];
+
+/**
+ * The events an endpoint has to gain, in the order this script lists them.
+ * None for an endpoint subscribed to everything (`*`), which already
+ * receives them all and would only be narrowed by writing a list.
+ */
+export function missingWebhookEvents(enabled) {
+  if (enabled.includes('*')) return [];
+  return REQUIRED_WEBHOOK_EVENTS.filter((type) => !enabled.includes(type));
 }
 
 async function stripe(key, method, path, body) {
@@ -168,28 +193,26 @@ async function configureStripe(key, apply, report) {
     report.line(
       `- \`${c.id}\` exists: ${c.percent_off}% off, ${c.duration}, products ${c.applies_to?.products?.join(', ') ?? 'all'}.`,
     );
+  } else if (existing.status !== 404) {
+    report.fail(
+      `The retention coupon could not be read: ${stripeError(existing)}`,
+    );
+  } else if (!apply) {
+    report.line(
+      `- Would create \`${RETENTION_COUPON.id}\`: ${RETENTION_COUPON.percent_off}% off, ${RETENTION_COUPON.duration}, any product.`,
+    );
   } else {
-    const scope = retentionScope(prices.json.data);
-    if (scope.error) {
-      report.fail(`Retention coupon not created: ${scope.error}`);
-    } else if (!apply) {
+    const created = await stripe(key, 'POST', '/coupons', RETENTION_COUPON);
+    if (created.status === 200) {
       report.line(
-        `- Would create \`${RETENTION_COUPON.id}\` for products ${scope.products.join(', ')}.`,
+        `- Created \`${created.json.id}\`: ${created.json.percent_off}% off, ${created.json.duration}, any product.`,
       );
     } else {
-      const created = await stripe(key, 'POST', '/coupons', {
-        ...RETENTION_COUPON,
-        applies_to: { products: scope.products },
-      });
-      if (created.status === 200) {
-        report.line(
-          `- Created \`${created.json.id}\` for products ${scope.products.join(', ')}.`,
-        );
-      } else {
-        report.fail(`Retention coupon not created: ${stripeError(created)}`);
-      }
+      report.fail(`Retention coupon not created: ${stripeError(created)}`);
     }
   }
+
+  await configureWebhookEndpoint(key, apply, report);
 
   report.line('### Customer portal');
   const configs = await stripe(
@@ -230,6 +253,66 @@ async function configureStripe(key, apply, report) {
     report.fail(
       `The default portal configuration was not updated: ${stripeError(updated)}`,
     );
+  }
+}
+
+/**
+ * Make sure the endpoint that delivers to the Worker sends every event the
+ * Worker acts on. Only ever adds: an event somebody ticked by hand stays
+ * ticked, and an endpoint on `*` is left alone.
+ *
+ * A missing endpoint is reported rather than created. A new endpoint comes
+ * with a new signing secret, and the Worker verifies every delivery against
+ * the one it already holds (`STRIPE_WEBHOOK_SECRET`), so creating one here
+ * would add an endpoint whose every delivery is refused.
+ */
+async function configureWebhookEndpoint(key, apply, report) {
+  report.line('### Webhook endpoint');
+  const listed = await stripe(key, 'GET', '/webhook_endpoints?limit=100');
+  if (listed.status !== 200) {
+    report.fail(
+      `Stripe webhook endpoints could not be read: ${stripeError(listed)}`,
+    );
+    return;
+  }
+  const endpoints = (listed.json.data ?? []).filter(
+    (endpoint) => endpoint.url === WEBHOOK_URL,
+  );
+  if (endpoints.length === 0) {
+    report.fail(
+      `No webhook endpoint delivers to ${WEBHOOK_URL}. Not created here, because its new signing secret would not match the Worker's STRIPE_WEBHOOK_SECRET.`,
+    );
+    return;
+  }
+  for (const endpoint of endpoints) {
+    const enabled = endpoint.enabled_events ?? [];
+    const missing = missingWebhookEvents(enabled);
+    report.line(
+      `- \`${endpoint.id}\` (${endpoint.status}): ${enabled.includes('*') ? 'every event' : `${enabled.length} events`}` +
+        `${missing.length > 0 ? `, missing ${missing.map((type) => `\`${type}\``).join(', ')}` : ', nothing missing'}.`,
+    );
+    if (missing.length === 0) continue;
+    if (!apply) {
+      report.line(
+        `- Would add ${missing.length} events to \`${endpoint.id}\`.`,
+      );
+      continue;
+    }
+    const updated = await stripe(
+      key,
+      'POST',
+      `/webhook_endpoints/${endpoint.id}`,
+      { enabled_events: [...enabled, ...missing] },
+    );
+    if (updated.status === 200) {
+      report.line(
+        `- Added to \`${endpoint.id}\`: ${missing.map((type) => `\`${type}\``).join(', ')}.`,
+      );
+    } else {
+      report.fail(
+        `Events not added to webhook endpoint ${endpoint.id}: ${stripeError(updated)}`,
+      );
+    }
   }
 }
 

@@ -62,6 +62,47 @@ export const PRICE_USD_CENTS = {
   topup: 2000,
 } as const satisfies Record<keyof typeof PRICE_LOOKUP_KEYS, number>;
 
+/**
+ * The coupon offered to somebody cancelling a monthly plan: 50% off one
+ * month, once (Chris, 2026-09-28). `scripts/configure-accounts.mjs` creates
+ * it in Stripe under this id, and a test there pins the two together.
+ *
+ * The coupon itself applies to any product. Stripe keeps each tier's monthly
+ * and annual prices on one product, so a coupon cannot be limited to the
+ * monthly price by product, and a percentage off an annual invoice would be
+ * half a year's fee rather than half a month's. What keeps it to monthly
+ * subscribers is that the only place it is offered is vibld's own cancel
+ * flow (`billing-checkout.ts`'s `createCancelSession`), which offers it only
+ * for a price `isMonthlyPlanPrice` accepts. The Billing Portal's own
+ * retention setting stays empty, because it cannot tell the two apart.
+ */
+export const RETENTION_COUPON_ID = 'vibld-retention-50-1mo';
+
+const MONTHLY_PLAN_LOOKUP_KEYS: readonly string[] = [
+  PRICE_LOOKUP_KEYS.buildMonthly,
+  PRICE_LOOKUP_KEYS.shipMonthly,
+];
+
+/**
+ * Whether a subscribed price is one of the monthly plans, and so one the
+ * retention coupon may be offered against.
+ *
+ * Both tests, not either. The lookup key says which plan was sold, and the
+ * interval says what the price actually bills: a key reused on a price with
+ * a different interval (a correction made in the Dashboard, say) must not
+ * turn a year's invoice into one the coupon halves.
+ */
+export function isMonthlyPlanPrice(price: {
+  lookup_key: string | null;
+  recurring: { interval: string } | null;
+}): boolean {
+  return (
+    price.recurring?.interval === 'month' &&
+    price.lookup_key !== null &&
+    MONTHLY_PLAN_LOOKUP_KEYS.includes(price.lookup_key)
+  );
+}
+
 const TIER_LOOKUP_KEYS: Record<string, Tier> = {
   [PRICE_LOOKUP_KEYS.buildMonthly]: 'build',
   [PRICE_LOOKUP_KEYS.buildAnnual]: 'build',

@@ -148,8 +148,9 @@ export const DEFAULT_REQUEST_BUDGET = 20;
  *
  * Asked of Stripe rather than filtered after the fact, so a busy account's
  * unrelated events do not spend the budget. It is the same list
- * `billing-handlers.ts` registers as the webhook's `enabled_events`, and
- * `applyStripeEvent` logs anything outside it.
+ * `scripts/configure-accounts.mjs` adds to the webhook's `enabled_events`
+ * (its test holds the two lists equal), and `applyStripeEvent` logs anything
+ * outside it.
  */
 export const REPLAYED_EVENT_TYPES = [
   'checkout.session.completed',

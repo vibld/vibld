@@ -212,6 +212,74 @@ describe('the billing readout, as it is actually wired', () => {
     second.unmount();
   });
 
+  it('offers to cancel only a plan that is live and not already ending', async () => {
+    // Nothing to cancel on the free tier, and a plan already set to end
+    // says so in the readout and is kept or left from the portal.
+    for (const [overrides, offered] of [
+      [{ tier: 'free', hasStripeCustomer: true }, false],
+      [{ tier: 'build', hasStripeCustomer: true }, true],
+      [{ tier: 'ship', hasStripeCustomer: true }, true],
+      [{ tier: 'build', cancelAtPeriodEnd: true }, false],
+    ] as const) {
+      serving({ '/api/billing/status': () => reply(billing(overrides)) });
+      const view = await mount();
+      assert.equal(
+        Boolean(view.button(/Cancel plan/)),
+        offered,
+        `${JSON.stringify(overrides)}: cancel offered should be ${offered}`,
+      );
+      view.unmount();
+    }
+  });
+
+  it('sends the browser to the cancel flow vibld opens', async () => {
+    // Through `/api/billing/cancel` rather than the portal's front page,
+    // because that route is what decides whether a monthly plan is offered
+    // half off a month first.
+    const was = window.location.href;
+    const calls = serving({
+      '/api/billing/status': () =>
+        reply(billing({ tier: 'build', hasStripeCustomer: true })),
+      '/api/billing/cancel': () =>
+        reply({ url: 'https://billing.example/cancel' }),
+    });
+    const view = await mount();
+    await view.press(/Cancel plan/);
+
+    const cancel = calls.find((call) =>
+      call.url.includes('/api/billing/cancel'),
+    );
+    assert.equal(cancel?.method, 'POST');
+    assert.equal(cancel?.body, undefined);
+    assert.equal(
+      calls.some((call) => call.url.includes('/api/billing/portal')),
+      false,
+    );
+    assert.equal(window.location.href, 'https://billing.example/cancel');
+
+    window.location.href = was;
+    view.unmount();
+  });
+
+  it('says why the cancel flow could not be opened', async () => {
+    serving({
+      '/api/billing/status': () =>
+        reply(billing({ tier: 'build', hasStripeCustomer: true })),
+      '/api/billing/cancel': () =>
+        reply(
+          { error: 'Could not open the cancellation page. Try again shortly.' },
+          502,
+        ),
+    });
+    const view = await mount();
+    await view.press(/Cancel plan/);
+
+    const alert = view.container.querySelector('[role="alert"]');
+    assert.match(alert?.textContent ?? '', /cancellation page/);
+    assert.equal(view.button(/Cancel plan/)?.disabled, false);
+    view.unmount();
+  });
+
   it('sends the browser to the Checkout page for the tier that was chosen', async () => {
     const was = window.location.href;
     const calls = serving({

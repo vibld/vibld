@@ -789,10 +789,10 @@ export async function applyStripeEvent(
       );
     default:
       // Every type here is one this deployment asked Stripe for
-      // (billing-handlers.ts registers the webhook's `enabled_events`), so
-      // reaching this branch means the endpoint's own subscription list
-      // drifted from this switch -- worth knowing about, not worth failing
-      // the delivery over.
+      // (`scripts/configure-accounts.mjs` sets the webhook endpoint's
+      // `enabled_events`, and its test reads this switch), so reaching this
+      // branch means the endpoint's own subscription list drifted from this
+      // switch -- worth knowing about, not worth failing the delivery over.
       console.error('unhandled stripe webhook event type', event.type);
       // Applied in the sense that matters to a caller deciding whether to
       // come back: nothing here can write it, and reading it again would

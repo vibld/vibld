@@ -4,6 +4,7 @@ import {
   fetchBillingStatus,
   formatUsd,
   openBillingPortal,
+  openCancelPlan,
   startCheckout,
 } from '../src/billing/billing-client.ts';
 
@@ -170,6 +171,43 @@ describe('openBillingPortal', () => {
           ),
         ),
       /Try again shortly/,
+    );
+  });
+});
+
+describe('openCancelPlan', () => {
+  it('posts with no body to the cancel route and returns the redirect URL', async () => {
+    const calls: Array<[string, RequestInit | undefined]> = [];
+    const url = await openCancelPlan(
+      (async (path: string, init?: RequestInit) => {
+        calls.push([path, init]);
+        return new Response(
+          JSON.stringify({ url: 'https://billing.stripe.com/session_2' }),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch,
+      async () => 'a-token',
+    );
+
+    assert.equal(url, 'https://billing.stripe.com/session_2');
+    const [path, init] = calls[0]!;
+    assert.equal(path, '/api/billing/cancel');
+    assert.equal(init?.method, 'POST');
+    assert.equal(init?.body, undefined);
+  });
+
+  it("surfaces the route's own error", async () => {
+    await assert.rejects(
+      () =>
+        openCancelPlan(
+          jsonFetch(
+            {
+              error: 'Could not open the cancellation page. Try again shortly.',
+            },
+            502,
+          ),
+        ),
+      /cancellation page/,
     );
   });
 });

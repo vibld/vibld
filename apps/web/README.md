@@ -728,6 +728,23 @@ Dashboard needs no code change, only the amount to change.
 - `POST /api/billing/portal` -- authenticated, no body. Returns `{ url }` for
   the Stripe-hosted Billing Portal, where a customer manages or cancels
   their own subscription.
+- `POST /api/billing/cancel` -- authenticated, no body, open to the same
+  callers as the portal. Returns `{ url }` for a Billing Portal session
+  that opens straight on cancelling the caller's subscription
+  (`billing-checkout.ts`'s `createCancelSession`), and answers an account
+  with no subscription the way the portal answers one with no customer
+  (502). **A monthly plan is offered 50% off one month, once, before it
+  cancels; an annual plan is offered nothing** (docs/decisions.md,
+  2026-09-28). The offer is coupon `vibld-retention-50-1mo`
+  (`stripe-client.ts`'s `RETENTION_COUPON_ID`), attached only when the
+  subscription's price, read from Stripe, has a monthly lookup key and
+  bills by the month. It is decided here and not in the portal's own
+  settings because Stripe keeps a tier's monthly and annual prices on one
+  product, so neither the portal's retention setting nor the coupon can
+  tell them apart; that setting stays empty. If Stripe refuses the coupon
+  (it has not been created yet, say), the flow opens without the offer
+  and the refusal is logged, so nobody is kept from cancelling. A
+  subscription already set to end is sent to the plain portal instead.
 - `POST /api/billing/card` -- authenticated, gated, no body. Returns `{ url }`
   for a Stripe Checkout Session in `setup` mode, which saves a card and
   charges nothing. Answers 409 unless the caller is offered the welcome
@@ -746,17 +763,20 @@ Dashboard needs no code change, only the amount to change.
   **`setup_intent.succeeded` pays the welcome credit** (see below), and so
   does a `checkout.session.completed` in `setup` mode. Either one alone is
   enough, and both arriving pays once. It is on the list so a saved card is
-  still paid if the Checkout event is ever dropped from the endpoint; add it
-  at <https://dashboard.stripe.com/workbench/webhooks>: open the existing
-  endpoint and add `setup_intent.succeeded` to the events it sends. Check
-  `checkout.session.completed` is still ticked while there.
+  still paid if the Checkout event is ever dropped from the endpoint.
 
-  **The last two have to be ticked on the endpoint, or refunds only ever
-  reach this deployment through the nightly replay.** They are what takes a
-  referral reward back when the payment that funded it goes out again, and
-  an endpoint configured from an older copy of this list will never deliver
-  either. Add them at
-  <https://dashboard.stripe.com/webhooks> on the existing endpoint.
+  **The endpoint's events are kept complete by the Configure Stripe and
+  Clerk workflow** (see "Setup" below), which adds any of these the
+  endpoint for `https://app.vibld.com/api/stripe/webhook` is missing and
+  never removes one. Its list is `scripts/configure-accounts.mjs`'s
+  `REQUIRED_WEBHOOK_EVENTS`, and its test fails if that list drifts from
+  the `case`s `billing-events.ts` handles or from the nightly replay's.
+
+  **`charge.refunded` and `charge.dispute.closed` matter most, or refunds
+  only ever reach this deployment through the nightly replay.** They are
+  what takes a referral reward back when the payment that funded it goes
+  out again, and an endpoint configured from an older copy of this list
+  will never deliver either.
   `charge.dispute.closed` is acted on only when the dispute was lost: a won
   dispute means the money stayed. Both also take back the credit or plan
   the payment bought; see "Refunds and disputes" below.
@@ -1101,6 +1121,9 @@ reserves against; nothing new is authoritative, `UserBudget` still is), plus:
   only once the status endpoint reports a Stripe customer exists
   (`hasStripeCustomer`), since the Portal 502s without one and a caller who
   has never checked out has nothing to manage yet.
+- **"Cancel plan"**, opening the cancel flow from `POST /api/billing/cancel`
+  (`openCancelPlan`), which is where a monthly plan is offered half off a
+  month -- shown only on a paid tier whose plan is not already set to end.
 - **"Add a card"**, for an account offered the welcome credit
   (`src/components/SignupCreditOffer.tsx`), here and above the composer.
 
@@ -1127,6 +1150,13 @@ wrapper and URL-shaped response parsing it calls are JSX-free
    not change). Until then, deliveries queue and retry against a domain
    that does not yet resolve to this Worker -- harmless, since nothing can
    subscribe before both the code and the domain exist.
+4. Run **Configure Stripe and Clerk** with `mode` = `apply`:
+   <https://github.com/vibld/vibld-internal/actions/workflows/configure-accounts.yml>.
+   It creates the retention coupon `vibld-retention-50-1mo` (50% off,
+   `once`, any product), adds any missing event to the webhook endpoint
+   above, and sets the portal's default configuration, including the
+   cancel feature the cancel flow needs. `inspect` shows what it would do
+   and writes nothing; both are safe to repeat.
 
 ## Admin: manual credit grants (docs/decisions.md L4)
 
