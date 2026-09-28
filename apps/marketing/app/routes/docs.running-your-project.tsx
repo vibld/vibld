@@ -19,9 +19,10 @@ export default function RunningYourProject() {
 
       <h2>Starting one</h2>
       <p>
-        <strong>Run in sandbox</strong> sits under the Preview pane and acts on
-        the last accepted checkpoint. It moves through a few states and each one
-        is reported rather than hidden behind a spinner:
+        <strong>Run live preview</strong> sits in the Preview pane once
+        something is built, and acts on the last accepted checkpoint. It moves
+        through a few states and each one is reported rather than hidden behind
+        a spinner:
       </p>
       <ul>
         <li>
@@ -37,7 +38,7 @@ export default function RunningYourProject() {
         </li>
         <li>
           <strong>Ready</strong>, at which point the frame is the running app
-          and the expiry time is shown beside the button.
+          and the expiry time is shown below it.
         </li>
         <li>
           <strong>Failed</strong>, with the reason, which is not the same as
@@ -56,7 +57,7 @@ export default function RunningYourProject() {
         A running sandbox keeps serving the checkpoint it was started from.
         Accepting a newer one does not change what it is serving, and the pane
         says so rather than letting the frame quietly misrepresent the project.
-        Use <strong>Restart in sandbox</strong> to run the current one.
+        Use <strong>Restart</strong> to run the current one.
       </p>
       <p>
         <strong>Stop</strong> shuts a running sandbox down. It does not touch

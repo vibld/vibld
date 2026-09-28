@@ -58,7 +58,7 @@ export const FLOW: FlowStep[] = [
     id: 'preview',
     short: 'Preview',
     title: 'Look at it privately',
-    body: 'The first preview is a picture of the plan that runs nothing. Run in sandbox installs the project and starts a real dev server, and a share link lets someone else see it until you revoke it. None of this makes anything public.',
+    body: 'Run live preview installs the project in a private sandbox and starts a real dev server, and a share link lets someone else see it until you revoke it. None of this makes anything public.',
     doc: { href: '/docs/running-your-project', label: 'Running and sharing' },
   },
   {

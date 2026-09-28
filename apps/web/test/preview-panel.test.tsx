@@ -127,7 +127,7 @@ describe('the preview, as it is actually wired', () => {
   it('runs the checkpoint that is accepted, and says which it is', async () => {
     const ran: Ran[] = [];
     const view = await mount(stateWith('r3'), sandboxWith(null, null, ran));
-    await view.press(/Run in sandbox/);
+    await view.press(/Run live preview/);
 
     assert.deepEqual(ran, [{ revision: 'r3', paths: ['index.html'] }]);
     view.unmount();
@@ -136,7 +136,7 @@ describe('the preview, as it is actually wired', () => {
   it('offers a restart rather than a first run once one is up', async () => {
     const view = await mount(stateWith('r1'), sandboxWith(READY, 'r1'));
 
-    assert.ok(view.button(/Restart in sandbox/));
+    assert.ok(view.button(/^Restart$/));
     assert.ok(view.button(/Stop/), 'nothing offered to stop a running sandbox');
     view.unmount();
   });
@@ -167,8 +167,8 @@ describe('the preview, as it is actually wired', () => {
   it('asks for a checkpoint before there is anything to preview', async () => {
     const view = await mount(stateWith(null), sandboxWith(null, null));
 
-    assert.match(view.text(), /Accept a checkpoint/);
-    assert.equal(view.button(/Run in sandbox/), undefined);
+    assert.match(view.text(), /Nothing to preview yet/);
+    assert.equal(view.button(/Run live preview/), undefined);
     view.unmount();
   });
 

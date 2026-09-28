@@ -88,10 +88,9 @@ export default function GettingStarted() {
 
       <h2>4. Run it for real</h2>
       <p>
-        The preview you see first is a local mock assembled from the plan and
-        the stylesheet. It runs nothing. When you want a genuinely installed,
-        genuinely running copy, use <strong>Run in sandbox</strong>, which is
-        covered in{' '}
+        Once something is built, the Preview pane offers{' '}
+        <strong>Run live preview</strong>, which installs the project and starts
+        it in a private sandbox so you can click through it. That is covered in{' '}
         <a href="/docs/running-your-project">
           Running and sharing your project
         </a>

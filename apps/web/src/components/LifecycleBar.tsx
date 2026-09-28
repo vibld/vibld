@@ -2,9 +2,9 @@ import type { BuilderStatus } from '../generation/session.ts';
 
 const STEPS: { status: BuilderStatus; label: string }[] = [
   { status: 'planning', label: 'Plan' },
-  { status: 'staging', label: 'Stage' },
-  { status: 'validating', label: 'Validate' },
-  { status: 'accepted', label: 'Accept' },
+  { status: 'staging', label: 'Write' },
+  { status: 'validating', label: 'Check' },
+  { status: 'accepted', label: 'Done' },
 ];
 
 const ORDER: BuilderStatus[] = [

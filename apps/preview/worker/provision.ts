@@ -133,7 +133,7 @@ export async function provisionPreview(
     done('write');
 
     next('install');
-    const installTimedOut = `Installing dependencies did not finish within ${PREVIEW_INSTALL_TIMEOUT_MS / 60_000} minutes. Try "Run in sandbox" again; if it happens again, the project's dependencies may be too large for a preview.`;
+    const installTimedOut = `Installing dependencies did not finish within ${PREVIEW_INSTALL_TIMEOUT_MS / 60_000} minutes. Try "Run live preview" again; if it happens again, the project's dependencies may be too large for a preview.`;
     let install: ExecResultLike;
     try {
       install = await steps.exec('npm install --no-audit --no-fund', {

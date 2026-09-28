@@ -590,7 +590,7 @@ revoked, url? }, ...] }`. `url` is present only for a still-active grant.
 
 ### In the builder shell
 
-The Preview tab's "Run in sandbox" button calls `/api/preview` with the
+The Preview tab's "Run live preview" button calls `/api/preview` with the
 accepted checkpoint's files
 (`src/generation/preview-client.ts`, the browser-side mirror of
 `worker/preview-client.ts`'s `PreviewStatus` union and its defensive

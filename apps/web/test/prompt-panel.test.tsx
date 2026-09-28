@@ -184,7 +184,9 @@ describe('the composer, as it is actually wired', () => {
     // Per-request, not a setting. Left ticked it quietly spends every later
     // run on a checkpoint designed to be rejected, and the box is far enough
     // up the form to be out of sight by the time the failure arrives.
-    const view = await mount(builder());
+    // Offered only against the deterministic provider: against a real
+    // model it would spend a run on a checkpoint designed to be rejected.
+    const view = await mount(builder({ generation: 'fake' }));
     await view.type('A landing page');
     await view.tickFailNext();
     await view.send();
@@ -280,14 +282,14 @@ describe('the composer, as it is actually wired', () => {
 
   it('offers examples until there is a conversation, and fills the box with one', async () => {
     const view = await mount(builder());
-    const example = view.button(/landing page for a cybersecurity/);
+    const example = view.button(/Cybersecurity SaaS landing page/);
     assert.ok(example, 'no example offered');
-    await view.press(/landing page for a cybersecurity/);
+    await view.press(/Cybersecurity SaaS landing page/);
     assert.match(view.prompt().value, /cybersecurity SaaS/);
     view.unmount();
 
     const started = await mount(builder({ transcript: TURN }));
-    assert.equal(started.button(/cybersecurity/), undefined);
+    assert.equal(started.button(/Cybersecurity/), undefined);
     started.unmount();
   });
 
@@ -305,7 +307,7 @@ describe('the composer, as it is actually wired', () => {
 
   it('offers Start over only once there is something to start over from', async () => {
     const fresh = await mount(builder());
-    assert.equal(fresh.button(/Start over/)?.disabled, true);
+    assert.equal(fresh.button(/Start over/), undefined);
     fresh.unmount();
 
     const started = await mount(builder({ transcript: TURN }));
@@ -462,6 +464,113 @@ describe('asking for directions', () => {
     const working = view.button(/Sketching/);
     assert.ok(working, 'the control does not say it is working');
     assert.equal(working.disabled, true);
+    view.unmount();
+  });
+});
+
+/**
+ * The composer's options row (D6, 2026-09-28): each option a button that
+ * opens its panel in place, one at a time, and says on its face when it is
+ * set, so nothing shapes a build out of sight.
+ */
+describe('the options row', () => {
+  const panel = (view: Awaited<ReturnType<typeof mount>>, label: string) =>
+    view.container.querySelector<HTMLElement>(
+      `.option-panel[aria-label="${label}"]`,
+    );
+
+  it('keeps every panel closed until it is asked for', async () => {
+    const view = await mount(builder());
+    for (const element of view.container.querySelectorAll('.option-panel')) {
+      assert.equal((element as HTMLElement).hidden, true);
+    }
+    view.unmount();
+  });
+
+  it('opens one panel at a time, and closes it again', async () => {
+    const view = await mount(builder());
+    await view.press(/^Style/);
+    assert.equal(panel(view, 'Style')?.hidden, false);
+    await view.press(/^Reference/);
+    assert.equal(panel(view, 'Style')?.hidden, true);
+    assert.equal(panel(view, 'Reference')?.hidden, false);
+    await view.press(/^Reference/);
+    assert.equal(panel(view, 'Reference')?.hidden, true);
+    view.unmount();
+  });
+
+  it('says what each option changes about the result', async () => {
+    const view = await mount(builder());
+    for (const element of view.container.querySelectorAll('.option-panel')) {
+      const about = element.querySelector('.option-panel__about');
+      assert.ok(
+        (about?.textContent ?? '').length > 20,
+        `${element.getAttribute('aria-label')} has no explanation`,
+      );
+    }
+    view.unmount();
+  });
+
+  it('shows a set option on its button', async () => {
+    const view = await mount(builder());
+    await view.reference_('https://example.com/about');
+    const button = view.button(/^Reference/);
+    assert.match(button?.textContent ?? '', /example\.com/);
+    view.unmount();
+  });
+
+  it('opens the reference panel when the browser refuses its value', async () => {
+    const view = await mount(builder());
+    await act(async () => {
+      view.reference().dispatchEvent(new Event('invalid'));
+    });
+    assert.equal(panel(view, 'Reference')?.hidden, false);
+    view.unmount();
+  });
+
+  it('offers standing preferences only where they can be kept', async () => {
+    const view = await mount(builder());
+    assert.equal(view.button(/^Preferences/), undefined);
+    view.unmount();
+  });
+
+  it('does not offer a forced failure against a real model', async () => {
+    const view = await mount(builder());
+    assert.equal(view.failNext(), null);
+    view.unmount();
+  });
+});
+
+describe('sending from the keyboard', () => {
+  async function key(
+    view: Awaited<ReturnType<typeof mount>>,
+    init: KeyboardEventInit,
+  ) {
+    await act(async () => {
+      view.prompt().dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+          ...init,
+        }),
+      );
+    });
+  }
+
+  it('sends on Enter', async () => {
+    const view = await mount(builder());
+    await view.type('A landing page');
+    await key(view, {});
+    assert.equal(view.sent[0]?.prompt, 'A landing page');
+    view.unmount();
+  });
+
+  it('keeps Shift+Enter for a new line', async () => {
+    const view = await mount(builder());
+    await view.type('A landing page');
+    await key(view, { shiftKey: true });
+    assert.deepEqual(view.sent, []);
     view.unmount();
   });
 });

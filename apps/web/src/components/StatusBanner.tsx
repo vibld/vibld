@@ -1,11 +1,11 @@
 import type { BuilderState, BuilderStatus } from '../generation/session.ts';
 
 const MESSAGES: Record<BuilderStatus, string> = {
-  idle: 'Describe the application you want and vibld will plan, stage and validate it.',
+  idle: 'What do you want to build? Describe it below, and keep chatting to change it.',
   planning: 'Planning the change…',
-  staging: 'Staging generated files…',
-  validating: 'Validating the staged project…',
-  accepted: 'Checkpoint accepted.',
+  staging: 'Writing the files…',
+  validating: 'Checking the project…',
+  accepted: 'Done.',
   failed: 'This run failed. Your last accepted checkpoint is unchanged.',
   cancelled: 'Run cancelled. Your last accepted checkpoint is unchanged.',
 };

@@ -1843,3 +1843,377 @@ body {
   align-items: flex-start;
   gap: 0.5rem;
 }
+
+/* --- Composer, options row and spacing (D6, 2026-09-28) -------------------
+ * The composer is a message box, one row of options and a send button. Each
+ * option opens its panel in place, between the message and the row, one at
+ * a time. The spacing below is one scale (0.5, 0.75, 1, 1.25rem) applied to
+ * the whole left column, where it had drifted to a different value per
+ * rule. Placed last so it settles the earlier rules it replaces. */
+.column {
+  gap: 1rem;
+}
+
+.composer {
+  gap: 0.75rem;
+}
+
+.conversation {
+  gap: 1rem;
+}
+
+.prompt {
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.prompt__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prompt__input {
+  padding: 0.65rem 0.75rem;
+}
+
+/* Grows with what is typed, up to a limit, where the browser can. */
+.prompt__message {
+  resize: none;
+  min-height: 4.75rem;
+  max-height: 14rem;
+  field-sizing: content;
+  line-height: 1.5;
+}
+
+.prompt__examples {
+  gap: 0.5rem;
+}
+
+.prompt__examples .chip {
+  padding: 0.35rem 0.75rem;
+}
+
+.prompt__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.prompt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.models {
+  display: block;
+}
+
+.models__select {
+  max-width: 12rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 560;
+  border-color: var(--edge-strong);
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--edge-strong);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 560;
+  cursor: pointer;
+  transition:
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+
+.option:hover {
+  border-color: var(--brand-40);
+  color: var(--text);
+}
+
+.option--set {
+  border-color: var(--brand-40);
+  background: var(--brand-8);
+  color: var(--text);
+}
+
+.option--open {
+  border-color: var(--vibld-accent-ink);
+  color: var(--text);
+}
+
+.option__value {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.option__value::before {
+  content: '· ';
+}
+
+.option-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+}
+
+.option-panel__about {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.option-panel__label {
+  display: block;
+  margin-bottom: -0.35rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* The panels' own contents used to carry their own card; inside a panel
+   they are one more field. */
+.option-panel .knowledge {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.option-panel .knowledge__count {
+  margin: 0;
+}
+
+.dna-panel {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+}
+
+.dna-panel .dna {
+  width: 100%;
+}
+
+.styles__chosen {
+  margin: 0.75rem 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.styles__chosen strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* A button that reads as a link: for the quiet, secondary acts ("Start
+   over", "Clear all", "Discard") that should not compete with Send. */
+.linkbutton {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.linkbutton:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.linkbutton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Conversation: a little more air in each turn, so a long one reads as a
+   conversation rather than a log. */
+.transcript {
+  gap: 1.25rem;
+}
+
+.transcript__turn {
+  gap: 0.5rem;
+}
+
+.bubble {
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius-lg);
+}
+
+.bubble__who {
+  margin-bottom: 0.3rem;
+}
+
+.bubble__text {
+  line-height: 1.55;
+}
+
+.runstats__note {
+  display: block;
+  max-width: 70ch;
+  padding-top: 0.35rem;
+}
+
+.shell__footer {
+  padding-block: 0.6rem;
+}
+
+.prompt__send {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.prompt__toolbar {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.welcome {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: auto;
+  padding: 1.5rem 0.25rem;
+  max-width: 34ch;
+}
+
+.welcome__title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.welcome__text {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* The preview pane before there is a frame: one state, centred, with the
+   one thing to do next. */
+.preview__empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.75rem;
+  min-height: 18rem;
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+.preview__empty-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 640;
+  color: var(--text);
+}
+
+.preview__empty-text {
+  margin: 0;
+  max-width: 42ch;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* An npm or Vite error tail: kept as the tool wrote it, and scrollable
+   rather than stretching the pane. */
+.preview__error {
+  margin: 0;
+  max-width: min(100%, 60rem);
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--danger-dim);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview__working {
+  width: 10rem;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--brand) 50%,
+    transparent
+  );
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: vibld-working 1.4s var(--ease) infinite;
+}
+
+@keyframes vibld-working {
+  from {
+    background-position: -100% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview__working {
+    animation: none;
+    background: var(--brand-40);
+  }
+}
+
+.prompt__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}

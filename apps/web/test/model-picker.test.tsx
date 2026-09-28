@@ -8,9 +8,9 @@ import { ModelPicker } from '../src/components/ModelPicker.tsx';
 import type { ModelOption } from '../src/generation/remote-provider.ts';
 
 /**
- * The picker groups every offered version into families and opens each on
- * its newest version, so choosing "Claude Opus" means Opus 5.5 unless
- * someone asks for another.
+ * One dropdown, every offered version grouped under its family, newest
+ * first, and nothing else: Chris asked for a plain dropdown without the
+ * sentence of pricing that used to sit under it (2026-09-28).
  */
 
 const MODELS: ModelOption[] = MODEL_CATALOGUE.map(
@@ -37,8 +37,8 @@ function mount(value: string | null, models = MODELS) {
   return {
     container,
     chosen,
-    family: selects[0]!,
-    version: selects[1] as HTMLSelectElement | undefined,
+    selects,
+    select: selects[0]!,
     unmount: () => {
       act(() => root.unmount());
       container.remove();
@@ -54,55 +54,71 @@ function choose(select: HTMLSelectElement, value: string) {
 }
 
 describe('ModelPicker', () => {
-  it('offers each family once, not each version', () => {
+  it('is one dropdown, with no prose beside it', () => {
     const view = mount('claude-opus-5-5');
-    const labels = [...view.family.options].map((option) => option.text);
-    assert.equal(labels.filter((label) => label === 'Claude Opus').length, 1);
-    assert.ok(!labels.includes('Claude Opus 4.8'));
+    assert.equal(view.selects.length, 1);
+    for (const model of MODELS) {
+      assert.ok(
+        !(view.container.textContent ?? '').includes(model.note),
+        `the note for ${model.id} is on screen`,
+      );
+    }
     view.unmount();
   });
 
-  it('lands on Opus 5.5 when someone chooses Opus', () => {
-    const view = mount('deepseek-flash');
-    choose(view.family, 'claude-opus');
-    assert.deepEqual(view.chosen, ['claude-opus-5-5']);
+  it('groups a family of several under its name, newest first', () => {
+    const view = mount('claude-opus-5-5');
+    const group = [...view.select.querySelectorAll('optgroup')].find(
+      (element) => element.label === 'Claude Opus',
+    );
+    assert.ok(group, 'no Claude Opus group');
+    assert.deepEqual(
+      [...group.querySelectorAll('option')].map((option) => option.value),
+      [
+        'claude-opus-5-5',
+        'claude-opus-5',
+        'claude-opus-4-8',
+        'claude-opus-4-7',
+        'claude-opus-4-6',
+      ],
+    );
     view.unmount();
   });
 
-  it('still lets someone choose an older version by name', () => {
+  it('lists a family of one as a plain choice, not a group of one', () => {
     const view = mount('claude-opus-5-5');
-    assert.ok(view.version, 'no version control for a family of several');
-    const versions = [...view.version.options].map((option) => option.value);
-    assert.deepEqual(versions, [
-      'claude-opus-5-5',
-      'claude-opus-5',
-      'claude-opus-4-8',
-      'claude-opus-4-7',
-      'claude-opus-4-6',
-    ]);
-    choose(view.version, 'claude-opus-4-8');
+    const flash = view.select.querySelector('option[value="deepseek-flash"]');
+    assert.ok(flash, 'deepseek-flash is not offered');
+    assert.equal(flash.parentElement, view.select);
+    view.unmount();
+  });
+
+  it('sends the version chosen, older ones included', () => {
+    const view = mount('claude-opus-5-5');
+    choose(view.select, 'claude-opus-4-8');
     assert.deepEqual(view.chosen, ['claude-opus-4-8']);
     view.unmount();
   });
 
-  it('shows an older version as selected when that is what was chosen', () => {
+  it('shows what was chosen as selected', () => {
     const view = mount('claude-opus-4-8');
-    assert.equal(view.family.value, 'claude-opus');
-    assert.equal(view.version?.value, 'claude-opus-4-8');
+    assert.equal(view.select.value, 'claude-opus-4-8');
     view.unmount();
   });
 
-  it('asks for no version where a family has only one', () => {
-    const view = mount('deepseek-flash');
-    assert.equal(view.version, undefined);
-    view.unmount();
-  });
-
-  it('opens on the newest version granted, not the newest that exists', () => {
+  it('offers only what is granted', () => {
     const granted = MODELS.filter((model) => model.id !== 'claude-opus-5-5');
     const view = mount('deepseek-flash', granted);
-    choose(view.family, 'claude-opus');
-    assert.deepEqual(view.chosen, ['claude-opus-5']);
+    assert.equal(
+      view.select.querySelector('option[value="claude-opus-5-5"]'),
+      null,
+    );
+    view.unmount();
+  });
+
+  it('renders nothing when there is no choice to make', () => {
+    const view = mount(null, MODELS.slice(0, 1));
+    assert.equal(view.selects.length, 0);
     view.unmount();
   });
 });

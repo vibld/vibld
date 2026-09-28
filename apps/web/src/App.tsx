@@ -7,8 +7,6 @@ import { navigate, usePathname } from './admin/use-pathname.ts';
 import { useFocusOnChange } from './admin/use-focus-on-change.ts';
 import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
-import { KnowledgePanel } from './components/KnowledgePanel.tsx';
-import { StyleDnaPanel } from './components/StyleDnaPanel.tsx';
 import { SettingsMenu } from './components/SettingsMenu.tsx';
 import { BillingStatusWidget } from './components/BillingStatus.tsx';
 import { SignupCreditBanner } from './components/SignupCreditOffer.tsx';
@@ -18,7 +16,6 @@ import { ThemeToggle } from './components/ThemeToggle.tsx';
 import { footerNote } from './generation/pane-gaps.ts';
 import { saveStyleDna } from './generation/style-dna-store.ts';
 import { saveKnowledge } from './generation/knowledge-store.ts';
-import { LifecycleBar } from './components/LifecycleBar.tsx';
 import { PromptPanel } from './components/PromptPanel.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
@@ -179,23 +176,6 @@ function Builder() {
               new looks.
             */}
             <SignupCreditBanner />
-            <LifecycleBar status={state.status} />
-            <KnowledgePanel
-              knowledge={state.knowledge}
-              disabled={state.running}
-              onChange={(value) => {
-                session.setKnowledge(value);
-                saveKnowledge(value);
-              }}
-            />
-            <StyleDnaPanel
-              styleDna={state.styleDna}
-              disabled={state.running}
-              onChange={(value) => {
-                session.setStyleDna(value);
-                saveStyleDna(value);
-              }}
-            />
             {/*
               Above the composer, because it is what the next click is
               about. Every mockup is model output and renders in a fully
@@ -219,6 +199,16 @@ function Builder() {
               onCancel={() => session.cancel()}
               onCancelExplore={() => session.cancelExplore()}
               onModelChange={(model) => session.setModel(model)}
+              knowledge={state.knowledge}
+              onKnowledgeChange={(value) => {
+                session.setKnowledge(value);
+                saveKnowledge(value);
+              }}
+              styleDna={state.styleDna}
+              onStyleDnaChange={(value) => {
+                session.setStyleDna(value);
+                saveStyleDna(value);
+              }}
             />
           </div>
         </section>
@@ -249,6 +239,12 @@ function Builder() {
             {state.providerId ?? 'not run yet'} · Model tokens:{' '}
             {usage.modelInputTokens} in / {usage.modelOutputTokens} out
           </span>
+          {/*
+            Inside the fold since 2026-09-28: a paragraph of caveats along
+            the bottom of every screen was the first thing Chris named as
+            clutter, and it is reference in the same way the figures are.
+          */}
+          <span className="runstats__note">{footerNote()}</span>
         </details>
         {/*
           This used to say that sandbox execution, real providers, Git export
@@ -259,7 +255,6 @@ function Builder() {
           the panes state their own gaps from (generation/pane-gaps.ts), so
           there is nothing here to correct separately.
         */}
-        <span>{footerNote()}</span>
       </footer>
     </div>
   );

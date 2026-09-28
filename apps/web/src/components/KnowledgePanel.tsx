@@ -1,13 +1,14 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import { MAX_KNOWLEDGE_CHARS } from '@vibld/ai/limits';
 
 /**
  * Standing instructions: the things a person should only have to say once.
  *
- * Collapsed by default. This is a preference someone sets and then forgets
- * about, so it should not take space from the composer on every turn -- but
- * the summary says when it is set, because instructions you cannot see
- * silently shaping every result would be worse than not having them.
+ * Shown inside the composer's options row rather than as its own panel
+ * above it (2026-09-28): this is a preference someone sets and then forgets
+ * about, so it should not take space from the conversation on every turn.
+ * The option's button says when it is set, because instructions you cannot
+ * see silently shaping every result would be worse than not having them.
  */
 export function KnowledgePanel({
   knowledge,
@@ -18,27 +19,13 @@ export function KnowledgePanel({
   onChange: (value: string) => void;
   disabled: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const fieldId = useId();
-  const set = knowledge.trim().length > 0;
   const remaining = MAX_KNOWLEDGE_CHARS - knowledge.length;
 
   return (
-    <details
-      className="knowledge"
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary className="knowledge__summary">
+    <div className="knowledge">
+      <label className="option-panel__label" htmlFor={fieldId}>
         Project instructions
-        {set ? (
-          <span className="pill pill--on">on</span>
-        ) : (
-          <span className="knowledge__hint">not set</span>
-        )}
-      </summary>
-      <label className="knowledge__label" htmlFor={fieldId}>
-        Applied to every request, so you do not have to repeat yourself.
       </label>
       <textarea
         id={fieldId}
@@ -55,6 +42,6 @@ export function KnowledgePanel({
           ? `${remaining} characters left`
           : `Up to ${MAX_KNOWLEDGE_CHARS} characters`}
       </p>
-    </details>
+    </div>
   );
 }

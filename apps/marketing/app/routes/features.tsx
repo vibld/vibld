@@ -187,7 +187,7 @@ export default function Features() {
             eyebrow="Sandbox and sharing"
             id="sandbox-title"
             title="A real, installed, running copy"
-            lede="Run in sandbox installs the dependencies and starts a dev server. It reports each state (queued, installing, starting, ready, failed) instead of a spinner, and it expires, because it is for looking at a project rather than hosting one."
+            lede="Run live preview installs the dependencies and starts a dev server. It reports each state (queued, installing, starting, ready, failed) instead of a spinner, and it expires, because it is for looking at a project rather than hosting one."
           />
           <div className="lb-grid2">
             <article className="lb-card">
@@ -207,8 +207,8 @@ export default function Features() {
               <h3>It says when it is out of date</h3>
               <p>
                 A sandbox serves the checkpoint it started from. Accept a newer
-                one and the pane says so and offers Restart in sandbox, rather
-                than letting the frame quietly misrepresent the project.
+                one and the pane says so and offers Restart, rather than letting
+                the frame quietly misrepresent the project.
               </p>
               <p>
                 <Link className="lb-link" to="/docs/running-your-project">

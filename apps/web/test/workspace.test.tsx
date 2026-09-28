@@ -89,7 +89,7 @@ async function mount(state: BuilderState, preview: () => Response = QUIET) {
     },
     async run() {
       const button = [...container.querySelectorAll('button')].find((element) =>
-        /Run in sandbox/.test(element.textContent ?? ''),
+        /Run live preview/.test(element.textContent ?? ''),
       );
       assert.ok(button, 'no run button');
       await act(async () => {

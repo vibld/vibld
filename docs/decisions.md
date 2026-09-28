@@ -205,6 +205,19 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-28
+
+**The builder's composer is a message box and one row of options.** Chris
+chose this on 2026-09-28, after finding the builder cluttered: every option
+was on screen at once. The message and the send button stay put; style,
+reference URL, media and preferences (project instructions and visual
+preferences together) are each a button that opens its panel in place, with
+one line on what it changes about the result, and a set option says so on
+its button. The model is one dropdown beside the send button, grouped by
+family, with no description under it. "Force a validation failure" is
+offered only against the deterministic provider. The Preview pane's
+"Run in sandbox" is now "Run live preview", in the middle of the pane.
+
 ### Resolved 2026-09-27
 
 **Roadmap additions.** Chris added, on 2026-09-27: Figma import (out of the

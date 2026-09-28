@@ -1,17 +1,37 @@
-import { useEffect, useId, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { MAX_REFERENCE_URL_CHARS } from '@vibld/ai/limits';
+import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
+import type { StyleDna } from '@vibld/ai/style-dna';
 import type { BuilderState } from '../generation/session.ts';
 import type { PlanMode } from '../generation/plan-builder.ts';
+import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { MediaLibrary } from './MediaLibrary.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
+import { StyleDnaPanel } from './StyleDnaPanel.tsx';
 import { StylePicker } from './StylePicker.tsx';
 
+/** A short label on the chip, and the whole request it puts in the box. */
 const EXAMPLES = [
-  'A landing page for a cybersecurity SaaS with pricing, FAQ and a contact form',
-  'A marketing site for an indie coffee roaster with features and testimonials',
+  {
+    label: 'Cybersecurity SaaS landing page',
+    prompt:
+      'A landing page for a cybersecurity SaaS with pricing, FAQ and a contact form',
+  },
+  {
+    label: 'Coffee roaster website',
+    prompt:
+      'A marketing site for an indie coffee roaster with features and testimonials',
+  },
+  {
+    label: 'Photographer portfolio',
+    prompt:
+      'A portfolio for a wedding photographer with a gallery, packages and a booking form',
+  },
 ];
+
+type OptionId = 'style' | 'reference' | 'media' | 'preferences';
 
 export interface PromptPanelProps {
   state: BuilderState;
@@ -39,8 +59,35 @@ export interface PromptPanelProps {
    */
   onCancelExplore: () => void;
   onModelChange: (model: string | null) => void;
+  /**
+   * Standing instructions and visual preferences. Optional so the composer
+   * can be mounted on its own; where they are absent their options are not
+   * offered.
+   */
+  knowledge?: string;
+  onKnowledgeChange?: (value: string) => void;
+  styleDna?: StyleDna;
+  onStyleDnaChange?: (value: StyleDna) => void;
 }
 
+/**
+ * The composer: a message box, one row of options, and the send button.
+ *
+ * It used to be a form. Every option was on screen at once (reference URL,
+ * media library, two model dropdowns with a sentence of pricing, twenty-three
+ * style chips, a test checkbox), with project instructions and visual
+ * preferences stacked above it, so the one field that matters most sat in
+ * the middle of a column somebody had to scroll. Chris's decision D6
+ * (2026-09-28): the message and the send button stay put, and each option
+ * is a button in one row that opens its panel in place, with a line saying
+ * what it changes about the result. The model sits beside Send, because
+ * it is a choice about who answers rather than about the result. An option that is set says so on its
+ * button, so nothing shapes a build out of sight.
+ *
+ * Panels are hidden rather than unmounted: what somebody typed into one
+ * survives closing it, and the media library does not refetch on every
+ * open.
+ */
 export function PromptPanel({
   state,
   onSubmit,
@@ -49,18 +96,33 @@ export function PromptPanel({
   onCancel,
   onCancelExplore,
   onModelChange,
+  knowledge,
+  onKnowledgeChange,
+  styleDna,
+  onStyleDnaChange,
 }: PromptPanelProps) {
   const [prompt, setPrompt] = useState('');
   const [failNext, setFailNext] = useState(false);
   const [style, setStyle] = useState<StylePresetId | null>(null);
   const [referenceUrl, setReferenceUrl] = useState('');
+  const [open, setOpen] = useState<OptionId | null>(null);
+  // Set when the browser refuses the form over the reference field while
+  // its panel is closed, so the panel can open and then show why.
+  const [revealReference, setRevealReference] = useState(false);
   const promptId = useId();
   const failId = useId();
   const referenceId = useId();
+  const panelId = useId();
+  const referenceRef = useRef<HTMLInputElement | null>(null);
   const disabled = state.running || state.exploring;
   // Once there is a conversation, the examples are noise: what to type next
   // comes from what was just built, not from a generic starting point.
   const started = state.transcript.length > 0;
+  // "Force a validation failure" exists to exercise the failure path
+  // against the deterministic provider. Against a real model it only
+  // spends a run on a checkpoint designed to be rejected, so it is not
+  // offered there.
+  const testing = state.generation !== 'model';
 
   /**
    * Everything that belonged to the request that just started.
@@ -73,15 +135,13 @@ export function PromptPanel({
    * the reference.
    *
    * - The prompt, because this is a composer, not a field that holds the
-   *   last thing submitted: leaving the sent message in it means the next
-   *   turn starts by editing the previous one.
+   *   last thing submitted.
    * - The reference URL, which is scoped to the request it went with rather
    *   than being a standing preference the way `knowledge` is, so a later
    *   unrelated turn never refetches a page nobody meant it for.
    * - "Force a validation failure", which costs the most: left ticked it
    *   quietly spends every later run on a checkpoint designed to be
-   *   rejected, and the box is far enough up the form to be out of sight by
-   *   the time the failure arrives.
+   *   rejected.
    */
   function clearPerRequestFields() {
     setPrompt('');
@@ -94,196 +154,336 @@ export function PromptPanel({
   // id rather than on `running`, so a run that finishes before this renders
   // still clears, and so a re-render during a run does not wipe what
   // somebody has begun typing for the turn after it.
-  //
-  // That last part is the dependency array's job and nothing else's. The
-  // first version also kept a ref of the last id it had cleared for, and a
-  // mutation showed the ref was unobservable: React re-runs this only when
-  // the id changes, run ids are monotonic, so there is no second path for
-  // the same id to arrive by. A guard no test can distinguish is a guard
-  // that is not carrying its weight, so it is gone.
   useEffect(() => {
     if (state.runId === null) return;
     clearPerRequestFields();
+    setOpen(null);
     // `clearPerRequestFields` only calls setters, which React guarantees are
     // stable; listing it would mean re-running on every render rather than
     // on every run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.runId]);
 
+  // The browser cannot show why a field is invalid while the field is
+  // hidden, so the refusal opened the panel; now that it is on screen, say
+  // why, in the field's own words.
+  useEffect(() => {
+    if (!revealReference || open !== 'reference') return;
+    setRevealReference(false);
+    referenceRef.current?.reportValidity();
+  }, [revealReference, open]);
+
+  function trimmedReference(): string | null {
+    const trimmed = referenceUrl.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled || prompt.trim().length === 0) return;
-    const trimmedReference = referenceUrl.trim();
     onSubmit(
       prompt,
       failNext ? 'fail-validation' : 'succeed',
       style,
-      trimmedReference.length > 0 ? trimmedReference : null,
+      trimmedReference(),
     );
     // Here as well as in the effect above, deliberately: the effect cannot
     // run until the session has reported a new run, and a composer that
     // still showed the sent message for that round trip would read as a
     // click that did nothing.
     clearPerRequestFields();
+    setOpen(null);
+  }
+
+  // Enter sends, Shift+Enter is a new line: what every chat box does. Not
+  // while an input method is composing, where Enter confirms a character.
+  function onPromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      event.key !== 'Enter' ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    )
+      return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
+  const chosenStyle = STYLE_PRESETS.find((preset) => preset.id === style);
+  const referenceHost = (() => {
+    const value = trimmedReference();
+    if (!value) return null;
+    try {
+      return new URL(value).hostname;
+    } catch {
+      return value;
+    }
+  })();
+  const lookCount = styleDna ? Object.keys(styleDna).length : 0;
+  const instructionsSet = (knowledge ?? '').trim().length > 0;
+
+  const options: {
+    id: OptionId;
+    label: string;
+    value: string | null;
+    about: string;
+    body: ReactNode;
+  }[] = [
+    {
+      id: 'style',
+      label: 'Style',
+      value: chosenStyle?.name ?? null,
+      about:
+        'Sets the overall look. A treatment is a surface finish; a complete system also brings its own colours and fonts.',
+      body: (
+        <StylePicker value={style} onChange={setStyle} disabled={disabled} />
+      ),
+    },
+    {
+      id: 'reference',
+      label: 'Reference',
+      value: referenceHost,
+      about:
+        "vibld reads this page's text, colours, fonts and spacing and uses them as a starting point. It adapts rather than copies. Used for this message only.",
+      body: (
+        <>
+          <label className="option-panel__label" htmlFor={referenceId}>
+            Reference URL
+          </label>
+          <input
+            id={referenceId}
+            ref={referenceRef}
+            type="url"
+            className="prompt__input"
+            // The same bound the Worker's guard enforces, declared where the
+            // value is entered (internal PR 189 review).
+            maxLength={MAX_REFERENCE_URL_CHARS}
+            value={referenceUrl}
+            placeholder="https://example.com"
+            onChange={(event) => setReferenceUrl(event.target.value)}
+            onInvalid={() => {
+              if (open !== 'reference') {
+                setOpen('reference');
+                setRevealReference(true);
+              }
+            }}
+            disabled={disabled}
+          />
+        </>
+      ),
+    },
+  ];
+  if (state.generation === 'model') {
+    options.push({
+      id: 'media',
+      label: 'Media',
+      value: null,
+      about:
+        'Images and video you upload here are placed in the site wherever your request calls for them.',
+      body: <MediaLibrary disabled={disabled} />,
+    });
+  }
+  // Instructions (free text) and look (closed-set choices) are one option:
+  // both are standing preferences applied to every build, and as two
+  // buttons they pushed the row onto a second line for no gain.
+  if (onKnowledgeChange || onStyleDnaChange) {
+    const setCount = (instructionsSet ? 1 : 0) + lookCount;
+    options.push({
+      id: 'preferences',
+      label: 'Preferences',
+      value: setCount > 0 ? String(setCount) : null,
+      about:
+        'Applied to every message, so you only say it once. What you type in a message wins.',
+      body: (
+        <>
+          {onKnowledgeChange ? (
+            <KnowledgePanel
+              knowledge={knowledge ?? ''}
+              disabled={state.running}
+              onChange={onKnowledgeChange}
+            />
+          ) : null}
+          {onStyleDnaChange ? (
+            <StyleDnaPanel
+              styleDna={styleDna ?? {}}
+              disabled={state.running}
+              onChange={onStyleDnaChange}
+            />
+          ) : null}
+        </>
+      ),
+    });
   }
 
   return (
     <form className="prompt" onSubmit={handleSubmit}>
-      <label className="prompt__label" htmlFor={promptId}>
-        {started ? 'What should change?' : 'Describe your application'}
-      </label>
-      <textarea
-        id={promptId}
-        className="prompt__input"
-        value={prompt}
-        rows={started ? 2 : 4}
-        placeholder={started ? 'Make the hero navy…' : 'A landing page for…'}
-        onChange={(event) => setPrompt(event.target.value)}
-        disabled={disabled}
-      />
+      <div className="prompt__head">
+        <label className="prompt__label" htmlFor={promptId}>
+          {started ? 'What should change?' : 'Describe your application'}
+        </label>
+        {started || state.running ? (
+          <button
+            type="button"
+            className="linkbutton"
+            onClick={onReset}
+            disabled={!started && !state.running}
+          >
+            Start over
+          </button>
+        ) : null}
+      </div>
 
       {started ? null : (
-        <div className="prompt__examples">
+        <div className="prompt__examples" aria-label="Examples">
           {EXAMPLES.map((example) => (
             <button
-              key={example}
+              key={example.label}
               type="button"
               className="chip"
-              onClick={() => setPrompt(example)}
+              title={example.prompt}
+              onClick={() => setPrompt(example.prompt)}
               disabled={disabled}
             >
-              {example.slice(0, 38)}…
+              {example.label}
             </button>
           ))}
         </div>
       )}
 
-      <label className="prompt__label" htmlFor={referenceId}>
-        Reference URL (optional)
-      </label>
-      <input
-        id={referenceId}
-        type="url"
-        className="prompt__input"
-        // The same bound the Worker's guard enforces, declared where the
-        // value is entered (internal PR 189 review). Without it an over-long address
-        // was valid markup that paid for a look and was refused only by the
-        // build that choosing a direction submits.
-        maxLength={MAX_REFERENCE_URL_CHARS}
-        value={referenceUrl}
-        placeholder="https://example.com -- a page to copy from or emulate"
-        onChange={(event) => setReferenceUrl(event.target.value)}
+      <textarea
+        id={promptId}
+        className="prompt__input prompt__message"
+        value={prompt}
+        rows={started ? 2 : 3}
+        placeholder={
+          started
+            ? 'Make the hero navy and add a pricing table…'
+            : 'A landing page for…'
+        }
+        onChange={(event) => setPrompt(event.target.value)}
+        onKeyDown={onPromptKeyDown}
         disabled={disabled}
       />
 
-      {state.generation === 'model' ? (
-        <MediaLibrary disabled={disabled} />
+      {options.map((option) => (
+        <div
+          key={option.id}
+          id={`${panelId}-${option.id}`}
+          className="option-panel"
+          role="group"
+          aria-label={option.label}
+          hidden={open !== option.id}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setOpen(null);
+          }}
+        >
+          <p className="option-panel__about">{option.about}</p>
+          {option.body}
+        </div>
+      ))}
+
+      {testing ? (
+        <div className="prompt__row">
+          <input
+            id={failId}
+            type="checkbox"
+            checked={failNext}
+            onChange={(event) => setFailNext(event.target.checked)}
+            disabled={disabled}
+          />
+          <label htmlFor={failId} className="prompt__checkbox-label">
+            Force a validation failure (staged file escapes the project root)
+          </label>
+        </div>
       ) : null}
 
-      <ModelPicker
-        models={state.models}
-        value={state.model}
-        onChange={onModelChange}
-        disabled={disabled}
-      />
+      <div className="prompt__toolbar">
+        <div className="options" role="group" aria-label="Options">
+          {options.map((option) => {
+            const isOpen = open === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                className={`option${isOpen ? ' option--open' : ''}${option.value ? ' option--set' : ''}`}
+                aria-expanded={isOpen}
+                aria-controls={`${panelId}-${option.id}`}
+                onClick={() => setOpen(isOpen ? null : option.id)}
+              >
+                {option.label}
+                {option.value ? (
+                  <span className="option__value">{option.value}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
 
-      <StylePicker value={style} onChange={setStyle} disabled={disabled} />
-
-      <div className="prompt__row">
-        <input
-          id={failId}
-          type="checkbox"
-          checked={failNext}
-          onChange={(event) => setFailNext(event.target.checked)}
-          disabled={disabled}
-        />
-        <label htmlFor={failId} className="prompt__checkbox-label">
-          Force a validation failure (staged file escapes the project root)
-        </label>
-      </div>
-
-      <div className="prompt__actions">
-        <button
-          type="submit"
-          className="button button--primary"
-          disabled={disabled || prompt.trim().length === 0}
-        >
-          {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
-        </button>
-        {/*
-          Offered until a project exists (internal issue 185), which is not the same as
-          until an attempt was made (internal PR 189 review), and only where there is
-          a model to ask. `explore` always calls the real `/api/mockups`,
-          while a build in `fake` mode is served by `FakeModelProvider`, so
-          this was offering something that could only fail in exactly the
-          modes the fake exists to keep usable. Hidden rather than faked:
-          three invented pages would be the promise the generator has not
-          made that rendered-not-drawn exists to avoid. A failed or cancelled
-          first build still appends a transcript turn, so `started` was
-          true with nothing built -- and the feature meant for exactly that
-          moment had already hidden itself. `acceptedSnapshot` is the thing
-          that answers "is there a project", so it is the thing to ask.
-        */}
-        {state.acceptedSnapshot === null && state.generation === 'model' ? (
-          <button
-            type="button"
-            className="button"
-            onClick={(event) => {
-              // The browser's own check, not a second URL parser of mine
-              // (internal PR 189 review). This control is a `button`, so clicking it
-              // skips the native validation `Generate` gets for free, and
-              // a malformed reference then sailed past: the look is paid
-              // for, the bad value is kept in the mockup context, and the
-              // build that choosing a direction submits is refused on a
-              // field the reader could have been told about before
-              // spending anything.
-              //
-              // `reportValidity` rather than `checkValidity`, so the
-              // refusal is the message the field would have shown anyway
-              // rather than a click that silently does nothing.
-              const form = event.currentTarget.form;
-              if (form && !form.reportValidity()) return;
-              onExplore(
-                prompt,
-                style,
-                referenceUrl.trim().length > 0 ? referenceUrl.trim() : null,
-              );
-            }}
-            disabled={disabled || prompt.trim().length === 0}
-            title="Three quick sketches to choose from, for about a tenth of a build"
-          >
-            {state.exploring ? 'Sketching…' : 'Show me three directions'}
-          </button>
-        ) : null}
-        {/*
-          A generation can run for a minute or more. Without this the only way
-          out is to close the tab, and the run keeps spending either way --
-          cancelling drops the connection, which is what tells the endpoint to
-          stop its own model call.
-        */}
-        {state.running ? (
-          <button type="button" className="button" onClick={onCancel}>
-            Cancel
-          </button>
-        ) : null}
-        {/*
-          A look is about a minute and is billed for (internal PR 189 review). Without
-          this the only way out of one was to leave the page, and it kept
-          spending either way.
-        */}
-        {state.exploring ? (
-          <button type="button" className="button" onClick={onCancelExplore}>
-            Cancel
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="button"
-          onClick={onReset}
-          disabled={!started && !state.running}
-        >
-          Start over
-        </button>
+        <div className="prompt__send">
+          <ModelPicker
+            models={state.models}
+            value={state.model}
+            onChange={onModelChange}
+            disabled={disabled}
+          />
+          <div className="prompt__actions">
+            {/*
+            Offered until a project exists (internal issue 185), and only where there is
+            a model to ask: `explore` always calls the real `/api/mockups`,
+            which the fake mode cannot answer. `acceptedSnapshot` is what
+            answers "is there a project", so it is the thing to ask: a
+            failed first build still appends a transcript turn.
+          */}
+            {state.acceptedSnapshot === null && state.generation === 'model' ? (
+              <button
+                type="button"
+                className="button"
+                onClick={(event) => {
+                  // The browser's own check, not a second URL parser (internal PR 189
+                  // review): this is a `button`, so clicking it skips the
+                  // native validation `Generate` gets, and a malformed
+                  // reference would be paid for and then refused.
+                  const form = event.currentTarget.form;
+                  if (form && !form.checkValidity()) {
+                    setOpen('reference');
+                    setRevealReference(true);
+                    return;
+                  }
+                  onExplore(prompt, style, trimmedReference());
+                }}
+                disabled={disabled || prompt.trim().length === 0}
+                title="Three quick sketches to choose from, for about a tenth of a build"
+              >
+                {state.exploring ? 'Sketching…' : 'Show me three directions'}
+              </button>
+            ) : null}
+            {/*
+            A generation can run for a minute or more, and a look about a
+            minute; both are billed. Without these the only way out is to
+            close the tab, and the run keeps spending either way.
+          */}
+            {state.running ? (
+              <button type="button" className="button" onClick={onCancel}>
+                Cancel
+              </button>
+            ) : null}
+            {state.exploring ? (
+              <button
+                type="button"
+                className="button"
+                onClick={onCancelExplore}
+              >
+                Cancel
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              className="button button--primary"
+              disabled={disabled || prompt.trim().length === 0}
+            >
+              {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
+            </button>
+          </div>
+        </div>
       </div>
     </form>
   );

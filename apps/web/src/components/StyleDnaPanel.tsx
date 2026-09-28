@@ -1,9 +1,10 @@
 import { useId } from 'react';
-import { STYLE_DIMENSIONS, encodeStyleDna } from '@vibld/ai/style-dna';
+import { STYLE_DIMENSIONS } from '@vibld/ai/style-dna';
 import type { StyleDna, StyleDimensionId } from '@vibld/ai/style-dna';
 
 /**
- * Standing visual preferences, as a row of small closed-set selects.
+ * Standing visual preferences, as a row of small closed-set selects. Shown
+ * inside the composer's options row as "Look" (2026-09-28).
  *
  * These sit beside the free-text project instructions rather than inside
  * them, and the difference is the point. Prose drifts: "keep it minimal"
@@ -25,7 +26,6 @@ export function StyleDnaPanel({
   disabled: boolean;
 }) {
   const groupId = useId();
-  const encoded = encodeStyleDna(styleDna);
   const count = Object.keys(styleDna).length;
 
   const set = (id: StyleDimensionId, value: string) => {
@@ -38,18 +38,8 @@ export function StyleDnaPanel({
   };
 
   return (
-    <details className="knowledge">
-      <summary className="knowledge__summary">
-        Visual preferences
-        {count > 0 ? (
-          <span className="pill pill--on">{count}</span>
-        ) : (
-          <span className="knowledge__hint">not set</span>
-        )}
-      </summary>
-      <p className="knowledge__label">
-        Applied to every request. Anything you type in a request outranks them.
-      </p>
+    <div className="dna-panel">
+      <p className="option-panel__label">Look</p>
       <div className="dna">
         {STYLE_DIMENSIONS.map((dimension) => {
           const fieldId = `${groupId}-${dimension.id}`;
@@ -76,7 +66,16 @@ export function StyleDnaPanel({
           );
         })}
       </div>
-      {encoded ? <p className="knowledge__count">{encoded}</p> : null}
-    </details>
+      {count > 0 ? (
+        <button
+          type="button"
+          className="linkbutton"
+          disabled={disabled}
+          onClick={() => onChange({})}
+        >
+          Clear all
+        </button>
+      ) : null}
+    </div>
   );
 }

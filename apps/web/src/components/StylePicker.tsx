@@ -33,6 +33,7 @@ export function StylePicker({
   onChange: (value: StylePresetId | null) => void;
   disabled: boolean;
 }) {
+  const chosen = STYLE_PRESETS.find((preset) => preset.id === value) ?? null;
   const row = (label: string, presets: readonly StylePreset[]) => (
     <>
       <span className="styles__group" aria-hidden="true">
@@ -82,6 +83,16 @@ export function StylePicker({
       </legend>
       {row('Treatment', TREATMENTS)}
       {row('Complete system', SYSTEMS)}
+      {/*
+        What the chosen one will do, in the preset's own words. The chip
+        names alone ("Claymorphism") told somebody who had not seen one
+        nothing (internal issue 186), and a tooltip is invisible on a phone.
+      */}
+      {chosen ? (
+        <p className="styles__chosen" aria-live="polite">
+          <strong>{chosen.name}:</strong> {chosen.description}
+        </p>
+      ) : null}
     </fieldset>
   );
 }
