@@ -2,7 +2,7 @@ import { LegalPage } from '../components/SiteChrome';
 import { LEGAL_DOCS, SITE, metaFor } from '../site';
 
 const DOC = LEGAL_DOCS.find((d) => d.slug === 'cookies')!;
-const UPDATED = '2026-09-16';
+const UPDATED = '2026-09-27';
 
 export function meta() {
   return metaFor('/legal/cookies');
@@ -91,6 +91,13 @@ export default function Cookies() {
           opt-out browser add-on
         </a>
         . Nothing on this site depends on any of it working.
+      </p>
+      <p>
+        If you arrive through a referral link, one ending in <code>?ref=</code>{' '}
+        and a code, we keep that code in your browser&apos;s session storage for
+        the rest of your visit and add it to our sign-up links, so an account
+        you create is credited to the person who shared the link. It is not a
+        cookie, and it is gone when you close the tab.
       </p>
       <p>
         Cloudflare also hosts the site, and may set a small number of

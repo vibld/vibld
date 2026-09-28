@@ -26,11 +26,11 @@ const SCHEMA = schemaSql();
 
 const PRINCIPAL = { userId: 'user_new', policyIdentity: 'new@example.com' };
 
-function newEnv(): { DB: SqliteD1Database; VIBLD_APP_ORIGIN: string } {
-  return {
-    DB: new SqliteD1Database(SCHEMA),
-    VIBLD_APP_ORIGIN: 'https://app.vibld.com',
-  };
+function newEnv(): {
+  DB: SqliteD1Database;
+  VIBLD_REFERRAL_ORIGIN?: string;
+} {
+  return { DB: new SqliteD1Database(SCHEMA) };
 }
 
 function claim(code: unknown): Request {
@@ -134,6 +134,77 @@ describe('handleReferralStatus', () => {
     ).json()) as { code: string };
 
     assert.equal(first.code, second.code);
-    assert.equal(first.url, `https://app.vibld.com/?ref=${first.code}`);
+    // vibld.com, not the builder the request came from (Chris, 2026-09-28):
+    // a friend sees the site first, and it carries the code to sign-up.
+    assert.equal(first.url, `https://vibld.com/?ref=${first.code}`);
+  });
+
+  it('points links wherever a deployment says its site is', async () => {
+    const env = { ...newEnv(), VIBLD_REFERRAL_ORIGIN: 'https://example.test' };
+    const request = new Request('https://app.vibld.com/api/referral/status');
+    const body = (await (
+      await handleReferralStatus(request, env, PRINCIPAL)
+    ).json()) as { code: string; url: string };
+    assert.equal(body.url, `https://example.test/?ref=${body.code}`);
+  });
+
+  it('reports what the builder shows: the reward, the cap and progress', async () => {
+    const env = newEnv();
+    const request = new Request('https://app.vibld.com/api/referral/status');
+
+    const body = (await (
+      await handleReferralStatus(request, env, PRINCIPAL)
+    ).json()) as Record<string, unknown>;
+
+    assert.deepEqual(body.rewardCents, { referrer: 500, referred: 500 });
+    assert.equal(body.maxPaidReferrals, 25);
+    assert.equal(body.referred, 0);
+    assert.equal(body.paid, 0);
+    assert.equal(body.earnedCents, 0);
+  });
+
+  it('reports credit earned from the grants, net of a clawback', async () => {
+    // Two referrals paid and one of them refunded after the referrer had
+    // spent part of it: the readout is what was given and kept, not paid
+    // times the reward.
+    const env = newEnv();
+    const billing = new BillingStore(env.DB);
+    await billing.grantAdminCredit(
+      'referral:referrer:user_a',
+      PRINCIPAL.userId,
+      500,
+      'referral',
+      null,
+    );
+    await billing.grantAdminCredit(
+      'referral:referrer:user_b',
+      PRINCIPAL.userId,
+      500,
+      'referral',
+      null,
+    );
+    await billing.grantAdminCredit(
+      'referral-clawback:referrer:user_b',
+      PRINCIPAL.userId,
+      -300,
+      'referral',
+      null,
+    );
+    // Credit this account received for being referred itself is not earned
+    // by referring anybody.
+    await billing.grantAdminCredit(
+      `referral:referred:${PRINCIPAL.userId}`,
+      PRINCIPAL.userId,
+      500,
+      'referral',
+      null,
+    );
+
+    const request = new Request('https://app.vibld.com/api/referral/status');
+    const body = (await (
+      await handleReferralStatus(request, env, PRINCIPAL)
+    ).json()) as { earnedCents: number };
+
+    assert.equal(body.earnedCents, 700);
   });
 });

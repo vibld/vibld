@@ -2,12 +2,21 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { ClerkRoot } from './auth/clerk.tsx';
+import {
+  captureReferral,
+  referralStorage,
+} from './referral/referral-client.ts';
 import './styles.css';
 
 const container = document.getElementById('root');
 if (!container) {
   throw new Error('Root container is missing from index.html');
 }
+
+// Before anything renders: Clerk's sign-up form carries its own steps in the
+// path, so the `?ref=` a shared link arrived with is only certain to be in
+// the URL on this first load.
+captureReferral(window.location, referralStorage());
 
 createRoot(container).render(
   <StrictMode>

@@ -46,11 +46,28 @@ describe('BillingStore.hasBegunAPurchase', () => {
   it('says yes from the moment a Checkout exists, before it is paid', async () => {
     // The barrier has to precede the charge or it is not a barrier: a claim
     // submitted while a Checkout is in flight would otherwise see no
-    // purchase. The customer row is written at Checkout creation, which is
-    // the earliest point there is.
+    // purchase. The start is recorded at Checkout creation, which is the
+    // earliest point there is.
+    const store = newStore();
+    await store.recordPurchaseStarted('user_1');
+    assert.equal(await store.hasBegunAPurchase('user_1'), true);
+  });
+
+  it('says no for an account that only has a Stripe customer', async () => {
+    // What saving a card for the welcome credit leaves behind. Nothing was
+    // sold, and reading the customer row as a purchase is what stopped every
+    // account that took its dollar from ever claiming a referral.
     const store = newStore();
     await store.linkCustomer('user_1', 'cus_1');
+    assert.equal(await store.hasBegunAPurchase('user_1'), false);
+  });
+
+  it('records a start once, and only for the account named', async () => {
+    const store = newStore();
+    await store.recordPurchaseStarted('user_1');
+    await store.recordPurchaseStarted('user_1');
     assert.equal(await store.hasBegunAPurchase('user_1'), true);
+    assert.equal(await store.hasBegunAPurchase('user_2'), false);
   });
 
   it('asks about this account only', async () => {

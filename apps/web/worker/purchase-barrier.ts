@@ -16,17 +16,26 @@
  * writes. Neither alone is enough, for the same reason `paid_at` and the
  * deterministic grant id are both needed on the payout.
  *
- * **The barrier is a started purchase, not a completed one.** The customer
- * row is written when Checkout is created, before Stripe can charge, which is
- * the only point early enough to be a barrier at all. The cost is a real one
- * and it is deliberate: somebody who starts a checkout, abandons it, and is
- * then sent a referral link can no longer claim it. That is the conservative
- * direction on a rule that hands out credit.
+ * **The barrier is a started purchase, not a completed one.** The
+ * `billing_purchase_starts` row is written when a plan or top-up Checkout is
+ * created, before Stripe can charge, which is the only point early enough to
+ * be a barrier at all. The cost is a real one and it is deliberate: somebody
+ * who starts a checkout, abandons it, and is then sent a referral link can no
+ * longer claim it. That is the conservative direction on a rule that hands
+ * out credit.
+ *
+ * **Having a Stripe customer is not a term.** It was, while a customer only
+ * ever came from a purchase Checkout. The card-first welcome credit creates
+ * one to save a card and sells nothing, and reading the customer row here
+ * turned "took the free dollar" into "can never be referred", which is the
+ * opposite of the offer. The top-up and subscription terms below still
+ * catch a purchase whose start row is missing, such as one mirrored from a
+ * webhook for a checkout this deployment did not create.
  *
  * `?1` is the user id. Every statement embedding this must bind it first.
  */
 export const PURCHASE_BARRIER_SQL = `(
-     EXISTS (SELECT 1 FROM billing_customers WHERE user_id = ?1)
+     EXISTS (SELECT 1 FROM billing_purchase_starts WHERE user_id = ?1)
   OR EXISTS (SELECT 1 FROM billing_topups WHERE user_id = ?1)
   OR EXISTS (SELECT 1 FROM billing_subscriptions
               WHERE user_id = ?1
@@ -42,8 +51,8 @@ export const PURCHASE_BARRIER_SQL = `(
  * true for a purchase that was later reversed. Netting reversals is tracked
  * separately; reading this as a current balance would be wrong.
  *
- * The barrier is deliberately early: a customer row exists from the moment a
- * Checkout is created, before Stripe can charge. That is right for refusing a
+ * The barrier is deliberately early: a purchase-start row exists from the
+ * moment a Checkout is created, before Stripe can charge. That is right for refusing a
  * referral claim and catastrophic for deciding to pay one, because it would
  * pay out on a checkout somebody abandoned.
  *

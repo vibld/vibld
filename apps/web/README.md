@@ -706,7 +706,10 @@ this Worker, only a redirect URL does. Stripe webhooks mirror subscription
 state into D1 (L13); the app reads that copy, not Stripe, on every request
 that needs it. Vibld owns the Clerk-user-id-to-Stripe-customer mapping
 (L14) via `client_reference_id` and customer metadata -- not Clerk Billing.
-Stripe Tax is on for every Checkout Session (L15).
+Stripe Tax is off (L15, confirmed 2026-09-27): no Checkout Session sets
+`automatic_tax`, and none collects a tax id or a billing address for it.
+`test/billing-checkout.test.ts` fails if a plan, top-up or card-setup session
+asks for any of them.
 
 The five prices this deployment sells (L36/L38: Build $29/mo or $290/yr,
 Ship $99/mo or $990/yr, Top-up $20 one-time) already exist in the live
@@ -966,6 +969,58 @@ Accounts that got their dollar on creation, before this, keep it: their row
 has the id already, so they are never offered or paid a second. A deployment
 with no Stripe configured offers nobody the credit, since there is no way to
 save a card.
+
+### Referrals
+
+$5 of build credit to each side once the referred account's first payment
+clears, for up to 25 paid referrals per referrer (`DEFAULT_REWARD_CENTS` and
+`MAX_PAID_REFERRALS`, `worker/referral.ts`). No self-referral, the first
+attribution is the only one, and none can be made once the account has
+started a purchase.
+
+- `GET /api/referral/status` -- authenticated. Issues the caller's code on
+  first look and returns `{ code, url, referred, paid, earnedCents,
+rewardCents, maxPaidReferrals }`. `url` is `https://vibld.com/?ref=<code>`
+  (`VIBLD_REFERRAL_ORIGIN` overrides the origin), so a friend sees the site
+  before signing up. `earnedCents` is summed from the
+  caller's referral grants net of clawbacks, not worked out from `paid`.
+- `POST /api/referral/claim` -- authenticated, body `{ "code": "..." }`.
+  Always answers `{ "recorded": true }`; why a claim was refused is logged,
+  never returned.
+
+End to end:
+
+1. A code is 8 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`. The Worker
+   (`normaliseCode`), the builder (`src/referral/referral-client.ts`) and
+   vibld.com (`apps/marketing/app/referral.ts`) each accept it in any case
+   with spaces or hyphens, and nothing else. Tests on both clients hold them
+   to the Worker's answers.
+2. A link to vibld.com with `?ref=CODE` keeps the code in `sessionStorage`
+   for the visit and adds it to every link to `SITE.signUpUrl` once the page
+   has hydrated. The prerendered HTML is unchanged, so without JavaScript the
+   sign-up link still works and simply carries no code. vibld.com's Cookie
+   Notice says so.
+3. The builder reads `?ref=` on `/` and `/sign-up` before rendering
+   (`src/main.tsx`) and keeps it in `localStorage`, which survives a
+   verification email opening a new tab.
+4. Once signed in, `ReferralClaim` posts the kept code to
+   `/api/referral/claim` once per page load, and forgets it as soon as the
+   Worker answers. A network failure or a Worker error keeps it for the next
+   load. The person signing up is never told a claim was refused.
+5. **Refer a friend**, under **Plan and usage** in the settings menu
+   (`src/components/ReferralPanel.tsx`), shows the link with a **Copy**
+   button (a refused clipboard selects the link instead), what both sides
+   get from `rewardCents` and `maxPaidReferrals`, and progress from
+   `referred`, `paid` and `earnedCents`.
+
+**Saving a card for the welcome credit does not close the barrier.** The
+barrier (`PURCHASE_BARRIER_SQL`, `worker/purchase-barrier.ts`) is a row in
+`billing_purchase_starts`, written when a plan or top-up Checkout Session is
+created, or a mirrored top-up or subscription. It used to be any row in
+`billing_customers`, which the card-setup session writes too, so every
+account that took its dollar could never be referred. `0030_purchase_starts.sql`
+carries every existing customer over as started, so no account that was
+blocked before is unblocked by the migration.
 
 ### Billing UI in the builder shell (L35)
 

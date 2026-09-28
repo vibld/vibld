@@ -36,6 +36,7 @@ import {
   type ConsentState,
 } from './consent.ts';
 import { SiteFooter, SiteHeader } from './components/SiteChrome';
+import { referralCodeForVisit, withReferral } from './referral.ts';
 import { SITE } from './site';
 import './app.css';
 
@@ -99,6 +100,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <ScrollRestoration />
         <Scripts />
         <PageviewBeacon />
+        <ReferralLinks />
       </body>
     </html>
   );
@@ -319,6 +321,50 @@ function PageviewBeacon() {
       <RouteChangeBeacon />
     </>
   );
+}
+
+/**
+ * Adds a visitor's referral code to every link to the builder's sign-up form.
+ *
+ * The builder is another origin, so the code has to ride in the link itself
+ * (see referral.ts). Done to the rendered anchors after hydration rather
+ * than in the components that render them: the prerendered HTML keeps the
+ * plain sign-up URL, which is right for a crawler and for a visitor without
+ * JavaScript, and hydration finds exactly the markup it rendered. React does
+ * not rewrite an attribute whose prop has not changed, so the edit stands.
+ *
+ * Rerun on every navigation and on every change to the page's elements,
+ * because a client-side route change or an opened menu brings new anchors
+ * that were not there when this last looked. It watches elements being
+ * added, not attributes, so its own edits do not wake it.
+ */
+function ReferralLinks() {
+  const location = useLocation();
+
+  useEffect(() => {
+    let store: Storage | null = null;
+    try {
+      store = window.sessionStorage;
+    } catch {
+      // Storage refused: the code still applies to this page.
+    }
+    const code = referralCodeForVisit(window.location.search, store);
+    if (code === null) return;
+
+    const apply = () => {
+      for (const anchor of document.querySelectorAll('a[href]')) {
+        const href = anchor.getAttribute('href') ?? '';
+        const next = withReferral(href, SITE.signUpUrl, code);
+        if (next !== href) anchor.setAttribute('href', next);
+      }
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [location.pathname, location.search]);
+
+  return null;
 }
 
 /**

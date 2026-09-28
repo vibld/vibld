@@ -198,6 +198,25 @@ export class BillingStore {
       .run();
   }
 
+  /**
+   * Record that this account has started a plan or top-up purchase.
+   *
+   * The referral barrier's earliest term (purchase-barrier.ts), written by
+   * `createCheckoutSession` and deliberately not by the card-setup session:
+   * saving a card for the welcome credit buys nothing. `DO NOTHING` keeps the
+   * first start, since only whether one ever happened is asked.
+   */
+  async recordPurchaseStarted(userId: string): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO billing_purchase_starts (user_id, started_at)
+         VALUES (?1, ?2)
+         ON CONFLICT(user_id) DO NOTHING`,
+      )
+      .bind(userId, new Date().toISOString())
+      .run();
+  }
+
   async findCustomerId(userId: string): Promise<string | undefined> {
     const row = await this.#db
       .prepare(

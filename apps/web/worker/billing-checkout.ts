@@ -67,7 +67,18 @@ export interface CheckoutUrls {
  * "who is buying", read back by `billing-events.ts` if the second is ever
  * missing; the second is what a live subscription object itself carries for
  * the rest of its life, so `customer.subscription.updated` never needs a
- * second lookup either. Stripe Tax is on unconditionally (L15).
+ * second lookup either.
+ *
+ * No Stripe Tax (L15, confirmed by Chris 2026-09-27): no `automatic_tax`, and
+ * so no tax id or billing address collection either, since both exist here
+ * only to feed it. Turning tax on later is a change to this call and to L15
+ * together, not a Dashboard toggle.
+ *
+ * The purchase is recorded as started (`recordPurchaseStarted`) after Stripe
+ * has created the session and before its URL is handed back. That order is
+ * what makes it a barrier: nobody can pay on a page whose URL they have not
+ * been given, so no charge can precede the row, and a failed write returns
+ * no URL at all rather than a checkout the referral rule cannot see.
  */
 export async function createCheckoutSession(
   stripe: Stripe,
@@ -84,7 +95,6 @@ export async function createCheckoutSession(
     client_reference_id: userId,
     line_items: [{ price, quantity: 1 }],
     mode: option.kind === 'topup' ? 'payment' : 'subscription',
-    automatic_tax: { enabled: true },
     success_url: urls.successUrl,
     cancel_url: urls.cancelUrl,
     ...(option.kind === 'topup'
@@ -101,6 +111,7 @@ export async function createCheckoutSession(
   if (!session.url) {
     throw new Error('Stripe did not return a Checkout URL.');
   }
+  await store.recordPurchaseStarted(userId);
   return session.url;
 }
 
@@ -119,8 +130,13 @@ export async function createCheckoutSession(
  * not be limited and is not offered.
  *
  * The purpose and the user id go on the SetupIntent as well as the session,
- * because `setup_intent.succeeded` carries only the SetupIntent. No Stripe
- * Tax here: nothing is being sold.
+ * because `setup_intent.succeeded` carries only the SetupIntent.
+ *
+ * This creates a Stripe customer but does not record a purchase as started,
+ * and that difference is the point. Saving a card sells nothing, so it must
+ * not close the referral barrier (purchase-barrier.ts): an account that took
+ * its welcome credit and was then sent a referral link is exactly who the
+ * offer is for.
  */
 export async function createCardSetupSession(
   stripe: Stripe,

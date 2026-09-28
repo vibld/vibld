@@ -196,13 +196,26 @@ describe('ReferralStore.attribute', () => {
     // after Checkout completes but before its webhook is mirrored sees no
     // purchase. The barrier is in this statement, so it loses here instead.
     const { store, db } = newStoreWithDb();
-    await new BillingStore(db).linkCustomer('user_new', 'cus_1');
+    await new BillingStore(db).recordPurchaseStarted('user_new');
 
     assert.equal(
       await store.attribute('user_new', 'user_owner', 'ABCD2345'),
       false,
     );
     assert.equal(await store.attributionFor('user_new'), undefined);
+  });
+
+  it('is not blocked by a Stripe customer that bought nothing', async () => {
+    // A card saved for the welcome credit creates a customer and sells
+    // nothing. The barrier in this statement must read it the same way the
+    // readable rule does, or the claim passes one and fails the other.
+    const { store, db } = newStoreWithDb();
+    await new BillingStore(db).linkCustomer('user_new', 'cus_1');
+
+    assert.equal(
+      await store.attribute('user_new', 'user_owner', 'ABCD2345'),
+      true,
+    );
   });
 
   it('refuses once a top-up has been recorded', async () => {
@@ -217,7 +230,7 @@ describe('ReferralStore.attribute', () => {
 
   it('is not blocked by somebody else having purchased', async () => {
     const { store, db } = newStoreWithDb();
-    await new BillingStore(db).linkCustomer('user_other', 'cus_1');
+    await new BillingStore(db).recordPurchaseStarted('user_other');
 
     assert.equal(
       await store.attribute('user_new', 'user_owner', 'ABCD2345'),
@@ -362,12 +375,13 @@ describe('ReferralStore.payoutsToRetry', () => {
   });
 
   it('never pays on a checkout somebody merely started', async () => {
-    // The barrier that refuses a *claim* counts a customer row, which exists
-    // from Checkout creation and before any charge. Reusing it here would pay
-    // out on an abandoned checkout.
+    // The barrier that refuses a *claim* counts a started purchase, which is
+    // recorded at Checkout creation and before any charge. Reusing it here
+    // would pay out on an abandoned checkout.
     const { store, db } = newStoreWithDb();
     const [referred] = await referAll(store, 'user_owner', 1);
     await new BillingStore(db).linkCustomer(referred!, 'cus_1');
+    await new BillingStore(db).recordPurchaseStarted(referred!);
 
     assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
   });

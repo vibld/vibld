@@ -14,8 +14,11 @@ import type { Principal } from './principal.ts';
 
 export interface ReferralEnv {
   DB?: D1Database;
-  /** Where a shared link points. The builder's own origin. */
-  VIBLD_APP_ORIGIN?: string;
+  /**
+   * Where a shared link points, when not vibld.com. For a deployment whose
+   * marketing site lives somewhere else.
+   */
+  VIBLD_REFERRAL_ORIGIN?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -26,16 +29,15 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * Where a referral link should send people.
- *
- * Derived from the request when nothing is configured, so preview and
- * production each produce links back to themselves rather than a preview
- * handing out production links or the reverse.
+ * Where a referral link should send people: vibld.com, where a friend sees
+ * what vibld is before being asked to sign up (Chris, 2026-09-28). The site
+ * keeps the code for the visit and carries it onto its sign-up links, and
+ * the builder claims it once the account exists.
  */
-function appOrigin(request: Request, env: ReferralEnv): string {
-  const configured = env.VIBLD_APP_ORIGIN?.trim();
-  if (configured) return configured;
-  return new URL(request.url).origin;
+export const DEFAULT_REFERRAL_ORIGIN = 'https://vibld.com';
+
+function referralOrigin(env: ReferralEnv): string {
+  return env.VIBLD_REFERRAL_ORIGIN?.trim() || DEFAULT_REFERRAL_ORIGIN;
 }
 
 /**
@@ -58,12 +60,17 @@ export async function handleReferralStatus(
   const store = new ReferralStore(env.DB);
   const code = await store.codeFor(principal.userId);
   const summary = await store.summaryFor(principal.userId);
+  const earnedCents = await store.earnedCentsFor(principal.userId);
 
   return json({
     code,
-    url: referralUrl(appOrigin(request, env), code),
+    url: referralUrl(referralOrigin(env), code),
     referred: summary.referred,
     paid: summary.paid,
+    // What the builder shows as earned. Sent rather than left to the client
+    // to multiply out, because paid times the reward is wrong after a
+    // clawback or a change to the reward; see `earnedCentsFor`.
+    earnedCents,
     // Both stated rather than left for the client to know: the reward is a
     // deployment setting, and the cap is the reason an honest advocate stops
     // earning. Somebody who has hit it should be able to see why.

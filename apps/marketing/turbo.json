@@ -16,6 +16,7 @@
         "$TURBO_ROOT$/apps/web/worker/entitlement.ts",
         "$TURBO_ROOT$/apps/web/worker/signup-credit.ts",
         "$TURBO_ROOT$/apps/web/worker/stripe-client.ts",
+        "$TURBO_ROOT$/apps/web/worker/referral.ts",
         "$TURBO_ROOT$/docs/decisions.md"
       ]
     }

@@ -10,6 +10,7 @@ import { Conversation } from './components/Conversation.tsx';
 import { SettingsMenu } from './components/SettingsMenu.tsx';
 import { BillingStatusWidget } from './components/BillingStatus.tsx';
 import { SignupCreditBanner } from './components/SignupCreditOffer.tsx';
+import { ReferralClaim, ReferralSection } from './components/ReferralPanel.tsx';
 import { GitHubPanel } from './components/GitHubPanel.tsx';
 import { describeMode } from './generation/labels.ts';
 import { ThemeToggle } from './components/ThemeToggle.tsx';
@@ -61,6 +62,12 @@ function Builder() {
   return (
     <div className="shell">
       {/*
+        Here, inside both gates, because a claim needs the account to exist
+        and be signed in. The code it claims was kept by main.tsx when the
+        page first loaded, before the sign-up form could move the URL on.
+      */}
+      <ReferralClaim />
+      {/*
         The bar carries what somebody looks at while building, and nothing
         else. It used to carry the brand, a sentence describing the
         deployment, a billing readout with three buttons, the whole GitHub
@@ -87,6 +94,7 @@ function Builder() {
                   <h2 className="settings__heading">Plan and usage</h2>
                   <BillingStatusWidget />
                 </section>
+                <ReferralSection />
                 <section className="settings__section">
                   <h2 className="settings__heading">GitHub</h2>
                   {/*

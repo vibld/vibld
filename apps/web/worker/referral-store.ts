@@ -7,7 +7,12 @@ import {
   CLEARED_PAYMENT_SQL,
   PURCHASE_BARRIER_SQL,
 } from './purchase-barrier.ts';
-import { makeCode, normaliseCode } from './referral.ts';
+import {
+  clawbackGrantId,
+  makeCode,
+  normaliseCode,
+  payoutGrantId,
+} from './referral.ts';
 
 export interface AttributionRecord {
   /**
@@ -357,5 +362,34 @@ export class ReferralStore {
       .bind(referrerUserId)
       .first<{ referred: number; paid: number }>();
     return { referred: row?.referred ?? 0, paid: row?.paid ?? 0 };
+  }
+
+  /**
+   * The referral credit this account has actually been given for referring,
+   * net of anything taken back, in cents.
+   *
+   * Read from the grant rows rather than worked out as paid referrals times
+   * the reward, because both halves of that product can be wrong: the reward
+   * is a setting that can change between one payout and the next, and a
+   * clawback takes back what was granted, floored at what was left, not a
+   * fixed amount. The rows are what the balance is made of, so they are what
+   * the readout should say. The referrer's own `referred` grant, if they
+   * arrived through somebody's link themselves, is not earned by referring
+   * and is left out.
+   */
+  async earnedCentsFor(referrerUserId: string): Promise<number> {
+    const row = await this.#db
+      .prepare(
+        `SELECT COALESCE(SUM(credit_usd_cents), 0) AS earned
+           FROM billing_admin_credits
+          WHERE user_id = ?1 AND (id LIKE ?2 OR id LIKE ?3)`,
+      )
+      .bind(
+        referrerUserId,
+        `${payoutGrantId('referrer', '')}%`,
+        `${clawbackGrantId('referrer', '')}%`,
+      )
+      .first<{ earned: number }>();
+    return Math.max(0, row?.earned ?? 0);
   }
 }

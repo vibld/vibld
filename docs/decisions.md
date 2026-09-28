@@ -207,6 +207,14 @@ exactly this path.
 
 ### Resolved 2026-09-28
 
+**Referral links land on vibld.com.** Chris chose on 2026-09-28 that a
+shared link is `https://vibld.com/?ref=<code>`, so a friend sees the site
+before signing up; the site carries the code to sign-up and the builder
+claims it. He also chose to keep every account that already had a Stripe
+customer before the barrier fix counted as having started a purchase, so
+no existing account's referral eligibility changes, and approved the Cookie
+Notice paragraph about the referral code in session storage.
+
 **The builder's composer is a message box and one row of options.** Chris
 chose this on 2026-09-28, after finding the builder cluttered: every option
 was on screen at once. The message and the send button stay put; style,
@@ -230,6 +238,27 @@ invite gate, model policy, rate limiters and reservation as `/api/mockups`,
 and is charged the same way.
 
 ### Resolved 2026-09-27
+
+**L15 stands: Stripe Tax is off, and the code now matches.** Chris confirmed
+tax off on 2026-09-27. Checkout had been creating plan and top-up sessions
+with `automatic_tax` on, contrary to L15. It no longer does, and no session
+collects a tax id or a billing address for tax; the card-setup session never
+did. `apps/web/test/billing-checkout.test.ts` holds every checkout path to
+that.
+
+**Referrals ship at launch, with a screen.** Chris decided on 2026-09-27 that
+the referral program launches with the open beta rather than existing only
+as an API. The builder's settings menu has **Refer a friend** under **Plan and
+usage**: the link, a Copy button, what both sides get and progress, all from
+`/api/referral/status`. A `?ref=` link to vibld.com or the builder is kept
+through sign-up and claimed once the account exists, and every refusal is
+silent. The terms are unchanged from 2026-09-16: $5 to each side on the
+referred account's first cleared payment, 25 paid referrals per referrer,
+no self-referral, first attribution fixed, and none once a purchase has
+started. Saving a card for the welcome credit no longer counts as starting
+a purchase (`0030_purchase_starts.sql`), since it would otherwise have
+blocked every account that took the dollar. See `apps/web/README.md`,
+"Referrals".
 
 **Roadmap additions.** Chris added, on 2026-09-27: Figma import (out of the
 deferred list), screenshot and image import, existing GitHub repository
