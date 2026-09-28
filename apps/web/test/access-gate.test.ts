@@ -119,6 +119,22 @@ describe('the invite gate', () => {
     assert.equal(isGated('/api/runs', 'GET'), false);
   });
 
+  it('lets an uninvited account delete itself, see where that stands, and take it back', () => {
+    // docs/decisions.md L32. An account that was never invited, or whose
+    // invite was withdrawn, still has data here and still gets to ask for
+    // it to be deleted. A gate in front of that would leave it no way to.
+    for (const method of ['GET', 'POST']) {
+      assert.equal(isGated('/api/account/delete', method), false, method);
+    }
+    assert.equal(isGated('/api/account/delete/cancel', 'POST'), false);
+    assert.ok('/api/account/delete' in UNGATED_PATHS);
+    assert.ok('/api/account/delete/cancel' in UNGATED_PATHS);
+    // The operator's list of them is behind the platform-admin check, as
+    // every other admin route is, and not behind an invite.
+    assert.equal(isGated('/api/admin/deletions', 'GET'), false);
+    assert.ok('/api/admin/deletions' in UNGATED_PATHS);
+  });
+
   it('gates every method of a route that only ever starts work', () => {
     for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
       assert.equal(isGated('/api/plan', method), true, method);

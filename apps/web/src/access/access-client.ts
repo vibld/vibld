@@ -1,4 +1,5 @@
 import { getClerkToken } from '../auth/clerk-token.ts';
+import { readDeletionRefusal } from '../account/deletion-client.ts';
 
 /**
  * Whether this account may use the product, as the shell asks it.
@@ -27,6 +28,13 @@ export interface AccessStatus {
    * not a status.
    */
   decided: boolean;
+  /**
+   * Present when this account asked to be deleted (docs/decisions.md L32).
+   * Every route but the deletion ones refuses it, this one included, and
+   * that refusal is an answer: "we could not check your account" would be
+   * the wrong thing to tell somebody whose account is being deleted.
+   */
+  deletion?: { purgeAfter: string };
 }
 
 /** What the shell assumes when it cannot find out. Closed, deliberately. */
@@ -50,7 +58,21 @@ export async function fetchAccess(): Promise<AccessStatus> {
     const response = await fetch('/api/access/status', {
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
-    if (!response.ok) return UNKNOWN_ACCESS;
+    if (!response.ok) {
+      const deletion = readDeletionRefusal(
+        response.status,
+        await response.json().catch(() => null),
+      );
+      return deletion
+        ? {
+            allowed: false,
+            mode: 'invite',
+            message: null,
+            decided: true,
+            deletion,
+          }
+        : UNKNOWN_ACCESS;
+    }
     return readAccess(await response.json());
   } catch {
     return UNKNOWN_ACCESS;

@@ -178,6 +178,19 @@ export class UserBudget extends DurableObject {
     );
   }
 
+  /**
+   * Delete this ledger's history, for an account being purged
+   * (docs/decisions.md L32, `account-deletion.ts`).
+   *
+   * Every row, whatever its period: what an account spent and when is its
+   * usage, not the accounting record, which is Stripe's and the billing
+   * tables'. Idempotent, so a purge that stops after this and runs again
+   * finds nothing to delete.
+   */
+  forget(): void {
+    this.ctx.storage.sql.exec(`DELETE FROM runs`);
+  }
+
   /** This period's spend, for reporting. Reads nothing the ceiling does not. */
   usageFor(periodKey: string): { spentMicroUsd: number; inFlight: number } {
     const [totals] = this.ctx.storage.sql

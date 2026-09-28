@@ -1,4 +1,5 @@
 import { AdminPanel } from './AdminPanel.tsx';
+import { DeletionsPanel } from './DeletionsPanel.tsx';
 import { InvitePanel } from './InvitePanel.tsx';
 import { ParkedQueuePanel } from './ParkedQueuePanel.tsx';
 import { SiteTakedown } from './SiteTakedown.tsx';
@@ -77,6 +78,7 @@ export function AdminSettings({ isAdmin }: { isAdmin: boolean | null }) {
         <AdminPanel />
         <InvitePanel />
         <ParkedQueuePanel />
+        <DeletionsPanel />
         <SiteTakedown />
       </div>
     </section>

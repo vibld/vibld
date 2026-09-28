@@ -62,6 +62,11 @@ describe('the refusal identifiers this Worker answers with', () => {
     assert.ok(used.has('already-running'), 'no already-running refusal');
   });
 
+  it('tell an account scheduled for deletion apart from a refused one', async () => {
+    const { used } = await wireReasons();
+    assert.ok(used.has('deletion-scheduled'), 'no deletion-scheduled refusal');
+  });
+
   it('tell an unreadable ledger apart from a spent one', async () => {
     const { used } = await wireReasons();
     assert.ok(used.has('accounting-unavailable'));
@@ -94,7 +99,13 @@ describe('the refusal identifiers this Worker answers with', () => {
     const reasons = [...source.matchAll(/reason: '([a-z-]+)'/g)].map(
       (match) => match[1],
     );
-    const identity = reasons.filter((reason) => reason !== 'not-configured');
+    // `deletion-scheduled` is not a missing identity: it is answered only
+    // after the token verified, to an account that asked to be deleted
+    // (docs/decisions.md L32), and it is still held to the vocabulary above.
+    const identity = reasons.filter(
+      (reason) =>
+        reason !== 'not-configured' && reason !== 'deletion-scheduled',
+    );
     assert.ok(identity.length >= 2, 'expected both identity paths to answer');
     assert.equal(
       new Set(identity).size,

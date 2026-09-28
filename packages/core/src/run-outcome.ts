@@ -66,7 +66,14 @@ export type RunRefusal =
    * tell, and telling somebody they are out of budget when we do not know is
    * a lie that costs them a support conversation.
    */
-  | 'accounting-unavailable';
+  | 'accounting-unavailable'
+  /**
+   * This account asked to be deleted (docs/decisions.md L32), and every
+   * request from it is refused until it is purged or the person keeps it.
+   * Distinct from `access-refused` because it is the account's own
+   * decision, it has a date, and signing in is how it is undone.
+   */
+  | 'deletion-scheduled';
 
 /**
  * Why a started run ended. Exactly one is recorded per run.
@@ -153,6 +160,7 @@ export const RUN_REFUSALS = [
   'account-ceiling',
   'already-running',
   'accounting-unavailable',
+  'deletion-scheduled',
 ] as const satisfies readonly RunRefusal[];
 
 /** Every stop, for the same reason. */

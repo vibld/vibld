@@ -35,7 +35,7 @@ async function mount(isAdmin: boolean | null) {
   });
   return {
     text: () => container.textContent ?? '',
-    // The four tools each render a disclosure. Counting them is what tells
+    // The five tools each render a disclosure. Counting them is what tells
     // "the page is drawn" apart from "the page is drawn empty".
     tools: () => container.querySelectorAll('details').length,
     unmount: () => act(() => root.unmount()),
@@ -78,13 +78,14 @@ describe('the platform admin page', () => {
     page.unmount();
   });
 
-  it('draws all four tools for an admin', async () => {
+  it('draws all five tools for an admin', async () => {
     const page = await mount(true);
     assert.equal(
       page.tools(),
-      4,
-      'the page is missing one of credit, invites, parked payments or takedowns',
+      5,
+      'the page is missing one of credit, invites, parked payments, pending deletions or takedowns',
     );
+    assert.match(page.text(), /accounts scheduled for deletion/);
     page.unmount();
   });
 

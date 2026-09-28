@@ -1107,6 +1107,94 @@ grant again for more.
    preview" → "Deploying" above) picks up any pending migration
    automatically on the next deploy.
 
+## Account deletion (docs/decisions.md L32)
+
+Anybody signed in can delete their account from the gear menu ("Account",
+then "Delete account"), invited or not: `/api/account/delete` is ungated in
+`access-gate.ts`. The page explains what stops now, what is deleted after
+30 days and what is kept, and sends nothing until the person types
+`delete my account`. The Worker checks the phrase too.
+
+**The moment they ask** (`account-deletion.ts`), a row is written to
+`account_deletions` (`migrations/0031_account_deletions.sql`) and, from then
+on, `resolvePrincipal` refuses every authenticated request from the account
+with 403 and `reason: "deletion-scheduled"`, except the deletion routes
+themselves. Then, each on its own and each recorded when it is done:
+
+1. **Subscription.** Every subscription Stripe has for the customer that can
+   still take money is cancelled immediately, with `prorate: false` and
+   `invoice_now: false`: nothing is refunded or prorated, as the refund
+   policy says.
+2. **Preview.** Stopped through the preview service's stop path.
+3. **Published site.** Taken down through the owner's own takedown
+   (`handleUnpublish`), while the person is asking. The step is done when
+   D1 says nothing of theirs is serving.
+4. **GitHub.** This deployment's grant is revoked. The GitHub App stays
+   installed on the person's GitHub account; that is theirs to remove.
+5. **Referrals.** Unpaid rewards on either side are reversed (paid ones are
+   ledger and untouched), and the referral code is deleted.
+
+A step that fails (Stripe unreachable, the publish service down) leaves the
+request recorded and the step undone. It is retried by the person, whose
+next sign-in shows a "scheduled for deletion" screen with a button for it,
+and by the nightly pass. The nightly pass never takes a site down
+(ADR-0013); a site still serving holds the purge until the owner or an
+operator takes it down, and the admin panel says which.
+
+**After 30 days** the nightly pass purges the account, in steps that each
+save their place: the subscription is checked once more, R2 snapshots
+(`projects/<user>/`) and media (`media/<user>/`) are deleted, then the
+project, run, trace and media rows, the published site's catalogue (its
+bytes are collected by apps/publish's orphan sweep; the slug is kept, never
+released, under the tombstone), the GitHub grant and push history, the
+referral code and the redeemed invite, both spend-ledger Durable Objects,
+and last the Clerk user (`DELETE https://api.clerk.com/v1/users/{id}` with
+`CLERK_SECRET_KEY`).
+
+**Kept**, re-keyed from the Clerk id to a random tombstone: billing
+customers, subscriptions, top-ups, payments, scheduled cancellations, the
+welcome-credit offer and card rows, credit grants (referral payouts
+included) and referral attributions. None of them holds an email address;
+parked Stripe events naming the account lose theirs
+(`customer_email`, `customer_details`, `billing_details`, `receipt_email`).
+The deletion row itself is the audit record L32 keeps: it is re-keyed to
+the tombstone and deleted 12 months after the purge. A site held by an
+operator keeps its bytes for their review and is marked unpublished, so
+lifting the hold does not put it back online.
+
+**Keeping the account.** Until the purge starts, the "scheduled for
+deletion" screen offers "Keep my account" (`/api/account/delete/cancel`).
+What was already stopped stays stopped.
+
+**The nightly budget.** The deletion pass shares the nightly D1 allowance
+(`VIBLD_REPLAY_QUERY_BUDGET`) with the billing pass. It costs one query a
+night to find out there is nothing to do, so the billing pass's thresholds
+(the parked floor from 35, the split from 92) now apply to the allowance
+less one. With work waiting, an allowance
+of 122 or more gives it up to a quarter and splits the rest as before;
+below that it takes a turn in the billing rotation (`planNight` in
+`billing-replay.ts`), and the parked queue keeps its floor. At most five
+requests a night; a request that has failed seven times is tried weekly.
+
+**The operator's view.** The admin page's "accounts scheduled for deletion"
+lists each pending request, when it purges, what is not done yet, its last
+error and any site still online (`/api/admin/deletions`).
+
+What is not deleted by this: the preview sandbox's own Durable Object keeps
+the record of share links it issued and the id of the account whose media
+it last served, because apps/preview has no route to forget them; and
+Cloudflare Workflows keeps finished generation instances for its own
+retention period.
+
+### Setup
+
+1. `CLERK_SECRET_KEY` on the `preview` environment (see "Admin: manual
+   credit grants" above). Without it every purge stops at its last step,
+   with the account's data deleted and the sign-in account kept, and the
+   admin panel shows the error.
+2. `migrations/0031_account_deletions.sql` is applied by the **Deploy web
+   preview** workflow like every other migration.
+
 ## Pushing to GitHub (internal issue 13, docs/decisions.md L30/L42a)
 
 A checkpoint can be pushed to a repository the user connected: a branch

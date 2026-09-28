@@ -149,11 +149,28 @@ import {
   retryBatchFor,
   retryUnattributedEvents,
   QUERIES_PER_TURN,
-  takeNightlyTurn,
+  planNight,
 } from './billing-replay.ts';
-import type { NightPlan } from './billing-replay.ts';
+import type {
+  NightPlan,
+  NightTurn,
+  NightWithDeletion,
+} from './billing-replay.ts';
 import { createStripeClient } from './stripe-client.ts';
 import { isGated } from './access-gate.ts';
+import {
+  QUERIES_TO_FIND_DELETIONS,
+  accountDeletionConfigured,
+  deletionDepsFor,
+  findDeletionWork,
+  runDeletionNight,
+} from './account-deletion.ts';
+import type { DeletionLookup } from './account-deletion.ts';
+import {
+  handleAccountDelete,
+  handleAccountDeleteCancel,
+  handleAdminDeletions,
+} from './account-deletion-handlers.ts';
 import {
   decideAccessFor,
   handleAccessStatus,
@@ -2050,7 +2067,20 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
  * caller, the same service, and a takedown is cheaper than the publish that
  * preceded it.
  */
-async function handleUnpublish(request: Request, env: Env): Promise<Response> {
+async function handleUnpublish(
+  request: Request,
+  env: Env,
+  options: {
+    /**
+     * Set only by the account deletion route, for the account that is
+     * asking to be deleted: its site comes down as part of the request, and
+     * by then the request is recorded, so the ordinary refusal of such an
+     * account (`principal.ts`) would stop its own takedown. Nothing a caller
+     * sends can set it.
+     */
+    forDeletion?: boolean;
+  } = {},
+): Promise<Response> {
   // Not `autoPublishConfigured`: that also wants the build service, which a
   // takedown never calls. Requiring it would answer 503 to the one control
   // that removes a live site, on a deployment where removing it still works.
@@ -2061,7 +2091,9 @@ async function handleUnpublish(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  const resolved = await resolvePrincipal(request, env);
+  const resolved = await resolvePrincipal(request, env, {
+    allowPendingDeletion: options.forDeletion === true,
+  });
   if (resolved.denied) return resolved.denied;
   const { principal } = resolved;
 
@@ -2222,28 +2254,82 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
-    if (billingConfigured(env)) {
+    /*
+     * D1 stops a Worker invocation at its query limit by throwing, and the
+     * limit depends on the plan: 1000 on Workers Paid, 50 on Workers Free.
+     * Nothing in the runtime reports which one this deployment is on, so
+     * the default is the one that is safe on either and a Paid deployment
+     * says so here.
+     *
+     * Raising it past the real limit is worse than leaving it low. The
+     * replay would throw partway through a page, which leaves its cursor
+     * where it was, so every following night would die in the same place.
+     *
+     * One allowance for the whole invocation, which the account deletion
+     * pass shares with the billing pass: D1 counts the invocation, not the
+     * pass.
+     */
+    const queryBudget = Number(env.VIBLD_REPLAY_QUERY_BUDGET);
+    const allowance =
+      Number.isFinite(queryBudget) && queryBudget > 0
+        ? queryBudget
+        : DEFAULT_QUERY_BUDGET;
+
+    /*
+     * Account deletion (docs/decisions.md L32): retrying immediate steps
+     * that did not finish, the purge once the 30 days are up, and
+     * forgetting audit records after 12 months. Found first, with one query,
+     * so the billing pass is planned on what that leaves and on whether
+     * there is anything to share with.
+     *
+     * It needs D1 and nothing else, so it runs on a deployment without
+     * Stripe as well. It never takes a site down: that happens while the
+     * person is asking (`account-deletion.ts`, ADR-0013).
+     */
+    const deletions = accountDeletionConfigured(env)
+      ? deletionDepsFor(env)
+      : null;
+    const findDeletions = async (): Promise<DeletionLookup> =>
+      deletions
+        ? findDeletionWork(deletions)
+        : { records: [], expired: [], need: 0 };
+    // The billing pass is planned on the allowance less the lookup, which
+    // moves its thresholds (the parked floor from 35, the split from 92)
+    // up by one. Neither the default of 40 nor the deployed 500 is near
+    // either.
+    const afterLookup = deletions
+      ? Math.max(0, allowance - QUERIES_TO_FIND_DELETIONS)
+      : allowance;
+    const deleteAccounts = async (lookup: DeletionLookup, share: number) => {
+      if (!deletions || share <= 0) return;
+      await runDeletionNight(deletions, lookup, share).then(
+        (result) =>
+          console.log(
+            JSON.stringify({
+              event: 'account_deletion.night',
+              share,
+              ...result,
+            }),
+          ),
+        (error: unknown) =>
+          console.error('account deletion pass failed', error),
+      );
+    };
+
+    if (!billingConfigured(env)) {
+      // No billing pass to share with: the deletion pass may have what it
+      // needs of the whole allowance.
+      ctx.waitUntil(
+        findDeletions().then((lookup) =>
+          deleteAccounts(lookup, Math.min(lookup.need, afterLookup)),
+        ),
+      );
+    } else {
       const billing = new BillingStore(env.DB!);
       const referrals = new ReferralStore(env.DB!);
       const payout = { referrals, billing };
 
       const stripe = createStripeClient(env);
-      /*
-       * D1 stops a Worker invocation at its query limit by throwing, and the
-       * limit depends on the plan: 1000 on Workers Paid, 50 on Workers Free.
-       * Nothing in the runtime reports which one this deployment is on, so
-       * the default is the one that is safe on either and a Paid deployment
-       * says so here.
-       *
-       * Raising it past the real limit is worse than leaving it low. The
-       * replay would throw partway through a page, which leaves its cursor
-       * where it was, so every following night would die in the same place.
-       */
-      const queryBudget = Number(env.VIBLD_REPLAY_QUERY_BUDGET);
-      const budget =
-        Number.isFinite(queryBudget) && queryBudget > 0
-          ? queryBudget
-          : DEFAULT_QUERY_BUDGET;
       const cleared = (userId: string) =>
         payReferralIfEarned(payout, userId).then(() => undefined);
       /**
@@ -2280,7 +2366,7 @@ export default {
       // night did before internal issue 176, and still what a night does whenever the
       // split buys every phase at least one item, which the deployed 500
       // does.
-      const everyPhase = () =>
+      const everyPhase = (budget: number) =>
         // The replay first, and the reconcile after it rather than beside
         // it. The replay applies events in the order Stripe created them
         // within a page, but a descent covers older ground on each run, so
@@ -2408,9 +2494,20 @@ export default {
       // ran; `billing.rotated` says which way that was. Each share is fixed
       // before anything runs, so a phase that throws cannot hand the next
       // one more than it was given.
-      const rotatedNight = async ({ turn, shares }: NightPlan) => {
+      const rotatedNight = async ({
+        turn,
+        shares,
+      }: {
+        turn: NightTurn;
+        shares: NightPlan['shares'];
+      }) => {
         console.log(
-          JSON.stringify({ event: 'billing.rotated', turn, shares, budget }),
+          JSON.stringify({
+            event: 'billing.rotated',
+            turn,
+            shares,
+            budget: allowance,
+          }),
         );
         if (shares.replay > 0) {
           await replayStripeEvents(
@@ -2478,28 +2575,42 @@ export default {
       };
 
       ctx.waitUntil(
-        takeNightlyTurn(billing, budget)
-          .catch((error: unknown): NightPlan => {
-            // Only reachable on an allowance that rotates, since one that
-            // splits never asks. Most likely 0028_nightly_rotation.sql has
-            // not been applied. The parked queue rather than nothing: it is
-            // first in the order of precedence and the one phase that runs
-            // every night anyway, it is handed no more than the allowance
-            // less the query that just failed, so the night stays inside
-            // the budget, and a pass that did nothing until somebody read
-            // this line is the failure internal issue 176 was about.
-            console.error('nightly rotation unavailable', error);
-            return {
-              turn: 'parked',
-              shares: {
-                parked: Math.max(0, budget - QUERIES_PER_TURN),
-                payout: 0,
-                reconcile: 0,
-                replay: 0,
-              },
-            };
-          })
-          .then((plan) => (plan === null ? everyPhase() : rotatedNight(plan))),
+        findDeletions().then(async (lookup) => {
+          const plan = await planNight(billing, afterLookup, lookup.need).catch(
+            (error: unknown): NightWithDeletion => {
+              // Only reachable on an allowance that rotates, since one that
+              // splits never asks. Most likely 0028_nightly_rotation.sql has
+              // not been applied. The parked queue rather than nothing: it
+              // is first in the order of precedence and the one phase that
+              // runs every night anyway, it is handed no more than the
+              // allowance less the query that just failed, so the night
+              // stays inside the budget, and a pass that did nothing until
+              // somebody read this line is the failure internal issue 176 was about.
+              // Deletion waits for a night that can plan: its retries and
+              // its purge keep, and parked money does not.
+              console.error('nightly rotation unavailable', error);
+              return {
+                deletion: 0,
+                billing: {
+                  kind: 'rotate',
+                  turn: 'parked',
+                  shares: {
+                    parked: Math.max(0, afterLookup - QUERIES_PER_TURN),
+                    payout: 0,
+                    reconcile: 0,
+                    replay: 0,
+                  },
+                },
+              };
+            },
+          );
+          // Each share is fixed before either pass runs, so one that throws
+          // cannot hand the other more than it was given.
+          await deleteAccounts(lookup, plan.deletion);
+          await (plan.billing.kind === 'split'
+            ? everyPhase(plan.billing.budget)
+            : rotatedNight(plan.billing));
+        }),
       );
     }
 
@@ -2726,6 +2837,33 @@ async function route(
     const resolved = await resolvePrincipal(request, env);
     if (resolved.denied) return resolved.denied;
     return handleReferralClaim(request, env, resolved.principal);
+  }
+
+  // Self-serve account deletion (docs/decisions.md L32). Ungated
+  // (access-gate.ts): an account that was never invited, or whose invite
+  // was withdrawn, can still leave.
+  if (pathname === '/api/account/delete') {
+    return handleAccountDelete(request, env, {
+      // The site comes down through the owner's own takedown, the one path
+      // allowed to do that (ADR-0013), with the person present and asking.
+      // Only when publishing exists here: without it there is no site, and
+      // the step is settled by D1 saying so.
+      takeDown: async () => {
+        if (publishServiceConfigured(env)) {
+          await handleUnpublish(request, env, { forDeletion: true });
+        }
+      },
+    });
+  }
+
+  if (pathname === '/api/account/delete/cancel') {
+    return handleAccountDeleteCancel(request, env);
+  }
+
+  if (pathname === '/api/admin/deletions') {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleAdminDeletions(request, env);
   }
 
   if (pathname === '/api/admin/user') {

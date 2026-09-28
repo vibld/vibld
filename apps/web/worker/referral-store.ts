@@ -238,12 +238,18 @@ export class ReferralStore {
    * referrer is now at the cap, because it is not asking for a new one: it
    * is a payout that failed after reserving, and recovering exactly those is
    * what this sweep is for.
+   *
+   * A reversed row is not owed, for the same reason: `decidePayout` refuses
+   * it every time. A refund could already produce one, and account deletion
+   * (`cancelReferralPayouts`) now does so on purpose, for a purchase that
+   * cleared and was never paid out; selecting them would have each take a
+   * place in the batch every night, for ever.
    */
   async payoutsToRetry(limit: number, maxClaimed: number): Promise<string[]> {
     const result = await this.#db
       .prepare(
         `SELECT referred_user_id FROM referral_attributions AS a
-          WHERE a.paid_at IS NULL
+          WHERE a.paid_at IS NULL AND a.reversed_at IS NULL
             AND ${CLEARED_PAYMENT_SQL.replace(/\?1/g, 'a.referred_user_id')}
             AND (a.claimed_at IS NOT NULL
                  OR (SELECT COUNT(*) FROM referral_attributions AS held

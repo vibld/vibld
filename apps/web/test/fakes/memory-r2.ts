@@ -46,8 +46,25 @@ export class InMemoryR2Bucket implements R2Bucket {
     return undefined;
   }
 
-  async delete(key: string): Promise<void> {
-    this.#objects.delete(key);
+  async delete(keys: string | string[]): Promise<void> {
+    for (const key of Array.isArray(keys) ? keys : [keys]) {
+      this.#objects.delete(key);
+    }
+  }
+
+  /** Keys under a prefix in key order, a page at a time, as R2 lists them. */
+  async list(options: { prefix: string; limit?: number }): Promise<{
+    objects: { key: string }[];
+    truncated: boolean;
+  }> {
+    const limit = options.limit ?? 1000;
+    const keys = [...this.#objects.keys()]
+      .filter((key) => key.startsWith(options.prefix))
+      .sort();
+    return {
+      objects: keys.slice(0, limit).map((key) => ({ key })),
+      truncated: keys.length > limit,
+    };
   }
 
   /** What is stored under `key`, as bytes, for assertions. */

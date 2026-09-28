@@ -20,6 +20,7 @@
  */
 
 import { fetchClerkKeys, verifyClerkJwt } from './clerk-auth.ts';
+import { AccountDeletionStore } from './account-deletion-store.ts';
 import type { RunRefusal } from '@vibld/core';
 
 export interface Principal {
@@ -55,6 +56,43 @@ function json(body: unknown, status: number): Response {
 export interface PrincipalEnv {
   /** Clerk's Frontend API URL -- both the JWT issuer and the JWKS base. */
   CLERK_FRONTEND_API_URL?: string;
+  /**
+   * Where a deletion request is recorded (`0031_account_deletions.sql`).
+   * Absent means no request can have been made, so there is nothing to
+   * refuse on.
+   */
+  DB?: D1Database;
+}
+
+export interface ResolveOptions {
+  /**
+   * Answer for an account that has asked to be deleted.
+   *
+   * Only the deletion routes pass it: asking again (which is how an
+   * unfinished step is retried), reading where the request stands, and
+   * keeping the account. Everything else refuses such an account, which is
+   * what L32's deletion means from the moment it is asked for.
+   */
+  allowPendingDeletion?: boolean;
+}
+
+/**
+ * The refusal every other route gives an account that asked to be deleted.
+ *
+ * 403 rather than 401: the identity is fine, and signing in again is the
+ * way to reach the one screen that can undo it. The date is carried so
+ * that screen can say when the purge happens without a second request.
+ */
+export function deletionScheduled(purgeAfter: string): Response {
+  return json(
+    {
+      error:
+        'This account is scheduled for deletion. Sign in and choose to keep it before the date shown, or it will be deleted.',
+      reason: 'deletion-scheduled' satisfies RunRefusal,
+      purgeAfter,
+    },
+    403,
+  );
 }
 
 /**
@@ -75,6 +113,7 @@ function bearerToken(request: Request): string | undefined {
 export async function resolvePrincipal(
   request: Request,
   env: PrincipalEnv,
+  options: ResolveOptions = {},
 ): Promise<PrincipalDenied | PrincipalGranted> {
   if (!clerkConfigured(env)) {
     return {
@@ -98,20 +137,18 @@ export async function resolvePrincipal(
     };
   }
 
+  let principal: Principal;
   try {
     const issuer = env.CLERK_FRONTEND_API_URL!;
     const keys = await fetchClerkKeys(issuer);
     const claims = await verifyClerkJwt(token, { keys, issuer });
     const verifiedEmail =
       claims.email && claims.emailVerified === true ? claims.email : undefined;
-    return {
-      denied: null,
-      principal: {
-        userId: claims.sub,
-        email: claims.email,
-        emailVerified: claims.emailVerified,
-        policyIdentity: verifiedEmail ?? 'unknown',
-      },
+    principal = {
+      userId: claims.sub,
+      email: claims.email,
+      emailVerified: claims.emailVerified,
+      policyIdentity: verifiedEmail ?? 'unknown',
     };
   } catch {
     // Deliberately opaque: a verification failure should not tell a caller
@@ -128,4 +165,33 @@ export async function resolvePrincipal(
       ),
     };
   }
+
+  // Here rather than in each route, so that no route can be the one that
+  // forgets: every authenticated request comes through this function, and
+  // the promise made to somebody who asked to be deleted is that nothing
+  // more happens on their account.
+  //
+  // Fails closed. A deletion that cannot be checked is refused rather than
+  // assumed absent, because the other answer lets an account that asked to
+  // leave carry on while D1 is unwell, and the routes that matter most need
+  // D1 to do anything anyway.
+  if (!options.allowPendingDeletion && env.DB) {
+    let pending: { purgeAfter: string } | null;
+    try {
+      pending = await new AccountDeletionStore(env.DB).pending(
+        principal.userId,
+      );
+    } catch (error) {
+      console.error('could not check for a deletion request', error);
+      return {
+        denied: json(
+          { error: 'Could not check this account right now. Try again.' },
+          503,
+        ),
+      };
+    }
+    if (pending) return { denied: deletionScheduled(pending.purgeAfter) };
+  }
+
+  return { denied: null, principal };
 }

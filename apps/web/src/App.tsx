@@ -8,6 +8,7 @@ import { useFocusOnChange } from './admin/use-focus-on-change.ts';
 import { Mark, WORDMARK } from './components/Mark.tsx';
 import { Conversation } from './components/Conversation.tsx';
 import { SettingsMenu } from './components/SettingsMenu.tsx';
+import { AccountDeletion } from './components/AccountDeletion.tsx';
 import { BillingStatusWidget } from './components/BillingStatus.tsx';
 import { SignupCreditBanner } from './components/SignupCreditOffer.tsx';
 import { ReferralClaim, ReferralSection } from './components/ReferralPanel.tsx';
@@ -144,6 +145,15 @@ function Builder() {
                     </a>
                   </section>
                 ) : null}
+                {/*
+              Last but one, and a button that only opens an explanation:
+              the one control in here that cannot be undone after a month
+              should not be the first thing under the gear.
+            */}
+                <section className="settings__section">
+                  <h2 className="settings__heading">Account</h2>
+                  <AccountDeletion />
+                </section>
                 <section className="settings__section">
                   <h2 className="settings__heading">This deployment</h2>
                   {/*

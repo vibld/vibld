@@ -3,6 +3,9 @@ import { beforeEach, describe, it } from 'node:test';
 import { resolvePrincipal } from '../worker/principal.ts';
 import { resetClerkKeyCache } from '../worker/clerk-auth.ts';
 import type { ClerkJwk } from '../worker/clerk-auth.ts';
+import { AccountDeletionStore } from '../worker/account-deletion-store.ts';
+import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
 const ISSUER = 'https://clerk.vibld.com';
 const NOW = 1_800_000_000;
@@ -224,5 +227,98 @@ describe('resolvePrincipal', () => {
     } finally {
       restore();
     }
+  });
+});
+
+/**
+ * An account that asked to be deleted (docs/decisions.md L32) is refused on
+ * every authenticated request from then on. Here rather than in each route,
+ * because every authenticated request resolves a principal, and this is
+ * the one place none of them can forget.
+ */
+describe('resolvePrincipal for an account scheduled for deletion', () => {
+  beforeEach(() => resetClerkKeyCache());
+
+  async function signedIn(db: D1Database | undefined, allow = false) {
+    // A fresh key each call, so the cache from the last one must go.
+    resetClerkKeyCache();
+    const { privateKey, jwk } = await makeKeypair('k1');
+    const liveNow = Math.floor(Date.now() / 1000);
+    const token = await sign(
+      privateKey,
+      { alg: 'RS256', kid: 'k1' },
+      { ...validPayload, exp: liveNow + 3600, iat: liveNow - 10 },
+    );
+    const restore = stubGlobalFetch(jwk);
+    try {
+      return await resolvePrincipal(
+        requestWithToken(token),
+        { CLERK_FRONTEND_API_URL: ISSUER, ...(db ? { DB: db } : {}) },
+        { allowPendingDeletion: allow },
+      );
+    } finally {
+      restore();
+    }
+  }
+
+  function database(): D1Database {
+    return new SqliteD1Database(schemaSql()) as unknown as D1Database;
+  }
+
+  it('refuses with a clear reason and the purge date', async () => {
+    const db = database();
+    await new AccountDeletionStore(db).request(
+      validPayload.sub,
+      '2026-09-01T00:00:00.000Z',
+      'deleted-x',
+    );
+    const result = await signedIn(db);
+    assert.ok(result.denied);
+    assert.equal(result.denied.status, 403);
+    const body = (await result.denied.json()) as {
+      error: string;
+      reason: string;
+      purgeAfter: string;
+    };
+    assert.equal(body.reason, 'deletion-scheduled');
+    assert.equal(body.purgeAfter, '2026-10-01T00:00:00.000Z');
+    assert.match(body.error, /scheduled for deletion/);
+  });
+
+  it('answers the deletion routes, which are the only ones that ask to be', async () => {
+    const db = database();
+    await new AccountDeletionStore(db).request(
+      validPayload.sub,
+      '2026-09-01T00:00:00.000Z',
+      'deleted-x',
+    );
+    const result = await signedIn(db, true);
+    assert.equal(result.denied, null);
+  });
+
+  it('lets the account back in once the request is taken back', async () => {
+    const db = database();
+    const store = new AccountDeletionStore(db);
+    await store.request(validPayload.sub, '2026-09-01T00:00:00.000Z', 'd-x');
+    await store.cancel(validPayload.sub, '2026-09-02T00:00:00.000Z');
+    assert.equal((await signedIn(db)).denied, null);
+  });
+
+  it('answers everybody else as before', async () => {
+    assert.equal((await signedIn(database())).denied, null);
+    assert.equal((await signedIn(undefined)).denied, null);
+  });
+
+  it('refuses rather than guessing when the check itself fails', async () => {
+    // Fails closed: an account that asked to leave must not carry on while
+    // D1 is unwell.
+    const broken = {
+      prepare() {
+        throw new Error('D1 is unavailable');
+      },
+    } as unknown as D1Database;
+    const result = await signedIn(broken);
+    assert.ok(result.denied);
+    assert.equal(result.denied.status, 503);
   });
 });

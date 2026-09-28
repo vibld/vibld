@@ -167,8 +167,19 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // A read of what is already connected. Answering it for an uninvited
   // account tells them nothing they did not already do.
   '/api/github/status': "a read-only view of the caller's own binding",
+  // Deleting the account (docs/decisions.md L32), asking where that stands,
+  // and taking it back within the 30 days. The same rule as the wind-down
+  // routes above, at its strongest: an account that was never invited, or
+  // whose invite was withdrawn, still has personal data here and a right
+  // to have it deleted, and gating this would leave it no way to ask. It
+  // spends nothing and grants nothing; everything it does is stopping,
+  // taking down and deleting.
+  '/api/account/delete': 'leaving is not something an invite buys',
+  '/api/account/delete/cancel':
+    'keeping an account already made, which grants nothing new',
   // Already behind the stricter platform-admin check, which an invite does
   // not confer and which an admin passes without one.
+  '/api/admin/deletions': 'behind the platform-admin check instead',
   '/api/admin/user': 'behind the platform-admin check instead',
   '/api/admin/topup': 'behind the platform-admin check instead',
   '/api/admin/unattributed': 'behind the platform-admin check instead',

@@ -250,6 +250,18 @@ describe('ReferralStore.payoutsToRetry', () => {
     ]);
   });
 
+  it('leaves alone one that was reversed before it was paid', async () => {
+    // A refund can reverse an unpaid row, and account deletion does so on
+    // purpose. `decidePayout` refuses a reversed row every time, so
+    // selecting it would spend a place in the batch on it every night.
+    const { store, db } = newStoreWithDb();
+    const [referred] = await referAll(store, 'user_owner', 1);
+    await hasPaid(db, referred!);
+    await store.markReversed(referred!, '2026-09-28T00:00:00.000Z');
+
+    assert.deepEqual(await store.payoutsToRetry(10, MAX_PAID_REFERRALS), []);
+  });
+
   it('leaves alone a top-up that granted credit and took no money', async () => {
     // A Checkout fully covered by a coupon settles as `no_payment_required`:
     // the credit is granted and the card is never charged. Reading the

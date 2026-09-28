@@ -12,8 +12,13 @@ import {
   QUERIES_PER_TURN,
   ROTATING_PHASES,
   everyPhaseBuysAnItem,
+  DELETION_TURN,
+  deletionReserveFor,
   itemsFor,
   nightSharesFor,
+  nightSharesWithDeletion,
+  planNight,
+  splitSurvivesDeletion,
   parkedFloorFitsFor,
   parkedReserveFor,
   payoutBatchFor,
@@ -27,7 +32,12 @@ import {
   splitSharesFor,
   takeNightlyTurn,
 } from '../worker/billing-replay.ts';
-import type { NightPlan, NightlyPhase } from '../worker/billing-replay.ts';
+import type {
+  NightPlan,
+  NightTurn,
+  NightlyPhase,
+} from '../worker/billing-replay.ts';
+import { MIN_DELETION_SHARE } from '../worker/account-deletion.ts';
 import { BillingStore } from '../worker/billing-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
@@ -370,14 +380,16 @@ describe('the nightly pass on the deployed allowance', () => {
     );
     const flat = source.replace(/\s+/g, ' ');
 
+    // `planNight` is `takeNightlyTurn` on a night with no account deletion
+    // waiting; the suite below holds it to that.
     assert.match(
       flat,
-      /takeNightlyTurn\(billing, budget\)/,
+      /planNight\(billing, afterLookup, lookup\.need\)/,
       'the pass no longer asks whose turn it is',
     );
     assert.match(
       flat,
-      /\(plan === null \? everyPhase\(\) : rotatedNight\(plan\)\)/,
+      /plan\.billing\.kind === 'split' \? everyPhase\(plan\.billing\.budget\) : rotatedNight\(plan\.billing\)/,
       'a night that can split no longer runs every phase',
     );
     for (const call of [
@@ -392,5 +404,133 @@ describe('the nightly pass on the deployed allowance', () => {
         'a phase on a rotating night is sized from the wrong share',
       );
     }
+  });
+});
+
+/**
+ * Account deletion's share of the same allowance (docs/decisions.md L32).
+ *
+ * The retries and the purge run in the nightly pass, inside the one D1
+ * allowance the invocation has. A night with nothing waiting has to be the
+ * night the billing pass always had; a night with something waiting has to
+ * buy deletion an item without taking the parked floor away or pushing any
+ * night past its allowance.
+ */
+describe('the nightly pass with account deletions waiting', () => {
+  /** The most one rotating night can spend, deletion's share included. */
+  async function worstRotatingNight(
+    shares: Record<NightlyPhase, number>,
+    deletion: number,
+  ): Promise<number> {
+    let total = QUERIES_PER_TURN + deletion;
+    for (const phase of NIGHTLY_PHASES) {
+      if (shares[phase] > 0) total += await worstCostFor(phase, shares[phase]);
+    }
+    return total;
+  }
+
+  it('is the ordinary night when nothing is waiting', async () => {
+    for (const budget of [24, 30, DEFAULT_QUERY_BUDGET, 91, 92, 121, 500]) {
+      const ordinary = countingStore();
+      const withDeletion = countingStore();
+      for (let night = 0; night < 4; night += 1) {
+        const plan = await takeNightlyTurn(ordinary.store, budget);
+        const planned = await planNight(withDeletion.store, budget, 0);
+        assert.equal(planned.deletion, 0);
+        assert.deepEqual(
+          planned.billing,
+          plan === null
+            ? { kind: 'split', budget }
+            : { kind: 'rotate', turn: plan.turn, shares: plan.shares },
+          `${budget} night ${night}`,
+        );
+      }
+      assert.equal(withDeletion.statements(), ordinary.statements());
+    }
+  });
+
+  it('rotates deletion in on the default allowance, keeping the parked floor', async () => {
+    const budget = DEFAULT_QUERY_BUDGET;
+    const { store } = countingStore();
+    const turns: NightTurn[] = [];
+    const bought = new Map<NightTurn, number>();
+    for (let night = 0; night < ROTATING_PHASES.length + 1; night += 1) {
+      const plan = await planNight(store, budget, 1000);
+      assert.equal(plan.billing.kind, 'rotate');
+      if (plan.billing.kind !== 'rotate') continue;
+      turns.push(plan.billing.turn);
+      assert.ok(itemsFor('parked', plan.billing.shares.parked) >= 1);
+      for (const phase of ROTATING_PHASES) {
+        bought.set(
+          phase,
+          (bought.get(phase) ?? 0) +
+            itemsFor(phase, plan.billing.shares[phase]),
+        );
+      }
+      if (plan.deletion >= MIN_DELETION_SHARE) bought.set(DELETION_TURN, 1);
+      const total = await worstRotatingNight(
+        plan.billing.shares,
+        plan.deletion,
+      );
+      assert.ok(total <= budget, `night ${night}: ${total} of ${budget}`);
+    }
+    assert.deepEqual(turns, [...ROTATING_PHASES, DELETION_TURN]);
+    for (const turn of [...ROTATING_PHASES, DELETION_TURN]) {
+      assert.ok((bought.get(turn) ?? 0) >= 1, `${turn} bought nothing`);
+    }
+  });
+
+  it('buys every phase and deletion an item within a lap, from 24 to 121', async () => {
+    for (let budget = 24; budget < 122; budget += 1) {
+      assert.equal(splitSurvivesDeletion(budget), false, `${budget}`);
+      const floor = parkedFloorFitsFor(budget);
+      const lap = floor
+        ? ROTATING_PHASES.length + 1
+        : NIGHTLY_PHASES.length + 1;
+      const bought = new Set<NightTurn>();
+      for (let night = 0; night < lap; night += 1) {
+        const plan = nightSharesWithDeletion(budget, night);
+        if (floor) {
+          assert.equal(plan.shares.parked, parkedReserveFor(budget));
+        }
+        if (plan.turn === DELETION_TURN) {
+          if (plan.deletion >= MIN_DELETION_SHARE) bought.add(DELETION_TURN);
+        } else if (itemsFor(plan.turn, plan.shares[plan.turn]) >= 1) {
+          bought.add(plan.turn);
+        }
+        const total = await worstRotatingNight(plan.shares, plan.deletion);
+        assert.ok(total <= budget, `${budget} night ${night}: ${total}`);
+      }
+      for (const turn of floor
+        ? [...ROTATING_PHASES, DELETION_TURN]
+        : [...NIGHTLY_PHASES, DELETION_TURN]) {
+        assert.ok(bought.has(turn), `${budget}: ${turn} bought nothing`);
+      }
+    }
+  });
+
+  it('keeps the split from 122 up, with a quarter for deletion', async () => {
+    for (let budget = 122; budget <= 1000; budget += 1) {
+      assert.equal(splitSurvivesDeletion(budget), true, `${budget}`);
+      assert.ok(deletionReserveFor(budget) >= MIN_DELETION_SHARE);
+    }
+    const { store, statements } = countingStore();
+    const plan = await planNight(store, 500, 1000);
+    assert.deepEqual(plan, {
+      deletion: 125,
+      billing: { kind: 'split', budget: 375 },
+    });
+    assert.equal(everyPhaseBuysAnItem(375), true);
+    // No turn is taken on a night that splits.
+    assert.equal(statements(), 0);
+  });
+
+  it('never gives deletion more than it could spend', async () => {
+    const { store } = countingStore();
+    const plan = await planNight(store, 500, 12);
+    assert.deepEqual(plan, {
+      deletion: 12,
+      billing: { kind: 'split', budget: 488 },
+    });
   });
 });

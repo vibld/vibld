@@ -88,7 +88,19 @@ interface R2Bucket {
     value: string | ArrayBuffer | ArrayBufferView,
     options?: { httpMetadata?: { contentType?: string } },
   ): Promise<unknown>;
-  delete(key: string): Promise<void>;
+  /**
+   * One key, or many at once: the account purge (`account-deletion.ts`)
+   * deletes a listed page in one call. The runtime takes up to 1000.
+   */
+  delete(keys: string | string[]): Promise<void>;
+  /**
+   * Keys under a prefix, a page at a time. Only the account purge lists, to
+   * find an account's snapshots and media without a row naming each one.
+   */
+  list(options: { prefix: string; limit?: number }): Promise<{
+    objects: { key: string }[];
+    truncated: boolean;
+  }>;
 }
 
 /**

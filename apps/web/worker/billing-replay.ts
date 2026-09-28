@@ -971,3 +971,127 @@ export async function takeNightlyTurn(
     await store.takeNightlyTurn(NIGHTLY_ROTATION),
   );
 }
+
+/**
+ * The account deletion pass's turn (docs/decisions.md L32,
+ * `account-deletion.ts`): retrying the immediate steps of a deletion that
+ * did not finish, and the purge 30 days after a request.
+ */
+export const DELETION_TURN = 'deletion' as const;
+
+/** Whose night it is, once account deletion is one of the candidates. */
+export type NightTurn = NightlyPhase | typeof DELETION_TURN;
+
+/**
+ * The deletion pass's share on an allowance large enough to split: a
+ * quarter, the same as each billing phase's reserve.
+ */
+export function deletionReserveFor(queryBudget: number): number {
+  return Math.floor(queryBudget / 4);
+}
+
+/**
+ * Whether a night with deletion work can still split: the billing split
+ * on what the deletion reserve leaves still buys every phase an item.
+ *
+ * Asked only on a night with deletion work, so a night without any splits
+ * exactly as it always has.
+ */
+export function splitSurvivesDeletion(queryBudget: number): boolean {
+  return everyPhaseBuysAnItem(queryBudget - deletionReserveFor(queryBudget));
+}
+
+/**
+ * One rotating night with account deletion in the rotation: the same
+ * shape as `nightSharesFor`, with the deletion pass as one more phase.
+ *
+ * Only for a night on which deletion has work. Rotating it in every night
+ * would give each billing phase one night in four rather than one in three
+ * for the sake of a pass that almost always has nothing to do, so a night
+ * with nothing waiting uses `nightSharesFor` and its lap of three.
+ *
+ * The parked queue keeps its floor on the deletion's night too, for the
+ * reason `nightSharesFor` gives. Below 35, where it cannot, deletion joins
+ * the rotation of all four instead.
+ */
+export function nightSharesWithDeletion(
+  queryBudget: number,
+  night: number,
+): { turn: NightTurn; shares: Record<NightlyPhase, number>; deletion: number } {
+  const shares: Record<NightlyPhase, number> = {
+    parked: 0,
+    payout: 0,
+    reconcile: 0,
+    replay: 0,
+  };
+  const floor = parkedFloorFitsFor(queryBudget);
+  const cycle: readonly NightTurn[] = floor
+    ? [...ROTATING_PHASES, DELETION_TURN]
+    : [...NIGHTLY_PHASES, DELETION_TURN];
+  const turn = cycle[wrap(night, cycle.length)]!;
+  const share = floor
+    ? turnShareFor(queryBudget)
+    : Math.max(0, queryBudget - QUERIES_PER_TURN);
+  if (floor) shares.parked = parkedReserveFor(queryBudget);
+  if (turn === DELETION_TURN) return { turn, shares, deletion: share };
+  shares[turn] = share;
+  return { turn, shares, deletion: 0 };
+}
+
+/** Tonight's plan for the billing pass and the deletion pass together. */
+export interface NightWithDeletion {
+  /** What the deletion pass may spend. Zero when it has nothing to do. */
+  deletion: number;
+  /**
+   * The billing pass: `split` runs every phase on its share of `budget`,
+   * which is the allowance less the deletion's share; otherwise the
+   * rotating night's shares.
+   */
+  billing:
+    | { kind: 'split'; budget: number }
+    | { kind: 'rotate'; turn: NightTurn; shares: Record<NightlyPhase, number> };
+}
+
+/**
+ * Tonight's plan, given what the deletion pass could spend at the most.
+ *
+ * With nothing waiting it is `takeNightlyTurn`, unchanged: the same split
+ * or the same lap of three, and the deletion pass gets nothing. With work
+ * waiting, an allowance that still splits after a quarter for deletion
+ * gives it that quarter (or what it needs, if less) and splits the rest;
+ * one that does not rotates deletion in as a fourth turn.
+ *
+ * The rotation counter is the one the billing pass already keeps, so a
+ * night that takes a turn costs the same one query either way.
+ */
+export async function planNight(
+  store: BillingStore,
+  queryBudget: number,
+  deletionNeed: number,
+): Promise<NightWithDeletion> {
+  if (deletionNeed <= 0) {
+    const plan = await takeNightlyTurn(store, queryBudget);
+    return {
+      deletion: 0,
+      billing:
+        plan === null
+          ? { kind: 'split', budget: queryBudget }
+          : { kind: 'rotate', turn: plan.turn, shares: plan.shares },
+    };
+  }
+  if (splitSurvivesDeletion(queryBudget)) {
+    const deletion = Math.min(deletionNeed, deletionReserveFor(queryBudget));
+    return {
+      deletion,
+      billing: { kind: 'split', budget: queryBudget - deletion },
+    };
+  }
+  const night = nightSharesWithDeletion(
+    queryBudget,
+    await store.takeNightlyTurn(NIGHTLY_ROTATION),
+  );
+  return {
+    deletion: Math.min(deletionNeed, night.deletion),
+    billing: { kind: 'rotate', turn: night.turn, shares: night.shares },
+  };
+}

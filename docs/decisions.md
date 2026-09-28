@@ -237,6 +237,38 @@ the conversation rather than sent on as the word. `POST /api/chat`
 invite gate, model policy, rate limiters and reservation as `/api/mockups`,
 and is charged the same way.
 
+**L32 is implemented: an account can delete itself, and is purged 30 days
+later.** Chris decided on 2026-09-27 to build it before the open beta. The
+builder's settings menu has "Delete account", confirmed in the page by
+typing a phrase, and `POST /api/account/delete` is open to any signed-in
+account, invited or not. From the request on, every other authenticated
+request from the account is refused with `deletion-scheduled`; its
+subscription is cancelled at once with no proration, its preview stopped,
+its published site taken down by the owner's own takedown, its GitHub grant
+revoked and its unpaid referral rewards reversed, each retried by the
+person and by the nightly pass until it has happened. Thirty days later the
+nightly pass, inside the same D1 allowance as the billing pass, deletes the
+project content (L32's promise), the account's other rows, its stored
+files, its spend ledgers and its Clerk user. Where this departs from the
+brief, or reads L32 in a particular way: there was no audit log to keep, so
+the deletion record itself is the audit record: it is re-keyed to a random
+tombstone at the purge and deleted 12 months later. The billing, payment,
+credit and referral rows are kept under the same tombstone rather than
+deleted, because they are accounting records; none holds an email address,
+and parked Stripe payloads lose theirs. The nightly pass never takes a site
+down (ADR-0013), so a site still serving holds the purge until the owner or
+an operator takes it down. The purge takes a turn in the nightly rotation
+only on a night with deletion work waiting, so the billing phases keep
+their lap of three otherwise, and from an allowance of 122 it has a quarter
+of its own instead. Not purged: the preview sandbox's Durable Object keeps
+its record of issued share links and the id of the account whose media it
+last served, since apps/preview has no route to forget them. The account
+can be kept, from the screen it sees on signing in, until the purge starts.
+Chris confirmed on 2026-09-28 that a subscription is cancelled with no
+refund of the paid period, and that a referrer's deletion also cancels the
+referred account's unpaid reward, which an operator can grant back by hand.
+See `apps/web/README.md`, "Account deletion".
+
 ### Resolved 2026-09-27
 
 **L15 stands: Stripe Tax is off, and the code now matches.** Chris confirmed

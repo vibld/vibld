@@ -20,6 +20,13 @@ import {
   stopSandboxPreview,
 } from '../generation/preview-client.ts';
 import type { AccessStatus as AccessStatusValue } from '../access/access-client.ts';
+import {
+  cancelAccountDeletion,
+  fetchDeletionSchedule,
+  formatPurgeDate,
+  requestAccountDeletion,
+} from '../account/deletion-client.ts';
+import type { DeletionSchedule } from '../account/deletion-client.ts';
 import { Mark, WORDMARK } from './Mark.tsx';
 
 /**
@@ -90,6 +97,20 @@ export function AccessGate({
   // refusal reads as a product that broke, rather than one that is closed.
   if (status === null) return null;
   if (status.allowed) return children;
+  // Its own screen, before the other two: the account is refused because
+  // it asked to be, and neither "not on the list" nor "could not check" is
+  // true of it. The wind-down controls are not offered here, because every
+  // route behind them now refuses this account; the deletion already does
+  // all of what they would.
+  if (status.deletion) {
+    return (
+      <DeletionScheduledNotice
+        purgeAfter={status.deletion.purgeAfter}
+        kept={() => setAttempt((n) => n + 1)}
+        signOut={signOut}
+      />
+    );
+  }
   /*
    * Two different screens, because they are two different facts. The gate
    * stays shut either way: an unknown answer is not a yes, and showing a
@@ -103,6 +124,136 @@ export function AccessGate({
     );
   }
   return <ClosedNotice status={status} signOut={signOut} />;
+}
+
+/**
+ * What an account that asked to be deleted sees when it signs in again
+ * (docs/decisions.md L32).
+ *
+ * The date the purge happens, what has not finished yet with a way to
+ * finish it, and, while the purge has not started, the way to keep the
+ * account. Keeping it gives back the account and its data; what was
+ * already stopped (the subscription, the published site, the GitHub
+ * connection, pending referral rewards) stays stopped, and it says so.
+ */
+function DeletionScheduledNotice({
+  purgeAfter,
+  kept,
+  signOut,
+}: {
+  purgeAfter: string;
+  kept: () => void;
+  signOut: ReactNode;
+}) {
+  const [schedule, setSchedule] = useState<DeletionSchedule | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void fetchDeletionSchedule()
+      .then((next) => {
+        if (live) setSchedule(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const unfinished = schedule?.errors ?? [];
+  const cancellable = schedule?.cancellable ?? false;
+
+  async function retry() {
+    setBusy(true);
+    setNote(null);
+    try {
+      // A request that already stands needs no phrase: it is finishing
+      // what was already confirmed, not deciding anything new.
+      const result = await requestAccountDeletion('');
+      if (result.ok) {
+        setSchedule(result.schedule);
+        setNote(
+          result.schedule.errors.length === 0
+            ? 'Everything that stops straight away has now stopped.'
+            : null,
+        );
+      } else {
+        setNote(result.error);
+      }
+    } catch {
+      setNote('The request could not be made. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function keep() {
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await cancelAccountDeletion();
+      if (result.ok) kept();
+      else setNote(result.error);
+    } catch {
+      setNote('The request could not be made. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth-gate">
+      <GateBrand />
+      <div className="banner" role="status">
+        <p className="banner__title">This account is scheduled for deletion</p>
+        <p className="banner__detail">
+          Everything in it will be deleted on {formatPurgeDate(purgeAfter)}.
+          Until then it cannot be used.
+        </p>
+        {unfinished.length > 0 ? (
+          <>
+            <p className="banner__detail">Not everything has stopped yet:</p>
+            <ul className="banner__detail">
+              {unfinished.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+            <p className="banner__detail">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void retry()}
+              >
+                Try those again
+              </button>
+            </p>
+          </>
+        ) : null}
+        {cancellable ? (
+          <>
+            <p className="banner__detail">
+              Changed your mind? You can keep the account until then. Your
+              projects and files come back as they were. Anything already
+              stopped stays stopped: a cancelled subscription, a published site
+              taken down, the GitHub connection and referral rewards.
+            </p>
+            <p className="banner__detail">
+              <button type="button" disabled={busy} onClick={() => void keep()}>
+                Keep my account
+              </button>
+            </p>
+          </>
+        ) : null}
+        {note ? (
+          <p className="banner__detail" role="status">
+            {note}
+          </p>
+        ) : null}
+      </div>
+      {signOut}
+    </div>
+  );
 }
 
 /** The brand header both refusal screens carry. */
