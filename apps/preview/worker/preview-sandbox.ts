@@ -34,6 +34,7 @@ import {
 // The one fleet instance that counts every container, previews and builds
 // alike: see `capacity.ts` for how the budget is shared (internal issue 197).
 import { FLEET_NAME } from './capacity.ts';
+import { provisionPreview } from './provision.ts';
 
 /**
  * Vibld's own untrusted-execution sandbox (ADR-0004; docs/decisions.md L7,
@@ -95,9 +96,6 @@ const MEDIA_OWNER_KEY = 'media-owner';
  * and the library is the whole account's.
  */
 const MEDIA_ALLOWED_KEY = 'media-allowed';
-
-/** Vite's default dev-server port; every generated project here uses Vite. */
-const DEV_PORT = 5173;
 
 /**
  * How long the pre-preview typecheck may take before it is abandoned.
@@ -1090,74 +1088,58 @@ export class PreviewSandbox extends Sandbox<Env> {
     startedAt: number,
     fleetTicketId: number,
   ): Promise<void> {
-    try {
+    // The steps, their bounds and their logging live in `provision.ts`,
+    // where they can be run against fakes. This supplies the container.
+    const result = await provisionPreview({
       // Always alive: a preview holds no build lock, so there is nothing
       // to renew and nothing that can take the workspace from it. Its own
       // claim on this sandbox is the fleet ticket, which has a hard
       // lifetime rather than a heartbeat and is `reclaimStale`'s business.
-      await this.writeProject(
-        files,
-        async () => true,
-        (work) => work,
-      );
-      await this.writeState({ phase: 'starting', startedAt, fleetTicketId });
-
-      const install = await this.exec('npm install --no-audit --no-fund', {
-        cwd: '/workspace',
-      });
-      if (!install.success) {
-        throw new Error(
-          `npm install failed (exit ${install.exitCode}): ${install.stderr.slice(-2000)}`,
+      writeProject: async () => {
+        await this.writeProject(
+          files,
+          async () => true,
+          (work) => work,
         );
-      }
-
+      },
+      setPhase: (phase) => this.writeState({ phase, startedAt, fleetTicketId }),
+      exec: (command, options) => this.exec(command, options),
       // The cheapest place in the product to find out that a generated
-      // project does not compile (internal issue 194): the container is up and the
-      // install has already happened, so this costs seconds rather than a
-      // second sandbox. Two of six real generations measured against the
-      // production provider produced a project that fails `npm run build`,
-      // for two unrelated reasons, and until now the only gate was publish.
-      //
-      // Deliberately not a failure. The dev server starts either way, and
-      // Vite does not typecheck, so the preview really does run -- it just
-      // may show Vite's own transform error where a page should be, which
-      // reads as Vibld being broken rather than as the project needing a
-      // fix. Naming it is the whole point.
-      const typecheckFailure = await this.typecheck();
+      // project does not compile (internal issue 194). Deliberately not a failure: the
+      // dev server starts either way, and Vite does not typecheck.
+      typecheck: () => this.typecheck(),
+      startProcess: (command, options) => this.startProcess(command, options),
+      exposePort: (port) => this.exposePort(port, { hostname }),
+      now: () => Date.now(),
+      log: (event, fields) => console.log(event, JSON.stringify(fields)),
+    });
 
-      const dev = await this.startProcess(
-        `npm run dev -- --host 0.0.0.0 --port ${DEV_PORT}`,
-        { cwd: '/workspace' },
-      );
-      // TCP only: a generated project's dev server has no guaranteed '/'
-      // route or status code, only that something is listening.
-      await dev.waitForPort(DEV_PORT, { mode: 'tcp' });
-
-      const exposed = await this.exposePort(DEV_PORT, { hostname });
+    if (result.ok) {
       await this.writeState({
         phase: 'ready',
         startedAt,
         fleetTicketId,
-        url: exposed.url,
+        url: result.url,
         expiresAt: startedAt + HARD_LIFETIME_MS,
-        ...(typecheckFailure ? { typecheckFailure } : {}),
+        ...(result.typecheckFailure
+          ? { typecheckFailure: result.typecheckFailure }
+          : {}),
       });
-    } catch (error) {
-      await this.writeState({
-        phase: 'failed',
-        startedAt,
-        fleetTicketId,
-        error:
-          error instanceof Error ? error.message : 'Preview failed to start.',
-      });
-      // A failed attempt must not go on occupying an account-wide slot for
-      // up to the full hard lifetime (L9) while doing nothing useful with
-      // it -- release it the moment the failure is known, same as a normal
-      // stop does.
-      await this.env.Fleet.getByName(FLEET_NAME)
-        .release(fleetTicketId, 'preview')
-        .catch(() => {});
+      return;
     }
+    await this.writeState({
+      phase: 'failed',
+      startedAt,
+      fleetTicketId,
+      error: result.error,
+    });
+    // A failed attempt must not go on occupying an account-wide slot for
+    // up to the full hard lifetime (L9) while doing nothing useful with
+    // it -- release it the moment the failure is known, same as a normal
+    // stop does.
+    await this.env.Fleet.getByName(FLEET_NAME)
+      .release(fleetTicketId, 'preview')
+      .catch(() => {});
   }
 
   /**

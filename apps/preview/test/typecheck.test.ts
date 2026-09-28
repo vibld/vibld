@@ -80,14 +80,17 @@ describe('what a preview finds out about the project it is running', () => {
       'private async provision(',
       'private async typecheck(',
     );
+    // The steps themselves are in `provision.ts` and run under
+    // `provision.test.ts`; this is the container's half, which hands the
+    // typecheck in and puts its answer on the ready state.
     assert.match(
       provision,
-      /this\.typecheck\(\)/,
+      /typecheck: \(\) => this\.typecheck\(\)/,
       'the typecheck is defined and never run',
     );
     assert.match(
       provision,
-      /typecheckFailure \? \{ typecheckFailure \} : \{\}/,
+      /result\.typecheckFailure\s*\?\s*\{ typecheckFailure: result\.typecheckFailure \}\s*:\s*\{\}/,
       'the answer is found and then dropped before anyone sees it',
     );
   });

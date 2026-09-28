@@ -9,9 +9,14 @@
   // actually printed was unreadable from outside.
   "observability": { "enabled": true },
 
-  // docs/decisions.md L7: Cloudflare Sandbox SDK / Containers. "lite" is the
-  // smallest instance type -- matches L27's "expect single-digit cents per
-  // preview session" estimate. max_instances is the whole container budget
+  // docs/decisions.md L7: Cloudflare Sandbox SDK / Containers. "basic" (1 GiB,
+  // 1/4 vCPU) rather than "lite" (256 MiB, 1/16 vCPU): a preview in lite sat
+  // on "Starting the dev server" until its hard lifetime (2026-09-28), and
+  // 256 MiB is the likeliest reason an `npm install` of a generated Vite
+  // project never finished. A
+  // session in basic is still single-digit cents under L27's approved
+  // Containers line, because CPU is billed on active use and a session is
+  // minutes. max_instances is the whole container budget
   // for this class, enforced by Cloudflare as a hard platform limit
   // underneath PreviewFleet's own queue. Builds run in this class too, and
   // PreviewFleet counts previews and builds against this one number, with
@@ -22,7 +27,7 @@
     {
       "class_name": "PreviewSandbox",
       "image": "./Dockerfile",
-      "instance_type": "lite",
+      "instance_type": "basic",
       "max_instances": 25,
     },
   ],
