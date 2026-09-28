@@ -76,7 +76,7 @@ jobs:
           node-version: 24
 
       - name: Download the built sites
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: built-examples
           path: ${{ runner.temp }}/examples

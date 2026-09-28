@@ -252,7 +252,7 @@ jobs:
           node-version: 24
 
       - name: Download the candidates
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-candidates
           path: ${{ runner.temp }}/candidates
@@ -327,13 +327,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download the candidates
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-candidates
           path: ${{ runner.temp }}/candidates
 
       - name: Download the build results
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-build-results
           path: ${{ runner.temp }}/build-results
@@ -387,7 +387,7 @@ jobs:
           node-version: 24
 
       - name: Download the repaired candidates
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-repaired
           path: ${{ runner.temp }}/repaired
@@ -438,28 +438,28 @@ jobs:
       # depended on it, so a missing file can never read as a pass.
       - name: Download the candidates
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-candidates
           path: ${{ runner.temp }}/candidates
 
       - name: Download the build results
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-build-results
           path: ${{ runner.temp }}/build-results
 
       - name: Download the repaired candidates
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-repaired
           path: ${{ runner.temp }}/repaired
 
       - name: Download the repaired build results
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bakeoff-repaired-build-results
           path: ${{ runner.temp }}/rebuild-results
