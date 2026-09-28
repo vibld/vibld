@@ -1,8 +1,10 @@
 import { LegalPage } from '../components/SiteChrome';
+import { PLANS } from '../plan-sources.ts';
+import { dollars, priceLabel } from '../plans.ts';
 import { LEGAL_DOCS, SITE, metaFor } from '../site';
 
 const DOC = LEGAL_DOCS.find((d) => d.slug === 'refunds')!;
-const UPDATED = '2026-09-10';
+const UPDATED = SITE.legalEffectiveDate;
 
 export function meta() {
   return metaFor('/legal/refunds');
@@ -12,36 +14,57 @@ export default function Refunds() {
   return (
     <LegalPage title={DOC.label} updated={UPDATED}>
       <p>
-        vibld does not yet have paid plans, so nothing on this page applies
-        today. Joining the waitlist never involves a payment. This policy is
-        published in advance of billing so its terms are set before anyone is
-        charged, not adjusted afterward.
+        This policy covers what you pay vibld for: Build and Ship subscriptions,
+        monthly or annual, and one-time top-ups. Prices and what each includes
+        are on the <a href="/pricing">pricing page</a> and in our{' '}
+        <a href="/legal/terms">Terms of Service</a>. All payments are taken by
+        Stripe.
       </p>
 
-      <h2>How billing will work</h2>
+      <h2>No surprise charges</h2>
       <p>
-        When paid plans launch, vibld&apos;s subscriptions are structured to
-        avoid surprise charges: usage stops at your plan&apos;s included
-        allowance rather than billing overage automatically, and any additional
-        spend requires you to actively purchase a top-up.
+        Usage stops at your plan&apos;s monthly allowance and any credit you
+        hold; nothing is billed for going past it. More spend means buying a
+        top-up yourself. The welcome credit ({dollars(PLANS.signupCents)} when
+        you save a card) charges nothing, so there is nothing to refund.
+      </p>
+
+      <h2>Cancelling a subscription</h2>
+      <p>
+        Cancel at any time from <strong>Manage billing</strong> in the builder,
+        which opens Stripe&apos;s billing portal. Cancelling there takes effect
+        at the end of the period you have already paid for, and your plan stays
+        active until then. Once a subscription is no longer active, your account
+        has the Free allowance. Unspent top-up credit stays usable until it
+        expires, twelve months after purchase.
+      </p>
+      <p>
+        Deleting your account cancels any subscription at once, with no refund
+        of the period already paid for. When an account is closed or deleted,
+        its unused credit and allowance, whether paid for, free or from
+        referrals, are forfeited, with no refund.
       </p>
 
       <h2>Monthly plans</h2>
       <p>
-        You may cancel a monthly subscription at any time; cancellation takes
-        effect at the end of the current billing period, and we do not prorate
-        or refund the remainder of a period already paid for, except where
-        required by law.
+        We do not prorate or refund the remainder of a month already paid for,
+        except where the law requires.
       </p>
 
       <h2>Annual plans</h2>
       <p>
-        Annual plans are billed once for the year. If you cancel within 14 days
-        of an annual purchase and have not substantially used the included
-        allowance, contact{' '}
-        <a href={`mailto:${SITE.emails.billing}`}>{SITE.emails.billing}</a> for
-        a full refund. After 14 days, annual plans are non-refundable except
-        where required by law, though you may cancel to stop renewal.
+        You can cancel an annual plan at any time and get a prorated refund for
+        the whole months of it left unused. To ask for one, email{' '}
+        <a href={`mailto:${SITE.emails.billing}`}>{SITE.emails.billing}</a>.
+        Cancelling in the billing portal on its own stops the plan renewing at
+        the end of the year, without a refund.
+      </p>
+
+      <h2>Top-ups</h2>
+      <p>
+        A top-up costs {priceLabel(PLANS.topup.priceCents)} and adds{' '}
+        {dollars(PLANS.topup.creditCents)} of model spend. Top-ups are not
+        refunded once bought, whether or not the credit has been used.
       </p>
 
       <h2>Errors and outages</h2>
@@ -52,11 +75,33 @@ export default function Refunds() {
         we will make it right.
       </p>
 
-      <h2>This page will be finalized before checkout exists</h2>
+      <h2>How a refund is made</h2>
       <p>
-        This policy is a commitment for how billing will work, published ahead
-        of the feature itself. We will confirm and, if needed, expand it before
-        the first payment is ever collected, not after.
+        Refunds are issued by us through Stripe, to the payment method that
+        paid. Nothing in the builder issues one automatically. When a payment is
+        refunded, the credit, allowance or plan it bought is removed from your
+        account automatically.
+      </p>
+
+      <h2>Disputes and chargebacks</h2>
+      <p>
+        Please email{' '}
+        <a href={`mailto:${SITE.emails.billing}`}>{SITE.emails.billing}</a>{' '}
+        before disputing a charge with your bank; we can usually settle it
+        faster. If a dispute is decided against us, the credit, allowance or
+        plan that payment bought is removed from your account automatically, as
+        it is after a refund, and we may suspend the account until the matter is
+        resolved.
+      </p>
+
+      <h2>Referral rewards</h2>
+      <p>
+        A referral reward is paid when the referred account&apos;s first payment
+        clears. If that payment is refunded, or a dispute over it is lost, the
+        reward is taken back from both accounts&apos; granted credit, down to
+        zero at most; nobody is left owing money, and purchased top-up credit is
+        never reduced for this. A refund of a different, later payment does not
+        affect the reward.
       </p>
     </LegalPage>
   );

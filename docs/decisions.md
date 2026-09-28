@@ -207,6 +207,67 @@ exactly this path.
 
 ### Resolved 2026-09-28
 
+**The legal pages carry Chris's decisions for the open paid beta.** Chris
+decided on 2026-09-28: users must be 18, or the age of majority where they
+live if higher; total liability is capped at the greater of what the user
+paid in the 12 months before the claim and US$100; users indemnify Chris
+Brock LLC against third-party claims arising from what they build, upload
+or publish and from their breach of the Terms or the Acceptable Use Policy;
+disputes go to the courts under Georgia law with Gwinnett County venue, with
+no arbitration and no class-action waiver; a material change to the Terms
+is emailed 14 days before it takes effect, and a price change applies from
+the next renewal, never to a period already paid for; unused credit and
+allowance, paid, free or referral, are forfeited without refund when an
+account is closed or deleted; the remainder of a paid month is not refunded;
+privacy requests are answered within 30 days. The Acceptable Use Policy adds
+phishing and impersonation, malware, fraud and scams, selling illegal goods
+or services, copyright and trademark infringement, and sexually explicit
+material to what a published site may not contain, and it covers the hosted
+service at vibld.com and app.vibld.com and the sites published through it,
+not anyone running the open-source code themselves. Every legal page reads
+one effective date, `SITE.legalEffectiveDate` in `apps/marketing/app/site.ts`,
+which is set to the launch day in the launch deploy. The remaining
+`[CHRIS: ...]` placeholders on those pages are still open.
+
+**The legal pages carry Chris's second set of legal choices.** Chris decided
+on 2026-09-28: anyone anywhere can sign up, and the access, correction and
+deletion rights (answered within 30 days) are everyone's, with no
+compliance certification claimed; there is no SLA, the beta is provided as
+is with reasonable efforts to keep it up, and significant outages are posted
+on the website; an account is suspended or closed for breach of the Terms or
+the Acceptable Use Policy after an email and 14 days to export projects,
+except that serious or illegal abuse is acted on at once, with no refund
+when the Terms were broken and a prorated refund of the unused paid period
+otherwise; appeals go to the abuse address, naming the site or account, and
+a person replies within 14 days; annual plans can be cancelled at any time
+for a prorated refund of the unused whole months, cancelling in the billing
+portal takes effect at the end of the paid period (set in Stripe), and
+top-ups are never refunded; a refund or a lost dispute removes the credit,
+allowance or plan that payment bought, automatically, and a lost dispute
+lets vibld suspend the account until it is resolved; the waitlist is kept
+for occasional product news until the person unsubscribes, account holders
+may get product news with an unsubscribe link, and service, billing and
+security email is sent regardless; billing records are kept as long as tax
+and accounting law requires; users keep ownership of their content and
+license Chris Brock LLC only to host, store, process, build, preview and
+publish it and send it to their chosen model provider, to run the Service
+for them, until it is deleted; and the default model at launch is OpenAI's
+GPT-6 Sol (the code change that makes it the default is pending). Chris
+then decided: Google Analytics 4 stays, loaded only with consent, and he
+turns off Google Signals, Google Ads links and GA data sharing in the GA
+admin himself, so the Privacy Policy says vibld does not sell personal
+information or share it for cross-context behavioural advertising;
+DeepSeek stays, disclosed as it is with no opt-out (data stored in China,
+de-identified inputs and outputs usable to improve its services, no
+published API retention period); annual refunds are requested by email to
+the billing address, and cancelling in the portal alone stops renewal with
+no refund; and Resend sends both the waitlist email and product news to
+account holders. Data is disclosed beyond the subprocessors only with the
+person's consent or at their request, when the law requires it, to protect
+people or the Service, or in a sale or reorganisation. Placeholders still
+open: the DMCA agent registration number. Cloudflare Workflows keeps a
+finished run for 30 days (Chris, from the account's Workflows settings).
+
 **Referral links land on vibld.com.** Chris chose on 2026-09-28 that a
 shared link is `https://vibld.com/?ref=<code>`, so a friend sees the site
 before signing up; the site carries the code to sign-up and the builder

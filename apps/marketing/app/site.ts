@@ -93,6 +93,17 @@ export const SITE = {
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   /**
+   * The date every legal page shows as "Last updated", and the date the
+   * Terms, the policies and the notices take effect. One value for all of
+   * them: they were rewritten together for the open paid beta and take
+   * effect together (Chris, 2026-09-28).
+   *
+   * It is the launch day, the day the beta opened (Chris, 2026-09-28). A
+   * later revision of any one document changes this for all of them, since
+   * they are one set.
+   */
+  legalEffectiveDate: '2026-09-28',
+  /**
    * Decisions BRAND-01 -- searching "vibld" returns Bible-study sites, because
    * Google reads the word as a misspelling of "Bible". Nothing on-page fixes
    * that directly; what does help is publishing an unambiguous entity, so the
@@ -135,46 +146,49 @@ export const LEGAL_DOCS: LegalDoc[] = [
     label: 'Terms of Service',
     title: `Terms of Service | ${SITE.name}`,
     description:
-      'The agreement between you and Chris Brock LLC for using vibld and its waitlist.',
+      'The agreement between you and Chris Brock LLC for using vibld, its plans and credit, and what you build and publish with it.',
   },
   {
     slug: 'privacy',
     label: 'Privacy Policy',
     title: `Privacy Policy | ${SITE.name}`,
     description:
-      'What vibld collects, why, how long it is kept, and how to request access or deletion.',
+      'What vibld collects on this site and in the builder, which services receive it, how long it is kept, and how to ask for access or deletion.',
   },
   {
     slug: 'acceptable-use',
     label: 'Acceptable Use Policy',
     title: `Acceptable Use Policy | ${SITE.name}`,
-    description: 'What may and may not be built, sent or hosted through vibld.',
+    description:
+      'What may and may not be built, published, shared or sent through vibld, and how to report abuse.',
   },
   {
     slug: 'security',
     label: 'Security & Vulnerability Disclosure',
     title: `Security & Vulnerability Disclosure | ${SITE.name}`,
     description:
-      'How to report a vulnerability, and the safe harbor for good-faith research.',
+      'How to report a vulnerability, what is in scope, and the safe harbor for good-faith research.',
   },
   {
     slug: 'subprocessors',
     label: 'Subprocessors',
     title: `Subprocessors | ${SITE.name}`,
     description:
-      'The services vibld uses to operate, and what each one is used for.',
+      'The services that process data for vibld, and what each one receives.',
   },
   {
     slug: 'cookies',
     label: 'Cookie Notice',
     title: `Cookie Notice | ${SITE.name}`,
-    description: 'What this site stores in your browser today, and why.',
+    description:
+      'What vibld.com, the builder and shared previews store in your browser, and why.',
   },
   {
     slug: 'refunds',
     label: 'Refund Policy',
     title: `Refund Policy | ${SITE.name}`,
-    description: 'How refunds work for paid vibld plans.',
+    description:
+      'Cancelling a plan, refunds for plans and top-ups, and what happens after a refund or a dispute.',
   },
   {
     slug: 'licenses',

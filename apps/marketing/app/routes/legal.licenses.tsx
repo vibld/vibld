@@ -2,7 +2,7 @@ import { LegalPage } from '../components/SiteChrome';
 import { LEGAL_DOCS, SITE, metaFor } from '../site';
 
 const DOC = LEGAL_DOCS.find((d) => d.slug === 'licenses')!;
-const UPDATED = '2026-09-27';
+const UPDATED = SITE.legalEffectiveDate;
 
 /**
  * The self-hosted typefaces (app.css), stated as facts: the family, the
@@ -42,7 +42,7 @@ export default function Licenses() {
   return (
     <LegalPage title={DOC.label} updated={UPDATED}>
       <p>
-        vibld is built on open-source foundations, and its own source will be
+        vibld is built on open-source foundations, and its own source is
         published under a dual-license structure. This page explains what that
         means for the core project, for starter templates, and for what you
         build with vibld.
@@ -58,7 +58,7 @@ export default function Licenses() {
         >
           Apache License, Version 2.0
         </a>
-        . The source is not public yet. It will be published at{' '}
+        . The source is published at{' '}
         <a href={SITE.repoUrl} rel="noopener noreferrer">
           github.com/vibld/vibld
         </a>

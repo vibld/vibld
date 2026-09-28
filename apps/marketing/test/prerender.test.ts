@@ -14,6 +14,7 @@ import {
   SITE,
   guidesIn,
 } from '../app/site.ts';
+import { PROVIDER_NAMES } from '@vibld/ai/select-client';
 import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 import { LOG } from '../app/demo-script.ts';
 import { dollars, priceLabel, readPlans } from '../app/plans.ts';
@@ -250,6 +251,25 @@ describe('legal pages', () => {
     assert.match(html, /Gwinnett County/);
   });
 
+  it('lists every model provider a run can be sent to as a subprocessor', () => {
+    // A provider added to packages/ai receives prompts and project files the
+    // day it is configured, so the page has to name it before then.
+    const shown: Record<string, string> = {
+      anthropic: 'Anthropic',
+      openai: 'OpenAI',
+      deepseek: 'DeepSeek',
+    };
+    const html = read('/legal/subprocessors');
+    for (const provider of PROVIDER_NAMES) {
+      const name = shown[provider];
+      assert.ok(name, `no display name for the ${provider} provider`);
+      assert.ok(
+        html.includes(name),
+        `${name} is not on the Subprocessors page`,
+      );
+    }
+  });
+
   it('links every legal document from the /legal index', () => {
     const html = read('/legal');
     for (const doc of LEGAL_DOCS) {
@@ -375,15 +395,17 @@ describe('Google Analytics', () => {
   });
 
   it('names Google as a current subprocessor, not a planned one', () => {
+    // The page used to split current from planned, and this checked Google
+    // sat above the planned table. With the paid beta every service it named
+    // as planned is in use, so the planned table is gone and the check is
+    // that Google is listed and nothing is still described as planned.
     const html = read('/legal/subprocessors');
-    const google = html.indexOf('Google LLC');
-    const planned = html.indexOf('Planned for product launch');
-    assert.notEqual(google, -1, 'Google is not listed as a subprocessor');
-    assert.notEqual(planned, -1, 'the planned table is gone, so this is stale');
-    assert.ok(
-      google < planned,
-      'Google is processing data today, so it belongs in the current table',
+    assert.notEqual(
+      html.indexOf('Google LLC'),
+      -1,
+      'Google is not listed as a subprocessor',
     );
+    assert.doesNotMatch(html, /Planned for product launch/);
   });
 });
 

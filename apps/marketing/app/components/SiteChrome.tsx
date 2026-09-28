@@ -268,7 +268,13 @@ export function LegalPage({
   children,
 }: {
   title: string;
-  /** ISO date, e.g. "2026-09-10". Shown and used as the machine-readable value. */
+  /**
+   * `SITE.legalEffectiveDate`, which every legal page passes: an ISO date,
+   * e.g. "2026-09-10", shown and used as the machine-readable value. Anything
+   * that is not an ISO date (the launch-day placeholder it holds until the
+   * launch deploy) is shown as written, with no `<time>` element claiming to
+   * be a date.
+   */
   updated: string;
   children: React.ReactNode;
 }) {
@@ -286,7 +292,12 @@ export function LegalPage({
         {title}
       </h1>
       <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
-        Last updated <time dateTime={updated}>{formatDate(updated)}</time>
+        Last updated{' '}
+        {/^\d{4}-\d{2}-\d{2}$/.test(updated) ? (
+          <time dateTime={updated}>{formatDate(updated)}</time>
+        ) : (
+          updated
+        )}
       </p>
       <div className="prose-legal mt-8 max-w-none">{children}</div>
     </article>
