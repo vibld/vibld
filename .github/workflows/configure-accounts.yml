@@ -1,0 +1,44 @@
+# Brings the live Stripe and Clerk accounts to the settings vibld relies on,
+# as far as each API reaches: the retention coupon, the customer portal's
+# default configuration, and Clerk's support email. `inspect` only reads;
+# `apply` writes and is safe to repeat. See scripts/configure-accounts.mjs.
+name: Configure Stripe and Clerk
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: inspect (read only) or apply
+        type: choice
+        options: [inspect, apply]
+        default: inspect
+
+permissions:
+  contents: read
+
+concurrency:
+  group: configure-accounts
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    # The keys exist only in the private working repository.
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Configure
+        env:
+          CONFIGURE_MODE: ${{ inputs.mode }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        run: node scripts/configure-accounts.mjs
