@@ -96,6 +96,18 @@ export function formPairs(value, prefix = '') {
 export const WEBHOOK_URL = 'https://app.vibld.com/api/stripe/webhook';
 
 /**
+ * Where the Worker's endpoint used to be. The Worker answered on its
+ * workers.dev address until app.vibld.com became its custom domain, and a
+ * custom domain turns the workers.dev address off (Cloudflare error 1042),
+ * so an endpoint still pointing there reaches nothing. Moving the endpoint's
+ * URL keeps its signing secret, which is what the Worker verifies with; a
+ * new endpoint would not. Only these exact addresses are moved.
+ */
+export const LEGACY_WEBHOOK_URLS = [
+  'https://vibld-web-preview.chris-brock-llc.workers.dev/api/stripe/webhook',
+];
+
+/**
  * Every event type the Worker acts on, which is every `case` in
  * `apps/web/worker/billing-events.ts`'s `applyStripeEvent` and the same list
  * as `billing-replay.ts`'s `REPLAYED_EVENT_TYPES`. The test reads both files
@@ -275,9 +287,43 @@ async function configureWebhookEndpoint(key, apply, report) {
     );
     return;
   }
-  const endpoints = (listed.json.data ?? []).filter(
+  let endpoints = (listed.json.data ?? []).filter(
     (endpoint) => endpoint.url === WEBHOOK_URL,
   );
+  const legacy = (listed.json.data ?? []).filter((endpoint) =>
+    LEGACY_WEBHOOK_URLS.includes(endpoint.url),
+  );
+  if (endpoints.length === 0 && legacy.length > 0) {
+    if (!apply) {
+      for (const endpoint of legacy) {
+        report.line(
+          `- Would move \`${endpoint.id}\` from ${endpoint.url} to ${WEBHOOK_URL}.`,
+        );
+      }
+      endpoints = legacy;
+    } else {
+      const moved = [];
+      for (const endpoint of legacy) {
+        const updated = await stripe(
+          key,
+          'POST',
+          `/webhook_endpoints/${endpoint.id}`,
+          { url: WEBHOOK_URL },
+        );
+        if (updated.status === 200) {
+          report.line(
+            `- Moved \`${endpoint.id}\` from ${endpoint.url} to ${WEBHOOK_URL}; its signing secret is unchanged.`,
+          );
+          moved.push(updated.json);
+        } else {
+          report.fail(
+            `Webhook endpoint ${endpoint.id} was not moved to ${WEBHOOK_URL}: ${stripeError(updated)}`,
+          );
+        }
+      }
+      endpoints = moved;
+    }
+  }
   if (endpoints.length === 0) {
     // The addresses Stripe does deliver to, so a run that finds none says
     // where the Worker's endpoint went instead of only that it is missing.

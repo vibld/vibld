@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  LEGACY_WEBHOOK_URLS,
   PORTAL_SETTINGS,
   REQUIRED_WEBHOOK_EVENTS,
   RETENTION_COUPON,
+  WEBHOOK_URL,
   formPairs,
   missingWebhookEvents,
 } from './configure-accounts.mjs';
@@ -113,4 +115,11 @@ test('only the missing events are added, and nothing is taken away', () => {
 test('an endpoint on every event is left as it is', () => {
   // Writing a list to it would narrow it to that list.
   assert.deepEqual(missingWebhookEvents(['*']), []);
+});
+
+test("only the Worker's own old workers.dev address is moved", () => {
+  assert.deepEqual(LEGACY_WEBHOOK_URLS, [
+    'https://vibld-web-preview.chris-brock-llc.workers.dev/api/stripe/webhook',
+  ]);
+  assert.ok(!LEGACY_WEBHOOK_URLS.includes(WEBHOOK_URL));
 });
