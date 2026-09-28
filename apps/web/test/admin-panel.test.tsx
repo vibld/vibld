@@ -480,3 +480,101 @@ describe('a history with a row the page cannot read', () => {
     assert.doesNotMatch(view.text(), /could not be read/i);
   });
 });
+
+describe('what refunds and disputes took, and lifting a suspension', () => {
+  const SUSPENDED = {
+    ...FOUND,
+    suspended: true,
+    clawbacks: [
+      {
+        cause: 'dispute',
+        kind: 'topup',
+        stripeChargeId: 'ch_1',
+        stripeObjectId: 'cs_1',
+        reversedUsdCents: 2000,
+        chargeUsdCents: 2000,
+        creditRemovedUsdCents: 200,
+        creditShortfallUsdCents: 600,
+        stripeSubscriptionId: null,
+        suspends: true,
+        liftedAt: null,
+        liftedByEmail: null,
+        createdAt: '2026-09-28T00:00:00Z',
+      },
+      {
+        cause: 'refund',
+        kind: 'subscription',
+        stripeChargeId: 'ch_2',
+        stripeObjectId: 'in_2',
+        reversedUsdCents: 12083,
+        chargeUsdCents: 29000,
+        creditRemovedUsdCents: 0,
+        creditShortfallUsdCents: 0,
+        stripeSubscriptionId: 'sub_2',
+        suspends: false,
+        liftedAt: null,
+        liftedByEmail: null,
+        createdAt: '2026-09-27T00:00:00Z',
+      },
+    ],
+  };
+
+  it('shows what each reversal removed, and that the account is suspended', async () => {
+    serving({ '/api/admin/user': () => reply(SUSPENDED) });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.lookUp();
+
+    assert.match(
+      view.text(),
+      /Dispute lost on ch_1: removed \$2\.00 credit \(\$6\.00 already spent, not collected\), account suspended/,
+    );
+    assert.match(view.text(), /Refund of \$120\.83 on ch_2: ended sub_2/);
+    assert.match(view.text(), /Suspended after a lost dispute/);
+    view.unmount();
+  });
+
+  it('lifts it for the address in the field, says so, and reads the account again', async () => {
+    let lifted = false;
+    const calls = serving({
+      '/api/admin/suspension/lift': () => {
+        lifted = true;
+        return reply({ ok: true, userId: 'user_alice', lifted: 1 });
+      },
+      '/api/admin/user': () =>
+        reply(lifted ? { ...SUSPENDED, suspended: false } : SUSPENDED),
+    });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.lookUp();
+
+    const button = [...view.container.querySelectorAll('button')].find((b) =>
+      /Lift suspension/.test(b.textContent ?? ''),
+    );
+    assert.ok(button, 'no lift button for a suspended account');
+    await act(async () => {
+      button.click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const lift = calls.find((call) => call.url.includes('/suspension/lift'));
+    assert.equal(lift?.method, 'POST');
+    assert.deepEqual(lift?.body, { email: 'alice@example.com' });
+    assert.match(view.text(), /Lifted the suspension on user_alice/);
+    assert.doesNotMatch(view.text(), /Suspended after a lost dispute/);
+    view.unmount();
+  });
+
+  it('offers no lift to an account that is not suspended', async () => {
+    serving({ '/api/admin/user': () => reply(FOUND) });
+    const view = await mount();
+    await view.email('alice@example.com');
+    await view.lookUp();
+
+    assert.doesNotMatch(view.text(), /Lift suspension/);
+    assert.doesNotMatch(view.text(), /Refunds and disputes/);
+    view.unmount();
+  });
+});

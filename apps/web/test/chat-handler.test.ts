@@ -245,6 +245,30 @@ describe('who a chat turn refuses, before anything is reserved', () => {
     assert.equal(client.seen.length, 0);
   });
 
+  it('refuses an account a lost dispute suspended, with its own reason', async () => {
+    // Not `account-ceiling`: buying a top-up does not resolve a suspension,
+    // and telling somebody it would sends them to spend money for nothing.
+    const { env, reserves } = ledger();
+    const client = modelReplying({});
+    const response = await handleChat(
+      chatRequest({ messages: CONVERSATION }),
+      env,
+      deps(client, {
+        spendable: async () => ({
+          monthlyAllowance: 0,
+          topupCeiling: 0,
+          suspended: true,
+        }),
+      }),
+    );
+    assert.equal(response.status, 403);
+    const body = await bodyOf(response);
+    assert.equal(body.reason, 'account-suspended');
+    assert.match(String(body.error), /dispute/);
+    assert.equal(reserves.length, 0);
+    assert.equal(client.seen.length, 0);
+  });
+
   it('is behind the invite gate, which refuses somebody not on the list', async () => {
     // The gate runs in the router, before dispatch, for every path
     // `access-gate.ts` lists (`access-gate.test.ts` holds the router to

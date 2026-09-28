@@ -1,11 +1,12 @@
 import type Stripe from 'stripe';
 import { resolvePrincipal } from './principal.ts';
-import { BillingStore } from './billing-store.ts';
+import { BILLABLE_STATUSES, BillingStore } from './billing-store.ts';
 import {
   applyStripeEvent,
-  idsOf,
+  invoicePaymentIds,
   ownerOfSubscription,
   stripeCollectedUsdCents,
+  subscriptionOfInvoice,
   subscriptionRecordFrom,
 } from './billing-events.ts';
 import { clawBackReferral, payReferralIfEarned } from './referral-payout.ts';
@@ -19,7 +20,15 @@ import { createStripeClient, stripeConfigured } from './stripe-client.ts';
 import type { PurchaseOption } from './stripe-client.ts';
 import { signupCreditStatus } from './signup-credit.ts';
 import type { SignupCreditEnv } from './signup-credit.ts';
-import type { ResolveSetupIntent } from './billing-events.ts';
+import type {
+  CancelSubscription,
+  ClawbackDeps,
+  ResolveInvoiceOfPayment,
+  ResolveSetupIntent,
+} from './billing-events.ts';
+import type { ClawbackRecord } from './billing-store.ts';
+import { topupKeyFor } from './reserve.ts';
+import type { UserBudget } from './budget.ts';
 
 /**
  * The Worker-facing half of Stripe billing (docs/decisions.md L12-L15):
@@ -35,6 +44,12 @@ export interface BillingEnv {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   DB?: D1Database;
+  /**
+   * The spend ledger, read only for how much top-up credit an account has
+   * spent: a refund removes at most what is left (`ClawbackDeps`). Absent,
+   * a refunded top-up parks rather than guessing.
+   */
+  USER_BUDGET?: DurableObjectNamespace<Pick<UserBudget, 'usageFor'>>;
 }
 
 export function billingConfigured(env: BillingEnv): boolean {
@@ -135,6 +150,71 @@ export function readSetupIntent(stripe: Stripe): ResolveSetupIntent {
     stripe.setupIntents.retrieve(setupIntentId, {
       expand: ['payment_method'],
     });
+}
+
+/**
+ * The invoice a payment intent paid, read the one way the current Stripe
+ * API allows: its invoice payments, with the invoice expanded so its
+ * subscription comes back in the same request.
+ */
+export function readInvoiceOfPayment(stripe: Stripe): ResolveInvoiceOfPayment {
+  return async (paymentIntentId) => {
+    const page = await stripe.invoicePayments.list({
+      payment: { type: 'payment_intent', payment_intent: paymentIntentId },
+      limit: 1,
+      expand: ['data.invoice'],
+    });
+    const invoice = page.data[0]?.invoice;
+    if (!invoice) return null;
+    if (typeof invoice === 'string') {
+      return { invoiceId: invoice, subscriptionId: null };
+    }
+    if (!invoice.id) return null;
+    return {
+      invoiceId: invoice.id,
+      subscriptionId:
+        'deleted' in invoice ? null : subscriptionOfInvoice(invoice),
+    };
+  };
+}
+
+/**
+ * End a subscription now, the way account deletion does: no final invoice
+ * and no proration. Asked of Stripe first, so a subscription already over
+ * is reported rather than cancelled twice, which Stripe refuses.
+ */
+export function cancelSubscriptionNow(stripe: Stripe): CancelSubscription {
+  return async (stripeSubscriptionId) => {
+    const current = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    if (!BILLABLE_STATUSES.includes(current.status)) return 'already-ended';
+    await stripe.subscriptions.cancel(stripeSubscriptionId, {
+      invoice_now: false,
+      prorate: false,
+    });
+    return 'cancelled';
+  };
+}
+
+/**
+ * Everything a reversal needs to remove what the payment bought, from one
+ * Stripe client and the spend ledger. Shared by the webhook and the nightly
+ * pass, so the two cannot remove different things for the same refund.
+ */
+export function clawbackDepsFor(
+  stripe: Stripe,
+  ledger: BillingEnv['USER_BUDGET'],
+): ClawbackDeps {
+  return {
+    cancelSubscription: cancelSubscriptionNow(stripe),
+    resolveInvoice: readInvoiceOfPayment(stripe),
+    ...(ledger
+      ? {
+          creditSpentMicroUsd: async (userId: string) =>
+            (await ledger.getByName(topupKeyFor(userId)).usageFor('lifetime'))
+              .spentMicroUsd,
+        }
+      : {}),
+  };
 }
 
 /**
@@ -318,6 +398,10 @@ export async function handleStripeWebhook(
       // A saved card is known only by its fingerprint, which is on the
       // PaymentMethod and on neither event that reports the card.
       readSetupIntent(stripe),
+      // What a refunded or disputed payment bought comes off with it, on the
+      // same terms as the referral above: a clawback that cannot finish
+      // answers `unresolved`, so this delivery fails and Stripe retries it.
+      clawbackDepsFor(stripe, env.USER_BUDGET),
     );
 
     // `unresolved` means the handler wrote nothing, so the event is not
@@ -665,11 +749,9 @@ async function recordLatestPaidInvoice(
       : new Date().toISOString(),
     // The same aliases the webhook path records, so a payment recovered by
     // the reconcile is as reversible as one that arrived by delivery.
-    idsOf(
-      invoice.id,
-      (invoice as unknown as { payment_intent?: unknown }).payment_intent,
-      (invoice as unknown as { charge?: unknown }).charge,
-    ),
+    invoicePaymentIds(invoice),
+    // Known here without reading the invoice: it was listed by subscription.
+    subscriptionOfInvoice(invoice) ?? subscriptionId,
   );
 
   return collected > 0;
@@ -850,4 +932,107 @@ export async function handleUnattributedQueue(
   const summary = await store.unattributedSummary();
   const events = await store.listUnattributedEvents(50);
   return json({ ...summary, events: events.map(parkedPaymentOf) });
+}
+
+/**
+ * One reversal as the admin panel shows it: what went back out, what was
+ * removed for it, and whether it still has the account suspended.
+ *
+ * Named fields, for the reason `ParkedPayment` names its own: this is a page
+ * an operator reads, and a row that grows a column should not reach it
+ * without somebody deciding it should.
+ */
+export interface ClawbackView {
+  cause: ClawbackRecord['cause'];
+  kind: ClawbackRecord['kind'];
+  stripeChargeId: string;
+  /** The Checkout Session or Invoice the charge paid for. */
+  stripeObjectId: string;
+  reversedUsdCents: number;
+  chargeUsdCents: number;
+  creditRemovedUsdCents: number;
+  creditShortfallUsdCents: number;
+  stripeSubscriptionId: string | null;
+  suspends: boolean;
+  liftedAt: string | null;
+  liftedByEmail: string | null;
+  createdAt: string;
+}
+
+export function clawbackViewOf(record: ClawbackRecord): ClawbackView {
+  return {
+    cause: record.cause,
+    kind: record.kind,
+    stripeChargeId: record.stripeChargeId,
+    stripeObjectId: record.stripeObjectId,
+    reversedUsdCents: record.reversedUsdCents,
+    chargeUsdCents: record.chargeUsdCents,
+    creditRemovedUsdCents: record.creditRemovedUsdCents,
+    creditShortfallUsdCents: record.creditShortfallUsdCents,
+    stripeSubscriptionId: record.stripeSubscriptionId,
+    suspends: record.suspends,
+    liftedAt: record.liftedAt,
+    liftedByEmail: record.liftedByEmail,
+    createdAt: record.createdAt,
+  };
+}
+
+/** Who an email belongs to, as the admin credit tool already asks Clerk. */
+export type LookupUserId = (
+  email: string,
+) => Promise<{ ok: true; userId: string } | { ok: false; error: string }>;
+
+/**
+ * POST { email } -> lift the suspension a lost dispute put on an account.
+ *
+ * An operator's decision, made once the dispute is resolved with the
+ * customer, so it is a deliberate request with its own record rather than
+ * something the next payment does by itself: the row keeps who lifted it and
+ * when (`BillingStore.liftSuspension`). Nothing that was removed comes back;
+ * that is a credit grant or a new subscription, each with its own tool.
+ *
+ * Assumes the admin check already ran, like `handleUnattributedQueue`.
+ */
+export async function handleLiftSuspension(
+  request: Request,
+  env: BillingEnv,
+  adminEmail: string,
+  lookupUserId: LookupUserId,
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!env.DB) return json({ error: 'Billing is not configured here.' }, 503);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const email =
+    typeof body === 'object' &&
+    body !== null &&
+    typeof (body as { email?: unknown }).email === 'string'
+      ? (body as { email: string }).email.trim()
+      : '';
+  if (email === '') {
+    return json({ error: 'A non-empty "email" is required.' }, 400);
+  }
+
+  const lookup = await lookupUserId(email);
+  if (!lookup.ok) return json({ error: lookup.error }, 404);
+
+  const lifted = await new BillingStore(env.DB).liftSuspension(
+    lookup.userId,
+    adminEmail,
+  );
+  // The row is the audit record; this line is for a live tail.
+  console.log(
+    JSON.stringify({
+      event: 'billing.suspension_lifted',
+      userId: lookup.userId,
+      by: adminEmail,
+      lifted,
+    }),
+  );
+  return json({ ok: true, userId: lookup.userId, lifted });
 }

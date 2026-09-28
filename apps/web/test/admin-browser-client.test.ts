@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   grantAdminCredit,
+  liftSuspension,
   lookupAdminUser,
 } from '../src/generation/admin-client.ts';
 
@@ -217,5 +218,89 @@ describe('a grant row the page cannot read', () => {
     assert.equal(result.grants.length, 1);
     assert.equal(result.grants[0]?.note, null);
     assert.equal(result.unreadable, 0);
+  });
+});
+
+describe('what a lookup says about refunds and disputes', () => {
+  it('reads the suspension and every reversal it can, and drops one it cannot', async () => {
+    const result = await lookupAdminUser(
+      'a@example.com',
+      jsonFetch({
+        userId: 'user_1',
+        spendableCreditMicroUsd: 0,
+        grants: [],
+        suspended: true,
+        clawbacks: [
+          {
+            cause: 'refund',
+            kind: 'topup',
+            stripeChargeId: 'ch_1',
+            reversedUsdCents: 2000,
+            creditRemovedUsdCents: 800,
+            creditShortfallUsdCents: 0,
+            stripeSubscriptionId: null,
+            suspends: false,
+            liftedAt: null,
+            createdAt: '2026-09-28T00:00:00Z',
+          },
+          { cause: 'refund', kind: 'something-else' },
+        ],
+      }),
+      async () => null,
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.suspended, true);
+    assert.deepEqual(result.clawbacks, [
+      {
+        cause: 'refund',
+        kind: 'topup',
+        stripeChargeId: 'ch_1',
+        reversedUsdCents: 2000,
+        creditRemovedUsdCents: 800,
+        creditShortfallUsdCents: 0,
+        stripeSubscriptionId: null,
+        suspends: false,
+        liftedAt: null,
+        createdAt: '2026-09-28T00:00:00Z',
+      },
+    ]);
+  });
+});
+
+describe('liftSuspension', () => {
+  it('posts the email with the bearer token and reads what was lifted', async () => {
+    const calls: Array<[string, RequestInit | undefined]> = [];
+    const result = await liftSuspension(
+      'a@example.com',
+      (async (url: string, init?: RequestInit) => {
+        calls.push([url, init]);
+        return new Response(
+          JSON.stringify({ ok: true, userId: 'user_1', lifted: 1 }),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch,
+      async () => 'a-token',
+    );
+
+    assert.deepEqual(result, { ok: true, userId: 'user_1', lifted: 1 });
+    const [url, init] = calls[0]!;
+    assert.equal(url, '/api/admin/suspension/lift');
+    assert.equal(init?.method, 'POST');
+    assert.equal(init?.body, JSON.stringify({ email: 'a@example.com' }));
+    assert.equal(
+      (init?.headers as Record<string, string>).Authorization,
+      'Bearer a-token',
+    );
+  });
+
+  it('surfaces the server error message', async () => {
+    const result = await liftSuspension(
+      'a@example.com',
+      jsonFetch({ error: 'Not authorized.' }, 403),
+      async () => null,
+    );
+    assert.deepEqual(result, { ok: false, error: 'Not authorized.' });
   });
 });

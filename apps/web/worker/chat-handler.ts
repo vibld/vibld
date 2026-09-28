@@ -27,7 +27,8 @@ import type { ReserveEnv } from './reserve.ts';
 import { CHAT_INPUT_CHARS, runCeilingFor } from './run-ceiling.ts';
 import type { RunCeilingEnv } from './run-ceiling.ts';
 import { cancelledUsage, worstCaseMicroUsd } from './spend.ts';
-import { spendableFor } from './spendable.ts';
+import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
+import type { Spendable } from './spendable.ts';
 import type { SpendableEnv } from './spendable.ts';
 
 /**
@@ -74,9 +75,7 @@ export interface ChatDeps {
   /** Keeps settlement alive past a client that disconnected. */
   waitUntil: (promise: Promise<unknown>) => void;
   /** Defaults to `spendableFor`, which reads D1. */
-  spendable?: (
-    principal: Principal,
-  ) => Promise<{ monthlyAllowance: number; topupCeiling: number }>;
+  spendable?: (principal: Principal) => Promise<Spendable>;
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -175,7 +174,11 @@ export async function handleChat(
   try {
     const spendable =
       deps.spendable ?? ((who: Principal) => spendableFor(env, who));
-    const { monthlyAllowance, topupCeiling } = await spendable(principal);
+    const allowed = await spendable(principal);
+    if (allowed.suspended) {
+      return refuse('account-suspended', SUSPENDED_MESSAGE, 403);
+    }
+    const { monthlyAllowance, topupCeiling } = allowed;
     reserved = await reserveBudget(
       env,
       principal.userId,

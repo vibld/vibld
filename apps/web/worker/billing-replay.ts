@@ -29,6 +29,7 @@
 import type Stripe from 'stripe';
 import { applyStripeEvent } from './billing-events.ts';
 import type {
+  ClawbackDeps,
   OnPurchaseReversed,
   ResolveCharge,
   ResolveSetupIntent,
@@ -77,8 +78,17 @@ const PAGE_SIZE_CAP = 100;
  * A card saved for the welcome credit fits under it: a setup-mode Checkout
  * links the customer twice, then claims (two inserts and a read), pays, and
  * is marked processed. Seven.
+ *
+ * Measured rather than read off, the reversal was already ten and not nine:
+ * each side's deduction reads the grant it reverses before it writes. And
+ * removing what the reversed payment bought (`clawBackPurchase`) adds three:
+ * the payment lookup, a second lookup when Stripe had to name the invoice,
+ * and the one statement that records the clawback and removes the credit.
+ * Thirteen, which `payment-clawback.test.ts` measures. Cancelling a
+ * subscription and reading the spend ledger are Stripe and a Durable
+ * Object, not D1, so they cost none.
  */
-const MAX_QUERIES_PER_EVENT = 9;
+const MAX_QUERIES_PER_EVENT = 13;
 
 /** The page's dedupe read, plus the cursor save after it. */
 const QUERIES_PER_PAGE = 2;
@@ -226,6 +236,8 @@ export async function replayStripeEvents(
   onPurchaseReversed?: OnPurchaseReversed,
   resolveCharge?: ResolveCharge,
   resolveSetupIntent?: ResolveSetupIntent,
+  /** What a missed refund or lost dispute needs to remove what it bought. */
+  clawback?: ClawbackDeps,
 ): Promise<ReplayResult> {
   const pageSize = pageSizeFor(queryBudget);
   // What a page costs at its worst, which is what decides whether there is
@@ -353,6 +365,7 @@ export async function replayStripeEvents(
           onPurchaseReversed,
           resolveCharge,
           resolveSetupIntent,
+          clawback,
         );
         if (outcome === 'unresolved') {
           // Nothing was written, so it is not done, and marking it processed
@@ -715,6 +728,8 @@ export async function retryUnattributedEvents(
   onPurchaseReversed?: OnPurchaseReversed,
   resolveCharge?: ResolveCharge,
   resolveSetupIntent?: ResolveSetupIntent,
+  /** The same as the replay's: a parked refund is retried in full or not at all. */
+  clawback?: ClawbackDeps,
 ): Promise<RetryResult> {
   // Least recently tried first, so a row that can never be attributed costs
   // one attempt a night rather than holding the front of the queue for ever.
@@ -743,6 +758,7 @@ export async function retryUnattributedEvents(
         onPurchaseReversed,
         resolveCharge,
         resolveSetupIntent,
+        clawback,
       );
       if (outcome === 'unresolved') {
         waiting += 1;
@@ -890,7 +906,7 @@ export function turnShareFor(queryBudget: number): number {
  * Whether the parked queue can keep its floor every night and each of the
  * others still buy an item on its own night.
  *
- * True from 35, which is where what is left after the floor (11) and the
+ * True from 39, which is where what is left after the floor (15) and the
  * turn (1) first covers a subscription (23). Below that, see
  * `nightSharesFor`.
  */
@@ -914,7 +930,7 @@ export interface NightPlan {
  * exists so that no night passes without one being retried; the other
  * three keep, so they wait their turn.
  *
- * Below 35 the floor cannot be held without starving somebody for good:
+ * Below 39 the floor cannot be held without starving somebody for good:
  * what is left after it cannot buy a subscription on any night, so the
  * reconcile would never run again, which is internal issue 176 back with a different
  * victim. There the parked queue gives up its floor and joins the
@@ -1011,7 +1027,7 @@ export function splitSurvivesDeletion(queryBudget: number): boolean {
  * with nothing waiting uses `nightSharesFor` and its lap of three.
  *
  * The parked queue keeps its floor on the deletion's night too, for the
- * reason `nightSharesFor` gives. Below 35, where it cannot, deletion joins
+ * reason `nightSharesFor` gives. Below 39, where it cannot, deletion joins
  * the rotation of all four instead.
  */
 export function nightSharesWithDeletion(

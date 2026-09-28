@@ -17,6 +17,25 @@ function positiveInt(raw: string | undefined, fallback: number): number {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+export interface Spendable {
+  monthlyAllowance: number;
+  topupCeiling: number;
+  /**
+   * A lost dispute has this account suspended (docs/decisions.md, resolved
+   * 2026-09-28). Both ceilings are then zero as well, so a caller that
+   * forgot to check this still cannot spend; checking it is what lets the
+   * refusal say why, as `account-suspended` rather than `account-ceiling`.
+   */
+  suspended?: true;
+}
+
+/**
+ * The sentence a suspended account is refused with. One copy, because three
+ * routes say it and the builder shows whichever one answered.
+ */
+export const SUSPENDED_MESSAGE =
+  'This account is suspended because a payment on it was disputed and the dispute was lost. Email billing@vibld.com to resolve it.';
+
 /**
  * What this caller is allowed to spend: their tier's monthly allowance, and
  * whatever credit they hold on top of it.
@@ -39,8 +58,15 @@ function positiveInt(raw: string | undefined, fallback: number): number {
 export async function spendableFor(
   env: SpendableEnv,
   principal: Principal,
-): Promise<{ monthlyAllowance: number; topupCeiling: number }> {
+): Promise<Spendable> {
   const billing = new BillingStore(env.DB!);
+  // Here, beside the allowance, because this is the one function every paid
+  // request asks and a suspension is an answer to the same question: what
+  // may this account spend. A check in each route is one a new route
+  // forgets.
+  if (await billing.isSuspended(principal.userId)) {
+    return { monthlyAllowance: 0, topupCeiling: 0, suspended: true };
+  }
   const subscription = await billing.findActiveSubscription(principal.userId);
   const freeAllowance = positiveInt(
     env.VIBLD_FREE_MONTHLY_MICRO_USD,

@@ -73,7 +73,16 @@ export type RunRefusal =
    * Distinct from `access-refused` because it is the account's own
    * decision, it has a date, and signing in is how it is undone.
    */
-  | 'deletion-scheduled';
+  | 'deletion-scheduled'
+  /**
+   * A payment on this account was disputed and the dispute was lost, so
+   * paid features are refused until an operator lifts the suspension
+   * (docs/decisions.md, resolved 2026-09-28). Distinct from
+   * `account-ceiling` because buying a top-up does not resolve it, and from
+   * `access-refused` because the person is still admitted and can still
+   * reach billing and their own account.
+   */
+  | 'account-suspended';
 
 /**
  * Why a started run ended. Exactly one is recorded per run.
@@ -161,6 +170,7 @@ export const RUN_REFUSALS = [
   'already-running',
   'accounting-unavailable',
   'deletion-scheduled',
+  'account-suspended',
 ] as const satisfies readonly RunRefusal[];
 
 /** Every stop, for the same reason. */

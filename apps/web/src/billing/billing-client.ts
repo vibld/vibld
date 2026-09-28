@@ -37,6 +37,11 @@ export interface BillingStatus {
    * than a wrong one.
    */
   signupCredit?: SignupCredit;
+  /**
+   * A lost dispute has this account's paid features refused until an
+   * operator lifts it. Optional for the same reason `signupCredit` is.
+   */
+  suspended?: boolean;
 }
 
 async function authHeaders(

@@ -29,12 +29,37 @@ export interface AdminGrant {
   createdAt: string;
 }
 
+/**
+ * One refund or lost dispute, and what it removed (docs/decisions.md,
+ * resolved 2026-09-28). The route's `ClawbackView`, re-checked field by
+ * field like every other row this file reads.
+ */
+export interface AdminClawback {
+  cause: 'refund' | 'dispute';
+  kind: 'topup' | 'subscription';
+  stripeChargeId: string;
+  reversedUsdCents: number;
+  creditRemovedUsdCents: number;
+  creditShortfallUsdCents: number;
+  stripeSubscriptionId: string | null;
+  suspends: boolean;
+  liftedAt: string | null;
+  createdAt: string;
+}
+
 export type AdminUserResult =
   | {
       ok: true;
       userId: string;
       spendableCreditMicroUsd: number;
       grants: AdminGrant[];
+      /**
+       * Present when the route sends it. Absent from a Worker deployed
+       * before refunds removed anything, which has nothing to say here.
+       */
+      suspended?: boolean;
+      /** Newest first; absent for the same reason `suspended` can be. */
+      clawbacks?: AdminClawback[];
       /**
        * Rows the route returned that could not be read as a grant.
        *
@@ -87,6 +112,38 @@ function readGrant(value: unknown): AdminGrant | null {
   };
 }
 
+/** A reversal the route sent, or null when it is not one this can show. */
+function readClawback(value: unknown): AdminClawback | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as Record<string, unknown>;
+  if (
+    (row.cause !== 'refund' && row.cause !== 'dispute') ||
+    (row.kind !== 'topup' && row.kind !== 'subscription') ||
+    typeof row.stripeChargeId !== 'string' ||
+    typeof row.reversedUsdCents !== 'number' ||
+    typeof row.creditRemovedUsdCents !== 'number' ||
+    typeof row.creditShortfallUsdCents !== 'number' ||
+    typeof row.createdAt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    cause: row.cause,
+    kind: row.kind,
+    stripeChargeId: row.stripeChargeId,
+    reversedUsdCents: row.reversedUsdCents,
+    creditRemovedUsdCents: row.creditRemovedUsdCents,
+    creditShortfallUsdCents: row.creditShortfallUsdCents,
+    stripeSubscriptionId:
+      typeof row.stripeSubscriptionId === 'string'
+        ? row.stripeSubscriptionId
+        : null,
+    suspends: row.suspends === true,
+    liftedAt: typeof row.liftedAt === 'string' ? row.liftedAt : null,
+    createdAt: row.createdAt,
+  };
+}
+
 /** Look up a user's current spendable credit and admin-grant history by email. */
 export async function lookupAdminUser(
   email: string,
@@ -104,6 +161,8 @@ export async function lookupAdminUser(
       userId?: unknown;
       spendableCreditMicroUsd?: unknown;
       grants?: unknown;
+      suspended?: unknown;
+      clawbacks?: unknown;
     };
     if (
       typeof record.userId !== 'string' ||
@@ -130,12 +189,25 @@ export async function lookupAdminUser(
       };
     }
     const rows = record.grants.map(readGrant);
+    // A reversal that cannot be read is left out rather than failing the
+    // lookup: this list explains a balance, it is not what an operator
+    // reads to decide whether a grant already landed, and the balance
+    // above already counts it.
+    const clawbacks = Array.isArray(record.clawbacks)
+      ? record.clawbacks
+          .map(readClawback)
+          .filter((row): row is AdminClawback => row !== null)
+      : undefined;
     return {
       ok: true,
       userId: record.userId,
       spendableCreditMicroUsd: record.spendableCreditMicroUsd,
       grants: rows.filter((row): row is AdminGrant => row !== null),
       unreadable: rows.filter((row) => row === null).length,
+      ...(typeof record.suspended === 'boolean'
+        ? { suspended: record.suspended }
+        : {}),
+      ...(clawbacks ? { clawbacks } : {}),
     };
   } catch {
     return {
@@ -186,6 +258,44 @@ export async function grantAdminCredit(
       userId: record.userId,
       creditUsdCents: record.creditUsdCents,
     };
+  } catch {
+    return {
+      ok: false,
+      error: 'The admin service returned an unreadable response.',
+    };
+  }
+}
+
+export type LiftSuspensionResult =
+  { ok: true; userId: string; lifted: number } | { ok: false; error: string };
+
+/**
+ * Lift the suspension a lost dispute put on an account. The direct result
+ * of an admin's click, like `grantAdminCredit`.
+ */
+export async function liftSuspension(
+  email: string,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<LiftSuspensionResult> {
+  const response = await fetchImpl('/api/admin/suspension/lift', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(await authHeaders(getToken)),
+    },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) return { ok: false, error: await errorMessage(response) };
+  try {
+    const body = ((await response.json()) ?? {}) as Record<string, unknown>;
+    if (typeof body.userId !== 'string' || typeof body.lifted !== 'number') {
+      return {
+        ok: false,
+        error: 'The admin service returned an unexpected response.',
+      };
+    }
+    return { ok: true, userId: body.userId, lifted: body.lifted };
   } catch {
     return {
       ok: false,

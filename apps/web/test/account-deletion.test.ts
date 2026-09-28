@@ -289,6 +289,20 @@ async function seed(w: World, { siteLive = false } = {}) {
     USER,
     at,
   );
+  // A lost dispute on the top-up: the credit it removed and the suspension
+  // it left are money records too, and one of them is keyed by the account.
+  await exec(
+    db,
+    `INSERT INTO billing_clawbacks
+       (id, user_id, cause, stripe_event_id, stripe_charge_id,
+        stripe_object_id, kind, charge_usd_cents, reversed_usd_cents,
+        credit_removed_usd_cents, credit_shortfall_usd_cents,
+        credit_granted_at, stripe_subscription_id, suspends, created_at)
+     VALUES ('dispute:dp_leaver', ?1, 'dispute', 'evt_dp', 'ch_leaver',
+             'cs_cus_leaver', 'topup', 2000, 2000, 800, 0, ?2, NULL, 1, ?2)`,
+    USER,
+    at,
+  );
   // USER was referred by OTHER and it paid out: both grants are ledger.
   await exec(
     db,

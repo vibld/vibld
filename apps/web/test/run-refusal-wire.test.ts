@@ -67,6 +67,14 @@ describe('the refusal identifiers this Worker answers with', () => {
     assert.ok(used.has('deletion-scheduled'), 'no deletion-scheduled refusal');
   });
 
+  it('tell a suspended account apart from a spent one', async () => {
+    // A lost dispute suspends paid features until an operator lifts it
+    // (docs/decisions.md, resolved 2026-09-28). A top-up does not resolve
+    // that, so it must not arrive as `account-ceiling`.
+    const { used } = await wireReasons();
+    assert.ok(used.has('account-suspended'), 'no account-suspended refusal');
+  });
+
   it('tell an unreadable ledger apart from a spent one', async () => {
     const { used } = await wireReasons();
     assert.ok(used.has('accounting-unavailable'));

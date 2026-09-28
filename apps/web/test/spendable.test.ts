@@ -127,4 +127,45 @@ describe('what a caller may spend', () => {
     const other = await spendableFor(env(db), principal('user_2'));
     assert.equal(other.topupCeiling, 0);
   });
+
+  it('gives a suspended account nothing, and says why', async () => {
+    // A lost dispute suspends paid features until an operator lifts it.
+    // Both ceilings are zero as well as the flag being set, so a route
+    // that forgot to check the flag still could not spend.
+    const db = new SqliteD1Database(SCHEMA);
+    const store = new BillingStore(db);
+    await store.grantAdminCredit('grant_1', 'user_1', 250, 'a@b.c', null);
+    await store.recordClawback({
+      id: 'dispute:dp_1',
+      userId: 'user_1',
+      cause: 'dispute',
+      stripeEventId: 'evt_1',
+      stripeChargeId: 'ch_1',
+      stripeObjectId: 'in_1',
+      kind: 'subscription',
+      chargeUsdCents: 2900,
+      reversedUsdCents: 2900,
+      creditUsdCents: 0,
+      creditGrantedAt: null,
+      stripeSubscriptionId: 'sub_1',
+      suspends: true,
+      spentCents: 0,
+    });
+
+    assert.deepEqual(await spendableFor(env(db), principal()), {
+      monthlyAllowance: 0,
+      topupCeiling: 0,
+      suspended: true,
+    });
+    // Nobody else's.
+    assert.equal(
+      (await spendableFor(env(db), principal('user_2'))).suspended,
+      undefined,
+    );
+
+    await store.liftSuspension('user_1', 'ops@vibld.com');
+    const lifted = await spendableFor(env(db), principal());
+    assert.equal(lifted.suspended, undefined);
+    assert.equal(lifted.topupCeiling, 2_500_000);
+  });
 });

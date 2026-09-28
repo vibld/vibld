@@ -552,7 +552,7 @@ export class AccountDeletionStore {
   }
 
   /** One per kept billing table; `account-deletion.test.ts` holds the two equal. */
-  static readonly BILLING_ROW_QUERIES = 8;
+  static readonly BILLING_ROW_QUERIES = 9;
 
   /**
    * The rest of what is kept: credit grants (including referral payouts,
@@ -697,4 +697,8 @@ export const KEPT_BILLING_TABLES = [
   // the billing record rather than deleted: it is about money, and like
   // them it no longer names anyone once re-keyed.
   'billing_purchase_starts',
+  // What refunds and lost disputes removed, and any suspension (with who
+  // lifted it). A record of money going back out, kept like the payment it
+  // reverses.
+  'billing_clawbacks',
 ] as const;

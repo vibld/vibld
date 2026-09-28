@@ -269,6 +269,26 @@ refund of the paid period, and that a referrer's deletion also cancels the
 referred account's unpaid reward, which an operator can grant back by hand.
 See `apps/web/README.md`, "Account deletion".
 
+**A refunded or disputed payment loses what it bought, automatically.**
+Chris decided on 2026-09-28 to automate this before launch, and the refund
+policy will say so. A refunded top-up loses the refunded share of its
+credit, floored at what is still unspent, with the rest recorded as a
+shortfall and never collected. A refunded subscription payment ends the
+subscription at once, in D1 and in Stripe, with no further proration; a
+partial refund is treated the same way, because it is how an operator
+processes an annual plan's prorated cancellation. A lost dispute does the
+same for whatever the payment bought and also suspends the account's paid
+features, refused as `account-suspended`, until an operator lifts it from
+the admin panel. A won or withdrawn dispute removes nothing. Every effect
+is a row in `billing_clawbacks`, shown against the account in the admin
+panel, and a reversal that cannot be tied to a recorded payment is parked
+like an unattributed payment rather than guessed at. His other refund
+decisions: monthly plans are not refunded; annual plans can be cancelled at
+any time for a prorated refund of unused whole months, which an operator
+issues as a partial refund in Stripe; top-ups are never refunded; and
+cancelling from the billing portal takes effect at the end of the paid
+period. See `apps/web/README.md`, "Refunds and disputes".
+
 ### Resolved 2026-09-27
 
 **L15 stands: Stripe Tax is off, and the code now matches.** Chris confirmed

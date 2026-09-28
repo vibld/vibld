@@ -1,5 +1,9 @@
 import type Stripe from 'stripe';
-import type { BillingStore, SubscriptionRecord } from './billing-store.ts';
+import type {
+  BillingStore,
+  ClawbackCause,
+  SubscriptionRecord,
+} from './billing-store.ts';
 import {
   PURPOSE_METADATA_KEY,
   SIGNUP_CARD_PURPOSE,
@@ -119,6 +123,60 @@ export type ResolveCharge = (chargeId: string) => Promise<Stripe.Charge>;
 export type ResolveSetupIntent = (
   setupIntentId: string,
 ) => Promise<Stripe.SetupIntent>;
+
+/**
+ * End a subscription in Stripe now, because the payment for its period went
+ * back out. Immediately and without proration (a refund is the operator's
+ * decision in Stripe, and nothing here refunds anything further).
+ *
+ * `already-ended` for one Stripe no longer bills, which is what makes a
+ * retry, a replay and a second reversal of the same subscription safe.
+ * Injected for the reason `ResolveCharge` is: this module reads Stripe's
+ * envelopes and does not call Stripe.
+ */
+export type CancelSubscription = (
+  stripeSubscriptionId: string,
+) => Promise<'cancelled' | 'already-ended'>;
+
+/**
+ * The invoice a payment intent paid, and that invoice's subscription.
+ *
+ * The fallback for a charge whose ids match no recorded payment. On the
+ * current Stripe API a charge names no invoice and an `invoice.paid` names
+ * no payment intent, so for a subscription payment the two meet only in
+ * Stripe's invoice payments. `null` means Stripe knows of no invoice for it.
+ */
+export type ResolveInvoiceOfPayment = (
+  paymentIntentId: string,
+) => Promise<{ invoiceId: string; subscriptionId: string | null } | null>;
+
+/**
+ * What removing what a reversed payment bought needs from outside D1
+ * (docs/decisions.md, resolved 2026-09-28).
+ *
+ * Every member is optional so a test can supply only what it exercises. A
+ * reversal that needs one that is missing answers `unresolved` rather than
+ * doing half of it: parked is visible and retried, and half is neither.
+ */
+export interface ClawbackDeps {
+  /**
+   * Top-up credit this account has already spent, in micro-USD: the spend
+   * ledger's `"<userId>:topup"` total, which is a Durable Object and not a
+   * table. What a refund removes is floored at what is still unspent, and
+   * this is the half of that floor D1 cannot see.
+   */
+  creditSpentMicroUsd?: (userId: string) => Promise<number>;
+  cancelSubscription?: CancelSubscription;
+  resolveInvoice?: ResolveInvoiceOfPayment;
+}
+
+/** Which reversal this is, carried from the event to the record. */
+interface Reversal {
+  cause: ClawbackCause;
+  stripeEventId: string | null;
+  /** Present for a dispute: its own id and amount are what get recorded. */
+  dispute?: Stripe.Dispute;
+}
 
 /**
  * Whether applying an event actually wrote what the event was about.
@@ -551,17 +609,14 @@ async function applyInvoicePaid(
   // payment could go unrecorded for ever.
   //
   const amountUsdCents = stripeCollectedUsdCents(invoice);
-  const settledBy = idsOf(
-    invoice.id,
-    (invoice as unknown as { payment_intent?: unknown }).payment_intent,
-    (invoice as unknown as { charge?: unknown }).charge,
-  );
+  const settledBy = invoicePaymentIds(invoice);
   await store.recordPayment(
     invoice.id ?? `invoice-unknown-${userId}`,
     userId,
     amountUsdCents,
     new Date().toISOString(),
     settledBy,
+    subscriptionOfInvoice(invoice),
   );
 
   await announceIfPaid(onPurchaseCleared, userId, amountUsdCents, settledBy);
@@ -591,6 +646,62 @@ export function idsOf(...values: unknown[]): string[] {
   return ids;
 }
 
+/**
+ * Every id a paid invoice can be recognised by when a refund names it.
+ *
+ * Read in both shapes Stripe has sent. An invoice from an older API version
+ * carries `payment_intent` and `charge` itself; a current one carries
+ * neither and lists its payments under `payments`, which Stripe includes
+ * only when asked. Whatever is present is recorded, and a refund that still
+ * matches nothing is tied back through `ResolveInvoiceOfPayment` instead.
+ */
+export function invoicePaymentIds(invoice: Stripe.Invoice): string[] {
+  const loose = invoice as unknown as {
+    payment_intent?: unknown;
+    charge?: unknown;
+    payments?: { data?: unknown };
+  };
+  const listed = Array.isArray(loose.payments?.data) ? loose.payments.data : [];
+  return [
+    ...new Set(
+      idsOf(
+        invoice.id,
+        loose.payment_intent,
+        loose.charge,
+        ...listed.flatMap((entry) => {
+          const payment = (
+            entry as {
+              payment?: { payment_intent?: unknown; charge?: unknown };
+            }
+          )?.payment;
+          return [payment?.payment_intent, payment?.charge];
+        }),
+      ),
+    ),
+  ];
+}
+
+/**
+ * The subscription an invoice paid for, or null for one that paid for none.
+ *
+ * `parent.subscription_details.subscription` on the current API and a
+ * top-level `subscription` on older ones, as an id or an expanded object.
+ */
+export function subscriptionOfInvoice(invoice: Stripe.Invoice): string | null {
+  const loose = invoice as unknown as {
+    subscription?: unknown;
+    parent?: {
+      subscription_details?: { subscription?: unknown } | null;
+    } | null;
+  };
+  return (
+    idsOf(
+      loose.parent?.subscription_details?.subscription,
+      loose.subscription,
+    )[0] ?? null
+  );
+}
+
 export async function applyStripeEvent(
   store: BillingStore,
   event: Stripe.Event,
@@ -598,6 +709,14 @@ export async function applyStripeEvent(
   onPurchaseReversed?: OnPurchaseReversed,
   resolveCharge?: ResolveCharge,
   resolveSetupIntent?: ResolveSetupIntent,
+  /**
+   * What removing what a reversed payment bought needs beyond the store.
+   * Absent means the caller is not asking for that, the same way an absent
+   * `onPurchaseReversed` means it is not asking about referrals; every path
+   * that applies real events passes it (the webhook, the replay and the
+   * parked retry).
+   */
+  clawback?: ClawbackDeps,
 ): Promise<EventOutcome> {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -642,21 +761,31 @@ export async function applyStripeEvent(
       return await applyChargeReversed(
         store,
         event.data.object,
+        { cause: 'refund', stripeEventId: event.id ?? null },
         'Referral reversed: the payment was refunded.',
         onPurchaseReversed,
         resolveCharge,
+        clawback,
       );
     case 'charge.dispute.closed':
       // Only a dispute that was lost took the money back. A won dispute
       // means it stayed, and clawing back on `dispute.created` instead would
-      // mean re-crediting everybody whose dispute this deployment wins.
+      // mean re-crediting everybody whose dispute this deployment wins. The
+      // same holds for what the payment bought: a won or withdrawn dispute
+      // removes nothing and suspends nobody.
       if (event.data.object.status !== 'lost') return 'applied';
       return await applyChargeReversed(
         store,
         event.data.object.charge,
+        {
+          cause: 'dispute',
+          stripeEventId: event.id ?? null,
+          dispute: event.data.object,
+        },
         'Referral reversed: the dispute was lost.',
         onPurchaseReversed,
         resolveCharge,
+        clawback,
       );
     default:
       // Every type here is one this deployment asked Stripe for
@@ -681,8 +810,11 @@ export async function applyStripeEvent(
  * other places read as "they have paid at some point", which is still true
  * of somebody who was refunded.
  *
- * The one thing that must not survive a reversal is credit handed out
- * because the money arrived, and that is the callback's business.
+ * Two things must not survive a reversal. Credit handed out because the
+ * money arrived (a referral reward) is the callback's business. What the
+ * money bought (top-up credit, a plan) is `clawBackPurchase`'s, which
+ * records what it removed in a table of its own rather than in the payment
+ * row, for the reason above.
  *
  * `unresolved` rather than `applied` when the customer cannot be mapped to
  * an account: a refund read before the `checkout.session.completed` that
@@ -692,9 +824,11 @@ export async function applyStripeEvent(
 async function applyChargeReversed(
   store: BillingStore,
   charge: Stripe.Charge | string,
+  reversal: Reversal,
   reason: string,
   onPurchaseReversed?: OnPurchaseReversed,
   resolveCharge?: ResolveCharge,
+  clawback?: ClawbackDeps,
 ): Promise<EventOutcome> {
   // A dispute carries its charge as a bare id in the ordinary case, and the
   // customer is only on the charge. This module does not call Stripe, so the
@@ -752,5 +886,221 @@ async function applyChargeReversed(
       return 'unresolved';
     }
   }
+
+  // After the referral, not before: the referral path is idempotent and
+  // already written this way, and a clawback that parks the event (below)
+  // brings the whole delivery back, the referral with it, as a no-op.
+  if (!clawback) return 'applied';
+  return await clawBackPurchase(store, userId, resolved, reversal, clawback);
+}
+
+/**
+ * Remove what a refunded or disputed payment bought (Chris, 2026-09-28).
+ *
+ * The payment is found from the charge through the ids recorded when it
+ * settled, and only among the account's own payments. What it bought decides
+ * the rest:
+ *
+ * - **A top-up** loses the refunded or disputed share of its credit, floored
+ *   at what the account has not spent. The rest is recorded as a shortfall,
+ *   never as a debt.
+ * - **A subscription payment** ends the subscription, full refund, partial
+ *   refund or lost dispute alike. A partial refund is how an operator gives
+ *   an annual plan its prorated cancellation, so it is a cancellation: the
+ *   allowance stops now, in D1 first and then in Stripe, with no further
+ *   proration.
+ * - **A lost dispute**, whichever it was, also suspends the account until an
+ *   operator lifts it.
+ *
+ * All of it is one row in `billing_clawbacks`, keyed so every retry lands on
+ * the same row. Cancelling in Stripe is not in D1 and is asked every time
+ * the event is applied; it is idempotent on Stripe's side (`already-ended`),
+ * so a retry after a failed cancel does the one thing that is still owed.
+ *
+ * `unresolved` whenever the work cannot be done in full, which parks the
+ * event exactly as an unattributed payment is parked: a charge that matches
+ * no recorded payment (the replay descends newest first, so a refund can be
+ * read before the purchase it refunds), Stripe not answering, or a
+ * dependency the caller did not supply. Nothing is removed on a guess.
+ */
+async function clawBackPurchase(
+  store: BillingStore,
+  userId: string,
+  charge: Stripe.Charge,
+  reversal: Reversal,
+  deps: ClawbackDeps,
+): Promise<EventOutcome> {
+  const loose = charge as unknown as {
+    invoice?: unknown;
+    amount?: unknown;
+    amount_refunded?: unknown;
+    refunded?: unknown;
+  };
+  const paymentIntentId = idsOf(
+    charge.payment_intent,
+    reversal.dispute?.payment_intent,
+  )[0];
+  let payment = await store.findReversedPayment(
+    userId,
+    idsOf(charge.id, loose.invoice, charge.payment_intent, paymentIntentId),
+  );
+
+  // The one Stripe question, asked only when the recorded ids were not
+  // enough. On the current API a subscription charge and its `invoice.paid`
+  // share no id at all, so without this every subscription refund would
+  // park for ever. The answer is still matched against the payments this
+  // deployment recorded, so it can find a payment and never invent one.
+  let asked: { invoiceId: string; subscriptionId: string | null } | null = null;
+  let askedAlready = false;
+  const askStripe = async (): Promise<boolean> => {
+    if (askedAlready || !paymentIntentId || !deps.resolveInvoice) return true;
+    askedAlready = true;
+    try {
+      asked = await deps.resolveInvoice(paymentIntentId);
+      return true;
+    } catch (error) {
+      console.error(
+        'clawback: the invoice could not be read',
+        charge.id,
+        error,
+      );
+      return false;
+    }
+  };
+
+  if (!payment) {
+    if (!(await askStripe())) return 'unresolved';
+    const invoiceId = (asked as { invoiceId: string } | null)?.invoiceId;
+    if (invoiceId)
+      payment = await store.findReversedPayment(userId, [invoiceId]);
+  }
+  if (!payment) {
+    console.error(
+      JSON.stringify({
+        event: 'billing.clawback_unattributed',
+        userId,
+        cause: reversal.cause,
+        charge: charge.id,
+      }),
+    );
+    return 'unresolved';
+  }
+
+  const kind = payment.topup ? 'topup' : 'subscription';
+  let subscriptionId: string | null = null;
+  if (kind === 'subscription') {
+    subscriptionId = payment.stripeSubscriptionId;
+    if (!subscriptionId) {
+      if (!(await askStripe())) return 'unresolved';
+      subscriptionId =
+        (asked as { subscriptionId: string | null } | null)?.subscriptionId ??
+        null;
+    }
+    if (!subscriptionId) {
+      // A payment that is neither a top-up nor tied to a subscription is not
+      // one this deployment sells, so there is nothing it could safely end.
+      console.error(
+        JSON.stringify({
+          event: 'billing.clawback_no_subscription',
+          userId,
+          charge: charge.id,
+          payment: payment.stripeObjectId,
+        }),
+      );
+      return 'unresolved';
+    }
+    if (!deps.cancelSubscription) {
+      console.error('clawback: no way to cancel the subscription', charge.id);
+      return 'unresolved';
+    }
+  }
+
+  let spentCents = 0;
+  if (kind === 'topup') {
+    if (!deps.creditSpentMicroUsd) {
+      console.error('clawback: no way to read what was spent', charge.id);
+      return 'unresolved';
+    }
+    try {
+      // Rounded up: a part-cent already spent is spent, and the floor errs
+      // towards leaving credit rather than taking it.
+      spentCents = Math.ceil((await deps.creditSpentMicroUsd(userId)) / 10_000);
+    } catch (error) {
+      console.error('clawback: the spend ledger could not be read', error);
+      return 'unresolved';
+    }
+  }
+
+  // Stripe states both in the charge's own currency, which is USD for
+  // everything this deployment sells. A charge that somehow lacks them falls
+  // back to what was recorded when it settled, and to nothing reversed, so a
+  // missing field removes less rather than more.
+  const chargeUsdCents =
+    typeof loose.amount === 'number' ? loose.amount : payment.amountUsdCents;
+  const reversedUsdCents =
+    reversal.cause === 'dispute'
+      ? typeof reversal.dispute?.amount === 'number'
+        ? reversal.dispute.amount
+        : chargeUsdCents
+      : typeof loose.amount_refunded === 'number'
+        ? loose.amount_refunded
+        : loose.refunded === true
+          ? chargeUsdCents
+          : 0;
+
+  const recorded = await store.recordClawback({
+    id:
+      reversal.cause === 'dispute'
+        ? `dispute:${reversal.dispute?.id ?? charge.id}`
+        : `refund:${charge.id}:${reversedUsdCents}`,
+    userId,
+    cause: reversal.cause,
+    stripeEventId: reversal.stripeEventId,
+    stripeChargeId: charge.id,
+    stripeObjectId: payment.stripeObjectId,
+    kind,
+    chargeUsdCents,
+    reversedUsdCents,
+    creditUsdCents: payment.topup?.creditUsdCents ?? 0,
+    creditGrantedAt: payment.topup?.createdAt ?? null,
+    stripeSubscriptionId: subscriptionId,
+    suspends: reversal.cause === 'dispute',
+    spentCents,
+  });
+
+  // After the row, so the allowance has already stopped by the time Stripe
+  // is asked, and stays stopped if Stripe has to be asked again tomorrow.
+  let stripe: 'cancelled' | 'already-ended' | undefined;
+  if (subscriptionId && deps.cancelSubscription) {
+    try {
+      stripe = await deps.cancelSubscription(subscriptionId);
+    } catch (error) {
+      console.error(
+        'clawback: the subscription could not be cancelled',
+        subscriptionId,
+        error,
+      );
+      return 'unresolved';
+    }
+  }
+
+  // The row is the record an operator reads; this is for a live tail.
+  console.log(
+    JSON.stringify({
+      event: 'billing.clawback',
+      userId,
+      cause: reversal.cause,
+      kind,
+      charge: charge.id,
+      payment: payment.stripeObjectId,
+      reversedUsdCents,
+      creditRemovedUsdCents: recorded?.creditRemovedUsdCents ?? 0,
+      creditShortfallUsdCents: recorded?.creditShortfallUsdCents ?? 0,
+      subscription: subscriptionId,
+      stripe,
+      suspended: reversal.cause === 'dispute',
+      alreadyRecorded: recorded === null,
+    }),
+  );
   return 'applied';
 }

@@ -130,9 +130,10 @@ async function worstCostFor(
 ): Promise<number> {
   switch (phase) {
     case 'parked':
-      // Eleven a row: the handler's worst event, the attempt stamp, then
-      // the mark and the delete.
-      return retryBatchFor(share) * 11;
+      // Fifteen a row: the handler's worst event (thirteen, since a
+      // reversal also removes what the payment bought), then the attempt
+      // stamp and the delete.
+      return retryBatchFor(share) * 15;
     case 'payout':
       return 1 + payoutBatchFor(share) * MAX_QUERIES_PER_PAYOUT_ROW;
     case 'reconcile':
@@ -254,12 +255,14 @@ describe('the nightly pass on the default allowance', () => {
 });
 
 describe('the nightly pass below the split', () => {
-  it('keeps the parked floor from 35 to 91, and holds both properties there', async () => {
-    // 35 is where the allowance less the floor (11) and the turn (1) first
-    // covers a subscription's worst case (23). Every allowance from there to
+  it('keeps the parked floor from 39 to 91, and holds both properties there', async () => {
+    // 39 is where the allowance less the floor (15) and the turn (1) first
+    // covers a subscription's worst case (23). It was 35 until a reversal
+    // also removed what the payment bought, and the worst event was
+    // measured at thirteen queries rather than assumed at nine. Every allowance from there to
     // the split has to retry a parked row every night, buy each rotating
     // phase an item within a lap, and stay inside itself every night.
-    for (let budget = 35; budget < 92; budget += 1) {
+    for (let budget = 39; budget < 92; budget += 1) {
       assert.equal(parkedFloorFitsFor(budget), true, `budget ${budget}`);
       const bought = new Map<NightlyPhase, number>();
       for (let night = 0; night < ROTATING_PHASES.length; night += 1) {
@@ -276,13 +279,13 @@ describe('the nightly pass below the split', () => {
     }
   });
 
-  it('rotates all four from 24 to 34 rather than starving the reconcile', async () => {
-    // Below 35 the floor leaves less than a subscription on every night, so
+  it('rotates all four from 24 to 38 rather than starving the reconcile', async () => {
+    // Below 39 the floor leaves less than a subscription on every night, so
     // holding it would stop the reconcile for good: Internal issue 176 again with a
     // different victim. So the parked queue joins the rotation there, and
     // each phase gets the allowance less the turn one night in four. 24 is
     // the least allowance on which that still buys every phase an item.
-    for (const budget of [24, 30, 34]) {
+    for (const budget of [24, 30, 34, 38]) {
       assert.equal(parkedFloorFitsFor(budget), false, `budget ${budget}`);
       const turns: NightlyPhase[] = [];
       for (let night = 0; night < NIGHTLY_PHASES.length; night += 1) {
@@ -340,7 +343,11 @@ describe('the nightly pass on the deployed allowance', () => {
       Object.fromEntries(
         NIGHTLY_PHASES.map((phase) => [phase, itemsFor(phase, shares[phase])]),
       ),
-      { parked: 11, payout: 7, reconcile: 6, replay: 13 },
+      // Parked and replay were 11 and 13 until a reversal also removed
+      // what the payment bought: the worst event went from nine queries
+      // (as counted; ten as measured) to thirteen, and both phases are
+      // sized from it.
+      { parked: 8, payout: 7, reconcile: 6, replay: 9 },
     );
   });
 
@@ -364,9 +371,9 @@ describe('the nightly pass on the deployed allowance', () => {
       assert.equal(everyPhaseBuysAnItem(budget), budget >= 92, `${budget}`);
     }
     // And the step below it, for the same reason: the parked floor holds
-    // from 35 up and nowhere under it.
+    // from 39 up and nowhere under it.
     for (let budget = 1; budget < 92; budget += 1) {
-      assert.equal(parkedFloorFitsFor(budget), budget >= 35, `${budget}`);
+      assert.equal(parkedFloorFitsFor(budget), budget >= 39, `${budget}`);
     }
   });
 
@@ -393,8 +400,8 @@ describe('the nightly pass on the deployed allowance', () => {
       'a night that can split no longer runs every phase',
     );
     for (const call of [
-      /replayStripeEvents\( stripe, billing, undefined, undefined, shares\.replay, reversed, readCharge, readCard, \)/,
-      /retryUnattributedEvents\( billing, retryBatchFor\(shares\.parked\),/,
+      /replayStripeEvents\( stripe, billing, undefined, undefined, shares\.replay, reversed, readCharge, readCard, clawback, \)/,
+      /retryUnattributedEvents\( billing, retryBatchFor\(shares\.parked\), undefined, reversed, readCharge, readCard, clawback, \)/,
       /resumeStrandedPayouts\(\s?payout, payoutBatchFor\(shares\.payout\),?\s?\)/,
       /reconcileSubscriptions\( stripe, billing, cleared, reconcileBatchFor\(shares\.reconcile\), \)/,
     ]) {

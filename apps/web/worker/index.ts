@@ -36,7 +36,7 @@ import { fetchReferenceContext } from './reference-fetch.ts';
 import { handleMedia } from './media-handlers.ts';
 import { handleChat } from './chat-handler.ts';
 import { MediaStore } from './media-store.ts';
-import { spendableFor } from './spendable.ts';
+import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { POLL_INTERVAL_MS, stageFor } from './run-stage.ts';
 import { RunProgress } from './run-progress.ts';
@@ -111,7 +111,10 @@ import {
 } from './publish-client.ts';
 import {
   billingConfigured,
+  clawbackDepsFor,
+  clawbackViewOf,
   handleBillingCard,
+  handleLiftSuspension,
   handleBillingCheckout,
   handleBillingPortal,
   handleStripeWebhook,
@@ -567,6 +570,7 @@ async function handleBillingStatus(
     const hasStripeCustomer = Boolean(
       await billing.findCustomerId(principal.userId),
     );
+    const suspended = await billing.isSuspended(principal.userId);
 
     return json({
       tier,
@@ -581,6 +585,7 @@ async function handleBillingStatus(
       hasStripeCustomer,
       billingConfigured: billingConfigured(env),
       signupCredit,
+      suspended,
     });
   } catch (error) {
     console.error('billing status unavailable', error);
@@ -685,9 +690,11 @@ async function handleAdminUser(request: Request, env: Env): Promise<Response> {
   if (!lookup.ok) return json({ error: lookup.error }, 404);
 
   const billing = new BillingStore(env.DB!);
-  const [creditMicroUsd, grants] = await Promise.all([
+  const [creditMicroUsd, grants, suspended, clawbacks] = await Promise.all([
     billing.totalSpendableCreditMicroUsd(lookup.userId),
     billing.listAdminCredits(lookup.userId),
+    billing.isSuspended(lookup.userId),
+    billing.listClawbacks(lookup.userId),
   ]);
   return json({
     userId: lookup.userId,
@@ -698,7 +705,29 @@ async function handleAdminUser(request: Request, env: Env): Promise<Response> {
       note: grant.note,
       createdAt: grant.createdAt,
     })),
+    // What refunds and lost disputes removed, beside the credit an operator
+    // is about to grant: a grant to somebody whose top-up was just refunded
+    // is a different decision from a grant to anybody else.
+    suspended,
+    clawbacks: clawbacks.map(clawbackViewOf),
   });
+}
+
+/**
+ * POST { email } -> lift a lost dispute's suspension. The admin check and
+ * the Clerk lookup the credit routes use, then `handleLiftSuspension`.
+ */
+async function handleAdminLiftSuspension(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const admin = await requireAdmin(request, env);
+  if (admin.denied) return admin.denied;
+  const unconfigured = creditToolDenial(env);
+  if (unconfigured) return unconfigured;
+  return handleLiftSuspension(request, env, admin.adminEmail, (email) =>
+    findClerkUserIdByEmail(env, email),
+  );
 }
 
 /** POST -> grant a user manual spend credit (docs/decisions.md L4). */
@@ -988,7 +1017,14 @@ async function handlePlan(
   let topupCeiling: number;
   try {
     const now = Date.now();
-    ({ monthlyAllowance, topupCeiling } = await spendableFor(env, principal));
+    const spendable = await spendableFor(env, principal);
+    // Before anything is reserved: a suspended account is refused with its
+    // own reason, not left to fail the ceiling below as though it had spent
+    // its allowance.
+    if (spendable.suspended) {
+      return refuse('account-suspended', SUSPENDED_MESSAGE, 403);
+    }
+    ({ monthlyAllowance, topupCeiling } = spendable);
 
     const sized = await sizedReservation(carry, sizeFor, (amount) =>
       reserveBudget(
@@ -1471,10 +1507,11 @@ async function handleMockups(
   let reserved;
   try {
     const now = Date.now();
-    const { monthlyAllowance, topupCeiling } = await spendableFor(
-      env,
-      principal,
-    );
+    const spendable = await spendableFor(env, principal);
+    if (spendable.suspended) {
+      return refuse('account-suspended', SUSPENDED_MESSAGE, 403);
+    }
+    const { monthlyAllowance, topupCeiling } = spendable;
     reserved = await reserveBudget(
       env,
       principal.userId,
@@ -2294,9 +2331,10 @@ export default {
         ? findDeletionWork(deletions)
         : { records: [], expired: [], need: 0 };
     // The billing pass is planned on the allowance less the lookup, which
-    // moves its thresholds (the parked floor from 35, the split from 92)
-    // up by one. Neither the default of 40 nor the deployed 500 is near
-    // either.
+    // moves its thresholds (the parked floor from 39, the split from 92)
+    // up by one. The deployed 500 is near neither. The default of 40 sits
+    // exactly on the floor once the lookup is paid for, so a handler that
+    // grows another query moves that default into the four-way rotation.
     const afterLookup = deletions
       ? Math.max(0, allowance - QUERIES_TO_FIND_DELETIONS)
       : allowance;
@@ -2354,6 +2392,11 @@ export default {
       // delivery is only recovered if the replay can find the card's
       // fingerprint the way the webhook does.
       const readCard = readSetupIntent(stripe);
+      // What a missed refund or lost dispute bought comes off when the
+      // replay or the parked retry applies it, exactly as it would have on
+      // delivery: the same Stripe client, and the same spend ledger for the
+      // floor that keeps a refund from leaving anybody owing.
+      const clawback = clawbackDepsFor(stripe, env.USER_BUDGET);
       const reversed = (
         userId: string,
         reason: string,
@@ -2385,6 +2428,7 @@ export default {
           reversed,
           readCharge,
           readCard,
+          clawback,
         )
           .then(
             (result) => {
@@ -2426,6 +2470,7 @@ export default {
               reversed,
               readCharge,
               readCard,
+              clawback,
             ),
           )
           .then(
@@ -2519,6 +2564,7 @@ export default {
             reversed,
             readCharge,
             readCard,
+            clawback,
           ).then(
             (result) =>
               console.log(
@@ -2535,6 +2581,7 @@ export default {
             reversed,
             readCharge,
             readCard,
+            clawback,
           ).then(
             (result) =>
               console.log(
@@ -2896,6 +2943,10 @@ async function route(
 
   if (pathname === '/api/admin/topup') {
     return handleAdminTopup(request, env);
+  }
+
+  if (pathname === '/api/admin/suspension/lift') {
+    return handleAdminLiftSuspension(request, env);
   }
 
   if (pathname === '/api/admin/publish/hold') {

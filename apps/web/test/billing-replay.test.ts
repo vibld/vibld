@@ -990,7 +990,7 @@ describe('two phases in one invocation', () => {
     const flat = source.replace(/\s+/g, ' ');
     assert.match(
       flat,
-      /replayStripeEvents\( stripe, billing, undefined, undefined, replayBudgetFor\(budget\), reversed, readCharge, readCard, \)/,
+      /replayStripeEvents\( stripe, billing, undefined, undefined, replayBudgetFor\(budget\), reversed, readCharge, readCard, clawback, \)/,
       'the replay is handed the whole allowance again, or lost its clawback hook',
     );
     assert.doesNotMatch(
@@ -1092,7 +1092,7 @@ describe('the phases that hand over money already owed', () => {
 
       const parked = parkedReserveFor(budget);
       assert.ok(
-        retryBatchFor(parked) * 11 <= parked,
+        retryBatchFor(parked) * 15 <= parked,
         `budget ${budget}: the parked retry overruns its own share`,
       );
     }

@@ -93,6 +93,70 @@ const BILLABLE_STATUS_SQL = BILLABLE_STATUSES.map((s) => `'${s}'`).join(', ');
 export type SignupCardOutcome =
   'granted' | 'card-used' | 'account-granted' | 'no-offer';
 
+/** What went back out: a refund, or a dispute this deployment lost. */
+export type ClawbackCause = 'refund' | 'dispute';
+
+/** What the reversed payment had bought. */
+export type ClawbackKind = 'topup' | 'subscription';
+
+/** A recorded payment, found from a charge that was refunded or disputed. */
+export interface ReversedPayment {
+  /** The `billing_payments` key: a Checkout Session or an Invoice id. */
+  stripeObjectId: string;
+  amountUsdCents: number;
+  /** The subscription an invoice paid for, when `invoice.paid` recorded it. */
+  stripeSubscriptionId: string | null;
+  /** Present when the payment was a top-up: what it granted, and when. */
+  topup: { creditUsdCents: number; createdAt: string } | null;
+}
+
+/** One reversal, as `recordClawback` is asked to write it. */
+export interface ClawbackInput {
+  /** Deterministic; see 0032_payment_clawbacks.sql. */
+  id: string;
+  userId: string;
+  cause: ClawbackCause;
+  stripeEventId: string | null;
+  stripeChargeId: string;
+  stripeObjectId: string;
+  kind: ClawbackKind;
+  chargeUsdCents: number;
+  /** Cumulative `amount_refunded` for a refund, the dispute's amount for a dispute. */
+  reversedUsdCents: number;
+  /** The top-up's credit. Ignored for a subscription payment. */
+  creditUsdCents: number;
+  creditGrantedAt: string | null;
+  stripeSubscriptionId: string | null;
+  suspends: boolean;
+  /** Top-up credit already spent, in cents, from the spend ledger. */
+  spentCents: number;
+  at?: string;
+}
+
+/** What one newly recorded reversal took, and what it could not. */
+export interface ClawbackRecorded {
+  creditRemovedUsdCents: number;
+  creditShortfallUsdCents: number;
+}
+
+/** One reversal, as the admin panel reads it back. */
+export interface ClawbackRecord {
+  id: string;
+  cause: ClawbackCause;
+  stripeChargeId: string;
+  stripeObjectId: string;
+  kind: ClawbackKind;
+  chargeUsdCents: number;
+  reversedUsdCents: number;
+  creditRemovedUsdCents: number;
+  creditShortfallUsdCents: number;
+  stripeSubscriptionId: string | null;
+  suspends: boolean;
+  liftedAt: string | null;
+  liftedByEmail: string | null;
+  createdAt: string;
+}
+
 export interface AdminCreditRecord {
   id: string;
   userId: string;
@@ -328,6 +392,18 @@ export class BillingStore {
     return row ? toSubscriptionRecord(row) : undefined;
   }
 
+  /**
+   * A subscription a refund or a lost dispute ended is never one, whatever
+   * its mirrored status says (0032_payment_clawbacks.sql).
+   *
+   * Asked of the clawback record rather than written into `status`, because
+   * the mirror is overwritten by every subscription event and the replay
+   * applies them out of order: an older `customer.subscription.updated`
+   * reading `active` would otherwise hand back an allowance whose payment
+   * has already gone back out. Stripe's own cancellation arrives later and
+   * agrees; this is what makes the allowance stop before it does, and stay
+   * stopped if cancelling in Stripe has to be retried.
+   */
   async findActiveSubscription(
     userId: string,
   ): Promise<SubscriptionRecord | undefined> {
@@ -337,6 +413,10 @@ export class BillingStore {
                 price_id, current_period_end, cancel_at_period_end
          FROM billing_subscriptions
          WHERE user_id = ?1 AND status IN ('active', 'trialing')
+           AND NOT EXISTS (
+             SELECT 1 FROM billing_clawbacks
+              WHERE billing_clawbacks.stripe_subscription_id =
+                    billing_subscriptions.stripe_subscription_id)
          ORDER BY updated_at DESC LIMIT 1`,
       )
       .bind(userId)
@@ -355,13 +435,24 @@ export class BillingStore {
    * an approximation of it, not an exact one: this excludes an old top-up
    * from the total outright rather than tracking each purchase's own expiry
    * against what was actually drawn from it first.
+   *
+   * Net of what a refund or a lost dispute removed from it
+   * (0032_payment_clawbacks.sql), windowed on when the removed credit was
+   * bought rather than when it was removed, so a removal expires with the
+   * top-up it came out of and never reaches credit bought afterwards.
    */
   async totalTopupCreditMicroUsd(userId: string): Promise<number> {
     const row = await this.#db
       .prepare(
-        `SELECT COALESCE(SUM(credit_usd_cents), 0) AS total
-         FROM billing_topups
-         WHERE user_id = ?1 AND created_at > datetime('now', '-12 months')`,
+        `SELECT COALESCE((SELECT SUM(credit_usd_cents)
+                  FROM billing_topups
+                 WHERE user_id = ?1
+                   AND created_at > datetime('now', '-12 months')), 0)
+              - COALESCE((SELECT SUM(credit_removed_usd_cents)
+                  FROM billing_clawbacks
+                 WHERE user_id = ?1
+                   AND credit_granted_at > datetime('now', '-12 months')), 0)
+                AS total`,
       )
       .bind(userId)
       .first<{ total: number }>();
@@ -833,16 +924,305 @@ export class BillingStore {
      * than from an event can still be tied to the payment that funded it.
      */
     aliases: string[] = [],
+    /**
+     * The subscription an invoice paid for, so a refund of that invoice ends
+     * that subscription (0032_payment_clawbacks.sql). Absent for a top-up.
+     *
+     * The one column a repeat may fill in, and only while it is empty: the
+     * nightly reconcile re-records invoices this deployment already holds,
+     * which is how a row written before the column existed learns its
+     * subscription without anything else about the first settlement moving.
+     */
+    stripeSubscriptionId: string | null = null,
   ): Promise<void> {
     await this.#db
       .prepare(
         `INSERT INTO billing_payments
-           (stripe_object_id, user_id, amount_usd_cents, cleared_at, aliases)
-         VALUES (?1, ?2, ?3, ?4, NULLIF(?5, ''))
-         ON CONFLICT(stripe_object_id) DO NOTHING`,
+           (stripe_object_id, user_id, amount_usd_cents, cleared_at, aliases,
+            stripe_subscription_id)
+         VALUES (?1, ?2, ?3, ?4, NULLIF(?5, ''), ?6)
+         ON CONFLICT(stripe_object_id) DO UPDATE SET
+           stripe_subscription_id = excluded.stripe_subscription_id
+         WHERE billing_payments.stripe_subscription_id IS NULL
+           AND excluded.stripe_subscription_id IS NOT NULL`,
       )
-      .bind(stripeObjectId, userId, amountUsdCents, at, aliases.join(' '))
+      .bind(
+        stripeObjectId,
+        userId,
+        amountUsdCents,
+        at,
+        aliases.join(' '),
+        stripeSubscriptionId,
+      )
       .run();
+  }
+
+  /**
+   * The recorded payment a refunded or disputed charge paid for, if any.
+   *
+   * Matched on the ledger key and on every alias recorded with it, the same
+   * ids `firstClearedPaymentIds` reads, and only among this account's own
+   * payments: the charge's customer already said whose money it was, and a
+   * match outside that account would take somebody else's credit.
+   *
+   * The top-up is joined in, because a Checkout Session's payment and its
+   * credit are two rows keyed the same way, and which one this is decides
+   * whether credit or a plan is what gets removed.
+   */
+  async findReversedPayment(
+    userId: string,
+    ids: readonly string[],
+  ): Promise<ReversedPayment | undefined> {
+    const wanted = [...new Set(ids.filter((id) => id !== ''))];
+    if (wanted.length === 0) return undefined;
+    const holes = wanted.map((_, n) => n + 2);
+    const row = await this.#db
+      .prepare(
+        `SELECT p.stripe_object_id, p.amount_usd_cents, p.stripe_subscription_id,
+                t.credit_usd_cents AS topup_credit_usd_cents,
+                t.created_at AS topup_created_at
+           FROM billing_payments p
+           LEFT JOIN billing_topups t
+             ON t.stripe_checkout_session_id = p.stripe_object_id
+          WHERE p.user_id = ?1
+            AND (p.stripe_object_id IN (${holes.map((n) => `?${n}`).join(', ')})
+                 OR ${holes
+                   .map(
+                     (n) =>
+                       `instr(' ' || COALESCE(p.aliases, '') || ' ', ' ' || ?${n} || ' ') > 0`,
+                   )
+                   .join(' OR ')})
+          ORDER BY p.cleared_at, p.stripe_object_id
+          LIMIT 1`,
+      )
+      .bind(userId, ...wanted)
+      .first<{
+        stripe_object_id: string;
+        amount_usd_cents: number;
+        stripe_subscription_id: string | null;
+        topup_credit_usd_cents: number | null;
+        topup_created_at: string | null;
+      }>();
+    if (!row) return undefined;
+    return {
+      stripeObjectId: row.stripe_object_id,
+      amountUsdCents: row.amount_usd_cents,
+      stripeSubscriptionId: row.stripe_subscription_id,
+      topup:
+        row.topup_credit_usd_cents === null || row.topup_created_at === null
+          ? null
+          : {
+              creditUsdCents: row.topup_credit_usd_cents,
+              createdAt: row.topup_created_at,
+            },
+    };
+  }
+
+  /**
+   * Record one reversal and remove what it owes, in one statement.
+   *
+   * One statement for the reason `deductAdminCredit` is one: the amount owed
+   * and the balance it is floored against are both read inside the INSERT,
+   * and D1 admits one writer at a time. Two partial refunds of the same
+   * charge delivered together therefore cannot both read "nothing removed
+   * yet" and both take their share of the whole; the second sees the
+   * first's row.
+   *
+   * What is owed is cumulative, not per event. Stripe's `amount_refunded` is
+   * the charge's running total, so the refunded share is the larger of this
+   * event's total and any earlier one, plus whatever lost disputes took,
+   * capped at the charge. The credit owed is that share of the top-up's
+   * credit, less everything earlier rows for the charge already owed. An
+   * older refund event replayed after a newer one therefore owes nothing,
+   * and two refunds add up to exactly the share they refunded between them.
+   *
+   * What is removed is floored at the balance still unspent: the account's
+   * granted credit (top-ups and grants, the same 12-month window as
+   * everywhere else), less earlier removals, less `spentCents`. The rest is
+   * recorded as a shortfall and never collected, so nobody is left owing.
+   * `spentCents` comes from the spend ledger, which is not in D1, and is the
+   * one number here read outside the statement.
+   *
+   * Credit that has already expired (a top-up older than the 12-month
+   * window) owes nothing: it is no longer in the balance to take from, and
+   * taking the same amount out of newer credit would charge a later
+   * purchase for an older one.
+   *
+   * `null` means the id was already recorded, which is what a redelivery,
+   * a replay and a parked retry all look like. Nothing is removed twice.
+   */
+  async recordClawback(input: ClawbackInput): Promise<ClawbackRecorded | null> {
+    const now = input.at ?? new Date().toISOString();
+    const row = await this.#db
+      .prepare(
+        `WITH prior AS (
+           SELECT COALESCE(MAX(CASE WHEN cause = 'refund'
+                                    THEN reversed_usd_cents END), 0) AS refunded,
+                  COALESCE(SUM(CASE WHEN cause = 'dispute'
+                                    THEN reversed_usd_cents END), 0) AS disputed,
+                  COALESCE(SUM(credit_removed_usd_cents
+                               + credit_shortfall_usd_cents), 0) AS owed
+             FROM billing_clawbacks
+            WHERE stripe_charge_id = ?5
+         ),
+         due AS (
+           SELECT CASE WHEN ?8 > 0 AND ?10 > 0
+                        AND ?11 > datetime('now', '-12 months') THEN MAX(0,
+                    CAST(?10 * MIN(?8,
+                           MAX(CASE WHEN ?3 = 'refund' THEN ?9 ELSE 0 END,
+                               prior.refunded)
+                           + CASE WHEN ?3 = 'dispute' THEN ?9 ELSE 0 END
+                           + prior.disputed) / ?8 AS INTEGER)
+                    - prior.owed)
+                  ELSE 0 END AS cents
+             FROM prior
+         ),
+         balance AS (
+           SELECT MAX(0,
+                    COALESCE((SELECT SUM(credit_usd_cents) FROM billing_topups
+                               WHERE user_id = ?2
+                                 AND created_at > datetime('now', '-12 months')), 0)
+                  + COALESCE((SELECT SUM(credit_usd_cents) FROM billing_admin_credits
+                               WHERE user_id = ?2
+                                 AND created_at > datetime('now', '-12 months')), 0)
+                  - COALESCE((SELECT SUM(credit_removed_usd_cents) FROM billing_clawbacks
+                               WHERE user_id = ?2
+                                 AND credit_granted_at > datetime('now', '-12 months')), 0)
+                  - ?15) AS cents
+         )
+         INSERT INTO billing_clawbacks
+           (id, user_id, cause, stripe_event_id, stripe_charge_id,
+            stripe_object_id, kind, charge_usd_cents, reversed_usd_cents,
+            credit_removed_usd_cents, credit_shortfall_usd_cents,
+            credit_granted_at, stripe_subscription_id, suspends, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                MIN(due.cents, balance.cents),
+                due.cents - MIN(due.cents, balance.cents),
+                ?11, ?12, ?13, ?14
+           FROM due, balance
+          WHERE 1
+         ON CONFLICT(id) DO NOTHING
+         RETURNING credit_removed_usd_cents, credit_shortfall_usd_cents`,
+      )
+      .bind(
+        input.id,
+        input.userId,
+        input.cause,
+        input.stripeEventId,
+        input.stripeChargeId,
+        input.stripeObjectId,
+        input.kind,
+        Math.max(0, Math.round(input.chargeUsdCents)),
+        Math.max(0, Math.round(input.reversedUsdCents)),
+        input.kind === 'topup' ? Math.max(0, input.creditUsdCents) : 0,
+        input.creditGrantedAt,
+        input.stripeSubscriptionId,
+        input.suspends ? 1 : 0,
+        now,
+        Math.max(0, Math.ceil(input.spentCents)),
+      )
+      .first<{
+        credit_removed_usd_cents: number;
+        credit_shortfall_usd_cents: number;
+      }>();
+    if (!row) return null;
+    return {
+      creditRemovedUsdCents: row.credit_removed_usd_cents,
+      creditShortfallUsdCents: row.credit_shortfall_usd_cents,
+    };
+  }
+
+  /**
+   * Whether a lost dispute has this account suspended and no operator has
+   * lifted it yet. Read by `spendableFor`, which every paid request asks.
+   */
+  async isSuspended(userId: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(
+        `SELECT 1 AS found FROM billing_clawbacks
+          WHERE user_id = ?1 AND suspends = 1 AND lifted_at IS NULL
+          LIMIT 1`,
+      )
+      .bind(userId)
+      .first();
+    return row !== null;
+  }
+
+  /**
+   * An operator lifting a suspension, and saying so.
+   *
+   * Every open suspension on the account at once: it is the account that is
+   * suspended, not the dispute, and an operator who has resolved it with the
+   * customer should not have to lift it twice for two charges. A dispute
+   * lost afterwards is a new row and suspends again; a replay of one already
+   * lifted is the same row and does not.
+   *
+   * Returns how many were lifted, so a lift of nothing can say so.
+   */
+  async liftSuspension(
+    userId: string,
+    liftedByEmail: string,
+    at: string = new Date().toISOString(),
+  ): Promise<number> {
+    const result = await this.#db
+      .prepare(
+        `UPDATE billing_clawbacks
+            SET lifted_at = ?3, lifted_by_email = ?2
+          WHERE user_id = ?1 AND suspends = 1 AND lifted_at IS NULL`,
+      )
+      .bind(userId, liftedByEmail, at)
+      .run();
+    return result.meta.changes;
+  }
+
+  /** The account's reversals, newest first: the admin panel's history. */
+  async listClawbacks(userId: string, limit = 20): Promise<ClawbackRecord[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT id, cause, stripe_charge_id, stripe_object_id, kind,
+                charge_usd_cents, reversed_usd_cents, credit_removed_usd_cents,
+                credit_shortfall_usd_cents, stripe_subscription_id, suspends,
+                lifted_at, lifted_by_email, created_at
+           FROM billing_clawbacks
+          WHERE user_id = ?1
+          ORDER BY created_at DESC, id
+          LIMIT ?2`,
+      )
+      .bind(userId, limit)
+      .all<{
+        id: string;
+        cause: string;
+        stripe_charge_id: string;
+        stripe_object_id: string;
+        kind: string;
+        charge_usd_cents: number;
+        reversed_usd_cents: number;
+        credit_removed_usd_cents: number;
+        credit_shortfall_usd_cents: number;
+        stripe_subscription_id: string | null;
+        suspends: number;
+        lifted_at: string | null;
+        lifted_by_email: string | null;
+        created_at: string;
+      }>();
+    return (result.results ?? []).map((row) => ({
+      id: row.id,
+      // Closed sets this table only holds because `recordClawback` is its
+      // one writer, the same trust `toSubscriptionRecord` places in `tier`.
+      cause: row.cause as ClawbackCause,
+      stripeChargeId: row.stripe_charge_id,
+      stripeObjectId: row.stripe_object_id,
+      kind: row.kind as ClawbackKind,
+      chargeUsdCents: row.charge_usd_cents,
+      reversedUsdCents: row.reversed_usd_cents,
+      creditRemovedUsdCents: row.credit_removed_usd_cents,
+      creditShortfallUsdCents: row.credit_shortfall_usd_cents,
+      stripeSubscriptionId: row.stripe_subscription_id,
+      suspends: row.suspends !== 0,
+      liftedAt: row.lifted_at,
+      liftedByEmail: row.lifted_by_email,
+      createdAt: row.created_at,
+    }));
   }
 
   /**

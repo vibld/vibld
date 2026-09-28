@@ -95,6 +95,17 @@ export function BillingStatusPanel() {
         {status.cancelAtPeriodEnd ? ' · cancels at period end' : ''}
       </p>
 
+      {/*
+       * Said here as well as on the refusal, because the refusal only
+       * arrives once somebody has typed a prompt and pressed build.
+       */}
+      {status.suspended ? (
+        <p className="pane-note pane-note--error" role="alert">
+          This account is suspended because a payment on it was disputed and the
+          dispute was lost. Email billing@vibld.com to resolve it.
+        </p>
+      ) : null}
+
       <SignupCreditOffer status={status} />
 
       {status.tier === 'free' ? (

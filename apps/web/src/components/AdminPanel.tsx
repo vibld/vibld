@@ -1,9 +1,11 @@
 import { useId, useRef, useState } from 'react';
 import {
   grantAdminCredit,
+  liftSuspension,
   lookupAdminUser,
 } from '../generation/admin-client.ts';
 import type {
+  AdminClawback,
   AdminGrant,
   AdminUserResult,
 } from '../generation/admin-client.ts';
@@ -18,8 +20,43 @@ type LookupState =
       spendableCreditMicroUsd: number;
       grants: AdminGrant[];
       unreadable: number;
+      suspended: boolean;
+      clawbacks: AdminClawback[];
     }
   | { phase: 'failed'; error: string };
+
+/**
+ * Lifting a lost dispute's suspension. Kept apart from the lookup for the
+ * reason the grant is: the refresh after it is a second request, and its
+ * failing says nothing about whether the lift landed.
+ */
+type LiftState =
+  | { phase: 'idle' }
+  | { phase: 'lifting' }
+  | { phase: 'lifted'; userId: string; lifted: number }
+  | { phase: 'failed'; error: string };
+
+/** One reversal, in the words an operator reads it in. */
+function describeClawback(row: AdminClawback): string {
+  const what =
+    row.cause === 'dispute'
+      ? `Dispute lost on ${row.stripeChargeId}`
+      : `Refund of ${formatUsd(row.reversedUsdCents * 10_000)} on ${row.stripeChargeId}`;
+  const effect =
+    row.kind === 'subscription'
+      ? `ended ${row.stripeSubscriptionId ?? 'the subscription'}`
+      : `removed ${formatUsd(row.creditRemovedUsdCents * 10_000)} credit${
+          row.creditShortfallUsdCents > 0
+            ? ` (${formatUsd(row.creditShortfallUsdCents * 10_000)} already spent, not collected)`
+            : ''
+        }`;
+  const suspension = row.suspends
+    ? row.liftedAt
+      ? ', suspension lifted'
+      : ', account suspended'
+    : '';
+  return `${what}: ${effect}${suspension}`;
+}
 
 type GrantState =
   | { phase: 'idle' }
@@ -68,6 +105,7 @@ export function AdminPanel() {
   const [note, setNote] = useState('');
   const [lookup, setLookup] = useState<LookupState>({ phase: 'idle' });
   const [grant, setGrant] = useState<GrantState>({ phase: 'idle' });
+  const [lift, setLift] = useState<LiftState>({ phase: 'idle' });
   const lookups = useRef(createStatusGate());
   /**
    * The address the field names *now*. A keystroke during a request leaves
@@ -115,9 +153,36 @@ export function AdminPanel() {
             spendableCreditMicroUsd: result.spendableCreditMicroUsd,
             grants: result.grants,
             unreadable: result.unreadable,
+            suspended: result.suspended ?? false,
+            clawbacks: result.clawbacks ?? [],
           }
         : { phase: 'failed', error: result.error },
     );
+  }
+
+  async function submitLift() {
+    const trimmed = email.trim();
+    if (trimmed === '') return;
+    setLift({ phase: 'lifting' });
+    try {
+      const result = await liftSuspension(trimmed);
+      setLift(
+        result.ok
+          ? { phase: 'lifted', userId: result.userId, lifted: result.lifted }
+          : { phase: 'failed', error: result.error },
+      );
+      if (!result.ok) return;
+    } catch (error) {
+      setLift({
+        phase: 'failed',
+        error: messageFor(error, 'The suspension could not be lifted.'),
+      });
+      return;
+    }
+    // Only while the field still names the account that was lifted, for
+    // the reason `submitGrant` gives.
+    if (address.current.trim() !== trimmed) return;
+    await runLookup();
   }
 
   /**
@@ -136,6 +201,9 @@ export function AdminPanel() {
     setLookup({ phase: 'idle' });
     setGrant((previous) =>
       previous.phase === 'granting' ? previous : { phase: 'idle' },
+    );
+    setLift((previous) =>
+      previous.phase === 'lifting' ? previous : { phase: 'idle' },
     );
   }
 
@@ -275,6 +343,46 @@ export function AdminPanel() {
       {lookup.phase === 'failed' ? (
         <p className="pane-note pane-note--error" role="alert">
           {lookup.error}
+        </p>
+      ) : null}
+
+      {/*
+        What refunds and lost disputes took from this account, beside the
+        form that gives credit back: granting to somebody whose top-up was
+        just refunded is a different decision from granting to anybody else.
+      */}
+      {lookup.phase === 'found' && lookup.clawbacks.length > 0 ? (
+        <p className="pane-note">
+          Refunds and disputes:{' '}
+          {lookup.clawbacks.map(describeClawback).join('; ')}
+        </p>
+      ) : null}
+      {lookup.phase === 'found' && lookup.suspended ? (
+        <div className="prompt__row">
+          <p className="pane-note pane-note--error" role="alert">
+            Suspended after a lost dispute: paid features are refused until this
+            is lifted.
+          </p>
+          <button
+            type="button"
+            className="button"
+            onClick={() => void submitLift()}
+            disabled={lift.phase === 'lifting'}
+          >
+            {lift.phase === 'lifting' ? 'Lifting…' : 'Lift suspension'}
+          </button>
+        </div>
+      ) : null}
+      {lift.phase === 'lifted' ? (
+        <p className="pane-note" role="status">
+          {lift.lifted > 0
+            ? `Lifted the suspension on ${lift.userId}.`
+            : `${lift.userId} had no suspension to lift.`}
+        </p>
+      ) : null}
+      {lift.phase === 'failed' ? (
+        <p className="pane-note pane-note--error" role="alert">
+          {lift.error}
         </p>
       ) : null}
 

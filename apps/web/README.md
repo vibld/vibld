@@ -758,7 +758,8 @@ Dashboard needs no code change, only the amount to change.
   either. Add them at
   <https://dashboard.stripe.com/webhooks> on the existing endpoint.
   `charge.dispute.closed` is acted on only when the dispute was lost: a won
-  dispute means the money stayed.
+  dispute means the money stayed. Both also take back the credit or plan
+  the payment bought; see "Refunds and disputes" below.
 
   **A refund takes a reward back only when it is demonstrably the payment
   that earned it.** The ids a payment can be recognised by are recorded on
@@ -872,6 +873,68 @@ Dashboard needs no code change, only the amount to change.
   whose share never covers its list visible in the logs rather than silent --
   the "stops early and reports success" failure `0009_event_replay.sql` was
   written from, three times over.
+
+### Refunds and disputes (resolved 2026-09-28)
+
+A refund or a lost dispute takes back what the payment bought, as well as
+any referral reward it funded (`clawBackPurchase` in
+`worker/billing-events.ts`, `migrations/0032_payment_clawbacks.sql`). The
+events are the two the webhook already receives, `charge.refunded` and
+`charge.dispute.closed`; no new event type is needed. Both have to be ticked
+on the endpoint at <https://dashboard.stripe.com/workbench/webhooks>, or a
+refund reaches this deployment only through the nightly replay.
+`charge.dispute.created` is not subscribed and removes nothing: only a lost
+dispute took the money.
+
+The charge is tied to the payment it paid for through the ids recorded when
+that payment settled (`billing_payments`, its key and `aliases`), among the
+charge customer's own payments only. On the current Stripe API a
+subscription charge and its `invoice.paid` share no id, so when nothing
+matches the Worker asks Stripe once which invoice the charge's payment
+intent paid (`invoicePayments.list`) and matches that invoice instead.
+
+| What happened                            | What is removed                                                                                                                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Top-up refunded, in full or in part      | The refunded share of its $8 credit, floored at what the account has not spent. The rest is recorded as a shortfall and never collected.                                          |
+| Subscription payment refunded, in full   | The subscription: its allowance stops at once in D1, and it is cancelled in Stripe with no final invoice and no proration.                                                        |
+| Subscription payment refunded, in part   | The same. A partial refund is how an operator processes an annual plan's prorated cancellation, so it is treated as that cancellation.                                            |
+| Dispute lost, on either                  | The same as a full refund of that payment, and the account is suspended: `/api/plan`, `/api/mockups` and `/api/chat` refuse it as `account-suspended` until an operator lifts it. |
+| Dispute won, withdrawn, or merely opened | Nothing.                                                                                                                                                                          |
+
+**Any refund of a subscription invoice ends that subscription**, including
+one issued as goodwill or for a charge made in error. That follows from the
+decision and is stated so nobody issues one expecting the plan to continue:
+to compensate a subscriber and keep the plan, grant credit from the admin
+panel instead.
+
+Every effect is one row in `billing_clawbacks`: what went back out, the
+payment it was tied to, the credit removed and any shortfall, the
+subscription ended, and whether it suspended the account. The admin panel's
+user lookup lists them, and offers **Lift suspension** for a suspended
+account (`POST /api/admin/suspension/lift` `{ email }`). Lifting restores
+paid features only; credit or a plan that was removed comes back only by a
+grant or a new purchase.
+
+Idempotency is the row id: `refund:<charge>:<cumulative amount refunded>`
+for a refund and `dispute:<dispute>` for a dispute, so a redelivery, the
+nightly replay and the parked retry all land on the same row. Credit owed
+is computed from Stripe's running refunded total inside the one statement
+that writes the row, so two partial refunds add up to exactly the share
+they refunded and an older refund replayed late owes nothing. Cancelling in
+Stripe is asked on every application and answers `already-ended` for a
+subscription that is over.
+
+A reversal that cannot be done in full answers `unresolved`, exactly like
+an unattributed payment: the webhook delivery fails so Stripe retries it,
+and the nightly replay parks it for the nightly retry. That happens for a charge that matches no
+recorded payment (the replay can read a refund before the purchase it
+refunds), Stripe not answering, or the spend ledger not answering. Nothing
+is removed on a guess, and a parked reversal shows in the admin panel's
+parked queue.
+
+Things this does not do: a refund that later fails in Stripe does not
+restore anything, and a refund of a charge made outside this product stays
+parked for an operator to look at.
 
 ### Provider balance alerts (docs/decisions.md L44)
 
@@ -1093,6 +1156,11 @@ verification). A single grant is capped at $500 (`request-guard.ts`'s
 `MAX_ADMIN_TOPUP_USD_CENTS`) so a typo cannot hand out an enormous sum;
 grant again for more.
 
+The same lookup lists what refunds and lost disputes removed from the
+account, and whether a lost dispute has it suspended; **Lift suspension**
+(`POST /api/admin/suspension/lift`, same admin check and Clerk lookup)
+clears it. See "Refunds and disputes" above.
+
 ### Setup
 
 1. `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) and
@@ -1169,7 +1237,7 @@ What was already stopped stays stopped.
 **The nightly budget.** The deletion pass shares the nightly D1 allowance
 (`VIBLD_REPLAY_QUERY_BUDGET`) with the billing pass. It costs one query a
 night to find out there is nothing to do, so the billing pass's thresholds
-(the parked floor from 35, the split from 92) now apply to the allowance
+(the parked floor from 39, the split from 92) now apply to the allowance
 less one. With work waiting, an allowance
 of 122 or more gives it up to a quarter and splits the rest as before;
 below that it takes a turn in the billing rotation (`planNight` in
