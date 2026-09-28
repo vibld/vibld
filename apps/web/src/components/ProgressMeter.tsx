@@ -14,8 +14,15 @@ import {
  */
 export function ProgressMeter({
   progress,
+  announce = true,
 }: {
   progress: GenerationProgress | null;
+  /**
+   * Whether this copy speaks to a screen reader. The draft preview shows a
+   * second meter over its sketch while the conversation shows the first,
+   * and two live regions saying the same thing would say it twice.
+   */
+  announce?: boolean;
 }) {
   if (progress === null) return null;
   const note = reassurance(progress);
@@ -35,9 +42,11 @@ export function ProgressMeter({
       {/* Unlike the counters this appears once and never changes, so it is
           left readable: it is the part that answers "is this stuck?". */}
       {note ? <p className="progress__note">{note}</p> : null}
-      <p className="visually-hidden" role="status" aria-live="polite">
-        {announcement ?? ''}
-      </p>
+      {announce ? (
+        <p className="visually-hidden" role="status" aria-live="polite">
+          {announcement ?? ''}
+        </p>
+      ) : null}
     </div>
   );
 }

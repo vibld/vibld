@@ -83,6 +83,28 @@ describe('requesting mockups', () => {
     assert.deepEqual(body, { prompt: 'a bakery', style: 'brutalism' });
   });
 
+  it('asks for a draft only when told to', async () => {
+    // The draft a build shows while it runs (docs/decisions.md,
+    // 2026-09-28): one direction, through the same route.
+    const { fetchImpl, sent } = serving([
+      event('mockups', { mockups: [mockup('A')] }),
+    ]);
+    const drafted = await requestMockups({
+      prompt: 'a bakery',
+      draft: true,
+      fetchImpl,
+      getToken: token,
+    });
+    assert.deepEqual(JSON.parse(String(sent[0]?.body)), {
+      prompt: 'a bakery',
+      draft: true,
+    });
+    assert.deepEqual(
+      drafted.map((each) => each.label),
+      ['A'],
+    );
+  });
+
   it('reports progress as it arrives', async () => {
     // The payoff of running in the request: the model client streams, so
     // the character count has a producer again on this route (internal issue 183).

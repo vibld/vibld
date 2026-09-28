@@ -172,6 +172,34 @@ export interface BuilderState {
    * in the moment before is sent against the project being left.
    */
   opening: boolean;
+  /**
+   * A static sketch of the page to show while a first build runs, instead
+   * of an empty pane (docs/decisions.md, 2026-09-28, the draft preview).
+   *
+   * Null for a follow-up: a project with an accepted checkpoint already
+   * has something real to show, so it keeps showing that. Kept after the
+   * build is accepted, because the pane goes on showing it until the live
+   * preview is running, and cleared when the build fails or is cancelled.
+   *
+   * Transient. It is not a setting and not a turn, so the autosave never
+   * sees it, and opening the project again does not bring it back.
+   */
+  draft: DraftPreview | null;
+}
+
+/** A sketch shown in the preview pane while the real site is built. */
+export interface DraftPreview {
+  label: string;
+  /** Model output: framed through `mockupFrameDocument`, never inlined. */
+  html: string;
+  /**
+   * `picked` is the direction chosen in Explore, which is also what the
+   * build was asked to follow. `quick` is one drafted for this build
+   * because nothing was picked.
+   */
+  source: 'picked' | 'quick';
+  /** The build it was shown for. */
+  runId: string;
 }
 
 // Where it has always been imported from. The shape moved to @vibld/core
@@ -309,6 +337,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     style: null,
     referenceUrl: '',
     opening: false,
+    draft: null,
   };
 }
 
@@ -412,6 +441,13 @@ export class BuilderSession {
    * way.
    */
   #exploreAbort: AbortController | null = null;
+  /**
+   * The quick draft's own controller (docs/decisions.md, 2026-09-28, the
+   * draft preview). Separate from the build's `#abort` for the reason the
+   * look's is: it is a different spend, and it ends when the build does,
+   * whichever way the build ends, rather than when anybody presses Cancel.
+   */
+  #draftAbort: AbortController | null = null;
   readonly #resolveProvider: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -479,6 +515,7 @@ export class BuilderSession {
     this.#exploreAbort = null;
     this.#chatAbort?.abort();
     this.#chatAbort = null;
+    this.#stopDraft();
     this.#listeners.clear();
   }
 
@@ -607,6 +644,7 @@ export class BuilderSession {
     this.#exploreAbort = null;
     this.#chatAbort?.abort();
     this.#chatAbort = null;
+    this.#stopDraft();
     this.#pendingBuildOptions = null;
     this.#mockupContext = null;
 
@@ -698,6 +736,7 @@ export class BuilderSession {
     this.#exploreAbort = null;
     this.#chatAbort?.abort();
     this.#chatAbort = null;
+    this.#stopDraft();
     this.#pendingBuildOptions = null;
     this.#mockupContext = null;
     this.#emit();
@@ -1105,6 +1144,7 @@ export class BuilderSession {
         status: 'failed',
         runId,
         prompt: trimmed,
+        draft: null,
         problems: [message],
         transcript: this.#openTurn(state.transcript, runId, shown, {
           ...said,
@@ -1119,6 +1159,23 @@ export class BuilderSession {
     const controller = new AbortController();
     this.#abort = controller;
 
+    // The draft preview (docs/decisions.md, 2026-09-28). Only for a first
+    // build: a follow-up has an accepted checkpoint, whose preview and code
+    // stay on screen, so it neither shows a sketch nor pays for one. A
+    // direction picked in Explore is shown at once, because it is already
+    // in hand and is what this build was asked to follow. Otherwise one
+    // quick sketch is asked for, below, once the build has been admitted.
+    this.#stopDraft();
+    const firstBuild = this.#state.acceptedSnapshot === null;
+    const picked: DraftPreview | null =
+      firstBuild && mockup
+        ? { label: mockup.label, html: mockup.html, source: 'picked', runId }
+        : null;
+    // Only against a real model. `/api/mockups` cannot answer a
+    // deployment in `fake` mode, which is why Explore is hidden there too.
+    let wantsQuickDraft =
+      firstBuild && !mockup && this.#state.generation === 'model';
+
     this.#patch(epoch, (state) => ({
       ...state,
       status: 'planning',
@@ -1128,6 +1185,7 @@ export class BuilderSession {
       planSummary: null,
       stagedFiles: [],
       problems: [],
+      draft: picked,
       transcript: this.#openTurn(state.transcript, runId, shown, said),
       timeline: this.#append(
         state.timeline,
@@ -1179,6 +1237,15 @@ export class BuilderSession {
         plan,
         controller.signal,
         (progress) => {
+          // The first report is the Worker saying the build was admitted:
+          // `handlePlan` sends it only after the build's reservation is
+          // held. Asking for the draft any earlier could take the caller's
+          // last in-flight slot and have the build refused as already
+          // running, and the draft must never cost the build anything.
+          if (wantsQuickDraft) {
+            wantsQuickDraft = false;
+            this.#requestDraft(epoch, runId, trimmed, style);
+          }
           this.#patch(epoch, (state) => ({ ...state, progress }));
         },
         style,
@@ -1191,12 +1258,14 @@ export class BuilderSession {
       );
     } catch (error) {
       reservation.release();
+      this.#stopDraft();
       const message = error instanceof Error ? error.message : String(error);
       this.#patch(epoch, (state) => ({
         ...state,
         status: 'failed',
         running: false,
         progress: null,
+        draft: null,
         problems: [message],
         transcript: this.#closeTurn(state.transcript, {
           status: 'failed',
@@ -1220,12 +1289,14 @@ export class BuilderSession {
       );
     } catch (error) {
       reservation.release();
+      this.#stopDraft();
       const message = error instanceof Error ? error.message : String(error);
       this.#patch(epoch, (state) => ({
         ...state,
         status: 'failed',
         running: false,
         progress: null,
+        draft: null,
         problems: [message],
         transcript: this.#closeTurn(state.transcript, {
           status: 'failed',
@@ -1235,6 +1306,10 @@ export class BuilderSession {
       }));
       return;
     }
+
+    // A draft still being drawn has lost its race with the build. It is
+    // stopped rather than left to land, which also stops what it spends.
+    this.#stopDraft();
 
     const outputTokens = Math.min(
       RESERVED_OUTPUT_TOKENS,
@@ -1295,6 +1370,8 @@ export class BuilderSession {
       status: 'failed',
       running: false,
       progress: null,
+      // A sketch of a site that did not get built is not worth showing.
+      draft: null,
       problems,
       runCount: state.runCount + 1,
       budget,
@@ -1349,6 +1426,7 @@ export class BuilderSession {
 
     this.#abort?.abort();
     this.#abort = null;
+    this.#stopDraft();
     this.#epoch += 1;
 
     this.#state = {
@@ -1356,6 +1434,7 @@ export class BuilderSession {
       status: 'cancelled',
       running: false,
       progress: null,
+      draft: null,
       problems: [],
       transcript: this.#closeTurn(this.#state.transcript, {
         status: 'cancelled',
@@ -1367,6 +1446,69 @@ export class BuilderSession {
       ),
     };
     this.#emit();
+  }
+
+  /**
+   * Ask for one quick sketch to show while this build runs, beside it and
+   * never in front of it (docs/decisions.md, 2026-09-28, the draft
+   * preview).
+   *
+   * Nothing the build does waits on this, and nothing this does can reach
+   * the build: its answer only ever sets `draft`, and a failure of any
+   * kind is dropped. It is metered as a look is, because it is one, through
+   * `/api/mockups` with `draft`. It is shown only if it arrives while the
+   * build it was drawn for is still running; otherwise `#stopDraft`, which
+   * every way of ending a build calls, has already aborted it.
+   */
+  #requestDraft(
+    epoch: number,
+    runId: string,
+    prompt: string,
+    style: StylePresetId | null,
+  ): void {
+    const controller = new AbortController();
+    this.#draftAbort = controller;
+    this.#requestMockups({
+      prompt,
+      style,
+      model: this.#state.model,
+      signal: controller.signal,
+      draft: true,
+    })
+      .then((mockups) => {
+        const first = mockups[0];
+        const state = this.#state;
+        if (
+          !first ||
+          controller.signal.aborted ||
+          !state.running ||
+          state.runId !== runId ||
+          state.draft !== null
+        ) {
+          return;
+        }
+        this.#patch(epoch, (current) => ({
+          ...current,
+          draft: {
+            label: first.label,
+            html: first.html,
+            source: 'quick',
+            runId,
+          },
+        }));
+      })
+      // Skipped, not reported. The build is what was asked for; a sketch
+      // that could not be drawn is not a problem with it.
+      .catch(() => {})
+      .finally(() => {
+        if (this.#draftAbort === controller) this.#draftAbort = null;
+      });
+  }
+
+  /** Stop a quick draft that is still being drawn, if there is one. */
+  #stopDraft(): void {
+    this.#draftAbort?.abort();
+    this.#draftAbort = null;
   }
 
   /** Start a turn. Its outcome is filled in later by `#closeTurn`. */

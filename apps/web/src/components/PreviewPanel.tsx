@@ -1,8 +1,15 @@
 import { useMemo } from 'react';
-import type { BuilderState } from '../generation/session.ts';
+import type { BuilderState, DraftPreview } from '../generation/session.ts';
 import { buildPreviewDocument } from '../generation/preview.ts';
 import { servingOlderThan } from '../generation/use-preview-sandbox.ts';
 import type { PreviewSandbox } from '../generation/use-preview-sandbox.ts';
+import {
+  DRAFT_BUILDING_LABEL,
+  DRAFT_BUILT_LABEL,
+  DraftPreview as DraftView,
+} from './DraftPreview.tsx';
+import { LifecycleBar } from './LifecycleBar.tsx';
+import { ProgressMeter } from './ProgressMeter.tsx';
 
 function describeStatus(status: PreviewSandbox['status']): string | null {
   if (!status) return null;
@@ -32,9 +39,18 @@ function describeStatus(status: PreviewSandbox['status']): string | null {
 export function PreviewPanel({
   state,
   sandbox,
+  draft = null,
 }: {
   state: BuilderState;
   sandbox: PreviewSandbox;
+  /**
+   * The sketch to show while a first build runs (docs/decisions.md,
+   * 2026-09-28, the draft preview), or null. Passed rather than read from
+   * `state` because `Workspace` retires it once the live preview has run,
+   * and that is knowledge about the sandbox, which the session does not
+   * have.
+   */
+  draft?: DraftPreview | null;
 }) {
   const mockDocument = useMemo(() => {
     if (!state.acceptedBrief || !state.acceptedSnapshot) return null;
@@ -60,6 +76,24 @@ export function PreviewPanel({
     state.acceptedSnapshot?.revision,
   );
 
+  // The draft, while its build runs. Ahead of a ready sandbox as well: a
+  // first build has no checkpoint of its own to be serving, so a sandbox
+  // that is up now is left over from before, and the draft is the nearer
+  // picture of what is coming.
+  const draftWhileBuilding = draft !== null && state.running;
+  // And after, until the live preview is running. Accepting the build does
+  // not start a sandbox, so without this the sketch would give way to an
+  // empty pane with a button in it, which is the waiting state the draft
+  // exists to replace. A sandbox that failed shows its failure as it
+  // always has, with Try again.
+  const draftAfterBuild =
+    draft !== null &&
+    !state.running &&
+    state.status === 'accepted' &&
+    state.acceptedSnapshot !== null &&
+    sandbox.status?.status !== 'ready' &&
+    sandbox.status?.status !== 'failed';
+
   return (
     <div className="preview">
       {servingOlder ? (
@@ -70,12 +104,37 @@ export function PreviewPanel({
         </p>
       ) : null}
 
-      {sandbox.status?.status === 'ready' ? (
+      {draftWhileBuilding ? (
+        <DraftView draft={draft} label={DRAFT_BUILDING_LABEL}>
+          <LifecycleBar status={state.status} />
+          <ProgressMeter progress={state.progress} announce={false} />
+        </DraftView>
+      ) : sandbox.status?.status === 'ready' ? (
         <iframe
           className="preview__frame"
           title="Sandbox preview of the generated application"
           src={sandbox.status.url}
         />
+      ) : draftAfterBuild ? (
+        <DraftView draft={draft} label={DRAFT_BUILT_LABEL}>
+          {running ? (
+            <>
+              <p className="preview__draft-status" role="status">
+                {statusMessage}
+              </p>
+              <span className="preview__working" aria-hidden="true" />
+            </>
+          ) : (
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={sandbox.pending}
+              onClick={runAccepted}
+            >
+              Run live preview
+            </button>
+          )}
+        </DraftView>
       ) : mockDocument ? (
         <>
           <p className="preview__notice">

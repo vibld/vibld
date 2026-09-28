@@ -709,6 +709,25 @@ describe('a request for mockups', () => {
     }
   });
 
+  it('reads a draft request, and nothing that only looks like one', () => {
+    // The draft a build shows while it runs (docs/decisions.md,
+    // 2026-09-28, the draft preview).
+    const draft = parseMockupRequest({ prompt: 'a bakery', draft: true });
+    assert.deepEqual(draft.ok && draft.value, {
+      prompt: 'a bakery',
+      draft: true,
+    });
+    const look = parseMockupRequest({ prompt: 'a bakery', draft: false });
+    assert.deepEqual(look.ok && look.value, { prompt: 'a bakery' });
+    for (const value of ['true', 'false', 1, null]) {
+      assert.equal(
+        parseMockupRequest({ prompt: 'a bakery', draft: value }).ok,
+        false,
+        `accepted draft: ${JSON.stringify(value)}`,
+      );
+    }
+  });
+
   it('holds a prompt to the same cap a build does', () => {
     // Same person, same kind of sentence. Sharing the number means a prompt
     // accepted for a build is accepted for a look at it first.

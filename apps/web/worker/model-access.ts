@@ -106,3 +106,24 @@ export function decideModel(
     )?.defaultId;
   return { ok: true, model: preferred ?? granted[0]!.id, granted };
 }
+
+/**
+ * The model that draws a build's draft (Chris, 2026-09-28): the cheapest
+ * model in the catalogue that still writes a whole page, at about a cent or
+ * two a draft, whatever model the build itself runs on.
+ */
+export const DRAFT_MODEL = 'deepseek-flash';
+
+/**
+ * `DRAFT_MODEL` where this principal may use it, else null, so the draft
+ * falls back to the model they chose rather than being refused. A draft is
+ * a placeholder; the policy still decides, as it does for every run.
+ */
+export function draftModelFor(
+  env: ModelAccessEnv,
+  principal: string,
+): string | null {
+  return grantedFor(env, principal).some((model) => model.id === DRAFT_MODEL)
+    ? DRAFT_MODEL
+    : null;
+}

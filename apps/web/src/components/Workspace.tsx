@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { ProjectFile } from '@vibld/core';
-import type { BuilderState } from '../generation/session.ts';
+import type { BuilderState, DraftPreview } from '../generation/session.ts';
 import type { ProjectSummary } from '../projects/projects-client.ts';
 import {
   servingOlderThan,
@@ -94,6 +94,23 @@ export function Workspace({
     }
   }, [state.projectId]);
 
+  // The draft preview (docs/decisions.md, 2026-09-28) gives way to the
+  // live preview for good once that has run. Remembered here, which stays
+  // mounted across tab switches, because afterwards the sandbox can be
+  // stopped, and a pane that then went back to the sketch would be showing
+  // a guess at a site somebody has already seen for real. Only once the
+  // build is over: during a first build, a sandbox that is up is left over
+  // from before and says nothing about this draft.
+  const [retiredDraft, setRetiredDraft] = useState<DraftPreview | null>(null);
+  const sandboxReady = sandbox.status?.status === 'ready';
+  useEffect(() => {
+    if (sandboxReady && !state.running && state.draft) {
+      setRetiredDraft(state.draft);
+    }
+  }, [sandboxReady, state.running, state.draft]);
+  const draft =
+    state.draft && state.draft !== retiredDraft ? state.draft : null;
+
   // Derive the selection instead of storing it: when a run replaces the file
   // set, a selection that no longer exists falls back to the first file
   // rather than leaving the viewer pointed at a stale path.
@@ -184,7 +201,7 @@ export function Workspace({
         tabIndex={0}
       >
         {activeTab === 'preview' ? (
-          <PreviewPanel state={state} sandbox={sandbox} />
+          <PreviewPanel state={state} sandbox={sandbox} draft={draft} />
         ) : null}
 
         {activeTab === 'code' ? (

@@ -78,6 +78,13 @@ export const MOCKUP_SUBJECT: OutputSubject = {
     'Try a shorter description, or ask for the build directly and skip the sketches.',
 };
 
+/** One direction, shown as a draft while a build runs. */
+export const DRAFT_MOCKUP_SUBJECT: OutputSubject = {
+  noun: 'a draft',
+  truncated: 'the draft is incomplete',
+  advice: 'The build carries on without it.',
+};
+
 export const CHAT_SUBJECT: OutputSubject = {
   noun: 'a chat reply',
   truncated: 'the reply was cut off',

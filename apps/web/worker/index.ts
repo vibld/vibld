@@ -68,7 +68,7 @@ import {
   clerkLookupConfigured,
   findClerkUserIdByEmail,
 } from './clerk-lookup.ts';
-import { decideModel, grantedFor } from './model-access.ts';
+import { decideModel, draftModelFor, grantedFor } from './model-access.ts';
 import { signupCreditStatus } from './signup-credit.ts';
 import {
   handleReferralClaim,
@@ -1509,6 +1509,14 @@ async function handlePlan(
  * the request has one payoff the build lost -- the model client streams, so
  * `onProgress` reports a real character count here. `progress.characters`
  * has a producer again, on this route only.
+ *
+ * It also serves the draft a build shows while it runs (`"draft": true`,
+ * docs/decisions.md, 2026-09-28, the draft preview): one direction instead
+ * of three, through every line below unchanged. Same rate-limit bucket,
+ * same reservation and ceiling, same settlement. The one thing to know
+ * about running it beside a build is concurrency: it holds one of the
+ * caller's `VIBLD_MAX_IN_FLIGHT` slots while it runs, which is why the
+ * builder only asks for it once the build's own request has been admitted.
  */
 async function handleMockups(
   request: Request,
@@ -1564,10 +1572,19 @@ async function handleMockups(
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
   }
 
+  // A build's draft is always drawn by DRAFT_MODEL, whatever the build runs
+  // on (Chris, 2026-09-28): it is a placeholder shown for a minute, paid
+  // from the same credit as the build, and on the deployment's default
+  // model it would cost ten times as much for nothing the person keeps.
+  // Only where this person may use it; otherwise the draft falls back to
+  // the model they chose, as any look does.
+  const draftModel = parsed.value.draft
+    ? draftModelFor(env, principal.policyIdentity)
+    : null;
   const decision = decideModel(
     env,
     principal.policyIdentity,
-    chosenModel.value,
+    draftModel ?? chosenModel.value,
     resolveModel(env),
   );
   if (!decision.ok) {
@@ -1851,6 +1868,11 @@ async function handleMockups(
             return retryHold.verdict.allow;
           },
           ...(style.value ? { style: style.value } : {}),
+          // One direction, shown while a build runs (docs/decisions.md,
+          // 2026-09-28, the draft preview). The same run in every other
+          // respect: this route's reservation, ceiling, retry and
+          // settlement, so a draft is metered exactly as a look is.
+          ...(parsed.value.draft ? { draft: true } : {}),
         },
       );
 
@@ -1881,7 +1903,9 @@ async function handleMockups(
         const visible = sanitizedProviderFailure(
           error,
           'mockup generation failed',
-          'Could not produce mockups. Try again shortly.',
+          parsed.value.draft
+            ? 'Could not produce a draft.'
+            : 'Could not produce mockups. Try again shortly.',
         );
         await write(encodeEvent('error', { error: visible.message }));
       }
@@ -1941,6 +1965,8 @@ async function handleMockups(
         console.log(
           JSON.stringify({
             event: 'mockups.settled',
+            // So a draft's spend can be told apart from a look's.
+            ...(parsed.value.draft ? { draft: true } : {}),
             ...(usage
               ? {}
               : {

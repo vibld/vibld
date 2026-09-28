@@ -102,6 +102,19 @@ export const MockupSetSchema = z.object({
   mockups: z.array(MockupSchema).min(2).max(4),
 });
 
+/**
+ * One direction, shown as a draft while a build runs (docs/decisions.md,
+ * 2026-09-28, the draft preview).
+ *
+ * Asked for one and accepting up to four, for the reason the set above
+ * accepts two: the run is paid for by the time this parses, and a draft
+ * that arrived with company is still a draft. The first is the one shown.
+ * None is refused, because there is nothing to show.
+ */
+export const DraftMockupSetSchema = z.object({
+  mockups: z.array(MockupSchema).min(1).max(4),
+});
+
 export type ParsedMockup = z.infer<typeof MockupSchema>;
 export type ParsedMockupSet = z.infer<typeof MockupSetSchema>;
 
@@ -160,9 +173,43 @@ Body text must stay legible against its background in every direction, including
 export function mockupUserPrompt(
   prompt: string,
   direction: string | null,
+  // A draft says the same thing without the three (`DRAFT_MOCKUP_STYLE_PREAMBLE`).
+  preamble: string = MOCKUP_STYLE_PREAMBLE,
 ): string {
-  return direction ? `${prompt}${MOCKUP_STYLE_PREAMBLE}${direction}` : prompt;
+  return direction ? `${prompt}${preamble}${direction}` : prompt;
 }
 
 export const MOCKUP_STYLE_PREAMBLE =
   '\n\nStay within this visual direction; vary the three within it rather than against it.\n\n';
+
+/**
+ * What a draft run asks for: one quick sketch of the page, to look at while
+ * the real project is being built (docs/decisions.md, 2026-09-28, the draft
+ * preview).
+ *
+ * The three-direction prompt with the choosing taken out. There is nothing
+ * to choose between, so the instruction that leads that prompt, how far
+ * apart the three must be, has no work to do here; what is kept is every
+ * rule that makes a sketch safe to frame and honest about its subject.
+ *
+ * Counted by the same reservation as a look (`MAX_MOCKUP_FIXED_PROMPT_CHARS`
+ * in `limits.ts`), and `mockup-schema.test.ts` holds it inside that bound
+ * alongside `DRAFT_MOCKUP_STYLE_PREAMBLE` and the output instruction.
+ */
+export const DRAFT_MOCKUP_SYSTEM_PROMPT = `You produce one quick visual draft of a website, as a rendered HTML mockup, shown to a person while the real project is being built.
+
+Return JSON: { "mockups": [ { "label", "rationale", "html" } ] } with exactly one entry.
+
+THE DRAFT
+- label: two or three words naming the direction, in the reader's language, not a style-system term.
+- rationale: one sentence on who or what this direction suits. Not a description of what is on the page, which they can see.
+- html: one complete, self-contained document. Inline <style> only. No external stylesheet, no script, no web font, no image URL, no network reference of any kind.
+
+WHAT A DRAFT IS
+The hero and enough of the page below it to show the direction: roughly one to two screens. Real words about the actual subject, never lorem or placeholder. Use CSS gradients, shapes and type for imagery rather than linking pictures. Keep the document small and quick to write: it is replaced by the real project as soon as that is ready.
+
+Body text must stay legible against its background, including on a dark design.`;
+
+/** What a styled draft says around the chosen preset's direction. */
+export const DRAFT_MOCKUP_STYLE_PREAMBLE =
+  '\n\nStay within this visual direction.\n\n';

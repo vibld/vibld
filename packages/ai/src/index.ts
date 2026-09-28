@@ -73,6 +73,9 @@ export type {
 export { keepingRecordOf, repairPromptFor, withRecordOf } from './repair.ts';
 export type { ParsedGenerationPlan } from './plan-schema.ts';
 export {
+  DRAFT_MOCKUP_STYLE_PREAMBLE,
+  DRAFT_MOCKUP_SYSTEM_PROMPT,
+  DraftMockupSetSchema,
   MAX_MOCKUP_LABEL_CHARS,
   MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
@@ -99,6 +102,8 @@ export type { ChatProviderOptions, ChatRequest } from './chat-provider.ts';
 export {
   CHAT_JSON_INSTRUCTION,
   CHAT_OUTPUT,
+  DRAFT_MOCKUP_JSON_INSTRUCTION,
+  DRAFT_MOCKUP_OUTPUT,
   MOCKUP_JSON_INSTRUCTION,
   MOCKUP_OUTPUT,
   PLAN_JSON_INSTRUCTION,

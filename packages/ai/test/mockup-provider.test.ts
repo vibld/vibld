@@ -3,7 +3,12 @@ import { describe, it } from 'node:test';
 
 import { MockupProvider } from '../src/mockup-provider.ts';
 import { mockupMaxTokensFor } from '../src/plan-provider.ts';
-import { MOCKUP_SYSTEM_PROMPT, MockupSetSchema } from '../src/mockup-schema.ts';
+import {
+  DRAFT_MOCKUP_SYSTEM_PROMPT,
+  DraftMockupSetSchema,
+  MOCKUP_SYSTEM_PROMPT,
+  MockupSetSchema,
+} from '../src/mockup-schema.ts';
 import {
   ProviderRefusalError,
   ProviderShapeError,
@@ -760,5 +765,78 @@ describe('what the request asks the model for', () => {
       mockups: [mockup('Quiet'), mockup('Loud')],
     });
     assert.equal(parsed.success, true, 'the requested schema rejects mockups');
+  });
+});
+
+/**
+ * One direction, shown as a draft while a build runs (docs/decisions.md,
+ * 2026-09-28, the draft preview). The same run as a look, asking for less.
+ */
+describe('asking for one draft', () => {
+  function draftClient(
+    mockups: unknown[] = [mockup('Warm')],
+  ): PlanClient & { readonly seen: PlanRequest[] } {
+    const seen: PlanRequest[] = [];
+    return {
+      id: 'fake',
+      seen,
+      async createPlan(request: PlanRequest) {
+        seen.push(request);
+        return {
+          plan: { mockups },
+          stopReason: 'end_turn',
+          usage: USAGE,
+        } as PlanCompletion;
+      },
+    };
+  }
+
+  it('returns the one direction the model produced', async () => {
+    const set = await new MockupProvider(draftClient(), {
+      draft: true,
+    }).generate({ prompt: 'a bakery' });
+    assert.deepEqual(
+      set.mockups.map((each) => each.label),
+      ['Warm'],
+    );
+  });
+
+  it('sends the draft prompt and asks for the draft shape', async () => {
+    const fake = draftClient();
+    await new MockupProvider(fake, { draft: true }).generate({
+      prompt: 'a bakery',
+    });
+    assert.equal(fake.seen[0]?.system, DRAFT_MOCKUP_SYSTEM_PROMPT);
+    assert.equal(fake.seen[0]?.output?.name, 'mockup_draft');
+    assert.equal(fake.seen[0]?.output?.schema, DraftMockupSetSchema);
+  });
+
+  it('keeps the ceiling a look has, so it is metered as one', async () => {
+    const fake = draftClient();
+    await new MockupProvider(fake, {
+      model: 'deepseek-flash',
+      draft: true,
+    }).generate({ prompt: 'a bakery' });
+    assert.equal(fake.seen[0]?.maxTokens, mockupMaxTokensFor('deepseek-flash'));
+  });
+
+  it('carries a chosen style without asking for three', async () => {
+    const fake = draftClient();
+    await new MockupProvider(fake, {
+      style: 'brutalism',
+      draft: true,
+    }).generate({ prompt: 'a bakery' });
+    const sent = String(fake.seen[0]?.prompt);
+    assert.match(sent, /within this visual direction/i);
+    assert.doesNotMatch(sent, /three/);
+  });
+
+  it('refuses an answer with nothing to show', async () => {
+    await assert.rejects(
+      new MockupProvider(draftClient([]), { draft: true }).generate({
+        prompt: 'a bakery',
+      }),
+      ProviderShapeError,
+    );
   });
 });

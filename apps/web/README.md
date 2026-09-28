@@ -610,6 +610,42 @@ nobody opens. Shares are cleared from view (not revoked -- just no longer
 this session's to show) the moment the sandbox itself stops or fails, since
 a share only ever makes sense against a preview that is actually running.
 
+### The draft preview (resolved 2026-09-28)
+
+While a project's first build runs, the Preview tab shows a static draft of
+the page instead of "Nothing to preview yet", labelled "Draft, building the
+real site", with the build's stage (`LifecycleBar`) and progress
+(`ProgressMeter`) laid over its foot. `BuilderSession` holds it as
+`state.draft`; `PreviewPanel` renders it through `DraftPreview.tsx` and
+`MockupFrame.tsx`, the same `sandbox=""` frame and `mockupFrameDocument`
+content policy Explore's tiles use, so the draft cannot touch the builder.
+
+- **Which draft.** The direction picked in Explore, when there is one: it
+  is already in hand and is what the build was asked to follow. Otherwise
+  the session asks `/api/mockups` for one quick draft (`"draft": true`: one
+  direction instead of three, through the same route, rate-limit bucket,
+  reservation, ceiling and settlement as a look). The Worker draws it on
+  `DRAFT_MODEL` (DeepSeek Flash) whatever the build runs on, where the
+  model policy grants it, and on the build's model otherwise
+  (`draftModelFor` in `worker/model-access.ts`). It asks only after the
+  build's first progress event, which `/api/plan` sends once the build's
+  own reservation is held, so the draft can never take the in-flight slot
+  the build needed. A draft that fails is dropped silently; one still being
+  drawn when the build ends is aborted, which stops what it spends.
+- **After the build.** The draft stays, labelled "Draft, the real site is
+  built", with "Run live preview" (or the sandbox's start-up status) over
+  it, until the live preview is running; then the pane shows the live
+  preview as it always has. `Workspace` remembers that the live preview has
+  run, so stopping it afterwards does not bring the sketch back. A failed
+  or cancelled build drops the draft, and a sandbox that fails to start
+  shows its failure as before.
+- **Follow-ups** (a project with an accepted checkpoint) show no draft and
+  ask for none: the current preview or code stays on screen.
+- **Not saved.** The draft is neither a setting nor a turn, so the autosave
+  never sends it, and reopening the project does not bring it back.
+- **Fake mode** asks for no draft, since `/api/mockups` cannot answer a
+  deployment without model generation; the pane behaves as before.
+
 ### Setup
 
 1. Deploy `@vibld/preview` first (see its own README) -- apps/web's service

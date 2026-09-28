@@ -318,6 +318,12 @@ export function parseChosenMockup(
 
 export interface ParsedMockupRequest {
   prompt: string;
+  /**
+   * One direction to show while a build runs, rather than three to choose
+   * between (docs/decisions.md, 2026-09-28, the draft preview). Absent on
+   * an ordinary look.
+   */
+  draft?: true;
 }
 
 /**
@@ -342,7 +348,7 @@ export function parseMockupRequest(
     return fail(400, 'Body must be a JSON object.');
   }
 
-  const { prompt } = body as { prompt?: unknown };
+  const { prompt, draft } = body as { prompt?: unknown; draft?: unknown };
   if (typeof prompt !== 'string' || prompt.trim().length === 0) {
     return fail(400, 'A non-empty "prompt" is required.');
   }
@@ -352,7 +358,12 @@ export function parseMockupRequest(
       `Prompt must be ${limits.maxPromptChars} characters or fewer.`,
     );
   }
-  return { ok: true, value: { prompt } };
+  // Refused rather than read loosely: `"draft": "false"` is truthy, and a
+  // caller who meant a look would be sold a draft.
+  if (draft !== undefined && typeof draft !== 'boolean') {
+    return fail(400, '"draft" must be true or false.');
+  }
+  return { ok: true, value: { prompt, ...(draft ? { draft: true } : {}) } };
 }
 
 /** What a chat turn carries once validated (docs/decisions.md, 2026-09-28). */

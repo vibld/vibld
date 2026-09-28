@@ -1,26 +1,13 @@
 import type { ParsedMockup } from '@vibld/ai/mockup-schema';
-import { mockupFrameDocument } from '../generation/mockup-frame.ts';
+import { MockupFrame } from './MockupFrame.tsx';
 
 /**
  * The three directions, to look at and choose between (internal issue 185).
  *
  * Every mockup is model output, so every one is untrusted. Each renders in
- * an iframe with `srcDoc` and an empty `sandbox`, which is the same thing
- * `PreviewPanel` already does for the local mock and describes as "a fully
- * restricted frame": no scripts, no same-origin access, no forms, no
- * navigation. The mockup prompt forbids scripts outright, and this is what
- * makes that a guarantee rather than a request -- a `<script>` that slipped
- * through does not run.
- *
- * The sandbox is not a network policy, which is a separate guarantee this
- * component used to claim and not have (internal PR 189 review): a remote image or
- * font is fetched from inside a fully sandboxed frame and discloses the
- * viewer's IP. `mockupFrameDocument` adds the content policy that actually
- * stops it.
- *
- * Never `dangerouslySetInnerHTML`. Putting this markup in the shell's own
- * document would give model output the shell's origin, its Clerk session
- * and its DOM, which is the one thing ADR-0004 exists to prevent.
+ * `MockupFrame`, which says what makes that safe: a fully restricted frame
+ * and the content policy `mockupFrameDocument` adds, never the shell's own
+ * document.
  *
  * Renders what arrived rather than assuming three. The schema accepts two
  * to four on purpose (`mockup-schema.ts`): a run is already paid for by the
@@ -62,18 +49,11 @@ export function MockupChooser({
       <ul className="mockups__grid">
         {mockups.map((mockup, index) => (
           <li className="mockups__tile" key={`${mockup.label}-${index}`}>
-            {/*
-              `sandbox=""` and not merely `sandbox`: the empty value is the
-              deny-everything list. Dropping the attribute, or adding
-              `allow-scripts` with `allow-same-origin`, would hand model
-              output this document's origin.
-            */}
-            <iframe
+            <MockupFrame
               className="mockups__frame"
               title={`Mockup: ${mockup.label}`}
-              srcDoc={mockupFrameDocument(mockup.html)}
-              sandbox=""
-              loading="lazy"
+              html={mockup.html}
+              lazy
             />
             <div className="mockups__meta">
               <h3 className="mockups__label">{mockup.label}</h3>

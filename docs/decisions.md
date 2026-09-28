@@ -424,6 +424,37 @@ is still serving is not deleted until the takedown succeeds; and a site that
 had no project gets one, so its owner can reach it. See `apps/web/README.md`,
 "Projects" and "Cloudflare auto-publish".
 
+**While a build runs, the preview shows a draft of the page.** Chris decided
+on 2026-09-28 that the preview pane shows a static draft of the page while a
+build runs, instead of an empty or waiting state, labelled "Draft, building
+the real site" with the build's stage and progress over it: the mockup
+picked in Explore when there is one, and otherwise one quick mockup asked
+for when the build starts, accepting roughly 20 seconds and a few cents a
+build. The quick mockup is metered as mockups are, runs beside the build and
+never delays or blocks it, and is skipped if it fails or the build finishes
+first. The draft renders in a sandboxed frame, is never saved in the
+project, and gives way to the live preview once the build is accepted and
+the live preview is running. A follow-up on a project with an accepted
+checkpoint keeps its current preview or code and asks for no mockup. Where
+the implementation reads this in a particular way, not yet confirmed by
+Chris: the quick mockup is a one-direction request to `/api/mockups`
+(`"draft": true`) with the same ceiling, reservation, settlement and rate
+limit bucket as a three-direction look, in the build's chosen style but
+always on DeepSeek Flash where the policy allows it (Chris, 2026-09-28: a
+draft is a placeholder, a cent or two there against ten times that on the
+default model), falling back to the build's model otherwise; it is asked for once the Worker has admitted the build, not at the
+moment of submitting, so it cannot take the in-flight slot the build
+needed; between the build being accepted and the live preview running the
+pane keeps the draft, relabelled "Draft, the real site is built", with
+"Run live preview" or the sandbox's status over it, and does not return to
+it once the live preview has run; a failed or cancelled build drops the
+draft; "a follow-up" means any build once there is an accepted checkpoint,
+so a project whose earlier builds all failed still gets a draft, and a
+direction picked from Explore is not shown over an accepted project either;
+a failed quick mockup is not reported anywhere; and a deployment without
+model generation asks for none. See `apps/web/README.md`, "The draft
+preview".
+
 ### Resolved 2026-09-27
 
 **L15 stands: Stripe Tax is off, and the code now matches.** Chris confirmed

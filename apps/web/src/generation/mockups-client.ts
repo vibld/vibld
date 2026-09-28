@@ -27,6 +27,12 @@ export interface MockupRunOptions {
   fetchImpl?: typeof fetch;
   getToken?: () => Promise<string | null>;
   endpoint?: string;
+  /**
+   * One direction to show while a build runs, rather than three to choose
+   * between (docs/decisions.md, 2026-09-28, the draft preview). The same
+   * route, reservation and settlement; only what is asked for differs.
+   */
+  draft?: boolean;
 }
 
 export async function requestMockups(
@@ -47,6 +53,7 @@ export async function requestMockups(
       prompt: options.prompt,
       ...(options.style ? { style: options.style } : {}),
       ...(options.model ? { model: options.model } : {}),
+      ...(options.draft ? { draft: true } : {}),
     }),
     ...(options.signal ? { signal: options.signal } : {}),
   });

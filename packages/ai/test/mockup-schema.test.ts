@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  DRAFT_MOCKUP_STYLE_PREAMBLE,
+  DRAFT_MOCKUP_SYSTEM_PROMPT,
+  DraftMockupSetSchema,
   MAX_MOCKUP_LABEL_CHARS,
   MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
@@ -9,6 +12,7 @@ import {
   mockupUserPrompt,
 } from '../src/mockup-schema.ts';
 import { MAX_MOCKUP_FIXED_PROMPT_CHARS } from '../src/limits.ts';
+import { DRAFT_MOCKUP_JSON_INSTRUCTION } from '../src/plan-output.ts';
 import {
   MOCKUP_OUTPUT_TOKENS,
   mockupMaxTokensFor,
@@ -323,5 +327,95 @@ describe('the prompt a mockup run sends', () => {
     const bare = mockupUserPrompt('a bakery', null).length;
     const styled = mockupUserPrompt('a bakery', 'x'.repeat(1_500)).length;
     assert.ok(styled - bare > 1_000);
+  });
+});
+
+/**
+ * One direction, shown as a draft while a build runs (docs/decisions.md,
+ * 2026-09-28, the draft preview).
+ */
+describe('what a draft may be', () => {
+  it('accepts the one direction it asks for', () => {
+    assert.equal(
+      DraftMockupSetSchema.safeParse({ mockups: [mockup()] }).success,
+      true,
+    );
+  });
+
+  it('keeps a draft that arrived with company rather than refusing a paid run', () => {
+    assert.equal(
+      DraftMockupSetSchema.safeParse({ mockups: [mockup(), mockup()] }).success,
+      true,
+    );
+  });
+
+  it('refuses an answer with nothing to show', () => {
+    assert.equal(
+      DraftMockupSetSchema.safeParse({ mockups: [] }).success,
+      false,
+    );
+  });
+
+  it('holds its document to the same bounds as a direction', () => {
+    assert.equal(
+      DraftMockupSetSchema.safeParse({
+        mockups: [mockup({ html: 'x'.repeat(MAX_CHOSEN_MOCKUP_CHARS + 1) })],
+      }).success,
+      false,
+    );
+    assert.equal(
+      DraftMockupSetSchema.safeParse({ mockups: [mockup({ html: '  ' })] })
+        .success,
+      false,
+    );
+  });
+});
+
+describe('what the draft prompt asks for', () => {
+  it('asks for one, not three', () => {
+    assert.match(DRAFT_MOCKUP_SYSTEM_PROMPT, /exactly one entry/);
+    // "Two or three words" for the label is the only three it may say.
+    assert.doesNotMatch(
+      DRAFT_MOCKUP_SYSTEM_PROMPT,
+      /three (short|visual|directions|entries|mockups)|the three/i,
+    );
+    assert.doesNotMatch(DRAFT_MOCKUP_STYLE_PREAMBLE, /three/);
+  });
+
+  it('forbids every network reference, as a look does', () => {
+    for (const banned of [
+      /no external stylesheet/i,
+      /no script/i,
+      /no web font/i,
+      /no image URL/i,
+    ]) {
+      assert.match(DRAFT_MOCKUP_SYSTEM_PROMPT, banned);
+    }
+  });
+
+  it('keeps its fixed text inside the bound a look reserves', () => {
+    // The draft is reserved as a look is (`MOCKUP_INPUT_CHARS`), so its
+    // own fixed text has to fit the same bound. The output instruction is
+    // counted too, because DeepSeek appends it to the system message.
+    const fixed =
+      DRAFT_MOCKUP_SYSTEM_PROMPT.length +
+      DRAFT_MOCKUP_STYLE_PREAMBLE.length +
+      DRAFT_MOCKUP_JSON_INSTRUCTION.length;
+    assert.ok(
+      fixed <= MAX_MOCKUP_FIXED_PROMPT_CHARS,
+      `draft prompt text is ${fixed} chars, past the reserved ${MAX_MOCKUP_FIXED_PROMPT_CHARS}`,
+    );
+  });
+
+  it('wraps a chosen direction in its own preamble', () => {
+    const sent = mockupUserPrompt(
+      'a bakery',
+      'Quiet editorial, serif.',
+      DRAFT_MOCKUP_STYLE_PREAMBLE,
+    );
+    assert.equal(
+      sent,
+      `a bakery${DRAFT_MOCKUP_STYLE_PREAMBLE}Quiet editorial, serif.`,
+    );
   });
 });

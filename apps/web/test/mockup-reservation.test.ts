@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  DRAFT_MOCKUP_JSON_INSTRUCTION,
+  DRAFT_MOCKUP_STYLE_PREAMBLE,
+  DRAFT_MOCKUP_SYSTEM_PROMPT,
   MAX_CHOSEN_MOCKUP_CHARS,
   MAX_MOCKUP_LABEL_CHARS,
   MOCKUP_STYLE_PREAMBLE,
@@ -60,6 +63,26 @@ describe('what a mockup run reserves', () => {
     assert.ok(
       MOCKUP_INPUT_CHARS >= sent,
       `reserves ${MOCKUP_INPUT_CHARS} characters of input for a run that can send ${sent}`,
+    );
+  });
+
+  it('covers a draft, which is reserved as a look is', () => {
+    // The draft a build shows while it runs (docs/decisions.md, 2026-09-28)
+    // goes through the same route and the same reservation, so its own
+    // text has to fit the same figure. The output instruction is counted
+    // because DeepSeek appends it to the system message.
+    const longestDirection = Math.max(
+      ...STYLE_PRESETS.map((preset) => styleDirection(preset.id)?.length ?? 0),
+    );
+    const sent =
+      DEFAULT_LIMITS.maxPromptChars +
+      longestDirection +
+      DRAFT_MOCKUP_STYLE_PREAMBLE.length +
+      DRAFT_MOCKUP_SYSTEM_PROMPT.length +
+      DRAFT_MOCKUP_JSON_INSTRUCTION.length;
+    assert.ok(
+      MOCKUP_INPUT_CHARS >= sent,
+      `reserves ${MOCKUP_INPUT_CHARS} characters of input for a draft that can send ${sent}`,
     );
   });
 

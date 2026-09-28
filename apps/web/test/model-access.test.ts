@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { MODEL_CATALOGUE } from '@vibld/ai/model-catalogue';
-import { decideModel, grantedFor } from '../worker/model-access.ts';
+import {
+  DRAFT_MODEL,
+  decideModel,
+  draftModelFor,
+  grantedFor,
+} from '../worker/model-access.ts';
 
 /** Every provider keyed, so "everything configured" really means everything. */
 const ALL_KEYED = {
@@ -209,5 +214,29 @@ describe('a renamed model id reaching the endpoint', () => {
       'deepseek-flash',
     );
     assert.equal(decision.ok, false);
+  });
+});
+
+describe('draftModelFor', () => {
+  // A build's draft is drawn by the cheapest page-writing model whatever
+  // the build runs on (Chris, 2026-09-28), where the policy allows it.
+  it('names DeepSeek Flash where it is deployed and granted', () => {
+    assert.equal(DRAFT_MODEL, 'deepseek-flash');
+    assert.equal(draftModelFor(ALL_KEYED, 'anyone@example.com'), DRAFT_MODEL);
+  });
+
+  it('falls back to null where the policy withholds it', () => {
+    const env = {
+      ...ALL_KEYED,
+      VIBLD_MODEL_POLICY: JSON.stringify({ default: ['gpt-6-sol'] }),
+    };
+    assert.equal(draftModelFor(env, 'anyone@example.com'), null);
+  });
+
+  it('falls back to null where DeepSeek is not deployed', () => {
+    assert.equal(
+      draftModelFor({ OPENAI_API_KEY: 'o' }, 'anyone@example.com'),
+      null,
+    );
   });
 });

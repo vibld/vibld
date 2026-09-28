@@ -2180,6 +2180,47 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* The draft preview (docs/decisions.md, 2026-09-28): a sketch of the page
+   while the real site is built, with the build's progress over its foot.
+   The label sits outside the frame, where the model cannot reach it. */
+.preview__draft {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+
+.preview__draft-label {
+  color: var(--text);
+}
+
+.preview__draft-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 24rem;
+}
+
+.preview__draft-overlay {
+  position: absolute;
+  inset: auto 0.75rem 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--surface-veil);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+}
+
+.preview__draft-status {
+  margin: 0;
+  font-weight: 600;
+}
+
 .preview__working {
   width: 10rem;
   height: 3px;

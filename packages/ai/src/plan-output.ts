@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { ZodType } from 'zod';
 
 import { GenerationPlanSchema } from './plan-schema.ts';
-import { MockupSetSchema } from './mockup-schema.ts';
+import { DraftMockupSetSchema, MockupSetSchema } from './mockup-schema.ts';
 import { ChatDecisionSchema } from './chat-schema.ts';
 
 /**
@@ -128,6 +128,23 @@ code fence. It must match this shape exactly:
 "mockups" must contain three entries, each a complete self-contained HTML
 document.`;
 
+export const DRAFT_MOCKUP_JSON_INSTRUCTION = `OUTPUT FORMAT
+Reply with a single json object and nothing else. No prose, no markdown, no
+code fence. It must match this shape exactly:
+
+{
+  "mockups": [
+    {
+      "label": "a short name for this direction",
+      "rationale": "one sentence on what it is for",
+      "html": "<!doctype html><html>...the complete document...</html>"
+    }
+  ]
+}
+
+"mockups" must contain exactly one entry, a complete self-contained HTML
+document.`;
+
 export const CHAT_JSON_INSTRUCTION = `OUTPUT FORMAT
 Reply with a single json object and nothing else. No prose, no markdown, no
 code fence. It must match this shape exactly:
@@ -152,6 +169,16 @@ export const MOCKUP_OUTPUT: PlanOutput = {
   name: 'mockup_set',
   schema: MockupSetSchema,
   instruction: MOCKUP_JSON_INSTRUCTION,
+};
+
+/**
+ * One direction, shown as a draft while a build runs (docs/decisions.md,
+ * 2026-09-28, the draft preview).
+ */
+export const DRAFT_MOCKUP_OUTPUT: PlanOutput = {
+  name: 'mockup_draft',
+  schema: DraftMockupSetSchema,
+  instruction: DRAFT_MOCKUP_JSON_INSTRUCTION,
 };
 
 /**

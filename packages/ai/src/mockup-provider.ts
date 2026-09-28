@@ -1,11 +1,18 @@
 import {
+  DRAFT_MOCKUP_STYLE_PREAMBLE,
+  DRAFT_MOCKUP_SYSTEM_PROMPT,
+  DraftMockupSetSchema,
+  MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
   MockupSetSchema,
   mockupUserPrompt,
 } from './mockup-schema.ts';
-import { MOCKUP_OUTPUT } from './plan-output.ts';
+import { DRAFT_MOCKUP_OUTPUT, MOCKUP_OUTPUT } from './plan-output.ts';
+import type { PlanOutput } from './plan-output.ts';
 import type { ParsedMockupSet } from './mockup-schema.ts';
-import { MOCKUP_SUBJECT } from './errors.ts';
+import type { ZodType } from 'zod';
+import { DRAFT_MOCKUP_SUBJECT, MOCKUP_SUBJECT } from './errors.ts';
+import type { OutputSubject } from './errors.ts';
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -97,7 +104,42 @@ export interface MockupProviderOptions {
    */
   onPromptChars?: (characters: number) => void;
   style?: StylePresetId;
+  /**
+   * One direction rather than three, shown as a draft while a build runs
+   * (docs/decisions.md, 2026-09-28, the draft preview).
+   *
+   * Everything else is the same run: the same ceiling, the same retry of
+   * an empty reply, the same reporting. Only what is asked for and what
+   * the answer is checked against change, so a draft is metered exactly as
+   * a look is.
+   */
+  draft?: boolean;
 }
+
+/** What one kind of mockup run asks for and holds its answer to. */
+interface MockupAsk {
+  system: string;
+  preamble: string;
+  output: PlanOutput;
+  schema: ZodType<ParsedMockupSet>;
+  subject: OutputSubject;
+}
+
+const THREE_DIRECTIONS: MockupAsk = {
+  system: MOCKUP_SYSTEM_PROMPT,
+  preamble: MOCKUP_STYLE_PREAMBLE,
+  output: MOCKUP_OUTPUT,
+  schema: MockupSetSchema,
+  subject: MOCKUP_SUBJECT,
+};
+
+const ONE_DRAFT: MockupAsk = {
+  system: DRAFT_MOCKUP_SYSTEM_PROMPT,
+  preamble: DRAFT_MOCKUP_STYLE_PREAMBLE,
+  output: DRAFT_MOCKUP_OUTPUT,
+  schema: DraftMockupSetSchema,
+  subject: DRAFT_MOCKUP_SUBJECT,
+};
 
 export interface MockupRequest {
   prompt: string;
@@ -116,6 +158,7 @@ export class MockupProvider {
   readonly #onProgress?: (progress: PlanProgress) => void;
   readonly #onPromptChars?: (characters: number) => void;
   readonly #style?: StylePresetId;
+  readonly #ask: MockupAsk;
 
   constructor(client: PlanClient, options: MockupProviderOptions = {}) {
     this.#client = client;
@@ -129,11 +172,12 @@ export class MockupProvider {
     this.#onProgress = options.onProgress;
     this.#style = options.style;
     this.#onPromptChars = options.onPromptChars;
+    this.#ask = options.draft ? ONE_DRAFT : THREE_DIRECTIONS;
     this.id = `${client.id}:${this.#model}`;
   }
 
   async generate(request: MockupRequest): Promise<ParsedMockupSet> {
-    const first = await this.#ask(request);
+    const first = await this.#send(request);
 
     /*
      * One retry, for an empty reply and nothing else (internal PR 190).
@@ -214,8 +258,8 @@ export class MockupProvider {
         return readCompletion(
           first,
           this.#maxTokens,
-          MockupSetSchema,
-          MOCKUP_SUBJECT,
+          this.#ask.schema,
+          this.#ask.subject,
         );
       }
       /*
@@ -244,12 +288,12 @@ export class MockupProvider {
         return readCompletion(
           first,
           this.#maxTokens,
-          MockupSetSchema,
-          MOCKUP_SUBJECT,
+          this.#ask.schema,
+          this.#ask.subject,
         );
       }
 
-      completion = await this.#ask(request);
+      completion = await this.#send(request);
     }
 
     // Reported before anything can throw, for the same reason the build
@@ -263,17 +307,17 @@ export class MockupProvider {
     return readCompletion(
       completion,
       this.#maxTokens,
-      MockupSetSchema,
-      MOCKUP_SUBJECT,
+      this.#ask.schema,
+      this.#ask.subject,
     );
   }
 
   /** One attempt, with nothing reported and nothing validated. */
-  async #ask(request: MockupRequest): Promise<PlanCompletion> {
+  async #send(request: MockupRequest): Promise<PlanCompletion> {
     const direction = this.#style ? styleDirection(this.#style) : null;
     return this.#client.createPlan({
-      system: MOCKUP_SYSTEM_PROMPT,
-      prompt: mockupUserPrompt(request.prompt, direction),
+      system: this.#ask.system,
+      prompt: mockupUserPrompt(request.prompt, direction, this.#ask.preamble),
       model: this.#model,
       maxTokens: this.#maxTokens,
       effort: this.#effort,
@@ -282,7 +326,7 @@ export class MockupProvider {
       // constrained the reply to a generation plan while the system prompt
       // above asked for a set of directions, so on Anthropic and OpenAI the
       // run could not succeed and on DeepSeek it was being argued with.
-      output: MOCKUP_OUTPUT,
+      output: this.#ask.output,
       ...(this.#signal ? { signal: this.#signal } : {}),
       ...(this.#onProgress ? { onProgress: this.#onProgress } : {}),
       // Forwarded so the caller can settle a cancelled run from what was
