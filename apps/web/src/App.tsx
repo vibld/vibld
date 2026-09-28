@@ -190,7 +190,9 @@ function Builder() {
             <PromptPanel
               state={state}
               onSubmit={(prompt, mode, style, referenceUrl) => {
-                void session.submit(prompt, mode, style, referenceUrl);
+                // Through the conversation: the agent decides whether this
+                // is a question to answer or a change to build.
+                void session.send(prompt, mode, style, referenceUrl);
               }}
               onExplore={(prompt, style, referenceUrl) => {
                 void session.explore(prompt, style, referenceUrl);

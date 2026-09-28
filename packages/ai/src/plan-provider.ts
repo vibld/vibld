@@ -423,6 +423,43 @@ export function mockupMaxTokensFor(
   );
 }
 
+/**
+ * A runaway guard on one chat turn, in the sense `MOCKUP_OUTPUT_TOKENS` is
+ * one: not an estimate of what a turn needs, but the point past which it has
+ * clearly gone wrong.
+ *
+ * A turn writes a few sentences, or a brief of at most
+ * `MAX_CHAT_BRIEF_CHARS` (about a thousand tokens), plus whatever the model
+ * thinks first. Eight thousand leaves room for thinking at the measured
+ * two-thirds share (internal PR 190) several times over, and keeps the reservation a
+ * turn holds small: it is held against the same allowance a build draws on,
+ * and a question should not look like a build to somebody near their limit.
+ */
+export const CHAT_OUTPUT_TOKENS = 8_000;
+
+/**
+ * The chat ceiling for one model: the flat guard, or the mockup ceiling for
+ * that model, whichever is smaller. A turn is never allowed to cost more
+ * than a look, for the reason a look is never allowed to cost more than a
+ * build.
+ */
+export function chatMaxTokensFor(
+  model: string,
+  /** The rate in force, for the reason `mockupMaxTokensFor` takes it. */
+  outputMicroUsd?: number,
+): number {
+  return Math.min(
+    CHAT_OUTPUT_TOKENS,
+    mockupMaxTokensFor(model, outputMicroUsd),
+  );
+}
+
+/**
+ * How hard a chat turn thinks. Low, because a turn is a routing decision and
+ * a short piece of writing, and the person is waiting for it in a chat box.
+ */
+export const CHAT_EFFORT: PlanEffort = 'low';
+
 export const DEFAULT_EFFORT: PlanEffort = 'high';
 
 /**

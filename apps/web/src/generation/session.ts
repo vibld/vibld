@@ -14,7 +14,14 @@ import type {
 } from '@vibld/core';
 import type { ModelProvider } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
-import { MAX_REFERENCE_CHARS } from '@vibld/ai/limits';
+import {
+  MAX_CHAT_MESSAGE_CHARS,
+  MAX_CHAT_PATH_CHARS,
+  MAX_CHAT_PROJECT_FILES,
+  MAX_CHAT_SUMMARY_CHARS,
+  MAX_CHAT_TOTAL_PATH_CHARS,
+  MAX_REFERENCE_CHARS,
+} from '@vibld/ai/limits';
 import type { ModelOption } from './remote-provider.ts';
 import type { ProjectBrief } from './brief.ts';
 import { deriveBrief } from './brief.ts';
@@ -23,6 +30,8 @@ import { buildPlan } from './plan-builder.ts';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import type { ParsedMockup } from '@vibld/ai/mockup-schema';
 import { requestMockups } from './mockups-client.ts';
+import { requestChatTurn } from './chat-client.ts';
+import type { ChatMessage, ChatProjectContext } from './chat-client.ts';
 import { createValidator } from './validator.ts';
 import {
   ObservingGenerationStore,
@@ -134,6 +143,12 @@ export interface BuilderState {
   mockups: ParsedMockup[];
   /** A mockup run is in flight. Separate from `running`, which is a build. */
   exploring: boolean;
+  /**
+   * The agent is deciding whether to answer or build (`/api/chat`).
+   * Separate from `running`, which is a build: nothing is being written
+   * yet, and a reply may mean nothing will be.
+   */
+  chatting: boolean;
 }
 
 /** One prompt and what became of it. */
@@ -142,7 +157,17 @@ export interface TranscriptTurn {
   runId: string;
   prompt: string;
   at: number;
-  status: 'running' | 'accepted' | 'failed' | 'cancelled';
+  /**
+   * `replied`: the agent answered in words and nothing was built (the
+   * decision recorded in docs/decisions.md, 2026-09-28).
+   */
+  status: 'running' | 'accepted' | 'failed' | 'cancelled' | 'replied';
+  /**
+   * What the agent said in the conversation: the whole reply for a
+   * `replied` turn, or its one line about the change it is making for a
+   * build. Null for a turn that went straight to a build.
+   */
+  agentMessage?: string | null;
   /** The model's own description of what it built. Null until the plan lands. */
   summary: string | null;
   fileCount: number;
@@ -193,6 +218,7 @@ export interface SessionOptions {
    */
   /** Ask for directions. Injectable so tests need no network. */
   requestMockupsImpl?: typeof requestMockups;
+  requestChatTurnImpl?: typeof requestChatTurn;
   resolveProvider?: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -253,6 +279,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     generation: null,
     mockups: [],
     exploring: false,
+    chatting: false,
   };
 }
 
@@ -326,6 +353,17 @@ export class BuilderSession {
   readonly #stageDelayMs: number;
   readonly #budgetLimits: ConstructorParameters<typeof RunBudgetLedger>[0];
   readonly #requestMockups: typeof requestMockups;
+  readonly #requestChatTurn: typeof requestChatTurn;
+  #chatAbort: AbortController | null = null;
+  /**
+   * The style and reference sent with a message the agent answered rather
+   * than built. They were chosen for a build, so they are kept for the
+   * next one, which is usually the "yes" that approves what was proposed.
+   */
+  #pendingBuildOptions: {
+    style: StylePresetId | null;
+    referenceUrl: string | null;
+  } | null = null;
   #mockupContext: {
     prompt: string;
     style: StylePresetId | null;
@@ -362,6 +400,7 @@ export class BuilderSession {
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
     this.#resolveProvider = options.resolveProvider ?? defaultResolveProvider;
     this.#requestMockups = options.requestMockupsImpl ?? requestMockups;
+    this.#requestChatTurn = options.requestChatTurnImpl ?? requestChatTurn;
     this.#state = initialState(this.#ledger.report());
   }
 
@@ -401,6 +440,8 @@ export class BuilderSession {
     this.#abort = null;
     this.#exploreAbort?.abort();
     this.#exploreAbort = null;
+    this.#chatAbort?.abort();
+    this.#chatAbort = null;
     this.#listeners.clear();
   }
 
@@ -490,6 +531,9 @@ export class BuilderSession {
     // actually takes.
     this.#exploreAbort?.abort();
     this.#exploreAbort = null;
+    this.#chatAbort?.abort();
+    this.#chatAbort = null;
+    this.#pendingBuildOptions = null;
     this.#mockupContext = null;
     this.#emit();
   }
@@ -635,15 +679,204 @@ export class BuilderSession {
     this.#emit();
   }
 
+  /**
+   * One message in the conversation (docs/decisions.md, 2026-09-28: the
+   * agent decides). `/api/chat` either answers in words, which closes the
+   * turn as `replied` and changes nothing, or returns a build brief, which
+   * is submitted exactly as a typed prompt would be, under the person's own
+   * words and the agent's one line about what it is doing.
+   *
+   * Only against a real model. The deterministic provider has nobody to
+   * talk to, and a forced failure is a test of the build path, so both go
+   * straight to `submit`.
+   */
+  async send(
+    prompt: string,
+    mode: PlanMode = 'succeed',
+    style: StylePresetId | null = null,
+    referenceUrl: string | null = null,
+  ): Promise<void> {
+    const trimmed = prompt.trim();
+    if (
+      this.#disposed ||
+      this.#state.running ||
+      this.#state.chatting ||
+      this.#state.exploring ||
+      trimmed.length === 0
+    ) {
+      return;
+    }
+    if (this.#state.generation !== 'model' || mode !== 'succeed') {
+      return this.submit(trimmed, mode, style, referenceUrl);
+    }
+
+    // Chosen for a build. A reply leaves them for the next build, which is
+    // usually the "yes" to what the agent proposed.
+    const pending = this.#pendingBuildOptions;
+    const buildStyle = style ?? pending?.style ?? null;
+    const buildReference = referenceUrl ?? pending?.referenceUrl ?? null;
+
+    // Directions belong to the request they were drawn for, and this is a
+    // new one either way.
+    this.#mockupContext = null;
+    const epoch = this.#epoch;
+    this.#runSeq += 1;
+    const runId = `chat-${this.#runSeq}`;
+    const messages: ChatMessage[] = [
+      ...this.#conversation(),
+      { role: 'user', text: trimmed },
+    ];
+    const project = this.#projectContext();
+    const controller = new AbortController();
+    this.#chatAbort = controller;
+    this.#patch(epoch, (state) => ({
+      ...state,
+      chatting: true,
+      mockups: [],
+      transcript: this.#openTurn(state.transcript, runId, trimmed),
+    }));
+
+    const result = await this.#requestChatTurn({
+      messages,
+      project,
+      model: this.#state.model,
+      signal: controller.signal,
+    });
+    if (this.#chatAbort === controller) this.#chatAbort = null;
+    if (this.#disposed || epoch !== this.#epoch) return;
+
+    if (!result.ok) {
+      // A cancellation already closed the turn, as `cancelled`.
+      if (result.error.kind === 'aborted') return;
+      const problem = result.error.message;
+      this.#patch(epoch, (state) => ({
+        ...state,
+        chatting: false,
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'failed',
+          problem,
+        }),
+        timeline: this.#append(state.timeline, 'error', problem),
+      }));
+      return;
+    }
+
+    const turn = result.turn;
+    if (turn.action === 'reply') {
+      this.#pendingBuildOptions =
+        buildStyle || buildReference
+          ? { style: buildStyle, referenceUrl: buildReference }
+          : null;
+      this.#patch(epoch, (state) => ({
+        ...state,
+        chatting: false,
+        transcript: this.#closeTurn(state.transcript, {
+          status: 'replied',
+          agentMessage: turn.message,
+        }),
+      }));
+      return;
+    }
+
+    // A build. The deciding turn is replaced by the build's own, which
+    // `submit` opens under the same words, so the conversation shows one
+    // exchange rather than a question and then a second copy of it.
+    this.#pendingBuildOptions = null;
+    const last = this.#state.transcript.at(-1);
+    this.#state = {
+      ...this.#state,
+      chatting: false,
+      transcript:
+        last?.runId === runId
+          ? this.#state.transcript.slice(0, -1)
+          : this.#state.transcript,
+    };
+    this.#emit();
+    await this.submit(turn.brief, 'succeed', buildStyle, buildReference, null, {
+      prompt: trimmed,
+      agentMessage: turn.message,
+    });
+  }
+
+  /**
+   * The conversation so far, as `/api/chat` reads it: each message and
+   * what came of it. A build's outcome is said in words, because what the
+   * agent needs to know is what happened, not the shape of this state.
+   */
+  #conversation(): ChatMessage[] {
+    const clip = (text: string) => text.slice(0, MAX_CHAT_MESSAGE_CHARS);
+    const messages: ChatMessage[] = [];
+    for (const turn of this.#state.transcript) {
+      if (turn.status === 'running') continue;
+      const said: string[] = [];
+      if (turn.agentMessage) said.push(turn.agentMessage);
+      if (turn.status === 'accepted') {
+        said.push(
+          turn.summary
+            ? `Built it: ${turn.summary}`
+            : `Built it (${turn.fileCount} files).`,
+        );
+      } else if (turn.status === 'failed') {
+        said.push(
+          `That did not work${turn.problem ? `: ${turn.problem}` : '.'} Nothing was changed.`,
+        );
+      } else if (turn.status === 'cancelled') {
+        said.push('Cancelled. Nothing was changed.');
+      }
+      messages.push({ role: 'user', text: clip(turn.prompt) });
+      if (said.length > 0) {
+        messages.push({ role: 'assistant', text: clip(said.join(' ')) });
+      }
+    }
+    return messages;
+  }
+
+  /**
+   * The accepted project as `/api/chat` takes it: its summary and its file
+   * paths, never their contents, and within the Worker's own bounds, which
+   * refuse rather than trim. A large project is described by its first
+   * paths rather than turned away.
+   */
+  #projectContext(): ChatProjectContext | null {
+    const snapshot = this.#state.acceptedSnapshot;
+    if (!snapshot) return null;
+    const accepted = [...this.#state.transcript]
+      .reverse()
+      .find((turn) => turn.status === 'accepted');
+    const files: string[] = [];
+    let total = 0;
+    for (const file of snapshot.files) {
+      if (files.length >= MAX_CHAT_PROJECT_FILES) break;
+      if (file.path.length > MAX_CHAT_PATH_CHARS) continue;
+      if (/[\u0000-\u001f\u007f]/.test(file.path)) continue;
+      if (total + file.path.length > MAX_CHAT_TOTAL_PATH_CHARS) break;
+      total += file.path.length;
+      files.push(file.path);
+    }
+    return {
+      summary: accepted?.summary?.slice(0, MAX_CHAT_SUMMARY_CHARS) ?? null,
+      files,
+    };
+  }
+
   async submit(
     prompt: string,
     mode: PlanMode = 'succeed',
     style: StylePresetId | null = null,
     referenceUrl: string | null = null,
     mockup: { label: string; html: string } | null = null,
+    /**
+     * How the turn reads in the conversation, when the build was decided by
+     * the agent (`send`): the person's own words, and the agent's line about
+     * what it is doing. The build itself runs on `prompt`, the agent's
+     * brief, which carries everything agreed in the conversation.
+     */
+    display: { prompt: string; agentMessage: string } | null = null,
   ): Promise<void> {
     const trimmed = prompt.trim();
     if (this.#disposed || this.#state.running || trimmed.length === 0) return;
+    const shown = display?.prompt ?? trimmed;
+    const said = { agentMessage: display?.agentMessage ?? null };
 
     // Any build invalidates the directions, not only choosing one
     // (internal PR 189 review). Pressing Generate with a set on screen used to leave
@@ -708,7 +941,8 @@ export class BuilderSession {
         runId,
         prompt: trimmed,
         problems: [message],
-        transcript: this.#openTurn(state.transcript, runId, trimmed, {
+        transcript: this.#openTurn(state.transcript, runId, shown, {
+          ...said,
           status: 'failed',
           problem: message,
         }),
@@ -729,7 +963,7 @@ export class BuilderSession {
       planSummary: null,
       stagedFiles: [],
       problems: [],
-      transcript: this.#openTurn(state.transcript, runId, trimmed),
+      transcript: this.#openTurn(state.transcript, runId, shown, said),
       timeline: this.#append(
         state.timeline,
         'info',
@@ -928,7 +1162,24 @@ export class BuilderSession {
    * the epoch bump below drops every later write from the run being left.
    */
   cancel(): void {
-    if (this.#disposed || !this.#state.running) return;
+    if (this.#disposed) return;
+    if (this.#state.chatting) {
+      // The agent has not decided anything yet, so there is no build to
+      // stop and no checkpoint to protect: only the question to withdraw.
+      this.#chatAbort?.abort();
+      this.#chatAbort = null;
+      this.#epoch += 1;
+      this.#state = {
+        ...this.#state,
+        chatting: false,
+        transcript: this.#closeTurn(this.#state.transcript, {
+          status: 'cancelled',
+        }),
+      };
+      this.#emit();
+      return;
+    }
+    if (!this.#state.running) return;
 
     this.#abort?.abort();
     this.#abort = null;
@@ -973,6 +1224,7 @@ export class BuilderSession {
         revision: null,
         problem: null,
         providerId: null,
+        agentMessage: null,
         ...patch,
       },
     ];

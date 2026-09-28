@@ -69,6 +69,10 @@ export const GATED_PATHS: readonly string[] = [
   // gate is about whether an uninvited account may spend this deployment's
   // money at all, not about how much (internal issue 185).
   '/api/mockups',
+  // Spends model budget on every message, including the ones that only
+  // reply. A question is cheaper than a build and is still this
+  // deployment's money.
+  '/api/chat',
   // Writes into somebody's repository, and mints tokens to do it.
   '/api/github/connect',
   '/api/github/complete',

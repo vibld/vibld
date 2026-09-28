@@ -34,6 +34,7 @@ import {
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
 import { handleMedia } from './media-handlers.ts';
+import { handleChat } from './chat-handler.ts';
 import { MediaStore } from './media-store.ts';
 import { spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
@@ -2601,6 +2602,17 @@ async function route(
 
   if (pathname === '/api/mockups') {
     return handleMockups(request, env, ctx);
+  }
+
+  // One turn of the builder's conversation: a reply, or a brief the client
+  // then builds through `/api/plan` (docs/decisions.md, 2026-09-28).
+  if (pathname === '/api/chat') {
+    return handleChat(request, env, {
+      configured: isConfigured(env),
+      resolvePrincipal: (req) => resolvePrincipal(req, env),
+      createClient: (model) => createPlanClient(env, model),
+      waitUntil: (promise) => ctx.waitUntil(promise),
+    });
   }
 
   if (pathname === '/api/preview') {

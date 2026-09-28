@@ -1,5 +1,12 @@
 import {
   MAX_BASE_CONTENT_CHARS,
+  MAX_CHAT_MESSAGE_CHARS,
+  MAX_CHAT_MESSAGES,
+  MAX_CHAT_PATH_CHARS,
+  MAX_CHAT_PROJECT_FILES,
+  MAX_CHAT_SUMMARY_CHARS,
+  MAX_CHAT_TOTAL_CHARS,
+  MAX_CHAT_TOTAL_PATH_CHARS,
   MAX_CHOSEN_MOCKUP_CHARS,
   MAX_KNOWLEDGE_CHARS,
   MAX_REFERENCE_URL_CHARS,
@@ -12,6 +19,7 @@ import { isStylePresetId } from '@vibld/ai/style-presets';
 import { MAX_MOCKUP_LABEL_CHARS } from '@vibld/ai/mockup-schema';
 import { sanitizeStyleDna } from '@vibld/ai/style-dna';
 import type { ProviderName } from '@vibld/ai/select-client';
+import type { ChatMessage, ChatProjectContext } from '@vibld/ai/chat-schema';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -345,6 +353,137 @@ export function parseMockupRequest(
     );
   }
   return { ok: true, value: { prompt } };
+}
+
+/** What a chat turn carries once validated (docs/decisions.md, 2026-09-28). */
+export interface ParsedChatRequest {
+  /** The most recent messages, oldest first, ending with the user's. */
+  messages: ChatMessage[];
+  /** The current accepted checkpoint, or null before the first build. */
+  project: ChatProjectContext | null;
+}
+
+/** Any control character, line breaks included. */
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+
+/**
+ * A chat turn: the conversation so far, and what the project is now.
+ *
+ * Every term is bounded, because every term goes to the model and the
+ * reservation is sized from these bounds (`CHAT_INPUT_CHARS`). The message
+ * count is the one bound applied by trimming rather than refusal: the oldest
+ * messages are dropped, since a long conversation is an ordinary thing to
+ * have and its beginning is the part a turn needs least. Everything else is
+ * refused, so a caller is never answered about something it did not send.
+ *
+ * Paths are listed for the model and written nowhere, so they are held to a
+ * printable single line rather than to `pathProblem`'s canonical form: a
+ * line break is the only thing that could make one path read as two.
+ */
+export function parseChatRequest(
+  body: unknown,
+): GuardResult<ParsedChatRequest> {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return fail(400, 'Body must be a JSON object.');
+  }
+  const { messages, project } = body as {
+    messages?: unknown;
+    project?: unknown;
+  };
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return fail(400, '"messages" must be a non-empty list.');
+  }
+  const kept: ChatMessage[] = [];
+  let total = 0;
+  for (const entry of messages.slice(-MAX_CHAT_MESSAGES)) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return fail(400, 'Every message must be an object.');
+    }
+    const { role, text } = entry as { role?: unknown; text?: unknown };
+    if (role !== 'user' && role !== 'assistant') {
+      return fail(400, 'A message "role" must be "user" or "assistant".');
+    }
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      return fail(400, 'Every message needs non-empty "text".');
+    }
+    if (text.length > MAX_CHAT_MESSAGE_CHARS) {
+      return fail(
+        413,
+        `A message must be ${MAX_CHAT_MESSAGE_CHARS} characters or fewer.`,
+      );
+    }
+    total += text.length;
+    if (total > MAX_CHAT_TOTAL_CHARS) {
+      return fail(
+        413,
+        `The conversation sent with a message must be ${MAX_CHAT_TOTAL_CHARS} characters or fewer.`,
+      );
+    }
+    kept.push({ role, text });
+  }
+  if (kept[kept.length - 1]!.role !== 'user') {
+    return fail(400, 'The last message must be from the user.');
+  }
+
+  if (project === undefined || project === null) {
+    return { ok: true, value: { messages: kept, project: null } };
+  }
+  if (typeof project !== 'object' || Array.isArray(project)) {
+    return fail(400, '"project" must be an object.');
+  }
+  const { summary, files } = project as { summary?: unknown; files?: unknown };
+  if (
+    summary !== undefined &&
+    summary !== null &&
+    typeof summary !== 'string'
+  ) {
+    return fail(400, '"project.summary" must be a string or null.');
+  }
+  if (typeof summary === 'string' && summary.length > MAX_CHAT_SUMMARY_CHARS) {
+    return fail(
+      413,
+      `"project.summary" must be ${MAX_CHAT_SUMMARY_CHARS} characters or fewer.`,
+    );
+  }
+  if (!Array.isArray(files)) {
+    return fail(400, '"project.files" must be a list of paths.');
+  }
+  if (files.length > MAX_CHAT_PROJECT_FILES) {
+    return fail(
+      413,
+      `"project.files" may list at most ${MAX_CHAT_PROJECT_FILES} paths.`,
+    );
+  }
+  let pathChars = 0;
+  for (const path of files) {
+    if (typeof path !== 'string' || path.length === 0) {
+      return fail(400, 'Every entry of "project.files" must be a path.');
+    }
+    if (CONTROL_CHARACTER.test(path)) {
+      return fail(400, 'A project path contains an invalid character.');
+    }
+    if (path.length > MAX_CHAT_PATH_CHARS) {
+      return fail(
+        413,
+        `File paths must be ${MAX_CHAT_PATH_CHARS} characters or fewer.`,
+      );
+    }
+    pathChars += path.length;
+    if (pathChars > MAX_CHAT_TOTAL_PATH_CHARS) {
+      return fail(413, 'The project has too many path characters to send.');
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      messages: kept,
+      project: {
+        summary: typeof summary === 'string' ? summary : null,
+        files: files as string[],
+      },
+    },
+  };
 }
 
 export function parsePreviewRequest(

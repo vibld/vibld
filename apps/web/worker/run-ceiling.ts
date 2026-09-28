@@ -24,6 +24,7 @@
 
 import {
   cacheRatesFor,
+  chatMaxTokensFor,
   findModel,
   maxTokensFor,
   mockupMaxTokensFor,
@@ -32,6 +33,10 @@ import {
 import type { ProviderEnv } from '@vibld/ai';
 
 import {
+  MAX_CHAT_FIXED_PROMPT_CHARS,
+  MAX_CHAT_SUMMARY_CHARS,
+  MAX_CHAT_TOTAL_CHARS,
+  MAX_CHAT_TOTAL_PATH_CHARS,
   MAX_CHOSEN_MOCKUP_SECTION_CHARS,
   MAX_BUILD_FIXED_PROMPT_CHARS,
   MAX_MEDIA_SECTION_CHARS,
@@ -70,7 +75,7 @@ export interface RunCeiling {
  * that decides a ceiling is a second place that can disagree with the
  * reservation.
  */
-export type RunKind = 'build' | 'mockups';
+export type RunKind = 'build' | 'mockups' | 'chat';
 
 /**
  * Every character a mockup run may send the model.
@@ -122,6 +127,21 @@ export const MOCKUP_INPUT_CHARS =
   MAX_MOCKUP_FIXED_PROMPT_CHARS;
 
 /**
+ * Every character a chat turn may send the model (docs/decisions.md,
+ * "Resolved 2026-09-28").
+ *
+ * What the caller may send, each term refused past its bound by
+ * `parseChatRequest`, plus what this repository sends round it on every
+ * turn. `chat-handler.test.ts` builds the largest prompt a turn can send and
+ * fails if this does not cover it.
+ */
+export const CHAT_INPUT_CHARS =
+  MAX_CHAT_TOTAL_CHARS +
+  MAX_CHAT_SUMMARY_CHARS +
+  MAX_CHAT_TOTAL_PATH_CHARS +
+  MAX_CHAT_FIXED_PROMPT_CHARS;
+
+/**
  * `carryTokens` is what a follow-up spends re-emitting the project it edits
  * (internal issue 209), from `carryTokensFor` below. A build gets the room a first run
  * would, plus that. A mockup run ignores it: three sketches carry nothing
@@ -154,7 +174,9 @@ export function runCeilingFor(
     maxTokens:
       kind === 'mockups'
         ? mockupMaxTokensFor(model, prices.outputMicroUsd)
-        : maxTokensFor(model, prices.outputMicroUsd, carryTokens),
+        : kind === 'chat'
+          ? chatMaxTokensFor(model, prices.outputMicroUsd)
+          : maxTokensFor(model, prices.outputMicroUsd, carryTokens),
   };
 }
 

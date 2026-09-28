@@ -324,3 +324,69 @@ export const MAX_MEDIA_ENTRIES = 30;
  * largest one and measures it against this.
  */
 export const MAX_MEDIA_SECTION_CHARS = 24_000;
+
+/**
+ * How much of a conversation one chat turn sends (docs/decisions.md,
+ * "Resolved 2026-09-28").
+ *
+ * A chat turn decides whether a message is a question or a build, so it
+ * needs the conversation that led up to it: "yes" means nothing without the
+ * proposal it answers. It does not need the whole of a long one, and every
+ * message it carries is an input token paid for on every later turn, so the
+ * count is capped and the oldest messages are the ones dropped.
+ */
+export const MAX_CHAT_MESSAGES = 24;
+
+/**
+ * The longest single message a chat turn carries. The same figure as the
+ * build prompt cap (`maxPromptChars` in the Worker's request guard): it is
+ * the same person typing into the same box.
+ */
+export const MAX_CHAT_MESSAGE_CHARS = 4_000;
+
+/**
+ * Every message a chat turn carries, together. Refused past this rather
+ * than trimmed by the Worker, so a caller always knows what was sent; the
+ * browser client trims oldest-first to fit before it asks.
+ */
+export const MAX_CHAT_TOTAL_CHARS = 24_000;
+
+/** The current checkpoint's summary, as a chat turn carries it. */
+export const MAX_CHAT_SUMMARY_CHARS = 1_000;
+
+/**
+ * The current checkpoint's file paths, as a chat turn carries them. Paths
+ * only, never contents: a chat turn talks about the project, it does not
+ * edit it.
+ */
+export const MAX_CHAT_PROJECT_FILES = 100;
+
+/** The longest one of those paths may be. */
+export const MAX_CHAT_PATH_CHARS = 256;
+
+/** All of those paths together. */
+export const MAX_CHAT_TOTAL_PATH_CHARS = 8_000;
+
+/**
+ * The longest build brief a chat turn may return.
+ *
+ * Not a free choice: the brief is submitted to `/api/plan` exactly as a typed
+ * prompt is, and that route refuses a prompt past its own cap. A longer brief
+ * would be paid for here and then refused there, so the schema holds it to
+ * the same figure, and `chat-handler.test.ts` in apps/web fails if the two
+ * ever part.
+ */
+export const MAX_CHAT_BRIEF_CHARS = 4_000;
+
+/** The longest reply a chat turn may show in the conversation. */
+export const MAX_CHAT_REPLY_CHARS = 2_000;
+
+/**
+ * The fixed prompt text every chat turn sends, whoever is asking: the system
+ * prompt, the output instruction a JSON-mode client appends, and the framing
+ * round each message and path. Pinned the way
+ * `MAX_MOCKUP_FIXED_PROMPT_CHARS` is: `chat-schema.test.ts` builds the
+ * largest prompt a turn can send and fails if it outgrows the bound.
+ * Measured at about 3,400 characters when this was written.
+ */
+export const MAX_CHAT_FIXED_PROMPT_CHARS = 5_000;

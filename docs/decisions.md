@@ -218,6 +218,17 @@ family, with no description under it. "Force a validation failure" is
 offered only against the deterministic provider. The Preview pane's
 "Run in sandbox" is now "Run live preview", in the middle of the pane.
 
+**The agent decides whether to answer or build.** Chris decided on
+2026-09-28: the builder has one chat box, and for each message the agent
+either replies in words and changes nothing, or returns a self-contained
+build brief that the client submits through `/api/plan` exactly as a typed
+prompt. Before the first build it may ask one or two clarifying questions,
+and an answer such as "yes" is turned into the full instruction agreed in
+the conversation rather than sent on as the word. `POST /api/chat`
+(`apps/web/worker/chat-handler.ts`) makes that decision, behind the same
+invite gate, model policy, rate limiters and reservation as `/api/mockups`,
+and is charged the same way.
+
 ### Resolved 2026-09-27
 
 **Roadmap additions.** Chris added, on 2026-09-27: Figma import (out of the

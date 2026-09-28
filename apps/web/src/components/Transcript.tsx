@@ -34,23 +34,44 @@ export function Transcript({ turns }: { turns: TranscriptTurn[] }) {
 }
 
 function Reply({ turn }: { turn: TranscriptTurn }) {
+  // What the agent said, above whatever the build then did: the whole of a
+  // reply, or its one line about the change it is making.
+  const said = turn.agentMessage ? (
+    <p className="bubble__text">{turn.agentMessage}</p>
+  ) : null;
+
+  if (turn.status === 'replied') return said;
+
   // The elapsed clock lives in the progress meter directly below, so this
   // does not compete with it -- and does not need a ticking timer of its own.
   if (turn.status === 'running') {
-    return <p className="bubble__text bubble__text--pending">Working on it…</p>;
+    return (
+      <>
+        {said}
+        <p className="bubble__text bubble__text--pending">
+          {said ? 'Working on it…' : 'Thinking…'}
+        </p>
+      </>
+    );
   }
 
   if (turn.status === 'cancelled') {
     // A cancellation is a choice the user made. It reads as neutral, not as
     // something that went wrong and needs interpreting.
-    return <p className="bubble__text">Cancelled. Nothing was changed.</p>;
+    return (
+      <>
+        {said}
+        <p className="bubble__text">Cancelled. Nothing was changed.</p>
+      </>
+    );
   }
 
   if (turn.status === 'failed') {
     return (
       <>
+        {said}
         <p className="bubble__text">
-          This run failed. Your last accepted checkpoint is unchanged.
+          This did not work. Your project is unchanged.
         </p>
         {turn.problem ? <p className="bubble__detail">{turn.problem}</p> : null}
       </>
@@ -59,6 +80,7 @@ function Reply({ turn }: { turn: TranscriptTurn }) {
 
   return (
     <>
+      {said}
       {turn.summary ? <p className="bubble__text">{turn.summary}</p> : null}
       <p className="bubble__detail">
         {turn.fileCount} {turn.fileCount === 1 ? 'file' : 'files'}

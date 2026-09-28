@@ -114,7 +114,7 @@ export function PromptPanel({
   const referenceId = useId();
   const panelId = useId();
   const referenceRef = useRef<HTMLInputElement | null>(null);
-  const disabled = state.running || state.exploring;
+  const disabled = state.running || state.exploring || state.chatting;
   // Once there is a conversation, the examples are noise: what to type next
   // comes from what was just built, not from a generic starting point.
   const started = state.transcript.length > 0;
@@ -318,7 +318,7 @@ export function PromptPanel({
     <form className="prompt" onSubmit={handleSubmit}>
       <div className="prompt__head">
         <label className="prompt__label" htmlFor={promptId}>
-          {started ? 'What should change?' : 'Describe your application'}
+          {started ? 'Message vibld' : 'Describe your application'}
         </label>
         {started || state.running ? (
           <button
@@ -356,7 +356,7 @@ export function PromptPanel({
         rows={started ? 2 : 3}
         placeholder={
           started
-            ? 'Make the hero navy and add a pricing table…'
+            ? 'Ask a question, or describe a change…'
             : 'A landing page for…'
         }
         onChange={(event) => setPrompt(event.target.value)}
@@ -461,7 +461,7 @@ export function PromptPanel({
             minute; both are billed. Without these the only way out is to
             close the tab, and the run keeps spending either way.
           */}
-            {state.running ? (
+            {state.running || state.chatting ? (
               <button type="button" className="button" onClick={onCancel}>
                 Cancel
               </button>
@@ -480,7 +480,13 @@ export function PromptPanel({
               className="button button--primary"
               disabled={disabled || prompt.trim().length === 0}
             >
-              {state.running ? 'Generating…' : started ? 'Send' : 'Generate'}
+              {state.running
+                ? 'Generating…'
+                : state.chatting
+                  ? 'Thinking…'
+                  : started
+                    ? 'Send'
+                    : 'Generate'}
             </button>
           </div>
         </div>

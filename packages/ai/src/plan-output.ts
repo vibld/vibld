@@ -3,6 +3,7 @@ import type { ZodType } from 'zod';
 
 import { GenerationPlanSchema } from './plan-schema.ts';
 import { MockupSetSchema } from './mockup-schema.ts';
+import { ChatDecisionSchema } from './chat-schema.ts';
 
 /**
  * What shape a model is being asked to reply in (internal PR 189 review, P1).
@@ -127,6 +128,18 @@ code fence. It must match this shape exactly:
 "mockups" must contain three entries, each a complete self-contained HTML
 document.`;
 
+export const CHAT_JSON_INSTRUCTION = `OUTPUT FORMAT
+Reply with a single json object and nothing else. No prose, no markdown, no
+code fence. It must match this shape exactly:
+
+{
+  "action": "reply" or "build",
+  "message": "what the person sees in the conversation",
+  "brief": "the complete build instruction, or null for a reply"
+}
+
+"brief" is a string when "action" is "build" and null when it is "reply".`;
+
 /** A generation plan: what every run asked for before this existed. */
 export const PLAN_OUTPUT: PlanOutput = {
   name: 'generation_plan',
@@ -139,6 +152,16 @@ export const MOCKUP_OUTPUT: PlanOutput = {
   name: 'mockup_set',
   schema: MockupSetSchema,
   instruction: MOCKUP_JSON_INSTRUCTION,
+};
+
+/**
+ * One chat turn's decision: a reply in words, or a brief to build from
+ * (docs/decisions.md, "Resolved 2026-09-28").
+ */
+export const CHAT_OUTPUT: PlanOutput = {
+  name: 'chat_turn',
+  schema: ChatDecisionSchema,
+  instruction: CHAT_JSON_INSTRUCTION,
 };
 
 /**

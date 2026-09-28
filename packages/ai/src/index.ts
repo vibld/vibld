@@ -14,6 +14,9 @@ export {
   readCompletion,
   MOCKUP_OUTPUT_TOKENS,
   mockupMaxTokensFor,
+  CHAT_EFFORT,
+  CHAT_OUTPUT_TOKENS,
+  chatMaxTokensFor,
   DEFAULT_MODEL,
   buildUserPrompt,
   chosenMockupSection,
@@ -33,6 +36,7 @@ export type {
   PlanUsage,
 } from './client.ts';
 export {
+  CHAT_SUBJECT,
   ProviderContextError,
   ProviderError,
   ProviderRefusalError,
@@ -78,6 +82,23 @@ export {
 } from './mockup-schema.ts';
 export type { ParsedMockup, ParsedMockupSet } from './mockup-schema.ts';
 export {
+  CHAT_SYSTEM_PROMPT,
+  ChatDecisionSchema,
+  chatUserPrompt,
+  toChatTurn,
+} from './chat-schema.ts';
+export type {
+  ChatMessage,
+  ChatProjectContext,
+  ChatRole,
+  ChatTurn,
+  ParsedChatDecision,
+} from './chat-schema.ts';
+export { ChatProvider } from './chat-provider.ts';
+export type { ChatProviderOptions, ChatRequest } from './chat-provider.ts';
+export {
+  CHAT_JSON_INSTRUCTION,
+  CHAT_OUTPUT,
   MOCKUP_JSON_INSTRUCTION,
   MOCKUP_OUTPUT,
   PLAN_JSON_INSTRUCTION,

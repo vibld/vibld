@@ -78,6 +78,12 @@ export const MOCKUP_SUBJECT: OutputSubject = {
     'Try a shorter description, or ask for the build directly and skip the sketches.',
 };
 
+export const CHAT_SUBJECT: OutputSubject = {
+  noun: 'a chat reply',
+  truncated: 'the reply was cut off',
+  advice: 'Try again, or say it in fewer words.',
+};
+
 /**
  * Generation stopped at the output ceiling, so the last file is almost
  * certainly cut off mid-token.

@@ -300,7 +300,7 @@ describe('the composer, as it is actually wired', () => {
     fresh.unmount();
 
     const started = await mount(builder({ transcript: TURN }));
-    assert.match(started.text(), /What should change\?/);
+    assert.match(started.text(), /Message vibld/);
     assert.ok(started.button(/Send/));
     started.unmount();
   });

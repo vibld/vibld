@@ -12,6 +12,7 @@ const SOURCES = [
   '../worker/index.ts',
   '../worker/principal.ts',
   '../worker/access-handlers.ts',
+  '../worker/chat-handler.ts',
 ];
 
 /**
