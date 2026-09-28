@@ -16,7 +16,12 @@ describe('readVars', () => {
       readFileSync(join(import.meta.dirname, '..', 'wrangler.jsonc'), 'utf8'),
     );
     assert.ok(vars.VIBLD_PROVIDER);
-    assert.ok(['anthropic', 'deepseek'].includes(vars.VIBLD_PROVIDER));
+    assert.ok(
+      ['anthropic', 'deepseek', 'openai'].includes(vars.VIBLD_PROVIDER),
+    );
+    // The Privacy Policy names the default model, so the config has to.
+    assert.equal(vars.VIBLD_PROVIDER, 'openai');
+    assert.equal(vars.VIBLD_MODEL, 'gpt-6-sol');
     assert.ok(vars.CLERK_FRONTEND_API_URL);
   });
 

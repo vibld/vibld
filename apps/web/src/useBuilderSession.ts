@@ -4,6 +4,10 @@ import type { BuilderState } from './generation/session.ts';
 import { loadKnowledge } from './generation/knowledge-store.ts';
 import { loadStyleDna } from './generation/style-dna-store.ts';
 import {
+  chooseModel,
+  loadModelChoice,
+} from './generation/model-choice-store.ts';
+import {
   detectDeploymentConfig,
   resetGenerationModeProbe,
 } from './generation/remote-provider.ts';
@@ -43,11 +47,19 @@ export interface ConfigurableSession {
 export async function applyDeploymentConfig(
   session: ConfigurableSession,
   probe: () => Promise<DeploymentConfig> = () => detectDeploymentConfig(),
+  preferred: () => string | null = () => loadModelChoice(),
 ): Promise<void> {
   try {
     const config = await probe();
     session.setModels(config.models);
-    session.setModel(config.defaultModel);
+    // The person's own choice survives a re-probe. This runs again on every
+    // Clerk session event, and Clerk sends one each time it refreshes the
+    // token, about once a minute: setting the default here unconditionally
+    // put the picker back on it every minute, which read as a choice that
+    // would not stay.
+    session.setModel(
+      chooseModel(preferred(), config.models, config.defaultModel),
+    );
     session.setGeneration(config.generation);
     session.setIsAdmin(config.isAdmin);
   } catch {
@@ -56,6 +68,11 @@ export async function applyDeploymentConfig(
     // whether to offer a paid action.
     session.setIsAdmin(false);
   }
+}
+
+/** What this tab has chosen, or failing that what this browser remembers. */
+function currentOrStoredModel(session: BuilderSession): string | null {
+  return session.getState().model ?? loadModelChoice();
 }
 
 /**
@@ -82,7 +99,9 @@ export function useBuilderSession(): {
     // What this deployment can serve. The picker stays hidden until it
     // answers, which is correct: there is no choice to offer yet, and a
     // failed probe is not worth surfacing here -- the run itself reports it.
-    void applyDeploymentConfig(created);
+    void applyDeploymentConfig(created, undefined, () =>
+      currentOrStoredModel(created),
+    );
     return created;
   }, []);
 
@@ -91,21 +110,27 @@ export function useBuilderSession(): {
   // Without this, the picker offered nothing signed-out and would keep
   // offering nothing signed-in, until a reload happened to re-run the probe
   // above.
-  useEffect(
-    () =>
-      onClerkSessionChange((signedIn) => {
-        if (!signedIn) {
-          session.setModels([]);
-          session.setGeneration(null);
-          session.setModel(null);
-          session.setIsAdmin(false);
-          return;
-        }
-        resetGenerationModeProbe();
-        void applyDeploymentConfig(session);
-      }),
-    [session],
-  );
+  useEffect(() => {
+    // Clerk reports far more than sign-in and sign-out: every token refresh
+    // and session touch arrives here too. Only a change of signed-in state
+    // is worth a new probe.
+    let wasSignedIn: boolean | undefined;
+    return onClerkSessionChange((signedIn) => {
+      if (signedIn === wasSignedIn) return;
+      wasSignedIn = signedIn;
+      if (!signedIn) {
+        session.setModels([]);
+        session.setGeneration(null);
+        session.setModel(null);
+        session.setIsAdmin(false);
+        return;
+      }
+      resetGenerationModeProbe();
+      void applyDeploymentConfig(session, undefined, () =>
+        currentOrStoredModel(session),
+      );
+    });
+  }, [session]);
 
   const state = useSyncExternalStore(
     session.subscribe,

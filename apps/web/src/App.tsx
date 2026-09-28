@@ -18,6 +18,7 @@ import { ThemeToggle } from './components/ThemeToggle.tsx';
 import { footerNote } from './generation/pane-gaps.ts';
 import { saveStyleDna } from './generation/style-dna-store.ts';
 import { saveKnowledge } from './generation/knowledge-store.ts';
+import { saveModelChoice } from './generation/model-choice-store.ts';
 import { PromptPanel } from './components/PromptPanel.tsx';
 import { Workspace } from './components/Workspace.tsx';
 import { useBuilderSession } from './useBuilderSession.ts';
@@ -218,7 +219,10 @@ function Builder() {
               onReset={() => session.reset()}
               onCancel={() => session.cancel()}
               onCancelExplore={() => session.cancelExplore()}
-              onModelChange={(model) => session.setModel(model)}
+              onModelChange={(model) => {
+                session.setModel(model);
+                saveModelChoice(model);
+              }}
               knowledge={state.knowledge}
               onKnowledgeChange={(value) => {
                 session.setKnowledge(value);

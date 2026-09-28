@@ -279,8 +279,15 @@ async function configureWebhookEndpoint(key, apply, report) {
     (endpoint) => endpoint.url === WEBHOOK_URL,
   );
   if (endpoints.length === 0) {
+    // The addresses Stripe does deliver to, so a run that finds none says
+    // where the Worker's endpoint went instead of only that it is missing.
+    // A webhook URL is not a secret; its signing secret is not listed.
+    const others = (listed.json.data ?? []).map(
+      (endpoint) => `${endpoint.url} (${endpoint.status})`,
+    );
     report.fail(
-      `No webhook endpoint delivers to ${WEBHOOK_URL}. Not created here, because its new signing secret would not match the Worker's STRIPE_WEBHOOK_SECRET.`,
+      `No webhook endpoint delivers to ${WEBHOOK_URL}. Not created here, because its new signing secret would not match the Worker's STRIPE_WEBHOOK_SECRET. ` +
+        `Endpoints on this account: ${others.length > 0 ? others.join(', ') : 'none'}.`,
     );
     return;
   }

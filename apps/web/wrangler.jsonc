@@ -77,10 +77,15 @@
   // /api/plan and /api/config both verify each request's Clerk token against
   // it, and refuse every request unless it and a provider key are present.
   "vars": {
-    // Which model service answers /api/plan. "anthropic" or "deepseek".
-    // The deploy workflow reads this to decide which key must be present
-    // before it will deploy.
-    "VIBLD_PROVIDER": "deepseek",
+    // Which model service answers a run that names no model: "anthropic",
+    // "deepseek" or "openai". The deploy workflow reads this to decide which
+    // key must be present before it will deploy.
+    "VIBLD_PROVIDER": "openai",
+
+    // The default model itself: GPT-6 Sol, as the Privacy Policy says
+    // (Chris, 2026-09-28). Unset would mean the provider's own default in
+    // packages/ai/src/select-client.ts, which is a different model.
+    "VIBLD_MODEL": "gpt-6-sol",
 
     // Clerk's Frontend API URL -- a public identifier, not a secret. Used as
     // both the JWT issuer to match and the base for the JWKS fetch
