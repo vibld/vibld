@@ -1,0 +1,141 @@
+name: End-to-end on production
+
+# Signs in to app.vibld.com as the test account and walks the builder the
+# way a person would: access, projects, share link, duplicate, archive,
+# delete, the billing and referral panels, and with `full` one real build,
+# its preview, a follow-up, Stop, and a build that carries on while its page
+# is closed. Every project the run makes is deleted before it ends, and
+# nothing is published. See scripts/e2e-production.mjs.
+#
+# Manual only: `full` spends real model money on the test account. On GPT-6
+# Luna that is a few cents a run; `max_spend_usd` stops the journey, and
+# goes straight to cleanup, once the account's own billing status says the
+# run has spent more.
+#
+# Sign-in is Clerk's documented testing route for a live instance: a
+# Testing Token for bot protection and a one-time sign-in token for the test
+# account, both minted with CLERK_SECRET_KEY and neither printed. Nobody's
+# email or password is involved.
+on:
+  workflow_dispatch:
+    inputs:
+      journey:
+        description: >-
+          no-builds spends nothing. full adds one build, its preview, a
+          follow-up, Stop, and keep-building.
+        type: choice
+        options: [no-builds, full]
+        default: no-builds
+      test_user:
+        description: >-
+          Clerk user id of the test account (user_...). Blank means the one
+          account marked as a test account; the run stops and lists the
+          candidates if there is not exactly one.
+        required: false
+        default: ''
+      model:
+        description: >-
+          Model id to build with. Blank means the cheapest granted of
+          gpt-6-luna and deepseek-flash; nothing dearer unless named.
+        required: false
+        default: ''
+      max_spend_usd:
+        description: What the run may spend, at most 5
+        required: false
+        default: '2'
+
+permissions:
+  contents: read
+
+# Never two at once: they would share the test account's projects and its
+# one running build. Not cancelled either, since a cancelled run skips its
+# own cleanup.
+concurrency:
+  group: e2e-production
+  cancel-in-progress: false
+
+jobs:
+  # Where the key lives. A job that names no environment sees repository
+  # secrets only, so this says whether CLERK_SECRET_KEY is one; the journey
+  # below names `preview`, where an environment secret wins over a
+  # repository secret of the same name.
+  key:
+    name: Where CLERK_SECRET_KEY is set
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Look for a repository secret
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        run: |
+          if [ -n "$CLERK_SECRET_KEY" ]; then
+            echo "CLERK_SECRET_KEY is a repository secret." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "CLERK_SECRET_KEY is not a repository secret, so the journey reads the 'preview' environment's." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  journey:
+    name: Walk the builder as the test account
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    # Three builds of up to twenty-five minutes each is the worst case of
+    # `full`; a real run on the cheap models is far shorter.
+    timeout-minutes: 90
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Require the Clerk key
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+        run: |
+          case "$CLERK_SECRET_KEY" in
+            sk_live_*) echo "CLERK_SECRET_KEY is set, for a live instance." ;;
+            sk_test_*) echo "::error::CLERK_SECRET_KEY is a development instance key; app.vibld.com runs on the live instance."; exit 1 ;;
+            '') echo "::error::CLERK_SECRET_KEY is not set on the 'preview' environment or the repository."; exit 1 ;;
+            *) echo "::error::CLERK_SECRET_KEY does not look like a Clerk secret key."; exit 1 ;;
+          esac
+
+      # Outside the workspace and not in the lockfile, as for the example
+      # screenshots: nothing else in the repository uses them.
+      - name: Install Playwright and Clerk's testing helpers
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2e"
+          cd "$RUNNER_TEMP/e2e"
+          echo '{"private":true}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts playwright@1.63.0 @playwright/test@1.63.0 @clerk/testing@2.2.39
+          npx playwright install --with-deps chromium
+
+      - name: Walk the builder
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          # Not secret (Clerk ships it in the page), and optional: it only
+          # names the Frontend API, which defaults to clerk.vibld.com.
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          # Dispatch input, so read by the script from the environment and
+          # never interpolated into this shell.
+          E2E_JOURNEY: ${{ inputs.journey }}
+          E2E_TEST_USER: ${{ inputs.test_user }}
+          E2E_MODEL: ${{ inputs.model }}
+          E2E_MAX_SPEND_USD: ${{ inputs.max_spend_usd }}
+        run: node scripts/e2e-production.mjs "$RUNNER_TEMP/e2e" "$RUNNER_TEMP/e2e-out"
+
+      # Screenshots and results.json only. No Playwright trace, because a
+      # trace records request headers, and those carry the session token.
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-production
+          path: ${{ runner.temp }}/e2e-out
+          retention-days: 14
+          if-no-files-found: ignore
