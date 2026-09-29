@@ -42,9 +42,11 @@
  * does not.
  */
 export const GATED_METHODS: Readonly<Record<string, readonly string[]>> = {
-  // POST starts a sandbox and spends time in it. DELETE stops one that is
+  // POST starts a sandbox and spends time in it. PATCH writes a new
+  // revision into a running one and may install packages in it (D74),
+  // which is new work in the same sandbox. DELETE stops one that is
   // already running, and its owner must always be able to.
-  '/api/preview': ['POST'],
+  '/api/preview': ['POST', 'PATCH'],
   // POST mints a public link to somebody's generated code. DELETE pulls it,
   // and GET lists what is currently exposed. A revoked owner who cannot do
   // either is left with their work public and no way to take it down.

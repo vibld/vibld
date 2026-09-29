@@ -55,10 +55,14 @@ function sandbox(ran: string[] = []): PreviewSandbox {
   return {
     status: null,
     ranRevision: null,
+    ranProjectId: null,
     pending: false,
     run(_files, revision) {
       ran.push(revision);
     },
+    update() {},
+    updating: false,
+    updateNote: null,
     stop() {},
     stopError: null,
     shares: [],

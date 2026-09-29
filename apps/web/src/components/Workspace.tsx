@@ -7,6 +7,7 @@ import {
 } from '../generation/ship-note.ts';
 import {
   servingOlderThan,
+  shouldUpdateLive,
   usePreviewSandbox,
 } from '../generation/use-preview-sandbox.ts';
 import { CodeViewer } from './CodeViewer.tsx';
@@ -46,6 +47,27 @@ export function Workspace({
   // tab switch hides PreviewPanel, so a running sandbox survives switching
   // to Code and back (see use-preview-sandbox.ts's own doc comment).
   const sandbox = usePreviewSandbox();
+
+  // A new revision reaches the running preview by itself (D74): an accepted
+  // checkpoint, or a build's code shown early while it is checked (D69), is
+  // written into the sandbox in place rather than left for a restart that
+  // somebody has to notice they need. Here rather than in `PreviewPanel`
+  // because the panel is unmounted on a tab switch, and the preview goes
+  // on running while it is; `shouldUpdateLive` says when, and the hook
+  // falls back to a restart when an update cannot be done in place.
+  const code = state.early ?? state.acceptedSnapshot;
+  const updateLive = useRef(sandbox.update);
+  updateLive.current = sandbox.update;
+  const projectId = state.projectId ?? null;
+  const wantsUpdate = shouldUpdateLive(sandbox, code, projectId);
+  const codeRef = useRef(code);
+  codeRef.current = code;
+  useEffect(() => {
+    const next = codeRef.current;
+    if (wantsUpdate && next) {
+      updateLive.current(next.files, next.revision, projectId);
+    }
+  }, [wantsUpdate, code?.revision, projectId]);
 
   // A sandbox is a live copy of one project's checkpoint, and there is one
   // per account. Opening another project stops it, rather than leaving the
@@ -136,14 +158,13 @@ export function Workspace({
               ? state.problems.length || null
               : tab.id === 'console'
                 ? state.timeline.length || null
-                : tab.id === 'preview' && sandbox.status?.status === 'ready'
-                  ? servingOlderThan(
-                      sandbox,
-                      (state.early ?? state.acceptedSnapshot)?.revision,
-                    )
-                    ? 'older'
-                    : 'live'
-                  : null;
+                : tab.id === 'preview' && sandbox.updating
+                  ? 'updating'
+                  : tab.id === 'preview' && sandbox.status?.status === 'ready'
+                    ? servingOlderThan(sandbox, code?.revision)
+                      ? 'older'
+                      : 'live'
+                    : null;
           return (
             <button
               key={tab.id}

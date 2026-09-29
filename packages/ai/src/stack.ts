@@ -16,6 +16,11 @@
  * imports), and an install that fails buys a paid repair. Caret ranges, so a
  * patch release is taken without anyone editing this file.
  *
+ * The preview image carries this set already installed (D74), from a copy
+ * in `apps/preview/warm/package.json` that a Docker build can read;
+ * `test/preview-warm-cache.test.ts` fails when the two differ, and the
+ * image has to be redeployed for a change here to reach it.
+ *
  * The set was installed and built together on 2026-09-26: a cold
  * `npm install --ignore-scripts` took 20 seconds and 162 MB, and the build
  * 2 seconds, well inside `build-limits.ts`.

@@ -16,7 +16,11 @@ import {
 } from './share-route.ts';
 import { isPublishedHost } from './publish-route.ts';
 import { signShare, verifyShare } from './share-token.ts';
-import { isProjectFileArray, parseStartRequest } from './start-request.ts';
+import {
+  isProjectFileArray,
+  parseStartRequest,
+  parseUpdateRequest,
+} from './start-request.ts';
 
 /** Re-exported so Wrangler can find these classes from the entrypoint. */
 export { ContainerProxy, PreviewFleet, PreviewSandbox };
@@ -89,7 +93,7 @@ async function handleStart(request: Request, env: Env): Promise<Response> {
   }
   const parsed = parseStartRequest(body);
   if (!parsed.ok) return json({ error: parsed.error }, 400);
-  const { userId, label, files, mediaOwner } = parsed.value;
+  const { userId, label, files, mediaOwner, revision } = parsed.value;
 
   const sandbox = getSandbox(env.Sandbox, userId, { normalizeId: true });
   const result = await sandbox.startPreview(
@@ -97,7 +101,32 @@ async function handleStart(request: Request, env: Env): Promise<Response> {
     configured.hostname,
     label,
     mediaOwner,
+    revision,
   );
+  return json(result);
+}
+
+/**
+ * Apply a new revision to the caller's running preview (D74): only what
+ * changed is written, and Vite reloads it. The reply says whether it was
+ * applied, is installing, or has to be a restart instead
+ * (`PreviewSandbox.updatePreview`); only a request that could not be read
+ * is an error status.
+ */
+async function handleUpdate(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'Body must be valid JSON.' }, 400);
+  }
+  const parsed = parseUpdateRequest(body);
+  if (!parsed.ok) return json({ error: parsed.error }, 400);
+  const { userId, files, revision } = parsed.value;
+
+  const sandbox = getSandbox(env.Sandbox, userId, { normalizeId: true });
+  const result = await sandbox.updatePreview(files, revision);
+  if (result.outcome === 'invalid') return json({ error: result.error }, 400);
   return json(result);
 }
 
@@ -298,6 +327,9 @@ async function handleInternal(
 
   if (pathname === '/internal/preview/start' && request.method === 'POST') {
     return handleStart(request, env);
+  }
+  if (pathname === '/internal/preview/update' && request.method === 'POST') {
+    return handleUpdate(request, env);
   }
   if (pathname === '/internal/preview/status' && request.method === 'GET') {
     return handleStatus(request, env);

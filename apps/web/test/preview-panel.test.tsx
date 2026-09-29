@@ -42,14 +42,19 @@ function sandboxWith(
   ran: Ran[] = [],
   shares: PreviewShare[] = [],
   stopError: string | null = null,
+  live: { updating?: boolean; updateNote?: string | null } = {},
 ): PreviewSandbox {
   return {
     status,
     ranRevision,
+    ranProjectId: null,
     pending: false,
     run(files, revision) {
       ran.push({ revision, paths: files.map((file) => file.path) });
     },
+    update() {},
+    updating: live.updating ?? false,
+    updateNote: live.updateNote ?? null,
     stop() {},
     stopError,
     shares,
@@ -110,6 +115,35 @@ describe('the preview, as it is actually wired', () => {
     const view = await mount(stateWith('r1'), sandboxWith(READY, 'r1'));
 
     assert.doesNotMatch(view.text(), /not the one accepted since/);
+    view.unmount();
+  });
+
+  it('says it is updating, not that it needs a restart, while an update is on its way (D74)', async () => {
+    const view = await mount(
+      stateWith('r2'),
+      sandboxWith(READY, 'r1', [], [], null, { updating: true }),
+    );
+
+    assert.match(view.text(), /Updating preview…/);
+    assert.doesNotMatch(view.text(), /not the one accepted since/);
+    // The frame stays up: the dev server reloads it in place.
+    assert.ok(view.container.querySelector('iframe[src]'));
+    // Restart stays on offer for anyone who wants a clean one anyway.
+    assert.ok(view.button(/^Restart$/));
+    view.unmount();
+  });
+
+  it('explains a restart that nobody pressed (D74)', async () => {
+    const view = await mount(
+      stateWith('r2'),
+      sandboxWith(null, null, [], [], null, {
+        updateNote:
+          'Restarted the preview: the change could not be applied to it in place. The dev server was no longer running.',
+      }),
+    );
+
+    assert.match(view.text(), /could not be applied to it in place/);
+    assert.match(view.text(), /no longer running/);
     view.unmount();
   });
 

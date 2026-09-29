@@ -7,8 +7,13 @@ import {
   revokePreviewShare,
   startSandboxPreview,
   stopSandboxPreview,
+  updateSandboxPreview,
 } from './preview-client.ts';
-import type { PreviewShare, PreviewStatus } from './preview-client.ts';
+import type {
+  PreviewShare,
+  PreviewStatus,
+  PreviewUpdate,
+} from './preview-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
 import { POLL_INTERVAL_MS } from './runs-client.ts';
 
@@ -21,16 +26,46 @@ export interface PreviewSandbox {
   status: PreviewStatus | null;
   pending: boolean;
   /**
-   * The checkpoint the running preview was built from. A sandbox is a live
-   * copy of one checkpoint, not of "the project", so once a later one is
-   * accepted the frame is serving work that has been moved on from. It is
+   * The checkpoint the running preview is serving: the one it was started
+   * from, or the last one a live update applied to it (D74). A sandbox is
+   * a live copy of one checkpoint, not of "the project", so once a later
+   * one is accepted the frame is serving work that has been moved on from
+   * until an update brings it forward. It is
    * kept here rather than in `PreviewPanel` because the panel is unmounted
    * on a tab switch, which would take the knowledge with it while the
    * sandbox it describes carried on running.
    */
   ranRevision: string | null;
-  /** Start (or restart) a preview of this checkpoint's files. */
-  run(files: ProjectFile[], revision: string): void;
+  /**
+   * The project the running preview belongs to, as its starter named it
+   * (null when nobody did). A live update is only ever applied to a
+   * preview of the same project: switching projects stops the sandbox, and
+   * until that stop lands the preview is still the last project's.
+   */
+  ranProjectId: string | null;
+  /**
+   * Start (or restart) a preview of this checkpoint's files: stop whatever
+   * is running, then start from a clean container.
+   */
+  run(files: ProjectFile[], revision: string, projectId?: string | null): void;
+  /**
+   * Apply this checkpoint to the preview that is running, without a
+   * restart (D74): only the changed files are written and the dev server
+   * reloads them. Falls back to `run` when it cannot, and says so in
+   * `updateNote`.
+   */
+  update(
+    files: ProjectFile[],
+    revision: string,
+    projectId?: string | null,
+  ): void;
+  /** Whether a live update is in flight. */
+  updating: boolean;
+  /**
+   * Why the last live update became a restart, or null. Shown beside the
+   * preview so a restart nobody pressed is never unexplained.
+   */
+  updateNote: string | null;
   /** Stop the running preview, if any. */
   stop(): void;
   /**
@@ -70,15 +105,60 @@ export interface PreviewSandbox {
  * badge is the one nobody is looking at when it goes wrong.
  */
 export function servingOlderThan(
-  sandbox: Pick<PreviewSandbox, 'status' | 'ranRevision'>,
+  sandbox: Pick<PreviewSandbox, 'status' | 'ranRevision'> &
+    Partial<Pick<PreviewSandbox, 'updating'>>,
   acceptedRevision: string | undefined,
 ): boolean {
   return (
+    // An update on its way is not a sandbox left behind (D74): it is being
+    // brought up to date, and saying "restart it" then would be telling
+    // somebody to do by hand what is already happening.
+    sandbox.updating !== true &&
     sandbox.status?.status === 'ready' &&
     sandbox.ranRevision !== null &&
     acceptedRevision !== undefined &&
     acceptedRevision !== sandbox.ranRevision
   );
+}
+
+/**
+ * Whether the running preview should take `code` now, in place (D74).
+ *
+ * When a new revision arrives (an accepted checkpoint, or a D69 build shown
+ * early while it is checked) and a preview of this same project is up and
+ * idle, it is updated without being asked. Not while it is starting,
+ * restarting, stopping or already updating: each of those ends in a state
+ * this is asked about again, and an update started under any of them would
+ * be racing it. Not for a preview whose revision is unknown, since there
+ * is nothing to say it is behind. And not across projects, which a
+ * project switch stops rather than updates.
+ */
+export function shouldUpdateLive(
+  sandbox: Pick<
+    PreviewSandbox,
+    'status' | 'ranRevision' | 'ranProjectId' | 'pending' | 'updating'
+  >,
+  code: { revision: string } | null,
+  projectId: string | null,
+): boolean {
+  return (
+    code !== null &&
+    sandbox.status?.status === 'ready' &&
+    !sandbox.pending &&
+    !sandbox.updating &&
+    sandbox.ranRevision !== null &&
+    sandbox.ranRevision !== code.revision &&
+    sandbox.ranProjectId === projectId
+  );
+}
+
+/**
+ * What the preview says when an update had to become a restart: that it
+ * restarted, which nobody pressed, and the service's own reason after it.
+ */
+export function restartNote(reason: string): string {
+  const said = reason.trim();
+  return `Restarted the preview: the change could not be applied to it in place.${said ? ` ${said}` : ''}`;
 }
 
 /**
@@ -96,8 +176,19 @@ export function servingOlderThan(
 export function usePreviewSandbox(): PreviewSandbox {
   const [status, setStatus] = useState<PreviewStatus | null>(null);
   const [ranRevision, setRanRevision] = useState<string | null>(null);
+  const [ranProjectId, setRanProjectId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateNote, setUpdateNote] = useState<string | null>(null);
+  /**
+   * The live update in flight, as a token rather than a flag (D74). A run
+   * or a stop takes the workspace over from an update part way through,
+   * and the update's own ending (its reply, or the poll it is waiting on)
+   * must then change nothing. Comparing tokens says whether it is still
+   * the update in charge; a flag could only say that some update was.
+   */
+  const updateToken = useRef(0);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * Whether the worker may still be holding a preview for this caller.
@@ -207,7 +298,12 @@ export function usePreviewSandbox(): PreviewSandbox {
    * The first tick is still one interval out: the caller has just read the
    * status itself.
    */
-  function pollUntilSettled() {
+  function pollUntilSettled(
+    // Told the settled answer, for a live update waiting on its install
+    // (D74). Called only by the chain that is still the poll: a run or a
+    // stop that supersedes it takes the decision away with it.
+    onSettled?: (status: PreviewStatus) => void,
+  ) {
     // Nothing to reconcile for a screen that is gone, and the timer this
     // would set is one the cleanup has already had its chance to clear.
     if (!mounted.current) return;
@@ -234,7 +330,10 @@ export function usePreviewSandbox(): PreviewSandbox {
         // started" is the panel contradicting itself. Worse, a failed
         // status takes the Stop button away, so nobody could clear it.
         if (result.status === 'failed') setStopError(null);
-        if (SETTLED.has(result.status)) return;
+        if (SETTLED.has(result.status)) {
+          onSettled?.(result);
+          return;
+        }
       }
       // A transient read failure (a dropped request, an expired session) is
       // not the sandbox failing -- `result === null` falls through to here
@@ -244,7 +343,19 @@ export function usePreviewSandbox(): PreviewSandbox {
     pollRef.current = setTimeout(() => void tick(), POLL_INTERVAL_MS);
   }
 
-  async function run(files: ProjectFile[], revision: string) {
+  async function run(
+    files: ProjectFile[],
+    revision: string,
+    projectId: string | null = null,
+    // Why this restart is happening when nobody pressed anything: a live
+    // update that could not be applied (D74). Null for a restart asked for.
+    note: string | null = null,
+  ) {
+    // Whatever update was in flight is over: this restart replaces it, and
+    // its own ending must not land on top of the new sandbox.
+    updateToken.current += 1;
+    setUpdating(false);
+    setUpdateNote(note);
     // A stale complaint about the last sandbox has nothing to say about
     // this one.
     setStopError(null);
@@ -253,6 +364,7 @@ export function usePreviewSandbox(): PreviewSandbox {
     setPending(true);
     setStatus(null);
     setRanRevision(null);
+    setRanProjectId(null);
     try {
       // `startPreview` reports an existing preview rather than replacing it
       // ("call `stopPreview()` first for a clean restart against new
@@ -278,11 +390,17 @@ export function usePreviewSandbox(): PreviewSandbox {
       // Before the request, not after: a start whose reply is lost may
       // still have created the sandbox, and the next run has to stop it.
       mayExist.current = true;
-      const initial = await startSandboxPreview(files);
+      const initial = await startSandboxPreview(
+        files,
+        undefined,
+        undefined,
+        revision,
+      );
       setStatus(initial);
       // Only now: this is the checkpoint the sandbox is actually being
       // built from.
       setRanRevision(revision);
+      setRanProjectId(projectId);
       if (!SETTLED.has(initial.status)) pollUntilSettled();
     } catch (error) {
       setStatus({
@@ -297,7 +415,90 @@ export function usePreviewSandbox(): PreviewSandbox {
     }
   }
 
+  /**
+   * Bring the running preview up to `revision` in place (D74).
+   *
+   * The sandbox decides what it can do (`PreviewSandbox.updatePreview`):
+   * apply the change, install new dependencies first, ask to be asked
+   * again, or refuse. A refusal, an answer that cannot be read and an
+   * install that fails all end the same way, in `run`: the restart this
+   * replaced, with `updateNote` saying why it happened.
+   *
+   * `ranRevision` moves only when the sandbox has the new files, so the
+   * "older checkpoint" notice is true at every moment it is shown, and
+   * `updating` hides it while the update is on its way.
+   */
+  async function update(
+    files: ProjectFile[],
+    revision: string,
+    projectId: string | null = null,
+  ) {
+    const token = ++updateToken.current;
+    const current = () => mounted.current && updateToken.current === token;
+    const done = () => {
+      if (updateToken.current === token) setUpdating(false);
+    };
+    const fallBack = (reason: string) => {
+      if (!current()) return;
+      void run(files, revision, projectId, restartNote(reason));
+    };
+    setUpdating(true);
+    setUpdateNote(null);
+    setStopError(null);
+    stopPolling();
+    polls.current.supersede();
+
+    let answer: PreviewUpdate;
+    try {
+      answer = await updateSandboxPreview(files, revision);
+    } catch (error) {
+      fallBack(error instanceof Error ? error.message : '');
+      return;
+    }
+    if (!current()) return;
+
+    if (answer.outcome === 'applied') {
+      setStatus(answer.status);
+      setRanRevision(revision);
+      setRanProjectId(projectId);
+      done();
+      return;
+    }
+    if (answer.outcome === 'restart') {
+      fallBack(answer.reason);
+      return;
+    }
+    // Installing new dependencies, or waiting on a start or another update
+    // already running there: either way the status poll says when it has
+    // settled, and only an install of this revision moves `ranRevision`.
+    const installing = answer.outcome === 'installing';
+    if (installing) setStatus({ status: 'installing' });
+    pollUntilSettled((settled) => {
+      if (!current()) return;
+      if (settled.status === 'ready') {
+        if (installing) {
+          setRanRevision(settled.revision ?? revision);
+          setRanProjectId(projectId);
+        } else if (settled.revision !== undefined) {
+          setRanRevision(settled.revision);
+        }
+        done();
+        return;
+      }
+      if (installing && settled.status === 'failed') {
+        fallBack(settled.error);
+        return;
+      }
+      done();
+    });
+  }
+
   async function stop() {
+    // A stop ends any update in flight: nothing it says afterwards is
+    // about a sandbox anybody still wants.
+    updateToken.current += 1;
+    setUpdating(false);
+    setUpdateNote(null);
     stopPolling();
     polls.current.supersede();
     setStopError(null);
@@ -309,6 +510,7 @@ export function usePreviewSandbox(): PreviewSandbox {
       // the screen say the sandbox was gone whatever happened.
       setStatus(null);
       setRanRevision(null);
+      setRanProjectId(null);
     } catch (error) {
       // What is actually known: the client did not get a successful answer.
       // Not that the sandbox is still running -- the DELETE may have been
@@ -380,8 +582,14 @@ export function usePreviewSandbox(): PreviewSandbox {
   return {
     status,
     ranRevision,
+    ranProjectId,
     pending,
-    run: (files, revision) => void run(files, revision),
+    run: (files, revision, projectId = null) =>
+      void run(files, revision, projectId),
+    update: (files, revision, projectId = null) =>
+      void update(files, revision, projectId),
+    updating,
+    updateNote,
     stop: () => void stop(),
     stopError,
     shares,

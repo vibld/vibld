@@ -17,27 +17,52 @@ import { registerHooks } from 'node:module';
  * reads from it. Anything that relied on real Durable Object behaviour, the
  * input gate above all, would be untested here and has to stay out of these
  * tests.
+ *
+ * `@cloudflare/sandbox` is stubbed the same way, and for the same reason
+ * (D74): a live update's bookkeeping (which revision is served, what a
+ * failure leaves behind, which fleet slot is given back) lives in
+ * `PreviewSandbox` itself, and until now nothing in that class could be
+ * run. `Sandbox` here holds `ctx` and `env` and nothing else; a test gives
+ * the instance the container methods it uses (`exec`, `writeFile` and the
+ * rest) as fakes of its own, so what is exercised is this Worker's code
+ * and never a guess at the SDK's.
  */
+const STUBS = {
+  'cloudflare:workers': `export class DurableObject {
+    constructor(ctx, env) {
+      this.ctx = ctx;
+      this.env = env;
+    }
+  }`,
+  '@cloudflare/sandbox': `export class Sandbox {
+    constructor(ctx, env) {
+      this.ctx = ctx;
+      this.env = env;
+    }
+  }
+  export class ContainerProxy {}
+  export function getSandbox() {
+    throw new Error('getSandbox is not available under node --test');
+  }
+  export async function proxyToSandbox() {
+    return null;
+  }`,
+};
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (specifier === 'cloudflare:workers') {
-      return { url: 'vibld-harness:cloudflare-workers', shortCircuit: true };
+    if (Object.hasOwn(STUBS, specifier)) {
+      return { url: `vibld-harness:${specifier}`, shortCircuit: true };
     }
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
-    if (url !== 'vibld-harness:cloudflare-workers') {
+    const name = url.startsWith('vibld-harness:')
+      ? url.slice('vibld-harness:'.length)
+      : undefined;
+    if (name === undefined || !Object.hasOwn(STUBS, name)) {
       return nextLoad(url, context);
     }
-    return {
-      format: 'module',
-      shortCircuit: true,
-      source: `export class DurableObject {
-        constructor(ctx, env) {
-          this.ctx = ctx;
-          this.env = env;
-        }
-      }`,
-    };
+    return { format: 'module', shortCircuit: true, source: STUBS[name] };
   },
 });

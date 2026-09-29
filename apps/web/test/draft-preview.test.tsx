@@ -61,10 +61,14 @@ function sandboxWith(
   return {
     status,
     ranRevision: status ? 'r1' : null,
+    ranProjectId: null,
     pending: false,
     run(_files, revision) {
       ran.push(revision);
     },
+    update() {},
+    updating: false,
+    updateNote: null,
     stop() {},
     stopError: null,
     shares: [],

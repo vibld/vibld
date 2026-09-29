@@ -78,6 +78,23 @@ async function mount() {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
     },
+    async update(revision: string) {
+      await act(async () => {
+        this.sandbox.update(
+          [{ path: 'index.html', content: `<h1>${revision}</h1>` }],
+          revision,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    },
+    /** Lets the poll run for `ticks` of its interval. */
+    async wait(ticks: number) {
+      await act(async () => {
+        await new Promise((resolve) =>
+          setTimeout(resolve, POLL_INTERVAL_MS * ticks + 200),
+        );
+      });
+    },
     unmount() {
       act(() => root.unmount());
       container.remove();
@@ -819,5 +836,192 @@ describe('a request still in flight when the shell goes', () => {
     );
 
     assert.equal(gets, 0, 'started a poll nothing can ever stop');
+  });
+});
+
+describe('a live update (D74)', () => {
+  /** The requests to `/api/preview` after the first run, by method. */
+  function methods(calls: string[], from: number): string[] {
+    return calls
+      .slice(from)
+      .filter((call) => call.endsWith('/api/preview'))
+      .map((call) => call.split(' ')[0]!);
+  }
+
+  it('moves the served revision on without a restart when the sandbox applies it', async () => {
+    const calls = serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'PATCH'
+          ? reply({ outcome: 'applied', status: { ...READY, revision: 'r2' } })
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    const before = calls.length;
+    await view.update('r2');
+
+    assert.deepEqual(methods(calls, before), ['PATCH']);
+    assert.equal(view.sandbox.ranRevision, 'r2');
+    assert.equal(view.sandbox.updating, false);
+    assert.equal(view.sandbox.updateNote, null);
+    view.unmount();
+  });
+
+  it('says it is updating until the answer arrives', async () => {
+    let answer: (response: Response) => void = () => {};
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'PATCH'
+          ? new Promise<Response>((resolve) => {
+              answer = resolve;
+            })
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    await view.update('r2');
+    assert.equal(view.sandbox.updating, true);
+    assert.equal(view.sandbox.ranRevision, 'r1', 'claimed r2 before it was in');
+
+    await act(async () => {
+      answer(
+        reply({ outcome: 'applied', status: { ...READY, revision: 'r2' } }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(view.sandbox.updating, false);
+    assert.equal(view.sandbox.ranRevision, 'r2');
+    view.unmount();
+  });
+
+  it('restarts instead, and says why, when the sandbox cannot update in place', async () => {
+    const calls = serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'PATCH'
+          ? reply({
+              outcome: 'restart',
+              reason: 'The dev server was no longer running.',
+            })
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    const before = calls.length;
+    await view.update('r2');
+
+    assert.deepEqual(methods(calls, before), ['PATCH', 'DELETE', 'POST']);
+    assert.equal(view.sandbox.ranRevision, 'r2');
+    assert.match(view.sandbox.updateNote ?? '', /no longer running/);
+    assert.equal(view.sandbox.updating, false);
+    view.unmount();
+  });
+
+  it('restarts instead when the update request itself fails', async () => {
+    const calls = serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'PATCH'
+          ? reply({ error: 'The preview service is unavailable.' }, 502)
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    const before = calls.length;
+    await view.update('r2');
+
+    assert.deepEqual(methods(calls, before), ['PATCH', 'DELETE', 'POST']);
+    assert.equal(view.sandbox.ranRevision, 'r2');
+    assert.match(view.sandbox.updateNote ?? '', /service is unavailable/);
+    view.unmount();
+  });
+
+  it('waits out an install of new dependencies, then serves the new revision', async () => {
+    let installed = false;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) => {
+        if (method === 'PATCH') return reply({ outcome: 'installing' });
+        if (method === 'GET') {
+          return reply(
+            installed ? { ...READY, revision: 'r2' } : { status: 'installing' },
+          );
+        }
+        return reply(READY);
+      },
+    });
+    const view = await mount();
+    await view.run('r1');
+    await view.update('r2');
+
+    assert.equal(view.sandbox.status?.status, 'installing');
+    assert.equal(view.sandbox.updating, true);
+    installed = true;
+    await view.wait(1);
+
+    assert.equal(view.sandbox.status?.status, 'ready');
+    assert.equal(view.sandbox.ranRevision, 'r2');
+    assert.equal(view.sandbox.updating, false);
+    view.unmount();
+  });
+
+  it('restarts when the install of new dependencies fails', async () => {
+    let posts = 0;
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) => {
+        if (method === 'PATCH') return reply({ outcome: 'installing' });
+        if (method === 'GET') {
+          return reply({
+            status: 'failed',
+            error:
+              'The preview could not take the new dependencies. npm install failed (exit 1).',
+          });
+        }
+        if (method === 'POST') posts += 1;
+        return reply(READY);
+      },
+    });
+    const view = await mount();
+    await view.run('r1');
+    await view.update('r2');
+    await view.wait(1);
+
+    assert.equal(posts, 2, 'the failed install was not followed by a restart');
+    assert.equal(view.sandbox.status?.status, 'ready');
+    assert.equal(view.sandbox.ranRevision, 'r2');
+    assert.match(view.sandbox.updateNote ?? '', /npm install failed/);
+    view.unmount();
+  });
+
+  it('lets a restart asked for by hand win over an update still on its way', async () => {
+    // Restart stays available (D74). An update that answers after it must
+    // not put its revision on the sandbox the restart replaced it with.
+    let answer: (response: Response) => void = () => {};
+    serving({
+      '/api/preview/share': () => reply({ shares: [] }),
+      '/api/preview': (method) =>
+        method === 'PATCH'
+          ? new Promise<Response>((resolve) => {
+              answer = resolve;
+            })
+          : reply(READY),
+    });
+    const view = await mount();
+    await view.run('r1');
+    await view.update('r2');
+    await view.run('r3');
+    await act(async () => {
+      answer(
+        reply({ outcome: 'applied', status: { ...READY, revision: 'r2' } }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    assert.equal(view.sandbox.ranRevision, 'r3');
+    assert.equal(view.sandbox.updating, false);
+    view.unmount();
   });
 });

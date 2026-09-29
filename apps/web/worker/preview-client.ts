@@ -22,8 +22,20 @@ export type PreviewStatus =
       url: string;
       expiresAt: number;
       typecheckFailure?: string;
+      /** The revision the preview serves, when it knows (D74). */
+      revision?: string;
     }
   | { status: 'failed'; error: string };
+
+/**
+ * What asking a running preview to take a new revision came to (D74),
+ * as `@vibld/preview`'s `PreviewSandbox.updatePreview` says it.
+ */
+export type PreviewUpdate =
+  | { outcome: 'applied'; status: PreviewStatus }
+  | { outcome: 'installing' }
+  | { outcome: 'busy' }
+  | { outcome: 'restart'; reason: string };
 
 /** The slice of a Workers service binding this file calls. */
 export interface ServiceBinding {
@@ -92,6 +104,10 @@ function parseStatus(body: unknown): PreviewStatus | null {
           ...(typeof record.typecheckFailure === 'string' &&
           record.typecheckFailure !== ''
             ? { typecheckFailure: record.typecheckFailure }
+            : {}),
+          // Likewise: a revision that cannot be read is one not known.
+          ...(typeof record.revision === 'string' && record.revision !== ''
+            ? { revision: record.revision }
             : {}),
         };
       }
@@ -180,6 +196,11 @@ export function startPreview(
    * has.
    */
   mediaOwner?: string,
+  /**
+   * The checkpoint these files are (D74), so the preview can say which
+   * revision it serves. Omitted, it serves files under no name, as before.
+   */
+  revision?: string,
 ): Promise<PreviewStatus> {
   // A start has to answer the person who pressed the button, so an
   // unreadable reply becomes a failure here rather than nothing. The status
@@ -193,8 +214,71 @@ export function startPreview(
       label: userId,
       files,
       ...(mediaOwner === undefined ? {} : { mediaOwner }),
+      ...(revision === undefined ? {} : { revision }),
     }),
   }).then((status) => status ?? UNREADABLE_PREVIEW);
+}
+
+/**
+ * `@vibld/preview`'s answer to an update, checked the way `parseStatus`
+ * checks a status, or null for one this cannot read.
+ */
+export function parseUpdate(body: unknown): PreviewUpdate | null {
+  const record = (body ?? {}) as Record<string, unknown>;
+  switch (record.outcome) {
+    case 'applied': {
+      const status = parseStatus(record.status);
+      // Applied means the preview is up on the new files, so anything
+      // but a ready status is an answer this cannot stand behind.
+      return status?.status === 'ready' ? { outcome: 'applied', status } : null;
+    }
+    case 'installing':
+      return { outcome: 'installing' };
+    case 'busy':
+      return { outcome: 'busy' };
+    case 'restart':
+      return {
+        outcome: 'restart',
+        reason:
+          typeof record.reason === 'string' && record.reason !== ''
+            ? record.reason
+            : 'The preview could not be updated in place.',
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Apply a new revision to the caller's running preview (D74).
+ *
+ * An error for a request the service refused (a path or size it would not
+ * write) or could not answer, since the builder's answer to both is the
+ * same: restart instead, as it did before D74.
+ */
+export async function updatePreview(
+  env: PreviewServiceEnv,
+  userId: string,
+  files: PreviewFile[],
+  revision: string,
+): Promise<{ ok: true; update: PreviewUpdate } | { ok: false; error: string }> {
+  const response = await env.PREVIEW!.fetch(
+    new Request(new URL('/internal/preview/update', INTERNAL_ORIGIN), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeaders(env) },
+      body: JSON.stringify({ userId, files, revision }),
+    }),
+  );
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: await serviceError(response, 'Could not update the preview.'),
+    };
+  }
+  const update = parseUpdate(await response.json().catch(() => null));
+  return update
+    ? { ok: true, update }
+    : { ok: false, error: UNREADABLE_PREVIEW.error };
 }
 
 /** `null` when the service's answer could not be read. */

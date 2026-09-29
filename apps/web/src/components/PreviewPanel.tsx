@@ -69,7 +69,7 @@ export function PreviewPanel({
     (state.check?.state === 'checking' || state.check?.state === 'repairing');
   const runAccepted = () => {
     if (!code) return;
-    sandbox.run(code.files, code.revision);
+    sandbox.run(code.files, code.revision, state.projectId ?? null);
   };
 
   // A sandbox is a live copy of the checkpoint it was started from, and
@@ -104,11 +104,30 @@ export function PreviewPanel({
     <div className="preview">
       <BuildCheckBadge check={state.check} />
 
-      {servingOlder ? (
+      {/*
+        A new revision on its way into the running preview (D74), said in
+        place of the notice below rather than beside it: the sandbox is not
+        being left behind, it is being brought up to date, and "restart it"
+        would ask somebody to do by hand what is already happening.
+      */}
+      {sandbox.updating ? (
+        <p className="pane-note" role="status">
+          Updating preview…
+        </p>
+      ) : servingOlder ? (
         <p className="pane-note" role="status">
           This sandbox is running the checkpoint it was started from, not the
           one accepted since. Restart it in the sandbox to run the current
           project.
+        </p>
+      ) : null}
+      {/*
+        A restart nobody pressed, explained: the update could not be
+        applied in place, so the preview was started again, and why.
+      */}
+      {sandbox.updateNote ? (
+        <p className="pane-note" role="status">
+          {sandbox.updateNote}
         </p>
       ) : null}
 
@@ -190,8 +209,9 @@ export function PreviewPanel({
                 {statusMessage}
               </p>
               <p className="preview__empty-text">
-                The first start installs the project, which takes a minute or
-                two.
+                {sandbox.updating
+                  ? "This change touches the project's dependencies, so they are installed before the preview comes back."
+                  : 'The first start installs the project, which takes a minute or two.'}
               </p>
               <span className="preview__working" aria-hidden="true" />
             </>

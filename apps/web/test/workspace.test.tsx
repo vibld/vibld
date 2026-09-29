@@ -39,11 +39,21 @@ const READY = () =>
     expiresAt: Date.UTC(2026, 0, 1),
   });
 
-function serving(preview: () => Response): void {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+/** Every request to `/api/preview`, as `METHOD body`. */
+let previewCalls: string[] = [];
+
+function serving(
+  preview: (method: string) => Response | Promise<Response>,
+): void {
+  previewCalls = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('/api/preview/share')) return reply({ shares: [] });
-    if (url.includes('/api/preview')) return preview();
+    if (url.includes('/api/preview')) {
+      const method = init?.method ?? 'GET';
+      previewCalls.push(`${method} ${String(init?.body ?? '')}`);
+      return preview(method);
+    }
     return reply({});
   }) as typeof fetch;
 }
@@ -64,7 +74,10 @@ function builder(overrides: Partial<BuilderState> = {}): BuilderState {
   } as BuilderState;
 }
 
-async function mount(state: BuilderState, preview: () => Response = QUIET) {
+async function mount(
+  state: BuilderState,
+  preview: (method: string) => Response | Promise<Response> = QUIET,
+) {
   serving(preview);
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -255,10 +268,13 @@ describe('the workspace, as it is actually wired', () => {
     view.unmount();
   });
 
-  it('stops calling it live once it is running an older checkpoint', async () => {
+  it('stops calling it live while a newer checkpoint is on its way in', async () => {
     // The badge exists for the person who has looked away from Preview, so
-    // it is the one place "live" must not mean "an older one is".
-    const view = await mount(builder(), READY);
+    // it is the one place "live" must not mean "an older one is". Since
+    // D74 the older one is being updated, and the badge says so.
+    const view = await mount(builder(), (method) =>
+      method === 'PATCH' ? new Promise<Response>(() => {}) : READY(),
+    );
     await view.run();
     assert.match(view.tab(/Preview/).textContent ?? '', /live/);
 
@@ -272,7 +288,82 @@ describe('the workspace, as it is actually wired', () => {
     );
 
     assert.doesNotMatch(view.tab(/Preview/).textContent ?? '', /live/);
-    assert.match(view.tab(/Preview/).textContent ?? '', /older/);
+    assert.match(view.tab(/Preview/).textContent ?? '', /updating/);
+    view.unmount();
+  });
+
+  it('brings the running preview up to a newly accepted checkpoint by itself (D74)', async () => {
+    const view = await mount(builder(), (method) =>
+      method === 'PATCH'
+        ? reply({
+            outcome: 'applied',
+            status: {
+              status: 'ready',
+              url: 'https://sandbox.example/app',
+              expiresAt: Date.UTC(2026, 0, 1),
+              revision: 'r2',
+            },
+          })
+        : READY(),
+    );
+    await view.run();
+    previewCalls = [];
+
+    await view.render(
+      builder({
+        acceptedSnapshot: {
+          revision: 'r2',
+          files: [{ path: 'index.html', content: '<h1>new</h1>' }],
+        } as BuilderState['acceptedSnapshot'],
+      }),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // One update, carrying the new checkpoint, and no restart.
+    assert.deepEqual(
+      previewCalls.map((call) => call.split(' ')[0]),
+      ['PATCH'],
+    );
+    assert.deepEqual(JSON.parse(previewCalls[0]!.slice('PATCH '.length)), {
+      files: [{ path: 'index.html', content: '<h1>new</h1>' }],
+      revision: 'r2',
+    });
+    assert.match(view.tab(/Preview/).textContent ?? '', /live/);
+    assert.doesNotMatch(view.text(), /not the one accepted since/);
+    view.unmount();
+  });
+
+  it('updates to a build shown early while it is checked (D69, D74)', async () => {
+    const view = await mount(builder(), (method) =>
+      method === 'PATCH' ? new Promise<Response>(() => {}) : READY(),
+    );
+    await view.run();
+    previewCalls = [];
+
+    await view.render(
+      builder({
+        running: true,
+        early: {
+          revision: 'r2-early',
+          files: [{ path: 'index.html', content: '<h1>checking</h1>' }],
+        },
+        check: { state: 'checking', revision: 'r2-early' },
+      } as Partial<BuilderState>),
+    );
+
+    assert.equal(previewCalls.length, 1);
+    assert.match(previewCalls[0] ?? '', /^PATCH .*"revision":"r2-early"/);
+    view.unmount();
+  });
+
+  it('does not update a preview when nothing new has arrived', async () => {
+    const view = await mount(builder(), READY);
+    await view.run();
+    previewCalls = [];
+    await view.render(builder());
+    assert.deepEqual(previewCalls, []);
     view.unmount();
   });
 

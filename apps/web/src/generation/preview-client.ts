@@ -25,8 +25,22 @@ export type PreviewStatus =
       url: string;
       expiresAt: number;
       typecheckFailure?: string;
+      /** The revision the sandbox serves, when it knows (D74). */
+      revision?: string;
     }
   | { status: 'failed'; error: string };
+
+/**
+ * What asking the running sandbox to take a new revision came to (D74):
+ * applied in place, installing new dependencies (poll until it settles),
+ * busy with a start or another update (poll, then ask again), or a restart
+ * it could not avoid, with the reason.
+ */
+export type PreviewUpdate =
+  | { outcome: 'applied'; status: PreviewStatus }
+  | { outcome: 'installing' }
+  | { outcome: 'busy' }
+  | { outcome: 'restart'; reason: string };
 
 async function authHeaders(
   getToken: () => Promise<string | null>,
@@ -71,6 +85,9 @@ function parseStatus(body: unknown): PreviewStatus | null {
           ...(typeof record.typecheckFailure === 'string' &&
           record.typecheckFailure !== ''
             ? { typecheckFailure: record.typecheckFailure }
+            : {}),
+          ...(typeof record.revision === 'string' && record.revision !== ''
+            ? { revision: record.revision }
             : {}),
         };
       }
@@ -148,6 +165,8 @@ export async function startSandboxPreview(
   files: ProjectFile[],
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
+  /** Which checkpoint these files are, so the sandbox can say (D74). */
+  revision?: string,
 ): Promise<PreviewStatus> {
   const response = await fetchImpl('/api/preview', {
     method: 'POST',
@@ -155,7 +174,9 @@ export async function startSandboxPreview(
       'content-type': 'application/json',
       ...(await authHeaders(getToken)),
     },
-    body: JSON.stringify({ files }),
+    body: JSON.stringify(
+      revision === undefined ? { files } : { files, revision },
+    ),
   });
   if (!response.ok) throw new Error(await errorMessage(response));
   const unreadable: PreviewStatus = {
@@ -170,6 +191,62 @@ export async function startSandboxPreview(
   } catch {
     return unreadable;
   }
+}
+
+/**
+ * `PreviewUpdate` from the Worker's reply, or null for one this cannot
+ * read. Checked field by field, as `parseStatus` is.
+ */
+export function parseUpdate(body: unknown): PreviewUpdate | null {
+  const record = (body ?? {}) as Record<string, unknown>;
+  switch (record.outcome) {
+    case 'applied': {
+      const status = parseStatus(record.status);
+      return status?.status === 'ready' ? { outcome: 'applied', status } : null;
+    }
+    case 'installing':
+      return { outcome: 'installing' };
+    case 'busy':
+      return { outcome: 'busy' };
+    case 'restart':
+      return {
+        outcome: 'restart',
+        reason:
+          typeof record.reason === 'string' && record.reason !== ''
+            ? record.reason
+            : 'The preview could not be updated in place.',
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Apply a new revision to the caller's running sandbox without restarting
+ * it (D74). Throws for anything that is not an answer, as a start does,
+ * because the caller's response to every such case is the same: restart,
+ * which is what it did before live updates existed.
+ */
+export async function updateSandboxPreview(
+  files: ProjectFile[],
+  revision: string,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<PreviewUpdate> {
+  const response = await fetchImpl('/api/preview', {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      ...(await authHeaders(getToken)),
+    },
+    body: JSON.stringify({ files, revision }),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  const update = parseUpdate(await response.json().catch(() => null));
+  if (!update) {
+    throw new Error('The preview service returned an unreadable response.');
+  }
+  return update;
 }
 
 /** Stop the caller's running preview, if any. */

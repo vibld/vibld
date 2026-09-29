@@ -70,7 +70,22 @@ pnpm --filter @vibld/preview test
   than one sandbox per link. That sandbox serves its project owner's media,
   so apps/web names the owner as `mediaOwner`; still only the files the
   code references are served. Absent, the media owner is the sandbox's own
-  name, as it always was.
+  name, as it always was. It also says what `/internal/preview/update`
+  accepts.
+- **`worker/live-update.ts`** -- a new revision applied to a running
+  preview without a restart (D74): only the files that differ from what the
+  sandbox serves are written, deleted ones are removed, and Vite reloads.
+  When the dependencies changed, `npm install` runs first (under the
+  `installing` phase) and the dev server alone is restarted. Anything it
+  cannot do in place, `PreviewSandbox.updatePreview` answers as `restart`,
+  and the builder restarts the preview as it did before.
+- **`Dockerfile`, `warm/package.json`** -- the image carries the
+  generation stack already installed (D74). A preview moves that
+  node_modules into its project before its own `npm install`
+  (`worker/provision.ts`'s `SEED_COMMAND`), which then only reconciles it
+  with the project's package.json, and `npm prune` removes what the project
+  does not declare. `packages/ai/test/preview-warm-cache.test.ts` keeps the
+  list equal to `packages/ai/src/stack.ts`.
 
 ## Why a separate package, not a folder in apps/web
 

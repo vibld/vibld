@@ -512,6 +512,38 @@ export function parsePreviewRequest(
 }
 
 /**
+ * The longest revision id a preview request may name (D74). Generated ids
+ * are far shorter; `@vibld/preview` refuses anything longer, and
+ * `preview-live-update.test.ts` keeps the two equal.
+ */
+export const MAX_PREVIEW_REVISION_CHARS = 200;
+
+/**
+ * The checkpoint a preview request says its files are (D74): optional on a
+ * start, where an older builder sends none, and required on an update,
+ * where it is what the preview then says it serves. `null` when absent.
+ */
+export function parsePreviewRevision(
+  body: unknown,
+  required: boolean,
+): GuardResult<string | null> {
+  const { revision } = (body ?? {}) as { revision?: unknown };
+  if (revision === undefined && !required) return { ok: true, value: null };
+  if (
+    typeof revision !== 'string' ||
+    revision.length === 0 ||
+    revision.length > MAX_PREVIEW_REVISION_CHARS ||
+    CONTROL_CHARACTER.test(revision)
+  ) {
+    return fail(
+      400,
+      `"revision" must be a string of 1 to ${MAX_PREVIEW_REVISION_CHARS} characters.`,
+    );
+  }
+  return { ok: true, value: revision };
+}
+
+/**
  * Validate an optional style preset.
  *
  * Kept as its own rule rather than folded into the request, because the

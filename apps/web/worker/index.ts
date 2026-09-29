@@ -28,6 +28,7 @@ import {
   isProjectId,
   parseModel,
   parsePreviewRequest,
+  parsePreviewRevision,
   parseProjectId,
   parseAdminTopupRequest,
   parseReferenceUrl,
@@ -138,6 +139,7 @@ import {
   revokeShare,
   startPreview,
   stopPreview,
+  updatePreview,
 } from './preview-client.ts';
 import type { ServiceBinding } from './preview-client.ts';
 import {
@@ -2332,14 +2334,49 @@ async function handlePreview(request: Request, env: Env): Promise<Response> {
     }
     const files = parsePreviewRequest(body);
     if (!files.ok) return json({ error: files.error }, files.status);
-    return json(await startPreview(env, principal.userId, files.value));
+    const revision = parsePreviewRevision(body, false);
+    if (!revision.ok) return json({ error: revision.error }, revision.status);
+    return json(
+      await startPreview(
+        env,
+        principal.userId,
+        files.value,
+        undefined,
+        revision.value ?? undefined,
+      ),
+    );
+  }
+
+  // A new revision into the preview that is already running (D74): the
+  // same files a start takes, checked by the same rules, and the revision
+  // they are. What the service answers is passed through; a refusal it
+  // gave, or an answer it could not give, is a 502 the builder treats as
+  // "restart instead".
+  if (request.method === 'PATCH') {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Body must be valid JSON.' }, 400);
+    }
+    const files = parsePreviewRequest(body);
+    if (!files.ok) return json({ error: files.error }, files.status);
+    const revision = parsePreviewRevision(body, true);
+    if (!revision.ok) return json({ error: revision.error }, revision.status);
+    const result = await updatePreview(
+      env,
+      principal.userId,
+      files.value,
+      revision.value as string,
+    );
+    return result.ok ? json(result.update) : json({ error: result.error }, 502);
   }
 
   if (request.method === 'DELETE') {
     return outcomeResponse(await stopPreview(env, principal.userId));
   }
 
-  return json({ error: 'Use GET, POST or DELETE.' }, 405);
+  return json({ error: 'Use GET, POST, PATCH or DELETE.' }, 405);
 }
 
 /**

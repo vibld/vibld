@@ -35,10 +35,23 @@ import {
 // alike: see `capacity.ts` for how the budget is shared (internal issue 197).
 import { FLEET_NAME } from './capacity.ts';
 import {
+  DEV_COMMAND,
+  PREVIEW_INSTALL_TIMEOUT_MS,
   PROVISION_LOST_ERROR,
   provisionLost,
   provisionPreview,
 } from './provision.ts';
+import {
+  applyLiveUpdate,
+  describeFiles,
+  filesProblem,
+  planUpdate,
+} from './live-update.ts';
+import type {
+  LiveUpdateResult,
+  LiveUpdateSteps,
+  ServedFiles,
+} from './live-update.ts';
 
 /**
  * Vibld's own untrusted-execution sandbox (ADR-0004; docs/decisions.md L7,
@@ -102,6 +115,30 @@ const MEDIA_OWNER_KEY = 'media-owner';
 const MEDIA_ALLOWED_KEY = 'media-allowed';
 
 /**
+ * Which files the running preview was given, as digests (D74,
+ * `live-update.ts`'s `ServedFiles`). What a live update diffs against, so
+ * it is written wherever the files the dev server runs change, and nowhere
+ * else. A preview with none recorded (one started before D74, or one an
+ * update left half-written) is never updated in place, only restarted.
+ */
+const SERVED_KEY = 'vibld:preview-files';
+
+/**
+ * The sandbox's id for the running dev server process, so a live update
+ * that installs new dependencies can stop it and start another in the same
+ * container. Absent means it cannot, and such an update is a restart.
+ */
+const DEV_PROCESS_KEY = 'vibld:preview-dev';
+
+/**
+ * The least of its lifetime a preview must have left to install new
+ * dependencies in place. Less than this and the install would be cut short
+ * by the preview's own end, so the update is refused and the builder
+ * restarts, which begins a new lifetime.
+ */
+const MIN_UPDATE_INSTALL_MS = 60_000;
+
+/**
  * How long the pre-preview typecheck may take before it is abandoned.
  *
  * Generous against what it measures and strict against what it can cost.
@@ -136,6 +173,12 @@ interface PreviewState {
   expiresAt?: number;
   error?: string;
   typecheckFailure?: string;
+  /**
+   * The revision the dev server is serving, when the caller named one
+   * (D74). Moved on by a live update only once every file is written, and
+   * cleared when one stops part way, since the sandbox then serves neither.
+   */
+  revision?: string;
 }
 
 const STORAGE_KEY = 'vibld:preview';
@@ -174,7 +217,30 @@ export interface PreviewStatus {
    * actually failed, so absent means clean, not declared, or not asked.
    */
   typecheckFailure?: string;
+  /** The revision being served, when one is known (D74). */
+  revision?: string;
 }
+
+/**
+ * What asking a running preview to take a new revision came to (D74).
+ *
+ * - `applied`: the files are in and the dev server has them; `status` is
+ *   the preview as it now is.
+ * - `installing`: new dependencies are being installed; poll the status,
+ *   which says `installing` until the update ends as `ready` or `failed`.
+ * - `busy`: a start-up or another update is running here; poll, and ask
+ *   again once it has settled.
+ * - `restart`: this preview cannot be updated in place, for `reason`. The
+ *   caller restarts it (stop, then start), which is the path that existed
+ *   before D74.
+ * - `invalid`: the request itself was refused, and nothing was touched.
+ */
+export type UpdateOutcome =
+  | { outcome: 'applied'; status: PreviewStatus }
+  | { outcome: 'installing' }
+  | { outcome: 'busy' }
+  | { outcome: 'restart'; reason: string }
+  | { outcome: 'invalid'; error: string };
 
 /** L10's default and ceiling for how long a share grant lasts, independent of (but still capped by) the preview's own remaining L9 lifetime. */
 const SHARE_LIFETIME_MS = 24 * 60 * 60_000;
@@ -222,6 +288,24 @@ export class PreviewSandbox extends Sandbox<Env> {
   private provisioning = false;
 
   /**
+   * Whether this instance is running a live update that installs new
+   * dependencies (D74). In memory for the same reason as `provisioning`:
+   * such an update writes `installing` and runs past the call that began
+   * it, so an instance that finds `installing` stored with neither flag set
+   * has found one that was lost with an earlier instance, and settles it
+   * the same way (`settleLostProvision`).
+   */
+  private updating = false;
+
+  /**
+   * Live updates, one at a time. Each writes files into /workspace across
+   * several awaits, and the input gate opens at every one of them, so two
+   * that overlapped would interleave their writes and each record a set of
+   * files the other had changed underneath it.
+   */
+  private updates: Promise<unknown> = Promise.resolve();
+
+  /**
    * Start (or report progress on, or resume after queueing) a preview of
    * `files`. `label` is metadata only, passed straight to `PreviewFleet` for
    * observability -- never a limit key.
@@ -242,6 +326,8 @@ export class PreviewSandbox extends Sandbox<Env> {
     // that id lower-cased (`normalizeId`), which cannot be turned back into
     // it, so it is recorded here by the caller that knows it.
     owner?: string,
+    // Which checkpoint these files are, when the caller knows (D74).
+    revision?: string,
   ): Promise<PreviewStatus> {
     // A start-up lost with an earlier instance is a failed one, so this
     // start is a retry rather than a report of it (`settleLostProvision`).
@@ -267,11 +353,13 @@ export class PreviewSandbox extends Sandbox<Env> {
         return { status: 'queued', position: ticket.position };
       }
       await this.recordMedia(owner, files);
+      await this.recordServed(files);
       await this.beginProvisioning(
         existing.startedAt,
         existing.fleetTicketId,
         files,
         hostname,
+        revision,
       );
       return { status: 'installing' };
     }
@@ -287,8 +375,295 @@ export class PreviewSandbox extends Sandbox<Env> {
       return { status: 'queued', position: ticket.position };
     }
     await this.recordMedia(owner, files);
-    await this.beginProvisioning(startedAt, ticket.id, files, hostname);
+    await this.recordServed(files);
+    await this.beginProvisioning(
+      startedAt,
+      ticket.id,
+      files,
+      hostname,
+      revision,
+    );
     return { status: 'installing' };
+  }
+
+  /**
+   * What the dev server is about to be given, as `live-update.ts` diffs
+   * it. Written beside `recordMedia`, before the files go in, for the same
+   * reason: this describes the files being provisioned now, and a start
+   * that fails leaves a `failed` phase no update will act on.
+   */
+  private async recordServed(files: ProjectFile[]): Promise<void> {
+    await this.ctx.storage.put<ServedFiles>(
+      SERVED_KEY,
+      await describeFiles(files),
+    );
+  }
+
+  /**
+   * Take a new revision into the preview that is running, without a
+   * restart (D74).
+   *
+   * Only the files that differ from what the sandbox is serving are
+   * written, deleted ones are removed, and Vite's watcher reloads the page.
+   * When the dependencies changed the install runs first, under the
+   * `installing` phase, and this returns before it ends; the caller polls
+   * `getPreviewStatus` as it does for a start.
+   *
+   * Everything this does happens inside the preview that already exists:
+   * it takes no fleet ticket, moves no clock (the hard lifetime still runs
+   * from the original start, and the install is bounded by what is left of
+   * it), and runs under the same egress allowlist. Anything it cannot do in
+   * place it refuses as `restart` with a reason, and the caller restarts,
+   * which is the path that existed before.
+   */
+  async updatePreview(
+    files: ProjectFile[],
+    revision: string,
+  ): Promise<UpdateOutcome> {
+    const problem = filesProblem(files);
+    if (problem) return { outcome: 'invalid', error: problem };
+    const turn = this.updates.then(() => this.liveUpdate(files, revision));
+    this.updates = turn.catch(() => undefined);
+    return turn;
+  }
+
+  private async liveUpdate(
+    files: ProjectFile[],
+    revision: string,
+  ): Promise<UpdateOutcome> {
+    const refuse = (code: string, reason: string): UpdateOutcome => {
+      console.log('preview.update-refused', JSON.stringify({ reason: code }));
+      return { outcome: 'restart', reason };
+    };
+    // A start-up, or an update's install, owns the workspace until it
+    // ends. Asked to wait rather than refused, because nothing is wrong:
+    // the caller asks again once the status settles.
+    if (this.provisioning || this.updating) return { outcome: 'busy' };
+
+    const state = await this.settleLostProvision(await this.readState());
+    if (!state || state.phase !== 'ready' || !state.url) {
+      return refuse('not-running', 'The preview was not running.');
+    }
+    if (this.isExpired(state)) {
+      return refuse('expired', "The preview's time limit was reached.");
+    }
+    const served = await this.ctx.storage.get<ServedFiles>(SERVED_KEY);
+    if (!served) {
+      return refuse(
+        'unrecorded',
+        'The preview does not know which files it is serving.',
+      );
+    }
+
+    const next = await describeFiles(files);
+    const plan = planUpdate(served, next, files);
+    if (plan.write.length === 0 && plan.remove.length === 0) {
+      // Already serving these files, under whatever name: say so under
+      // this one, without touching the container.
+      const same: PreviewState = { ...state, revision };
+      await this.writeState(same);
+      console.log(
+        'preview.updated',
+        JSON.stringify({ ms: 0, written: 0, removed: 0, installed: false }),
+      );
+      return { outcome: 'applied', status: this.describe(same) };
+    }
+
+    const devProcess = await this.ctx.storage.get<string>(DEV_PROCESS_KEY);
+    if (plan.installs && !devProcess) {
+      return refuse(
+        'no-dev-process',
+        'The dev server cannot be restarted in place for the new dependencies.',
+      );
+    }
+    const steps = this.liveUpdateSteps(devProcess);
+    // A first start's bound, cut down to what is left of this preview's
+    // lifetime: an install that outlived the preview would be spending a
+    // fleet slot the fleet has already reclaimed.
+    const installTimeoutMs = budgeted(
+      PREVIEW_INSTALL_TIMEOUT_MS,
+      state.startedAt + HARD_LIFETIME_MS - Date.now(),
+    );
+    // A restart starts a fresh lifetime, so it is the better answer for an
+    // install that would have to race this one's end.
+    if (plan.installs && installTimeoutMs < MIN_UPDATE_INSTALL_MS) {
+      return refuse(
+        'expiring',
+        'The preview is too close to its time limit to install new dependencies.',
+      );
+    }
+
+    if (!plan.installs) {
+      const result = await applyLiveUpdate(plan, steps, { installTimeoutMs });
+      if (!(await this.stillServing(state))) {
+        return refuse('stopped', 'The preview was stopped during the update.');
+      }
+      if (result.ok) {
+        return this.finishUpdate(state, next, files, revision, result);
+      }
+      await this.forgetServed(state, result.touched);
+      return refuse('failed', result.error);
+    }
+
+    // Set before the phase is written, so no read in this instance can see
+    // this update's `installing` without it (`settleLostProvision`).
+    this.updating = true;
+    try {
+      await this.writeState({ ...state, phase: 'installing' });
+    } catch (error) {
+      this.updating = false;
+      throw error;
+    }
+    this.ctx.waitUntil(
+      applyLiveUpdate(plan, steps, { installTimeoutMs })
+        .then(async (result) => {
+          // Stopped (or replaced by a new start) while it installed: that
+          // preview is gone, and neither ending may be written over it.
+          if (!(await this.stillServing(state))) return;
+          if (result.ok) {
+            await this.finishUpdate(state, next, files, revision, result);
+            return;
+          }
+          await this.failUpdate(state, result.error);
+        })
+        .catch(async (error: unknown) => {
+          if (!(await this.stillServing(state))) return;
+          await this.failUpdate(
+            state,
+            error instanceof Error ? error.message : 'The update failed.',
+          );
+        })
+        .finally(() => {
+          this.updating = false;
+        }),
+    );
+    return { outcome: 'installing' };
+  }
+
+  /**
+   * Whether the preview an update began on is still the one stored.
+   *
+   * An update awaits the container many times, and a stop can land in any
+   * of those gaps. Writing `ready` (or `failed`) afterwards would bring a
+   * stopped preview back as a state with nothing behind it, so an update
+   * writes its ending only over the preview it began on: the same start
+   * and the same fleet ticket.
+   */
+  private async stillServing(began: PreviewState): Promise<boolean> {
+    const now = await this.readState();
+    return (
+      now !== undefined &&
+      now.startedAt === began.startedAt &&
+      now.fleetTicketId === began.fleetTicketId &&
+      (now.phase === 'ready' || now.phase === 'installing')
+    );
+  }
+
+  /** The container, as `live-update.ts` asks for it. */
+  private liveUpdateSteps(devProcess: string | undefined): LiveUpdateSteps {
+    return {
+      exec: (command, options) => this.exec(command, options),
+      write: async (path, content) => {
+        const dir = path.slice(0, path.lastIndexOf('/'));
+        if (dir && dir !== '/workspace') {
+          await this.mkdir(dir, { recursive: true });
+        }
+        await this.writeFile(path, content);
+      },
+      // Removing a file that is not there is the state being asked for,
+      // not a failure: somebody's own code may have deleted it already.
+      remove: async (path) => {
+        if ((await this.exists(path)).exists) await this.deleteFile(path);
+      },
+      typecheck: () => this.typecheck(),
+      // A kill that fails (the process already gone, say) is not the
+      // answer: whether the port is free is, and `applyLiveUpdate` waits
+      // for that and fails the update if it never comes.
+      stopDevServer: async () => {
+        if (devProcess) await this.killProcess(devProcess).catch(() => {});
+      },
+      startDevServer: async () => {
+        const dev = await this.startProcess(DEV_COMMAND, {
+          cwd: '/workspace',
+        });
+        await this.ctx.storage.put(DEV_PROCESS_KEY, dev.id);
+        return dev;
+      },
+      wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+      log: (event, fields) => console.log(event, JSON.stringify(fields)),
+    };
+  }
+
+  /**
+   * An update that got every file in: record what is served now, which
+   * media its code may reference, and the revision, as one moment.
+   */
+  private async finishUpdate(
+    before: PreviewState,
+    next: ServedFiles,
+    files: ProjectFile[],
+    revision: string,
+    result: Extract<LiveUpdateResult, { ok: true }>,
+  ): Promise<UpdateOutcome> {
+    await this.ctx.storage.put<ServedFiles>(SERVED_KEY, next);
+    // The allowlist follows the code the dev server now runs, in both
+    // directions: an image the new revision references is served, and one
+    // it no longer references stops being.
+    const owner = await this.ctx.storage.get<string>(MEDIA_OWNER_KEY);
+    await this.recordMedia(owner, files);
+    const ready: PreviewState = {
+      phase: 'ready',
+      startedAt: before.startedAt,
+      fleetTicketId: before.fleetTicketId,
+      ...(before.url ? { url: before.url } : {}),
+      ...(before.expiresAt ? { expiresAt: before.expiresAt } : {}),
+      revision,
+      ...(result.typecheckFailure
+        ? { typecheckFailure: result.typecheckFailure }
+        : {}),
+    };
+    await this.writeState(ready);
+    return { outcome: 'applied', status: this.describe(ready) };
+  }
+
+  /**
+   * An update that stopped without its install: the preview is left
+   * running and still ready, since the dev server is up, but when files
+   * were written it is serving neither revision, so it stops saying it
+   * serves the old one and refuses any further update in place.
+   */
+  private async forgetServed(
+    state: PreviewState,
+    touched: boolean,
+  ): Promise<void> {
+    if (!touched) return;
+    await this.ctx.storage.delete(SERVED_KEY);
+    const { revision: _served, ...rest } = state;
+    await this.writeState(rest);
+  }
+
+  /**
+   * An update whose install, or the dev server's restart after it, failed.
+   *
+   * Written as a failure, with the fleet slot given back and the container
+   * destroyed, exactly as a failed start is: the dev server may be down,
+   * the workspace is half one revision and half the other, and the phase a
+   * poll is waiting on has to end. The builder restarts from here, which
+   * is the fallback D74 asks for, and a restart is a clean container.
+   */
+  private async failUpdate(state: PreviewState, why: string): Promise<void> {
+    await this.writeState({
+      phase: 'failed',
+      startedAt: state.startedAt,
+      fleetTicketId: state.fleetTicketId,
+      error: `The preview could not take the new dependencies. ${why}`,
+    });
+    await this.ctx.storage.delete(SERVED_KEY);
+    await this.env.Fleet.getByName(FLEET_NAME)
+      .release(state.fleetTicketId, 'preview')
+      .catch(() => {});
+    await this.destroy().catch(() => {});
   }
 
   /**
@@ -339,7 +714,7 @@ export class PreviewSandbox extends Sandbox<Env> {
   /** Idempotent: stopping a preview that never started, or already stopped, still succeeds. */
   async stopPreview(): Promise<void> {
     const state = await this.readState();
-    await this.ctx.storage.delete(STORAGE_KEY);
+    await this.ctx.storage.delete([STORAGE_KEY, SERVED_KEY, DEV_PROCESS_KEY]);
     if (state) {
       await this.env.Fleet.getByName(FLEET_NAME)
         .release(state.fleetTicketId, 'preview')
@@ -1093,18 +1468,30 @@ export class PreviewSandbox extends Sandbox<Env> {
     fleetTicketId: number,
     files: ProjectFile[],
     hostname: string,
+    revision: string | undefined,
   ): Promise<void> {
     // Before the phase is written, so no read in this instance can see
     // `installing` without it.
     this.provisioning = true;
     try {
-      await this.writeState({ phase: 'installing', startedAt, fleetTicketId });
+      await this.writeState({
+        phase: 'installing',
+        startedAt,
+        fleetTicketId,
+        ...(revision ? { revision } : {}),
+      });
     } catch (error) {
       this.provisioning = false;
       throw error;
     }
     this.ctx.waitUntil(
-      this.provision(files, hostname, startedAt, fleetTicketId).finally(() => {
+      this.provision(
+        files,
+        hostname,
+        startedAt,
+        fleetTicketId,
+        revision,
+      ).finally(() => {
         this.provisioning = false;
       }),
     );
@@ -1125,7 +1512,12 @@ export class PreviewSandbox extends Sandbox<Env> {
   private async settleLostProvision(
     state: PreviewState | undefined,
   ): Promise<PreviewState | undefined> {
-    if (!state || !provisionLost(state.phase, this.provisioning)) return state;
+    if (
+      !state ||
+      !provisionLost(state.phase, this.provisioning || this.updating)
+    ) {
+      return state;
+    }
     const failed: PreviewState = {
       phase: 'failed',
       startedAt: state.startedAt,
@@ -1149,7 +1541,9 @@ export class PreviewSandbox extends Sandbox<Env> {
     hostname: string,
     startedAt: number,
     fleetTicketId: number,
+    revision: string | undefined,
   ): Promise<void> {
+    const named = revision ? { revision } : {};
     // The steps, their bounds and their logging live in `provision.ts`,
     // where they can be run against fakes. This supplies the container.
     const result = await provisionPreview({
@@ -1164,13 +1558,20 @@ export class PreviewSandbox extends Sandbox<Env> {
           (work) => work,
         );
       },
-      setPhase: (phase) => this.writeState({ phase, startedAt, fleetTicketId }),
+      setPhase: (phase) =>
+        this.writeState({ phase, startedAt, fleetTicketId, ...named }),
       exec: (command, options) => this.exec(command, options),
       // The cheapest place in the product to find out that a generated
       // project does not compile (internal issue 194). Deliberately not a failure: the
       // dev server starts either way, and Vite does not typecheck.
       typecheck: () => this.typecheck(),
-      startProcess: (command, options) => this.startProcess(command, options),
+      // Its id kept, so a live update that installs new dependencies can
+      // restart this server rather than the whole container (D74).
+      startProcess: async (command, options) => {
+        const dev = await this.startProcess(command, options);
+        await this.ctx.storage.put(DEV_PROCESS_KEY, dev.id);
+        return dev;
+      },
       exposePort: (port) => this.exposePort(port, { hostname }),
       now: () => Date.now(),
       log: (event, fields) => console.log(event, JSON.stringify(fields)),
@@ -1183,6 +1584,7 @@ export class PreviewSandbox extends Sandbox<Env> {
         fleetTicketId,
         url: result.url,
         expiresAt: startedAt + HARD_LIFETIME_MS,
+        ...named,
         ...(result.typecheckFailure
           ? { typecheckFailure: result.typecheckFailure }
           : {}),
@@ -1446,6 +1848,7 @@ export class PreviewSandbox extends Sandbox<Env> {
       ...(state.typecheckFailure
         ? { typecheckFailure: state.typecheckFailure }
         : {}),
+      ...(state.revision ? { revision: state.revision } : {}),
     };
   }
 

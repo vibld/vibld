@@ -4,9 +4,19 @@ import { describe, it } from 'node:test';
 import {
   DEV_PORT,
   DEV_SERVER_READY_TIMEOUT_MS,
+  INSTALL_COMMAND,
+  ONLINE_INSTALL_COMMAND,
   PREVIEW_INSTALL_TIMEOUT_MS,
+  PRUNE_COMMAND,
+  SEED_CLEANUP,
+  SEED_COMMAND,
+  SEED_TIMEOUT_MS,
+  WARM_MODULES,
+  installDependencies,
   outputTail,
   provisionPreview,
+  seedModules,
+  staleCacheMiss,
 } from '../worker/provision.ts';
 import type {
   DevProcessLike,
@@ -26,18 +36,27 @@ import type {
 interface Recorded {
   phases: string[];
   commands: { command: string; timeout?: number }[];
+  /** The seed (D74) and its cleanup, kept apart from the commands above. */
+  seeding: string[];
   logs: { event: string; fields: Record<string, unknown> }[];
   waitedWith?: { mode: string; timeout: number };
 }
 
 function harness(overrides: {
   install?: (clock: { t: number }) => Promise<ExecResultLike>;
+  seed?: () => Promise<ExecResultLike>;
+  prune?: () => Promise<ExecResultLike>;
   typecheck?: () => Promise<string | undefined>;
   waitForPort?: (clock: { t: number }) => Promise<void>;
   devLogs?: () => Promise<{ stdout: string; stderr: string }>;
 }) {
   const clock = { t: 1_000 };
-  const recorded: Recorded = { phases: [], commands: [], logs: [] };
+  const recorded: Recorded = {
+    phases: [],
+    commands: [],
+    seeding: [],
+    logs: [],
+  };
   const dev: DevProcessLike = {
     waitForPort: async (_port, options) => {
       recorded.waitedWith = options;
@@ -51,6 +70,18 @@ function harness(overrides: {
       recorded.phases.push(phase);
     },
     exec: async (command, options) => {
+      if (
+        command === SEED_COMMAND ||
+        command === SEED_CLEANUP ||
+        command === PRUNE_COMMAND
+      ) {
+        recorded.seeding.push(command);
+        if (command === SEED_COMMAND && overrides.seed) return overrides.seed();
+        if (command === PRUNE_COMMAND && overrides.prune) {
+          return overrides.prune();
+        }
+        return { success: true, exitCode: 0, stdout: '', stderr: '' };
+      }
       recorded.commands.push({ command, timeout: options.timeout });
       return overrides.install
         ? overrides.install(clock)
@@ -79,11 +110,12 @@ describe('provisionPreview', () => {
     assert.deepEqual(recorded.phases, ['installing', 'starting']);
     assert.equal(
       recorded.commands[0]?.command,
-      'npm install --no-audit --no-fund',
+      'npm install --prefer-offline --no-audit --no-fund',
+      'the install does not prefer what npm already has (D74)',
     );
     assert.match(
       recorded.commands[1]?.command ?? '',
-      /^npm run dev -- --host 0\.0\.0\.0 --port 5173$/,
+      /^npm run dev -- --host 0\.0\.0\.0 --port 5173 --strictPort$/,
     );
   });
 
@@ -231,6 +263,195 @@ describe('provisionPreview', () => {
     };
     const result = await provisionPreview(steps);
     assert.deepEqual(result, { ok: false, error: 'writeFile failed' });
+  });
+});
+
+describe('seeding node_modules from the image (D74)', () => {
+  it('puts the installed stack in place before the install, and prunes after it', async () => {
+    const { steps, recorded } = harness({});
+    const order: string[] = [];
+    const exec = steps.exec;
+    steps.exec = async (command, options) => {
+      order.push(command === SEED_COMMAND ? 'seed' : command.split(' ')[1]!);
+      return exec(command, options);
+    };
+    await provisionPreview(steps);
+    assert.deepEqual(order.slice(0, 3), ['seed', 'install', 'prune']);
+    assert.deepEqual(recorded.seeding, [SEED_COMMAND, PRUNE_COMMAND]);
+    const seed = recorded.logs.find(
+      (l) => l.event === 'preview.step' && l.fields.step === 'seed',
+    );
+    assert.equal(seed?.fields.ok, true);
+  });
+
+  it('moves the image copy only into an empty place, through a staging name', () => {
+    // A retry in the same container keeps the node_modules it has, and a
+    // move that fails part way never leaves half a tree named node_modules.
+    assert.match(SEED_COMMAND, /\[ ! -e \/workspace\/node_modules \]/);
+    assert.ok(
+      SEED_COMMAND.indexOf(`mv ${WARM_MODULES} /workspace/.node_modules-seed`) <
+        SEED_COMMAND.indexOf(
+          'mv /workspace/.node_modules-seed /workspace/node_modules',
+        ),
+    );
+  });
+
+  it('cleans up after a seed that failed, and still installs', async () => {
+    for (const seed of [
+      async () => ({ success: false, exitCode: 1, stdout: '', stderr: '' }),
+      async (): Promise<ExecResultLike> => {
+        throw new Error('exec failed');
+      },
+    ]) {
+      const { steps, recorded } = harness({ seed });
+      const result = await provisionPreview(steps);
+      assert.equal(result.ok, true, 'a failed seed failed the start');
+      // No prune either: an install from nothing has nothing undeclared.
+      assert.deepEqual(recorded.seeding, [SEED_COMMAND, SEED_CLEANUP]);
+      assert.equal(recorded.commands[0]?.command, INSTALL_COMMAND);
+      const logged = recorded.logs.find(
+        (l) => l.event === 'preview.step' && l.fields.step === 'seed',
+      );
+      assert.equal(logged?.fields.ok, false);
+    }
+  });
+
+  it('starts the preview even when the prune fails, and says so in the log', async () => {
+    const { steps } = harness({
+      prune: async () => ({
+        success: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: '',
+      }),
+    });
+    const logs: { event: string; fields: Record<string, unknown> }[] = [];
+    const log = steps.log;
+    steps.log = (event, fields) => {
+      logs.push({ event, fields });
+      log(event, fields);
+    };
+    const result = await provisionPreview(steps);
+    assert.equal(result.ok, true);
+    assert.equal(
+      logs.find((l) => l.event === 'preview.step' && l.fields.step === 'prune')
+        ?.fields.ok,
+      false,
+    );
+  });
+
+  it('is bounded', async () => {
+    const timeouts: number[] = [];
+    await seedModules(async (_command, options) => {
+      timeouts.push(options.timeout);
+      return { success: true, exitCode: 0, stdout: '', stderr: '' };
+    });
+    assert.deepEqual(timeouts, [SEED_TIMEOUT_MS]);
+  });
+});
+
+describe('installDependencies (D74, cache first)', () => {
+  function execs(
+    answers: ((clock: { t: number }) => Promise<ExecResultLike>)[],
+  ) {
+    const clock = { t: 0 };
+    const commands: { command: string; timeout: number }[] = [];
+    let call = 0;
+    const exec = async (
+      command: string,
+      options: { cwd: string; timeout: number },
+    ) => {
+      commands.push({ command, timeout: options.timeout });
+      const answer = answers[call++];
+      assert.ok(answer, `an unexpected command: ${command}`);
+      return answer(clock);
+    };
+    return { exec, clock, commands, now: () => clock.t };
+  }
+  const ok = async () => ({
+    success: true,
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  });
+
+  it('installs from the cache first and asks the registry only for what is missing', async () => {
+    const { exec, now, commands } = execs([ok]);
+    const result = await installDependencies(exec, now, 60_000);
+    assert.deepEqual(result, { ok: true, retriedOnline: false });
+    assert.deepEqual(commands, [{ command: INSTALL_COMMAND, timeout: 60_000 }]);
+  });
+
+  it('retries online, inside what is left of the bound, when the cache is stale', async () => {
+    // npm uses a cached package document as it is under --prefer-offline,
+    // so a version published since it was cached is ETARGET rather than a
+    // fetch. That is the cache's fault, not the project's.
+    const { exec, now, commands } = execs([
+      async (clock) => {
+        clock.t += 10_000;
+        return {
+          success: false,
+          exitCode: 1,
+          stdout: '',
+          stderr:
+            'npm error code ETARGET\nnpm error notarget No matching version found for react@^19.9.0.',
+        };
+      },
+      ok,
+    ]);
+    const result = await installDependencies(exec, now, 60_000);
+    assert.deepEqual(result, { ok: true, retriedOnline: true });
+    assert.deepEqual(commands, [
+      { command: INSTALL_COMMAND, timeout: 60_000 },
+      { command: ONLINE_INSTALL_COMMAND, timeout: 50_000 },
+    ]);
+  });
+
+  it("does not retry a failure that is the project's own", async () => {
+    const { exec, now, commands } = execs([
+      async () => ({
+        success: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: 'npm error 404 Not Found - GET https://registry.npmjs.org/nope',
+      }),
+    ]);
+    const result = await installDependencies(exec, now, 60_000);
+    assert.equal(result.ok, false);
+    assert.equal(commands.length, 1);
+    assert.match(result.ok ? '' : result.output, /404 Not Found/);
+  });
+
+  it('does not retry once the bound is spent', async () => {
+    const { exec, now, commands } = execs([
+      async (clock) => {
+        clock.t += 60_000;
+        return {
+          success: false,
+          exitCode: 1,
+          stdout: '',
+          stderr: 'npm error code ETARGET',
+        };
+      },
+    ]);
+    const result = await installDependencies(exec, now, 60_000);
+    assert.deepEqual(result, {
+      ok: false,
+      timedOut: true,
+      exitCode: -1,
+      output: '',
+    });
+    assert.equal(commands.length, 1);
+  });
+
+  it('tells a stale cache from any other failure', () => {
+    assert.equal(staleCacheMiss('npm error code ETARGET'), true);
+    assert.equal(
+      staleCacheMiss('No matching version found for vite@^9.0.0'),
+      true,
+    );
+    assert.equal(staleCacheMiss('npm error code E404'), false);
+    assert.equal(staleCacheMiss('npm error code ERESOLVE'), false);
   });
 });
 

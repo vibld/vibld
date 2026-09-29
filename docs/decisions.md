@@ -498,6 +498,105 @@ Decided while implementing it, and Chris's to reverse:
   tombstone. Rows are kept after the purge, with no 12-month expiry. The
   purge deletes an account's gifts, overrides and ban.
 
+**A running preview takes a new revision in place, and its image starts
+warm.** Chris decided on 2026-09-29 (D74, "Live-update + warm image").
+Seeing a change in the preview took a minute or two every time. A running
+preview could not take new files, so after a follow-up was accepted the
+panel said the sandbox was serving an older checkpoint and asked for a
+restart, and a restart destroyed the container and paid again for a cold
+`npm install`, a typecheck and a dev-server start; a first preview measured
+about 126 seconds end to end in production. Now, when a new revision
+arrives (an accepted checkpoint, or a D69 build shown early while it is
+checked) and a preview of the same project is running, the builder sends it
+to the preview with `PATCH /api/preview`, which apps/web passes to
+`@vibld/preview`'s `/internal/preview/update` (`PreviewSandbox.updatePreview`,
+`apps/preview/worker/live-update.ts`). The sandbox keeps a digest of every
+file it was given, writes only the files that are new or changed, removes
+the ones that are gone, and Vite's watcher reloads the page. When
+package.json's dependency fields or the lockfile changed, the manifests go
+in first, `npm install` runs under the `installing` phase (bounded like a
+first start's install and by what is left of the preview's lifetime), the
+other files follow, and the dev server alone is restarted. The preview
+records which revision it serves, so the "older checkpoint" notice goes
+once an update lands; while one is on its way the panel says "Updating
+preview…" and the tab badge says "updating". What the sandbox cannot do in
+place (the dev server gone, an update that broke off, a preview expired or
+not running, a failed install) comes back as a restart with a reason, and
+the builder restarts as it did before and says why beside the preview.
+Restart stays on offer. Fleet tickets, the hard lifetime, internal PR 307's
+lost-start settling, the media allowlist and the egress allowlist all hold
+across an update, and every path is checked against /workspace again inside
+the sandbox.
+
+The image now carries the generation stack already installed
+(`apps/preview/Dockerfile`, from `apps/preview/warm/package.json`, which
+`packages/ai/test/preview-warm-cache.test.ts` keeps equal to
+`packages/ai/src/stack.ts`). A start moves that node_modules into the
+project before its `npm install`, which then only reconciles it with the
+project's package.json: anything beyond the stack comes from the registry
+as before, under the same egress allowlist, and `npm prune` removes what
+the project does not declare. Of the two options D74 named, this one and
+not a warmed npm cache, on measurement at the container's size (a quarter
+of a CPU, 1 GiB, a scaffolded project): a cold install took about 111
+seconds, one from a warm cache 87 to 98, and one from the installed stack
+13 to 27, prune included (61 with an extra package that brings 38 more,
+against 146 cold). The install's time goes on unpacking and writing packages, which
+a cache does not save, and a cache is also the heavier of the two: npm keeps
+every package document it reads, 277 MB of them for this stack against 38 MB
+of tarballs. The image grows from 228 MB to 267 MB compressed (864 MB to
+1.08 GB unpacked); the warm cache alone had made it 308 MB. Each step is
+logged as `preview.step` (a start adds `seed` and `prune`; an update logs
+`update-probe`, `update-install`, `update-prune`, `update-write`,
+`update-dev-server` and `update-typecheck`, then `preview.updated` with its
+total), so the speed-up can be read from the Worker's logs.
+
+Decided while implementing it, and Chris's to reverse:
+
+- After an install of new dependencies the dev server is restarted (not
+  the container). Vite pre-bundles dependencies when it starts and serves
+  that bundle until it restarts, so a changed version would otherwise go
+  on being served; the restart is seconds, not the minutes a container's
+  was.
+- A package.json change that no install reads (the name, a script) is
+  written without an install and without a dev-server restart, so a
+  changed `dev` script reaches the preview only on the next restart.
+- A dependency install that fails ends the preview as a failed start does
+  (fleet slot given back, container destroyed), and the builder restarts
+  it; the restart's own install then shows npm's error as before.
+- An update that stops part way leaves the preview running but stops it
+  claiming either revision, and refuses further updates in place, so the
+  next one is a restart.
+- An update that needs an install is refused (a restart) when less than a
+  minute of the preview's thirty remains, because a restart begins a new
+  lifetime.
+- While new dependencies install, the preview's phase is `installing`, so
+  a share link to it answers "no longer running" until the install ends.
+- The project's own typecheck runs again after each update and replaces the
+  finding shown with the preview.
+- A preview started before this change has no record of its files and is
+  restarted on its first update.
+- `PATCH /api/preview` is behind the invite gate, as starting a preview is.
+- Updating is automatic, with no setting to turn it off.
+- The installed stack is moved, not copied, into the project, since a
+  container runs one preview; on a filesystem where that move is a copy
+  (as it was in the measurement) it took 5 to 19 seconds of the total.
+- These numbers come from Docker with the container's CPU and memory
+  limits, not from Cloudflare; production's are for the Worker logs to
+  say.
+- A failed seed is cleaned up and the start installs as it used to; a
+  failed prune is logged and the preview starts anyway, since the build's
+  clean install still refuses an undeclared package.
+- The image's stack is resolved from `stack.ts`'s caret ranges when the
+  image is built, with no lockfile, so a preview keeps the patch versions
+  of its image until the image is redeployed, while a build resolves the
+  newest. Changing `stack.ts` now also needs the sandbox service
+  redeployed to reach previews.
+- The build path is unchanged: it still installs from nothing, online, so
+  it goes on measuring what a clean machine resolves.
+- Installs run with `--prefer-offline` (a live update's install reuses what
+  the start fetched minutes before) and retry once online when that cache
+  was stale (ETARGET).
+
 ### Resolved 2026-09-29
 
 **Builds are generated in bounded steps, and follow-ups as patches.** Every

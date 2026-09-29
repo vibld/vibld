@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseStartRequest } from '../worker/start-request.ts';
+import {
+  parseStartRequest,
+  parseUpdateRequest,
+} from '../worker/start-request.ts';
 
 /**
  * What `/internal/preview/start` accepts, and in particular whose media a
@@ -56,5 +59,64 @@ describe('starting a preview', () => {
       parseStartRequest({ userId: 'u', files: [{ path: 1 }] }).ok,
       false,
     );
+  });
+});
+
+describe('naming the revision a preview runs (D74)', () => {
+  it('carries the revision when one is named, and nothing when not', () => {
+    const named = parseStartRequest({
+      userId: 'user_1',
+      files: FILES,
+      revision: 'rev_2',
+    });
+    assert.ok(named.ok);
+    assert.equal(named.value.revision, 'rev_2');
+    const unnamed = parseStartRequest({ userId: 'user_1', files: FILES });
+    assert.ok(unnamed.ok);
+    assert.equal('revision' in unnamed.value, false);
+  });
+
+  it('refuses a revision that is not a short name', () => {
+    for (const revision of ['', 7, 'x'.repeat(201)]) {
+      assert.equal(
+        parseStartRequest({ userId: 'user_1', files: FILES, revision }).ok,
+        false,
+        String(revision).slice(0, 10),
+      );
+    }
+  });
+});
+
+describe('updating a running preview (D74)', () => {
+  it('takes a user, the whole set of files and the revision they are', () => {
+    const parsed = parseUpdateRequest({
+      userId: 'user_1',
+      files: FILES,
+      revision: 'rev_2',
+    });
+    assert.ok(parsed.ok);
+    assert.deepEqual(parsed.value, {
+      userId: 'user_1',
+      files: FILES,
+      revision: 'rev_2',
+    });
+  });
+
+  it('requires the revision, since it is what the preview then says it serves', () => {
+    assert.equal(
+      parseUpdateRequest({ userId: 'user_1', files: FILES }).ok,
+      false,
+    );
+  });
+
+  it('refuses a path that would write outside /workspace', () => {
+    for (const path of ['../x.ts', '/etc/passwd', 'a/../../x', 'a\\b.ts']) {
+      const parsed = parseUpdateRequest({
+        userId: 'user_1',
+        files: [{ path, content: '' }],
+        revision: 'rev_2',
+      });
+      assert.equal(parsed.ok, false, path);
+    }
   });
 });
