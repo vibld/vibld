@@ -1140,7 +1140,32 @@ async function main() {
       const frame = page.locator(
         'iframe[title="Sandbox preview of the generated application"]',
       );
-      await frame.waitFor({ state: 'visible', timeout: 6 * 60_000 });
+      // Either the frame, or the panel's failure with its Try again. A
+      // start-up can be lost with the sandbox's instance, which the panel
+      // reports as a failure (run 36611993082); a reader would try once
+      // more, so this does too, and says that it did.
+      const tryAgain = page.getByRole('button', { name: 'Try again' });
+      let retried = null;
+      for (let attempt = 0; ; attempt += 1) {
+        await frame
+          .or(tryAgain)
+          .first()
+          .waitFor({ state: 'visible', timeout: 6 * 60_000 });
+        if (await frame.isVisible()) break;
+        const said = redact(
+          await page
+            .locator('.preview__error')
+            .innerText()
+            .catch(() => ''),
+          secrets,
+        );
+        if (attempt > 0) {
+          throw new Error(`The preview did not start twice: ${said}`);
+        }
+        retried = said;
+        facts.previewRetried = said;
+        await tryAgain.click({ timeout: 10_000 });
+      }
       const body = page
         .frameLocator(
           'iframe[title="Sandbox preview of the generated application"]',
@@ -1163,7 +1188,7 @@ async function main() {
         .getByRole('button', { name: 'Stop', exact: true })
         .click({ timeout: 10_000 })
         .catch(() => undefined);
-      return `${text.trim().length} characters of page text${/bak/i.test(text) ? ', mentions baking' : ''}`;
+      return `${text.trim().length} characters of page text${/bak/i.test(text) ? ', mentions baking' : ''}${retried === null ? '' : `; started on the second try (first: ${retried.slice(0, 120)})`}`;
     });
 
     await step('A small follow-up', async () => {

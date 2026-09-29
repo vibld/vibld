@@ -242,3 +242,16 @@ describe('outputTail', () => {
     assert.ok(tail.length <= 1501);
   });
 });
+
+describe('provisionLost', () => {
+  it('is lost only when a start-up phase has nothing running it here', async () => {
+    const { provisionLost } = await import('../worker/provision.ts');
+    assert.equal(provisionLost('installing', false), true);
+    assert.equal(provisionLost('starting', false), true);
+    assert.equal(provisionLost('installing', true), false);
+    assert.equal(provisionLost('starting', true), false);
+    for (const phase of ['queued', 'ready', 'failed'] as const) {
+      assert.equal(provisionLost(phase, false), false);
+    }
+  });
+});

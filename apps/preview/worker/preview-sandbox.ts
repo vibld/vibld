@@ -34,7 +34,11 @@ import {
 // The one fleet instance that counts every container, previews and builds
 // alike: see `capacity.ts` for how the budget is shared (internal issue 197).
 import { FLEET_NAME } from './capacity.ts';
-import { provisionPreview } from './provision.ts';
+import {
+  PROVISION_LOST_ERROR,
+  provisionLost,
+  provisionPreview,
+} from './provision.ts';
 
 /**
  * Vibld's own untrusted-execution sandbox (ADR-0004; docs/decisions.md L7,
@@ -210,6 +214,14 @@ export class PreviewSandbox extends Sandbox<Env> {
   allowedHosts = ['registry.npmjs.org'];
 
   /**
+   * Whether this instance is running a preview's start-up now. In memory on
+   * purpose: the start-up lives in the instance that began it, so a new
+   * instance starts at false, which is how `settleLostProvision` knows a
+   * stored `installing` or `starting` was left by one that is gone.
+   */
+  private provisioning = false;
+
+  /**
    * Start (or report progress on, or resume after queueing) a preview of
    * `files`. `label` is metadata only, passed straight to `PreviewFleet` for
    * observability -- never a limit key.
@@ -231,7 +243,9 @@ export class PreviewSandbox extends Sandbox<Env> {
     // it, so it is recorded here by the caller that knows it.
     owner?: string,
   ): Promise<PreviewStatus> {
-    const existing = await this.readState();
+    // A start-up lost with an earlier instance is a failed one, so this
+    // start is a retry rather than a report of it (`settleLostProvision`).
+    const existing = await this.settleLostProvision(await this.readState());
     const fleet = this.env.Fleet.getByName(FLEET_NAME);
 
     // A failed attempt is a finished one, not an in-progress one -- it must
@@ -294,9 +308,13 @@ export class PreviewSandbox extends Sandbox<Env> {
     });
   }
 
-  /** Read-only: never enqueues, never provisions. Safe to poll freely. */
+  /**
+   * Never enqueues, never provisions. Safe to poll freely. It writes only
+   * to settle a start-up that was lost with an earlier instance, which it
+   * does once (`settleLostProvision`).
+   */
   async getPreviewStatus(): Promise<PreviewStatus> {
-    const state = await this.readState();
+    const state = await this.settleLostProvision(await this.readState());
     if (!state) {
       return { status: 'failed', error: 'No preview has been started.' };
     }
@@ -1076,10 +1094,54 @@ export class PreviewSandbox extends Sandbox<Env> {
     files: ProjectFile[],
     hostname: string,
   ): Promise<void> {
-    await this.writeState({ phase: 'installing', startedAt, fleetTicketId });
+    // Before the phase is written, so no read in this instance can see
+    // `installing` without it.
+    this.provisioning = true;
+    try {
+      await this.writeState({ phase: 'installing', startedAt, fleetTicketId });
+    } catch (error) {
+      this.provisioning = false;
+      throw error;
+    }
     this.ctx.waitUntil(
-      this.provision(files, hostname, startedAt, fleetTicketId),
+      this.provision(files, hostname, startedAt, fleetTicketId).finally(() => {
+        this.provisioning = false;
+      }),
     );
+  }
+
+  /**
+   * A stored start-up with nothing running it, written down as the failure
+   * it is, with its fleet slot given back; anything else, as it was.
+   *
+   * `provision` writes a final phase on every exit it gets to take, but an
+   * instance the platform replaces takes none: the start-up and the write
+   * that would have ended it both go with it (run 36611993082, 2026-09-29).
+   * Left alone, the stored `installing` was reported on every poll for the
+   * preview's whole hard lifetime, a restart was answered with the same
+   * report, and the slot stayed taken. Its container is destroyed as well,
+   * since whatever the lost start-up left running in it serves nobody.
+   */
+  private async settleLostProvision(
+    state: PreviewState | undefined,
+  ): Promise<PreviewState | undefined> {
+    if (!state || !provisionLost(state.phase, this.provisioning)) return state;
+    const failed: PreviewState = {
+      phase: 'failed',
+      startedAt: state.startedAt,
+      fleetTicketId: state.fleetTicketId,
+      error: PROVISION_LOST_ERROR,
+    };
+    await this.writeState(failed);
+    console.log(
+      'preview.lost',
+      JSON.stringify({ phase: state.phase, ms: Date.now() - state.startedAt }),
+    );
+    await this.env.Fleet.getByName(FLEET_NAME)
+      .release(state.fleetTicketId, 'preview')
+      .catch(() => {});
+    await this.destroy().catch(() => {});
+    return failed;
   }
 
   private async provision(

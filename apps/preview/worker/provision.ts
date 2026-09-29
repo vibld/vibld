@@ -212,3 +212,34 @@ export async function provisionPreview(
     );
   }
 }
+
+/**
+ * What a reader is told when a start-up was lost rather than failed.
+ *
+ * The start-up runs inside the Durable Object instance that began it
+ * (`ctx.waitUntil`). When the platform replaces that instance mid-way, the
+ * work goes with it, and so does the write that would have said how it
+ * ended: production run 36611993082 (2026-09-29) installed and typechecked,
+ * lost its instance as the dev server started, and was then reported as
+ * "Installing dependencies…" on every poll until the e2e gave up six
+ * minutes later.
+ */
+export const PROVISION_LOST_ERROR =
+  'The preview stopped while it was starting. Run it again.';
+
+/**
+ * Whether a stored phase describes a start-up nothing is running any more.
+ *
+ * `installing` and `starting` are written only by the start-up itself, and
+ * the start-up only runs in the instance that began it, so an instance that
+ * finds either stored without a start-up of its own running has found one
+ * that was lost with an earlier instance. `queued` is waiting on the fleet,
+ * not on this instance, and `ready` and `failed` are finished, so none of
+ * those is ever lost.
+ */
+export function provisionLost(
+  phase: 'queued' | 'installing' | 'starting' | 'ready' | 'failed',
+  runningHere: boolean,
+): boolean {
+  return (phase === 'installing' || phase === 'starting') && !runningHere;
+}

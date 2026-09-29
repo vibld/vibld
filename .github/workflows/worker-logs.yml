@@ -15,6 +15,14 @@ on:
         description: Only events with an error, a warning, or a 5xx status
         type: boolean
         default: true
+      service:
+        description: Which Worker (vibld-web-preview, or vibld-preview for the sandboxes)
+        required: true
+        default: vibld-web-preview
+      match:
+        description: Only events whose message contains this text (empty for all)
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -33,12 +41,15 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           MINUTES: ${{ inputs.minutes }}
           ERRORS_ONLY: ${{ inputs.errors_only }}
+          SERVICE: ${{ inputs.service }}
+          MATCH: ${{ inputs.match }}
         run: |
           set -euo pipefail
           case "$MINUTES" in ''|*[!0-9]*) echo "::error::minutes must be a number"; exit 1 ;; esac
+          case "$SERVICE" in vibld-web-preview|vibld-preview) ;; *) echo "::error::service must be vibld-web-preview or vibld-preview"; exit 1 ;; esac
           to=$(( $(date +%s) * 1000 ))
           from=$(( to - MINUTES * 60 * 1000 ))
-          body=$(jq -n --argjson from "$from" --argjson to "$to" '{
+          body=$(jq -n --argjson from "$from" --argjson to "$to" --arg service "$SERVICE" '{
             queryId: "worker-logs",
             timeframe: { from: $from, to: $to },
             view: "events",
@@ -46,7 +57,7 @@ jobs:
             parameters: {
               datasets: ["cloudflare-workers"],
               filters: [
-                { key: "$metadata.service", operation: "eq", type: "string", value: "vibld-web-preview" }
+                { key: "$metadata.service", operation: "eq", type: "string", value: $service }
               ]
             }
           }')
@@ -63,9 +74,13 @@ jobs:
           echo "Events returned: $(jq '.result.events.events | length' response.json)"
           # Only fields about the request and the error. Never headers or
           # bodies, which is where a token or a person's text would be.
-          jq -r --arg errorsOnly "$ERRORS_ONLY" '
+          jq -r --arg errorsOnly "$ERRORS_ONLY" --arg match "$MATCH" '
             .result.events.events
             | sort_by(.timestamp)
+            | map(select(
+                $match == ""
+                or ((.["$metadata"].message // "") | contains($match))
+              ))
             | map(select(
                 $errorsOnly != "true"
                 or (.["$metadata"].error // "") != ""
