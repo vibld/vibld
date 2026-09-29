@@ -17,12 +17,14 @@ import {
   describeGroup,
   estimateTokens,
   groupLabel,
+  groupPrompt,
   normaliseOutline,
   orderManifest,
   partitionManifest,
   rankOf,
   runBoundedBuild,
   splitGroup,
+  uiApiLine,
 } from '../src/bounded-build.ts';
 import type {
   BoundedBuildHooks,
@@ -1717,5 +1719,119 @@ describe('the effort of the file-writing steps (D70)', () => {
       assert.equal(request.output?.name, 'file_group');
       assert.equal(request.effort, 'medium');
     }
+  });
+});
+
+describe('the shadcn/ui components a step did not declare', () => {
+  // As shadcn writes it today, and as the North Star build wrote it
+  // (run 36577433562): a forwardRef Button with no asChild.
+  const shadcnButton = `import * as React from "react"
+import { Slot as SlotPrimitive } from "radix-ui"
+import { cva, type VariantProps } from "class-variance-authority"
+
+const buttonVariants = cva("inline-flex", { variants: { variant: { default: "a" } } })
+
+function Button({
+  className,
+  variant,
+  size,
+  asChild = false,
+  ...props
+}: React.ComponentProps<"button"> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean
+  }) {
+  const Comp = asChild ? SlotPrimitive.Slot : "button"
+  return <Comp className={cn(buttonVariants({ variant, size, className }))} {...props} />
+}
+
+export { Button, buttonVariants }
+`;
+  const plainButton = `export const buttonVariants = cva('x');
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {}
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, ...props }, ref) => <button ref={ref} {...props} />,
+);
+`;
+
+  it('reads what each file exports and the props each component takes', () => {
+    assert.equal(
+      uiApiLine('src/components/ui/button.tsx', shadcnButton),
+      'src/components/ui/button.tsx: exports Button, buttonVariants: Button({className, variant, size, asChild = false, ...props}: React.ComponentProps<"button"> & VariantProps<typeof buttonVariants> & {asChild?: boolean})',
+    );
+    const plain = uiApiLine('src/components/ui/button.tsx', plainButton)!;
+    assert.match(
+      plain,
+      /Button<HTMLButtonElement, ButtonProps>\(\{className, variant, size, \.\.\.props\}, ref\)/,
+    );
+    assert.match(
+      plain,
+      /interface ButtonProps extends React\.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> \{\}/,
+    );
+    assert.doesNotMatch(plain, /asChild/);
+    assert.equal(uiApiLine('src/components/ui/x.tsx', '// nothing'), undefined);
+  });
+
+  it('tells a step the props of every primitive already written, without sending the files', () => {
+    const plan = normaliseOutline(
+      {
+        summary: 'A site.',
+        spec: SPEC,
+        manifest: [
+          entry('src/components/ui/button.tsx'),
+          entry('src/components/ui/card.tsx'),
+          // Declares only the card, as the outline that failed did.
+          entry('src/components/SiteHeader.tsx', 'small', [
+            'src/components/ui/card.tsx',
+          ]),
+        ],
+        delete: [],
+      },
+      [],
+    );
+    const card =
+      'function Card({ className, ...props }: React.ComponentProps<"div">) { return <div /> }\nexport { Card }\n';
+    const written = [
+      { path: 'src/components/ui/button.tsx', content: plainButton },
+      { path: 'src/components/ui/card.tsx', content: card },
+    ];
+    const header = plan.manifest.find(
+      (item) => item.path === 'src/components/SiteHeader.tsx',
+    )!;
+    const { prompt, prefix } = groupPrompt(
+      'context',
+      { prompt: 'p', plan, entries: [header], written },
+      undefined,
+    );
+    // The button's API, which says it has no asChild; not its source.
+    assert.match(
+      prompt,
+      /src\/components\/ui\/button\.tsx: exports buttonVariants, ButtonProps, Button/,
+    );
+    assert.ok(!prompt.includes('React.forwardRef'));
+    // The card is shown in full, so not listed a second time.
+    assert.ok(prompt.includes(JSON.stringify(card).slice(1, 40)));
+    assert.doesNotMatch(prompt, /src\/components\/ui\/card\.tsx: exports/);
+    // Outside the cached prefix, which every step shares.
+    assert.ok(!prefix.includes('ui/button.tsx: exports'));
+
+    // A step writing the button itself is not told its old API.
+    const buttonStep = groupPrompt(
+      'context',
+      {
+        prompt: 'p',
+        plan,
+        entries: [
+          plan.manifest.find(
+            (item) => item.path === 'src/components/ui/button.tsx',
+          )!,
+        ],
+        written,
+      },
+      undefined,
+    );
+    assert.doesNotMatch(buttonStep.prompt, /ui\/button\.tsx: exports/);
   });
 });
