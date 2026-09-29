@@ -9,7 +9,7 @@ import {
   readJsonPlan,
 } from '../src/deepseek-client.ts';
 import { ProviderShapeError, ProviderTruncationError } from '../src/errors.ts';
-import type { PlanUsage } from '../src/client.ts';
+import type { PlanEffort, PlanUsage } from '../src/client.ts';
 import {
   MOCKUP_OUTPUT,
   OUTLINE_JSON_INSTRUCTION,
@@ -173,6 +173,38 @@ describe('createDeepseekPlanClient', () => {
     assert.ok(sent.messages[0].content.includes(JSON_MODE_INSTRUCTION));
     assert.ok(sent.messages[0].content.startsWith('SYSTEM'));
     assert.equal(sent.messages[1].content, 'a landing page');
+  });
+
+  it('asks DeepSeek to think as hard as the request says', async () => {
+    // Thinking is on by default at high and is billed inside max_tokens.
+    // Sending no effort made a bounded build's "more briefly" retry of an
+    // outline the same request twice (try-generation run 36565232849).
+    const expected: [PlanEffort, string][] = [
+      ['low', 'low'],
+      ['medium', 'high'],
+      ['high', 'high'],
+      ['xhigh', 'high'],
+      ['max', 'max'],
+    ];
+    for (const [effort, sent] of expected) {
+      const { impl, calls } = fetchReturning(
+        sse(contentFrames(JSON.stringify(PLAN))),
+      );
+      const client = createDeepseekPlanClient({ apiKey: 'k', fetchImpl: impl });
+      await client.createPlan({
+        system: 'SYSTEM',
+        prompt: 'a landing page',
+        model: 'deepseek-flash',
+        maxTokens: 16_000,
+        effort,
+        output: OUTLINE_OUTPUT,
+      });
+      assert.equal(
+        JSON.parse(String(calls[0]!.body)).reasoning_effort,
+        sent,
+        effort,
+      );
+    }
   });
 
   it('sends a cache prefix as the start of the user message, and the outline instruction', async () => {

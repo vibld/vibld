@@ -720,8 +720,9 @@ content policy Explore's tiles use, so the draft cannot touch the builder.
   direction instead of three, through the same route, rate-limit bucket,
   reservation, ceiling and settlement as a look). The Worker draws it on
   `DRAFT_MODEL` (DeepSeek Flash) whatever the build runs on, where the
-  model policy grants it, and on the build's model otherwise
-  (`draftModelFor` in `worker/model-access.ts`). It asks only after the
+  model policy and the caller's plan grant it, and on the build's model
+  otherwise (`draftModelFor` in `worker/model-access.ts`): a Free account's
+  draft is drawn on GPT-6 Luna (D66). It asks only after the
   build's first progress event, which `/api/plan` sends once the build's
   own reservation is held, so the draft can never take the in-flight slot
   the build needed. A draft that fails is dropped silently; one still being
@@ -1255,6 +1256,23 @@ created, or a mirrored top-up or subscription. It used to be any row in
 account that took its dollar could never be referred. `0030_purchase_starts.sql`
 carries every existing customer over as started, so no account that was
 blocked before is unblocked by the migration.
+
+### Models by plan (D66)
+
+A Free account builds, chats and mocks up with GPT-6 Luna only; Build and
+Ship keep every model the policy grants them. `TIER_MODELS` in
+`worker/model-access.ts` holds the list, in code, and is applied after
+`VIBLD_MODEL_POLICY`, so the policy can narrow a Free account but not widen
+it. `/api/plan`, `/api/mockups` and `/api/chat` read the caller's tier
+(`tierOf` in `worker/spendable.ts`) and refuse a model the plan does not
+include with 403 `model-not-allowed`; naming no model runs on Luna, not on
+the deployment's `VIBLD_MODEL`. `/api/config` offers Luna alone and sends
+`modelsNote`, which the builder shows where the picker would be. A choice
+this browser remembers (`vibld.model.v1`) that is no longer offered is
+neither shown nor sent, and is kept for when the plan includes it again. A
+deployment with billing not configured sells no plans, so nobody there is
+held to one. A tier that cannot be read refuses the run with
+`accounting-unavailable`, and fills the picker as Free.
 
 ### Billing UI in the builder shell (L35)
 

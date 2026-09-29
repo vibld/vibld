@@ -375,6 +375,23 @@ replaced; nothing a site ships can set one today, since there is no
 wallet button (Apple Pay, Google Pay) in an embedded checkout; a link out
 to a hosted checkout is unaffected.
 
+**Free accounts build with GPT-6 Luna only.** Chris decided on 2026-09-29
+(D66): a Free account builds, chats and mocks up with `gpt-6-luna` and
+nothing else, and the paid tiers keep every model they had. The limit is
+`TIER_MODELS` in `apps/web/worker/model-access.ts`, in code rather than in
+`VIBLD_MODEL_POLICY`, applied after the policy, so the policy can narrow a
+Free account but not widen it. `/api/plan`, `/api/mockups` and `/api/chat`
+refuse a model the plan does not include with 403 `model-not-allowed` and
+the sentence the builder shows, "Free builds use GPT-6 Luna. Paid plans
+unlock the other models."; a Free request naming no model runs on Luna, not
+on the deployment's `gpt-6-sol`. `/api/config` offers Luna alone, so a
+choice the browser remembers, such as Sol, is neither shown nor sent, and
+is kept for when the plan includes it again. A Free build's draft is drawn
+on Luna: DeepSeek Flash is not the plan's to use, and the draft already
+falls back to the build's model where Flash is withheld. On a deployment
+with billing not configured nobody is held to a plan, since none can be
+bought; that part was decided while implementing, and Chris may reverse it.
+
 ### Resolved 2026-09-28
 
 **The legal pages carry Chris's decisions for the open paid beta.** Chris

@@ -176,8 +176,11 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
  * guidance; the bound leaves room for the catalogues to grow a little
  * without a silent under-reservation, and `mockup-reservation.test.ts` in
  * apps/web measures the real text against it, in both directions.
+ *
+ * Raised from 32,000 when the Motion typing rules (D66 follow-up) took the
+ * longest system prompt plus guidance to about 32,200.
  */
-export const MAX_BUILD_FIXED_PROMPT_CHARS = 32_000;
+export const MAX_BUILD_FIXED_PROMPT_CHARS = 34_000;
 
 /**
  * The longest reference URL a request may carry (internal PR 189 review).

@@ -4,10 +4,12 @@ import {
   canonicalModelId,
   configuredProviders,
   familyOf,
+  findModel,
   groupByFamily,
   parseModelPolicy,
 } from '@vibld/ai';
 import type { ModelChoice } from '@vibld/ai';
+import type { Tier } from './entitlement.ts';
 
 /**
  * Decide which model a request may run on.
@@ -35,15 +37,70 @@ export type ModelDecision =
   | { ok: true; model: string; granted: ModelChoice[] }
   | { ok: false; status: number; error: string };
 
-/** Everything this principal may use here, after both filters. */
-export function grantedFor(
-  env: ModelAccessEnv,
-  principal: string,
-): ModelChoice[] {
+/**
+ * The models a tier is held to, whatever the policy grants (D66, Chris,
+ * 2026-09-29): a Free account builds, chats and mocks up with GPT-6 Luna
+ * only. A tier not named here is held to nothing beyond the policy, which
+ * is every paid tier, so they keep every model they had.
+ *
+ * In code rather than in `VIBLD_MODEL_POLICY`, and applied after it: the
+ * policy is a secret nobody can read in review, and a limit that depends on
+ * what somebody pasted into it is one a stale policy quietly lifts. The
+ * policy can still narrow a Free account further; it cannot widen one.
+ *
+ * The tier passed in is null on a deployment that sells no plans (billing
+ * not configured, `tierOf`): everybody there is Free with no paid plan to
+ * move to, so nobody is held to a tier and the policy alone decides, as it
+ * did before D66. A self-hosted deployment with no OpenAI key would
+ * otherwise generate nothing at all.
+ */
+export const TIER_MODELS: Readonly<Partial<Record<Tier, readonly string[]>>> = {
+  free: ['gpt-6-luna'],
+};
+
+/**
+ * The sentence a Free account is shown where the picker would be
+ * (`/api/config` sends it), and the refusal of a model the plan does not
+ * include. One copy, in the Worker, so the builder cannot say one thing
+ * while the endpoint enforces another.
+ */
+export const FREE_PLAN_MODELS_NOTE =
+  'Free builds use GPT-6 Luna. Paid plans unlock the other models.';
+
+/** What the policy grants and the deployment can serve, before the tier. */
+function policyGrantFor(env: ModelAccessEnv, principal: string): ModelChoice[] {
   return allowedModels(
     parseModelPolicy(env.VIBLD_MODEL_POLICY),
     principal,
     availableModels(configuredProviders(env)),
+  );
+}
+
+/** Everything this principal may use here, after all three filters. */
+export function grantedFor(
+  env: ModelAccessEnv,
+  principal: string,
+  tier: Tier | null,
+): ModelChoice[] {
+  const granted = policyGrantFor(env, principal);
+  const held = tier ? TIER_MODELS[tier] : undefined;
+  return held ? granted.filter((model) => held.includes(model.id)) : granted;
+}
+
+/**
+ * Whether this caller's plan withholds a model the policy would otherwise
+ * give them, which is when the builder says what a paid plan unlocks.
+ * False for a Free account the policy already holds to Luna: an upgrade
+ * would change nothing there, and saying it would is a false promise.
+ */
+export function planWithholdsModels(
+  env: ModelAccessEnv,
+  principal: string,
+  tier: Tier | null,
+): boolean {
+  return (
+    grantedFor(env, principal, tier).length <
+    policyGrantFor(env, principal).length
   );
 }
 
@@ -58,12 +115,27 @@ export function grantedFor(
 export function decideModel(
   env: ModelAccessEnv,
   principal: string,
+  tier: Tier | null,
   chosen: string | null,
   fallback: string,
 ): ModelDecision {
-  const granted = grantedFor(env, principal);
+  const policyGrant = policyGrantFor(env, principal);
+  const granted = grantedFor(env, principal, tier);
+  const withheld = granted.length < policyGrant.length;
 
   if (granted.length === 0) {
+    // The plan's own model is not deployable here (no OpenAI key, for
+    // Free), which no edit to the policy would fix.
+    if (withheld) {
+      const names = (tier ? (TIER_MODELS[tier] ?? []) : [])
+        .map((id) => findModel(id)?.label ?? id)
+        .join(', ');
+      return {
+        ok: false,
+        status: 403,
+        error: `This plan builds with ${names}, which this deployment cannot serve.`,
+      };
+    }
     // Names the identity it matched on. A policy keyed on the wrong address
     // is the likeliest way to be locked out of your own deployment, and
     // "no model is available to you" gives no way to find out which "you"
@@ -82,11 +154,21 @@ export function decideModel(
     const wanted = canonicalModelId(chosen);
     // A hidden option is still a reachable one: the picker not offering it
     // is not what stops it being used.
+    //
+    // Refused rather than swapped for Luna when the plan is what withholds
+    // it, as every ungranted model is: a run on a model nobody asked for
+    // reads as the choice being honoured. The builder never sends one it
+    // was not offered (`chooseModel`), so this is a stale tab or a hand-
+    // made request, and the sentence says what the plan includes.
     if (!granted.some((model) => model.id === wanted)) {
+      const byPlan =
+        withheld && policyGrant.some((model) => model.id === wanted);
       return {
         ok: false,
         status: 403,
-        error: `That model is not available to ${principal}.`,
+        error: byPlan
+          ? FREE_PLAN_MODELS_NOTE
+          : `That model is not available to ${principal}.`,
       };
     }
     return { ok: true, model: wanted, granted };
@@ -122,8 +204,11 @@ export const DRAFT_MODEL = 'deepseek-flash';
 export function draftModelFor(
   env: ModelAccessEnv,
   principal: string,
+  tier: Tier | null,
 ): string | null {
-  return grantedFor(env, principal).some((model) => model.id === DRAFT_MODEL)
+  return grantedFor(env, principal, tier).some(
+    (model) => model.id === DRAFT_MODEL,
+  )
     ? DRAFT_MODEL
     : null;
 }

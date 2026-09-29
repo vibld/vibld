@@ -31,6 +31,7 @@ const ANSWER: DeploymentConfig = {
   generation: 'model',
   models: [{ id: 'deepseek-flash', label: 'Flash', note: '', provider: 'd' }],
   defaultModel: 'deepseek-flash',
+  modelsNote: null,
   isAdmin: true,
 };
 

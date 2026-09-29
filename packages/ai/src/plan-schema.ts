@@ -221,6 +221,26 @@ cannot tell from this file alone whether CardProps is a type or a value. The
 same goes for a type imported alongside values: \`import { cva, type
 VariantProps } from 'class-variance-authority'\`.
 
+A Motion variants object written outside the JSX is typed Variants, with a
+type-only import from 'motion/react', or is one of the shared variants in
+src/lib/motion.ts. A cubic-bezier easing array anywhere else is \`as const\`:
+
+  import type { Variants } from 'motion/react';
+  const rise: Variants = {
+    hidden: { opacity: 0, y: 16 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.23, 1, 0.32, 1] } },
+  };
+  const EASE_OUT = [0.23, 1, 0.32, 1] as const;
+
+Left untyped, TypeScript widens the array to number[] and the object's
+strings to string, and passing it to variants= fails the build with TS2322.
+A typed variant holds only Motion's own camelCase values: backdropFilter,
+never WebkitBackdropFilter or another vendor-prefixed key, which Variants
+rejects with TS2353. A vendor prefix belongs in CSS, not in a variant.
+A component that spreads its props onto motion.div types them
+HTMLMotionProps<'div'> from 'motion/react', not HTMLAttributes<HTMLDivElement>,
+whose onAnimationStart and onDrag clash with Motion's and fail with TS2322.
+
 tsconfig.json sets "types": ["vite/client", "node"], or the import of
 src/styles.css fails to compile; "allowImportingTsExtensions": true with
 "noEmit": true, so imports can name ./App.tsx; and maps "@/*" to "./src/*"

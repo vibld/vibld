@@ -16,7 +16,10 @@ import { onClerkSessionChange } from './auth/clerk-token.ts';
 
 /** The part of a session this file sets from the deployment probe. */
 export interface ConfigurableSession {
-  setModels(models: DeploymentConfig['models']): void;
+  setModels(
+    models: DeploymentConfig['models'],
+    modelsNote?: DeploymentConfig['modelsNote'],
+  ): void;
   setModel(model: string | null): void;
   setIsAdmin(isAdmin: boolean | null): void;
   setGeneration(generation: DeploymentConfig['generation'] | null): void;
@@ -51,12 +54,18 @@ export async function applyDeploymentConfig(
 ): Promise<void> {
   try {
     const config = await probe();
-    session.setModels(config.models);
+    session.setModels(config.models, config.modelsNote);
     // The person's own choice survives a re-probe. This runs again on every
     // Clerk session event, and Clerk sends one each time it refreshes the
     // token, about once a minute: setting the default here unconditionally
     // put the picker back on it every minute, which read as a choice that
     // would not stay.
+    //
+    // Only where it is still offered, which is also what keeps a Free
+    // account (D66) from sending a model its plan no longer includes: its
+    // offer is GPT-6 Luna alone, so a stored GPT-6 Sol shows and sends the
+    // default, Luna, instead. The stored choice is left as it is, and comes
+    // back if the plan does.
     session.setModel(
       chooseModel(preferred(), config.models, config.defaultModel),
     );

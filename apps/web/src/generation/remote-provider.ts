@@ -353,6 +353,13 @@ export interface DeploymentConfig {
   models: ModelOption[];
   defaultModel: string | null;
   /**
+   * What to say where the picker would be, when the caller's plan is what
+   * keeps the other models out of it (D66): a Free account sees GPT-6 Luna
+   * alone, and the sentence says why. The Worker writes it, so the builder
+   * says what the endpoint enforces. Null for everyone else.
+   */
+  modelsNote: string | null;
+  /**
    * Whether the signed-in caller is a platform admin (docs/decisions.md
    * L4). Only decides whether the shell *offers* the admin credit tool --
    * `/api/admin/*` re-checks this itself at the trusted boundary either
@@ -374,6 +381,7 @@ const UNCONFIGURED: DeploymentConfig = {
   generation: 'fake',
   models: [],
   defaultModel: null,
+  modelsNote: null,
   isAdmin: false,
 };
 
@@ -413,6 +421,7 @@ export function detectDeploymentConfig(
         generation?: unknown;
         models?: unknown;
         defaultModel?: unknown;
+        modelsNote?: unknown;
         isAdmin?: unknown;
       };
       // Every field is checked. This is the deployment's own endpoint, but a
@@ -432,6 +441,10 @@ export function detectDeploymentConfig(
         models,
         defaultModel:
           typeof body.defaultModel === 'string' ? body.defaultModel : null,
+        modelsNote:
+          typeof body.modelsNote === 'string' && body.modelsNote.length > 0
+            ? body.modelsNote
+            : null,
         isAdmin: body.isAdmin === true,
       };
     } catch {

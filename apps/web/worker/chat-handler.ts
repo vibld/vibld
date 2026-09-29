@@ -27,9 +27,10 @@ import type { ReserveEnv } from './reserve.ts';
 import { CHAT_INPUT_CHARS, runCeilingFor } from './run-ceiling.ts';
 import type { RunCeilingEnv } from './run-ceiling.ts';
 import { cancelledUsage, worstCaseMicroUsd } from './spend.ts';
-import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
+import type { Tier } from './entitlement.ts';
+import { SUSPENDED_MESSAGE, spendableFor, tierOf } from './spendable.ts';
 import type { Spendable } from './spendable.ts';
-import type { SpendableEnv } from './spendable.ts';
+import type { TierEnv } from './spendable.ts';
 
 /**
  * `POST /api/chat`: one turn of the builder's conversation (docs/decisions.md,
@@ -59,7 +60,7 @@ import type { SpendableEnv } from './spendable.ts';
  */
 
 export interface ChatEnv
-  extends ReserveEnv, SpendableEnv, RunCeilingEnv, ModelAccessEnv {
+  extends ReserveEnv, TierEnv, RunCeilingEnv, ModelAccessEnv {
   PLAN_BURST?: RateLimit;
   PLAN_SUSTAINED?: RateLimit;
 }
@@ -76,6 +77,8 @@ export interface ChatDeps {
   waitUntil: (promise: Promise<unknown>) => void;
   /** Defaults to `spendableFor`, which reads D1. */
   spendable?: (principal: Principal) => Promise<Spendable>;
+  /** Defaults to `tierOf`, which reads D1. */
+  tier?: (principal: Principal) => Promise<Tier | null>;
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
@@ -136,9 +139,29 @@ export async function handleChat(
     return refuse('request-invalid', chosenModel.error, chosenModel.status);
   }
 
+  // The plan holds a Free account to GPT-6 Luna (D66). Unreadable, the
+  // turn is refused as the reservation below refuses it: guessing a plan
+  // either way is wrong for somebody.
+  let tier: Tier | null;
+  try {
+    tier = await (deps.tier ?? ((who: Principal) => tierOf(env, who)))(
+      principal,
+    );
+  } catch (error) {
+    console.error('tier unavailable', error);
+    return new Response(
+      JSON.stringify({
+        error: 'Usage accounting is unavailable; generation is paused.',
+        reason: 'accounting-unavailable' satisfies RunRefusal,
+      }),
+      { status: 503, headers: { ...JSON_HEADERS, 'retry-after': '30' } },
+    );
+  }
+
   const decision = decideModel(
     env,
     principal.policyIdentity,
+    tier,
     chosenModel.value,
     resolveModel(env),
   );

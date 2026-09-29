@@ -18,21 +18,32 @@ import type { ModelOption } from '../generation/remote-provider.ts';
  * second control.
  *
  * Renders nothing when there is no choice to make -- one model, or none,
- * which is what `pnpm dev` and the static-only deploy report.
+ * which is what `pnpm dev` and the static-only deploy report -- except the
+ * `note` the deployment sends when the caller's plan is what leaves one
+ * model (D66): a Free account is told it builds with GPT-6 Luna and that
+ * a paid plan unlocks the rest, where the dropdown would have been.
  */
 export function ModelPicker({
   models,
   value,
   onChange,
   disabled,
+  note = null,
 }: {
   models: ModelOption[];
   value: string | null;
   onChange: (model: string | null) => void;
   disabled: boolean;
+  note?: string | null;
 }) {
   const id = useId();
-  if (models.length < 2) return null;
+  if (models.length < 2) {
+    return note ? (
+      <div className="models">
+        <p className="models__note">{note}</p>
+      </div>
+    ) : null;
+  }
 
   const groups = groupByFamily(models);
   const selected = models.find((model) => model.id === value) ?? models[0]!;
@@ -66,6 +77,7 @@ export function ModelPicker({
           ),
         )}
       </select>
+      {note ? <p className="models__note">{note}</p> : null}
     </div>
   );
 }

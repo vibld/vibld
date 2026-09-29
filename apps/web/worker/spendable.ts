@@ -4,6 +4,8 @@ import {
   monthlyAllowanceMicroUsd,
   tierFor,
 } from './entitlement.ts';
+import type { Tier } from './entitlement.ts';
+import { billingConfigured } from './billing-handlers.ts';
 import type { Principal } from './principal.ts';
 
 /** Only what deciding an allowance needs, so a test need not build a router. */
@@ -81,4 +83,29 @@ export async function spendableFor(
     // `totalSpendableCreditMicroUsd`'s own comment.
     topupCeiling: await billing.totalSpendableCreditMicroUsd(principal.userId),
   };
+}
+
+/**
+ * This caller's tier, which decides the models they may use (D66,
+ * `TIER_MODELS` in `model-access.ts`), or null on a deployment that sells
+ * no plans, where there is no tier to hold anybody to.
+ *
+ * Its own read rather than a field of `spendableFor`'s answer, because the
+ * model is decided before anything is reserved, and `spendableFor` is asked
+ * only once a run has passed the rate limiter. A D1 that fails throws, and
+ * the caller decides what that means.
+ */
+export interface TierEnv extends SpendableEnv {
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+}
+
+export async function tierOf(
+  env: TierEnv,
+  principal: Principal,
+): Promise<Tier | null> {
+  if (!billingConfigured(env) || !env.DB) return null;
+  return tierFor(
+    await new BillingStore(env.DB).findActiveSubscription(principal.userId),
+  );
 }

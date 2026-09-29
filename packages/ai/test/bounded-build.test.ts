@@ -230,6 +230,32 @@ describe('the prompts a bounded build sends', () => {
     assert.ok(!GROUP_SYSTEM_PROMPT.includes('\nSIZE\n'));
   });
 
+  it('tells every file-group call to type Motion variants (try-generation run 36565229539)', async () => {
+    // GPT-6 Luna wrote a whole site, then failed its own build twice with
+    // TS2322: an untyped variants object whose easing array TypeScript had
+    // widened to number[], passed to variants=.
+    const { result, client } = await build({
+      summary: 'A site.',
+      spec: SPEC,
+      files: requiredFiles(),
+    });
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    const groups = client.requests.filter(
+      (request) => requestedPaths(request.prompt).length > 0,
+    );
+    assert.ok(groups.length > 0);
+    for (const request of groups) {
+      assert.ok(
+        request.system.includes("import type { Variants } from 'motion/react'"),
+      );
+      assert.ok(request.system.includes('src/lib/motion.ts'));
+      assert.ok(request.system.includes('[0.23, 1, 0.32, 1] as const'));
+      assert.match(request.system, /TS2322/);
+      assert.match(request.system, /never WebkitBackdropFilter/);
+      assert.match(request.system, /HTMLMotionProps<'div'>/);
+    }
+  });
+
   it('never uses the character the house rules ban', () => {
     for (const prompt of [OUTLINE_SYSTEM_PROMPT, GROUP_SYSTEM_PROMPT]) {
       assert.equal(prompt.includes(String.fromCharCode(0x2014)), false);
@@ -645,6 +671,22 @@ describe('the outline', () => {
     assert.equal(client.requests[1]!.effort, 'low');
     assert.equal(result.failure?.stop, 'model-truncated');
     assert.match(result.failure!.message, /Ask for fewer pages/);
+  });
+
+  it('fits on the retry when thinking, not the plan, filled the first reply', async () => {
+    // Try-generation run 36565232849: DeepSeek Flash thought through the
+    // whole 16,000 on both attempts of a full site's outline. The retry is
+    // asked at low effort, and a model that honours it thinks less there,
+    // so the same plan fits the second time.
+    const { result, hooks, client } = await build(
+      { summary: 'A site.', spec: SPEC, files: requiredFiles() },
+      inProcess(),
+      { thinking: { high: OUTLINE_MAX_TOKENS, low: 2_000 } },
+    );
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.deepEqual(hooks.names.slice(0, 2), ['outline', 'outline.again']);
+    assert.equal(client.requests[0]!.effort, 'high');
+    assert.equal(client.requests[1]!.effort, 'low');
   });
 
   it('refuses a plan with more files than a project may hold, before writing any', async () => {

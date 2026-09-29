@@ -1,4 +1,9 @@
-import type { PlanClient, PlanCompletion, PlanRequest } from './client.ts';
+import type {
+  PlanClient,
+  PlanCompletion,
+  PlanEffort,
+  PlanRequest,
+} from './client.ts';
 import { PLAN_JSON_INSTRUCTION, outputFor } from './plan-output.ts';
 
 /**
@@ -46,6 +51,31 @@ export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
  * otherwise still gets.
  */
 export const JSON_MODE_INSTRUCTION = PLAN_JSON_INSTRUCTION;
+
+/**
+ * How hard DeepSeek thinks, from the effort the request asked for.
+ *
+ * DeepSeek thinks by default, at `high`, and bills the thinking as output
+ * inside `max_tokens`. This client used to send no effort at all, so every
+ * request thought at `high` whatever it asked for, and the retry a bounded
+ * build makes after an outline runs out of room, "asked for again more
+ * briefly" at `low`, was the same request twice. DeepSeek Flash filled the
+ * whole 16,000 on both attempts at a full company site's outline (try-
+ * generation run 36565232849), where GPT-6 Sol fitted it at the first.
+ *
+ * DeepSeek takes `low`, `high` and `max` and maps the rest itself; they are
+ * mapped here the same way so the request says what will actually happen.
+ */
+export function reasoningEffortFor(effort: PlanEffort): 'low' | 'high' | 'max' {
+  switch (effort) {
+    case 'low':
+      return 'low';
+    case 'max':
+      return 'max';
+    default:
+      return 'high';
+  }
+}
 
 /** OpenAI-style finish reasons, mapped to the vocabulary Vibld reasons about. */
 export function mapFinishReason(
@@ -253,6 +283,7 @@ export function createDeepseekPlanClient(
           stream: true,
           stream_options: { include_usage: true },
           response_format: { type: 'json_object' },
+          reasoning_effort: reasoningEffortFor(request.effort),
           messages: [
             {
               role: 'system',

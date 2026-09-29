@@ -17,7 +17,11 @@ const MODELS: ModelOption[] = MODEL_CATALOGUE.map(
   ({ id, label, note, provider }) => ({ id, label, note, provider }),
 );
 
-function mount(value: string | null, models = MODELS) {
+function mount(
+  value: string | null,
+  models = MODELS,
+  note: string | null = null,
+) {
   const chosen: (string | null)[] = [];
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -30,6 +34,7 @@ function mount(value: string | null, models = MODELS) {
         value={value}
         onChange={(model) => chosen.push(model)}
         disabled={false}
+        note={note}
       />,
     );
   });
@@ -119,6 +124,17 @@ describe('ModelPicker', () => {
   it('renders nothing when there is no choice to make', () => {
     const view = mount(null, MODELS.slice(0, 1));
     assert.equal(view.selects.length, 0);
+    assert.equal(view.container.textContent, '');
+    view.unmount();
+  });
+
+  it('says why when the plan leaves one model (D66)', () => {
+    const luna = MODELS.filter((model) => model.id === 'gpt-6-luna');
+    const note =
+      'Free builds use GPT-6 Luna. Paid plans unlock the other models.';
+    const view = mount('gpt-6-luna', luna, note);
+    assert.equal(view.selects.length, 0);
+    assert.equal(view.container.textContent, note);
     view.unmount();
   });
 });

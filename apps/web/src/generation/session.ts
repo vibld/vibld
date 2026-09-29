@@ -115,6 +115,12 @@ export interface BuilderState {
   /** What this deployment can serve. Empty until the probe answers. */
   models: ModelOption[];
   /**
+   * The Worker's sentence for a caller whose plan limits `models` (D66),
+   * shown where the picker would be. Null otherwise, and until the probe
+   * answers.
+   */
+  modelsNote: string | null;
+  /**
    * Whether the signed-in caller is a platform admin (docs/decisions.md
    * L4) -- decides only what the shell draws, never what it may do. Every
    * `/api/admin/*` route checks the caller itself (ADR-0006).
@@ -381,6 +387,7 @@ function initialState(budget: RunUsageReport): BuilderState {
     styleDna: {},
     model: null,
     models: [],
+    modelsNote: null,
     isAdmin: null,
     generation: null,
     mockups: [],
@@ -602,9 +609,9 @@ export class BuilderSession {
   }
 
   /** Record what the deployment can serve, once the probe answers. */
-  setModels(models: ModelOption[]): void {
+  setModels(models: ModelOption[], modelsNote: string | null = null): void {
     if (this.#disposed) return;
-    this.#state = { ...this.#state, models };
+    this.#state = { ...this.#state, models, modelsNote };
     this.#emit();
   }
 
@@ -717,7 +724,7 @@ export class BuilderSession {
    */
   async restore(project: RestoredProject): Promise<void> {
     if (this.#disposed) return;
-    const { models, isAdmin, generation } = this.#state;
+    const { models, modelsNote, isAdmin, generation } = this.#state;
     this.#epoch += 1;
     const epoch = this.#epoch;
     this.#abort?.abort();
@@ -759,6 +766,7 @@ export class BuilderSession {
     this.#state = {
       ...initialState(this.#ledger.report()),
       models,
+      modelsNote,
       isAdmin,
       generation,
       projectId: project.id,
@@ -941,8 +949,15 @@ export class BuilderSession {
    */
   reset(): void {
     if (this.#disposed) return;
-    const { knowledge, model, models, isAdmin, generation, projectId } =
-      this.#state;
+    const {
+      knowledge,
+      model,
+      models,
+      modelsNote,
+      isAdmin,
+      generation,
+      projectId,
+    } = this.#state;
     this.#epoch += 1;
     this.#store = new InMemoryGenerationStore();
     this.#ledger = new RunBudgetLedger(this.#budgetLimits);
@@ -953,6 +968,7 @@ export class BuilderSession {
       knowledge,
       model,
       models,
+      modelsNote,
       isAdmin,
       generation,
       projectId,

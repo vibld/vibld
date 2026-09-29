@@ -92,19 +92,24 @@ describe('a re-probe of the deployment', () => {
       { id: 'gpt-6-sol', label: 'Sol', note: '', provider: 'o' },
     ],
     defaultModel: 'gpt-6-sol',
+    modelsNote: null,
     isAdmin: false,
   };
 
   function session(): {
     model: string | null;
-    setModels(): void;
+    note: string | null | undefined;
+    setModels(models: unknown, note?: string | null): void;
     setModel(model: string | null): void;
     setIsAdmin(): void;
     setGeneration(): void;
   } {
     return {
       model: null,
-      setModels() {},
+      note: undefined,
+      setModels(_models, note) {
+        this.note = note;
+      },
       setModel(model) {
         this.model = model;
       },
@@ -131,5 +136,31 @@ describe('a re-probe of the deployment', () => {
       () => null,
     );
     assert.equal(s.model, 'gpt-6-sol');
+  });
+
+  it('puts a Free account on Luna over a stored Sol, and keeps the Sol (D66)', async () => {
+    // What /api/config answers a Free caller: Luna alone, Luna as the
+    // default, and the sentence to show where the picker was.
+    const note =
+      'Free builds use GPT-6 Luna. Paid plans unlock the other models.';
+    const free: DeploymentConfig = {
+      generation: 'model',
+      models: [{ id: 'gpt-6-luna', label: 'Luna', note: '', provider: 'o' }],
+      defaultModel: 'gpt-6-luna',
+      modelsNote: note,
+      isAdmin: false,
+    };
+    const storage = memoryStorage();
+    saveModelChoice('gpt-6-sol', storage);
+    const s = session();
+    await applyDeploymentConfig(
+      s,
+      async () => free,
+      () => loadModelChoice(storage),
+    );
+    assert.equal(s.model, 'gpt-6-luna');
+    assert.equal(s.note, note);
+    // Not overwritten: it is shown and sent again once the plan includes it.
+    assert.equal(loadModelChoice(storage), 'gpt-6-sol');
   });
 });

@@ -1,6 +1,7 @@
 import type {
   PlanClient,
   PlanCompletion,
+  PlanEffort,
   PlanRequest,
   PlanUsage,
 } from './client.ts';
@@ -51,6 +52,13 @@ export interface ScriptedClientOptions {
   refuse?: 'build_outline' | 'file_group';
   /** Answer the first request of this kind with something unreadable. */
   malformOnce?: 'build_outline' | 'file_group';
+  /**
+   * Output tokens spent thinking before the answer, by the effort asked
+   * for, as a reasoning model spends them: billed as output and counted
+   * against the call's ceiling, so enough of it truncates an answer that
+   * would otherwise fit. None where an effort is not named.
+   */
+  thinking?: Partial<Record<PlanEffort, number>>;
 }
 
 export interface ScriptedClient extends PlanClient {
@@ -138,12 +146,19 @@ export function createScriptedBuildClient(
       if (prefix.length > 0) cached.add(prefix);
 
       const text = JSON.stringify(reply);
-      const needed = Math.ceil(text.length / CHARS_PER_OUTPUT_TOKEN);
+      const thinking = options.thinking?.[request.effort] ?? 0;
+      const needed = thinking + Math.ceil(text.length / CHARS_PER_OUTPUT_TOKEN);
       const truncated = needed > request.maxTokens;
       request.onProgress?.({
         characters: truncated
-          ? request.maxTokens * CHARS_PER_OUTPUT_TOKEN
+          ? Math.max(0, request.maxTokens - thinking) * CHARS_PER_OUTPUT_TOKEN
           : text.length,
+        ...(thinking > 0
+          ? {
+              reasoningCharacters:
+                Math.min(thinking, request.maxTokens) * CHARS_PER_OUTPUT_TOKEN,
+            }
+          : {}),
       });
       const usage: PlanUsage = {
         inputTokens: promptTokens,

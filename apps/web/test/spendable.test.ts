@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { spendableFor } from '../worker/spendable.ts';
+import { spendableFor, tierOf } from '../worker/spendable.ts';
 import { BillingStore } from '../worker/billing-store.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
@@ -167,5 +167,37 @@ describe('what a caller may spend', () => {
     const lifted = await spendableFor(env(db), principal());
     assert.equal(lifted.suspended, undefined);
     assert.equal(lifted.topupCeiling, 2_500_000);
+  });
+});
+
+describe('the tier that decides the models (D66)', () => {
+  const BILLED = { STRIPE_SECRET_KEY: 'sk', STRIPE_WEBHOOK_SECRET: 'wh' };
+
+  it('is Free for an account with no subscription, where plans are sold', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    assert.equal(await tierOf({ DB: db, ...BILLED }, principal()), 'free');
+  });
+
+  it('is the subscribed tier for a subscriber', async () => {
+    const db = new SqliteD1Database(SCHEMA);
+    await new BillingStore(db).upsertSubscription({
+      stripeSubscriptionId: 'sub_1',
+      userId: 'user_1',
+      stripeCustomerId: 'cus_1',
+      tier: 'ship',
+      status: 'active',
+      priceId: 'price_ship_monthly',
+      currentPeriodEnd: '2099-01-01T00:00:00.000Z',
+      cancelAtPeriodEnd: false,
+    });
+    assert.equal(await tierOf({ DB: db, ...BILLED }, principal()), 'ship');
+  });
+
+  it('is no tier at all on a deployment that sells no plans', async () => {
+    // A self-hosted deployment without Stripe: nobody there can upgrade,
+    // so nobody is held to a plan's models.
+    const db = new SqliteD1Database(SCHEMA);
+    assert.equal(await tierOf({ DB: db }, principal()), null);
+    assert.equal(await tierOf({ ...BILLED }, principal()), null);
   });
 });

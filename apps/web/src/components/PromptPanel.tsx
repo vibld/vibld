@@ -454,6 +454,7 @@ export function PromptPanel({
         <div className="prompt__send">
           <ModelPicker
             models={state.models}
+            note={state.modelsNote}
             value={state.model}
             onChange={onModelChange}
             disabled={disabled}

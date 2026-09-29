@@ -54,7 +54,8 @@ export default function Configuration() {
           <code>VIBLD_MODEL_POLICY</code>, JSON naming which models each
           identity may use. A secret rather than a var because it names people.
           Absent means no policy: everyone may use whatever the deployment can
-          serve.
+          serve. Where billing is configured, a Free account is held to GPT-6
+          Luna whatever the policy grants.
         </li>
       </ul>
       <p>

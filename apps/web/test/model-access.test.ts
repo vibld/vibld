@@ -3,9 +3,12 @@ import { describe, it } from 'node:test';
 import { MODEL_CATALOGUE } from '@vibld/ai/model-catalogue';
 import {
   DRAFT_MODEL,
+  FREE_PLAN_MODELS_NOTE,
+  TIER_MODELS,
   decideModel,
   draftModelFor,
   grantedFor,
+  planWithholdsModels,
 } from '../worker/model-access.ts';
 
 /** Every provider keyed, so "everything configured" really means everything. */
@@ -21,7 +24,7 @@ const POLICY = JSON.stringify({
 
 describe('grantedFor', () => {
   it('offers everything configured when no policy is set', () => {
-    const granted = grantedFor(ALL_KEYED, 'anyone@example.com');
+    const granted = grantedFor(ALL_KEYED, 'anyone@example.com', 'build');
     // Asserted against the catalogue rather than a literal: the count moves
     // whenever a model is added, and a hard-coded number turns that into a
     // failure that says nothing about what actually changed.
@@ -39,6 +42,7 @@ describe('grantedFor', () => {
         }),
       },
       'a@b.com',
+      'build',
     );
     assert.deepEqual(
       granted.map((m) => m.id),
@@ -54,6 +58,7 @@ describe('decideModel', () => {
     const decision = decideModel(
       env,
       'sam@example.com',
+      'build',
       'claude-opus-5',
       'deepseek-flash',
     );
@@ -67,6 +72,7 @@ describe('decideModel', () => {
     const decision = decideModel(
       env,
       'stranger@x.com',
+      'build',
       'claude-opus-5',
       'deepseek-flash',
     );
@@ -84,7 +90,13 @@ describe('decideModel', () => {
     // The deployment default is Opus here, but this person is only granted
     // Flash. Falling back to the default would hand them what the policy
     // withheld -- the exact failure this exists to prevent.
-    const decision = decideModel(env, 'stranger@x.com', null, 'claude-opus-5');
+    const decision = decideModel(
+      env,
+      'stranger@x.com',
+      'build',
+      null,
+      'claude-opus-5',
+    );
     assert.equal(decision.ok, true);
     if (decision.ok) assert.equal(decision.model, 'deepseek-flash');
   });
@@ -98,6 +110,7 @@ describe('decideModel', () => {
     const decision = decideModel(
       { ...ALL_KEYED, VIBLD_MODEL_POLICY: policy },
       'anyone@example.com',
+      'build',
       null,
       'claude-opus-5-5',
     );
@@ -109,6 +122,7 @@ describe('decideModel', () => {
     const decision = decideModel(
       env,
       'sam@example.com',
+      'build',
       null,
       'deepseek-v4-pro',
     );
@@ -120,6 +134,7 @@ describe('decideModel', () => {
     const decision = decideModel(
       { ...ALL_KEYED, VIBLD_MODEL_POLICY: JSON.stringify({ default: [] }) },
       'nobody@x.com',
+      'build',
       null,
       'claude-opus-5',
     );
@@ -143,7 +158,7 @@ describe('decideModel', () => {
       (m) => m.outputMicroUsd === lowestOutput,
     ).sort((a, b) => a.inputMicroUsd - b.inputMicroUsd)[0]!;
     for (const who of ['sam@example.com', 'stranger@x.com']) {
-      const decision = decideModel(broken, who, null, 'claude-opus-5');
+      const decision = decideModel(broken, who, 'build', null, 'claude-opus-5');
       assert.equal(decision.ok, true, who);
       if (decision.ok) assert.equal(decision.model, cheapest.id);
     }
@@ -151,6 +166,7 @@ describe('decideModel', () => {
     const refused = decideModel(
       broken,
       'sam@example.com',
+      'build',
       'claude-opus-5',
       'x',
     );
@@ -159,7 +175,13 @@ describe('decideModel', () => {
 
   it('is unaffected by how the caller cases their identity', () => {
     for (const who of ['SAM@EXAMPLE.COM', ' sam@example.com ']) {
-      const decision = decideModel(env, who, 'claude-opus-5', 'deepseek-flash');
+      const decision = decideModel(
+        env,
+        who,
+        'build',
+        'claude-opus-5',
+        'deepseek-flash',
+      );
       assert.equal(decision.ok, true, who);
     }
   });
@@ -170,6 +192,7 @@ describe('decideModel', () => {
     const decision = decideModel(
       env,
       'unknown',
+      'build',
       'claude-opus-5',
       'deepseek-flash',
     );
@@ -185,7 +208,7 @@ describe('a renamed model id reaching the endpoint', () => {
     const legacyPolicy = JSON.stringify({ default: ['deepseek-v4-flash'] });
     const env = { ...ALL_KEYED, VIBLD_MODEL_POLICY: legacyPolicy };
 
-    const granted = grantedFor(env, 'sam@example.com');
+    const granted = grantedFor(env, 'sam@example.com', 'build');
     assert.deepEqual(
       granted.map((model) => model.id),
       ['deepseek-flash'],
@@ -194,6 +217,7 @@ describe('a renamed model id reaching the endpoint', () => {
     const decision = decideModel(
       env,
       'sam@example.com',
+      'build',
       'deepseek-v4-flash',
       'deepseek-flash',
     );
@@ -210,6 +234,7 @@ describe('a renamed model id reaching the endpoint', () => {
     const decision = decideModel(
       env,
       'sam@example.com',
+      'build',
       'claude-opus-5',
       'deepseek-flash',
     );
@@ -222,7 +247,10 @@ describe('draftModelFor', () => {
   // the build runs on (Chris, 2026-09-28), where the policy allows it.
   it('names DeepSeek Flash where it is deployed and granted', () => {
     assert.equal(DRAFT_MODEL, 'deepseek-flash');
-    assert.equal(draftModelFor(ALL_KEYED, 'anyone@example.com'), DRAFT_MODEL);
+    assert.equal(
+      draftModelFor(ALL_KEYED, 'anyone@example.com', 'build'),
+      DRAFT_MODEL,
+    );
   });
 
   it('falls back to null where the policy withholds it', () => {
@@ -230,13 +258,135 @@ describe('draftModelFor', () => {
       ...ALL_KEYED,
       VIBLD_MODEL_POLICY: JSON.stringify({ default: ['gpt-6-sol'] }),
     };
-    assert.equal(draftModelFor(env, 'anyone@example.com'), null);
+    assert.equal(draftModelFor(env, 'anyone@example.com', 'build'), null);
   });
 
   it('falls back to null where DeepSeek is not deployed', () => {
     assert.equal(
-      draftModelFor({ OPENAI_API_KEY: 'o' }, 'anyone@example.com'),
+      draftModelFor({ OPENAI_API_KEY: 'o' }, 'anyone@example.com', 'build'),
       null,
     );
+  });
+});
+
+describe('a Free account (D66)', () => {
+  // The production shape: every provider keyed, GPT-6 Sol the default, and
+  // no policy, which used to mean everyone may use everything.
+  const env = { ...ALL_KEYED, VIBLD_MODEL: 'gpt-6-sol' };
+
+  it('is granted GPT-6 Luna and nothing else, with no policy set', () => {
+    assert.deepEqual(TIER_MODELS.free, ['gpt-6-luna']);
+    assert.deepEqual(
+      grantedFor(env, 'anyone@example.com', 'free').map((m) => m.id),
+      ['gpt-6-luna'],
+    );
+    assert.equal(planWithholdsModels(env, 'anyone@example.com', 'free'), true);
+  });
+
+  it('is refused Sol by name, and told what the plan includes', () => {
+    // Refused, as every ungranted model is, rather than quietly run on Luna.
+    const decision = decideModel(
+      env,
+      'anyone@example.com',
+      'free',
+      'gpt-6-sol',
+      'gpt-6-sol',
+    );
+    assert.equal(decision.ok, false);
+    if (!decision.ok) {
+      assert.equal(decision.status, 403);
+      assert.equal(decision.error, FREE_PLAN_MODELS_NOTE);
+    }
+  });
+
+  it('runs on Luna when it names no model, not on the Sol default', () => {
+    const decision = decideModel(
+      env,
+      'anyone@example.com',
+      'free',
+      null,
+      'gpt-6-sol',
+    );
+    assert.ok(decision.ok);
+    assert.equal(decision.model, 'gpt-6-luna');
+  });
+
+  it('cannot be widened by the policy, only narrowed', () => {
+    const wide = JSON.stringify({ default: ['gpt-6-sol', 'gpt-6-luna'] });
+    assert.deepEqual(
+      grantedFor(
+        { ...env, VIBLD_MODEL_POLICY: wide },
+        'sam@example.com',
+        'free',
+      ).map((m) => m.id),
+      ['gpt-6-luna'],
+    );
+    // A policy that already holds somebody to Luna leaves the plan nothing
+    // to withhold, so the builder promises no upgrade that changes nothing.
+    const narrow = JSON.stringify({ default: ['gpt-6-luna'] });
+    assert.equal(
+      planWithholdsModels(
+        { ...env, VIBLD_MODEL_POLICY: narrow },
+        'sam@example.com',
+        'free',
+      ),
+      false,
+    );
+  });
+
+  it('says so when the deployment cannot serve Luna at all', () => {
+    const decision = decideModel(
+      { ANTHROPIC_API_KEY: 'a' },
+      'anyone@example.com',
+      'free',
+      null,
+      'claude-opus-5-5',
+    );
+    assert.equal(decision.ok, false);
+    if (!decision.ok) assert.match(decision.error, /GPT-6 Luna/);
+  });
+
+  it('draws its draft on Luna, since Flash is not its to use', () => {
+    assert.equal(draftModelFor(env, 'anyone@example.com', 'free'), null);
+    // null sends the draft through decideModel with the build's model.
+    const decision = decideModel(
+      env,
+      'anyone@example.com',
+      'free',
+      'gpt-6-luna',
+      'gpt-6-sol',
+    );
+    assert.ok(decision.ok);
+    assert.equal(decision.model, 'gpt-6-luna');
+  });
+
+  it('leaves every paid tier with every model it had', () => {
+    for (const tier of ['build', 'ship'] as const) {
+      assert.equal(
+        grantedFor(env, 'anyone@example.com', tier).length,
+        MODEL_CATALOGUE.length,
+        tier,
+      );
+      const decision = decideModel(
+        env,
+        'anyone@example.com',
+        tier,
+        'gpt-6-sol',
+        'gpt-6-sol',
+      );
+      assert.ok(decision.ok, tier);
+      assert.equal(decision.model, 'gpt-6-sol');
+      assert.equal(planWithholdsModels(env, 'anyone@example.com', tier), false);
+      assert.equal(draftModelFor(env, 'anyone@example.com', tier), DRAFT_MODEL);
+    }
+  });
+
+  it('is not held to Luna where the deployment sells no plans', () => {
+    // `tierOf` answers null there: no paid plan exists to unlock anything.
+    assert.equal(
+      grantedFor(env, 'anyone@example.com', null).length,
+      MODEL_CATALOGUE.length,
+    );
+    assert.equal(planWithholdsModels(env, 'anyone@example.com', null), false);
   });
 });

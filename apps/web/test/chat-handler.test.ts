@@ -158,6 +158,7 @@ function deps(
       waited.push(promise);
     },
     spendable: async () => ({ monthlyAllowance: 5_000_000, topupCeiling: 0 }),
+    tier: async () => 'build',
     waited,
     ...overrides,
   };
@@ -344,6 +345,56 @@ describe('who a chat turn refuses, before anything is reserved', () => {
     assert.equal(refused.status, 403);
     assert.equal((await bodyOf(refused)).reason, 'model-not-allowed');
     assert.equal(reserves.length + withheld.reserves.length, 0);
+  });
+
+  it('holds a Free account to GPT-6 Luna (D66)', async () => {
+    const keyed = { OPENAI_API_KEY: 'o', VIBLD_MODEL: 'gpt-6-sol' };
+    const free = ledger(undefined, keyed);
+    const refused = await handleChat(
+      chatRequest({ messages: CONVERSATION, model: 'gpt-6-sol' }),
+      free.env,
+      deps(modelReplying({}), { tier: async () => 'free' }),
+    );
+    assert.equal(refused.status, 403);
+    const answer = await bodyOf(refused);
+    assert.equal(answer.reason, 'model-not-allowed');
+    assert.match(String(answer.error), /Free builds use GPT-6 Luna/);
+    assert.equal(free.reserves.length, 0);
+
+    // Naming no model, the turn runs on Luna, not the deployment's Sol.
+    const client = modelReplying({});
+    const ran = await handleChat(
+      chatRequest({ messages: CONVERSATION }),
+      ledger(undefined, keyed).env,
+      deps(client, { tier: async () => 'free' }),
+    );
+    assert.equal(ran.status, 200);
+    assert.equal(client.seen[0]!.model, 'gpt-6-luna');
+
+    // A paid caller on the same deployment still gets Sol.
+    const paid = modelReplying({});
+    await handleChat(
+      chatRequest({ messages: CONVERSATION, model: 'gpt-6-sol' }),
+      ledger(undefined, keyed).env,
+      deps(paid),
+    );
+    assert.equal(paid.seen[0]!.model, 'gpt-6-sol');
+  });
+
+  it('refuses when the plan cannot be read, before reserving', async () => {
+    const { env, reserves } = ledger();
+    const response = await handleChat(
+      chatRequest({ messages: CONVERSATION }),
+      env,
+      deps(modelReplying({}), {
+        tier: async () => {
+          throw new Error('D1 is down');
+        },
+      }),
+    );
+    assert.equal(response.status, 503);
+    assert.equal((await bodyOf(response)).reason, 'accounting-unavailable');
+    assert.equal(reserves.length, 0);
   });
 
   it('refuses input past every bound, with the shared refusal shape', async () => {

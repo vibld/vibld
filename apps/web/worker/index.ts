@@ -53,7 +53,7 @@ import type { SiteProject } from './project-store.ts';
 import { handleShare, handleShareHold } from './share-handlers.ts';
 import { sharePreviewKey } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
-import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
+import { SUSPENDED_MESSAGE, spendableFor, tierOf } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { POLL_INTERVAL_MS, phaseFor, stageFor, stepFor } from './run-stage.ts';
 import { RunProgress } from './run-progress.ts';
@@ -70,7 +70,13 @@ import {
   clerkLookupConfigured,
   findClerkUserIdByEmail,
 } from './clerk-lookup.ts';
-import { decideModel, draftModelFor, grantedFor } from './model-access.ts';
+import {
+  FREE_PLAN_MODELS_NOTE,
+  decideModel,
+  draftModelFor,
+  grantedFor,
+  planWithholdsModels,
+} from './model-access.ts';
 import { signupCreditStatus } from './signup-credit.ts';
 import {
   handleReferralClaim,
@@ -100,6 +106,7 @@ import {
   monthlyAllowanceMicroUsd,
   tierFor,
 } from './entitlement.ts';
+import type { Tier } from './entitlement.ts';
 import { securedApp } from '../src/crawling.ts';
 import {
   KEEPALIVE_COMMENT,
@@ -486,6 +493,32 @@ function json(body: unknown, status = 200): Response {
  */
 function refuse(reason: RunRefusal, error: string, status: number): Response {
   return json({ error, reason }, status);
+}
+
+/**
+ * The caller's tier for `decideModel` (D66), or the refusal to send when it
+ * cannot be read. Fails closed, as the reservation does, rather than
+ * guessing a plan: guessing Free refuses somebody the model they pay for,
+ * and guessing paid hands a Free account what its plan withholds.
+ */
+async function tierOrRefusal(
+  env: Env,
+  principal: Principal,
+): Promise<{ tier: Tier | null } | { refusal: Response }> {
+  try {
+    return { tier: await tierOf(env, principal) };
+  } catch (error) {
+    console.error('tier unavailable', error);
+    return {
+      refusal: new Response(
+        JSON.stringify({
+          error: 'Usage accounting is unavailable; generation is paused.',
+          reason: 'accounting-unavailable' satisfies RunRefusal,
+        }),
+        { status: 503, headers: { ...JSON_HEADERS, 'retry-after': '30' } },
+      ),
+    };
+  }
 }
 
 /**
@@ -1015,10 +1048,14 @@ async function handlePlan(
   // The picker only offers what this person may use, but the picker is a
   // convenience and this endpoint is the boundary. Model policy is keyed by
   // email (L4), not the Clerk user id the ledger below uses (L3) -- it is a
-  // human-edited secret that predates Clerk.
+  // human-edited secret that predates Clerk. The plan is keyed by the user
+  // id, and holds a Free account to GPT-6 Luna whatever the policy says (D66).
+  const caller = await tierOrRefusal(env, principal);
+  if ('refusal' in caller) return caller.refusal;
   const decision = decideModel(
     env,
     principal.policyIdentity,
+    caller.tier,
     chosenModel.value,
     resolveModel(env),
   );
@@ -1687,13 +1724,17 @@ async function handleMockups(
   // from the same credit as the build, and on the deployment's default
   // model it would cost ten times as much for nothing the person keeps.
   // Only where this person may use it; otherwise the draft falls back to
-  // the model they chose, as any look does.
+  // the model they chose, as any look does. A Free account is not granted
+  // Flash (D66), so its draft is drawn on GPT-6 Luna, the one model it has.
+  const caller = await tierOrRefusal(env, principal);
+  if ('refusal' in caller) return caller.refusal;
   const draftModel = parsed.value.draft
-    ? draftModelFor(env, principal.policyIdentity)
+    ? draftModelFor(env, principal.policyIdentity, caller.tier)
     : null;
   const decision = decideModel(
     env,
     principal.policyIdentity,
+    caller.tier,
     draftModel ?? chosenModel.value,
     resolveModel(env),
   );
@@ -3068,14 +3109,37 @@ async function route(
     // withhold one.
     const configured = isConfigured(env);
 
-    // Two filters, in order. What the deployment can serve at all --
+    // Three filters, in order. What the deployment can serve at all --
     // offering a model whose provider has no key produces a run that fails
     // after the user has waited for it. Then what this person is granted
-    // (by email, per L4 -- see the same note in handlePlan).
-    const models = configured ? grantedFor(env, principal.policyIdentity) : [];
+    // (by email, per L4 -- see the same note in handlePlan). Then what
+    // their plan includes (D66).
+    //
+    // A tier that cannot be read is answered as Free here, where the runs
+    // refuse instead. This only fills the picker, and a failed probe is
+    // worse than a short one: the shell takes it for a deployment with no
+    // model and would run the deterministic fake. The run itself reads the
+    // tier again and is the boundary.
+    let tier: Tier | null = 'free';
+    if (configured) {
+      try {
+        tier = await tierOf(env, principal);
+      } catch (error) {
+        console.error('tier unavailable', error);
+      }
+    }
+    const models = configured
+      ? grantedFor(env, principal.policyIdentity, tier)
+      : [];
     // The deployment default is only offered if this person may use it.
     const decided = configured
-      ? decideModel(env, principal.policyIdentity, null, resolveModel(env))
+      ? decideModel(
+          env,
+          principal.policyIdentity,
+          tier,
+          null,
+          resolveModel(env),
+        )
       : { ok: false as const, error: 'not configured' };
     return json({
       generation: configured ? 'model' : 'fake',
@@ -3086,6 +3150,13 @@ async function route(
         provider,
       })),
       defaultModel: decided.ok ? decided.model : null,
+      // Said where the picker would be, when the plan is what keeps the
+      // other models out of it; null otherwise, including for a Free
+      // account the policy already holds to Luna.
+      modelsNote:
+        configured && planWithholdsModels(env, principal.policyIdentity, tier)
+          ? FREE_PLAN_MODELS_NOTE
+          : null,
       // So the shell knows whether to offer the admin credit tool at all --
       // `/api/admin/*` itself re-checks this independently either way
       // (ADR-0006), the same as every other grant this endpoint reports.
