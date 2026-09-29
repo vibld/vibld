@@ -33,6 +33,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Full history, so postbuild.ts can date each page in sitemap.xml
+          # from the last commit that touched it. A shallow clone knows one
+          # commit, and postbuild then leaves lastmod out rather than stamp
+          # every page with the same date.
+          fetch-depth: 0
 
       - name: Require deploy credentials
         env:

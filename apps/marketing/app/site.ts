@@ -112,6 +112,12 @@ export const SITE = {
    * so it lists only profiles that actually exist -- an invented URL is worse
    * than an omitted one.
    */
+  sameAs: [
+    'https://github.com/vibld/vibld',
+    // The company page docs/social-launch.md describes. Checked on
+    // 2026-09-29: it exists, is named vibld, and links to https://vibld.com/.
+    'https://www.linkedin.com/company/vibld',
+  ] as readonly string[],
   /** The social card built by the brand system (internal issue 7). Absolute URL is filled in against SITE.url; see `metaFor`. */
   ogImage: '/og-image.png',
   ogImageAlt:
@@ -326,9 +332,13 @@ export function trackFor(guide: DocGuide): DocTrackInfo {
 export const ROUTES: SiteRoute[] = [
   {
     path: '/',
-    title: `${SITE.name} | ${SITE.tagline}`,
+    // What the product is, in the title itself. The tagline alone said
+    // nothing a searcher could match, and "vibld" on its own is read as a
+    // misspelling (BRAND-01), so the title is where the words that
+    // disambiguate it do the most work.
+    title: `${SITE.name} | AI application builder | ${SITE.tagline}`,
     description:
-      'vibld is an AI application builder that generates conventional, portable projects -- no proprietary runtime, no lock-in. Now in public beta: sign up and start building.',
+      'vibld is an AI application builder that generates conventional, portable projects: no proprietary runtime and no lock-in. In public beta, open to anyone.',
   },
   {
     path: '/how-it-works',
@@ -363,13 +373,13 @@ export const ROUTES: SiteRoute[] = [
     path: '/styles',
     title: `Styles | ${SITE.name}`,
     description:
-      'Every visual direction vibld can build in, generated from the builder\u2019s own list: full colour systems where a direction has one, and surface treatments where it deliberately does not.',
+      'Every visual direction vibld can build in, from the builder\u2019s own list: full colour systems where a direction has one, surface treatments where it does not.',
   },
   {
     path: '/examples',
     title: `Examples | ${SITE.name}`,
     description:
-      'Sites and apps vibld built, each shown exactly as generated from the prompt beside it, with a live copy and the source to download; then the hand-built starter templates, marked as templates.',
+      'Sites and apps vibld built, each shown exactly as generated from its prompt, with a live copy and the source to download, then the hand-built starter templates.',
   },
   {
     path: '/roadmap',
@@ -422,6 +432,58 @@ export function routeFor(path: string): SiteRoute {
   return route;
 }
 
+/**
+ * The trail from the home page to `path`, for BreadcrumbList schema.
+ *
+ * Each step's name is the label the site already gives that page in its
+ * navigation, never a new one, and a path this cannot name is a build
+ * failure rather than a guess.
+ */
+export function breadcrumbsFor(path: string): { name: string; path: string }[] {
+  const labels = new Map<string, string>([
+    ['/', SITE.name],
+    ['/legal', 'Legal'],
+    ['/docs', 'Docs'],
+    ...PRODUCT_PAGES.map((page) => [page.path, page.label] as [string, string]),
+    ...LEGAL_DOCS.map(
+      (doc) => [`/legal/${doc.slug}`, doc.label] as [string, string],
+    ),
+    ...DOC_GUIDES.map(
+      (guide) => [`/docs/${guide.slug}`, guide.label] as [string, string],
+    ),
+    ...USE_CASES.map(
+      (useCase) =>
+        [`/use-cases/${useCase.slug}`, useCase.label] as [string, string],
+    ),
+  ]);
+  const segments = path.split('/').filter(Boolean);
+  const paths = [
+    '/',
+    ...segments.map((_, i) => `/${segments.slice(0, i + 1).join('/')}`),
+  ];
+  return paths.map((step) => {
+    const name = labels.get(step);
+    if (!name) throw new Error(`No breadcrumb label for ${step}`);
+    return { name, path: step };
+  });
+}
+
+/** BreadcrumbList schema for every page below the home page. */
+export function breadcrumbSchema(path: string) {
+  return {
+    'script:ld+json': {
+      '@context': 'https://schema.org',
+      '@type': 'BreadcrumbList',
+      itemListElement: breadcrumbsFor(path).map((step, index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        name: step.name,
+        item: new URL(step.path, SITE.url).toString(),
+      })),
+    },
+  };
+}
+
 export function metaFor(path: string) {
   const route = routeFor(path);
   const url = new URL(path, SITE.url).toString();
@@ -447,6 +509,7 @@ export function metaFor(path: string) {
     { name: 'twitter:description', content: route.description },
     { name: 'twitter:image', content: image },
     { name: 'twitter:image:alt', content: SITE.ogImageAlt },
+    ...(path === '/' ? [] : [breadcrumbSchema(path)]),
   ];
 }
 
@@ -468,10 +531,18 @@ export function organizationSchema() {
           name: SITE.name,
           alternateName: ['Vibld', 'Vibld by Chris Brock LLC'],
           url: SITE.url,
-          logo: new URL('/favicon.svg', SITE.url).toString(),
+          // A raster logo at a known size. Google asks for at least
+          // 112x112 in a format Google Images indexes; the SVG favicon had
+          // no size to read, and the touch icon is the same mark at 180.
+          logo: {
+            '@type': 'ImageObject',
+            url: new URL('/apple-touch-icon.png', SITE.url).toString(),
+            width: 180,
+            height: 180,
+          },
           description: SITE.summary,
           email: SITE.emails.hello,
-          sameAs: [SITE.repoUrl],
+          sameAs: [...SITE.sameAs],
           address: {
             '@type': 'PostalAddress',
             streetAddress: '285 W Wieuca Rd NE STE 62715',

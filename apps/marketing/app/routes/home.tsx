@@ -23,6 +23,9 @@ import { UseCaseVisual } from '../components/UseCaseVisual';
 import { catalogue } from '../catalogue';
 import { DEMO_SITES, DEMO_SITE_IDS } from '../demo-sites';
 import { lookById } from '../looks';
+import { answers } from '../answers';
+import { PLANS } from '../plan-sources';
+import { faqSchema, softwareApplicationSchema } from '../schema';
 import { SITE, metaFor, organizationSchema } from '../site';
 import { USE_CASES } from '../use-cases';
 
@@ -51,7 +54,12 @@ import { USE_CASES } from '../use-cases';
  */
 
 export function meta() {
-  return [...metaFor('/'), organizationSchema()];
+  return [
+    ...metaFor('/'),
+    organizationSchema(),
+    softwareApplicationSchema(PLANS),
+    faqSchema(answers(PLANS)),
+  ];
 }
 
 export default function Home() {
@@ -63,6 +71,7 @@ export default function Home() {
       <WhatYouGet />
       <UseCases />
       <Pricing />
+      <Questions />
       <Join />
     </LiveBuild>
   );
@@ -320,6 +329,39 @@ function Pricing() {
         <p className="lb-more-link">
           <Link className="lb-link" to="/pricing">
             Plans and credit, in full
+          </Link>
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The questions a search engine or an assistant is most often asked about
+ * vibld, answered in their first sentence. The same list is the FAQPage
+ * schema in `meta` and a section of llms.txt; see `answers.ts`.
+ */
+function Questions() {
+  return (
+    <section className="lb-section" aria-labelledby="questions-title">
+      <div className="lb-wrap">
+        <SectionHead
+          number="06"
+          eyebrow="Questions"
+          id="questions-title"
+          title="The short answers"
+        />
+        <ul className="lb-grid2">
+          {answers(PLANS).map((item) => (
+            <li key={item.question} className="lb-card">
+              <h3>{item.question}</h3>
+              <p>{item.answer}</p>
+            </li>
+          ))}
+        </ul>
+        <p className="lb-more-link">
+          <Link className="lb-link" to="/docs/self-hosting">
+            What self-hosting involves
           </Link>
         </p>
       </div>

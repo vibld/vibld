@@ -953,3 +953,191 @@ describe('the templates on /examples', () => {
     }
   });
 });
+
+describe('structured data a search engine or an assistant reads', () => {
+  /** Every JSON-LD block on a page, parsed. */
+  function schemas(path: string): Record<string, unknown>[] {
+    return [
+      ...read(path).matchAll(
+        /<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/g,
+      ),
+    ].map((match) => JSON.parse(match[1]!));
+  }
+
+  function ofType(path: string, type: string) {
+    return schemas(path).find((block) => block['@type'] === type) as
+      Record<string, any> | undefined;
+  }
+
+  const worker = (file: string) =>
+    readFileSync(
+      join(import.meta.dirname, '..', '..', 'web', 'worker', file),
+      'utf8',
+    );
+  const PLANS_NOW = readPlans({
+    entitlement: worker('entitlement.ts'),
+    signupCredit: worker('signup-credit.ts'),
+    stripeClient: worker('stripe-client.ts'),
+  });
+
+  it('gives every page below the home page a breadcrumb that ends at its canonical URL', () => {
+    for (const route of ROUTES.filter((candidate) => candidate.path !== '/')) {
+      const crumbs = ofType(route.path, 'BreadcrumbList');
+      assert.ok(crumbs, `no BreadcrumbList on ${route.path}`);
+      const items = crumbs!.itemListElement as {
+        item: string;
+        position: number;
+      }[];
+      assert.equal(items[0]!.item, new URL('/', SITE.url).toString());
+      assert.equal(
+        items.at(-1)!.item,
+        new URL(route.path, SITE.url).toString(),
+        route.path,
+      );
+      items.forEach((item, index) => assert.equal(item.position, index + 1));
+    }
+  });
+
+  it('states only the prices the builder charges, on the home page and /pricing', () => {
+    const expected = new Set<string>([
+      '0.00',
+      (PLANS_NOW.topup.priceCents / 100).toFixed(2),
+    ]);
+    for (const plan of PLANS_NOW.plans) {
+      if (!plan.price) continue;
+      expected.add((plan.price.monthly / 100).toFixed(2));
+      expected.add((plan.price.annual / 100).toFixed(2));
+    }
+    for (const path of ['/', '/pricing']) {
+      const app = ofType(path, 'WebApplication');
+      assert.ok(app, `no WebApplication schema on ${path}`);
+      const prices = new Set(
+        (app!.offers as { price: string; priceCurrency: string }[]).map(
+          (offer) => {
+            assert.equal(offer.priceCurrency, 'USD');
+            return offer.price;
+          },
+        ),
+      );
+      assert.deepEqual([...prices].sort(), [...expected].sort(), path);
+      // A rating or a review would have to be invented: the site has none.
+      assert.equal(app!.aggregateRating, undefined);
+      assert.equal(app!.review, undefined);
+    }
+  });
+
+  it('marks up as FAQ only questions the page shows, word for word', () => {
+    for (const path of ['/', '/features']) {
+      const faq = ofType(path, 'FAQPage');
+      assert.ok(faq, `no FAQPage on ${path}`);
+      const text = read(path)
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&quot;/g, '"')
+        .replace(/&#x27;|&#39;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ');
+      for (const entry of faq!.mainEntity as {
+        name: string;
+        acceptedAnswer: { text: string };
+      }[]) {
+        assert.ok(
+          text.includes(entry.name),
+          `${path} does not show "${entry.name}"`,
+        );
+        assert.ok(
+          text.includes(entry.acceptedAnswer.text),
+          `${path} does not show the answer to "${entry.name}"`,
+        );
+      }
+    }
+  });
+
+  it('answers what vibld costs with the prices the builder charges', () => {
+    const faq = ofType('/', 'FAQPage')!;
+    const cost = (
+      faq.mainEntity as { name: string; acceptedAnswer: { text: string } }[]
+    ).find((entry) => /cost/.test(entry.name));
+    assert.ok(cost, 'no answer to what vibld costs');
+    for (const plan of PLANS_NOW.plans) {
+      if (!plan.price) continue;
+      assert.ok(
+        cost!.acceptedAnswer.text.includes(
+          `${priceLabel(plan.price.monthly)} a month or ${priceLabel(plan.price.annual)} a year`,
+        ),
+        plan.name,
+      );
+    }
+  });
+
+  it('gives the Organization a raster logo that was built, and only real profiles', () => {
+    const org = (schemas('/')[0]!['@graph'] as Record<string, any>[]).find(
+      (node) => node['@type'] === 'Organization',
+    )!;
+    const logo = new URL(org.logo.url);
+    assert.match(logo.pathname, /\.png$/);
+    assert.ok(
+      existsSync(join(CLIENT, logo.pathname)),
+      `${logo.pathname} did not build`,
+    );
+    assert.deepEqual(org.sameAs, [...SITE.sameAs]);
+  });
+});
+
+describe('what AI crawlers are told', () => {
+  it('names the AI crawlers in the same group as every other crawler', () => {
+    const body = readFileSync(join(CLIENT, 'robots.txt'), 'utf8');
+    // One group: a crawler obeys only the most specific group naming it, so
+    // a separate group would have to repeat every rule or drop /api/.
+    const groups = body
+      .split(/\n\s*\n/)
+      .filter((block) => /^User-agent:/m.test(block));
+    assert.equal(groups.length, 1, 'robots.txt must keep a single group');
+    for (const agent of [
+      'GPTBot',
+      'ClaudeBot',
+      'PerplexityBot',
+      'Google-Extended',
+    ]) {
+      assert.match(body, new RegExp(`^User-agent: ${agent}$`, 'm'));
+    }
+    assert.match(body, /^Disallow: \/api\/$/m);
+    assert.doesNotMatch(body, /^Disallow: \/$/m);
+  });
+
+  it('publishes llms-full.txt with every product page, doc and policy', () => {
+    const body = readFileSync(join(CLIENT, 'llms-full.txt'), 'utf8');
+    const paths = [
+      ...PRODUCT_PAGES.map((page) => page.path),
+      ...DOC_GUIDES.map((guide) => `/docs/${guide.slug}`),
+      ...LEGAL_DOCS.map((doc) => `/legal/${doc.slug}`),
+    ];
+    for (const path of paths) {
+      assert.ok(
+        body.includes(`Source: ${new URL(path, SITE.url).toString()}\n`),
+        `llms-full.txt is missing ${path}`,
+      );
+    }
+    // Placeholders such as <revision> are prose and stay; tags are not.
+    assert.doesNotMatch(
+      body,
+      /<\/?(p|div|span|a|h[1-6]|li|ul|ol|script|section|small)\b[^>]*>/,
+      'llms-full.txt still has markup',
+    );
+    const llms = readFileSync(join(CLIENT, 'llms.txt'), 'utf8');
+    assert.ok(llms.includes(new URL('/llms-full.txt', SITE.url).toString()));
+  });
+});
+
+describe('files a crawler should not find', () => {
+  it('does not ship the SPA fallback, which would answer 200 with no title', () => {
+    assert.ok(!existsSync(join(CLIENT, '__spa-fallback.html')));
+  });
+
+  it('dates sitemap entries only in a form a crawler accepts', () => {
+    const body = readFileSync(join(CLIENT, 'sitemap.xml'), 'utf8');
+    for (const match of body.matchAll(/<lastmod>([^<]*)<\/lastmod>/g)) {
+      assert.match(match[1]!, /^\d{4}-\d{2}-\d{2}$/);
+      assert.ok(new Date(match[1]!).getTime() <= Date.now());
+    }
+  });
+});

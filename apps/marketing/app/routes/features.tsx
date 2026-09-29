@@ -3,10 +3,11 @@ import { STYLE_PRESETS } from '@vibld/ai/style-presets';
 
 import { FeatureBento, SectionHead } from '../components/Sections';
 import { PageHead } from '../components/SiteChrome';
+import { faqSchema } from '../schema';
 import { SITE, metaFor } from '../site';
 
 export function meta() {
-  return metaFor('/features');
+  return [...metaFor('/features'), faqSchema(QUESTIONS)];
 }
 
 /**

@@ -714,3 +714,78 @@ describe('the self-hosted fonts', () => {
     }
   });
 });
+
+describe('the build’s hashed scripts and stylesheets', () => {
+  const store = (status: number) => ({
+    fetch: async () =>
+      new Response('/* built */', {
+        status,
+        headers: { 'cache-control': 'public, max-age=0, must-revalidate' },
+      }),
+  });
+
+  it('caches a hashed file for a year', async () => {
+    for (const path of [
+      '/assets/entry.client-CESUXnr0.js',
+      '/assets/root-DpPZ_TgP.css',
+    ]) {
+      const response = await worker.fetch(
+        new Request(`https://vibld.com${path}`),
+        { ...ENV, ASSETS: store(200) },
+      );
+      assert.equal(
+        response.headers.get('cache-control'),
+        'public, max-age=31536000, immutable',
+        path,
+      );
+    }
+  });
+
+  it('leaves a missing file and an unhashed name alone', async () => {
+    const cases: [string, number][] = [
+      ['/assets/entry.client-CESUXnr0.js', 404],
+      ['/assets/readme.js', 200],
+      ['/og-image.png', 200],
+    ];
+    for (const [path, status] of cases) {
+      const response = await worker.fetch(
+        new Request(`https://vibld.com${path}`),
+        { ...ENV, ASSETS: store(status) },
+      );
+      assert.equal(
+        response.headers.get('cache-control'),
+        'public, max-age=0, must-revalidate',
+        path,
+      );
+    }
+  });
+});
+
+describe('the asset store’s redirects', () => {
+  /** What html_handling answers for /pricing/ and /pricing/index.html. */
+  const store = {
+    fetch: async () =>
+      new Response(null, { status: 307, headers: { location: '/pricing' } }),
+  };
+
+  it('are permanent for a page request', async () => {
+    for (const method of ['GET', 'HEAD']) {
+      const response = await worker.fetch(
+        new Request('https://vibld.com/pricing/', { method }),
+        { ...ENV, ASSETS: store },
+      );
+      assert.equal(response.status, 301, method);
+      assert.equal(response.headers.get('location'), '/pricing');
+      // Still carries the headers every response does.
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    }
+  });
+
+  it('keep the method for anything else', async () => {
+    const response = await worker.fetch(
+      new Request('https://vibld.com/pricing/', { method: 'POST' }),
+      { ...ENV, ASSETS: store },
+    );
+    assert.equal(response.status, 307);
+  });
+});

@@ -152,7 +152,13 @@ async function route(request: Request, env: Env): Promise<Response> {
   // this site out of the index; production serves the same bytes without
   // that header.
   if (env.ASSETS) {
-    const response = fontHeaders(url.pathname, await env.ASSETS.fetch(request));
+    const response = permanentRedirect(
+      request.method,
+      hashedAssetHeaders(
+        url.pathname,
+        fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
+      ),
+    );
     return env.VIBLD_NOINDEX === '1' ? noindex(response) : response;
   }
   return new Response('Not found', { status: 404 });
@@ -204,6 +210,57 @@ export function fontHeaders(pathname: string, response: Response): Response {
     statusText: response.statusText,
     headers,
   });
+}
+
+/**
+ * The build's own scripts and stylesheets, cached for a year.
+ *
+ * Vite names every file it writes to `/assets/` after a hash of its
+ * contents, so a file at a given URL never changes: a new build is a new
+ * name, and the page that asks for it is revalidated on every visit. The
+ * asset store's default (`max-age=0, must-revalidate`) made every page view
+ * ask again for roughly 300 KB of JavaScript that could not have changed.
+ *
+ * Only a name that carries a hash is touched, and only a 200, for the same
+ * reason as `fontHeaders`: a missing file must not be cached for a year.
+ */
+export function hashedAssetHeaders(
+  pathname: string,
+  response: Response,
+): Response {
+  if (
+    !/^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(pathname) ||
+    response.status !== 200
+  ) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set('cache-control', 'public, max-age=31536000, immutable');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/**
+ * The asset store's own redirects, made permanent.
+ *
+ * `html_handling: "drop-trailing-slash"` answers `/pricing/`,
+ * `/pricing/index.html` and `/index.html` with a 307 to the canonical form.
+ * A 307 says "temporary", so a crawler keeps the old URL on file and comes
+ * back to it; the move is not temporary, and a 301 is the status that says
+ * so. Only GET and HEAD, for the reason `canonicalHost`'s caller gives: a
+ * 301 turns a POST into a GET.
+ */
+export function permanentRedirect(
+  method: string,
+  response: Response,
+): Response {
+  if (response.status !== 307 || (method !== 'GET' && method !== 'HEAD')) {
+    return response;
+  }
+  return new Response(null, { status: 301, headers: response.headers });
 }
 
 /**

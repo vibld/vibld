@@ -2,10 +2,12 @@ import { Link } from 'react-router';
 
 import { PlanCards, PlanFacts, SectionHead } from '../components/Sections';
 import { PageHead } from '../components/SiteChrome';
+import { PLANS } from '../plan-sources';
+import { softwareApplicationSchema } from '../schema';
 import { SITE, metaFor } from '../site';
 
 export function meta() {
-  return metaFor('/pricing');
+  return [...metaFor('/pricing'), softwareApplicationSchema(PLANS)];
 }
 
 /**
