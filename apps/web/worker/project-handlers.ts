@@ -22,8 +22,12 @@ import { D1GenerationStore } from './generation-store.ts';
 import { ACTIVE_PROJECT_LIMIT, tierFor } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
 import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
-import { ProjectStore } from './project-store.ts';
-import type { ProjectRecord, ProjectSettings } from './project-store.ts';
+import { ProjectStore, mayReplace } from './project-store.ts';
+import type {
+  ProjectRecord,
+  ProjectSettings,
+  SaveGuard,
+} from './project-store.ts';
 import {
   DEFAULT_LIMITS,
   checkBodySize,
@@ -136,6 +140,24 @@ export const MAX_PROJECT_BODY_BYTES = MAX_TRANSCRIPT_BYTES + 64 * 1024;
 export const PROJECT_LIMIT_CODE = 'project-limit';
 
 /**
+ * The code a save made from an older copy of the project is refused with
+ * (docs/decisions.md, "Resolved 2026-09-29 (later)", D63), which the
+ * builder matches on to stop saving and offer a reload.
+ */
+export const PROJECT_CHANGED_CODE = 'project-changed';
+
+function changedRefusal(version: number): Response {
+  return json(
+    {
+      error: 'This project changed in another tab.',
+      code: PROJECT_CHANGED_CODE,
+      version,
+    },
+    409,
+  );
+}
+
+/**
  * Refuse a create, a duplicate or an unarchive that would pass the limit.
  *
  * Not a `RunRefusal` (`run-outcome.ts`): that vocabulary names why a run
@@ -176,6 +198,8 @@ export function projectView(project: ProjectRecord, links?: ProjectLinks) {
     lastOpenedAt: project.lastOpenedAt,
     hasCode: project.acceptedRevision !== null,
     turns: project.transcriptTurns,
+    // The version the next save names as the one it was made from.
+    version: project.version,
     settings: project.settings,
     share: {
       on: project.share.token !== null,
@@ -252,7 +276,12 @@ interface ProjectPatch {
   archived?: boolean;
   settings?: Partial<ProjectSettings>;
   transcript?: TranscriptTurn[];
+  /** Absent from a builder older than versions, whose save always wins. */
+  guard?: SaveGuard;
 }
+
+/** A page's name for itself: a UUID, or anything as plain and as short. */
+const WRITER = /^[A-Za-z0-9-]{1,64}$/;
 
 /** Everything a PATCH may carry, all of it checked before any of it is written. */
 export function parseProjectPatch(body: unknown): GuardResult<ProjectPatch> {
@@ -284,6 +313,21 @@ export function parseProjectPatch(body: unknown): GuardResult<ProjectPatch> {
       return fail(413, 'This conversation is too long to save.');
     }
     patch.transcript = transcript.turns;
+  }
+  if ('version' in raw) {
+    if (!Number.isSafeInteger(raw.version) || (raw.version as number) < 0) {
+      return fail(400, '"version" must be a whole number.');
+    }
+    if (
+      'writer' in raw &&
+      (typeof raw.writer !== 'string' || !WRITER.test(raw.writer))
+    ) {
+      return fail(400, '"writer" is not a page id.');
+    }
+    patch.guard = {
+      version: raw.version as number,
+      writer: typeof raw.writer === 'string' ? raw.writer : null,
+    };
   }
   return { ok: true, value: patch };
 }
@@ -597,6 +641,19 @@ export async function handleProjects(
   const patch = parseProjectPatch(body.value);
   if (!patch.ok) return json({ error: patch.error }, patch.status);
   const at = now();
+  const content =
+    patch.value.settings !== undefined || patch.value.transcript !== undefined;
+  const guard = patch.value.guard ?? null;
+
+  // A save made from an older copy of the project, before anything else is
+  // written, so the refused tab has changed nothing and is told why. The
+  // store asks again as it writes, which is what decides a race; this is
+  // for the common case of a tab that has simply been left open. Only the
+  // settings and the conversation are versioned: a rename or an archive
+  // overwrites nothing another tab saved, and is never refused for this.
+  if (content && !mayReplace(project, guard)) {
+    return changedRefusal(project.version);
+  }
 
   // The one change that can be refused, first, so a refused unarchive
   // writes nothing else either and the builder is told plainly why.
@@ -615,11 +672,23 @@ export async function handleProjects(
   if (patch.value.name !== undefined) {
     await store.rename(userId, project.id, patch.value.name, at);
   }
-  if (patch.value.settings !== undefined) {
-    await store.saveSettings(userId, project.id, patch.value.settings, at);
-  }
-  if (patch.value.transcript !== undefined) {
-    await store.saveTranscript(userId, project.id, patch.value.transcript, at);
+  if (content) {
+    const saved = await store.saveContent(
+      userId,
+      project.id,
+      {
+        ...(patch.value.settings !== undefined
+          ? { settings: patch.value.settings }
+          : {}),
+        ...(patch.value.transcript !== undefined
+          ? { transcript: patch.value.transcript }
+          : {}),
+      },
+      at,
+      guard,
+    );
+    if (saved.outcome === 'missing') return NOT_FOUND();
+    if (saved.outcome === 'changed') return changedRefusal(saved.version);
   }
   const saved = await store.find(userId, project.id);
   return saved ? json({ project: view(saved) }) : NOT_FOUND();

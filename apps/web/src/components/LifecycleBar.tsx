@@ -1,3 +1,5 @@
+import { LIFECYCLE_ORDER, lifecycleStatus } from '../generation/run-phase.ts';
+import type { RunPhase } from '../generation/run-phase.ts';
 import type { BuilderStatus } from '../generation/session.ts';
 
 const STEPS: { status: BuilderStatus; label: string }[] = [
@@ -5,14 +7,6 @@ const STEPS: { status: BuilderStatus; label: string }[] = [
   { status: 'staging', label: 'Write' },
   { status: 'validating', label: 'Check' },
   { status: 'accepted', label: 'Done' },
-];
-
-const ORDER: BuilderStatus[] = [
-  'idle',
-  'planning',
-  'staging',
-  'validating',
-  'accepted',
 ];
 
 function stepState(
@@ -24,14 +18,26 @@ function stepState(
   if (status === 'failed' || status === 'cancelled') return 'todo';
   // 'accepted' is terminal: every step of the lifecycle is complete.
   if (status === 'accepted') return 'done';
-  const current = ORDER.indexOf(status);
-  const index = ORDER.indexOf(step);
+  const current = LIFECYCLE_ORDER.indexOf(status);
+  const index = LIFECYCLE_ORDER.indexOf(step);
   if (current > index) return 'done';
   if (current === index) return 'active';
   return 'todo';
 }
 
-export function LifecycleBar({ status }: { status: BuilderStatus }) {
+/**
+ * `phase` is where the Worker says a build has got to (`run-phase.ts`): the
+ * builder's own status stays `planning` until the Workflow is done, so
+ * without it the bar says "Plan" while the files are being written.
+ */
+export function LifecycleBar({
+  status: own,
+  phase,
+}: {
+  status: BuilderStatus;
+  phase?: RunPhase | undefined;
+}) {
+  const status = lifecycleStatus(own, phase);
   return (
     <ol className="lifecycle" aria-label="Generation lifecycle">
       {STEPS.map((step) => {

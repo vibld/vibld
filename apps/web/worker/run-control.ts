@@ -7,6 +7,9 @@ import type { RunStageRow } from './project-store.ts';
 import { isProjectId } from './request-guard.ts';
 import { topupKeyFor } from './reserve.ts';
 import type { HoldClaim, HoldSettler } from './run-progress.ts';
+import { phaseFor } from './run-stage.ts';
+import type { RunProgressState } from './generation-run.ts';
+import type { RunPhase } from '../src/generation/run-phase.ts';
 import { ACCOUNT_BUDGET_KEY } from './spend.ts';
 
 /**
@@ -65,6 +68,11 @@ export interface RunControlDeps {
    * later, as it always did.
    */
   settleStopped?: (runId: string, userId: string) => Promise<void>;
+  /**
+   * What a running build's own progress channel says (`RunProgress.read`),
+   * for where it has got to. Absent where there is no channel.
+   */
+  progressOf?: (runId: string) => Promise<RunProgressState | undefined>;
   /** The per-address limiter a stop is counted against (`IP_BURST`). */
   ipLimit?: RateLimit;
   now?: () => Date;
@@ -86,6 +94,12 @@ export interface RunView {
    * the instance can no longer say.
    */
   summary?: string;
+  /**
+   * Where a `running` build has got to (`run-phase.ts`), as the stream's
+   * progress events say it, for a builder asking rather than streaming.
+   * Absent where the run has not said, or its channel cannot be read.
+   */
+  phase?: RunPhase;
 }
 
 /** What `WorkflowInstance.status()` says of an instance that has stopped. */
@@ -245,23 +259,32 @@ export async function buildInFlight(
 }
 
 /**
- * Close a stopped run's reservation, at what the reclaim would charge for
- * it, now rather than in thirty-five minutes (D60).
+ * Close a stopped run's reservation now, at what its model calls spent
+ * (D65), rather than in thirty-five minutes at all it reserved (D60).
  *
  * Stop terminates the Workflow before its `settle-budget` step, so the
  * reservation it held, against the caller's ledger and the deployment's,
  * used to stay open until `UserBudget.reserve` reclaimed it after
  * `RUN_ABANDONED_AFTER_MS`. Open, it held an in-flight slot, and at
- * `VIBLD_MAX_IN_FLIGHT=2` two Stops locked a caller out. The reclaim
- * charges each row what it reserved, and so does this (`UserBudget.reclaim`
- * is the same statement for one row): the only change is when.
+ * `VIBLD_MAX_IN_FLIGHT=2` two Stops locked a caller out.
  *
- * The run's own record says where the reservation is (`RunProgress.hold`).
- * Taking it for Stop is what keeps the settle step from closing it again if
- * the Workflow reaches that step anyway; a second Stop takes it again and
- * finds both rows already closed, which changes nothing. Each layer is
- * closed on its own, so a ledger that fails for one does not keep the other
- * open; one that fails is left to the reclaim, as before.
+ * What each layer is charged is what the run's own record says its model
+ * calls came to (`RunProgress.spentByCalls`): every call that finished at
+ * what it cost, priced the way the settle step prices it, and a call that
+ * had started and not finished, the one in flight when Stop landed, at the
+ * most it could cost. Each layer is charged that or its own reservation,
+ * whichever is less (`UserBudget.reclaim`), so a Stop never charges more
+ * than was reserved. Where the record cannot be read, or the run never
+ * kept one (a run enqueued before D65), each layer is charged its whole
+ * reservation, which is what the reclaim would have charged.
+ *
+ * The run's own record also says where the reservation is
+ * (`RunProgress.hold`). Taking it for Stop is what keeps the settle step
+ * from closing it again if the Workflow reaches that step anyway; a second
+ * Stop takes it again and finds both rows already closed, which changes
+ * nothing. Each layer is closed on its own, so a ledger that fails for one
+ * does not keep the other open; one that fails is left to the reclaim, as
+ * before.
  *
  * Returns what the caller's own layer was charged, or nothing where this
  * Stop closed nothing of theirs.
@@ -270,6 +293,8 @@ export async function settleStopped(
   /** The run's own `RunProgress`, as its stub or the object itself. */
   channel: {
     claimSettlement(by: HoldSettler): HoldClaim | Promise<HoldClaim>;
+    spentByCalls(): number | undefined | Promise<number | undefined>;
+    stopCharged(microUsd: number): void | Promise<void>;
   },
   ledger: DurableObjectNamespace<Pick<UserBudget, 'reclaim'>>,
   userId: string,
@@ -278,9 +303,23 @@ export async function settleStopped(
   const claim = await channel.claimSettlement('stop');
   if (claim.claimed !== 'yours') return undefined;
   const { hold } = claim;
+  // Read after the claim, so a call that finishes in between is counted at
+  // what it cost rather than at its worst case. Undefined is "charge the
+  // reservation": a record that cannot be read is not a reason to charge
+  // less.
+  let spent: number | undefined;
+  try {
+    spent = await channel.spentByCalls();
+  } catch (error) {
+    console.error('could not read what a stopped run spent', {
+      runId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    spent = undefined;
+  }
   const close = async (key: string, id: number | undefined) => {
     if (id === undefined) return undefined;
-    return ledger.getByName(key).reclaim(id);
+    return ledger.getByName(key).reclaim(id, spent);
   };
   const [own, account] = await Promise.allSettled([
     close(hold.topup ? topupKeyFor(userId) : userId, hold.reservationId),
@@ -303,12 +342,20 @@ export async function settleStopped(
   }
   const charged = own.status === 'fulfilled' ? own.value : undefined;
   if (charged !== undefined) {
+    // For the settle step's record, if the Workflow reaches it anyway.
+    // Best effort: it only changes what that step logs and traces.
+    try {
+      await channel.stopCharged(charged);
+    } catch {
+      // The settle step then reports the reservation, as it did before.
+    }
     console.log(
       JSON.stringify({
         event: 'generation.stopped',
         userId,
         runId,
         microUsd: charged,
+        measured: spent !== undefined,
       }),
     );
   }
@@ -370,6 +417,15 @@ export async function handleRun(
   if (method === 'GET') {
     const view = await describeRun(load, generation, runId, now, deps);
     if (!view) return NOT_FOUND();
+    if (view.state === 'running') {
+      // Never a reason to fail the answer: without it the builder shows the
+      // lifecycle as its own status says, which is what it did before.
+      const progress = deps.progressOf
+        ? await deps.progressOf(runId).catch(() => undefined)
+        : undefined;
+      const phase = phaseFor('running', progress);
+      return json({ run: phase ? { ...view, phase } : view, snapshot: null });
+    }
     // The code with the answer, when the build moved the project to it: a
     // builder that was not streaming the build has none of it, and asking
     // for the whole project again would be a second request for the same

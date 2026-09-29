@@ -6,6 +6,7 @@ import type {
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import { getClerkToken } from '../auth/clerk-token.ts';
+import { isRunPhase } from './run-phase.ts';
 import type { GenerationProgress } from './session.ts';
 
 /**
@@ -282,11 +283,12 @@ export class RemoteModelProvider implements ModelProvider {
         continue;
       }
       if (event === 'progress') {
-        const { characters, elapsedMs, stage, step } = data as {
+        const { characters, elapsedMs, stage, step, phase } = data as {
           characters?: number;
           elapsedMs?: number;
           stage?: unknown;
           step?: unknown;
+          phase?: unknown;
         };
         // Only the clock is required. Requiring a character count too meant
         // that once generation moved into a durable Workflow, which has no
@@ -307,6 +309,9 @@ export class RemoteModelProvider implements ModelProvider {
             ...(typeof step === 'string' && step.length > 0
               ? { step: step.slice(0, 120) }
               : {}),
+            // Where the build has got to, for the lifecycle bar; one of
+            // the phases the Worker names, or nothing.
+            ...(isRunPhase(phase) ? { phase } : {}),
           });
         }
         continue;

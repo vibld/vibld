@@ -55,7 +55,7 @@ import { sharePreviewKey } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
 import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
-import { POLL_INTERVAL_MS, stageFor, stepFor } from './run-stage.ts';
+import { POLL_INTERVAL_MS, phaseFor, stageFor, stepFor } from './run-stage.ts';
 import { RunProgress } from './run-progress.ts';
 import {
   positiveInt,
@@ -242,7 +242,10 @@ export interface Env {
    * existed.
    */
   RUN_PROGRESS?: DurableObjectNamespace<
-    Pick<RunProgress, 'read' | 'hold' | 'claimSettlement'>
+    Pick<
+      RunProgress,
+      'read' | 'hold' | 'claimSettlement' | 'spentByCalls' | 'stopCharged'
+    >
   >;
   /**
    * Burst gates. Optional: they are per-location and documented as permissive,
@@ -1290,6 +1293,9 @@ async function handlePlan(
         ...(reserved.layers.account.id !== undefined
           ? { accountReservationId: reserved.layers.account.id }
           : {}),
+        // Every run made here is a bounded build, whose model steps record
+        // what they spend beside this (D65), so a Stop can charge that.
+        metered: true,
       });
     } catch (error) {
       console.error('failed to record where a run is reserved', error);
@@ -1561,6 +1567,10 @@ async function handlePlan(
         // finished. `stepFor` says nothing otherwise, and the stage word
         // carries the line as it did before.
         const step = stepFor(status.status, progress);
+        // Which part of its work the run is doing, as a word the builder
+        // acts on: its lifecycle bar moves on from "Plan" by it
+        // (`run-phase.ts`), where the builder's own status cannot.
+        const phase = phaseFor(status.status, progress);
         if (!gone) {
           await write(
             encodeEvent('progress', {
@@ -1568,6 +1578,7 @@ async function handlePlan(
               ...(stage ? { stage } : {}),
               ...(characters > 0 ? { characters } : {}),
               ...(step ? { step } : {}),
+              ...(phase ? { phase } : {}),
             }),
           );
         }
@@ -3158,6 +3169,12 @@ async function route(
           }
         : {}),
       ...(env.IP_BURST ? { ipLimit: env.IP_BURST } : {}),
+      ...(env.RUN_PROGRESS
+        ? {
+            progressOf: (runId: string) =>
+              env.RUN_PROGRESS!.getByName(runId).read(),
+          }
+        : {}),
       ...(env.RUN_PROGRESS && env.USER_BUDGET
         ? {
             settleStopped: async (runId: string, userId: string) => {

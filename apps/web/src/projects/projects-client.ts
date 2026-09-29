@@ -38,6 +38,12 @@ export interface ProjectSummary {
   lastOpenedAt: string;
   hasCode: boolean;
   turns: number;
+  /**
+   * How many times its settings or conversation have been saved, which a
+   * save names as the version it was made from (D63). Absent from a Worker
+   * older than versions, whose saves are never refused for it.
+   */
+  version?: number;
   settings: ProjectSettings;
   /**
    * The project's share link. `url` is null while it is off; `held` is an
@@ -87,6 +93,16 @@ export interface OpenedProject {
   build: { runId: string; startedAt: string } | null;
 }
 
+/**
+ * The version a save was made from, and the page that made it, so the
+ * Worker can refuse a save from a copy another tab has saved over since
+ * (docs/decisions.md, "Resolved 2026-09-29 (later)", D63).
+ */
+export interface SaveGuard {
+  version: number;
+  writer: string;
+}
+
 /** What a save may carry; every field is optional and independent. */
 export interface ProjectPatch {
   name?: string;
@@ -98,6 +114,8 @@ export interface ProjectPatch {
 export type ProjectFailure =
   /** The free tier's limit on active projects (`project-limit`). */
   | { kind: 'limit'; message: string; limit: number }
+  /** Saved from another tab since this one read it (`project-changed`). */
+  | { kind: 'changed'; message: string }
   /** Gone, or never the caller's: the Worker answers both the same. */
   | { kind: 'not-found'; message: string }
   /** This deployment has no projects (no storage, or no Worker at all). */
@@ -172,6 +190,9 @@ async function call(
       ok: false,
       failure: { kind: 'limit', message, limit: record.limit },
     };
+  }
+  if (response.status === 409 && record.code === 'project-changed') {
+    return { ok: false, failure: { kind: 'changed', message } };
   }
   if (response.status === 404) {
     return { ok: false, failure: { kind: 'not-found', message } };
@@ -289,15 +310,21 @@ export async function openProject(
   };
 }
 
+/**
+ * Save a change. With a guard, a change to the settings or the
+ * conversation is refused as `changed` if another tab has saved either
+ * since the version it names; without one, it wins, as every save used to.
+ */
 export async function saveProject(
   id: string,
   patch: ProjectPatch,
   deps: ClientDeps = {},
+  guard: SaveGuard | null = null,
 ): Promise<ProjectResult<ProjectSummary>> {
   return project(
     await call(
       `/api/projects/${encodeURIComponent(id)}`,
-      { method: 'PATCH', body: patch },
+      { method: 'PATCH', body: guard ? { ...patch, ...guard } : patch },
       deps,
     ),
   );

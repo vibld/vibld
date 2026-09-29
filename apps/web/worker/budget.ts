@@ -179,29 +179,38 @@ export class UserBudget extends DurableObject {
   }
 
   /**
-   * Close one reservation exactly as the reclaim in `reserve` would, now
-   * rather than once `ABANDONED_AFTER_MS` has passed (D60).
+   * Close one reservation now, for a run the caller stopped: at
+   * `atMostMicroUsd` where the run could say what it spent (D65), and
+   * otherwise exactly as the reclaim in `reserve` would (D60).
    *
-   * For a run the caller stopped. Stop terminates the Workflow before its
-   * settle step, so until this existed the row stayed open until the
-   * reclaim found it, about thirty-five minutes, holding an in-flight slot
-   * the whole time: two Stops in a row locked a caller out with "A
-   * generation is already running". The charge is the reclaim's own, by
-   * the reclaim's own statement restricted to one row, `actual = reserved`,
-   * so the only thing a Stop changes is when it lands.
+   * Stop terminates the Workflow before its settle step, so until this
+   * existed the row stayed open until the reclaim found it, about
+   * thirty-five minutes, holding an in-flight slot the whole time: two
+   * Stops in a row locked a caller out with "A generation is already
+   * running". With no figure, the charge is the reclaim's own, by the
+   * reclaim's own statement restricted to one row, `actual = reserved`.
+   * With one, it is that figure, never more than the row reserved and
+   * never less than nothing, capped here in the statement so that no
+   * caller's arithmetic can charge past the reservation.
    *
    * Only an unsettled row is touched, which is what makes a second Stop, or
    * a Stop after the run settled what it measured, change nothing. Returns
    * what the row was charged, or nothing when there was no open row to
    * close.
    */
-  reclaim(id: number): number | undefined {
+  reclaim(id: number, atMostMicroUsd?: number): number | undefined {
+    const figure =
+      atMostMicroUsd !== undefined && Number.isFinite(atMostMicroUsd)
+        ? Math.max(0, Math.ceil(atMostMicroUsd))
+        : null;
     const [row] = this.ctx.storage.sql
       .exec<{ actual: number }>(
-        `UPDATE runs SET settled = ?, actual = reserved
+        `UPDATE runs SET settled = ?,
+                         actual = MIN(reserved, COALESCE(?, reserved))
            WHERE id = ? AND settled IS NULL
            RETURNING actual`,
         Date.now(),
+        figure,
         id,
       )
       .toArray();

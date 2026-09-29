@@ -413,13 +413,21 @@ What this costs, accepted rather than solved here:
   lands at a step boundary; a Stop that arrives mid-model-call cannot stop
   that one call from finishing (or being billed for). With bounded steps (below)
   the next boundary is at most one group of files away. The stopped run's
-  reservation is closed by the Stop itself, at what `budget.ts`'s
-  abandoned-reservation reclaim would have charged (every reserved
-  micro-dollar, at both layers), so its in-flight slot is free at once
-  rather than thirty-five minutes later (D60). The run's `RunProgress`
-  object records where the reservation is, and whichever of Stop and the
-  settle step asks first closes it. The reclaim is still the backstop for a
-  Stop that cannot reach the ledger.
+  reservation is closed by the Stop itself, so its in-flight slot is free
+  at once rather than thirty-five minutes later (D60), and it is charged
+  what the run's model steps spent (D65): each model step records in the
+  run's `RunProgress` object, inside the step, that it has started and the
+  most it can cost (its output ceiling and what is left of the input
+  budget, at the run's prices), and then what it did cost, priced as the
+  settle step prices it. Both layers are charged the sum, a step started
+  and not finished at its most, and never more than each reserved
+  (`UserBudget.reclaim`). Where that record cannot be read, or a run never
+  kept one, both are charged the whole reservation, as the reclaim would.
+  The same object records where the reservation is, and whichever of Stop
+  and the settle step asks first closes it. The reclaim is still the
+  backstop for a Stop that cannot reach the ledger. A repair turn's own
+  reservation is not closed by Stop: the repair step settles it itself at
+  what it measured, and the reclaim is the backstop.
 - **The browser still keeps its own working copy.** `BuilderSession` runs
   the lifecycle against an in-memory store and sends the revision it
   believes it is editing; the Worker reads the files from D1/R2 (internal issue 181) and
@@ -482,6 +490,13 @@ of its own:
   and DeepSeek cache a matching prefix on their own.
 - **Progress.** Each step says what it is ("Writing 3 of 7: services page")
   and the builder shows it; the character count runs across the whole build.
+  The run also says which part of its work it is doing, as one of `outline`,
+  `writing`, `assembling`, `validating` or `repairing` (`run-phase.ts`): the
+  model steps with their reports, the Workflow with `RunProgress.enter` as
+  it moves on. The stream's `progress` events and `GET /api/runs/:id` for a
+  running build both carry it as `phase`, and the lifecycle bar goes by it,
+  so writing files shows as Write and the checks and a repair as Check,
+  where the builder's own status would still say Plan.
 - **One trace per run,** its tokens and cost summed, its context window
   counted once per call.
 
@@ -1354,8 +1369,10 @@ load, so a refresh lost the conversation and every setting.
 `projects` row per project (owner, name, archive state, when it was created,
 changed and last opened, and the settings) beside the generation store's own
 `generation_projects` row, which shares its id and still holds the accepted
-revision. The conversation is JSON in R2 at `projects/<id>/transcript.json`,
-under the same prefix as the snapshots, with its key in the row. The
+revision. The conversation is JSON in R2 at `projects/<id>/transcript-<nonce>.json`
+(a new object for every save, and `transcript.json` for one last saved
+before D63), under the same prefix as the snapshots, with its key in the
+row. The
 migration turns each account's one project into its first, named "Untitled
 project" and keeping its id, which is how work from before projects comes
 back.
@@ -1378,6 +1395,21 @@ The gate's reasons are in `access-gate.ts`: making or copying a project is
 starting new work, and reading, tidying or deleting your own is not.
 Deleting refuses with 409 while a build is still running in the project,
 because the run would otherwise recreate its rows with no owner.
+
+**Two tabs on one project** (D63, `migrations/0036_project_version.sql`).
+The row has a `version` that every save of the settings or the conversation
+moves by one, and nothing else does: not a rename, not an archive, and not a
+build, which writes `generation_projects`. `GET` and `PATCH` return it as
+`project.version`. The builder sends it back with each save, with `writer`,
+a name the page gives itself on load; a save made from a version another
+page has saved over since is refused with 409 and `code: "project-changed"`,
+and the builder stops saving and shows "This project changed in another tab"
+with a Reload button. The same page's retry of a save whose answer was lost
+is accepted, because the row still names that page as its last writer. A
+save with no `version`, from a builder older than this, wins as every save
+used to, and moves the version so newer tabs are told. The conversation is
+written to a new object before the row's conditional `UPDATE` moves to it,
+so a refused save never touches the one the row names.
 
 **The limit.** A free account may have three active projects; archived
 ones are unlimited, and Build and Ship have no limit

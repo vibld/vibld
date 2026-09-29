@@ -1,0 +1,30 @@
+-- Two tabs on one project: detect and reload (docs/decisions.md, "Resolved
+-- 2026-09-29 (later)", D63).
+--
+-- Until now the last save of a project's settings or conversation won, so
+-- a tab left open on an older copy erased what another tab had saved since.
+-- A save now names the version it was made from, and one made from a
+-- version that is no longer current is refused (`ProjectStore.saveContent`).
+--
+-- **A counter rather than `updated_at`.** `updated_at` is a timestamp at
+-- millisecond grain, so two saves inside one millisecond would read as the
+-- same version, and a rename or an archive moves it too, which would turn
+-- a rename in one tab into a refused save of the conversation in another
+-- when nothing either wrote overlaps. `version` moves on a save of the
+-- settings or the conversation and on nothing else: not a rename, not an
+-- archive, not an open, and not a build, which writes
+-- `generation_projects` and never this row.
+--
+-- **Who saved it last.** `version_writer` is the page that made the last
+-- save, as that page names itself, or NULL for a save that named no
+-- version (a builder older than this). A page whose save went through but
+-- whose answer was lost sends the same change again from the version it
+-- still holds; the row saying that page was the last to write is how that
+-- retry is told apart from a second tab, since any other page's save, or
+-- an older builder's, changes it.
+--
+-- Every existing project starts at 0 with nobody as its last writer, and
+-- a builder that loaded before this shipped sends no version and keeps
+-- saving as it did until it reloads.
+ALTER TABLE projects ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN version_writer TEXT;

@@ -1106,16 +1106,37 @@ export interface BoundedBuildHooks {
    */
   step<T>(name: string, run: () => Promise<T>): Promise<T>;
   /**
-   * Called inside a step, just before its call: what the step is, and how
-   * many characters the run had written before it. Where the Worker keeps
-   * the run's reservation alive and says what is being written.
+   * Called inside a step, just before its call: what the step is, how many
+   * characters the run had written before it, and the step's name and the
+   * most the call may spend. Where the Worker keeps the run's reservation
+   * alive, says what is being written, and records that a call has started
+   * and what it may cost (D65).
    */
-  beforeCall?(label: string, charactersBefore: number): Promise<void> | void;
+  beforeCall?(
+    label: string,
+    charactersBefore: number,
+    call: StartedCall,
+  ): Promise<void> | void;
+  /**
+   * Called inside a step, once its call has come back however it went,
+   * before the step returns: where the Worker records what the call spent,
+   * so a Stop that lands between steps can charge it (D65).
+   */
+  afterCall?(name: string, record: CallRecord<unknown>): Promise<void> | void;
   /** Where one call reports as it streams, for the progress meter. */
   progress?(
     label: string,
     charactersBefore: number,
   ): ((progress: PlanProgress) => void) | undefined;
+}
+
+/** A call about to be made: its step's name, and its ceilings. */
+export interface StartedCall {
+  name: string;
+  /** The output ceiling the call is given. */
+  maxTokens: number;
+  /** What is left of the run's input budget, which the call may not pass. */
+  maxInputTokens: number;
 }
 
 /** What a bounded build produced: the files it wrote and what it removes. */
@@ -1224,14 +1245,20 @@ export async function runBoundedBuild(
     }
     const before = characters;
     const record = await hooks.step(name, async () => {
-      await hooks.beforeCall?.(label, before);
-      return make({
+      await hooks.beforeCall?.(label, before, {
+        name,
+        maxTokens,
+        maxInputTokens: left.input,
+      });
+      const made = await make({
         maxTokens,
         maxInputTokens: left.input,
         ...(hooks.progress
           ? { onProgress: hooks.progress(label, before) }
           : {}),
       });
+      await hooks.afterCall?.(name, made);
+      return made;
     });
     usage = addUsage(usage, record.usage);
     if (record.called) calls += 1;

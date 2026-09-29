@@ -716,6 +716,65 @@ describe('the run budget', () => {
   });
 });
 
+describe('what each call says before and after it is made (D65)', () => {
+  it('names the step and its ceilings before the call, and its record after, inside the step', async () => {
+    const events: string[] = [];
+    const started: {
+      name: string;
+      maxTokens: number;
+      maxInputTokens: number;
+    }[] = [];
+    const finished = new Map<string, number>();
+    let inside = false;
+    const hooks = {
+      ...inProcess(),
+      step: async <T>(name: string, run: () => Promise<T>) => {
+        inside = true;
+        events.push(`step ${name}`);
+        try {
+          return await run();
+        } finally {
+          inside = false;
+        }
+      },
+      beforeCall: (
+        _label: string,
+        _before: number,
+        call: { name: string; maxTokens: number; maxInputTokens: number },
+      ) => {
+        assert.ok(inside, 'said outside its step');
+        events.push(`before ${call.name}`);
+        started.push(call);
+      },
+      afterCall: (
+        name: string,
+        record: { usage: { outputTokens: number } },
+      ) => {
+        assert.ok(inside, 'recorded outside its step');
+        events.push(`after ${name}`);
+        finished.set(name, record.usage.outputTokens);
+      },
+    };
+    const { result, client } = await build(companySite(), hooks);
+    assert.ok(result.ok);
+    assert.equal(started.length, client.requests.length);
+    assert.deepEqual(
+      started.map((call) => call.name),
+      [...finished.keys()],
+    );
+    // Each call is given what it said it would be given.
+    for (const [at, call] of started.entries()) {
+      assert.equal(call.maxTokens, client.requests[at]!.maxTokens);
+      assert.ok(call.maxInputTokens > 0);
+    }
+    assert.deepEqual(events.slice(0, 3), [
+      'step outline',
+      'before outline',
+      'after outline',
+    ]);
+  });
+});
+
 describe('a durable run replayed from its stored steps', () => {
   it('calls the model for nothing already done, and comes to the same result', async () => {
     const stored = new Map<string, unknown>();

@@ -68,7 +68,9 @@ export function Conversation({ state }: { state: BuilderState }) {
           <p className="banner__message">{state.notice}</p>
         </div>
       ) : null}
-      {state.running ? <LifecycleBar status={state.status} /> : null}
+      {state.running ? (
+        <LifecycleBar status={state.status} phase={state.progress?.phase} />
+      ) : null}
       <ProgressMeter progress={state.progress} />
       <div ref={endRef} />
     </div>

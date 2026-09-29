@@ -341,6 +341,34 @@ describe('buying one repair', () => {
     );
   });
 
+  it('says when it moves from checking the project to repairing it', async () => {
+    const phases: string[] = [];
+    const clean = deps({ ok: true });
+    await verifyAndRepair(ENV, PARAMS, ACCEPTED, {
+      ...clean.deps,
+      onPhase: (phase) => {
+        phases.push(phase);
+      },
+    });
+    assert.deepEqual(phases, ['validating']);
+
+    phases.length = 0;
+    const broken = deps(
+      { ok: false, reason: 'build', error: 'src/App.tsx(3,10): error TS1484' },
+      { rebuild: { ok: true } },
+    );
+    const outcome = await verifyAndRepair(ENV, PARAMS, ACCEPTED, {
+      ...broken.deps,
+      onPhase: (phase) => {
+        phases.push(phase);
+        // Never a reason to fail the step.
+        if (phase === 'repairing') throw new Error('channel gone');
+      },
+    });
+    assert.deepEqual(phases, ['validating', 'repairing']);
+    assert.equal(outcome.repaired, true);
+  });
+
   it('holds a reservation before it spends, and settles it after', async () => {
     const { spy, deps: d } = deps(
       { ok: false, reason: 'install', error: 'npm install failed' },

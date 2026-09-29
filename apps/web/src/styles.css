@@ -2363,6 +2363,15 @@ body {
   color: var(--danger);
 }
 
+.projectbar__changed {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
 .projectbar__offline {
   flex: 1 1 12rem;
   margin: 0;

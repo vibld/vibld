@@ -77,6 +77,7 @@ export type {
   GroupInput,
   NormalisedOutline,
   OutlineValue,
+  StartedCall,
 } from './bounded-build.ts';
 export {
   createScriptedBuildClient,

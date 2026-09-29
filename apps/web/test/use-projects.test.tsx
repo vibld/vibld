@@ -48,7 +48,10 @@ const summary = (over: Partial<ProjectSummary>): ProjectSummary => ({
   ...over,
 });
 
-function fakeServer(projects: ProjectSummary[]) {
+function fakeServer(
+  projects: ProjectSummary[],
+  onPatch?: (call: Call, project: ProjectSummary) => Response | undefined,
+) {
   const calls: Call[] = [];
   const reply = (value: unknown, status = 200) =>
     new Response(JSON.stringify(value), {
@@ -104,6 +107,10 @@ function fakeServer(projects: ProjectSummary[]) {
           : [],
         snapshot: project.hasCode ? SNAPSHOT : null,
       });
+    }
+    if (call.method === 'PATCH' && onPatch) {
+      const answer = onPatch(call, project);
+      if (answer) return answer;
     }
     return reply({ project });
   }) as typeof fetch;
@@ -243,6 +250,89 @@ describe('the builder with projects', () => {
     const view = await mount('model', '/p/gone');
     assert.equal(window.location.pathname, '/projects');
     assert.equal(view.projects().notice?.kind, 'not-found');
+    view.unmount();
+  });
+});
+
+describe('two tabs on one project (D63)', () => {
+  const json = (value: unknown, status = 200) =>
+    new Response(JSON.stringify(value), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+
+  async function buildAndLeave(view: Awaited<ReturnType<typeof mount>>) {
+    await act(async () => {
+      await view.session().submit('Add a menu page');
+      await settle();
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await settle(10);
+    });
+  }
+
+  it('names the version it read and the page it is, and moves to the version each save gives', async () => {
+    const calls = fakeServer(
+      [summary({ id: 'recent', version: 7 })],
+      (call, project) => {
+        if (call.body?.transcript === undefined) return undefined;
+        project.version = (call.body.version as number) + 1;
+        return json({ project });
+      },
+    );
+    const view = await mount('model');
+    await buildAndLeave(view);
+    await buildAndLeave(view);
+    const saves = calls.filter(
+      (call) => call.method === 'PATCH' && call.body?.transcript,
+    );
+    assert.ok(saves.length >= 2, `only ${saves.length} saves`);
+    assert.equal(saves[0]!.body!.version, 7);
+    assert.equal(saves[1]!.body!.version, 8);
+    const writer = saves[0]!.body!.writer;
+    assert.equal(typeof writer, 'string');
+    assert.equal(saves[1]!.body!.writer, writer);
+    assert.equal(view.projects().saveStatus, 'saved');
+    view.unmount();
+  });
+
+  it('stops saving and says so when another tab saved the project first', async () => {
+    const calls = fakeServer([summary({ id: 'recent', version: 3 })], () =>
+      json(
+        {
+          error: 'This project changed in another tab.',
+          code: 'project-changed',
+          version: 4,
+        },
+        409,
+      ),
+    );
+    const view = await mount('model');
+    await buildAndLeave(view);
+    assert.equal(view.projects().saveStatus, 'changed');
+    const refused = calls.filter((call) => call.method === 'PATCH').length;
+    assert.equal(refused, 1);
+
+    // Nothing more is sent from the old copy: not a later turn, not the
+    // save a page going away makes.
+    await buildAndLeave(view);
+    assert.equal(
+      calls.filter((call) => call.method === 'PATCH').length,
+      refused,
+    );
+    assert.equal(view.projects().saveStatus, 'changed');
+    view.unmount();
+  });
+
+  it('sends no version to a Worker that gave none, which saves as it always did', async () => {
+    const calls = fakeServer([summary({ id: 'recent' })]);
+    const view = await mount('model');
+    await buildAndLeave(view);
+    const save = calls.find((call) => call.method === 'PATCH');
+    assert.ok(save);
+    assert.equal('version' in save.body!, false);
+    assert.equal('writer' in save.body!, false);
     view.unmount();
   });
 });

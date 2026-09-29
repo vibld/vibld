@@ -1,6 +1,8 @@
 import type { ProjectSnapshot, RunStop, RunTrace } from '@vibld/core';
 import { cachedFraction, contextPressure } from '@vibld/core';
 import { getClerkToken } from '../auth/clerk-token.ts';
+import { isRunPhase } from './run-phase.ts';
+import type { RunPhase } from './run-phase.ts';
 
 /**
  * The builder's half of run history (internal issue 167): fetching `/api/runs` and turning
@@ -143,6 +145,11 @@ export interface BuildRun {
   revision?: string | null;
   /** What the build says it made, for `accepted`, where the Worker can say. */
   summary?: string;
+  /**
+   * Where a `running` build has got to (`run-phase.ts`), where the Worker
+   * can say; what the lifecycle bar goes by.
+   */
+  phase?: RunPhase;
 }
 
 export type BuildAnswer =
@@ -211,13 +218,14 @@ async function buildCall(
   const code = body.snapshot as ProjectSnapshot | null | undefined;
   // Kept only as a string: anything else in its place is dropped rather
   // than shown.
-  const { summary, ...rest } = run;
+  const { summary, phase, ...rest } = run;
   return {
     ok: true,
-    run:
-      typeof summary === 'string' && summary.length > 0
-        ? { ...rest, summary }
-        : rest,
+    run: {
+      ...rest,
+      ...(typeof summary === 'string' && summary.length > 0 ? { summary } : {}),
+      ...(isRunPhase(phase) ? { phase } : {}),
+    },
     snapshot:
       code && typeof code.revision === 'string' && Array.isArray(code.files)
         ? code

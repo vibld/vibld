@@ -50,6 +50,8 @@ interface World {
   refuseTerminate: boolean;
   /** How a stopped run's reservation is closed, where the test wires one. */
   settleStopped?: RunControlDeps['settleStopped'];
+  /** What each run's progress channel says, where the test wires one. */
+  progressOf?: RunControlDeps['progressOf'];
   generation: D1GenerationStore;
   run(
     user: string,
@@ -87,6 +89,7 @@ async function world(): Promise<World> {
           instances.set(runId, 'terminated');
         },
         ...(w.settleStopped ? { settleStopped: w.settleStopped } : {}),
+        ...(w.progressOf ? { progressOf: w.progressOf } : {}),
       };
       const response = await handleRun(
         new Request(`${ORIGIN}/api/runs/${id}`, {
@@ -252,6 +255,34 @@ describe('asking after a build', () => {
     assert.equal(asked.status, 200);
     assert.equal(asked.body.run.state, 'running');
     assert.equal(typeof asked.body.run.startedAt, 'string');
+  });
+
+  it('says where a running build has got to, as its channel says', async () => {
+    const w = await world();
+    await started(w);
+    const channel = new RunProgress(fakeDurableObjectCtx(), {});
+    w.progressOf = async () => channel.read();
+
+    const early = await w.run(ALICE, 'GET');
+    assert.equal(early.body.run.state, 'running');
+    assert.equal('phase' in early.body.run, false, 'a phase nobody said');
+
+    channel.report({
+      characters: 0,
+      reasoningCharacters: 0,
+      step: 'Writing 1 of 3: shared files',
+      phase: 'writing',
+    });
+    assert.equal((await w.run(ALICE, 'GET')).body.run.phase, 'writing');
+
+    // A channel that cannot be read costs the phase, not the answer.
+    w.progressOf = async () => {
+      throw new Error('gone');
+    };
+    const unread = await w.run(ALICE, 'GET');
+    assert.equal(unread.status, 200);
+    assert.equal(unread.body.run.state, 'running');
+    assert.equal('phase' in unread.body.run, false);
   });
 
   it('hands back the code a build moved the project to', async () => {
@@ -527,9 +558,8 @@ describe('the reservation of a stopped build', () => {
     await started(w, RUN);
     await w.run(ALICE, 'DELETE', RUN);
 
-    assert.equal(
+    assert.ok(
       await stoppedFirst(b.progress.getByName(RUN)),
-      true,
       'the settle step would close the stopped run a second time',
     );
   });

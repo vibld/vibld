@@ -50,6 +50,7 @@ import {
 import { POLL_INTERVAL_MS, fetchBuild, stopBuild } from './runs-client.ts';
 import type { BuildAnswer, BuildRun } from './runs-client.ts';
 import type { GenerationMode } from './remote-provider.ts';
+import type { RunPhase } from './run-phase.ts';
 
 export type BuilderStatus =
   | 'idle'
@@ -277,6 +278,12 @@ export interface GenerationProgress {
   characters?: number;
   elapsedMs: number;
   stage?: GenerationStage;
+  /**
+   * Which part of its work the build is doing, when the Worker says
+   * (`run-phase.ts`): what the lifecycle bar goes by while the builder's
+   * own status is still `planning`.
+   */
+  phase?: RunPhase;
   /**
    * Which step of the build is running, in words ("Writing 3 of 7:
    * services page"), when the Worker knows. A build is written in bounded
@@ -831,10 +838,17 @@ export class BuilderSession {
       }
       if (answer.ok) {
         const elapsedMs = this.#now() - Date.parse(answer.run.startedAt);
+        // Where the build has got to, for the lifecycle bar, as the
+        // stream's progress events say it for a build that is streamed.
+        const phase = answer.run.phase;
         if (Number.isFinite(elapsedMs)) {
           this.#patch(epoch, (state) => ({
             ...state,
-            progress: { ...state.progress, elapsedMs: Math.max(0, elapsedMs) },
+            progress: {
+              ...state.progress,
+              elapsedMs: Math.max(0, elapsedMs),
+              ...(phase ? { phase } : {}),
+            },
           }));
         }
       }

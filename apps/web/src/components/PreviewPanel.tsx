@@ -106,7 +106,7 @@ export function PreviewPanel({
 
       {draftWhileBuilding ? (
         <DraftView draft={draft} label={DRAFT_BUILDING_LABEL}>
-          <LifecycleBar status={state.status} />
+          <LifecycleBar status={state.status} phase={state.progress?.phase} />
           <ProgressMeter progress={state.progress} announce={false} />
         </DraftView>
       ) : sandbox.status?.status === 'ready' ? (

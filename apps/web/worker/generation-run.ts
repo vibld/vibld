@@ -23,7 +23,11 @@ import {
   runBoundedBuild,
   withRecordOf,
 } from '@vibld/ai';
-import { MAX_BASE_CONTENT_CHARS, projectChars } from '@vibld/ai/limits';
+import {
+  CHARS_PER_OUTPUT_TOKEN,
+  MAX_BASE_CONTENT_CHARS,
+  projectChars,
+} from '@vibld/ai/limits';
 import type {
   BoundedBuildResult,
   DerivedPalette,
@@ -34,7 +38,8 @@ import type {
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import { createValidator } from '../src/generation/validator.ts';
-import { ACCOUNT_BUDGET_KEY, microUsdOf } from './spend.ts';
+import type { RunPhase } from '../src/generation/run-phase.ts';
+import { ACCOUNT_BUDGET_KEY, microUsdOf, worstCaseMicroUsd } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 import type { UserBudget } from './budget.ts';
 import type { HoldClaim, HoldSettler, RunProgress } from './run-progress.ts';
@@ -284,6 +289,13 @@ export interface ProgressReport {
    * not go back to zero each time a step starts.
    */
   step?: string;
+  /**
+   * Which part of its work the run is doing, as a word the builder can
+   * act on rather than show (`run-phase.ts`): `outline` or `writing` from
+   * the model steps. The rest are said by the Workflow as it moves on
+   * (`RunProgress.enter`).
+   */
+  phase?: RunPhase;
 }
 
 /**
@@ -303,6 +315,11 @@ export interface RunProgressState {
   report?: ProgressReport;
   /** True once the generate step has left, however it left. */
   finished: boolean;
+  /**
+   * Which part of its work the run is doing (`run-phase.ts`), where it has
+   * said; absent before it has, and after the object is evicted.
+   */
+  phase?: RunPhase;
 }
 
 /**
@@ -558,7 +575,15 @@ export interface GenerationWorkflowEnv {
    * this channel existed.
    */
   RUN_PROGRESS?: DurableObjectNamespace<
-    Pick<RunProgress, 'report' | 'finish' | 'claimSettlement'>
+    Pick<
+      RunProgress,
+      | 'report'
+      | 'finish'
+      | 'enter'
+      | 'claimSettlement'
+      | 'callStarted'
+      | 'callFinished'
+    >
   >;
   /**
    * `@vibld/preview`, for building the project the run just produced (internal issue 194).
@@ -1044,34 +1069,83 @@ export async function touchReservation(
 
 /**
  * Whether Stop has already closed this run's reservation, asked by the
- * settle step before it settles (D60).
+ * settle step before it settles (D60), and what Stop charged the caller for
+ * it where Stop could say (D65).
  *
- * Stop terminates the Workflow and then closes the reservation itself, at
- * what the reclaim would charge, so a run that reaches its settle step all
- * the same must not close it a second time. Asking is also what takes the
- * settlement for the step, so a Stop that arrives after this finds it
- * taken and leaves it to the step.
+ * Stop terminates the Workflow and then closes the reservation itself, so
+ * a run that reaches its settle step all the same must not close it a
+ * second time. Asking is also what takes the settlement for the step, so a
+ * Stop that arrives after this finds it taken and leaves it to the step.
  *
  * `false` for everything but a Stop that got there first: no channel, a run
  * with no hold recorded, and a channel that could not be asked. The last is
  * the conservative reading, not a careless one. The ledger's `settle`
  * overwrites rather than adds, so settling after a Stop that did close it
- * replaces the reclaim's figure with the one measured, which is never more,
- * and never charges twice.
+ * replaces Stop's figure with the one measured, and never charges twice.
  */
 export async function stoppedFirst(
   channel:
     | { claimSettlement(by: HoldSettler): HoldClaim | Promise<HoldClaim> }
     | undefined,
-): Promise<boolean> {
+): Promise<false | { charged?: number }> {
   if (!channel) return false;
   try {
-    return (await channel.claimSettlement('workflow')).claimed === 'taken';
+    const claim = await channel.claimSettlement('workflow');
+    if (claim.claimed !== 'taken') return false;
+    return claim.charged !== undefined ? { charged: claim.charged } : {};
   } catch (error) {
     console.error('could not ask whether a run was stopped', {
       error: error instanceof Error ? error.message : String(error),
     });
     return false;
+  }
+}
+
+/**
+ * Where a run's model calls say what they risk and what they spent, so a
+ * Stop can charge that rather than the whole reservation (D65): the run's
+ * own `RunProgress`.
+ */
+export interface CallMeter {
+  callStarted(name: string, worstCaseMicroUsd: number): Promise<void> | void;
+  callFinished(name: string, actualMicroUsd: number): Promise<void> | void;
+}
+
+/**
+ * The most one call can cost at the run's prices: its output ceiling, and
+ * every token of what is left of the run's input budget at the dearest
+ * input rate, the way the reservation itself is priced (`worstCaseMicroUsd`).
+ */
+export function callWorstCaseMicroUsd(
+  prices: TokenPrices,
+  call: { maxTokens: number; maxInputTokens: number },
+): number {
+  return worstCaseMicroUsd(
+    prices,
+    Math.max(0, call.maxTokens),
+    Math.max(0, call.maxInputTokens) * CHARS_PER_OUTPUT_TOKEN,
+  );
+}
+
+/**
+ * Write one call's record to the meter, and never fail the call doing it.
+ *
+ * A record that could not be written costs only the accuracy of a Stop
+ * that lands while that call is running: its start unrecorded, the Stop
+ * charges the calls that finished and not this one. A finish unrecorded
+ * leaves the call at its worst case. Failing the step instead would cost
+ * the caller the build, and a call already made is paid for either way.
+ */
+async function meterCall(
+  write: () => Promise<void> | void,
+  what: 'started' | 'finished',
+): Promise<void> {
+  try {
+    await withinDeadline(Promise.resolve(write()), LEDGER_CALL_TIMEOUT_MS);
+  } catch (error) {
+    console.error(`could not record a model call as ${what}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -1084,6 +1158,11 @@ export interface BuildStepDeps {
   ledger?: DurableObjectNamespace<Pick<UserBudget, 'touch'>>;
   /** Where progress goes, never awaited. Absent: nothing is reported. */
   report?: (report: ProgressReport) => void;
+  /**
+   * Where each call records its start and its cost (D65). Absent: nothing
+   * is recorded, and a Stop charges the whole reservation.
+   */
+  meter?: CallMeter;
   /** The palette derived from the reference page, when there is one. */
   palette?: DerivedPalette | null;
 }
@@ -1106,8 +1185,11 @@ export type StepRunner = <T>(name: string, run: () => Promise<T>) => Promise<T>;
  *
  * Inside each step, before the call: the run's reservation is kept alive
  * (`touchReservation`), because the steps together can outlast the
- * reclaim window that one step fits inside; and the step's words are
- * reported, so the builder can say what is being written.
+ * reclaim window that one step fits inside; the step's words are
+ * reported, so the builder can say what is being written; and the call is
+ * recorded as started, at the most it can cost. After it, still inside the
+ * step, what it cost is recorded, so a Stop can charge the run what it
+ * spent (D65, `settleStopped`).
  */
 export async function buildInSteps(
   deps: BuildStepDeps,
@@ -1151,9 +1233,31 @@ export async function buildInSteps(
     },
     {
       step,
-      beforeCall: async (label, before) => {
-        report?.({ characters: before, reasoningCharacters: 0, step: label });
+      beforeCall: async (label, before, call) => {
+        report?.({
+          characters: before,
+          reasoningCharacters: 0,
+          step: label,
+          // The outline's step, and its one retry, are `outline*`; every
+          // other model step writes files.
+          phase: call.name.startsWith('outline') ? 'outline' : 'writing',
+        });
         if (deps.ledger) await touchReservation(deps.ledger, params);
+        // Before the call, so a Stop that lands while it runs charges it
+        // at the most it can cost rather than at nothing.
+        const meter = deps.meter;
+        if (meter) {
+          const worst = callWorstCaseMicroUsd(params.prices, call);
+          await meterCall(() => meter.callStarted(call.name, worst), 'started');
+        }
+      },
+      afterCall: async (name, record) => {
+        const meter = deps.meter;
+        if (!meter) return;
+        // Priced as the settle step prices the run: an unmeasured call's
+        // usage is already its worst case (`CallRecord.usage`).
+        const actual = microUsdOf(record.usage, params.prices);
+        await meterCall(() => meter.callFinished(name, actual), 'finished');
       },
       ...(report
         ? {
@@ -1348,11 +1452,25 @@ export async function verifyAndRepair(
     now?: () => number;
     /** Only so a test does not spend the settlement retry delay. */
     wait?: (ms: number) => Promise<void>;
+    /**
+     * Told as the step moves from checking the project to repairing it, so
+     * the builder can say which (`run-phase.ts`). Never awaited for long
+     * and never a reason to fail: it is what the lifecycle bar shows.
+     */
+    onPhase?: (phase: 'validating' | 'repairing') => Promise<void> | void;
   },
 ): Promise<RepairOutcome> {
   // Nothing to build. A refused or failed run has no files, and a build
   // that never happened must not be reported as one that failed.
   if (result.state !== 'accepted' || !result.accepted) return {};
+  const say = async (phase: 'validating' | 'repairing') => {
+    try {
+      await deps.onPhase?.(phase);
+    } catch {
+      // The bar keeps the phase before, which is still the right step.
+    }
+  };
+  await say('validating');
   // No build service here (a self-hosted or partial deployment). The
   // design checks need none, so they still run, and the build is one
   // nothing judged, as when the service cannot be reached.
@@ -1532,6 +1650,7 @@ export async function verifyAndRepair(
   if (!held.ok) {
     return { ...builtField, ...designCounts, skipped: 'no-budget' };
   }
+  await say('repairing');
 
   const startedAt = now();
   let usage: PlanUsage | undefined;

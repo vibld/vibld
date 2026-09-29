@@ -1,3 +1,5 @@
+import { isRunPhase } from '../src/generation/run-phase.ts';
+import type { RunPhase } from '../src/generation/run-phase.ts';
 import type { GenerationStage } from '../src/generation/session.ts';
 import type { RunProgressState } from './generation-run.ts';
 
@@ -103,4 +105,21 @@ export function stageFor(
     return 'thinking';
   }
   return 'running';
+}
+
+/**
+ * Which part of its work a running build is doing (`run-phase.ts`), for the
+ * builder's lifecycle bar, or nothing.
+ *
+ * Every server step falls inside the builder's own `planning`, so without
+ * this the bar said "Plan" while the files were being written. Only while
+ * the instance is running: a queued run has not started any of it, and one
+ * that has ended is described by its result.
+ */
+export function phaseFor(
+  status: string,
+  progress?: RunProgressState,
+): RunPhase | undefined {
+  if (status !== 'running') return undefined;
+  return isRunPhase(progress?.phase) ? progress.phase : undefined;
 }

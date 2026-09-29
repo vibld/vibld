@@ -205,6 +205,42 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-29 (later)
+
+**Two tabs on one project: the stale one is told and reloads.** Chris
+decided on 2026-09-29 (D63). With a project open in two tabs, the last save
+won, so the tab left open on an older copy erased the conversation the
+other had saved since. Now every save of a project's settings or
+conversation names the version it was made from, and one made from a
+version that is no longer current is refused with 409 and
+`code: "project-changed"`. The refused tab stops saving and shows "This
+project changed in another tab" with a Reload button, so nothing is lost
+without it being said. The version is a counter on the project's row
+(`0036_project_version.sql`) rather than `updated_at`, because two saves can
+land in one millisecond and a rename or an archive moves `updated_at` too;
+the counter moves only on a save of the settings or the conversation, and a
+build, which promotes its revision in `generation_projects`, never moves
+it. The builder's own saves already go one at a time; a retry of one that
+landed but whose answer was lost is accepted, because the row still names
+that page as its last writer. A builder loaded before this sends no version
+and wins as before until it reloads.
+
+**Stop charges what the build actually used.** Chris decided on 2026-09-29
+(D65), replacing D60's charge of the whole reservation. A stopped build is
+charged what its finished model steps cost, plus the step that was running
+when Stop landed at the most it could cost, and never more than was
+reserved. Each model step records, inside its durable step and before its
+call, that it has started and its worst case (its output ceiling and what
+is left of the run's input budget, at the run's prices), and afterwards
+what it cost, priced as the settle step prices it; the records sit in the
+run's `RunProgress` object beside D60's record of where the reservation
+is. Stop settles both ledger layers at the sum, each capped at its own
+reservation (`UserBudget.reclaim`), and keeps D60's rule that whichever of
+Stop and the settle step asks first closes it. Where the record cannot be
+read, or a run never kept one, Stop charges the whole reservation, as
+before. A repair turn's reservation is left as it was: the repair step
+settles it itself at what it measured, and the reclaim is the backstop.
+
 ### Resolved 2026-09-29
 
 **Builds are generated in bounded steps, and follow-ups as patches.** Every

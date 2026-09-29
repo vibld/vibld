@@ -5,11 +5,7 @@ import type { TranscriptTurn } from '@vibld/core';
 
 import { handleProjects } from '../worker/project-handlers.ts';
 import type { ProjectsDeps } from '../worker/project-handlers.ts';
-import {
-  ProjectStore,
-  resolveRunProject,
-  transcriptKeyFor,
-} from '../worker/project-store.ts';
+import { ProjectStore, resolveRunProject } from '../worker/project-store.ts';
 import { D1GenerationStore } from '../worker/generation-store.ts';
 import { ACTIVE_PROJECT_LIMIT } from '../worker/entitlement.ts';
 import type { Tier } from '../worker/entitlement.ts';
@@ -456,7 +452,11 @@ describe('what a project remembers', () => {
     assert.equal(saved.body.project.turns, 2);
 
     // In R2, beside the code, not in the row.
-    assert.ok(w.bucket.keys().includes(transcriptKeyFor(made.id)));
+    assert.ok(
+      w.bucket
+        .keys()
+        .some((key) => key.startsWith(`projects/${made.id}/transcript-`)),
+    );
 
     const opened = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
     assert.deepEqual(opened.body.transcript, transcript);
@@ -533,6 +533,229 @@ describe('what a project remembers', () => {
     const project = listed.body.projects[0];
     assert.equal(project.hasCode, true);
     assert.ok(project.editedAt >= project.createdAt);
+  });
+});
+
+describe('two tabs on one project (D63)', () => {
+  const WRITER_A = '0b6f3c1e-0000-4000-8000-00000000000a';
+  const WRITER_B = '0b6f3c1e-0000-4000-8000-00000000000b';
+
+  function transcriptObjects(w: World, id: string): string[] {
+    return w.bucket
+      .keys()
+      .filter((key) => key.startsWith(`projects/${id}/transcript`));
+  }
+
+  it('gives the version on opening and on every save', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
+    assert.equal(opened.body.project.version, 0);
+    const saved = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      transcript: [turn()],
+      version: 0,
+      writer: WRITER_A,
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.project.version, 1);
+  });
+
+  it('refuses a save made from an older version, and writes nothing of it', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    // Both tabs open the project at version 0; tab B saves first.
+    const first = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      settings: { style: 'brutalism' },
+      transcript: [turn()],
+      version: 0,
+      writer: WRITER_B,
+    });
+    assert.equal(first.body.project.version, 1);
+
+    const stale = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      name: 'From tab A',
+      settings: { style: 'editorial' },
+      transcript: [turn({ prompt: 'Tab A wrote this' })],
+      version: 0,
+      writer: WRITER_A,
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.code, 'project-changed');
+    assert.equal(stale.body.error, 'This project changed in another tab.');
+    assert.equal(stale.body.version, 1);
+
+    // Tab B's conversation, settings and version are as tab B left them,
+    // and the refused save left no object behind.
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
+    assert.deepEqual(opened.body.transcript, [turn()]);
+    assert.equal(opened.body.project.settings.style, 'brutalism');
+    assert.equal(opened.body.project.version, 1);
+    assert.equal(opened.body.project.name, made.name);
+    assert.equal(transcriptObjects(w, made.id).length, 1);
+  });
+
+  it("lets one tab's saves follow each other, each from the version the last one gave", async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    let version = 0;
+    for (let n = 1; n <= 3; n += 1) {
+      const saved = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+        transcript: Array.from({ length: n }, (_, i) => turn({ id: i + 1 })),
+        version,
+        writer: WRITER_A,
+      });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      version = saved.body.project.version;
+    }
+    assert.equal(version, 3);
+    // Each save replaced the object the one before it wrote.
+    assert.equal(transcriptObjects(w, made.id).length, 1);
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
+    assert.equal(opened.body.transcript.length, 3);
+  });
+
+  it('accepts a retry of a save that landed but whose answer was lost, until another tab saves', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    const body = { transcript: [turn()], version: 0, writer: WRITER_A };
+    const landed = await w.call(
+      ALICE,
+      'PATCH',
+      `/api/projects/${made.id}`,
+      body,
+    );
+    assert.equal(landed.status, 200);
+    // The page never heard back, so it still holds version 0.
+    const retried = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      ...body,
+      transcript: [turn(), turn({ id: 2 })],
+    });
+    assert.equal(retried.status, 200, JSON.stringify(retried.body));
+    assert.equal(retried.body.project.version, 2);
+
+    // Another tab saves; the first page's stale version is now refused.
+    await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      settings: { model: null },
+      version: 2,
+      writer: WRITER_B,
+    });
+    const refused = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      ...body,
+      transcript: [turn({ prompt: 'too late' })],
+    });
+    assert.equal(refused.status, 409);
+  });
+
+  it('does not count a rename, an archive or a build as a change to the content', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      name: 'Renamed in tab B',
+    });
+    await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      archived: true,
+    });
+    await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      archived: false,
+    });
+    // A build promotes into `generation_projects`, never this row.
+    await build(w, made.id, 'r1');
+    await build(w, made.id, 'r2');
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
+    assert.equal(opened.body.project.version, 0);
+    assert.equal(opened.body.snapshot.revision, 'r2');
+
+    const saved = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      transcript: [turn()],
+      version: 0,
+      writer: WRITER_A,
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    // A rename carrying a stale version is not refused either: it
+    // overwrites nothing another tab saved.
+    const renamed = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      name: 'Renamed in tab C',
+      version: 0,
+      writer: WRITER_B,
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.body.project.name, 'Renamed in tab C');
+  });
+
+  it('lets a builder older than versions save as it always did, and moves the version for everyone else', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      transcript: [turn()],
+      version: 0,
+      writer: WRITER_A,
+    });
+    // No version: the last write wins, whatever came before it.
+    const old = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      transcript: [turn({ prompt: 'From an old tab' })],
+    });
+    assert.equal(old.status, 200);
+    assert.equal(old.body.project.version, 2);
+    // And the newer tab, still at 1, is told rather than overwriting it.
+    const refused = await w.call(ALICE, 'PATCH', `/api/projects/${made.id}`, {
+      transcript: [turn({ prompt: 'From tab A' })],
+      version: 1,
+      writer: WRITER_A,
+    });
+    assert.equal(refused.status, 409);
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
+    assert.equal(opened.body.transcript[0].prompt, 'From an old tab');
+  });
+
+  it('lets exactly one of two saves racing from the same version win', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    const store = new ProjectStore(w.db, w.bucket);
+    const now = w.clock.now.toISOString();
+    const outcomes = await Promise.all([
+      store.saveContent(
+        ALICE,
+        made.id,
+        { transcript: [turn({ prompt: 'A' })] },
+        now,
+        { version: 0, writer: WRITER_A },
+      ),
+      store.saveContent(
+        ALICE,
+        made.id,
+        { transcript: [turn({ prompt: 'B' })] },
+        now,
+        { version: 0, writer: WRITER_B },
+      ),
+    ]);
+    assert.deepEqual(outcomes.map((o) => o.outcome).sort(), [
+      'changed',
+      'saved',
+    ]);
+    const winner = outcomes[0]!.outcome === 'saved' ? 'A' : 'B';
+    const opened = await w.call(ALICE, 'GET', `/api/projects/${made.id}`);
+    assert.equal(opened.body.transcript[0].prompt, winner);
+    assert.equal(opened.body.project.version, 1);
+    assert.equal(transcriptObjects(w, made.id).length, 1);
+  });
+
+  it('refuses a version or a writer that is not one', async () => {
+    const w = world();
+    const made = await create(w, ALICE);
+    for (const body of [
+      { transcript: [], version: -1 },
+      { transcript: [], version: 1.5 },
+      { transcript: [], version: '0' },
+      { transcript: [], version: 0, writer: 'not a/page id' },
+    ]) {
+      const refused = await w.call(
+        ALICE,
+        'PATCH',
+        `/api/projects/${made.id}`,
+        body,
+      );
+      assert.equal(refused.status, 400, JSON.stringify(body));
+    }
   });
 });
 

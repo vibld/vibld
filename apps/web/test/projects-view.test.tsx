@@ -299,6 +299,25 @@ describe('the project in the header', () => {
     view.unmount();
   });
 
+  it('says another tab changed the project, and offers a reload (D63)', async () => {
+    let reloaded = 0;
+    const saved = await render(<ProjectBar projects={controller()} />);
+    assert.doesNotMatch(saved.text(), /another tab/);
+    saved.unmount();
+
+    const view = await render(
+      <ProjectBar
+        projects={controller({ saveStatus: 'changed' })}
+        reload={() => (reloaded += 1)}
+      />,
+    );
+    assert.match(view.text(), /This project changed in another tab/);
+    assert.ok(view.container.querySelector('[role="alert"]'));
+    await view.press(view.buttons(/^Reload$/)[0]);
+    assert.equal(reloaded, 1);
+    view.unmount();
+  });
+
   it('renames the open project where it stands, and Escape keeps the name', async () => {
     const projects = controller();
     const view = await render(<ProjectBar projects={projects} />);

@@ -66,6 +66,14 @@ export interface ProjectRecord {
   settings: ProjectSettings;
   transcriptKey: string | null;
   transcriptTurns: number;
+  /**
+   * How many times the settings or the conversation have been saved
+   * (`0036_project_version.sql`). What a save names as the version it was
+   * made from, so one made from an older copy can be refused.
+   */
+  version: number;
+  /** The page that made the last of those saves, or null for none named. */
+  versionWriter: string | null;
   share: ProjectShare;
   /** The project's published site, or null for one never published. */
   site: ProjectSite | null;
@@ -114,6 +122,8 @@ interface ProjectRow {
   style_dna: string | null;
   transcript_key: string | null;
   transcript_turns: number;
+  version: number;
+  version_writer: string | null;
   share_token: string | null;
   shared_at: string | null;
   share_held_at: string | null;
@@ -138,7 +148,8 @@ interface ProjectRow {
 const SELECT = `SELECT p.id, p.user_id, p.name, p.archived_at, p.created_at,
        p.updated_at, p.last_opened_at, p.style_preset, p.reference_url,
        p.model, p.knowledge, p.style_dna, p.transcript_key,
-       p.transcript_turns, p.share_token, p.shared_at, p.share_held_at,
+       p.transcript_turns, p.version, p.version_writer, p.share_token,
+       p.shared_at, p.share_held_at,
        g.accepted_revision,
        MAX(p.updated_at, COALESCE(g.updated_at, p.updated_at)) AS edited_at,
        s.slug AS site_slug, s.unpublished_at AS site_unpublished_at,
@@ -190,6 +201,8 @@ function recordOf(row: ProjectRow): ProjectRecord {
     },
     transcriptKey: row.transcript_key,
     transcriptTurns: row.transcript_turns,
+    version: row.version,
+    versionWriter: row.version_writer,
     share: {
       token: row.share_token,
       sharedAt: row.shared_at,
@@ -205,10 +218,67 @@ export function projectPrefix(projectId: string): string {
   return `projects/${projectId}/`;
 }
 
-/** Where a project's conversation is kept, under the same prefix as its code. */
-export function transcriptKeyFor(projectId: string): string {
-  return `${projectPrefix(projectId)}transcript.json`;
+/**
+ * Where one saved copy of a project's conversation is kept, under the same
+ * prefix as its code.
+ *
+ * A new object for every save rather than one object overwritten, so that
+ * the row is the only thing a save has to win (`saveContent`): a save
+ * refused as made from an older copy has written an object nothing names,
+ * which it deletes, and never the one the row points at. Projects saved
+ * before this kept theirs at `transcript.json`, which their row still
+ * names until their next save.
+ */
+export function transcriptKeyFor(projectId: string, nonce: string): string {
+  return `${projectPrefix(projectId)}transcript-${nonce}.json`;
 }
+
+/** What a save of a project's content may carry, each part optional. */
+export interface ProjectContent {
+  settings?: Partial<ProjectSettings>;
+  transcript?: TranscriptTurn[];
+}
+
+/**
+ * The version a save was made from, and the page that made it
+ * (`0036_project_version.sql`). A save with no guard is a builder older
+ * than versions, and the last such save wins, as every save used to.
+ */
+export interface SaveGuard {
+  version: number;
+  writer: string | null;
+}
+
+/**
+ * What a save came to: written, at the version it made; refused, because
+ * the project has been saved from somewhere else since the version it
+ * named, with the version it is at now; or no such project.
+ */
+export type ContentSaved =
+  | { outcome: 'saved'; version: number }
+  | { outcome: 'changed'; version: number }
+  | { outcome: 'missing' };
+
+/**
+ * Whether a save made from `guard` may replace what the project holds now.
+ *
+ * Yes when nothing has been saved since the version it names. Yes as well
+ * when the last save was this same page's: that is a retry of a save that
+ * landed and whose answer was lost, or the next save of a page that never
+ * heard back, and no other page has written in between, because any other
+ * page's save, or an older builder's, names a different writer.
+ */
+export function mayReplace(
+  current: { version: number; versionWriter: string | null },
+  guard: SaveGuard | null,
+): boolean {
+  if (!guard) return true;
+  if (guard.version === current.version) return true;
+  return guard.writer !== null && guard.writer === current.versionWriter;
+}
+
+/** How many times a save re-reads a row that moved under it. */
+const SAVE_ATTEMPTS = 3;
 
 /**
  * The rows one project has, in the order they are deleted: its run
@@ -417,46 +487,6 @@ export class ProjectStore {
   }
 
   /**
-   * Replace the fields of `settings` that are present. A field left out is
-   * left as it was, so a builder that only knows some of them cannot clear
-   * the rest by omission.
-   */
-  async saveSettings(
-    userId: string,
-    id: string,
-    settings: Partial<ProjectSettings>,
-    now: string,
-  ): Promise<void> {
-    const columns: [keyof ProjectSettings, string][] = [
-      ['style', 'style_preset'],
-      ['referenceUrl', 'reference_url'],
-      ['model', 'model'],
-      ['knowledge', 'knowledge'],
-      ['styleDna', 'style_dna'],
-    ];
-    const present = columns.filter(([field]) => field in settings);
-    if (present.length === 0) return;
-    const values = present.map(([field]) =>
-      field === 'styleDna'
-        ? settings.styleDna
-          ? JSON.stringify(settings.styleDna)
-          : null
-        : (settings[field] ?? null),
-    );
-    // Column names come from the list above, never from the request.
-    const sets = present
-      .map(([, column], index) => `${column} = ?${index + 4}`)
-      .join(', ');
-    await this.#db
-      .prepare(
-        `UPDATE projects SET ${sets}, updated_at = ?3
-          WHERE id = ?1 AND user_id = ?2`,
-      )
-      .bind(id, userId, now, ...values)
-      .run();
-  }
-
-  /**
    * The saved conversation, or an empty one.
    *
    * A transcript that cannot be read back (an object R2 lost, or one a
@@ -478,25 +508,106 @@ export class ProjectStore {
   }
 
   /**
-   * Save the conversation: the object first, then the pointer to it, so the
-   * pointer never names a write that could still fail.
+   * Save the settings, the conversation or both, as one new version, unless
+   * the project has been saved from somewhere else since the version
+   * `guard` names (docs/decisions.md, "Resolved 2026-09-29 (later)", D63).
+   *
+   * A settings field that is absent is left as it was, so a builder that
+   * only knows some of them cannot clear the rest by omission.
+   *
+   * The conversation goes to a new object first (`transcriptKeyFor`), and
+   * then one UPDATE moves the row to it, with the settings, the turn count
+   * and the next version, on condition that the row is still at the version
+   * this read it at. That UPDATE is the whole decision: two saves racing
+   * cannot both pass it, and the loser has touched nothing anybody reads.
+   * A row that moved in between is read again and the question asked
+   * again, a few times, which only a save racing another page's can need,
+   * since one page sends one save at a time (`autosave.ts`). The object the
+   * row named before is deleted once it no longer does; a refused save
+   * deletes its own.
    */
-  async saveTranscript(
+  async saveContent(
     userId: string,
     id: string,
-    turns: TranscriptTurn[],
+    content: ProjectContent,
     now: string,
-  ): Promise<void> {
-    const key = transcriptKeyFor(id);
-    await this.#bucket.put(key, JSON.stringify(turns));
-    await this.#db
-      .prepare(
-        `UPDATE projects SET transcript_key = ?3, transcript_turns = ?4,
-                             updated_at = ?5
-          WHERE id = ?1 AND user_id = ?2`,
-      )
-      .bind(id, userId, key, turns.length, now)
-      .run();
+    guard: SaveGuard | null,
+  ): Promise<ContentSaved> {
+    const columns: [keyof ProjectSettings, string][] = [
+      ['style', 'style_preset'],
+      ['referenceUrl', 'reference_url'],
+      ['model', 'model'],
+      ['knowledge', 'knowledge'],
+      ['styleDna', 'style_dna'],
+    ];
+    const settings = content.settings ?? {};
+    const present = columns.filter(([field]) => field in settings);
+    const values: unknown[] = present.map(([field]) =>
+      field === 'styleDna'
+        ? settings.styleDna
+          ? JSON.stringify(settings.styleDna)
+          : null
+        : (settings[field] ?? null),
+    );
+    // Column names come from the list above, never from the request.
+    const sets = present.map(([, column]) => column);
+    let key: string | null = null;
+    if (content.transcript !== undefined) {
+      key = transcriptKeyFor(id, crypto.randomUUID());
+      await this.#bucket.put(key, JSON.stringify(content.transcript));
+      sets.push('transcript_key', 'transcript_turns');
+      values.push(key, content.transcript.length);
+    }
+    const assignments = sets
+      .map((column, index) => `${column} = ?${index + 6}, `)
+      .join('');
+
+    let outcome: ContentSaved = { outcome: 'missing' };
+    for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt += 1) {
+      const current = await this.find(userId, id);
+      if (!current) {
+        outcome = { outcome: 'missing' };
+        break;
+      }
+      if (!mayReplace(current, guard)) {
+        outcome = { outcome: 'changed', version: current.version };
+        break;
+      }
+      const result = await this.#db
+        .prepare(
+          `UPDATE projects
+              SET ${assignments}version = ?3 + 1, version_writer = ?4,
+                  updated_at = ?5
+            WHERE id = ?1 AND user_id = ?2 AND version = ?3`,
+        )
+        .bind(
+          id,
+          userId,
+          current.version,
+          guard?.writer ?? null,
+          now,
+          ...values,
+        )
+        .run();
+      if ((result.meta?.changes ?? 0) > 0) {
+        if (
+          key !== null &&
+          current.transcriptKey !== null &&
+          current.transcriptKey !== key
+        ) {
+          // Best effort: an object left behind is removed with the project.
+          await this.#bucket
+            .delete(current.transcriptKey)
+            .catch(() => undefined);
+        }
+        return { outcome: 'saved', version: current.version + 1 };
+      }
+      // Moved since it was read: every save moves `version`, so another
+      // one landed in between. The next pass reads it again and asks again.
+      outcome = { outcome: 'changed', version: current.version + 1 };
+    }
+    if (key !== null) await this.#bucket.delete(key).catch(() => undefined);
+    return outcome;
   }
 
   /** The project's accepted code, from the generation store. */
@@ -659,7 +770,13 @@ export class ProjectStore {
       if (options.transcript !== false) {
         const turns = await this.readTranscript(source);
         if (turns.length > 0) {
-          await this.saveTranscript(ownerId, copy.id, turns, copy.now);
+          await this.saveContent(
+            ownerId,
+            copy.id,
+            { transcript: turns },
+            copy.now,
+            null,
+          );
         }
       }
     } catch (error) {

@@ -59,6 +59,13 @@ import type {
  *
  * **Leaving a project saves it first.** The autosave is flushed before
  * another project is opened, so switching never drops the last change.
+ *
+ * **Two tabs on one project are told, not merged** (D63). Every save of
+ * the settings or the conversation names the version this page last read
+ * or wrote, and the page by a name it gives itself. The Worker refuses one
+ * made from a version another tab has saved over since, and this page then
+ * stops saving and says so, with a reload, rather than erasing that tab's
+ * conversation with its own.
  */
 
 export type ProjectsMode = 'pending' | 'local' | 'server';
@@ -87,6 +94,17 @@ export interface ProjectsController {
 }
 
 const idleSubscribe = () => () => undefined;
+
+/**
+ * This page's name for itself in the saves it makes, which the Worker uses
+ * to tell a retry of this page's own save from another tab's (`mayReplace`
+ * in `project-store.ts`). New on every load, so a reload is a new writer
+ * that starts from the version it reads.
+ */
+const PAGE_WRITER: string =
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 /** What this browser last chose, which a new project starts from. */
 function browserDefaults() {
@@ -125,6 +143,8 @@ export function useProjects(
   listRef.current = list;
   const saverRef = useRef<Autosaver | null>(null);
   const marks = useRef<SavedMarks>({ settings: null, transcript: null });
+  // The version of each project this page last read or saved, by id.
+  const versions = useRef(new Map<string, number>());
   const openToken = useRef(0);
   const openingId = useRef<string | null>(null);
   const creating = useRef(false);
@@ -179,8 +199,23 @@ export function useProjects(
     id: string,
     patch: ProjectPatch,
   ): Promise<SaveOutcome> {
-    const result = await saveProject(id, patch);
+    const version = versions.current.get(id);
+    const result = await saveProject(
+      id,
+      patch,
+      {},
+      version === undefined ? null : { version, writer: PAGE_WRITER },
+    );
     if (result.ok) {
+      // Only a save of the content moves this page to the version it
+      // answers with. A rename's answer may name a version another tab
+      // made, whose content this page has never read.
+      if (
+        (patch.settings !== undefined || patch.transcript !== undefined) &&
+        typeof result.value.version === 'number'
+      ) {
+        versions.current.set(id, result.value.version);
+      }
       // The name shown is kept unless this save carried one. A rename is
       // shown the moment it is typed and saved a second later, so a save
       // of something else that answers in between would otherwise put
@@ -192,6 +227,7 @@ export function useProjects(
       );
       return 'saved';
     }
+    if (result.failure.kind === 'changed') return 'changed';
     return result.failure.kind === 'not-found' ? 'gone' : 'retry';
   }
 
@@ -245,6 +281,11 @@ export function useProjects(
     if (token !== openToken.current) return;
 
     marks.current = marksFor(opened.project.settings, opened.transcript);
+    if (typeof opened.project.version === 'number') {
+      versions.current.set(id, opened.project.version);
+    } else {
+      versions.current.delete(id);
+    }
     const next = new Autosaver((patch) => persist(id, patch));
     saverRef.current = next;
     setSaver(next);

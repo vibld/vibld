@@ -23,9 +23,18 @@ const STATUS_LABEL: Record<SaveStatus, string> = {
   saving: 'Saving…',
   saved: 'Saved',
   error: 'Couldn’t save',
+  // Said in full beside it, with the reload, below.
+  changed: '',
 };
 
-export function ProjectBar({ projects }: { projects: ProjectsController }) {
+export function ProjectBar({
+  projects,
+  reload = () => window.location.reload(),
+}: {
+  projects: ProjectsController;
+  /** What the Reload button does; replaced in tests. */
+  reload?: () => void;
+}) {
   if (projects.mode === 'local' && projects.notice) {
     // A model deployment whose projects could not be read: the builder
     // still works, and says plainly that nothing is being kept.
@@ -77,6 +86,17 @@ export function ProjectBar({ projects }: { projects: ProjectsController }) {
           >
             {STATUS_LABEL[projects.saveStatus]}
           </span>
+          {projects.saveStatus === 'changed' ? (
+            // The one save state that does interrupt (D63): another tab
+            // saved this project over the copy this one is showing, so
+            // nothing typed here will be kept until it is reloaded.
+            <p className="projectbar__changed" role="alert">
+              This project changed in another tab.{' '}
+              <button type="button" className="chip" onClick={reload}>
+                Reload
+              </button>
+            </p>
+          ) : null}
           <ShareControl
             key={`share-${current.id}`}
             project={current}

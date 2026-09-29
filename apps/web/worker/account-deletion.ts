@@ -458,7 +458,8 @@ export const PURGE_STEPS: readonly PurgeStep[] = [
     // Every project's stored content, and then its rows: the snapshots
     // (`generation-store.ts`'s `projects/{projectId}/snapshots/{revision}.json`)
     // and the saved conversation beside them (`project-store.ts`'s
-    // `projects/{projectId}/transcript.json`), which one prefix covers.
+    // `projects/{projectId}/transcript-{nonce}.json`), which one prefix
+    // covers.
     //
     // One project a pass, repeated while the night's share allows
     // (`again`). An account used to have one project, keyed by its user id,

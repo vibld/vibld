@@ -296,6 +296,40 @@ describe('opening a project whose build carried on without it', () => {
     assert.equal(state.transcript.at(-1)?.revision, 'r-2');
   });
 
+  it('shows where the build it is asking after has got to', async () => {
+    const { session } = createSession({
+      answers: [
+        {
+          ok: true,
+          run: {
+            id: RUN,
+            state: 'running',
+            startedAt: '2026-09-29T12:00:00Z',
+            phase: 'writing',
+          },
+          snapshot: null,
+        },
+        {
+          ok: true,
+          run: {
+            id: RUN,
+            state: 'running',
+            startedAt: '2026-09-29T12:00:00Z',
+            phase: 'validating',
+          },
+          snapshot: null,
+        },
+      ],
+    });
+    await session.restore(
+      project({ build: { runId: RUN, startedAt: '2026-09-29T12:00:00Z' } }),
+    );
+    await until(() => session.getState().progress?.phase === 'writing');
+    assert.equal(session.getState().status, 'planning');
+    await until(() => session.getState().progress?.phase === 'validating');
+    await session.cancel();
+  });
+
   it('says the build is still running, and offers Stop through the Worker', async () => {
     const { session, stopped } = createSession();
     await session.restore(

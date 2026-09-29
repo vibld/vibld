@@ -36,6 +36,8 @@ import type {
   WorkflowParams,
 } from './generation-run.ts';
 
+import type { RunPhase } from '../src/generation/run-phase.ts';
+
 export type { WorkflowParams } from './generation-run.ts';
 
 /**
@@ -81,9 +83,10 @@ export type { WorkflowParams } from './generation-run.ts';
  *    -- a Stop that arrives while a model call is in flight cannot stop
  *    that one call from finishing (and being billed for). With bounded
  *    steps the next boundary is at most one group away. Stop closes the
- *    reservation itself, at what the ledger's abandoned-reservation reclaim
- *    (`budget.ts`, `ABANDONED_AFTER_MS`) would charge (D60), and the
- *    reclaim is the backstop where it cannot.
+ *    reservation itself (D60), at what the model steps recorded they spent,
+ *    the step in flight at its worst case (D65), and the ledger's
+ *    abandoned-reservation reclaim (`budget.ts`, `ABANDONED_AFTER_MS`) is
+ *    the backstop where it cannot.
  *
  * This file only glues `step.do` to `generation-run.ts`'s pure functions --
  * see that file's own comment for why the split exists and where the tests
@@ -150,6 +153,13 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         // Same as a lost report: the meter falls back to what the Workflow
         // itself says, which is the broader true word.
       });
+    // Where the run has got to once the model steps are over, for the
+    // builder's lifecycle bar (`run-phase.ts`). Awaited, so the phase is
+    // said before the work it names, and never a reason to fail.
+    const enter = (phase: RunPhase) =>
+      channel?.enter(phase).catch(() => {
+        // The bar keeps the phase before, which is the step before.
+      });
 
     const bounded = async () => {
       // The checks that cost nothing, before any model step. A refusal here
@@ -188,6 +198,9 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
               store: openStore,
               ledger: this.env.USER_BUDGET,
               ...(report ? { report } : {}),
+              // Awaited, unlike a report, and inside the step: what Stop
+              // charges a stopped run is read from here (D65).
+              ...(channel ? { meter: channel } : {}),
               palette: referencePalette,
             },
             params,
@@ -216,6 +229,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         },
         async () => {
           await finished();
+          await enter('assembling');
           // Kept alive until it is settled: this step can follow a long run
           // of model steps, and the reclaim counts from the last heartbeat.
           if (built) await touchReservation(this.env.USER_BUDGET, params);
@@ -311,11 +325,15 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         timeout: '30 seconds',
       },
       async () => {
-        // Stop may have closed the reservation already, at what the
-        // reclaim charges (D60, `run-control.ts`). Termination normally
+        // Stop may have closed the reservation already (D60, D65,
+        // `run-control.ts`). Termination normally
         // means this step never runs, so this is the guard for the one
         // that does, and it must not settle the same rows twice.
-        if (await stoppedFirst(channel)) {
+        const stopped = await stoppedFirst(channel);
+        if (stopped) {
+          // What Stop charged where it said, and otherwise what it would
+          // have charged at most, the reservation.
+          const charged = stopped.charged ?? params.worstCaseMicroUsd;
           console.log(
             JSON.stringify({
               event: 'generation.settled',
@@ -323,10 +341,10 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
               model: params.model,
               outcome: generation.outcome,
               settledByStop: true,
-              microUsd: params.worstCaseMicroUsd,
+              microUsd: charged,
             }),
           );
-          return params.worstCaseMicroUsd;
+          return charged;
         }
         const actual = await settleBudget(
           this.env.USER_BUDGET,
@@ -389,6 +407,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           store: openStore(),
           generate: (provider, request) =>
             runGeneration(openStore(), provider, request),
+          onPhase: (phase) => enter(phase),
           // A provider of its own, with its own usage capture: the run's
           // was settled above. A repair is a follow-up, so it is a patch in
           // bounded steps like any other, made in this step rather than as

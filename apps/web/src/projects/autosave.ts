@@ -16,17 +16,20 @@ import type { ProjectPatch } from './projects-client.ts';
  * A failed save is not dropped. What it carried is folded back under
  * anything newer and tried again, after a pause, so a network blip costs a
  * few seconds rather than the change. A save the Worker refuses because the
- * project is gone is the one that is not retried: nothing sent again will
- * bring it back.
+ * project is gone is not retried: nothing sent again will bring it back.
+ * Nor is one refused because another tab has saved the project since this
+ * one read it (D63): every later save from this tab would be made from the
+ * same old copy, so saving stops, and the builder offers a reload instead
+ * of either tab's work quietly replacing the other's.
  *
  * Framework-free, like `BuilderSession`, so every rule here is tested
  * without a DOM or a clock.
  */
 
-export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error' | 'changed';
 
 /** What one attempt came to. */
-export type SaveOutcome = 'saved' | 'retry' | 'gone';
+export type SaveOutcome = 'saved' | 'retry' | 'gone' | 'changed';
 
 export interface AutosaveOptions {
   /** Quiet time before a burst of changes is sent. */
@@ -67,6 +70,8 @@ export class Autosaver {
   #status: SaveStatus = 'idle';
   #listeners = new Set<() => void>();
   #disposed = false;
+  /** Refused as made from an older copy: nothing more is sent. */
+  #halted = false;
 
   constructor(
     save: (patch: ProjectPatch) => Promise<SaveOutcome>,
@@ -96,7 +101,7 @@ export class Autosaver {
 
   /** Queue a change. Sent once things have been quiet for `delayMs`. */
   schedule(patch: ProjectPatch): void {
-    if (this.#disposed) return;
+    if (this.#disposed || this.#halted) return;
     this.#pending = mergePatches(this.#pending, patch);
     this.#arm(this.#delayMs);
   }
@@ -121,7 +126,7 @@ export class Autosaver {
   }
 
   async #drain(): Promise<void> {
-    while (this.#pending && !this.#disposed) {
+    while (this.#pending && !this.#disposed && !this.#halted) {
       const patch = this.#pending;
       this.#pending = null;
       this.#setStatus('saving');
@@ -135,6 +140,12 @@ export class Autosaver {
       if (outcome === 'saved') {
         if (!this.#pending) this.#setStatus('saved');
         continue;
+      }
+      if (outcome === 'changed') {
+        this.#halted = true;
+        this.#pending = null;
+        this.#setStatus('changed');
+        return;
       }
       this.#setStatus('error');
       if (outcome === 'retry') {

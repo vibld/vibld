@@ -191,5 +191,10 @@ describe('the link between a running step and the reader watching it', () => {
       /stepFor\(status\.status, progress\)[\s\S]*step \? \{ step \} : \{\}/,
       'the step is read but never sent, so a long build says nothing about how far it has got',
     );
+    assert.match(
+      entrypoint,
+      /phaseFor\(status\.status, progress\)[\s\S]*phase \? \{ phase \} : \{\}/,
+      'the phase is read but never sent, so the lifecycle bar says Plan while files are written',
+    );
   });
 });

@@ -106,6 +106,20 @@ describe('the autosave', () => {
     assert.equal(clock.armed, 0);
   });
 
+  it('stops saving once a save is refused as made from an older copy (D63)', async () => {
+    const { autosaver, sent, clock } = saver(['changed']);
+    autosaver.schedule({ transcript: [] });
+    await clock.advance(1_000);
+    assert.equal(autosaver.status, 'changed');
+    assert.equal(clock.armed, 0, 'a refused save was set to be retried');
+    // Every later change would be made from the same old copy.
+    autosaver.schedule({ name: 'Later' });
+    await clock.advance(60_000);
+    await autosaver.flush();
+    assert.equal(sent.length, 1);
+    assert.equal(autosaver.status, 'changed');
+  });
+
   it('sends what is waiting at once when the project is left', async () => {
     const { autosaver, sent } = saver();
     autosaver.schedule({ name: 'Bakery' });
