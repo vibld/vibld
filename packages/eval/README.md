@@ -93,6 +93,16 @@ catalogue, and printed in cents. Cents rather than dollars because the
 cheapest model in the catalogue finishes a case for well under a cent, and a
 dollar figure rounded to two places prints that as `$0.00`.
 
+### File-writing effort (D70)
+
+`VIBLD_WRITE_EFFORT` asks the file-writing steps of every build, and of every
+repair, at another effort: one of `low`, `medium`, `high`, `xhigh` or `max`.
+The outline is asked at the default either way, and unset or blank leaves
+every step at the default. Anything else is refused before a model is paid,
+because a run reported as one arm of the comparison must not quietly measure
+the other. A live run prints which effort it used above its reports. The
+bakeoff takes it as its `write_effort` input.
+
 **`VIBLD_EVAL_LIVE` is the only thing that starts spending.** A key in the
 environment is never enough on its own, because this same command runs in CI.
 A live run is refused before it costs anything if it names no model, names a

@@ -1,7 +1,13 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { InMemoryGenerationStore } from '@vibld/core';
-import { BoundedPlanProvider, createPlanClient, findModel } from '@vibld/ai';
+import {
+  BoundedPlanProvider,
+  DEFAULT_EFFORT,
+  createPlanClient,
+  findModel,
+} from '@vibld/ai';
+import type { PlanEffort } from '@vibld/ai';
 import type { ModelProvider, ProjectSnapshot } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -37,6 +43,11 @@ export interface LiveOptions {
   runs: number;
   /** Where to write each run's project, if anywhere. */
   outDir?: string | undefined;
+  /**
+   * The effort the file-writing steps are asked at, from
+   * `VIBLD_WRITE_EFFORT` (D70). Absent means every step at the default.
+   */
+  writeEffort?: PlanEffort;
 }
 
 export interface LiveEnv {
@@ -44,6 +55,7 @@ export interface LiveEnv {
   VIBLD_EVAL_MODELS?: string | undefined;
   VIBLD_EVAL_RUNS?: string | undefined;
   VIBLD_EVAL_OUT?: string | undefined;
+  VIBLD_WRITE_EFFORT?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
   DEEPSEEK_API_KEY?: string | undefined;
   OPENAI_API_KEY?: string | undefined;
@@ -84,6 +96,51 @@ export function liveRuns(value: string | undefined): number | null {
   return runs;
 }
 
+/** Every effort `VIBLD_WRITE_EFFORT` may name, in the order they rise. */
+export const WRITE_EFFORTS = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const satisfies readonly PlanEffort[];
+
+/**
+ * The effort the file-writing steps are asked at (D70): undefined when
+ * `VIBLD_WRITE_EFFORT` is unset or blank, which leaves every step at the
+ * default, and null when it names something that is not an effort.
+ *
+ * Strict for the same reason `liveRuns` is. This is one arm of the D70
+ * comparison, decided on a margin of two points, so a mistyped
+ * value must stop the run rather than quietly measure the default and be
+ * reported as the other arm. Surrounding space is forgiven; case is not,
+ * since every effort is spelled in lower case wherever it is used.
+ */
+export function liveWriteEffort(
+  value: string | undefined,
+): PlanEffort | undefined | null {
+  const raw = value?.trim();
+  if (raw === undefined || raw === '') return undefined;
+  return (WRITE_EFFORTS as readonly string[]).includes(raw)
+    ? (raw as PlanEffort)
+    : null;
+}
+
+/** Why a `VIBLD_WRITE_EFFORT` that `liveWriteEffort` refused was refused. */
+function writeEffortProblem(value: string | undefined): string {
+  return `VIBLD_WRITE_EFFORT must be one of ${WRITE_EFFORTS.join(', ')}, or unset, not "${value}".`;
+}
+
+/**
+ * The line a live run prints about effort, so two runs that differ only in
+ * `VIBLD_WRITE_EFFORT` can be told apart from their reports alone.
+ */
+export function describeEffort(writeEffort: PlanEffort | undefined): string {
+  return writeEffort === undefined
+    ? `Effort: every step at the default, ${DEFAULT_EFFORT}.`
+    : `Effort: the outline at the default, ${DEFAULT_EFFORT}; the file-writing steps at ${writeEffort} (VIBLD_WRITE_EFFORT).`;
+}
+
 /**
  * What a live run would do, read from the environment.
  *
@@ -96,6 +153,9 @@ export function readLiveOptions(env: LiveEnv): LiveOptions {
     .split(',')
     .map((id) => id.trim())
     .filter((id) => id.length > 0);
+  // An unreadable value is left out here and refused by `liveProblems`, as
+  // an unreadable run count is.
+  const writeEffort = liveWriteEffort(env.VIBLD_WRITE_EFFORT);
   return {
     enabled,
     models,
@@ -104,6 +164,7 @@ export function readLiveOptions(env: LiveEnv): LiveOptions {
     // silently treated as a single run someone did not ask for.
     runs: liveRuns(env.VIBLD_EVAL_RUNS) ?? 1,
     ...(env.VIBLD_EVAL_OUT ? { outDir: env.VIBLD_EVAL_OUT } : {}),
+    ...(writeEffort ? { writeEffort } : {}),
   };
 }
 
@@ -126,6 +187,9 @@ export function liveProblems(options: LiveOptions, env: LiveEnv): string[] {
     problems.push(
       `VIBLD_EVAL_RUNS must be a whole number from 1 to ${MAX_RUNS}, not "${env.VIBLD_EVAL_RUNS}".`,
     );
+  }
+  if (liveWriteEffort(env.VIBLD_WRITE_EFFORT) === null) {
+    problems.push(writeEffortProblem(env.VIBLD_WRITE_EFFORT));
   }
   // Refused rather than quietly deduplicated. A repeated id pays for the whole
   // selected set twice, and with VIBLD_EVAL_OUT the second pass clears and
@@ -178,6 +242,12 @@ export interface LiveRun {
  * call, with a follow-up or a repair as a patch. A bakeoff measured through
  * a single response would be measuring a path the product no longer takes.
  * `onUsage` is told once per generation, with every call summed.
+ *
+ * `VIBLD_WRITE_EFFORT`, when set, is the effort of the file-writing steps
+ * (`writeEffort`, D70); the outline stays at the default. A repair turn is
+ * made here too, so it is held to the same effort. A value that is not an
+ * effort throws rather than falling back to the default, because a run
+ * reported as one arm of the comparison must not measure the other.
  */
 export function createLiveRun(
   env: LiveEnv,
@@ -191,11 +261,16 @@ export function createLiveRun(
    */
   options: { keepSpec?: boolean } = {},
 ): LiveRun {
+  const writeEffort = liveWriteEffort(env.VIBLD_WRITE_EFFORT);
+  if (writeEffort === null) {
+    throw new Error(writeEffortProblem(env.VIBLD_WRITE_EFFORT));
+  }
   const usage = { inputTokens: 0, outputTokens: 0 };
   const provider = new BoundedPlanProvider(createPlanClient(env, model), {
     model,
     ...(style ? { style } : {}),
     ...(options.keepSpec ? { keepSpec: true } : {}),
+    ...(writeEffort ? { writeEffort } : {}),
     onUsage: (reported) => {
       usage.inputTokens += reported.inputTokens;
       usage.outputTokens += reported.outputTokens;

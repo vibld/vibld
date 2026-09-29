@@ -10,6 +10,7 @@ import type { CaseResult } from '../src/harness.ts';
 import {
   acceptedProject,
   createLiveRun,
+  describeEffort,
   liveProblems,
   readLiveOptions,
   runCostCents,
@@ -173,6 +174,10 @@ async function main(): Promise<number> {
   const repeated = live.runs > 1;
   const recorded = new ResultsFile(live.outDir, 'live');
   await recorded.save();
+  // First, so the report of a run with the file steps at another effort
+  // (D70) says so before any of its figures, and the bakeoff's summary,
+  // which is this output, carries it.
+  console.log(describeEffort(live.writeEffort));
   for (const model of live.models) {
     const results: CaseResult[] = [];
     for (const testCase of cases) {

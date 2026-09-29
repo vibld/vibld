@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { DEFAULT_EFFORT } from '@vibld/ai';
 import {
   MAX_RUNS,
+  WRITE_EFFORTS,
   containedPath,
+  createLiveRun,
+  describeEffort,
   liveProblems,
   liveRuns,
+  liveWriteEffort,
   planWrites,
   readLiveOptions,
   runCostCents,
@@ -421,6 +426,88 @@ describe('a "--" forwarded by pnpm', () => {
     assert.match(
       selection.ok ? '' : selection.error,
       /Remove the "--".*run eval --case/,
+    );
+  });
+});
+
+describe('VIBLD_WRITE_EFFORT (D70)', () => {
+  const LIVE = { VIBLD_EVAL_LIVE: '1', VIBLD_EVAL_MODELS: 'claude-opus-5' };
+
+  it('reads every effort there is, with surrounding space', () => {
+    for (const effort of WRITE_EFFORTS) {
+      assert.equal(liveWriteEffort(effort), effort);
+      assert.equal(liveWriteEffort(` ${effort} `), effort);
+    }
+    assert.deepEqual(
+      [...WRITE_EFFORTS],
+      ['low', 'medium', 'high', 'xhigh', 'max'],
+    );
+  });
+
+  it('leaves the default in place when unset or blank', () => {
+    for (const value of [undefined, '', '  ']) {
+      assert.equal(liveWriteEffort(value), undefined, String(value));
+      const env = { ...LIVE, VIBLD_WRITE_EFFORT: value };
+      const options = readLiveOptions(env);
+      assert.equal('writeEffort' in options, false, String(value));
+      assert.deepEqual(liveProblems(options, { ...KEYED, ...env }), []);
+    }
+  });
+
+  it('carries a valid effort through to the options', () => {
+    const env = { ...LIVE, VIBLD_WRITE_EFFORT: 'low' };
+    const options = readLiveOptions(env);
+    assert.equal(options.writeEffort, 'low');
+    assert.deepEqual(liveProblems(options, { ...KEYED, ...env }), []);
+  });
+
+  it('refuses anything that is not an effort, rather than measuring the default', () => {
+    for (const value of ['LOW', 'Low', 'lo', 'none', 'minimal', 'high,low']) {
+      assert.equal(liveWriteEffort(value), null, value);
+      const env = { ...LIVE, VIBLD_WRITE_EFFORT: value };
+      const options = readLiveOptions(env);
+      assert.equal('writeEffort' in options, false, value);
+      const problems = liveProblems(options, { ...KEYED, ...env });
+      assert.equal(problems.length, 1, value);
+      assert.match(
+        problems[0]!,
+        /^VIBLD_WRITE_EFFORT must be one of low, medium, high, xhigh, max, or unset, not ".*"\.$/,
+      );
+      assert.ok(problems[0]!.includes(`"${value}"`), value);
+    }
+  });
+
+  it('refuses the same value where a live run is made, not only where it is checked', () => {
+    assert.throws(
+      () =>
+        createLiveRun(
+          { ...KEYED, VIBLD_WRITE_EFFORT: 'hgih' },
+          'claude-opus-5',
+          'project',
+        ),
+      /VIBLD_WRITE_EFFORT must be one of/,
+    );
+    // Valid and unset both make a run; nothing is called until it generates.
+    for (const value of ['medium', '', undefined]) {
+      const run = createLiveRun(
+        { ...KEYED, VIBLD_WRITE_EFFORT: value },
+        'claude-opus-5',
+        'project',
+      );
+      assert.ok(run.provider, String(value));
+    }
+  });
+
+  it('says in the report which effort the file steps were asked at', () => {
+    assert.ok(
+      describeEffort(undefined).includes(
+        `every step at the default, ${DEFAULT_EFFORT}.`,
+      ),
+    );
+    assert.ok(
+      describeEffort('low').includes(
+        `the outline at the default, ${DEFAULT_EFFORT}; the file-writing steps at low`,
+      ),
     );
   });
 });

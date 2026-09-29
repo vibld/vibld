@@ -26,6 +26,13 @@ name: Model bakeoff
 #   report          no keys  joins the four result files into one table
 #
 # Only files cross between them, as artifacts.
+
+# Named by the effort the file-writing steps were asked at (D70), so a run
+# with them at a lower effort and one at the default can be told apart in
+# the list of runs, not only once each is opened. Display text only: the
+# value is never run as a command.
+run-name: Model bakeoff (file steps at ${{ inputs.write_effort || 'default' }} effort)
+
 on:
   workflow_dispatch:
     inputs:
@@ -48,6 +55,12 @@ on:
           is written in terms of. This multiplies the bill by the same number.
         required: true
         default: '3'
+      write_effort:
+        description: >-
+          Effort for the file-writing steps: low, medium, high, xhigh or max.
+          Blank keeps the default. The outline is unaffected.
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -98,8 +111,17 @@ jobs:
           MODELS: ${{ inputs.models }}
           CASES: ${{ inputs.cases }}
           RUNS: ${{ inputs.runs }}
+          WRITE_EFFORT: ${{ inputs.write_effort }}
         run: |
           set -euo pipefail
+          # Exactly one of the efforts, or blank. A mistyped value would
+          # otherwise be refused by the eval only after this step, and a run
+          # that quietly measured the default would be reported as the other
+          # arm of the D70 comparison.
+          case "$WRITE_EFFORT" in
+            ''|low|medium|high|xhigh|max) ;;
+            *) echo "::error::write_effort must be blank or one of low, medium, high, xhigh, max, not \"$WRITE_EFFORT\"."; exit 1 ;;
+          esac
           if [ -z "${CASES// /}" ]; then
             echo "::error::No case named. Blank selects every case in the set, which is not something to arrive at by leaving a box empty."
             exit 1
@@ -128,6 +150,12 @@ jobs:
             echo
             echo "$models models x $cases cases x $runs runs = **$((models * cases * runs)) generations**, all of them billed."
             echo
+            if [ -n "$WRITE_EFFORT" ]; then
+              echo "Effort: the file-writing steps (and repairs' file steps) at **$WRITE_EFFORT**; the outline at its default."
+            else
+              echo "Effort: **every step at its default**."
+            fi
+            echo
             echo "Measured spend is reported at the end of the run, from the usage each provider reported."
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -145,11 +173,19 @@ jobs:
           VIBLD_EVAL_MODELS: ${{ inputs.models }}
           VIBLD_EVAL_RUNS: ${{ inputs.runs }}
           VIBLD_EVAL_OUT: ${{ runner.temp }}/candidates
+          WRITE_EFFORT: ${{ inputs.write_effort }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -uo pipefail
+          # Only when one was asked for, so a blank input leaves the eval
+          # exactly as it was before the input existed. Checked by the step
+          # above; the eval refuses anything else as well.
+          if [ -n "$WRITE_EFFORT" ]; then
+            export VIBLD_WRITE_EFFORT="$WRITE_EFFORT"
+          fi
+
           # Built as an array rather than interpolated into a string, so a
           # case id can never become a second argument or a shell operator.
           #
@@ -338,14 +374,27 @@ jobs:
           name: bakeoff-build-results
           path: ${{ runner.temp }}/build-results
 
+      # A repair is a bounded build like the first, so its file steps are
+      # asked at the same effort the candidates were (D70): the arm being
+      # measured is the whole path, repair included. Checked again here
+      # because this job runs even when the bakeoff job, which checks it
+      # first, failed.
       - name: Repair each candidate that did not build
         shell: bash
         env:
           VIBLD_EVAL_LIVE: '1'
+          WRITE_EFFORT: ${{ inputs.write_effort }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: pnpm --filter @vibld/eval run repair "$RUNNER_TEMP/candidates" "$RUNNER_TEMP/build-results/build-results.json" "$RUNNER_TEMP/repaired"
+        run: |
+          set -euo pipefail
+          case "$WRITE_EFFORT" in
+            '') ;;
+            low|medium|high|xhigh|max) export VIBLD_WRITE_EFFORT="$WRITE_EFFORT" ;;
+            *) echo "::error::write_effort must be blank or one of low, medium, high, xhigh, max, not \"$WRITE_EFFORT\"."; exit 1 ;;
+          esac
+          pnpm --filter @vibld/eval run repair "$RUNNER_TEMP/candidates" "$RUNNER_TEMP/build-results/build-results.json" "$RUNNER_TEMP/repaired"
 
       # include-hidden-files for the reason the candidates upload gives: a
       # repaired project missing its .gitignore is not the project that was
@@ -463,6 +512,24 @@ jobs:
         with:
           name: bakeoff-repaired-build-results
           path: ${{ runner.temp }}/rebuild-results
+
+      # Above the table, so a verdict copied out of this run still says
+      # which arm of the D70 comparison it is. Only a value the bakeoff job
+      # would accept is printed; anything else is said to be invalid, since
+      # both jobs that generate refuse it before spending anything.
+      - name: Say which effort the file steps were asked at
+        shell: bash
+        env:
+          WRITE_EFFORT: ${{ inputs.write_effort }}
+        run: |
+          set -euo pipefail
+          case "$WRITE_EFFORT" in
+            '') line='Effort: every step at its default.' ;;
+            low|medium|high|xhigh|max) line="Effort: the file-writing steps at $WRITE_EFFORT; the outline at its default." ;;
+            *) line='Effort: write_effort was not one of the allowed values, so nothing was generated at it.' ;;
+          esac
+          echo "$line"
+          printf '**%s**\n\n' "$line" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report
         run: >-

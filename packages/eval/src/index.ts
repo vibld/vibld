@@ -39,11 +39,14 @@ export {
 export type { CaseOutcome, CaseResult, HarnessOptions } from './harness.ts';
 export {
   MAX_RUNS,
+  WRITE_EFFORTS,
   acceptedProject,
   containedPath,
   createLiveRun,
+  describeEffort,
   liveProblems,
   liveRuns,
+  liveWriteEffort,
   planWrites,
   readLiveOptions,
   runCostCents,

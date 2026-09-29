@@ -728,6 +728,21 @@ export type BoundedBuilderOptions = Pick<
    */
   keepSpec?: boolean;
   /**
+   * How hard the file-writing steps think, where that differs from the
+   * outline (D70). Every file-group call (`write-N`, and the halves, rests
+   * and retries it splits into) is asked at this effort; the outline,
+   * including its retry, is asked exactly as it would be without it, at
+   * `effort` or `DEFAULT_EFFORT`.
+   *
+   * It exists so the eval can measure the file steps at a lower effort
+   * against today's default, with the outline, which decides the spec and
+   * the manifest every later step builds to, held where it is so that the
+   * file steps are the only thing that changes. Unset, every call is asked
+   * at the effort it always was. A repair is a bounded build made with the
+   * same options, so it inherits this too. The Worker does not set it.
+   */
+  writeEffort?: PlanEffort;
+  /**
    * Told about an error that is not this package's own, before it is
    * replaced by a generic sentence. The Worker logs it; nothing else sees
    * it, because an upstream message can quote the request back.
@@ -858,6 +873,11 @@ ${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
     }
     const { prefix, prompt } = groupPrompt(context, input, base);
     const wanted = new Set(input.entries.map((entry) => entry.path));
+    // A file step's own effort (D70), where one is set. An effort the call
+    // was given still comes first, as it does for every call, and with
+    // neither the limits pass through untouched, so `#call` falls back to
+    // the builder's effort exactly as it did before `writeEffort` existed.
+    const effort = limits.effort ?? this.#options.writeEffort;
     return this.#call(
       {
         system: GROUP_SYSTEM_PROMPT,
@@ -867,7 +887,7 @@ ${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
         schema: FileGroupSchema,
         subject: groupSubject(input.entries),
       },
-      limits,
+      effort ? { ...limits, effort } : limits,
       (reply) =>
         // Its own files, plus any file the manifest never planned that the
         // model found it needed. A file planned for another group is that

@@ -45,6 +45,7 @@ import {
 } from '../src/plan-schema.ts';
 import type { ManifestEntry } from '../src/plan-schema.ts';
 import {
+  DEFAULT_EFFORT,
   PlanProvider,
   RUN_WALL_CLOCK_BUDGET_MS,
   maxTokensFor,
@@ -1570,5 +1571,151 @@ describe('what each step took', () => {
     const [steps] = told as { name: string; reasoningTokens?: number }[][];
     assert.equal(steps![0]!.name, 'outline');
     assert.ok(steps!.every((step) => step.reasoningTokens === 10));
+  });
+});
+
+describe('the effort of the file-writing steps (D70)', () => {
+  type BuilderOptions = NonNullable<
+    ConstructorParameters<typeof BoundedBuilder>[1]
+  >;
+
+  /**
+   * A build with the given builder options, and the effort every call was
+   * asked at, split into the outline's calls and the file steps'.
+   */
+  async function efforts(
+    options: Omit<BuilderOptions, 'model'>,
+    script: ScriptedBuild = companySite(),
+    clientOptions: Parameters<typeof createScriptedBuildClient>[1] = {},
+  ) {
+    const client = createScriptedBuildClient(script, clientOptions);
+    const hooks = inProcess();
+    const result = await runBoundedBuild(
+      new BoundedBuilder(client, { model: MODEL, ...options }),
+      { prompt: 'A full website for North Star Systems.', budget: BUDGET },
+      hooks,
+    );
+    const writing = (request: (typeof client.requests)[number]) =>
+      request.output?.name === 'file_group';
+    return {
+      result,
+      names: hooks.names,
+      outline: client.requests
+        .filter((request) => !writing(request))
+        .map((request) => request.effort),
+      writes: client.requests
+        .filter((request) => writing(request))
+        .map((request) => request.effort),
+    };
+  }
+
+  it('asks every file step at writeEffort, and the outline at the effort it always had', async () => {
+    const { result, names, outline, writes } = await efforts({
+      writeEffort: 'low',
+    });
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.notEqual(DEFAULT_EFFORT, 'low');
+    assert.deepEqual(outline, [DEFAULT_EFFORT]);
+    // A whole site is several groups, so this is every write step and not
+    // just the first.
+    assert.ok(writes.length > 1, names.join(', '));
+    assert.equal(writes.length, names.length - 1);
+    assert.deepEqual(
+      writes,
+      writes.map(() => 'low'),
+    );
+  });
+
+  it("keeps the outline at the builder's own effort when one is set", async () => {
+    const { result, outline, writes } = await efforts({
+      effort: 'medium',
+      writeEffort: 'low',
+    });
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.deepEqual(outline, ['medium']);
+    assert.deepEqual(
+      writes,
+      writes.map(() => 'low'),
+    );
+  });
+
+  it('asks the retries and the rests a file step turns into at writeEffort too', async () => {
+    const { result, names, outline, writes } = await efforts(
+      { writeEffort: 'xhigh' },
+      // The first group comes back unreadable once, and a later one leaves
+      // out a file, so both a retry and a rest are asked for.
+      companySite(),
+      { malformOnce: 'file_group', omitOnce: ['src/App.tsx'] },
+    );
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.ok(
+      names.some((name) => name.endsWith('.again')),
+      names.join(', '),
+    );
+    assert.ok(
+      names.some((name) => name.endsWith('.rest')),
+      names.join(', '),
+    );
+    assert.deepEqual(outline, [DEFAULT_EFFORT]);
+    assert.deepEqual(
+      writes,
+      writes.map(() => 'xhigh'),
+    );
+  });
+
+  it("leaves the outline's retry at low, as it always was", async () => {
+    const huge: ScriptedBuild = {
+      summary: 'A site.',
+      files: Array.from({ length: 50 }, (_, index) => ({
+        ...file(`src/components/C${index}.tsx`, 100),
+        purpose: 'y'.repeat(2_000),
+      })),
+    };
+    const { names, outline, writes } = await efforts(
+      { writeEffort: 'max' },
+      huge,
+    );
+    assert.deepEqual(names, ['outline', 'outline.again']);
+    assert.deepEqual(outline, [DEFAULT_EFFORT, 'low']);
+    assert.deepEqual(writes, []);
+  });
+
+  it("asks every call at the builder's effort without it, exactly as before", async () => {
+    const plain = await efforts({});
+    assert.equal(plain.result.ok, true, plain.result.failure?.message ?? '');
+    assert.deepEqual(plain.outline, [DEFAULT_EFFORT]);
+    assert.ok(plain.writes.length > 1);
+    assert.deepEqual(
+      plain.writes,
+      plain.writes.map(() => DEFAULT_EFFORT),
+    );
+
+    const medium = await efforts({ effort: 'medium' });
+    assert.equal(medium.result.ok, true, medium.result.failure?.message ?? '');
+    assert.deepEqual(medium.outline, ['medium']);
+    assert.deepEqual(
+      medium.writes,
+      medium.writes.map(() => 'medium'),
+    );
+  });
+
+  it('is passed through by BoundedPlanProvider', async () => {
+    const client = createScriptedBuildClient({
+      summary: 'A site.',
+      spec: SPEC,
+      files: requiredFiles(),
+    });
+    await new BoundedPlanProvider(client, {
+      model: MODEL,
+      writeEffort: 'medium',
+    }).generate({ prompt: 'A site' });
+    assert.equal(client.requests[0]!.output?.name, 'build_outline');
+    assert.equal(client.requests[0]!.effort, DEFAULT_EFFORT);
+    const writes = client.requests.slice(1);
+    assert.ok(writes.length > 0);
+    for (const request of writes) {
+      assert.equal(request.output?.name, 'file_group');
+      assert.equal(request.effort, 'medium');
+    }
   });
 });

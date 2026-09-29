@@ -14,6 +14,7 @@ import { CASES } from '../src/cases.ts';
 import {
   containedPath,
   createLiveRun,
+  describeEffort,
   liveProblems,
   readLiveOptions,
   runCostCents,
@@ -109,6 +110,10 @@ async function main(): Promise<number> {
     for (const problem of problems) console.error(problem);
     return 1;
   }
+  // A repair's file steps are asked at VIBLD_WRITE_EFFORT too (D70), which
+  // the bakeoff sets to what the candidates were generated at, so its log
+  // says which effort that was, as the eval's does.
+  console.log(describeEffort(live.writeEffort));
 
   let unreadable = 0;
   let totalCents = 0;
