@@ -597,6 +597,37 @@ Decided while implementing it, and Chris's to reverse:
   the start fetched minutes before) and retry once online when that cache
   was stale (ETARGET).
 
+**The file-writing steps stay at their default effort.** Chris decided on
+2026-09-29 (D70, "Adopt if no worse"): the file-writing steps of a bounded
+build would run at `low` effort only if, over the bakeoff, both the pass
+rate (accepted after one repair) and the repair rate (the share of runs
+that needed a repair) came within 2 points of the default; the outline
+stays at its default either way. Measured with `bakeoff.yml`'s
+`write_effort` input on `gpt-6-luna`, nine cases (coffee-roaster,
+security-saas, dental-practice, freelance-portfolio, vibld-marketing,
+pottery-booking, budget-tracker, recipe-box, conference), two runs each per
+arm, prompt set 1.8.0:
+
+|                                   |       Default |         `low` |
+| --------------------------------- | ------------: | ------------: |
+| Accepted as generated             |         17/18 |         14/18 |
+| Accepted after one repair         | 17/18 (94.4%) | 17/18 (94.4%) |
+| Needed a repair                   |     0/18 (0%) |  3/18 (16.7%) |
+| Spend, generation and repair      |         39.6c |         30.1c |
+| Generation, wall time for 18 runs |        80 min |        51 min |
+
+The pass rates are equal, and the repair rate is 16.7 points worse, so D70
+is not adopted and production is unchanged: nothing sets `writeEffort`.
+The one rejection in each arm was the same failure, freelance-portfolio's
+copy never saying "portfolio". The `low` arm cost 24% less, its repairs
+included, and generated in 37% less time; the rule weighs repairs on their
+own because each one adds a second build and a model call to that user's
+wait. The plumbing from internal PR 309 stays (`BoundedBuilder`'s `writeEffort`,
+`VIBLD_WRITE_EFFORT` in `packages/eval`, the bakeoff's `write_effort`
+input), so the question can be asked again of another model or prompt set.
+Runs: default 36624066946, 36632453312, 36638630804; `low` 36624075815,
+36632487854, 36638633452.
+
 ### Resolved 2026-09-29
 
 **Builds are generated in bounded steps, and follow-ups as patches.** Every
