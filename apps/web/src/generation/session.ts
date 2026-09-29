@@ -584,6 +584,13 @@ export class BuilderSession {
   readonly #pollDelay: () => Promise<void>;
   /** A Stop is waiting on the Worker, so a second press does not send another. */
   #stopping = false;
+  /**
+   * The Stop in flight, until it has done what its answer calls for. A
+   * build's own failure waits on it (`#stoppedMeanwhile`), because the
+   * stream can report the build ended before Stop answers that it stopped
+   * it.
+   */
+  #stop: Promise<void> | null = null;
 
   constructor(options: SessionOptions = {}) {
     this.#delay =
@@ -1733,6 +1740,7 @@ export class BuilderSession {
     } catch (error) {
       reservation.release();
       this.#stopDraft();
+      if (await this.#stoppedMeanwhile(epoch)) return;
       const message = error instanceof Error ? error.message : String(error);
       this.#patch(epoch, (state) => ({
         ...state,
@@ -1848,6 +1856,7 @@ export class BuilderSession {
       return;
     }
 
+    if (await this.#stoppedMeanwhile(epoch)) return;
     const problems =
       result.errors.length > 0
         ? result.errors
@@ -1928,17 +1937,43 @@ export class BuilderSession {
     }
     if (this.#stopping) return;
     this.#stopping = true;
+    const stop = this.#stopRun(serverRunId);
+    this.#stop = stop;
+    try {
+      await stop;
+    } finally {
+      this.#stopping = false;
+      if (this.#stop === stop) this.#stop = null;
+    }
+  }
+
+  /**
+   * Whether a Stop in flight settled this run while it was failing: waits
+   * for the Stop to finish, and is true when the run was closed meanwhile
+   * (as cancelled, or by anything else that moved on from it).
+   *
+   * Stop terminates the Workflow and then settles the run before it
+   * answers, and the stream, polling the same instance, can see it
+   * terminated first and report an error (production run 36617524640).
+   * Closing the turn on that error said "This did not work" about a build
+   * the reader had stopped, and dropped the cancelled answer that came
+   * after. A Stop that could not stop anything leaves the run where it
+   * was, so its failure is reported as it would have been.
+   */
+  async #stoppedMeanwhile(epoch: number): Promise<boolean> {
+    const stop = this.#stop;
+    if (stop) await stop.catch(() => undefined);
+    return this.#disposed || epoch !== this.#epoch;
+  }
+
+  /** `cancel()` for a build the Worker admitted, once it is asked. */
+  async #stopRun(serverRunId: string): Promise<void> {
     const epoch = this.#epoch;
     this.#patch(epoch, (state) => ({
       ...state,
       notice: 'Stopping the build…',
     }));
-    let answer: BuildAnswer;
-    try {
-      answer = await this.#stopBuild(serverRunId);
-    } finally {
-      this.#stopping = false;
-    }
+    const answer = await this.#stopBuild(serverRunId);
     if (this.#disposed || epoch !== this.#epoch) return;
     if (!answer.ok) {
       const message = answer.message;

@@ -43,9 +43,21 @@ const frame = (event: string, data: unknown) =>
  */
 function planStream(ending: 'hold' | 'drop') {
   const seen = { aborted: false };
+  let stream: ReadableStreamDefaultController<Uint8Array> | null = null;
+  /**
+   * What the Worker's stream says when the instance it is watching was
+   * terminated and no revision was promoted: an error, then the end.
+   */
+  const terminate = () => {
+    stream?.enqueue(
+      frame('error', { error: 'Generation failed unexpectedly.' }),
+    );
+    stream?.close();
+  };
   const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
+        stream = controller;
         controller.enqueue(frame('run', { runId: RUN }));
         if (ending === 'drop') controller.close();
         init?.signal?.addEventListener('abort', () => {
@@ -59,13 +71,15 @@ function planStream(ending: 'hold' | 'drop') {
       headers: { 'content-type': 'text/event-stream' },
     });
   }) as typeof fetch;
-  return { fetchImpl, seen };
+  return { fetchImpl, seen, terminate };
 }
 
 interface Options {
   fetchImpl?: typeof fetch;
   answers?: BuildAnswer[];
   stop?: BuildAnswer;
+  /** Runs when Stop is asked, before its answer is given. */
+  beforeStopAnswer?: () => Promise<void>;
 }
 
 function createSession(options: Options = {}) {
@@ -91,6 +105,7 @@ function createSession(options: Options = {}) {
     },
     stopBuildImpl: async (runId) => {
       stopped.push(runId);
+      await options.beforeStopAnswer?.();
       return (
         options.stop ?? {
           ok: true,
@@ -205,6 +220,57 @@ describe('Stop', () => {
     assert.equal(state.status, 'cancelled');
     assert.equal(state.running, false);
     assert.equal(state.transcript.at(-1)?.status, 'cancelled');
+  });
+
+  it('is cancelled when the stream reports the stopped build before Stop answers', async () => {
+    // Production run 36617524640: Stop terminates the Workflow and then
+    // settles the run before it answers, and the stream, polling the same
+    // instance, saw it terminated first and sent an error. The turn closed
+    // as failed ("This did not work") and the cancelled answer, arriving
+    // after, was dropped.
+    const stream = planStream('hold');
+    const { session } = createSession({
+      fetchImpl: stream.fetchImpl,
+      beforeStopAnswer: async () => {
+        stream.terminate();
+        for (let i = 0; i < 20; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      },
+    });
+    void session.submit('A bakery');
+    await until(() => session.getState().serverRunId === RUN);
+
+    await session.cancel();
+    await until(() => !session.getState().running);
+
+    const state = session.getState();
+    assert.equal(state.status, 'cancelled');
+    assert.equal(state.transcript.at(-1)?.status, 'cancelled');
+    assert.deepEqual(state.problems, []);
+  });
+
+  it('reports the failure when Stop could not stop it and the stream failed meanwhile', async () => {
+    const stream = planStream('hold');
+    const { session } = createSession({
+      fetchImpl: stream.fetchImpl,
+      stop: { ok: false, message: 'Could not reach vibld.' },
+      beforeStopAnswer: async () => {
+        stream.terminate();
+        for (let i = 0; i < 20; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      },
+    });
+    void session.submit('A bakery');
+    await until(() => session.getState().serverRunId === RUN);
+
+    await session.cancel();
+    await until(() => !session.getState().running);
+
+    const state = session.getState();
+    assert.equal(state.status, 'failed');
+    assert.equal(state.transcript.at(-1)?.status, 'failed');
   });
 
   it('says so when the build could not be stopped, and does not claim it did', async () => {
