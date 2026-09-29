@@ -55,7 +55,13 @@ export type RunRefusal =
   | 'model-not-allowed'
   /** The request itself could not be read or exceeded a documented limit. */
   | 'request-invalid'
-  /** This account's own spend ceiling for the period is used up. */
+  /**
+   * A spend ceiling had too little left for this run: the caller's own for
+   * the period, or the deployment's for the day. The sentence sent with it
+   * says which, and how much the caller has left (`refusalFor` in
+   * `apps/web/worker/reserve.ts`); the client
+   * shows that sentence and does nothing else differently.
+   */
   | 'account-ceiling'
   /** This account already has a run in flight and may not start another. */
   | 'already-running'

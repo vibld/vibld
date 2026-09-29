@@ -268,6 +268,8 @@ export interface BuildOutcome {
   revision?: string | null;
   /** How many files that revision has, for `accepted`. */
   fileCount?: number;
+  /** What the build says it made, for `accepted`, where that is known. */
+  summary?: string;
 }
 
 /**
@@ -298,6 +300,7 @@ export function reconciledTranscript(
         status: 'accepted',
         revision: outcome.revision ?? null,
         fileCount: outcome.fileCount ?? turn.fileCount,
+        summary: outcome.summary ?? turn.summary,
       };
     }
     if (outcome.state === 'cancelled') return { ...turn, status: 'cancelled' };

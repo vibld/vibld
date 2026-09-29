@@ -13,6 +13,8 @@ const SOURCES = [
   '../worker/principal.ts',
   '../worker/access-handlers.ts',
   '../worker/chat-handler.ts',
+  // Where the money refusals are worded, for every route that reserves.
+  '../worker/reserve.ts',
 ];
 
 /**

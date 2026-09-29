@@ -362,7 +362,11 @@ describe('the request sizes a follow-up before it reserves', () => {
       handlePlan,
       /worstCaseMicroUsd\(\s*ceiling\.prices,\s*ceiling\.maxTokens,\s*BOUNDED_BUILD_INPUT_CHARS,?\s*\)/,
     );
-    assert.match(handlePlan, /maxInputChars:\s*BOUNDED_BUILD_INPUT_CHARS/);
+    // Told the input that was reserved for, which is the full figure or
+    // the smaller one a caller with less left was fitted to, never a
+    // constant beside it.
+    assert.match(handlePlan, /inputChars\s*=\s*sized\.inputChars/);
+    assert.match(handlePlan, /maxInputChars:\s*inputChars,/);
   });
 });
 

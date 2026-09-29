@@ -5,6 +5,7 @@ import type { RunTrace } from '@vibld/core';
 
 import {
   STOP_LABELS,
+  fetchBuild,
   fetchRuns,
   formatElapsed,
   formatFraction,
@@ -155,5 +156,35 @@ describe('fetching run history', () => {
     );
 
     assert.equal(sent, 'Bearer tok');
+  });
+});
+
+describe('asking after one build', () => {
+  const run = {
+    id: 'wf-1',
+    state: 'accepted',
+    startedAt: '2026-09-29T04:00:00.000Z',
+    revision: 'r2',
+  };
+
+  it('keeps the summary the Worker sent with an accepted build', async () => {
+    const answer = await fetchBuild(
+      'wf-1',
+      async () =>
+        reply({ run: { ...run, summary: 'A bakery site.' }, snapshot: null }),
+      noToken,
+    );
+    assert.ok(answer.ok);
+    assert.equal(answer.run.summary, 'A bakery site.');
+  });
+
+  it('drops a summary that is not a sentence', async () => {
+    const answer = await fetchBuild(
+      'wf-1',
+      async () => reply({ run: { ...run, summary: 42 }, snapshot: null }),
+      noToken,
+    );
+    assert.ok(answer.ok);
+    assert.equal('summary' in answer.run, false);
   });
 });

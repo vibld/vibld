@@ -360,6 +360,22 @@ describe('opening a project whose build carried on without it', () => {
     assert.deepEqual(moved.session.getState().acceptedSnapshot, NEW_CODE);
   });
 
+  it('keeps the summary of a build it settled by asking', async () => {
+    const { session } = createSession({
+      answers: [
+        {
+          ...accepted,
+          run: { ...accepted.run, summary: 'A bakery site with a menu page.' },
+        } as BuildAnswer,
+      ],
+    });
+    await session.restore(project());
+    await until(() => session.getState().running === false);
+    const settled = session.getState().transcript.at(-1);
+    assert.equal(settled?.status, 'accepted');
+    assert.equal(settled?.summary, 'A bakery site with a menu page.');
+  });
+
   it('still reads a running turn with no build id as cancelled', async () => {
     // A chat turn, or a build never admitted: both ended with their page.
     const { session, asked } = createSession();

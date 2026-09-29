@@ -42,7 +42,7 @@ import {
   handleProjects,
 } from './project-handlers.ts';
 import type { ProjectLinks } from './project-handlers.ts';
-import { handleRun } from './run-control.ts';
+import { handleRun, settleStopped } from './run-control.ts';
 import {
   ProjectStore,
   liveSiteProjects,
@@ -59,6 +59,7 @@ import { POLL_INTERVAL_MS, stageFor, stepFor } from './run-stage.ts';
 import { RunProgress } from './run-progress.ts';
 import {
   positiveInt,
+  refusalFor,
   reserveAccount,
   reserveBudget,
   topupKeyFor,
@@ -86,10 +87,13 @@ import type { TokenPrices } from './spend.ts';
 import {
   BOUNDED_BUILD_INPUT_CHARS,
   MOCKUP_INPUT_CHARS,
+  buildFloorSize,
   carryTokensFor,
+  fitBuildToCaller,
   runCeilingFor,
   sizedReservation,
 } from './run-ceiling.ts';
+import type { BuildSize } from './run-ceiling.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
   allowancePeriodKey,
@@ -237,7 +241,9 @@ export interface Env {
    * meter shows the clock alone, which is what it showed before this
    * existed.
    */
-  RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'read'>>;
+  RUN_PROGRESS?: DurableObjectNamespace<
+    Pick<RunProgress, 'read' | 'hold' | 'claimSettlement'>
+  >;
   /**
    * Burst gates. Optional: they are per-location and documented as permissive,
    * so they are a speed bump in front of the ledger rather than the limit.
@@ -1103,10 +1109,11 @@ async function handlePlan(
           parsed.value.baseRevision,
         )
       : 0;
-  const sizeFor = (carryTokens: number) => {
+  const sizeFor = (carryTokens: number): BuildSize => {
     const ceiling = runCeilingFor(env, effectiveModel, 'build', carryTokens);
     return {
       ceiling,
+      inputChars: BOUNDED_BUILD_INPUT_CHARS,
       worstCase: worstCaseMicroUsd(
         ceiling.prices,
         ceiling.maxTokens,
@@ -1115,10 +1122,12 @@ async function handlePlan(
     };
   };
   // Assigned by the reservation below, which may settle on the ordinary
-  // size rather than the carried one (internal PR 210 review). Everything after it,
-  // the Workflow's params included, reads what was actually reserved.
+  // size rather than the carried one (internal PR 210 review), or on a smaller one
+  // sized to what the caller has left (`fittedBuildSize`). Everything after
+  // it, the Workflow's params included, reads what was actually reserved.
   let prices: TokenPrices;
   let maxTokens: number;
+  let inputChars: number;
   let worstCase: number;
 
   // Layer three: what the caller's own subscription actually buys them
@@ -1141,18 +1150,25 @@ async function handlePlan(
     }
     ({ monthlyAllowance, topupCeiling } = spendable);
 
-    const sized = await sizedReservation(carry, sizeFor, (amount) =>
-      reserveBudget(
-        env,
-        principal.userId,
-        amount,
-        monthlyAllowance,
-        topupCeiling,
-        now,
-      ),
+    const sized = await sizedReservation(
+      carry,
+      sizeFor,
+      (amount) =>
+        reserveBudget(
+          env,
+          principal.userId,
+          amount,
+          monthlyAllowance,
+          topupCeiling,
+          now,
+        ),
+      // A caller with less left than the whole run's worst case gets a
+      // smaller run rather than a refusal, down to the floor.
+      fitBuildToCaller(effectiveModel),
     );
     reserved = sized.reserved;
     ({ prices, maxTokens } = sized.ceiling);
+    inputChars = sized.inputChars;
     worstCase = sized.worstCase;
   } catch (error) {
     // Fail closed. A retry costs the user a minute; an unbounded endpoint on
@@ -1177,24 +1193,24 @@ async function handlePlan(
     // prose, so a caller could only tell them apart by reading the sentence,
     // and they lead somewhere completely different: one is resolved by
     // buying a top-up or waiting for the month to turn, the other by waiting
-    // about a minute.
-    const ceiling = reserved.verdict.reason === 'period-ceiling';
-    return refuse(
-      ceiling ? 'account-ceiling' : 'already-running',
-      ceiling
-        ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
-        : 'A generation is already running. Wait for it to finish.',
-      429,
+    // about a minute. What a build needs is the floor, since anything above
+    // it would have been admitted at a smaller size.
+    const refusal = refusalFor(
+      reserved,
+      'A build on this model',
+      buildFloorSize(sizeFor(0), effectiveModel).worstCase,
     );
+    return refuse(refusal.reason, refusal.error, 429);
   }
   const reservation = reserved.layers.user;
   // Reservations settle inside the Workflow itself now (generation-workflow.ts's
   // 'settle-budget' step), once the run's real usage is known -- `handlePlan`
   // no longer holds the model call in its own scope to settle around. A run
-  // this connection never sees complete (a crash, a terminated instance that
-  // never reached that step) still settles: it falls back to `budget.ts`'s
-  // existing abandoned-reservation reclaim, the same backstop a Worker dying
-  // mid-request already relied on.
+  // this connection never sees complete still settles. One that Stop
+  // terminated is settled by the Stop, at what the reclaim would charge
+  // (D60, recorded for it below); a crash, or an instance that errored
+  // before that step, falls back to `budget.ts`'s abandoned-reservation
+  // reclaim, the same backstop a Worker dying mid-request already relied on.
 
   const runId = crypto.randomUUID();
 
@@ -1258,6 +1274,28 @@ async function handlePlan(
     return new Response(null, { status: 499 });
   }
 
+  // Where Stop will find this reservation (D60). Stop has only the run's
+  // id, and it terminates the Workflow before the step that would settle
+  // this, so the rows it has to close are recorded against that id before
+  // the Workflow exists. A write that fails costs only the timing: a Stop
+  // then leaves the reservation to the reclaim, as every Stop did before.
+  if (env.RUN_PROGRESS) {
+    try {
+      await env.RUN_PROGRESS.getByName(runId).hold({
+        ...(reservation.id !== undefined
+          ? { reservationId: reservation.id }
+          : {}),
+        topup:
+          reserved.layers.userReservationKey === topupKeyFor(principal.userId),
+        ...(reserved.layers.account.id !== undefined
+          ? { accountReservationId: reserved.layers.account.id }
+          : {}),
+      });
+    } catch (error) {
+      console.error('failed to record where a run is reserved', error);
+    }
+  }
+
   let instance;
   try {
     instance = await env.GENERATION_WORKFLOW!.create({
@@ -1289,8 +1327,9 @@ async function handlePlan(
         prices,
         maxTokens,
         // The input the reservation above was priced for, across every
-        // call of the bounded build.
-        maxInputChars: BOUNDED_BUILD_INPUT_CHARS,
+        // call of the bounded build: the full figure, or the smaller one a
+        // caller with less left was fitted to.
+        maxInputChars: inputChars,
         // The figures this run was admitted on, carried so a repair turn
         // can hold its own reservation without reconstructing a Principal
         // inside the Workflow (internal issue 194).
@@ -1711,14 +1750,12 @@ async function handleMockups(
   }
 
   if (!reserved.ok) {
-    const ceiling = reserved.verdict.reason === 'period-ceiling';
-    return refuse(
-      ceiling ? 'account-ceiling' : 'already-running',
-      ceiling
-        ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
-        : 'A generation is already running. Wait for it to finish.',
-      429,
+    const refusal = refusalFor(
+      reserved,
+      'Three directions on this model',
+      worstCase,
     );
+    return refuse(refusal.reason, refusal.error, 429);
   }
 
   const settleParams = {
@@ -3112,12 +3149,27 @@ async function route(
       ...(instanceStatus ? { instanceStatus } : {}),
       ...(env.GENERATION_WORKFLOW
         ? {
+            instanceOutput: async (runId: string) =>
+              (await (await env.GENERATION_WORKFLOW!.get(runId)).status())
+                .output,
             terminate: async (runId: string) => {
               await (await env.GENERATION_WORKFLOW!.get(runId)).terminate();
             },
           }
         : {}),
       ...(env.IP_BURST ? { ipLimit: env.IP_BURST } : {}),
+      ...(env.RUN_PROGRESS && env.USER_BUDGET
+        ? {
+            settleStopped: async (runId: string, userId: string) => {
+              await settleStopped(
+                env.RUN_PROGRESS!.getByName(runId),
+                env.USER_BUDGET!,
+                userId,
+                runId,
+              );
+            },
+          }
+        : {}),
     });
   }
 

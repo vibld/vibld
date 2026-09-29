@@ -404,15 +404,22 @@ What this costs, accepted rather than solved here:
   Stop calls `DELETE /api/runs/:id` (`worker/run-control.ts`), which checks
   the run is the caller's, terminates the instance and marks its stage
   `cancelled`; `GET /api/runs/:id` is what the builder polls for a build it
-  is not streaming. A stage the engine left unended (an instance terminated
+  is not streaming, and for an accepted one it returns the code and the
+  summary the build ended with (the summary read from the Workflow
+  instance's result, D62). A stage the engine left unended (an instance terminated
   or errored between steps) is settled when either route, or the open,
   finds the instance has stopped.
 - **Cancelling stops the _next_ step, not the current one.** Termination
   lands at a step boundary; a Stop that arrives mid-model-call cannot stop
   that one call from finishing (or being billed for). With bounded steps (below)
-  the next boundary is at most one group of files away. `budget.ts`'s
-  abandoned-reservation reclaim is the backstop either way -- the same one a
-  Worker dying mid-request already relied on before this change.
+  the next boundary is at most one group of files away. The stopped run's
+  reservation is closed by the Stop itself, at what `budget.ts`'s
+  abandoned-reservation reclaim would have charged (every reserved
+  micro-dollar, at both layers), so its in-flight slot is free at once
+  rather than thirty-five minutes later (D60). The run's `RunProgress`
+  object records where the reservation is, and whichever of Stop and the
+  settle step asks first closes it. The reclaim is still the backstop for a
+  Stop that cannot reach the ledger.
 - **The browser still keeps its own working copy.** `BuilderSession` runs
   the lifecycle against an in-memory store and sends the revision it
   believes it is editing; the Worker reads the files from D1/R2 (internal issue 181) and
@@ -459,7 +466,13 @@ of its own:
   (`BOUNDED_BUILD_INPUT_CHARS`, four single-call builds' worth). The run is
   told both and refuses a call that would pass either, so it cannot spend
   past its reservation; it settles once, at the summed usage. A call that
-  reported nothing is counted at its own worst case.
+  reported nothing is counted at its own worst case. A caller whose own
+  allowance or top-up credit cannot hold the whole run (a Free account on
+  GPT-6 Sol) is reserved what they have left instead, and the run is told
+  the smaller budgets (`fittedBuildSize`, D59), down to a floor of one
+  outline call and one group call at their own ceilings, with two
+  single-call builds' worth of input (`buildFloorSize`). Below that it is
+  refused, and the refusal says how much is left and how much is needed.
 - **Time.** Each call fits its step's timeout at the model's measured speed
   (`callCeilingFor`). A whole run can take longer than one step, so every
   model step renews the reservation first (`UserBudget.touch`) and the

@@ -24,6 +24,7 @@ import {
   preflightRun,
   runGeneration,
   settleBudget,
+  stoppedFirst,
   touchReservation,
   traceOf,
   verifyAndRepair,
@@ -79,9 +80,10 @@ export type { WorkflowParams } from './generation-run.ts';
  *    building). Termination lands at the next step boundary, not mid-step
  *    -- a Stop that arrives while a model call is in flight cannot stop
  *    that one call from finishing (and being billed for). With bounded
- *    steps the next boundary is at most one group away. The budget
- *    ledger's own abandoned-reservation reclaim (`budget.ts`,
- *    `ABANDONED_AFTER_MS`) is the backstop either way.
+ *    steps the next boundary is at most one group away. Stop closes the
+ *    reservation itself, at what the ledger's abandoned-reservation reclaim
+ *    (`budget.ts`, `ABANDONED_AFTER_MS`) would charge (D60), and the
+ *    reclaim is the backstop where it cannot.
  *
  * This file only glues `step.do` to `generation-run.ts`'s pure functions --
  * see that file's own comment for why the split exists and where the tests
@@ -309,6 +311,23 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         timeout: '30 seconds',
       },
       async () => {
+        // Stop may have closed the reservation already, at what the
+        // reclaim charges (D60, `run-control.ts`). Termination normally
+        // means this step never runs, so this is the guard for the one
+        // that does, and it must not settle the same rows twice.
+        if (await stoppedFirst(channel)) {
+          console.log(
+            JSON.stringify({
+              event: 'generation.settled',
+              userId: params.userId,
+              model: params.model,
+              outcome: generation.outcome,
+              settledByStop: true,
+              microUsd: params.worstCaseMicroUsd,
+            }),
+          );
+          return params.worstCaseMicroUsd;
+        }
         const actual = await settleBudget(
           this.env.USER_BUDGET,
           params,

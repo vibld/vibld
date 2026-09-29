@@ -882,6 +882,7 @@ export class BuilderSession {
           state: 'accepted',
           revision: run.revision ?? null,
           ...(code ? { fileCount: code.files.length } : {}),
+          ...(run.summary ? { summary: run.summary } : {}),
         }),
         timeline: this.#append(
           state.timeline,

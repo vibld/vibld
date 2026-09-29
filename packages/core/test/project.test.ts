@@ -175,6 +175,23 @@ describe('settling a build the page did not see finish', () => {
     assert.deepEqual(settled[0], running[0], 'an earlier turn was rewritten');
   });
 
+  it('keeps what the build said it made, where the Worker could say', () => {
+    // A turn settled by asking used to read "9 files" and nothing else, and
+    // the agent was told only "Built it (9 files)".
+    const settled = reconciledTranscript(running, 'wf-2', {
+      state: 'accepted',
+      revision: 'r2',
+      fileCount: 9,
+      summary: 'A bakery site with a menu page.',
+    });
+    assert.equal(settled[1]!.summary, 'A bakery site with a menu page.');
+    const unsaid = reconciledTranscript(running, 'wf-2', {
+      state: 'accepted',
+      revision: 'r2',
+    });
+    assert.equal(unsaid[1]!.summary, running[1]!.summary);
+  });
+
   it('reads as failed or cancelled otherwise', () => {
     const failed = reconciledTranscript(running, 'wf-2', { state: 'failed' });
     assert.equal(failed[1]!.status, 'failed');

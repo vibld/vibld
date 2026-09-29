@@ -197,6 +197,52 @@ describe('what a run has to get past before it may start', () => {
     assert.equal(!outcome.ok && outcome.verdict.reason, 'period-ceiling');
   });
 
+  it('says which ceiling refused on money, and what was left under it', async () => {
+    // The two refusals read the same verdict and are different facts: one
+    // is the deployment's day, the other the caller's own money. The copy
+    // that said "used up" for both was wrong about each (D61).
+    const platform = await reserveBudget(
+      ledgerThat({ [ACCOUNT_BUDGET_KEY]: OVER }).env,
+      'user_1',
+      1_000,
+      5_000,
+      0,
+      NOW,
+    );
+    assert.ok(!platform.ok);
+    assert.deepEqual(platform.ceiling, { layer: 'account' });
+
+    const own = await reserveBudget(
+      ledgerThat({
+        [ACCOUNT_BUDGET_KEY]: ALLOW,
+        user_1: { ...OVER, spentMicroUsd: 4_200 },
+        [topupKeyFor('user_1')]: { ...OVER, spentMicroUsd: 300 },
+      }).env,
+      'user_1',
+      1_000,
+      5_000,
+      900,
+      NOW,
+    );
+    assert.ok(!own.ok);
+    assert.deepEqual(own.ceiling, {
+      layer: 'user',
+      allowanceLeftMicroUsd: 800,
+      topupLeftMicroUsd: 600,
+    });
+
+    const busy = await reserveBudget(
+      ledgerThat({ [ACCOUNT_BUDGET_KEY]: ALLOW, user_1: BUSY }).env,
+      'user_1',
+      1_000,
+      5_000,
+      0,
+      NOW,
+    );
+    assert.ok(!busy.ok);
+    assert.equal(busy.ceiling, undefined, 'a busy caller was told about money');
+  });
+
   it('holds the same worst case at every layer', async () => {
     // Three ceilings asked for three different amounts would be three
     // different runs as far as the ledger is concerned.

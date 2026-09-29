@@ -5,8 +5,17 @@ import { D1GenerationStore } from '../worker/generation-store.ts';
 import { handleProjects } from '../worker/project-handlers.ts';
 import { ProjectStore } from '../worker/project-store.ts';
 import type { PrincipalGranted } from '../worker/principal.ts';
-import { handleRun } from '../worker/run-control.ts';
+import { RUN_ABANDONED_AFTER_MS } from '@vibld/ai';
+
+import { UserBudget } from '../worker/budget.ts';
+import { stoppedFirst } from '../worker/generation-run.ts';
+import { reserveBudget, topupKeyFor } from '../worker/reserve.ts';
+import type { ReserveEnv } from '../worker/reserve.ts';
+import { handleRun, settleStopped } from '../worker/run-control.ts';
 import type { RunControlDeps } from '../worker/run-control.ts';
+import { RunProgress } from '../worker/run-progress.ts';
+import { ACCOUNT_BUDGET_KEY } from '../worker/spend.ts';
+import { fakeDurableObjectCtx } from './fakes/sqlite-do-storage.ts';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
@@ -35,8 +44,12 @@ interface World {
   /** What the Workflow engine would say of each instance. */
   instances: Map<string, string>;
   terminated: string[];
+  /** What the Workflow engine would give as each instance's result. */
+  outputs: Map<string, unknown>;
   /** Whether `terminate` refuses, as the engine does for a finished instance. */
   refuseTerminate: boolean;
+  /** How a stopped run's reservation is closed, where the test wires one. */
+  settleStopped?: RunControlDeps['settleStopped'];
   generation: D1GenerationStore;
   run(
     user: string,
@@ -52,11 +65,13 @@ async function world(): Promise<World> {
   const bucket = new InMemoryR2Bucket();
   const instances = new Map<string, string>();
   const terminated: string[] = [];
+  const outputs = new Map<string, unknown>();
   const generation = new D1GenerationStore(db, bucket);
   const w: World = {
     db,
     bucket,
     instances,
+    outputs,
     terminated,
     refuseTerminate: false,
     generation,
@@ -65,11 +80,13 @@ async function world(): Promise<World> {
         resolvePrincipal: async () =>
           ({ denied: null, principal: { userId: user } }) as PrincipalGranted,
         instanceStatus: async (runId) => instances.get(runId),
+        instanceOutput: async (runId) => outputs.get(runId),
         terminate: async (runId) => {
           if (w.refuseTerminate) throw new Error('instance is not running');
           terminated.push(runId);
           instances.set(runId, 'terminated');
         },
+        ...(w.settleStopped ? { settleStopped: w.settleStopped } : {}),
       };
       const response = await handleRun(
         new Request(`${ORIGIN}/api/runs/${id}`, {
@@ -260,6 +277,29 @@ describe('asking after a build', () => {
     assert.equal(asked.body.run.state, 'accepted');
     assert.equal(asked.body.run.revision, 'r1');
     assert.deepEqual(asked.body.snapshot, snapshot);
+    assert.equal(
+      'summary' in asked.body.run,
+      false,
+      'a summary with no result to read it from',
+    );
+
+    // What the build said it made, from the instance's own result, for a
+    // builder that was not streaming it. Only for the revision it describes.
+    w.outputs.set(RUN, {
+      state: 'accepted',
+      accepted: { revision: 'r1', files: [] },
+      summary: 'A bakery site.',
+    });
+    assert.equal(
+      (await w.run(ALICE, 'GET')).body.run.summary,
+      'A bakery site.',
+    );
+    w.outputs.set(RUN, {
+      state: 'accepted',
+      accepted: { revision: 'r0', files: [] },
+      summary: 'Something else.',
+    });
+    assert.equal('summary' in (await w.run(ALICE, 'GET')).body.run, false);
   });
 
   it('settles a build the engine terminated without writing its end', async () => {
@@ -317,5 +357,223 @@ describe('opening a project with a build still running', () => {
 
     assert.equal((await w.open(ALICE)).body.build, null);
     assert.equal(await w.stage(), 'cancelled', 'still planning after the open');
+  });
+});
+
+/**
+ * What a stopped build is charged, and when (D60).
+ *
+ * Stop terminates the Workflow before the step that settles its
+ * reservation, so the reservation used to stay open until the ledger's
+ * abandoned-run reclaim found it, about thirty-five minutes later, holding
+ * an in-flight slot the whole time. At two runs in flight, two Stops locked
+ * the account out. These run the real ledger and the real per-run record
+ * behind the real route.
+ */
+describe('the reservation of a stopped build', () => {
+  const MONTH = '2026-09';
+  const DAY = '2026-09-29';
+  const NOW = Date.UTC(2026, 8, 29, 4, 0, 0);
+  const WORST = 3_201_250;
+  const RUN_2 = '553ea6c7-0000-4000-8000-000000000002';
+
+  /** `USER_BUDGET` and `RUN_PROGRESS` as real objects over SQLite. */
+  function bindings() {
+    const make = <T>(create: () => T) => {
+      const objects = new Map<string, T>();
+      return {
+        objects,
+        getByName(key: string): T {
+          let object = objects.get(key);
+          if (!object) {
+            object = create();
+            objects.set(key, object);
+          }
+          return object;
+        },
+      };
+    };
+    const ledger = make(() => new UserBudget(fakeDurableObjectCtx(), {}));
+    const progress = make(() => new RunProgress(fakeDurableObjectCtx(), {}));
+    const env = {
+      USER_BUDGET: ledger as unknown as ReserveEnv['USER_BUDGET'],
+      VIBLD_MAX_IN_FLIGHT: '2',
+    } satisfies ReserveEnv;
+    return { ledger, progress, env };
+  }
+
+  /** What `handlePlan` does before the Workflow exists: reserve, and record where. */
+  async function admit(
+    b: ReturnType<typeof bindings>,
+    runId: string,
+    topup = 0,
+    allowance = 10_000_000,
+  ) {
+    const reserved = await reserveBudget(
+      b.env,
+      ALICE,
+      WORST,
+      allowance,
+      topup,
+      NOW,
+    );
+    if (!reserved.ok) return reserved;
+    b.progress.getByName(runId).hold({
+      reservationId: reserved.layers.user.id!,
+      topup: reserved.layers.userReservationKey === topupKeyFor(ALICE),
+      accountReservationId: reserved.layers.account.id!,
+    });
+    return reserved;
+  }
+
+  /** The route, wired to the ledger the way `index.ts` wires it. */
+  async function wired() {
+    const w = await world();
+    const b = bindings();
+    w.settleStopped = async (runId, userId) => {
+      await settleStopped(
+        b.progress.getByName(runId),
+        b.ledger as never,
+        userId,
+        runId,
+      );
+    };
+    return { w, b };
+  }
+
+  it('leaves the account able to build again after two stops in a row', async () => {
+    const { w, b } = await wired();
+    for (const runId of [RUN, RUN_2]) {
+      assert.equal((await admit(b, runId)).ok, true);
+      await started(w, runId);
+    }
+    // Two in flight: a third is refused, which is the ceiling working.
+    const third = await reserveBudget(b.env, ALICE, WORST, 10_000_000, 0, NOW);
+    assert.ok(!third.ok);
+    assert.equal(third.verdict.reason, 'too-many-in-flight');
+
+    assert.equal((await w.run(ALICE, 'DELETE', RUN)).status, 200);
+    assert.equal((await w.run(ALICE, 'DELETE', RUN_2)).status, 200);
+
+    const again = await reserveBudget(b.env, ALICE, WORST, 10_000_000, 0, NOW);
+    assert.equal(
+      again.ok,
+      true,
+      'two stops still hold the account out of building',
+    );
+    assert.equal(b.ledger.getByName(ALICE).usageFor(MONTH).inFlight, 1);
+  });
+
+  it('charges what the abandoned-run reclaim would have, at both layers', async () => {
+    // One ledger has its run stopped; the other has the same run left for
+    // the reclaim to find. The two must end on the same figures.
+    const { w, b } = await wired();
+    await admit(b, RUN);
+    await started(w, RUN);
+    await w.run(ALICE, 'DELETE', RUN);
+
+    const left = bindings();
+    await admit(left, RUN);
+    const clock = Date.now;
+    Date.now = () => clock() + RUN_ABANDONED_AFTER_MS + 1000;
+    try {
+      // Any later reservation runs the reclaim, on both ledgers it asks.
+      await reserveBudget(left.env, ALICE, 1, 10_000_000, 0, NOW);
+    } finally {
+      Date.now = clock;
+    }
+    const reclaimedOwn = left.ledger.getByName(ALICE).usageFor(MONTH);
+    const reclaimedAccount = left.ledger
+      .getByName(ACCOUNT_BUDGET_KEY)
+      .usageFor(DAY);
+
+    const stoppedOwn = b.ledger.getByName(ALICE).usageFor(MONTH);
+    const stoppedAccount = b.ledger.getByName(ACCOUNT_BUDGET_KEY).usageFor(DAY);
+    assert.equal(stoppedOwn.spentMicroUsd, WORST);
+    assert.equal(stoppedOwn.inFlight, 0, 'the stop left the run in flight');
+    assert.equal(stoppedAccount.inFlight, 0);
+    // The reclaiming ledger also holds the one-micro-dollar run that ran
+    // the reclaim, still in flight.
+    assert.equal(reclaimedOwn.spentMicroUsd - 1, stoppedOwn.spentMicroUsd);
+    assert.equal(
+      reclaimedAccount.spentMicroUsd - 1,
+      stoppedAccount.spentMicroUsd,
+    );
+  });
+
+  it('settles once however many times it is stopped', async () => {
+    const { w, b } = await wired();
+    await admit(b, RUN);
+    await started(w, RUN);
+
+    const reclaims: number[] = [];
+    const own = b.ledger.getByName(ALICE);
+    const reclaim = own.reclaim.bind(own);
+    own.reclaim = (id: number) => {
+      const charged = reclaim(id);
+      if (charged !== undefined) reclaims.push(charged);
+      return charged;
+    };
+
+    await w.run(ALICE, 'DELETE', RUN);
+    await w.run(ALICE, 'DELETE', RUN);
+    assert.deepEqual(reclaims, [WORST], 'a second stop settled again');
+    assert.equal(own.usageFor(MONTH).spentMicroUsd, WORST);
+  });
+
+  it('is not settled again by a Workflow that reaches its settle step anyway', async () => {
+    const { w, b } = await wired();
+    await admit(b, RUN);
+    await started(w, RUN);
+    await w.run(ALICE, 'DELETE', RUN);
+
+    assert.equal(
+      await stoppedFirst(b.progress.getByName(RUN)),
+      true,
+      'the settle step would close the stopped run a second time',
+    );
+  });
+
+  it('leaves a run the Workflow settled first exactly as it settled it', async () => {
+    // The settle step took the settlement and charged what it measured;
+    // a Stop that lands afterwards has nothing of its own to close.
+    const { w, b } = await wired();
+    const reserved = await admit(b, RUN);
+    assert.ok(reserved.ok);
+    await started(w, RUN);
+    assert.equal(await stoppedFirst(b.progress.getByName(RUN)), false);
+    b.ledger.getByName(ALICE).settle(reserved.layers.user.id!, 700_000);
+    b.ledger
+      .getByName(ACCOUNT_BUDGET_KEY)
+      .settle(reserved.layers.account.id!, 700_000);
+
+    await w.run(ALICE, 'DELETE', RUN);
+    assert.equal(
+      b.ledger.getByName(ALICE).usageFor(MONTH).spentMicroUsd,
+      700_000,
+      'the stop replaced a measured charge with the worst case',
+    );
+  });
+
+  it('closes a reservation drawn from top-up credit in the top-up ledger', async () => {
+    const { w, b } = await wired();
+    // No allowance left, so the run is held against top-up credit.
+    assert.equal((await admit(b, RUN, 5_000_000, 0)).ok, true);
+    await started(w, RUN);
+    await w.run(ALICE, 'DELETE', RUN);
+    const topup = b.ledger.getByName(topupKeyFor(ALICE)).usageFor('lifetime');
+    assert.equal(topup.inFlight, 0);
+    assert.equal(topup.spentMicroUsd, WORST);
+  });
+
+  it('answers the stop even when the ledger cannot be reached', async () => {
+    const { w } = await wired();
+    await started(w, RUN);
+    w.settleStopped = async () => {
+      throw new Error('ledger unreachable');
+    };
+    const stopped = await w.run(ALICE, 'DELETE', RUN);
+    assert.equal(stopped.status, 200);
+    assert.equal(stopped.body.run.state, 'cancelled');
   });
 });

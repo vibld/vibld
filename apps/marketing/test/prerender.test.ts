@@ -588,6 +588,29 @@ describe('internal links', () => {
     );
   });
 
+  /**
+   * The host answers "/how-it-works/" with a redirect to "/how-it-works",
+   * so a link written with the slash costs a crawler a hop and points at
+   * an address the sitemap does not list. The rule above strips the slash
+   * before comparing, which is why it never saw the stepper on
+   * /how-it-works doing exactly that.
+   */
+  it('never points at a page by an address the host redirects', () => {
+    const redirected: string[] = [];
+    for (const route of ROUTES) {
+      for (const href of internalLinks(read(route.path))) {
+        if (href !== '/' && href.endsWith('/')) {
+          redirected.push(`${route.path} -> ${href}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      redirected,
+      [],
+      `links with a trailing slash:\n${redirected.join('\n')}`,
+    );
+  });
+
   it('checks enough pages to mean something', () => {
     // The rule above passes trivially if the walk finds nothing, which is
     // exactly what a wrong CLIENT path would produce.

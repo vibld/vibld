@@ -22,7 +22,7 @@ import {
   parseChatRequest,
   parseModel,
 } from './request-guard.ts';
-import { reserveBudget } from './reserve.ts';
+import { refusalFor, reserveBudget } from './reserve.ts';
 import type { ReserveEnv } from './reserve.ts';
 import { CHAT_INPUT_CHARS, runCeilingFor } from './run-ceiling.ts';
 import type { RunCeilingEnv } from './run-ceiling.ts';
@@ -198,15 +198,12 @@ export async function handleChat(
     );
   }
 
+  // Not fitted to what the caller has left, as a build is: a turn is one
+  // call with its own small ceiling, and a brief it returns is built by
+  // `/api/plan`, which does its own fitting. Only the sentence changes.
   if (!reserved.ok) {
-    const ceiling = reserved.verdict.reason === 'period-ceiling';
-    return refuse(
-      ceiling ? 'account-ceiling' : 'already-running',
-      ceiling
-        ? "This month's generation budget is used up. Buy a top-up to keep going, or it resets on the 1st (UTC)."
-        : 'A generation is already running. Wait for it to finish.',
-      429,
-    );
+    const refusal = refusalFor(reserved, 'A reply on this model', worstCase);
+    return refuse(refusal.reason, refusal.error, 429);
   }
 
   const settleParams = {

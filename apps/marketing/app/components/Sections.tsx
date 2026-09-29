@@ -65,15 +65,9 @@ export function FlowStepper({ onPage = false }: { onPage?: boolean }) {
         <path className="lb-wave__run" d={path} />
       </svg>
       <ol>
-        {FLOW.map((step, index) => (
-          <li
-            key={step.id}
-            style={{ left: `${at[index]![0]}%`, top: `${at[index]![1]}%` }}
-            className={index % 4 < 2 ? 'is-up' : ''}
-          >
-            <Link
-              to={onPage ? `#step-${step.id}` : `/how-it-works#step-${step.id}`}
-            >
+        {FLOW.map((step, index) => {
+          const label = (
+            <>
               <span className="lb-wave__n" aria-hidden="true">
                 {String(index + 1).padStart(2, '0')}
               </span>
@@ -81,9 +75,28 @@ export function FlowStepper({ onPage = false }: { onPage?: boolean }) {
                 <span className="sr-only">Step {index + 1}: </span>
                 {step.short}
               </span>
-            </Link>
-          </li>
-        ))}
+            </>
+          );
+          return (
+            <li
+              key={step.id}
+              style={{ left: `${at[index]![0]}%`, top: `${at[index]![1]}%` }}
+              className={index % 4 < 2 ? 'is-up' : ''}
+            >
+              {/*
+                A plain fragment link on the page itself. A `Link` to "#..."
+                resolves against the route, which prerenders as
+                "/how-it-works/", so every stop pointed at an address the
+                host answers with a redirect.
+              */}
+              {onPage ? (
+                <a href={`#step-${step.id}`}>{label}</a>
+              ) : (
+                <Link to={`/how-it-works#step-${step.id}`}>{label}</Link>
+              )}
+            </li>
+          );
+        })}
       </ol>
     </nav>
   );

@@ -23,8 +23,11 @@
  */
 
 import {
+  GROUP_MAX_TOKENS,
+  OUTLINE_MAX_TOKENS,
   buildOutputBudgetFor,
   cacheRatesFor,
+  callCeilingFor,
   chatMaxTokensFor,
   findModel,
   mockupMaxTokensFor,
@@ -49,8 +52,10 @@ import {
 } from '@vibld/ai/limits';
 import type { GenerationStore } from '@vibld/core';
 
+import { largestReservable } from './reserve.ts';
+import type { ReserveOutcome } from './reserve.ts';
 import { DEFAULT_LIMITS } from './request-guard.ts';
-import { parsePrices } from './spend.ts';
+import { parsePrices, worstCaseMicroUsd } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 
 export interface RunCeilingEnv extends ProviderEnv {
@@ -263,12 +268,121 @@ export async function carryTokensFor(
   }
 }
 
-/** What `sizedReservation` settled on, and the reservation it got for it. */
-export interface SizedReservation<Reserved> {
-  reserved: Reserved;
+/**
+ * A build's size: its output ceiling, the input it may send across all its
+ * calls, and what the two cost together at worst. Always the three at once,
+ * for the reason this file exists: the Workflow is told the budgets the
+ * reservation was priced for, and a budget passed on without its price is
+ * how a run comes to outspend what it holds.
+ */
+export interface BuildSize {
   ceiling: RunCeiling;
+  inputChars: number;
   worstCase: number;
 }
+
+/**
+ * The smallest build worth starting: room for the outline and for one group
+ * of files, at the model's prices.
+ *
+ * Derived from the ceilings the run already holds each call to rather than
+ * chosen. The output is the outline's ceiling plus one group's, as
+ * `callCeilingFor` clamps them for this model, so both calls can be asked
+ * for everything they are allowed. The input is two single-call builds'
+ * worth (`BUILD_INPUT_CHARS`), one per call, the unit
+ * `BOUNDED_INPUT_MULTIPLE` already counts in: every term of it is
+ * something the request guard bounds, and it is what one call may carry of
+ * the caller's request.
+ *
+ * Neither side is ever larger than the full size it is a floor under.
+ */
+export function buildFloorSize(full: BuildSize, model: string): BuildSize {
+  const maxTokens = Math.min(
+    full.ceiling.maxTokens,
+    callCeilingFor(model, OUTLINE_MAX_TOKENS) +
+      callCeilingFor(model, GROUP_MAX_TOKENS),
+  );
+  const inputChars = Math.min(full.inputChars, 2 * BUILD_INPUT_CHARS);
+  return {
+    ceiling: { prices: full.ceiling.prices, maxTokens },
+    inputChars,
+    worstCase: worstCaseMicroUsd(full.ceiling.prices, maxTokens, inputChars),
+  };
+}
+
+/**
+ * A build sized to what the caller has left, or nothing below the floor
+ * (docs/decisions.md, "Resolved 2026-09-29").
+ *
+ * The whole-run reservation (internal PR 292) is the worst case of every call a bounded
+ * build may make, about $3.20 on GPT-6 Sol, while a real build there costs
+ * about seventy cents. So a Free account, a dollar a month, was refused the
+ * default model outright with its whole dollar unspent. This is the smaller
+ * reservation it gets instead, and the Workflow is told the smaller budgets
+ * with it: the run refuses any call that would pass either, so it cannot
+ * spend past what it holds, and one that runs out of room fails with the
+ * file it had reached named.
+ *
+ * Between the floor and the full size, both budgets grow by the same share
+ * of the distance between them, so a caller with nearly enough gets nearly
+ * the full run and the input and output stay in the proportion the full
+ * size has. The input is kept to whole tokens (`worstCaseMicroUsd` rounds
+ * it up), and whatever rounding is left is taken off the output, so the
+ * figure reserved is never more than `availableMicroUsd`.
+ */
+export function fittedBuildSize(
+  full: BuildSize,
+  model: string,
+  availableMicroUsd: number,
+): BuildSize | undefined {
+  if (availableMicroUsd >= full.worstCase) return full;
+  const floor = buildFloorSize(full, model);
+  if (availableMicroUsd < floor.worstCase) return undefined;
+  const share =
+    full.worstCase > floor.worstCase
+      ? (availableMicroUsd - floor.worstCase) /
+        (full.worstCase - floor.worstCase)
+      : 0;
+  const prices = full.ceiling.prices;
+  let maxTokens =
+    floor.ceiling.maxTokens +
+    Math.floor(share * (full.ceiling.maxTokens - floor.ceiling.maxTokens));
+  const inputChars =
+    floor.inputChars +
+    Math.floor((share * (full.inputChars - floor.inputChars)) / 4) * 4;
+  let worstCase = worstCaseMicroUsd(prices, maxTokens, inputChars);
+  if (worstCase > availableMicroUsd) {
+    maxTokens = Math.max(
+      floor.ceiling.maxTokens,
+      maxTokens -
+        Math.ceil((worstCase - availableMicroUsd) / prices.outputMicroUsd),
+    );
+    worstCase = worstCaseMicroUsd(prices, maxTokens, inputChars);
+  }
+  if (worstCase > availableMicroUsd) return undefined;
+  return { ceiling: { prices, maxTokens }, inputChars, worstCase };
+}
+
+/**
+ * What `handlePlan` makes of a budget refusal of the ordinary size: a build
+ * fitted to what the caller's own ledger has left, or nothing.
+ *
+ * Only the caller's own ledger is fitted to. A refusal by the deployment's
+ * daily ceiling (L29) stands as it is: that money is not the caller's, and
+ * squeezing a smaller run in under it is not something anybody decided.
+ */
+export function fitBuildToCaller(model: string) {
+  return (
+    refused: Extract<ReserveOutcome, { ok: false }>,
+    ordinary: BuildSize,
+  ): BuildSize | undefined =>
+    refused.ceiling?.layer === 'user'
+      ? fittedBuildSize(ordinary, model, largestReservable(refused.ceiling))
+      : undefined;
+}
+
+/** What `sizedReservation` settled on, and the reservation it got for it. */
+export type SizedReservation<Reserved, Sized> = Sized & { reserved: Reserved };
 
 /**
  * Reserve for a follow-up at the size it needs, and at the size a first run
@@ -288,10 +402,17 @@ export interface SizedReservation<Reserved> {
  * were out of budget instead of that their project had moved. Falling back
  * lets the run start and say the true thing.
  *
+ * And one step further down, where `fit` is given: a budget refusal of the
+ * ordinary size is answered with whatever `fit` makes of the refusal, which
+ * for a build is a smaller run sized to what the caller has left
+ * (`fittedBuildSize`). `fit` saying nothing means there is nothing smaller
+ * worth asking for, and the refusal stands.
+ *
  * Only on a budget refusal. `too-many-in-flight` is a different fact, and
  * asking again for less would not change it.
  */
 export async function sizedReservation<
+  Sized extends { worstCase: number },
   Reserved extends
     | { ok: true }
     | {
@@ -300,18 +421,29 @@ export async function sizedReservation<
       },
 >(
   carry: number,
-  sizeFor: (carryTokens: number) => { ceiling: RunCeiling; worstCase: number },
+  sizeFor: (carryTokens: number) => Sized,
   reserve: (worstCase: number) => Promise<Reserved>,
-): Promise<SizedReservation<Reserved>> {
-  const sized = sizeFor(carry);
-  const reserved = await reserve(sized.worstCase);
-  if (
-    reserved.ok ||
-    reserved.verdict.reason !== 'period-ceiling' ||
-    carry <= 0
-  ) {
-    return { reserved, ...sized };
+  fit?: (
+    refused: Extract<Reserved, { ok: false }>,
+    ordinary: Sized,
+  ) => Sized | undefined,
+): Promise<SizedReservation<Reserved, Sized>> {
+  const refusedOnMoney = (
+    reserved: Reserved,
+  ): reserved is Extract<Reserved, { ok: false }> =>
+    !reserved.ok && reserved.verdict.reason === 'period-ceiling';
+
+  let sized = sizeFor(carry);
+  let reserved = await reserve(sized.worstCase);
+  if (refusedOnMoney(reserved) && carry > 0) {
+    sized = sizeFor(0);
+    reserved = await reserve(sized.worstCase);
   }
-  const ordinary = sizeFor(0);
-  return { reserved: await reserve(ordinary.worstCase), ...ordinary };
+  if (refusedOnMoney(reserved) && fit) {
+    const smaller = fit(reserved, sized);
+    if (smaller && smaller.worstCase < sized.worstCase) {
+      return { ...smaller, reserved: await reserve(smaller.worstCase) };
+    }
+  }
+  return { ...sized, reserved };
 }

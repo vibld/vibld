@@ -37,7 +37,7 @@ import { createValidator } from '../src/generation/validator.ts';
 import { ACCOUNT_BUDGET_KEY, microUsdOf } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 import type { UserBudget } from './budget.ts';
-import type { RunProgress } from './run-progress.ts';
+import type { HoldClaim, HoldSettler, RunProgress } from './run-progress.ts';
 import type { ServiceBinding } from './publish-client.ts';
 import {
   askWhileBusy,
@@ -557,7 +557,9 @@ export interface GenerationWorkflowEnv {
    * the meter falls back to the clock alone, which is what it showed before
    * this channel existed.
    */
-  RUN_PROGRESS?: DurableObjectNamespace<Pick<RunProgress, 'report' | 'finish'>>;
+  RUN_PROGRESS?: DurableObjectNamespace<
+    Pick<RunProgress, 'report' | 'finish' | 'claimSettlement'>
+  >;
   /**
    * `@vibld/preview`, for building the project the run just produced (internal issue 194).
    *
@@ -1038,6 +1040,39 @@ export async function touchReservation(
       }
     }),
   );
+}
+
+/**
+ * Whether Stop has already closed this run's reservation, asked by the
+ * settle step before it settles (D60).
+ *
+ * Stop terminates the Workflow and then closes the reservation itself, at
+ * what the reclaim would charge, so a run that reaches its settle step all
+ * the same must not close it a second time. Asking is also what takes the
+ * settlement for the step, so a Stop that arrives after this finds it
+ * taken and leaves it to the step.
+ *
+ * `false` for everything but a Stop that got there first: no channel, a run
+ * with no hold recorded, and a channel that could not be asked. The last is
+ * the conservative reading, not a careless one. The ledger's `settle`
+ * overwrites rather than adds, so settling after a Stop that did close it
+ * replaces the reclaim's figure with the one measured, which is never more,
+ * and never charges twice.
+ */
+export async function stoppedFirst(
+  channel:
+    | { claimSettlement(by: HoldSettler): HoldClaim | Promise<HoldClaim> }
+    | undefined,
+): Promise<boolean> {
+  if (!channel) return false;
+  try {
+    return (await channel.claimSettlement('workflow')).claimed === 'taken';
+  } catch (error) {
+    console.error('could not ask whether a run was stopped', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 /** What the model steps of a run need beyond its params. */

@@ -141,6 +141,8 @@ export interface BuildRun {
   startedAt: string;
   /** The revision it was accepted at, for `accepted`. */
   revision?: string | null;
+  /** What the build says it made, for `accepted`, where the Worker can say. */
+  summary?: string;
 }
 
 export type BuildAnswer =
@@ -207,9 +209,15 @@ async function buildCall(
     return { ok: false, message: fallback };
   }
   const code = body.snapshot as ProjectSnapshot | null | undefined;
+  // Kept only as a string: anything else in its place is dropped rather
+  // than shown.
+  const { summary, ...rest } = run;
   return {
     ok: true,
-    run,
+    run:
+      typeof summary === 'string' && summary.length > 0
+        ? { ...rest, summary }
+        : rest,
     snapshot:
       code && typeof code.revision === 'string' && Array.isArray(code.files)
         ? code

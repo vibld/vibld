@@ -1,9 +1,13 @@
 import { runIdInPath } from './access-gate.ts';
+import type { UserBudget } from './budget.ts';
 import { D1GenerationStore } from './generation-store.ts';
 import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
 import { ProjectStore, RUN_IN_FLIGHT_MS } from './project-store.ts';
 import type { RunStageRow } from './project-store.ts';
 import { isProjectId } from './request-guard.ts';
+import { topupKeyFor } from './reserve.ts';
+import type { HoldClaim, HoldSettler } from './run-progress.ts';
+import { ACCOUNT_BUDGET_KEY } from './spend.ts';
 
 /**
  * `/api/runs/:id`: one of the caller's builds, asked after and stopped
@@ -46,8 +50,21 @@ export interface RunControlDeps {
    * there is no Workflow binding.
    */
   instanceStatus?: (runId: string) => Promise<string | undefined>;
+  /**
+   * The Workflow instance's result (`status().output`), or undefined where
+   * it cannot be read. Only its summary is used. Absent where there is no
+   * Workflow binding.
+   */
+  instanceOutput?: (runId: string) => Promise<unknown>;
   /** Terminate the Workflow instance. Absent where there is no binding. */
   terminate?: (runId: string) => Promise<void>;
+  /**
+   * Close the reservation of a run this route stopped (`settleStopped`,
+   * D60). Absent where there is no ledger or no progress channel to find
+   * the reservation in, and the abandoned-reservation reclaim closes it
+   * later, as it always did.
+   */
+  settleStopped?: (runId: string, userId: string) => Promise<void>;
   /** The per-address limiter a stop is counted against (`IP_BURST`). */
   ipLimit?: RateLimit;
   now?: () => Date;
@@ -63,6 +80,12 @@ export interface RunView {
   startedAt: string;
   /** The revision it was accepted at, for `accepted`. */
   revision?: string | null;
+  /**
+   * What the build says it made, for `accepted`: the same sentence the
+   * stream ends with, for a builder that was not streaming it. Absent where
+   * the instance can no longer say.
+   */
+  summary?: string;
 }
 
 /** What `WorkflowInstance.status()` says of an instance that has stopped. */
@@ -166,6 +189,38 @@ export async function describeRun(
  * so opening a project is also what settles a run the engine stopped
  * without writing its end (`describeRun`).
  */
+/**
+ * The summary a build ended with, read from its Workflow instance's result,
+ * where that result is the revision the run was accepted at.
+ *
+ * Not stored anywhere of this service's own: the stage row has no column
+ * for it, and the instance already holds it for as long as the engine keeps
+ * the instance. A builder that asks after that gets the build without a
+ * summary, which is what every one got before this.
+ */
+async function summaryOf(
+  deps: Pick<RunControlDeps, 'instanceOutput'>,
+  runId: string,
+  revision: string | null | undefined,
+): Promise<string | undefined> {
+  if (!deps.instanceOutput || !revision) return undefined;
+  let output: unknown;
+  try {
+    output = await deps.instanceOutput(runId);
+  } catch {
+    return undefined;
+  }
+  if (typeof output !== 'object' || output === null) return undefined;
+  const result = output as {
+    accepted?: { revision?: unknown };
+    summary?: unknown;
+  };
+  if (result.accepted?.revision !== revision) return undefined;
+  return typeof result.summary === 'string' && result.summary.length > 0
+    ? result.summary
+    : undefined;
+}
+
 export async function buildInFlight(
   projects: ProjectStore,
   generation: Pick<D1GenerationStore, 'settleRun'>,
@@ -187,6 +242,77 @@ export async function buildInFlight(
     }
   }
   return null;
+}
+
+/**
+ * Close a stopped run's reservation, at what the reclaim would charge for
+ * it, now rather than in thirty-five minutes (D60).
+ *
+ * Stop terminates the Workflow before its `settle-budget` step, so the
+ * reservation it held, against the caller's ledger and the deployment's,
+ * used to stay open until `UserBudget.reserve` reclaimed it after
+ * `RUN_ABANDONED_AFTER_MS`. Open, it held an in-flight slot, and at
+ * `VIBLD_MAX_IN_FLIGHT=2` two Stops locked a caller out. The reclaim
+ * charges each row what it reserved, and so does this (`UserBudget.reclaim`
+ * is the same statement for one row): the only change is when.
+ *
+ * The run's own record says where the reservation is (`RunProgress.hold`).
+ * Taking it for Stop is what keeps the settle step from closing it again if
+ * the Workflow reaches that step anyway; a second Stop takes it again and
+ * finds both rows already closed, which changes nothing. Each layer is
+ * closed on its own, so a ledger that fails for one does not keep the other
+ * open; one that fails is left to the reclaim, as before.
+ *
+ * Returns what the caller's own layer was charged, or nothing where this
+ * Stop closed nothing of theirs.
+ */
+export async function settleStopped(
+  /** The run's own `RunProgress`, as its stub or the object itself. */
+  channel: {
+    claimSettlement(by: HoldSettler): HoldClaim | Promise<HoldClaim>;
+  },
+  ledger: DurableObjectNamespace<Pick<UserBudget, 'reclaim'>>,
+  userId: string,
+  runId: string,
+): Promise<number | undefined> {
+  const claim = await channel.claimSettlement('stop');
+  if (claim.claimed !== 'yours') return undefined;
+  const { hold } = claim;
+  const close = async (key: string, id: number | undefined) => {
+    if (id === undefined) return undefined;
+    return ledger.getByName(key).reclaim(id);
+  };
+  const [own, account] = await Promise.allSettled([
+    close(hold.topup ? topupKeyFor(userId) : userId, hold.reservationId),
+    close(ACCOUNT_BUDGET_KEY, hold.accountReservationId),
+  ]);
+  for (const [layer, result] of [
+    ['user', own],
+    ['account', account],
+  ] as const) {
+    if (result.status === 'rejected') {
+      console.error('could not settle a stopped run', {
+        runId,
+        layer,
+        error:
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason),
+      });
+    }
+  }
+  const charged = own.status === 'fulfilled' ? own.value : undefined;
+  if (charged !== undefined) {
+    console.log(
+      JSON.stringify({
+        event: 'generation.stopped',
+        userId,
+        runId,
+        microUsd: charged,
+      }),
+    );
+  }
+  return charged;
 }
 
 export async function handleRun(
@@ -249,14 +375,19 @@ export async function handleRun(
     // for the whole project again would be a second request for the same
     // thing.
     let snapshot = null;
+    let summary: string | undefined;
     if (view.state === 'accepted') {
       const rows = await load();
       const accepted = await generation.loadAccepted(rows[0]!.project_id);
       if (accepted && accepted.revision === view.revision) {
         snapshot = { revision: accepted.revision, files: accepted.files };
       }
+      // What the build said it made, which a builder settling the turn by
+      // asking would otherwise not have: its turn read "9 files", and the
+      // conversation told the agent "Built it (9 files)".
+      summary = await summaryOf(deps, runId, view.revision);
     }
-    return json({ run: view, snapshot });
+    return json({ run: summary ? { ...view, summary } : view, snapshot });
   }
 
   // DELETE: stop it.
@@ -292,5 +423,20 @@ export async function handleRun(
   }
   // Idempotent: a build that had already ended is answered with how it
   // ended, and a second stop is answered like the first.
-  return json({ run: viewOf(runId, await load()) });
+  const view = viewOf(runId, await load());
+  // Only a run that is cancelled, which only a stop makes it: one that
+  // finished settled what it measured, and one that failed is not this
+  // route's to charge. Asked again on a second stop, so one whose first
+  // settlement failed gets another try, and one that succeeded is left
+  // exactly as it is.
+  if (view.state === 'cancelled' && deps.settleStopped) {
+    try {
+      await deps.settleStopped(runId, userId);
+    } catch (error) {
+      // The build is stopped either way, and the reclaim still closes what
+      // this could not. Telling the caller the stop failed would be false.
+      console.error('could not settle a stopped run', { runId, error });
+    }
+  }
+  return json({ run: view });
 }

@@ -255,6 +255,68 @@ accepted, failed or cancelled. A page whose stream drops does the same
 instead of reporting a failure. A stage the engine left unended is settled
 when the build is next asked after or its project opened.
 
+**A build the caller cannot fully fund starts smaller instead of being
+refused.** Taken overnight on 2026-09-29 on Chris's behalf, while he was
+away, after an end-to-end test found that internal PR 292 had locked every Free account
+out of the default model; Chris may reverse it (D59). A build on GPT-6 Sol
+reserves about $3.20, the worst case of every call it may make, while a
+normal one costs about $0.70, so a Free account's dollar was refused with
+`period-ceiling` before anything was spent. Now, when the caller's own ledger
+refuses the whole run, `handlePlan` reserves what they have left instead (the
+larger of the month's allowance and their top-up credit, since one
+reservation is drawn from one of them, never both) and tells the Workflow
+the smaller output and input budgets, so the run still cannot spend past
+what it holds and fails with the file it reached named if it runs out. The
+floor is one outline call and one group call at the ceilings each call is
+already held to (16,000 and 32,000 output tokens, clamped per model by
+`callCeilingFor`) and two single-call builds' worth of input
+(`BUILD_INPUT_CHARS` per call): about $0.80 on Sol. Below it the build is
+refused. Between the floor and the full size, the output and input budgets
+grow by the same share of the distance. A refusal by the deployment's daily
+ceiling is never fitted to and stands as it is. Chat turns and mockups keep
+their one reservation: a chat turn never builds, and the brief it returns is
+built through `/api/plan`, which does the fitting.
+
+**Stop closes the build's reservation at once, at what the reclaim would
+have charged.** Taken overnight on 2026-09-29 on Chris's behalf; Chris may
+reverse it (D60). Stop terminates the Workflow before its settle step, so a
+stopped build's reservation stayed open until the ledger reclaimed it about
+thirty-five minutes later, holding an in-flight slot all that time: with two
+runs allowed in flight, two Stops refused the next build with "A generation
+is already running". Stop now closes both layers itself, the caller's and
+the deployment's, and charges each exactly what the reclaim charges, the
+whole amount reserved (`UserBudget.reclaim`, the reclaim's own statement for
+one row), so only the timing changes. Where the reservation is gets recorded
+against the run id in the run's own `RunProgress` object, one small row and
+no migration; whichever of Stop and the Workflow's settle step asks first
+closes it, and the other leaves it alone. A stopped build is therefore still
+charged its full reservation, as it was before this: charging only what its
+finished steps measured would be cheaper for the caller, and is Chris's
+decision to make.
+
+**A money refusal says which ceiling refused, and how much is left.** Taken
+overnight on 2026-09-29 on Chris's behalf; Chris may reverse it (D61). "This
+month's generation budget is used up" was shown to callers whose allowance
+was not used up, only smaller than one run's worst case, and for the
+deployment's daily ceiling, which is not theirs at all. The caller's own
+ceiling now says how much the allowance (and any top-up credit) has left,
+how much the build, the three directions or the chat reply needs set aside,
+and to choose a cheaper model or buy a top-up. The daily ceiling says
+Vibld has reached its spending limit for today and that generations resume
+after midnight UTC. Both keep the `account-ceiling` reason, because the
+client does nothing with it but show the sentence; no code was added.
+
+**A build settled by asking keeps its summary.** Taken overnight on
+2026-09-29 on Chris's behalf; Chris may reverse it (D62). A turn the builder
+settled by polling `GET /api/runs/:id`, after a dropped stream or a reopened
+project, showed only its file count and revision, and the chat context told
+the agent "Built it (9 files)", because the Worker never stored the build's
+summary. The route now returns it for an accepted build, read from the
+Workflow instance's own result where that result is the accepted revision,
+and the builder puts it on the turn as the stream would have. Nothing new is
+stored: once the engine no longer keeps the instance, a build asked after
+has no summary, as before.
+
 ### Resolved 2026-09-28
 
 **The legal pages carry Chris's decisions for the open paid beta.** Chris

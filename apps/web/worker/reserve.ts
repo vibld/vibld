@@ -72,6 +72,59 @@ export interface BudgetLayers {
 /** Only ever constructed from a verdict already known to deny the run. */
 export type DeniedVerdict = Extract<SpendVerdict, { allow: false }>;
 
+/**
+ * Which ceiling refused a run on money, and what was left under it.
+ *
+ * `period-ceiling` is one verdict for two different facts, and the copy
+ * that answered it said the same thing for both: "this month's generation
+ * budget is used up". That was wrong twice over. The deployment's daily
+ * ceiling (L29) refuses with the same verdict, and it is not the caller's
+ * budget at all; and a caller's own ledger refuses whenever the worst case
+ * does not fit in what is left, which is not the same as nothing being
+ * left. A Free account with its whole dollar was told it had spent it.
+ *
+ * The account layer's own headroom is deliberately not reported: what the
+ * whole deployment has left today is not the caller's business, and not
+ * something they can act on.
+ */
+export type CeilingRefusal =
+  | { layer: 'account' }
+  | {
+      layer: 'user';
+      /** What is left of this period's allowance, never below zero. */
+      allowanceLeftMicroUsd: number;
+      /**
+       * What is left of the caller's top-up credit, where they have any and
+       * it was asked. Absent when they have none.
+       */
+      topupLeftMicroUsd?: number;
+    };
+
+export type ReserveOutcome =
+  | { ok: true; layers: BudgetLayers }
+  | {
+      ok: false;
+      verdict: DeniedVerdict;
+      /** Present exactly when `verdict.reason` is `period-ceiling`. */
+      ceiling?: CeilingRefusal;
+    };
+
+/**
+ * The largest single reservation the caller's own ledger could still admit.
+ *
+ * The larger of the two buckets rather than their sum, because a
+ * reservation is drawn from one of them and never split across both
+ * (`reserveBudget`). A figure that added them would size a run the ledger
+ * then refuses.
+ */
+export function largestReservable(refusal: CeilingRefusal): number {
+  if (refusal.layer !== 'user') return 0;
+  return Math.max(
+    refusal.allowanceLeftMicroUsd,
+    refusal.topupLeftMicroUsd ?? 0,
+  );
+}
+
 export function topupKeyFor(userId: string): string {
   return `${userId}:topup`;
 }
@@ -136,13 +189,17 @@ export async function reserveBudget(
    * test is not a bound anybody would keep.
    */
   within: number = LEDGER_CALL_TIMEOUT_MS,
-): Promise<
-  { ok: true; layers: BudgetLayers } | { ok: false; verdict: DeniedVerdict }
-> {
+): Promise<ReserveOutcome> {
   const ledger = env.USER_BUDGET!;
   const account = await reserveAccount(env, worstCase, now);
   if (!account.verdict.allow) {
-    return { ok: false, verdict: account.verdict };
+    return {
+      ok: false,
+      verdict: account.verdict,
+      ...(account.verdict.reason === 'period-ceiling'
+        ? { ceiling: { layer: 'account' } as const }
+        : {}),
+    };
   }
 
   const releaseAccount = async () => {
@@ -233,9 +290,24 @@ export async function reserveBudget(
   // A top-up buys more spend, not more in-flight runs: concurrency is only
   // ever gated by the primary bucket, so this denial is final regardless of
   // top-up balance.
-  if (primary.verdict.reason === 'too-many-in-flight' || topupCeiling <= 0) {
+  if (primary.verdict.reason === 'too-many-in-flight') {
     await giveBackAccount();
     return { ok: false, verdict: primary.verdict };
+  }
+  // What was left under the allowance when it refused. `spentMicroUsd` on a
+  // refusal is what the period holds, runs still in flight included, which
+  // is exactly what a smaller reservation would have to fit beside.
+  const allowanceLeftMicroUsd = Math.max(
+    0,
+    monthlyAllowance - primary.spentMicroUsd,
+  );
+  if (topupCeiling <= 0) {
+    await giveBackAccount();
+    return {
+      ok: false,
+      verdict: primary.verdict,
+      ceiling: { layer: 'user', allowanceLeftMicroUsd },
+    };
   }
 
   // The monthly allowance is exhausted -- try the caller's top-up balance
@@ -259,6 +331,80 @@ export async function reserveBudget(
   await giveBackAccount();
   // The monthly-allowance denial is the one worth reporting: it is what a
   // top-up would have fixed, whereas the top-up bucket's own denial is just
-  // "also not enough" and says nothing new.
-  return { ok: false, verdict: primary.verdict };
+  // "also not enough" and says nothing new. What is left in both is
+  // reported, since either could hold a smaller run.
+  return {
+    ok: false,
+    verdict: primary.verdict,
+    ceiling: {
+      layer: 'user',
+      allowanceLeftMicroUsd,
+      topupLeftMicroUsd: Math.max(0, topupCeiling - topup.spentMicroUsd),
+    },
+  };
+}
+
+/** Dollars and cents, rounded the way `direction` says. */
+function dollars(microUsd: number, direction: 'up' | 'down'): string {
+  const cents =
+    direction === 'up'
+      ? Math.ceil(microUsd / 10_000)
+      : Math.floor(microUsd / 10_000);
+  return `$${(Math.max(0, cents) / 100).toFixed(2)}`;
+}
+
+/**
+ * The refusal a caller is shown when a reservation was not admitted, as the
+ * `reason` code the client already reads and the sentence it displays.
+ *
+ * The codes are unchanged: both money refusals are still `account-ceiling`,
+ * because the client does nothing different for them but show the
+ * sentence, and the sentence is what was wrong. It now says which ceiling
+ * refused and, for the caller's own, how much is left against how much
+ * `what` needs set aside. The figure needed is rounded up and the figure
+ * left rounded down, so the two can never read as equal when one did not
+ * fit in the other.
+ *
+ * Shared by every route that reserves, so the build, the mockups and the
+ * chat turn cannot come to describe the same ledger three different ways.
+ */
+export function refusalFor(
+  denied: Extract<ReserveOutcome, { ok: false }>,
+  /** What was being paid for, as the subject of a sentence. */
+  what: string,
+  /** The least that would have been admitted, in micro-USD. */
+  neededMicroUsd: number,
+): { reason: 'account-ceiling' | 'already-running'; error: string } {
+  if (denied.verdict.reason === 'too-many-in-flight') {
+    return {
+      reason: 'already-running',
+      error: 'A generation is already running. Wait for it to finish.',
+    };
+  }
+  const ceiling = denied.ceiling;
+  if (ceiling?.layer === 'account') {
+    return {
+      reason: 'account-ceiling',
+      error:
+        'Vibld has reached its spending limit for today, so new generations are paused until midnight UTC. Your own allowance was not touched.',
+    };
+  }
+  const needed = dollars(neededMicroUsd, 'up');
+  if (!ceiling) {
+    // Not reachable from `reserveBudget`, which always says which layer
+    // refused on money. Worded so it is true whichever it was.
+    return {
+      reason: 'account-ceiling',
+      error: `${what} needs ${needed} set aside, and there is not that much left to spend right now. Choose a cheaper model, or buy a top-up.`,
+    };
+  }
+  const allowance = dollars(ceiling.allowanceLeftMicroUsd, 'down');
+  const left =
+    ceiling.topupLeftMicroUsd === undefined
+      ? `this month's allowance has ${allowance} left`
+      : `this month's allowance has ${allowance} left and your top-up credit ${dollars(ceiling.topupLeftMicroUsd, 'down')}`;
+  return {
+    reason: 'account-ceiling',
+    error: `${what} needs at least ${needed} set aside, and ${left}. Choose a cheaper model or buy a top-up; the allowance resets on the 1st (UTC).`,
+  };
 }
