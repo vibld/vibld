@@ -10,6 +10,7 @@ import {
   leftoverThrowaways,
   maskEmail,
   redact,
+  retryDelayMs,
   spendable,
   spentBetween,
   THROWAWAY_KEY,
@@ -152,4 +153,12 @@ test('credentials are blanked before anything is logged', () => {
 test('an address is shown without giving it away', () => {
   assert.equal(maskEmail('chris+clerk_test@vibld.com'), 'ch…@vibld.com');
   assert.equal(maskEmail(''), '(no address)');
+});
+
+test('a 429 waits what Retry-After asks, or a doubling two seconds, at most twenty', () => {
+  assert.equal(retryDelayMs('3', 0), 3000);
+  assert.equal(retryDelayMs(null, 0), 2000);
+  assert.equal(retryDelayMs(null, 2), 8000);
+  assert.equal(retryDelayMs('600', 0), 20_000);
+  assert.equal(retryDelayMs('soon', 1), 4000);
 });

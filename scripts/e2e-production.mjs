@@ -361,32 +361,81 @@ function until(check, { timeoutMs, intervalMs = 2_000, what }) {
 }
 
 /**
+ * Every 429 an API call met, with what says where it came from: the
+ * Worker's own refusals are JSON with a `reason`, while a limit in front of
+ * it (a zone rule at Cloudflare's edge) answers with a page of its own.
+ * Run 36579908217 met one whose body was not JSON, and nothing recorded
+ * which it was. Headers and a short start of the body only; no token is in
+ * either.
+ */
+export const rateLimited = [];
+
+/** How long to wait before retrying a 429, in milliseconds. */
+export function retryDelayMs(retryAfter, attempt) {
+  const seconds = Number(retryAfter);
+  const base =
+    Number.isFinite(seconds) && seconds > 0
+      ? seconds * 1000
+      : 2000 * 2 ** attempt;
+  return Math.min(base, 20_000);
+}
+
+/**
  * A call to the app's own API from inside a page, with that page's Clerk
- * session. The token never leaves the browser: only the status and the
- * body come back.
+ * session. The token never leaves the browser: only the status, the body
+ * and, for a 429, the headers that say who sent it come back.
+ *
+ * A 429 is retried up to three times, waiting what `Retry-After` asks or
+ * a doubling two seconds, at most twenty: a run from one runner fires its
+ * requests faster than a person does, and a limit meant for floods is not
+ * what this journey tests.
  */
 async function api(page, path, { method = 'GET', body } = {}) {
-  return page.evaluate(
-    async ({ path, method, body }) => {
-      const token = await window.Clerk?.session?.getToken();
-      const response = await fetch(path, {
-        method,
-        headers: {
-          ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      });
-      let json = null;
-      try {
-        json = await response.json();
-      } catch {
-        json = null;
-      }
-      return { status: response.status, json };
-    },
-    { path, method, body },
-  );
+  for (let attempt = 0; ; attempt += 1) {
+    const result = await page.evaluate(
+      async ({ path, method, body }) => {
+        const token = await window.Clerk?.session?.getToken();
+        const response = await fetch(path, {
+          method,
+          headers: {
+            ...(body !== undefined
+              ? { 'content-type': 'application/json' }
+              : {}),
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        });
+        const text = await response.text();
+        let json = null;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = null;
+        }
+        const limited =
+          response.status === 429
+            ? {
+                server: response.headers.get('server'),
+                cfRay: response.headers.get('cf-ray'),
+                contentType: response.headers.get('content-type'),
+                retryAfter: response.headers.get('retry-after'),
+                reason: json?.reason ?? null,
+                bodyStart: text.slice(0, 160),
+              }
+            : null;
+        return { status: response.status, json, limited };
+      },
+      { path, method, body },
+    );
+    if (result.status !== 429) {
+      return { status: result.status, json: result.json };
+    }
+    rateLimited.push({ path, method, attempt, ...result.limited });
+    if (attempt >= 3) return { status: result.status, json: result.json };
+    const wait = retryDelayMs(result.limited?.retryAfter, attempt);
+    log(`  ${method} ${path} answered 429; retrying in ${wait}ms`);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
 }
 
 /** The label of the first locator to become visible, polling. */
@@ -1394,6 +1443,7 @@ async function main() {
   await browser.close();
 
   facts.refusals = refusals;
+  facts.rateLimited = rateLimited;
   facts.modelViolations = modelViolations;
   facts.pageErrors = pageEvents.slice(0, 50);
   writeFileSync(
@@ -1421,6 +1471,13 @@ async function main() {
     lines.push(
       '',
       `${pageEvents.length} console error(s) from the builder; see results.json.`,
+    );
+  }
+  if (rateLimited.length) {
+    const first = rateLimited[0];
+    lines.push(
+      '',
+      `${rateLimited.length} API call(s) answered 429; the first came from server ${first.server ?? '?'}, ${first.reason ? `reason ${first.reason}` : `content-type ${first.contentType ?? '?'}`}. See results.json.`,
     );
   }
   const summary = redact(lines.join('\n'), secrets);

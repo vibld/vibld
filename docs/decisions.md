@@ -405,6 +405,21 @@ once it is two hours old. The account's usage rows in D1 stay, since they
 record money that was spent. Naming an existing account with `test_user`
 still works.
 
+**A rate-limited read is waited out, and the edge rule is loosened.**
+Chris decided on 2026-09-29 (D68): "Loosen it + client retry". The
+production end-to-end run (36591020730) found a Cloudflare rate-limiting
+rule on app.vibld.com, with a ten second window, that one builder load
+from one address trips: access, config, billing and the project list are
+asked for at once, Cloudflare answers 429 with its own HTML page, and the
+builder showed "Could not reach your projects", the banner Chris saw on
+the North Star project. Chris raises the rule to 120 requests per ten
+seconds per address on `/api/*` in the dashboard. The builder wraps its
+`fetch` once at start (`src/net/rate-limit-retry.ts`): a GET or HEAD to
+this origin's `/api/` that answers 429 is retried up to three times,
+waiting what `Retry-After` asks or a doubling second, never more than ten
+seconds. Writes are never retried, since one that was refused could land
+twice.
+
 ### Resolved 2026-09-28
 
 **The legal pages carry Chris's decisions for the open paid beta.** Chris
