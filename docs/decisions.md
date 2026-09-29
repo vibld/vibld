@@ -207,6 +207,20 @@ exactly this path.
 
 ### Resolved 2026-09-29 (later)
 
+**Every call taken on Chris's behalf on 2026-09-29 stands.** Chris accepted
+all of them the same day: D56 to D62 from the overnight run, and the part of
+D66 decided while implementing it. The three not recorded elsewhere here:
+
+- D56: AI crawlers are allowed. vibld.com's `robots.txt` names GPTBot,
+  ClaudeBot, PerplexityBot and the other answer-engine crawlers as allowed,
+  and the site publishes `llms.txt` and `llms-full.txt`
+  (`apps/marketing/scripts/postbuild.ts`).
+- D57: app.vibld.com stays out of search. The builder sends
+  `noindex, nofollow` and its `robots.txt` says why; only vibld.com is
+  meant to rank.
+- D58: no competitor is named on vibld.com; its copy describes what
+  vibld does.
+
 **Two tabs on one project: the stale one is told and reloads.** Chris
 decided on 2026-09-29 (D63). With a project open in two tabs, the last save
 won, so the tab left open on an older copy erased the conversation the
@@ -294,7 +308,7 @@ when the build is next asked after or its project opened.
 **A build the caller cannot fully fund starts smaller instead of being
 refused.** Taken overnight on 2026-09-29 on Chris's behalf, while he was
 away, after an end-to-end test found that internal PR 292 had locked every Free account
-out of the default model; Chris may reverse it (D59). A build on GPT-6 Sol
+out of the default model; Chris accepted it the same day (D59). A build on GPT-6 Sol
 reserves about $3.20, the worst case of every call it may make, while a
 normal one costs about $0.70, so a Free account's dollar was refused with
 `period-ceiling` before anything was spent. Now, when the caller's own ledger
@@ -314,8 +328,8 @@ their one reservation: a chat turn never builds, and the brief it returns is
 built through `/api/plan`, which does the fitting.
 
 **Stop closes the build's reservation at once, at what the reclaim would
-have charged.** Taken overnight on 2026-09-29 on Chris's behalf; Chris may
-reverse it (D60). Stop terminates the Workflow before its settle step, so a
+have charged.** Taken overnight on 2026-09-29 on Chris's behalf; Chris accepted it the same
+day (D60). Stop terminates the Workflow before its settle step, so a
 stopped build's reservation stayed open until the ledger reclaimed it about
 thirty-five minutes later, holding an in-flight slot all that time: with two
 runs allowed in flight, two Stops refused the next build with "A generation
@@ -331,7 +345,7 @@ finished steps measured would be cheaper for the caller, and is Chris's
 decision to make.
 
 **A money refusal says which ceiling refused, and how much is left.** Taken
-overnight on 2026-09-29 on Chris's behalf; Chris may reverse it (D61). "This
+overnight on 2026-09-29 on Chris's behalf; Chris accepted it the same day (D61). "This
 month's generation budget is used up" was shown to callers whose allowance
 was not used up, only smaller than one run's worst case, and for the
 deployment's daily ceiling, which is not theirs at all. The caller's own
@@ -343,7 +357,7 @@ after midnight UTC. Both keep the `account-ceiling` reason, because the
 client does nothing with it but show the sentence; no code was added.
 
 **A build settled by asking keeps its summary.** Taken overnight on
-2026-09-29 on Chris's behalf; Chris may reverse it (D62). A turn the builder
+2026-09-29 on Chris's behalf; Chris accepted it the same day (D62). A turn the builder
 settled by polling `GET /api/runs/:id`, after a dropped stream or a reopened
 project, showed only its file count and revision, and the chat context told
 the agent "Built it (9 files)", because the Worker never stored the build's
@@ -390,7 +404,7 @@ is kept for when the plan includes it again. A Free build's draft is drawn
 on Luna: DeepSeek Flash is not the plan's to use, and the draft already
 falls back to the build's model where Flash is withheld. On a deployment
 with billing not configured nobody is held to a plan, since none can be
-bought; that part was decided while implementing, and Chris may reverse it.
+bought; that part was decided while implementing, and Chris accepted it the same day.
 
 **The production end-to-end run makes its own account.** Chris decided on
 2026-09-29 (D67): "Create it via Clerk API". The live Clerk instance had no
