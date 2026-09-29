@@ -392,6 +392,19 @@ falls back to the build's model where Flash is withheld. On a deployment
 with billing not configured nobody is held to a plan, since none can be
 bought; that part was decided while implementing, and Chris may reverse it.
 
+**The production end-to-end run makes its own account.** Chris decided on
+2026-09-29 (D67): "Create it via Clerk API". The live Clerk instance had no
+test account, and the journey must never run as a real person's. With no
+`test_user`, `e2e-production.yml` creates a passwordless user through the
+Backend API on an `e2e-throwaway-*@vibld.com` address nothing is sent to,
+marked in private metadata (`vibldE2eThrowaway`), signs in as it with a
+sign-in token, and deletes it from Clerk as its last step, after its
+projects are deleted and its spend is read. Only a user carrying the mark
+is ever deleted; one a run died before deleting is deleted by the next run
+once it is two hours old. The account's usage rows in D1 stay, since they
+record money that was spent. Naming an existing account with `test_user`
+still works.
+
 ### Resolved 2026-09-28
 
 **The legal pages carry Chris's decisions for the open paid beta.** Chris

@@ -6,11 +6,15 @@ import {
   chooseModel,
   chooseTestUser,
   fapiFromPublishableKey,
+  isThrowaway,
+  leftoverThrowaways,
   maskEmail,
   redact,
   spendable,
   spentBetween,
-  testUserSignals,
+  THROWAWAY_KEY,
+  throwawayEmail,
+  throwawayUserBody,
 } from './e2e-production.mjs';
 
 const user = (id, email, extra = {}) => ({
@@ -21,81 +25,47 @@ const user = (id, email, extra = {}) => ({
   ...extra,
 });
 
-test('a +clerk_test address or test metadata is a strong mark, a word is a weak one', () => {
-  assert.deepEqual(
-    testUserSignals(user('a', 'chris+clerk_test@vibld.com')).strong,
-    ['Clerk test address (+clerk_test)'],
+test('a throwaway account is made marked, passwordless, on vibld.com', () => {
+  const email = throwawayEmail('20260929T1300', 'A1b2');
+  assert.equal(email, 'e2e-throwaway-20260929t1300-a1b2@vibld.com');
+  const body = throwawayUserBody({ email, runId: '42', now: 't' });
+  assert.deepEqual(body.email_address, [email]);
+  assert.equal(body.skip_password_requirement, true);
+  assert.deepEqual(body.private_metadata[THROWAWAY_KEY], {
+    run: '42',
+    createdAt: 't',
+  });
+  assert.equal(isThrowaway({ private_metadata: body.private_metadata }), true);
+});
+
+test('only an account carrying the mark counts as a throwaway', () => {
+  assert.equal(isThrowaway(user('a', 'e2e@vibld.com')), false);
+  assert.equal(
+    isThrowaway(
+      user('b', 'b@vibld.com', { public_metadata: { [THROWAWAY_KEY]: {} } }),
+    ),
+    false,
   );
   assert.equal(
-    testUserSignals(
-      user('b', 'b@vibld.com', { private_metadata: { e2e: true } }),
-    ).strong.length,
-    1,
-  );
-  assert.equal(
-    testUserSignals(
-      user('c', 'c@vibld.com', { public_metadata: { role: 'test' } }),
-    ).strong.length,
-    1,
-  );
-  assert.deepEqual(testUserSignals(user('d', 'e2e-bot@vibld.com')).weak, [
-    'address names it a test',
-  ]);
-  assert.deepEqual(
-    testUserSignals(user('e', 'e@vibld.com', { first_name: 'Test' })).weak,
-    ['name says test'],
+    isThrowaway(
+      user('c', 'c@vibld.com', { private_metadata: { [THROWAWAY_KEY]: true } }),
+    ),
+    false,
   );
 });
 
-test('a word inside another word does not mark an account', () => {
-  for (const email of [
-    'contestant@vibld.com',
-    'latest@vibld.com',
-    'aqua@x.io',
-  ]) {
-    const { strong, weak } = testUserSignals(user('x', email));
-    assert.deepEqual([...strong, ...weak], [], email);
-  }
-  const { strong } = testUserSignals(
-    user('y', 'y@vibld.com', { private_metadata: { e2e: false } }),
-  );
-  assert.deepEqual(strong, []);
-});
-
-test('a banned or locked account is never chosen', () => {
-  const { strong } = testUserSignals(
-    user('z', 'z+clerk_test@vibld.com', { banned: true }),
-  );
-  assert.deepEqual(strong, []);
-});
-
-test('exactly one marked account is chosen; strong marks outrank weak ones', () => {
+test('only old throwaways are cleared as leftovers', () => {
+  const now = 1_790_000_000_000;
+  const mark = { private_metadata: { [THROWAWAY_KEY]: { run: '1' } } };
   const users = [
-    user('user_1', 'chris@vibld.com'),
-    user('user_2', 'qa@vibld.com'),
-    user('user_3', 'robot+clerk_test@vibld.com'),
+    user('old', 'o@vibld.com', { ...mark, created_at: now - 3 * 3_600_000 }),
+    user('new', 'n@vibld.com', { ...mark, created_at: now - 60_000 }),
+    user('chris', 'chris@vibld.com', { created_at: now - 10 * 3_600_000 }),
   ];
-  const chosen = chooseTestUser(users);
-  assert.equal(chosen.ok, true);
-  assert.equal(chosen.user.id, 'user_3');
-
-  const weakOnly = chooseTestUser([users[0], users[1]]);
-  assert.equal(weakOnly.ok, true);
-  assert.equal(weakOnly.user.id, 'user_2');
-});
-
-test('two candidates, or none, is not a choice', () => {
-  const two = chooseTestUser([
-    user('user_1', 'a+clerk_test@vibld.com'),
-    user('user_2', 'b+clerk_test@vibld.com'),
-  ]);
-  assert.equal(two.ok, false);
-  assert.equal(two.candidates.length, 2);
-  assert.ok(two.candidates.every((c) => !c.email.startsWith('a+clerk')));
-
-  const none = chooseTestUser([user('user_1', 'chris@vibld.com')]);
-  assert.equal(none.ok, false);
-  assert.match(none.problem, /No Clerk user/);
+  assert.deepEqual(
+    leftoverThrowaways(users, now).map((u) => u.id),
+    ['old'],
+  );
 });
 
 test('a named user wins, by id or by address', () => {

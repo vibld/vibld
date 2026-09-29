@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Signs in to app.vibld.com as the test account and walks the builder the
- * way a person would, against production.
+ * Signs in to app.vibld.com as a throwaway account it creates in Clerk for
+ * the run, walks the builder the way a person would, against production,
+ * and deletes the account at the end (D67, Chris, 2026-09-29).
  *
  *   node scripts/e2e-production.mjs <deps> <out>
  *
@@ -13,9 +14,10 @@
  *
  * Read from the environment:
  *
- *   CLERK_SECRET_KEY      the live instance's Backend API key. Used to find
- *                         the test account, to mint a one-time sign-in token
- *                         for it and a Testing Token for bot protection.
+ *   CLERK_SECRET_KEY      the live instance's Backend API key. Used to
+ *                         create and delete the throwaway account, to mint
+ *                         a one-time sign-in token for it and a Testing
+ *                         Token for bot protection.
  *                         Never printed, and neither is anything minted
  *                         from it.
  *   E2E_JOURNEY           `no-builds` (default) spends nothing: sign-in,
@@ -23,9 +25,9 @@
  *                         delete, billing and referral panels. `full` adds
  *                         one build, its preview, one follow-up, Stop, and
  *                         a build that carries on while its page is closed.
- *   E2E_TEST_USER         optional Clerk user id (user_...) of the test
- *                         account. Blank means: the one account that is
- *                         marked as a test account, or stop and say so.
+ *   E2E_TEST_USER         optional Clerk user id (user_...) of an existing
+ *                         account to run as instead. Blank (the default)
+ *                         means a throwaway account made for this run.
  *   E2E_MODEL             optional model id. Blank means the cheapest of
  *                         CHEAP_MODELS the account is granted.
  *   E2E_MAX_SPEND_USD     what the run may spend, measured from the
@@ -35,8 +37,12 @@
  *
  * Every project the run makes is deleted before it ends, a share link it
  * turned on is turned off, and nothing is published. A step that fails
- * skips the rest of the journey and goes straight to that cleanup.
+ * skips the rest of the journey and goes straight to that cleanup. The
+ * throwaway account is deleted from Clerk last; one a run died before
+ * deleting is deleted by the next run. Its usage rows in D1 stay, since
+ * they record money that was really spent.
  */
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
@@ -93,50 +99,56 @@ function allEmails(user) {
     .filter((e) => typeof e === 'string');
 }
 
-const TEST_WORD = /(^|[^a-z])(e2e|test|testing|qa)([^a-z]|$)/i;
-const METADATA_KEY = /^(e2e|test|tester|test_?user|is_?test|is_?e2e)$/i;
-const METADATA_VALUE = /^(e2e|test|tester|test[-_ ]?user)$/i;
+/**
+ * The private-metadata key that marks a Clerk user as one this script made
+ * for a run and may delete. Only this script sets it, and only a user
+ * carrying it is ever deleted.
+ */
+export const THROWAWAY_KEY = 'vibldE2eThrowaway';
 
-function metadataMarks(metadata) {
-  if (typeof metadata !== 'object' || metadata === null) return false;
-  return Object.entries(metadata).some(([key, value]) => {
-    if (METADATA_KEY.test(key) && value !== false && value !== null) {
-      return value !== '' && value !== 0 && value !== 'false';
-    }
-    return typeof value === 'string' && METADATA_VALUE.test(value.trim());
-  });
+/** A throwaway left longer than this by a run that died is cleared. */
+export const LEFTOVER_AGE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * The address a throwaway account is made with. On vibld.com, which is
+ * ours, and nothing is ever sent to it: a user made through the Backend
+ * API is not asked to verify, and the app sends no mail on sign-up.
+ */
+export function throwawayEmail(stamp, nonce) {
+  return `e2e-throwaway-${stamp}-${nonce}@vibld.com`.toLowerCase();
+}
+
+/** What `POST /v1/users` is sent to make the throwaway account. */
+export function throwawayUserBody({ email, runId, now }) {
+  return {
+    email_address: [email],
+    first_name: 'E2E',
+    last_name: 'Throwaway',
+    skip_password_requirement: true,
+    skip_legal_checks: true,
+    private_metadata: {
+      [THROWAWAY_KEY]: { run: runId || 'local', createdAt: now },
+    },
+  };
+}
+
+export function isThrowaway(user) {
+  const mark = user?.private_metadata?.[THROWAWAY_KEY];
+  return typeof mark === 'object' && mark !== null;
 }
 
 /**
- * Why a Clerk user looks like a test account, strongest reasons first.
- *
- * Strong: Clerk's own test address (`+clerk_test`), or metadata that says
- * so. Weak: "test", "e2e" or "qa" as a word in an address or a name. A
- * banned or locked account is never a candidate.
+ * Throwaway accounts an earlier run made and never deleted. Only old ones,
+ * so a run cannot take the account from under another (the workflow runs
+ * one at a time as well).
  */
-export function testUserSignals(user) {
-  if (user.banned || user.locked) return { strong: [], weak: [] };
-  const strong = [];
-  const weak = [];
-  const emails = allEmails(user);
-  if (emails.some((e) => e.toLowerCase().includes('+clerk_test'))) {
-    strong.push('Clerk test address (+clerk_test)');
-  }
-  for (const field of [
-    'public_metadata',
-    'private_metadata',
-    'unsafe_metadata',
-  ]) {
-    if (metadataMarks(user[field])) strong.push(`${field} marks it as a test`);
-  }
-  if (emails.some((e) => TEST_WORD.test(e.split('@')[0] ?? ''))) {
-    weak.push('address names it a test');
-  }
-  const names = [user.first_name, user.last_name, user.username]
-    .filter((n) => typeof n === 'string')
-    .join(' ');
-  if (TEST_WORD.test(names)) weak.push('name says test');
-  return { strong, weak };
+export function leftoverThrowaways(users, nowMs, minAgeMs = LEFTOVER_AGE_MS) {
+  return users.filter(
+    (user) =>
+      isThrowaway(user) &&
+      typeof user.created_at === 'number' &&
+      nowMs - user.created_at >= minAgeMs,
+  );
 }
 
 /** An address shown without giving it away: `ch…@example.com`. */
@@ -153,7 +165,7 @@ export function maskEmail(email) {
  * strongly marked accounts decide if there are any, and the weakly marked
  * ones only if there are none; either way exactly one, or nothing.
  */
-export function chooseTestUser(users, wanted = '') {
+export function chooseTestUser(users, wanted) {
   const want = wanted.trim();
   const describe = (user, reasons) => ({
     id: user.id,
@@ -161,45 +173,24 @@ export function chooseTestUser(users, wanted = '') {
     created: user.created_at ? new Date(user.created_at).toISOString() : null,
     reasons,
   });
-  if (want) {
-    const match = users.filter(
-      (user) =>
-        user.id === want ||
-        allEmails(user).some((e) => e.toLowerCase() === want.toLowerCase()),
-    );
-    if (match.length === 1) {
-      return { ok: true, user: match[0], why: ['named by E2E_TEST_USER'] };
-    }
-    return {
-      ok: false,
-      problem:
-        match.length === 0
-          ? 'No Clerk user matches E2E_TEST_USER.'
-          : 'More than one Clerk user matches E2E_TEST_USER.',
-      candidates: match.map((u) => describe(u, ['matches E2E_TEST_USER'])),
-    };
-  }
-  const scored = users.map((user) => ({ user, ...testUserSignals(user) }));
-  const strong = scored.filter((s) => s.strong.length > 0);
-  const weak = scored.filter((s) => s.strong.length === 0 && s.weak.length);
-  const tier = strong.length > 0 ? strong : weak;
-  if (tier.length === 1) {
-    const [only] = tier;
-    return { ok: true, user: only.user, why: [...only.strong, ...only.weak] };
+  const match = users.filter(
+    (user) =>
+      user.id === want ||
+      allEmails(user).some((e) => e.toLowerCase() === want.toLowerCase()),
+  );
+  if (match.length === 1) {
+    return { ok: true, user: match[0], why: ['named by E2E_TEST_USER'] };
   }
   return {
     ok: false,
     problem:
-      tier.length === 0
-        ? 'No Clerk user is marked as a test account.'
-        : `${tier.length} Clerk users look like test accounts, so none was chosen.`,
-    candidates: [...strong, ...weak].map((s) =>
-      describe(s.user, [...s.strong, ...s.weak]),
-    ),
+      match.length === 0
+        ? 'No Clerk user matches E2E_TEST_USER.'
+        : 'More than one Clerk user matches E2E_TEST_USER.',
+    candidates: match.map((u) => describe(u, ['matches E2E_TEST_USER'])),
   };
 }
 
-/** The model to build with: the one named, or the cheapest granted. */
 export function chooseModel(config, wanted = '') {
   const offered = Array.isArray(config?.models)
     ? config.models.map((m) => m.id)
@@ -788,11 +779,14 @@ async function main() {
   );
 
   let testUser = null;
-  await step('Find the test account in Clerk', async () => {
+  // Set only once this run has made the account, so the last step deletes
+  // what this run made and never an account somebody named.
+  let throwaway = null;
+  await step('Make the account this run signs in as', async () => {
     const key = process.env.CLERK_SECRET_KEY ?? '';
     if (!key.trim()) {
       throw new Error(
-        'CLERK_SECRET_KEY is not set, so the test account cannot be found or signed in.',
+        'CLERK_SECRET_KEY is not set, so no account can be made or signed in.',
       );
     }
     hide(key);
@@ -807,20 +801,43 @@ async function main() {
       );
     }
     const users = await listAllUsers();
-    const chosen = chooseTestUser(users, process.env.E2E_TEST_USER ?? '');
-    if (!chosen.ok) {
-      facts.testUserCandidates = chosen.candidates;
-      const listed = chosen.candidates
-        .map((c) => `${c.id} ${c.email} (${c.reasons.join(', ')})`)
-        .join('; ');
-      throw new Error(
-        `${chosen.problem} Looked at ${users.length} users.${listed ? ` Candidates: ${listed}.` : ''} Set E2E_TEST_USER to the test account's Clerk user id.`,
-      );
+    const named = (process.env.E2E_TEST_USER ?? '').trim();
+    if (named) {
+      const chosen = chooseTestUser(users, named);
+      if (!chosen.ok) {
+        facts.testUserCandidates = chosen.candidates;
+        throw new Error(`${chosen.problem} Looked at ${users.length} users.`);
+      }
+      testUser = chosen.user;
+      hide(primaryEmail(testUser));
+      facts.testUser = { id: testUser.id, why: chosen.why };
+      return `${testUser.id}, named by E2E_TEST_USER`;
     }
-    testUser = chosen.user;
-    hide(primaryEmail(testUser));
-    facts.testUser = { id: testUser.id, why: chosen.why };
-    return `${testUser.id}, chosen because: ${chosen.why.join(', ')} (of ${users.length} users)`;
+    const cleared = [];
+    for (const old of leftoverThrowaways(users, Date.now())) {
+      await clerkApi(`/users/${encodeURIComponent(old.id)}`, {
+        method: 'DELETE',
+      });
+      cleared.push(old.id);
+    }
+    const email = throwawayEmail(stamp, randomBytes(4).toString('hex'));
+    hide(email);
+    const made = await clerkApi('/users', {
+      method: 'POST',
+      body: throwawayUserBody({
+        email,
+        runId: process.env.GITHUB_RUN_ID ?? '',
+        now: new Date().toISOString(),
+      }),
+    });
+    if (!made?.id || !isThrowaway(made)) {
+      throw new Error('Clerk made the user without the throwaway mark.');
+    }
+    testUser = made;
+    throwaway = made.id;
+    facts.testUser = { id: made.id, why: ['throwaway made for this run'] };
+    facts.leftoversCleared = cleared;
+    return `made ${made.id}${cleared.length ? `; deleted ${cleared.length} left by an earlier run` : ''}`;
   });
 
   await step('Sign in with a Clerk sign-in token', async () => {
@@ -1352,6 +1369,24 @@ async function main() {
       facts.spentMicroUsd = spent;
       facts.spent = usd(spent);
       return `${usd(spent)} (cap ${usd(maxSpendMicro)})`;
+    },
+    { critical: false },
+  );
+
+  await step(
+    'Delete the throwaway account',
+    async () => {
+      if (!throwaway) throw new Skip('ran as a named account, or made none');
+      const user = await clerkApi(`/users/${encodeURIComponent(throwaway)}`);
+      if (!isThrowaway(user)) {
+        throw new Error(
+          `${throwaway} is not marked as a throwaway, so it was kept.`,
+        );
+      }
+      await clerkApi(`/users/${encodeURIComponent(throwaway)}`, {
+        method: 'DELETE',
+      });
+      return `deleted ${throwaway}`;
     },
     { critical: false },
   );

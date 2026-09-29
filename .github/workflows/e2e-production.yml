@@ -1,11 +1,12 @@
 name: End-to-end on production
 
-# Signs in to app.vibld.com as the test account and walks the builder the
-# way a person would: access, projects, share link, duplicate, archive,
+# Makes a throwaway account in Clerk (D67), signs in to app.vibld.com as it
+# and walks the builder the way a person would: access, projects, share link, duplicate, archive,
 # delete, the billing and referral panels, and with `full` one real build,
 # its preview, a follow-up, Stop, and a build that carries on while its page
 # is closed. Every project the run makes is deleted before it ends, and
-# nothing is published. See scripts/e2e-production.mjs.
+# nothing is published. The throwaway account is deleted from Clerk at the
+# end. See scripts/e2e-production.mjs.
 #
 # Manual only: `full` spends real model money on the test account. On GPT-6
 # Luna that is a few cents a run; `max_spend_usd` stops the journey, and
@@ -13,7 +14,7 @@ name: End-to-end on production
 # run has spent more.
 #
 # Sign-in is Clerk's documented testing route for a live instance: a
-# Testing Token for bot protection and a one-time sign-in token for the test
+# Testing Token for bot protection and a one-time sign-in token for the
 # account, both minted with CLERK_SECRET_KEY and neither printed. Nobody's
 # email or password is involved.
 on:
@@ -28,9 +29,9 @@ on:
         default: no-builds
       test_user:
         description: >-
-          Clerk user id of the test account (user_...). Blank means the one
-          account marked as a test account; the run stops and lists the
-          candidates if there is not exactly one.
+          Clerk user id (user_...) of an existing account to run as
+          instead. Blank means a throwaway account made for this run and
+          deleted after it.
         required: false
         default: ''
       model:
@@ -76,7 +77,7 @@ jobs:
           fi
 
   journey:
-    name: Walk the builder as the test account
+    name: Walk the builder as a throwaway account
     if: github.repository == 'vibld/vibld-internal'
     runs-on: ubuntu-24.04
     # Three builds of up to twenty-five minutes each is the worst case of
