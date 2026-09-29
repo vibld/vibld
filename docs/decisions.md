@@ -417,8 +417,12 @@ seconds per address on `/api/*` in the dashboard. The builder wraps its
 `fetch` once at start (`src/net/rate-limit-retry.ts`): a GET or HEAD to
 this origin's `/api/` that answers 429 is retried up to three times,
 waiting what `Retry-After` asks or a doubling second, never more than ten
-seconds. Writes are never retried, since one that was refused could land
-twice.
+seconds. A write is sent again only when the 429 is Cloudflare's own page,
+which the edge answers before the request reaches the Worker, so the write
+never happened; the run after the read retry shipped (36593518869) had the
+project list load and the project's creation refused that way. The Worker's
+own 429s are JSON, and a write they refuse is never sent again, nor is one
+whose body cannot be sent twice.
 
 ### Resolved 2026-09-28
 

@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 
 import {
   MAX_RETRIES,
+  canResendWrite,
+  isEdgeRefusal,
   isRetryableRead,
   rateLimitDelayMs,
   withRateLimitRetry,
@@ -10,14 +12,21 @@ import {
 
 const ORIGIN = 'https://app.vibld.com';
 
-function scripted(statuses: number[], retryAfter: string | null = '10') {
+function scripted(
+  statuses: number[],
+  retryAfter: string | null = '10',
+  contentType = 'text/html; charset=UTF-8',
+) {
   const calls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
     calls.push(String(input));
     const status = statuses[Math.min(calls.length - 1, statuses.length - 1)];
     return new Response(status === 429 ? '<html>' : '{}', {
       status,
-      headers: retryAfter ? { 'retry-after': retryAfter } : {},
+      headers: {
+        'content-type': status === 429 ? contentType : 'application/json',
+        ...(retryAfter ? { 'retry-after': retryAfter } : {}),
+      },
     });
   }) as typeof fetch;
   return { calls, fetchImpl };
@@ -74,14 +83,65 @@ describe('retrying an API read the edge rate limit refused (D68)', () => {
     assert.equal(calls.length, MAX_RETRIES + 1);
   });
 
-  it('never sends a write twice', async () => {
-    const { calls, fetchImpl } = scripted([429]);
-    const retrying = withRateLimitRetry(fetchImpl, {
+  it('sends a write again only when the edge refused it', async () => {
+    const edge = scripted([429, 201]);
+    const retrying = withRateLimitRetry(edge.fetchImpl, {
       origin: ORIGIN,
       sleep: async () => {},
     });
-    const response = await retrying('/api/projects', { method: 'POST' });
-    assert.equal(response.status, 429);
-    assert.equal(calls.length, 1);
+    const created = await retrying('/api/projects', {
+      method: 'POST',
+      body: '{}',
+    });
+    assert.equal(created.status, 201);
+    assert.equal(edge.calls.length, 2);
+
+    const worker = scripted([429], null, 'application/json; charset=utf-8');
+    const refused = await withRateLimitRetry(worker.fetchImpl, {
+      origin: ORIGIN,
+      sleep: async () => {},
+    })('/api/plan', { method: 'POST', body: '{}' });
+    assert.equal(refused.status, 429);
+    assert.equal(worker.calls.length, 1);
+  });
+
+  it('never resends a body that can only be read once', () => {
+    assert.equal(
+      canResendWrite('/api/x', { method: 'POST', body: '{}' }),
+      true,
+    );
+    assert.equal(canResendWrite('/api/x', { method: 'POST' }), true);
+    assert.equal(
+      canResendWrite('/api/x', {
+        method: 'POST',
+        body: new ReadableStream(),
+      }),
+      false,
+    );
+    assert.equal(
+      canResendWrite(new Request(`${ORIGIN}/api/x`, { method: 'POST' }), {}),
+      false,
+    );
+  });
+
+  it('tells the edge page from the Worker refusal', () => {
+    assert.equal(
+      isEdgeRefusal(
+        new Response('<html>', {
+          status: 429,
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+      true,
+    );
+    assert.equal(
+      isEdgeRefusal(
+        new Response('{}', {
+          status: 429,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+      false,
+    );
   });
 });

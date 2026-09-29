@@ -1,5 +1,5 @@
 /**
- * Retry an API read that a rate limit refused (D68, Chris, 2026-09-29).
+ * Retry an API call that a rate limit refused (D68, Chris, 2026-09-29).
  *
  * app.vibld.com sits behind a Cloudflare rate-limiting rule with a ten
  * second window. One builder load from one address asks for access, the
@@ -11,9 +11,14 @@
  * other half, so a burst that still trips it costs a short wait rather
  * than an error.
  *
- * Only reads are retried: a GET or HEAD to this origin's `/api/`. A write
- * that was refused may still be retried by the person, who can see what
- * happened; one retried here could land twice.
+ * A read (GET or HEAD to this origin's `/api/`) is retried on any 429. A
+ * write is retried only on the edge's 429, which is Cloudflare's own page
+ * and not JSON: it is sent before the request reaches the Worker, so the
+ * write never happened. The run after the read retry shipped (36593518869)
+ * showed the project list loading and the project's creation then refused
+ * that way. The Worker's own 429s are JSON with a `reason` (its per-user
+ * build limits), and a write they refuse is never sent again, and nor is
+ * a write whose body cannot be sent twice.
  */
 
 /** Retries after the first answer, so at most four requests in all. */
@@ -35,15 +40,14 @@ export function rateLimitDelayMs(
   return Math.min(asked, MAX_WAIT_MS);
 }
 
-/** Whether a request is an API read on this origin. */
-export function isRetryableRead(
+/** A request's method and URL, and whether it is to this origin's `/api/`. */
+function describe(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   origin: string,
-): boolean {
+): { method: string; api: boolean } {
   const request = input instanceof Request ? input : null;
   const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') return false;
   let url: URL;
   try {
     const href =
@@ -54,9 +58,52 @@ export function isRetryableRead(
           : String(input);
     url = new URL(href, origin);
   } catch {
-    return false;
+    return { method, api: false };
   }
-  return url.origin === origin && url.pathname.startsWith('/api/');
+  return {
+    method,
+    api: url.origin === origin && url.pathname.startsWith('/api/'),
+  };
+}
+
+/** Whether a request is an API read on this origin. */
+export function isRetryableRead(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  origin: string,
+): boolean {
+  const { method, api } = describe(input, init, origin);
+  return api && (method === 'GET' || method === 'HEAD');
+}
+
+/**
+ * Whether a write can be sent again as it was: not a `Request` (its body
+ * is read once), and a body that is nothing, text, or form data rather
+ * than a stream.
+ */
+export function canResendWrite(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+): boolean {
+  if (input instanceof Request) return false;
+  const body = init?.body;
+  return (
+    body === undefined ||
+    body === null ||
+    typeof body === 'string' ||
+    body instanceof URLSearchParams ||
+    (typeof FormData !== 'undefined' && body instanceof FormData)
+  );
+}
+
+/**
+ * Whether a 429 came from the edge rather than the Worker. The Worker
+ * answers every refusal in JSON; Cloudflare's rate-limiting rule answers
+ * with its own HTML page.
+ */
+export function isEdgeRefusal(response: Response): boolean {
+  const type = response.headers.get('content-type') ?? '';
+  return response.status === 429 && !type.includes('application/json');
 }
 
 export interface RetryDeps {
@@ -64,7 +111,7 @@ export interface RetryDeps {
   origin: string;
 }
 
-/** `fetchImpl`, with API reads retried on 429. */
+/** `fetchImpl`, with API calls a rate limit refused sent again. */
 export function withRateLimitRetry(
   fetchImpl: typeof fetch,
   deps: RetryDeps,
@@ -73,15 +120,16 @@ export function withRateLimitRetry(
     deps.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   return async (input, init) => {
-    if (!isRetryableRead(input, init, deps.origin)) {
-      return fetchImpl(input, init);
-    }
+    const { method, api } = describe(input, init, deps.origin);
+    if (!api) return fetchImpl(input, init);
+    const read = method === 'GET' || method === 'HEAD';
+    if (!read && !canResendWrite(input, init)) return fetchImpl(input, init);
     for (let attempt = 0; ; attempt += 1) {
-      // A Request's body is read once; a GET has none, so it can be sent
-      // again as it is.
       const response = await fetchImpl(input, init);
       if (response.status !== 429 || attempt >= MAX_RETRIES) return response;
+      if (!read && !isEdgeRefusal(response)) return response;
       if (init?.signal?.aborted) return response;
+      await response.body?.cancel().catch(() => undefined);
       await sleep(
         rateLimitDelayMs(response.headers.get('retry-after'), attempt),
       );
