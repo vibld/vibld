@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { SECURITY_HEADERS, headersFile, secured } from '../src/index.ts';
+import {
+  PUBLISHED_SITE_HEADERS,
+  SECURITY_HEADERS,
+  headersFile,
+  secured,
+  withDefaultHeaders,
+} from '../src/index.ts';
 
 describe('the headers both sites send', () => {
   it('names every header in lower case', () => {
@@ -97,5 +103,122 @@ describe('the asset store’s copy', () => {
     // the shell rather than a miss. A narrower pattern would leave the
     // shell's own URLs uncovered.
     assert.match(headersFile(), /^\/\*$/m);
+  });
+});
+
+describe('the defaults a published site gets (D64)', () => {
+  it('names every header in lower case', () => {
+    for (const name of Object.keys(PUBLISHED_SITE_HEADERS)) {
+      assert.equal(name, name.toLowerCase());
+    }
+  });
+
+  it('restricts neither what the page loads nor who frames it', () => {
+    // A user's site embeds videos, maps and forms, loads fonts and scripts
+    // from wherever it likes, and may itself be embedded. Any of these would
+    // break some of them.
+    assert.equal(PUBLISHED_SITE_HEADERS['content-security-policy'], undefined);
+    assert.equal(
+      PUBLISHED_SITE_HEADERS['content-security-policy-report-only'],
+      undefined,
+    );
+    assert.equal(PUBLISHED_SITE_HEADERS['x-frame-options'], undefined);
+    assert.equal(
+      PUBLISHED_SITE_HEADERS['cross-origin-embedder-policy'],
+      undefined,
+    );
+    assert.equal(
+      PUBLISHED_SITE_HEADERS['cross-origin-opener-policy'],
+      undefined,
+    );
+    assert.equal(
+      PUBLISHED_SITE_HEADERS['cross-origin-resource-policy'],
+      undefined,
+    );
+  });
+
+  it('sends HSTS for the site alone', () => {
+    const hsts = PUBLISHED_SITE_HEADERS['strict-transport-security'];
+    assert.equal(hsts, 'max-age=31536000');
+  });
+
+  it('denies the device and payment features, and nothing an embed uses', () => {
+    const policy = PUBLISHED_SITE_HEADERS['permissions-policy'] ?? '';
+    const denied = new Set(
+      policy.split(',').map((entry) => entry.trim().replace(/=\(\)$/, '')),
+    );
+    for (const feature of [
+      'camera',
+      'microphone',
+      'geolocation',
+      'payment',
+      'usb',
+    ]) {
+      assert.ok(denied.has(feature), `${feature} is not denied`);
+    }
+    // What a YouTube, Vimeo, Spotify or 3D-viewer iframe asks its page to
+    // delegate. The top-level policy binds every frame on the page, so
+    // denying one of these here would break the embed.
+    for (const feature of [
+      'autoplay',
+      'fullscreen',
+      'encrypted-media',
+      'picture-in-picture',
+      'clipboard-write',
+      'web-share',
+      'accelerometer',
+      'gyroscope',
+      'xr-spatial-tracking',
+    ]) {
+      assert.ok(!denied.has(feature), `${feature} would break embeds`);
+    }
+    // Every entry is a denial; an allowlist here would be a decision about
+    // somebody else's site.
+    assert.ok(policy.split(',').every((entry) => /=\(\)$/.test(entry.trim())));
+  });
+});
+
+describe('adding defaults to a response', () => {
+  it('adds each one the response does not carry', async () => {
+    const response = withDefaultHeaders(
+      new Response('hello'),
+      PUBLISHED_SITE_HEADERS,
+    );
+    for (const [name, value] of Object.entries(PUBLISHED_SITE_HEADERS)) {
+      assert.equal(response.headers.get(name), value);
+    }
+    assert.equal(await response.text(), 'hello');
+  });
+
+  it('keeps one the response already carries, whatever its case', () => {
+    const response = withDefaultHeaders(
+      new Response('hello', {
+        headers: {
+          'Referrer-Policy': 'no-referrer',
+          'Permissions-Policy': 'geolocation=(self)',
+        },
+      }),
+      PUBLISHED_SITE_HEADERS,
+    );
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(
+      response.headers.get('permissions-policy'),
+      'geolocation=(self)',
+    );
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  });
+
+  it('keeps the status and works on headers that cannot be written', () => {
+    const fromBinding = Response.redirect(
+      'https://acme.vibld-preview.dev/',
+      302,
+    );
+    const response = withDefaultHeaders(fromBinding, PUBLISHED_SITE_HEADERS);
+    assert.equal(response.status, 302);
+    assert.equal(
+      response.headers.get('location'),
+      'https://acme.vibld-preview.dev/',
+    );
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   });
 });

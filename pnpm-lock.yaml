@@ -258,6 +258,9 @@ importers:
       '@vibld/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@vibld/security-headers':
+        specifier: workspace:*
+        version: link:../../packages/security-headers
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20260925.1

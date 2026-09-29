@@ -1,4 +1,8 @@
 import type { ProjectFile } from '@vibld/core';
+import {
+  PUBLISHED_SITE_HEADERS,
+  withDefaultHeaders,
+} from '@vibld/security-headers';
 import { contentTypeFor } from './content-type.ts';
 import { isAuthorizedInternalCaller } from './internal-auth.ts';
 import { PublishStore } from './publish-store.ts';
@@ -464,17 +468,39 @@ export default {
     }
   },
 
+  /**
+   * Every response carries `PUBLISHED_SITE_HEADERS` unless it already sets
+   * the header itself (D64). Applied here, once, rather than at each
+   * `return`: a site's pages, its fallbacks, its 404s and its media all
+   * leave through this line, and so do the examples, which are published
+   * sites like any other. `/internal/` is included because apps/preview
+   * forwards a published host's paths here whole, so a stranger's request
+   * for `acme.vibld-preview.dev/internal/publish` is answered on the site's
+   * own origin.
+   *
+   * Nothing a site ships can set a header today (there is no `_headers`
+   * convention here), so what is kept is what this Worker's own code set,
+   * such as media's `nosniff`. Set-if-absent is what lets a per-site
+   * header win once there is one.
+   */
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith('/internal/')) {
-      return handleInternal(request, env, url.pathname);
-    }
-
-    const hostname = env.PUBLISH_HOSTNAME ?? 'vibld-preview.dev';
-    const slug = slugFromHost(url.hostname, hostname);
-    if (!slug) {
-      return json({ error: 'Not found.' }, 404);
-    }
-    return handlePublished(env, slug, url.pathname, request);
+    return withDefaultHeaders(
+      await route(request, env),
+      PUBLISHED_SITE_HEADERS,
+    );
   },
 };
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.pathname.startsWith('/internal/')) {
+    return handleInternal(request, env, url.pathname);
+  }
+
+  const hostname = env.PUBLISH_HOSTNAME ?? 'vibld-preview.dev';
+  const slug = slugFromHost(url.hostname, hostname);
+  if (!slug) {
+    return json({ error: 'Not found.' }, 404);
+  }
+  return handlePublished(env, slug, url.pathname, request);
+}

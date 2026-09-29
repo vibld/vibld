@@ -317,6 +317,28 @@ and the builder puts it on the turn as the stream would have. Nothing new is
 stored: once the engine no longer keeps the instance, a build asked after
 has no summary, as before.
 
+**Published sites send safe default headers, and nothing that restricts
+what they load.** Chris decided on 2026-09-29 (D64): "Safe defaults". Sites
+at `<slug>.vibld-preview.dev`, the examples among them, were served with no
+security headers at all. Every response apps/publish gives, 404s and media
+included, now carries `Strict-Transport-Security: max-age=31536000`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy:
+strict-origin-when-cross-origin` and a `Permissions-Policy` denying camera,
+microphone, geolocation, payment, USB, serial, HID, Bluetooth, MIDI and
+display capture (`PUBLISHED_SITE_HEADERS` in `@vibld/security-headers`, its
+own set rather than the one vibld.com and app.vibld.com send). There is no
+CSP and no `X-Frame-Options` or `frame-ancestors`, so a site's embeds,
+fonts, iframes and third-party scripts keep working and anybody may frame
+it; features embeds delegate to their frames (autoplay, fullscreen,
+encrypted media, picture-in-picture, clipboard write, web share, motion
+sensors, XR) are left alone. HSTS has no `includeSubDomains`: from a slug's
+host it would cover only hosts two labels deep, which have no certificate
+and serve nothing. A header a response already carries is kept rather than
+replaced; nothing a site ships can set one today, since there is no
+`_headers` convention for published sites. `payment=()` hides an in-page
+wallet button (Apple Pay, Google Pay) in an embedded checkout; a link out
+to a hosted checkout is unaffected.
+
 ### Resolved 2026-09-28
 
 **The legal pages carry Chris's decisions for the open paid beta.** Chris

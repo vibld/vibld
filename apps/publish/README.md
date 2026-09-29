@@ -54,6 +54,23 @@ userId}` mapping in D1, and a project's built file content in R2, keyed
   no metadata of its own in this Worker's usage, so this is recovered from
   the path alone, same as any conventional static file server.
 
+## Response headers
+
+Every response carries `PUBLISHED_SITE_HEADERS` from
+`@vibld/security-headers` (D64), added in `fetch` so a page, a fallback, a
+404, media and the examples all get them:
+
+- `Strict-Transport-Security: max-age=31536000`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), midi=(), display-capture=()`
+
+No CSP and no `X-Frame-Options`: a site's embeds, fonts, iframes and
+third-party scripts are its own business, and so is who frames it. A header
+the response already carries is kept, not replaced. Nothing a site ships
+can set one yet: there is no `_headers` convention here, and a `_headers`
+file in a build is served as an ordinary file.
+
 ## Taking a site down
 
 `POST /internal/unpublish` with `{userId, projectId}` (ADR-0013:

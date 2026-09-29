@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vibld/core": "workspace:*"
+    "@vibld/core": "workspace:*",
+    "@vibld/security-headers": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260925.1",

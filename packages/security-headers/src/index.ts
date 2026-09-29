@@ -15,6 +15,9 @@
  * calls `secured()` in the Worker for its API, while `vibld.com`, whose
  * Worker runs first on everything (`run_worker_first: true`, for the www
  * redirect), can only use `secured()`.
+ *
+ * Published sites get a smaller set of their own, `PUBLISHED_SITE_HEADERS`,
+ * applied by apps/publish with `withDefaultHeaders()` (D64).
  */
 
 /**
@@ -102,10 +105,101 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
  * streamed response stays streamed.
  */
 export function secured(response: Response): Response {
+  return rebuilt(response, (headers) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      headers.set(name, value);
+    }
+  });
+}
+
+/**
+ * What a published site (`<slug>.vibld-preview.dev`) carries, when the site
+ * has not said otherwise (D64).
+ *
+ * Its own set rather than `SECURITY_HEADERS`, because the facts that decide
+ * that one are not true here. vibld.com and app.vibld.com are pages Vibld
+ * wrote; a published site is a page a user's prompt wrote, and it is theirs
+ * to embed a video in, load a font from anywhere, run a third-party widget
+ * and be framed by whoever they like. So nothing below restricts what the
+ * page may load or who may frame it: no CSP of any kind, no
+ * `X-Frame-Options`. Each of those would break somebody's site in a way
+ * neither they nor we would see until a visitor did.
+ *
+ * Written out rather than spread from `SECURITY_HEADERS`, although three of
+ * the values are the same today. A change made for the two Vibld hostnames
+ * should not arrive on every user's site as a side effect.
+ */
+export const PUBLISHED_SITE_HEADERS: Readonly<Record<string, string>> = {
+  /**
+   * A year, without `includeSubDomains` or `preload`.
+   *
+   * The directive would not reach the other sites: sent by
+   * `acme.vibld-preview.dev`, it covers `*.acme.vibld-preview.dev` and not
+   * `other.vibld-preview.dev`, which sends its own. What it would cover is
+   * two labels deep, and nothing there is HTTPS. The zone's free
+   * certificate covers one level only, and apps/preview does not forward a
+   * dotted label here (`publish-route.ts`). `preload` needs the apex to
+   * send the header, and the apex is not a published site.
+   */
+  'strict-transport-security': 'max-age=31536000',
+
+  /**
+   * No MIME sniffing. This Worker decides every type from the extension
+   * (`content-type.ts`), so a type is never a guess the browser should
+   * second-guess.
+   */
+  'x-content-type-options': 'nosniff',
+
+  /**
+   * The browser's own default, sent so it does not vary by browser: a site's
+   * full URL within the site, its origin only when a visitor leaves.
+   */
+  'referrer-policy': 'strict-origin-when-cross-origin',
+
+  /**
+   * Device and payment access a generated marketing site has no use for.
+   *
+   * This also binds every iframe on the page, so the list stops at what the
+   * site itself would have to be asking for. Features an ordinary embed
+   * delegates to its frame (`autoplay`, `fullscreen`, `encrypted-media`,
+   * `picture-in-picture`, `clipboard-write`, `web-share`, the motion
+   * sensors a 360-degree video reads, `xr-spatial-tracking` for a 3D
+   * viewer) are left alone. `browsing-topics` is too: it is an advertising
+   * choice, and a user running ads on their own site gets to make it.
+   *
+   * `payment=()` turns off the Payment Request API, so an in-page wallet
+   * button (Apple Pay, Google Pay) inside an embedded checkout does not
+   * appear. A link out to a hosted checkout is unaffected.
+   */
+  'permissions-policy':
+    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), midi=(), display-capture=()',
+};
+
+/**
+ * The same response, with each of `defaults` it does not already carry.
+ *
+ * `secured` has the last word, which is right for pages Vibld wrote. This
+ * one never does: a header already on the response is the site's own
+ * decision, or a more specific one made nearer the bytes, and is kept as
+ * it is. Rebuilt for the reason `secured` is.
+ */
+export function withDefaultHeaders(
+  response: Response,
+  defaults: Readonly<Record<string, string>>,
+): Response {
+  return rebuilt(response, (headers) => {
+    for (const [name, value] of Object.entries(defaults)) {
+      if (!headers.has(name)) headers.set(name, value);
+    }
+  });
+}
+
+function rebuilt(
+  response: Response,
+  edit: (headers: Headers) => void,
+): Response {
   const headers = new Headers(response.headers);
-  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
-    headers.set(name, value);
-  }
+  edit(headers);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
