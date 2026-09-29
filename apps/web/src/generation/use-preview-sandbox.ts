@@ -10,9 +10,10 @@ import {
 } from './preview-client.ts';
 import type { PreviewShare, PreviewStatus } from './preview-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
+import { POLL_INTERVAL_MS } from './runs-client.ts';
 
-/** How often to re-check a preview that has not yet settled (matches `handlePlan`'s own poll interval, `worker/index.ts`'s `POLL_INTERVAL_MS`). */
-export const POLL_INTERVAL_MS = 1500;
+/** How often to re-check a preview that has not yet settled (matches `handlePlan`'s own poll interval, `worker/run-stage.ts`'s `POLL_INTERVAL_MS`). */
+export { POLL_INTERVAL_MS };
 
 const SETTLED = new Set(['ready', 'failed']);
 

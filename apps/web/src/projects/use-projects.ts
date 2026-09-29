@@ -239,6 +239,7 @@ export function useProjects(
       id,
       transcript: opened.transcript,
       snapshot: opened.snapshot,
+      build: opened.build,
       ...restored,
     });
     if (token !== openToken.current) return;

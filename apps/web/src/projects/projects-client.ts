@@ -79,6 +79,12 @@ export interface OpenedProject {
   project: ProjectSummary;
   transcript: TranscriptTurn[];
   snapshot: ProjectSnapshot | null;
+  /**
+   * A build still running in the project, which carried on after the page
+   * that started it went away; null for none, and from a Worker older than
+   * builds that outlive their page.
+   */
+  build: { runId: string; startedAt: string } | null;
 }
 
 /** What a save may carry; every field is optional and independent. */
@@ -254,13 +260,16 @@ export async function openProject(
     project: summary,
     transcript,
     snapshot,
+    build,
   } = result.value as {
     project?: unknown;
     transcript?: unknown;
     snapshot?: unknown;
+    build?: unknown;
   };
   if (!isSummary(summary) || !Array.isArray(transcript)) return MALFORMED;
   const code = snapshot as ProjectSnapshot | null | undefined;
+  const running = build as { runId?: unknown; startedAt?: unknown } | null;
   return {
     ok: true,
     value: {
@@ -269,6 +278,12 @@ export async function openProject(
       snapshot:
         code && typeof code.revision === 'string' && Array.isArray(code.files)
           ? code
+          : null,
+      build:
+        running &&
+        typeof running.runId === 'string' &&
+        typeof running.startedAt === 'string'
+          ? { runId: running.runId, startedAt: running.startedAt }
           : null,
     },
   };

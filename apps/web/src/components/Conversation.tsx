@@ -59,6 +59,15 @@ export function Conversation({ state }: { state: BuilderState }) {
         Only while a run is going: at rest it was four grey dots that meant
         nothing yet, above the composer on every screen.
       */}
+      {/*
+        A build that carried on while the page was away, one being stopped,
+        or one that could not be: said once, beside the run it is about.
+      */}
+      {state.notice ? (
+        <div className="banner" role="status" aria-live="polite">
+          <p className="banner__message">{state.notice}</p>
+        </div>
+      ) : null}
       {state.running ? <LifecycleBar status={state.status} /> : null}
       <ProgressMeter progress={state.progress} />
       <div ref={endRef} />

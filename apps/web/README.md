@@ -397,10 +397,19 @@ What this costs, accepted rather than solved here:
   (`worker/run-progress.ts`), which the poll loop reads (internal issue 183). Without the
   binding the stream still emits keepalives and the clock, so a long run
   reads as "still going" rather than as "how far along".
-- **Cancelling stops the _next_ step, not the current one.** `handlePlan`
-  calls `WorkflowInstance.terminate()` on disconnect, but termination lands
-  at a step boundary; a cancel that arrives mid-model-call cannot stop that
-  one call from finishing (or being billed for). With bounded steps (below)
+- **A build outlives its page, and only Stop cancels it** (docs/decisions.md,
+  "Resolved 2026-09-29"). A dropped connection stops `handlePlan`'s relay and
+  nothing else; the build saves to the project, and reopening the project
+  shows it still running (`GET /api/projects/:id` reports it) until it ends.
+  Stop calls `DELETE /api/runs/:id` (`worker/run-control.ts`), which checks
+  the run is the caller's, terminates the instance and marks its stage
+  `cancelled`; `GET /api/runs/:id` is what the builder polls for a build it
+  is not streaming. A stage the engine left unended (an instance terminated
+  or errored between steps) is settled when either route, or the open,
+  finds the instance has stopped.
+- **Cancelling stops the _next_ step, not the current one.** Termination
+  lands at a step boundary; a Stop that arrives mid-model-call cannot stop
+  that one call from finishing (or being billed for). With bounded steps (below)
   the next boundary is at most one group of files away. `budget.ts`'s
   abandoned-reservation reclaim is the backstop either way -- the same one a
   Worker dying mid-request already relied on before this change.

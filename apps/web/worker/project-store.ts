@@ -236,6 +236,17 @@ export const PROJECT_ROW_DELETIONS: readonly string[] = [
  */
 export const RUN_IN_FLIGHT_MS = 30 * 60_000;
 
+/** One stage row of a run, with the accepted revision of its project. */
+export interface RunStageRow {
+  run_id: string;
+  project_id: string;
+  state: string;
+  snapshot_revision: string | null;
+  created_at: string;
+  updated_at: string;
+  accepted_revision: string | null;
+}
+
 /** A limit, or `null` for none: `ACTIVE_PROJECT_LIMIT` in `entitlement.ts`. */
 export type ActiveLimit = number | null;
 
@@ -517,6 +528,56 @@ export class ProjectStore {
       .bind(projectId, new Date(now.getTime() - RUN_IN_FLIGHT_MS).toISOString())
       .first();
     return row !== null;
+  }
+
+  /**
+   * The stage rows of one run, if the run is in one of this account's
+   * projects: its own row and its repair turn's (`runId:repair`,
+   * `runId:restore`), oldest first. Empty for a run that is somebody
+   * else's, or none at all, which the caller answers the same way.
+   *
+   * Here rather than in the generation store because it is a question of
+   * whose the run is, and every such question is asked in this file.
+   */
+  async runStages(userId: string, runId: string): Promise<RunStageRow[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT s.run_id, s.project_id, s.state, s.snapshot_revision,
+                s.created_at, s.updated_at, g.accepted_revision
+           FROM generation_stages s
+           JOIN projects p ON p.id = s.project_id
+           LEFT JOIN generation_projects g ON g.id = s.project_id
+          WHERE (s.run_id = ?1 OR substr(s.run_id, 1, length(?1) + 1) = ?1 || ':')
+            AND p.user_id = ?2
+          ORDER BY s.created_at, s.run_id`,
+      )
+      .bind(runId, userId)
+      .all<RunStageRow>();
+    return result.results ?? [];
+  }
+
+  /**
+   * The runs in this project whose stages have not ended, whatever their
+   * age, by the id their Workflow instance has (the part of a stage's run
+   * id before any `:repair`), newest first. Ownership is the caller's to
+   * have established already.
+   *
+   * Every age, not only those inside `RUN_IN_FLIGHT_MS`: a run the engine
+   * stopped without writing its end is exactly what the caller is looking
+   * for, so that it can be settled rather than left at `planning`.
+   */
+  async unendedRuns(projectId: string): Promise<string[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT run_id FROM generation_stages
+          WHERE project_id = ?1
+            AND state NOT IN ('accepted', 'failed', 'cancelled', 'idle')
+          ORDER BY created_at DESC, run_id`,
+      )
+      .bind(projectId)
+      .all<{ run_id: string }>();
+    const ids = (result.results ?? []).map((row) => row.run_id.split(':')[0]!);
+    return [...new Set(ids)];
   }
 
   /**

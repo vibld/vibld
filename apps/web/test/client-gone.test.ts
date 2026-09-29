@@ -226,3 +226,64 @@ describe('how a route learns the caller has gone', () => {
     );
   });
 });
+
+/**
+ * A build that outlives its page (docs/decisions.md, "Resolved 2026-09-29",
+ * keep building).
+ *
+ * Source-level, for the reason the block above gives: `handlePlan` needs
+ * Clerk, D1, Durable Objects and a Workflow binding to run. What it pins is
+ * the part production got wrong: run 553ea6c7 was terminated three and a
+ * half minutes in because its page went away, and paid for anyway.
+ */
+describe('a build whose page goes away', () => {
+  async function planSource(): Promise<string> {
+    const source = await readFile(workerSource(), 'utf8');
+    const start = source.indexOf('async function handlePlan(');
+    const end = source.indexOf('async function handleMockups(');
+    assert.ok(start > -1 && end > start, 'the test lost handlePlan');
+    return source.slice(start, end);
+  }
+
+  it('is not terminated once it exists', async () => {
+    const plan = await planSource();
+    const stream = plan.indexOf('new TransformStream()');
+    assert.ok(stream > -1);
+    assert.doesNotMatch(
+      plan.slice(stream),
+      /terminate\(/,
+      'a disconnect terminates the build again; only Stop may (DELETE /api/runs/:id)',
+    );
+  });
+
+  it('stops only the relay when the caller leaves', async () => {
+    const plan = await planSource();
+    assert.match(plan, /whenClientGone\(request\.signal, stopRelay\)/);
+    assert.match(plan, /\.catch\(stopRelay\)/);
+    const relay = plan.slice(
+      plan.indexOf('const stopRelay = () => {'),
+      plan.indexOf('whenClientGone(request.signal, stopRelay)'),
+    );
+    assert.doesNotMatch(relay, /terminate|releaseWithoutCharging/);
+  });
+
+  it('tells the builder its id before anything else', async () => {
+    // Stop names the build by it, and a page whose connection drops asks
+    // after the build by it.
+    const plan = await planSource();
+    const named = plan.indexOf("encodeEvent('run', { runId })");
+    const loop = plan.indexOf('const run = (async () => {');
+    assert.ok(named > -1, 'the stream never says which build it is');
+    assert.ok(named < loop, 'the id is sent after the first progress');
+  });
+
+  it('records the build as soon as it exists', async () => {
+    // A bounded build stages nothing until its model steps are over, so
+    // without this a reopened project could not see it running.
+    const plan = await planSource();
+    const create = plan.indexOf('GENERATION_WORKFLOW!.create(');
+    const opened = plan.indexOf('.openStage(');
+    assert.ok(opened > create, 'the run is recorded before it exists');
+    assert.ok(opened < plan.indexOf('new TransformStream()'));
+  });
+});

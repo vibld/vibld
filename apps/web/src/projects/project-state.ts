@@ -137,12 +137,15 @@ export interface SavedMarks {
  * What has changed since the last save, as the patch that would save it,
  * or null for nothing.
  *
- * The conversation is only saved once its last turn has settled. A turn
- * still running has nothing worth keeping yet, and saving it would write
- * a spinner into the project that a reload could only show as cancelled;
- * what matters is saving it the moment it closes, which is "after each
- * accepted build and each agent reply". Settings are saved whenever they
- * change, running or not.
+ * The conversation is saved once its last turn has settled, which is
+ * "after each accepted build and each agent reply", and once more while a
+ * build runs, as soon as the Worker has named it (`serverRunId`). That
+ * build outlives the page (docs/decisions.md, "Resolved 2026-09-29", keep
+ * building), so a reload has to find its turn to show it running and then
+ * settle it. Any other running turn is still not saved: a chat turn or a
+ * build not yet admitted ends with its page, and saving it would write a
+ * spinner that a reload could only show as cancelled. Settings are saved
+ * whenever they change, running or not.
  */
 export function changedSince(
   marks: SavedMarks,
@@ -151,8 +154,9 @@ export function changedSince(
 ): { patch: ProjectPatch; marks: SavedMarks } | null {
   const wire = wireSettings(settings);
   const settingsKey = settingsMark(wire);
-  const settled = transcript.at(-1)?.status !== 'running';
-  const turns = settled ? transcript.map(clipTranscriptTurn) : null;
+  const last = transcript.at(-1);
+  const worthSaving = last?.status !== 'running' || Boolean(last.serverRunId);
+  const turns = worthSaving ? transcript.map(clipTranscriptTurn) : null;
   const transcriptMark = turns ? JSON.stringify(turns) : marks.transcript;
 
   const patch: ProjectPatch = {};

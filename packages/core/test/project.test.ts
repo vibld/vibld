@@ -9,7 +9,9 @@ import {
   cleanProjectName,
   clipTranscriptTurn,
   copyName,
+  UNSEEN_FAILURE,
   parseTranscript,
+  reconciledTranscript,
   remixName,
   settledTranscript,
 } from '../src/project.ts';
@@ -121,6 +123,82 @@ describe('a transcript read back after the page that wrote it has gone', () => {
     assert.deepEqual(
       settled.map((t) => t.status),
       ['accepted', 'cancelled'],
+    );
+  });
+
+  it('leaves a build the Worker is still running for the builder to ask after', () => {
+    // A build that had been admitted outlives its page (docs/decisions.md,
+    // "Resolved 2026-09-29", keep building). Reading it as cancelled would
+    // tell somebody a build had stopped that was about to change their code.
+    const settled = settledTranscript([
+      turn(),
+      turn({ id: 2, status: 'running', serverRunId: 'wf-2' }),
+    ]);
+    assert.equal(settled[1]!.status, 'running');
+  });
+
+  it('keeps the build id through a save and a read', () => {
+    const saved = clipTranscriptTurn(
+      turn({ status: 'running', serverRunId: 'wf-2' }),
+    );
+    const read = parseTranscript([saved]);
+    assert.ok(read.ok);
+    assert.equal(read.turns[0]!.serverRunId, 'wf-2');
+    // And a turn without one is stored without one, not with a null.
+    const plain = parseTranscript([turn()]);
+    assert.ok(plain.ok);
+    assert.equal('serverRunId' in plain.turns[0]!, false);
+  });
+});
+
+describe('settling a build the page did not see finish', () => {
+  const running = [
+    turn(),
+    turn({
+      id: 2,
+      status: 'running',
+      revision: null,
+      fileCount: 0,
+      serverRunId: 'wf-2',
+    }),
+  ];
+
+  it('reads as accepted, at its revision, when it moved the project', () => {
+    const settled = reconciledTranscript(running, 'wf-2', {
+      state: 'accepted',
+      revision: 'r2',
+      fileCount: 7,
+    });
+    assert.equal(settled[1]!.status, 'accepted');
+    assert.equal(settled[1]!.revision, 'r2');
+    assert.equal(settled[1]!.fileCount, 7);
+    assert.deepEqual(settled[0], running[0], 'an earlier turn was rewritten');
+  });
+
+  it('reads as failed or cancelled otherwise', () => {
+    const failed = reconciledTranscript(running, 'wf-2', { state: 'failed' });
+    assert.equal(failed[1]!.status, 'failed');
+    assert.equal(failed[1]!.problem, UNSEEN_FAILURE);
+    const cancelled = reconciledTranscript(running, 'wf-2', {
+      state: 'cancelled',
+    });
+    assert.equal(cancelled[1]!.status, 'cancelled');
+  });
+
+  it('touches only the running turn for that build', () => {
+    // Another build's answer, or a late one about a turn that already
+    // ended, changes nothing.
+    assert.deepEqual(
+      reconciledTranscript(running, 'wf-9', { state: 'failed' }),
+      running,
+    );
+    const ended = [turn({ status: 'cancelled', serverRunId: 'wf-2' })];
+    assert.deepEqual(
+      reconciledTranscript(ended, 'wf-2', {
+        state: 'accepted',
+        revision: 'r2',
+      }),
+      ended,
     );
   });
 });

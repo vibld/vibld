@@ -240,6 +240,23 @@ describe('what counts as a change worth saving', () => {
     });
   });
 
+  it('saves a build the Worker has admitted while it is still running', () => {
+    // It outlives the page (docs/decisions.md, "Resolved 2026-09-29", keep
+    // building), so a reload has to find its turn to show it running and
+    // settle it; a turn not saved is a prompt that vanishes from the
+    // conversation while its build changes the code.
+    const marks = marksFor(
+      { ...NOTHING, model: 'm', knowledge: '', styleDna: {} },
+      [],
+    );
+    const admitted = [
+      turn({ status: 'running', revision: null, serverRunId: 'wf-1' }),
+    ];
+    const changed = changedSince(marks, settings, admitted);
+    assert.equal(changed?.patch.transcript?.[0]?.serverRunId, 'wf-1');
+    assert.equal(changed?.patch.transcript?.[0]?.status, 'running');
+  });
+
   it('saves again a turn that was saved running and reads back cancelled', () => {
     const marks = marksFor(
       { ...NOTHING, model: 'm', knowledge: '', styleDna: {} },

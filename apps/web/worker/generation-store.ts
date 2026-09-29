@@ -217,6 +217,61 @@ export class D1GenerationStore implements GenerationStore {
       .run();
   }
 
+  /**
+   * Record that a run has been created, before any step of it has run.
+   *
+   * A bounded build writes its first stage only once its model steps are
+   * over, in `assemble`, so without this a run spends most of its life with
+   * no row at all: invisible to `ProjectStore.runInFlight` and to a builder
+   * reopening the project to ask whether it is still going
+   * (docs/decisions.md, "Resolved 2026-09-29", keep building).
+   *
+   * `DO NOTHING` on a row that exists, so it can never put back a run that
+   * has already moved past `planning`.
+   */
+  async openStage(record: {
+    runId: string;
+    projectId: string;
+    baseRevision: string | null;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await this.#db
+      .prepare(
+        `INSERT INTO generation_stages
+           (run_id, project_id, base_revision, state, snapshot_revision, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'planning', NULL, ?4, ?4)
+         ON CONFLICT(run_id) DO NOTHING`,
+      )
+      .bind(record.runId, record.projectId, record.baseRevision, now)
+      .run();
+  }
+
+  /**
+   * End every stage of run `runId` that has not ended, as `state`: the
+   * run's own row and the ones its repair turn writes under `runId:repair`
+   * and `runId:restore`.
+   *
+   * For a run that stopped without writing its own end: one somebody
+   * stopped (`cancelled`), or one the Workflow engine reports finished,
+   * errored or terminated while its row still says `planning`. Left alone,
+   * that row reads as a run in flight for `RUN_IN_FLIGHT_MS` and as
+   * `planning` for ever after.
+   *
+   * A row that has ended is never touched, so this cannot overwrite an
+   * accepted run, and asking twice is the same as asking once. Matched by
+   * prefix without `LIKE`, so an id cannot carry a wildcard into it.
+   */
+  async settleRun(runId: string, state: 'failed' | 'cancelled'): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE generation_stages SET state = ?2, updated_at = ?3
+          WHERE (run_id = ?1 OR substr(run_id, 1, length(?1) + 1) = ?1 || ':')
+            AND state NOT IN ('accepted', 'failed', 'cancelled', 'idle')`,
+      )
+      .bind(runId, state, new Date().toISOString())
+      .run();
+  }
+
   async loadStage(runId: string): Promise<GenerationStageRecord | undefined> {
     const row = await this.#db
       .prepare(

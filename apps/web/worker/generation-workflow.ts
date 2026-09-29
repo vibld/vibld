@@ -73,12 +73,15 @@ export type { WorkflowParams } from './generation-run.ts';
  *    through a named Durable Object (`run-progress.ts`) that the poll loop
  *    reads, throttled to about a report a second and never awaited.
  *  - Cancelling now means `WorkflowInstance.terminate()`, not dropping a
- *    fetch. `index.ts` calls it on disconnect, but termination lands at the
- *    next step boundary, not mid-step -- a cancel that arrives while a model
- *    call is in flight cannot stop that one call from finishing (and being
- *    billed for). With bounded steps the next boundary is at most one group
- *    away. The budget ledger's own abandoned-reservation reclaim
- *    (`budget.ts`, `ABANDONED_AFTER_MS`) is the backstop either way.
+ *    fetch. Only Stop calls it (`run-control.ts`, `DELETE /api/runs/:id`):
+ *    a page going away no longer cancels a build, which runs on and saves
+ *    to the project (docs/decisions.md, "Resolved 2026-09-29", keep
+ *    building). Termination lands at the next step boundary, not mid-step
+ *    -- a Stop that arrives while a model call is in flight cannot stop
+ *    that one call from finishing (and being billed for). With bounded
+ *    steps the next boundary is at most one group away. The budget
+ *    ledger's own abandoned-reservation reclaim (`budget.ts`,
+ *    `ABANDONED_AFTER_MS`) is the backstop either way.
  *
  * This file only glues `step.do` to `generation-run.ts`'s pure functions --
  * see that file's own comment for why the split exists and where the tests

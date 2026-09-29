@@ -42,6 +42,7 @@ import {
   handleProjects,
 } from './project-handlers.ts';
 import type { ProjectLinks } from './project-handlers.ts';
+import { handleRun } from './run-control.ts';
 import {
   ProjectStore,
   liveSiteProjects,
@@ -1328,6 +1329,21 @@ async function handlePlan(
     return new Response(null, { status: 499 });
   }
 
+  // The run's row, from the moment the run exists rather than from the
+  // moment its model steps finish (`openStage`). Until then a bounded build
+  // has no row at all, and a builder reopening the project could not see
+  // that it was still going. A write that fails costs only that: the run
+  // itself carries on, and stages itself as it always has.
+  try {
+    await new D1GenerationStore(env.DB!, env.PROJECT_CONTENT!).openStage({
+      runId,
+      projectId,
+      baseRevision: parsed.value.baseRevision ?? null,
+    });
+  } catch (error) {
+    console.error('failed to record a new run', error);
+  }
+
   // Stream rather than buffer. A buffered response sends nothing until the
   // run finishes, and the client gives up first -- which surfaces as an
   // opaque network error, not a failed generation.
@@ -1344,17 +1360,23 @@ async function handlePlan(
     }
   };
 
-  // A run nobody is waiting for should stop, not run to completion unread.
-  // Termination lands at the Workflow's next step boundary, not mid-step
-  // (generation-workflow.ts's own module comment), so a cancel that arrives
-  // while the model call itself is in flight cannot stop that one call --
-  // the ledger's abandoned-reservation reclaim is the backstop either way.
-  let cancelled = false;
-  const cancel = () => {
-    if (cancelled) return;
-    cancelled = true;
+  // A caller who leaves stops the relay, and only the relay. The build goes
+  // on without them and saves to the project, where reopening it picks the
+  // result up (docs/decisions.md, "Resolved 2026-09-29", keep building).
+  // Only Stop cancels a build, through `DELETE /api/runs/:id`
+  // (`run-control.ts`).
+  //
+  // This used to terminate the Workflow instead, on the reasoning that a run
+  // nobody is waiting for should not run to completion unread. On a phone
+  // that meant a locked screen or a switched app was a cancel: run 553ea6c7
+  // was terminated three and a half minutes in when its page went away, its
+  // stage left at `planning`, and the model call in flight was paid for
+  // anyway, since termination lands at the next step boundary.
+  let gone = false;
+  const stopRelay = () => {
+    if (gone) return;
+    gone = true;
     stopKeepalive();
-    ctx.waitUntil(instance.terminate().catch(() => {}));
   };
 
   // Two independent notices that the client is gone. The runtime aborts
@@ -1364,34 +1386,47 @@ async function handlePlan(
   // Through `whenClientGone`, because a caller who left during the identity
   // check or the reservation above has already aborted by the time this
   // runs, and an abort is not replayed to a listener added afterwards
-  // (internal PR 189 review). This route's version of that is the expensive one: a
-  // whole generation starts for somebody who is not there.
+  // (internal PR 189 review).
   //
-  // The second registration in this route, and both are needed. The first
-  // one, above `create()`, can only set a flag: there is no `instance` to
-  // terminate and no keepalive to stop until the lines between them have
-  // run. This one is the one that actually cancels, and it exists from the
-  // first byte of the stream onwards.
-  whenClientGone(request.signal, cancel);
+  // The second registration in this route, and the two now do different
+  // things. The first, above `create()`, still keeps a caller who left
+  // before the run existed from starting one. This one only stops relaying
+  // to somebody who is no longer there.
+  whenClientGone(request.signal, stopRelay);
 
   const write = (chunk: string) =>
-    writer.write(encoder.encode(chunk)).catch(cancel);
+    writer.write(encoder.encode(chunk)).catch(stopRelay);
 
   // First bytes immediately, so the connection is never idle from the start.
   void write(KEEPALIVE_COMMENT);
   keepalive = setInterval(() => void write(KEEPALIVE_COMMENT), keepaliveMs);
 
+  // Then the run's own id, before anything else: it is what the builder's
+  // Stop names, and what it asks after if this connection drops before the
+  // result arrives.
+  void write(encodeEvent('run', { runId }));
+
+  // Written down as well as shown, for a run whose instance ended without
+  // writing its own end (`settleRun`): the one a person is watching reads as
+  // it ended here rather than as `planning` until somebody opens the project.
+  const settleStages = (state: 'failed' | 'cancelled') =>
+    new D1GenerationStore(env.DB!, env.PROJECT_CONTENT!)
+      .settleRun(runId, state)
+      .catch((error: unknown) => {
+        console.error('failed to settle a run that ended', error);
+      });
+
   const run = (async () => {
     try {
       for (;;) {
-        if (cancelled) return;
+        if (gone) return;
 
         let status;
         try {
           status = await instance.status();
         } catch (error) {
           console.error('workflow status unavailable', error);
-          if (!cancelled) {
+          if (!gone) {
             await write(
               encodeEvent('error', {
                 error: 'Generation failed unexpectedly.',
@@ -1402,6 +1437,11 @@ async function handlePlan(
         }
 
         if (status.status === 'complete') {
+          // Nothing of a finished instance is still running, so any stage it
+          // left open ended with it: a refusal before any model step, which
+          // stages nothing past the row `openStage` wrote, or a repair turn
+          // cut off by its own deadline.
+          await settleStages('failed');
           const result = status.output as {
             state: string;
             accepted?: { revision: string; files: unknown[] };
@@ -1446,7 +1486,10 @@ async function handlePlan(
             status: status.status,
             error: status.error?.message,
           });
-          if (!cancelled) {
+          await settleStages(
+            status.status === 'terminated' ? 'cancelled' : 'failed',
+          );
+          if (!gone) {
             await write(
               encodeEvent('error', {
                 error:
@@ -1479,7 +1522,7 @@ async function handlePlan(
         // finished. `stepFor` says nothing otherwise, and the stage word
         // carries the line as it did before.
         const step = stepFor(status.status, progress);
-        if (!cancelled) {
+        if (!gone) {
           await write(
             encodeEvent('progress', {
               elapsedMs: Date.now() - waitingSince,
@@ -3049,6 +3092,35 @@ async function route(
     return handleRuns(request, env);
   }
 
+  // A build's Workflow instance, for the two routes that need to know
+  // whether it is still running: asking after a build and opening its
+  // project. `status()` on an instance that does not exist throws, which
+  // reads as "cannot tell".
+  const instanceStatus = env.GENERATION_WORKFLOW
+    ? async (runId: string) =>
+        (await env.GENERATION_WORKFLOW!.get(runId))
+          .status()
+          .then((status) => status.status as string)
+    : undefined;
+
+  // One of the caller's builds: what became of it, and Stop
+  // (`run-control.ts`, docs/decisions.md, "Resolved 2026-09-29", keep
+  // building).
+  if (pathname === '/api/runs/:id') {
+    return handleRun(request, env, {
+      resolvePrincipal: (req) => resolvePrincipal(req, env),
+      ...(instanceStatus ? { instanceStatus } : {}),
+      ...(env.GENERATION_WORKFLOW
+        ? {
+            terminate: async (runId: string) => {
+              await (await env.GENERATION_WORKFLOW!.get(runId)).terminate();
+            },
+          }
+        : {}),
+      ...(env.IP_BURST ? { ipLimit: env.IP_BURST } : {}),
+    });
+  }
+
   // The caller's projects (`project-handlers.ts`). Four literal routes,
   // one handler: the handler reads the id from the request's own path.
   const links: ProjectLinks = {
@@ -3076,6 +3148,7 @@ async function route(
         }
       : {}),
     ...(stopSharePreview ? { stopSharePreview } : {}),
+    ...(instanceStatus ? { instanceStatus } : {}),
   };
   if (pathname === '/api/projects') {
     return handleProjects(request, env, projectDeps);

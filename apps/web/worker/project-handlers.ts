@@ -18,6 +18,7 @@ import {
   routeKeyFor,
 } from './access-gate.ts';
 import { BillingStore } from './billing-store.ts';
+import { D1GenerationStore } from './generation-store.ts';
 import { ACTIVE_PROJECT_LIMIT, tierFor } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
 import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
@@ -32,6 +33,7 @@ import {
   parseReferenceUrl,
 } from './request-guard.ts';
 import type { GuardResult } from './request-guard.ts';
+import { buildInFlight } from './run-control.ts';
 import { newShareToken, shareUrl } from './share-link.ts';
 
 /**
@@ -41,7 +43,8 @@ import { newShareToken, shareUrl } from './share-link.ts';
  *     GET    /api/projects                 every project, active and archived
  *     POST   /api/projects                 make one (held to the tier's limit)
  *     GET    /api/projects/:id             open one: its settings, its
- *                                          conversation and its accepted code
+ *                                          conversation, its accepted code
+ *                                          and any build still running in it
  *     PATCH  /api/projects/:id             rename, archive or unarchive, save
  *                                          settings and conversation
  *     DELETE /api/projects/:id             delete it, code, site and all
@@ -94,6 +97,12 @@ export interface ProjectsDeps {
    * its lifetime. Absent where there is no preview service.
    */
   stopSharePreview?: (token: string) => Promise<void>;
+  /**
+   * A build's Workflow instance status, so opening a project can tell a
+   * build still running from one the engine stopped without writing its
+   * end (`run-control.ts`). Absent where there is no Workflow binding.
+   */
+  instanceStatus?: (runId: string) => Promise<string | undefined>;
 }
 
 /**
@@ -489,9 +498,25 @@ export async function handleProjects(
     // in its address opens next time.
     const at = now();
     await store.touchOpened(userId, project.id, at);
-    const [transcript, snapshot] = await Promise.all([
+    const [transcript, snapshot, build] = await Promise.all([
       store.readTranscript(project),
       store.accepted(project.id),
+      // A build the page that started it did not see finish, which goes on
+      // without it (docs/decisions.md, "Resolved 2026-09-29", keep
+      // building): the builder shows it as still running and asks after it
+      // until it ends. Never a reason to fail the open: the code and the
+      // conversation are what matter most, and they do not depend on it.
+      buildInFlight(
+        store,
+        new D1GenerationStore(db, env.PROJECT_CONTENT),
+        userId,
+        project.id,
+        clock(),
+        deps,
+      ).catch((error: unknown) => {
+        console.error('build in flight unreadable', error);
+        return null;
+      }),
     ]);
     return json({
       project: view({ ...project, lastOpenedAt: at }),
@@ -504,6 +529,9 @@ export async function handleProjects(
       snapshot: snapshot
         ? { revision: snapshot.revision, files: snapshot.files }
         : null,
+      // Its Workflow instance id, which Stop and the builder's questions
+      // name, and when it started; null for none.
+      build,
     });
   }
 

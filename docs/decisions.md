@@ -235,6 +235,26 @@ request, spec and manifest are marked for Anthropic's prompt cache; OpenAI
 and DeepSeek cache the same prefix on their own. `apps/web/README.md`,
 "Bounded steps", has the detail.
 
+**A build keeps running when its page goes away, and only Stop cancels it.**
+Chris decided on 2026-09-29 (D55): when the builder loses its connection in
+the middle of a build, because the phone was locked, the app was switched,
+the tab was closed or the page reloaded, the build goes on and saves to the
+project, and reopening the project picks the result up. Until then a dropped
+connection terminated the build: run 553ea6c7 on project 66163432 was
+terminated three and a half minutes in when Chris's phone left the page, its
+stage was left at `planning` for good, and the model call in flight was paid
+for anyway, because termination lands at the next step boundary. Now a
+disconnect stops only the stream. A caller who leaves before the build has
+been created still does not start one. Stop calls `DELETE /api/runs/:id`,
+which checks the build is the caller's, terminates it and marks it
+`cancelled`; if that fails, the builder says so and shows the build as still
+running. `GET /api/projects/:id` reports a build still running, and the
+builder shows it, polls `GET /api/runs/:id` every 1.5 seconds until it ends,
+then loads the new code and settles the turn the page left open as
+accepted, failed or cancelled. A page whose stream drops does the same
+instead of reporting a failure. A stage the engine left unended is settled
+when the build is next asked after or its project opened.
+
 ### Resolved 2026-09-28
 
 **The legal pages carry Chris's decisions for the open paid beta.** Chris

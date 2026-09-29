@@ -87,6 +87,15 @@ export interface TranscriptTurn {
   /** The first problem, when the run failed. Cancellation is not a problem. */
   problem: string | null;
   providerId: string | null;
+  /**
+   * The Worker's id for this turn's build, its Workflow instance, once the
+   * build has been admitted. `runId` above is the builder's own numbering
+   * and means nothing to the Worker; this is what Stop cancels and what a
+   * reopened project asks after (docs/decisions.md, "Resolved 2026-09-29",
+   * keep building). Absent for a reply, a build that never started, and
+   * every turn saved before builds outlived their page.
+   */
+  serverRunId?: string | null;
 }
 
 export type TranscriptParse =
@@ -153,6 +162,7 @@ export function parseTranscript(value: unknown): TranscriptParse {
       revision,
       problem,
       providerId,
+      serverRunId,
     } = raw;
     if (!finiteNumber(id) || !finiteNumber(at) || !finiteNumber(fileCount)) {
       return { ok: false, error: `${where} has a malformed number.` };
@@ -171,7 +181,8 @@ export function parseTranscript(value: unknown): TranscriptParse {
       !optionalText(summary) ||
       !optionalText(revision) ||
       !optionalText(problem) ||
-      !optionalText(providerId)
+      !optionalText(providerId) ||
+      !optionalText(serverRunId)
     ) {
       return { ok: false, error: `${where} has a field that is too long.` };
     }
@@ -187,6 +198,7 @@ export function parseTranscript(value: unknown): TranscriptParse {
       revision: revision ?? null,
       problem: problem ?? null,
       providerId: providerId ?? null,
+      ...(typeof serverRunId === 'string' ? { serverRunId } : {}),
     });
   }
   return { ok: true, turns };
@@ -222,6 +234,7 @@ export function clipTranscriptTurn(turn: TranscriptTurn): TranscriptTurn {
     revision: clipOptional(turn.revision),
     problem: clipOptional(turn.problem),
     providerId: clipOptional(turn.providerId),
+    ...(turn.serverRunId ? { serverRunId: clip(turn.serverRunId) } : {}),
   };
 }
 
@@ -229,16 +242,67 @@ export function clipTranscriptTurn(turn: TranscriptTurn): TranscriptTurn {
  * A transcript as it should read after the page that wrote it is gone.
  *
  * A turn saved while still `running` belonged to a request that the reload
- * or the switch to another project dropped, and a dropped request is one the
- * Worker stops (`handlePlan` terminates the run when its caller leaves, and
- * a chat turn is aborted the same way). Showing it as still running would
- * leave a spinner nothing will ever resolve, so it reads as cancelled,
- * which is what happened to it.
+ * or the switch to another project dropped. A chat turn is aborted with its
+ * request, and so is a build that had not been admitted yet, so either
+ * reads as cancelled, which is what happened to it: showing it as still
+ * running would leave a spinner nothing will ever resolve.
+ *
+ * A build that had been admitted is different. It carries the Worker's id
+ * for it (`serverRunId`), and it goes on running without the page
+ * (docs/decisions.md, "Resolved 2026-09-29", keep building), so it is left
+ * running here for the builder to ask after and settle with
+ * `reconciledTranscript`.
  */
 export function settledTranscript(turns: TranscriptTurn[]): TranscriptTurn[] {
   return turns.map((turn) =>
-    turn.status === 'running' ? { ...turn, status: 'cancelled' } : turn,
+    turn.status === 'running' && !turn.serverRunId
+      ? { ...turn, status: 'cancelled' }
+      : turn,
   );
+}
+
+/** What became of a build the page that started it did not see finish. */
+export interface BuildOutcome {
+  state: 'accepted' | 'failed' | 'cancelled';
+  /** The revision the build was accepted at, for `accepted`. */
+  revision?: string | null;
+  /** How many files that revision has, for `accepted`. */
+  fileCount?: number;
+}
+
+/**
+ * The problem a build that ended unseen is given, since nothing that
+ * watched it is left to say more.
+ */
+export const UNSEEN_FAILURE = 'This build stopped before it finished.';
+
+/**
+ * The transcript with the build `serverRunId` settled as `outcome` says.
+ *
+ * Only a turn still `running` is touched, the rule the builder's own
+ * `#closeTurn` keeps, so a turn somebody already saw end is never
+ * rewritten by a later answer about the same build.
+ */
+export function reconciledTranscript(
+  turns: TranscriptTurn[],
+  serverRunId: string,
+  outcome: BuildOutcome,
+): TranscriptTurn[] {
+  return turns.map((turn) => {
+    if (turn.status !== 'running' || turn.serverRunId !== serverRunId) {
+      return turn;
+    }
+    if (outcome.state === 'accepted') {
+      return {
+        ...turn,
+        status: 'accepted',
+        revision: outcome.revision ?? null,
+        fileCount: outcome.fileCount ?? turn.fileCount,
+      };
+    }
+    if (outcome.state === 'cancelled') return { ...turn, status: 'cancelled' };
+    return { ...turn, status: 'failed', problem: UNSEEN_FAILURE };
+  });
 }
 
 /**

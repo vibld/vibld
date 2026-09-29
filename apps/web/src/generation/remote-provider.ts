@@ -41,6 +41,23 @@ export class SignInRequiredError extends Error {
   }
 }
 
+/**
+ * The stream stopped before it said how the build ended: the network
+ * dropped, the phone slept, the connection closed. Not a failed build.
+ * Once the Worker has admitted one it goes on without the page
+ * (docs/decisions.md, "Resolved 2026-09-29", keep building), so the
+ * builder asks after it instead of reporting it failed.
+ */
+export class ConnectionLostError extends Error {
+  constructor(message = 'The connection closed before generation finished.') {
+    super(message);
+    this.name = 'ConnectionLostError';
+  }
+}
+
+/** The service's own words could not be read, which is not the network. */
+class MalformedEventError extends Error {}
+
 async function authHeaders(
   getToken: () => Promise<string | null>,
 ): Promise<Record<string, string>> {
@@ -86,7 +103,9 @@ export async function* readPlanEvents(
         try {
           yield { event, data: JSON.parse(dataLines.join('\n')) };
         } catch {
-          throw new Error('The generation service sent a malformed event.');
+          throw new MalformedEventError(
+            'The generation service sent a malformed event.',
+          );
         }
       }
     }
@@ -105,12 +124,19 @@ export interface RemoteModelProviderOptions {
    */
   onProgress?: (progress: GenerationProgress) => void;
   /**
-   * Aborts the request when the user cancels. Aborting the fetch also drops
-   * the connection, which is the signal the Worker uses to stop its own model
-   * call -- so cancelling here really does stop the spending, rather than
-   * merely stopping the waiting.
+   * Aborts the request. That stops the waiting and nothing else once the
+   * build has been admitted: the Worker goes on building without the page
+   * (docs/decisions.md, "Resolved 2026-09-29", keep building), and Stop
+   * ends a build through `stopBuild` with the id `onRun` reports. Before
+   * that, aborting still keeps a build from starting at all.
    */
   signal?: AbortSignal;
+  /**
+   * Called with the Worker's id for the build once it has been admitted:
+   * the stream's first event. It is what Stop names, and what the builder
+   * asks after if this connection drops before the result arrives.
+   */
+  onRun?: (runId: string) => void;
   /**
    * The chosen visual direction, by id. The Worker validates it against the
    * closed set -- the browser is not trusted to have sent a real one.
@@ -159,6 +185,7 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #fetch: typeof fetch;
   readonly #signal?: AbortSignal;
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
+  readonly #onRun?: RemoteModelProviderOptions['onRun'];
   readonly #style: StylePresetId | null;
   readonly #styleDna: StyleDna | null;
   readonly #knowledge: string | null;
@@ -174,6 +201,7 @@ export class RemoteModelProvider implements ModelProvider {
     this.#fetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
+    this.#onRun = options.onRun;
     this.#style = options.style ?? null;
     this.#styleDna = options.styleDna ?? null;
     this.#knowledge = options.knowledge ?? null;
@@ -231,7 +259,28 @@ export class RemoteModelProvider implements ModelProvider {
       throw new Error('The generation service returned an empty response.');
     }
 
-    for await (const { event, data } of readPlanEvents(response.body)) {
+    const events = readPlanEvents(response.body);
+    for (;;) {
+      let next: IteratorResult<PlanEvent>;
+      try {
+        next = await events.next();
+      } catch (error) {
+        if (error instanceof MalformedEventError || this.#signal?.aborted) {
+          throw error;
+        }
+        // The body stopped arriving part way: the browser's own "Load
+        // failed" or "network error", which says nothing about the build.
+        throw new ConnectionLostError();
+      }
+      if (next.done) break;
+      const { event, data } = next.value;
+      if (event === 'run') {
+        const { runId } = data as { runId?: unknown };
+        if (typeof runId === 'string' && runId.length > 0) {
+          this.#onRun?.(runId);
+        }
+        continue;
+      }
       if (event === 'progress') {
         const { characters, elapsedMs, stage, step } = data as {
           characters?: number;
@@ -280,7 +329,7 @@ export class RemoteModelProvider implements ModelProvider {
 
     // The connection closed without a result. Naming it beats the browser's
     // bare "Load failed".
-    throw new Error('The connection closed before generation finished.');
+    throw new ConnectionLostError();
   }
 }
 

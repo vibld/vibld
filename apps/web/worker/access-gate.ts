@@ -166,6 +166,15 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // description -- the writes happen in the Workflow, behind `/api/plan`,
   // which stays gated.
   '/api/runs': "a read of the caller's own run history",
+  // One of the caller's own builds: what became of it (GET), and stopping
+  // it (DELETE), which is the only thing that stops one now that a build
+  // outlives the page that started it (docs/decisions.md, "Resolved
+  // 2026-09-29", keep building). Open for the rule `GATED_METHODS` opens
+  // with: an account that loses its invite mid-build still owns the build,
+  // and taking away its Stop would leave it running and billed with no
+  // way to end it. Neither method starts or spends anything; the build it
+  // names was started through `/api/plan`, which stays gated.
+  '/api/runs/:id': "the caller's own build: ask after it or stop it",
   // One of the caller's own projects: open it (GET), rename, archive,
   // unarchive or save its settings and conversation (PATCH), or delete it
   // (DELETE). The same rule as the media library and the published site:
@@ -320,6 +329,8 @@ export const PROJECT_SHARE_ROUTE = '/api/projects/:id/share';
 export const SHARE_VIEW_ROUTE = '/api/share/:token';
 export const SHARE_PREVIEW_ROUTE = '/api/share/:token/preview';
 export const SHARE_REMIX_ROUTE = '/api/share/:token/remix';
+/** One build, by its Workflow instance id (`run-control.ts`). */
+export const RUN_ITEM_ROUTE = '/api/runs/:id';
 
 const PROJECT_ITEM = /^\/api\/projects\/([^/]+)$/;
 const PROJECT_DUPLICATE = /^\/api\/projects\/([^/]+)\/duplicate$/;
@@ -327,6 +338,7 @@ const PROJECT_SHARE = /^\/api\/projects\/([^/]+)\/share$/;
 const SHARE_VIEW = /^\/api\/share\/([^/]+)$/;
 const SHARE_PREVIEW = /^\/api\/share\/([^/]+)\/preview$/;
 const SHARE_REMIX = /^\/api\/share\/([^/]+)\/remix$/;
+const RUN_ITEM = /^\/api\/runs\/([^/]+)$/;
 
 export function routeKeyFor(pathname: string): string {
   if (PROJECT_DUPLICATE.test(pathname)) return PROJECT_DUPLICATE_ROUTE;
@@ -335,6 +347,7 @@ export function routeKeyFor(pathname: string): string {
   if (SHARE_PREVIEW.test(pathname)) return SHARE_PREVIEW_ROUTE;
   if (SHARE_REMIX.test(pathname)) return SHARE_REMIX_ROUTE;
   if (SHARE_VIEW.test(pathname)) return SHARE_VIEW_ROUTE;
+  if (RUN_ITEM.test(pathname)) return RUN_ITEM_ROUTE;
   return pathname;
 }
 
@@ -363,6 +376,11 @@ export function shareTokenInPath(pathname: string): string | null {
       SHARE_REMIX.exec(pathname) ??
       SHARE_VIEW.exec(pathname),
   );
+}
+
+/** The id in a run route's path, still to be checked for shape. */
+export function runIdInPath(pathname: string): string | null {
+  return segment(RUN_ITEM.exec(pathname));
 }
 
 export function isGated(pathname: string, method: string): boolean {

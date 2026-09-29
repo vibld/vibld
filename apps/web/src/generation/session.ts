@@ -4,6 +4,8 @@ import {
   FakeModelProvider,
   InMemoryGenerationStore,
   RunBudgetLedger,
+  UNSEEN_FAILURE,
+  reconciledTranscript,
   settledTranscript,
 } from '@vibld/core';
 import type {
@@ -41,9 +43,12 @@ import {
   withValidationDelay,
 } from './observers.ts';
 import {
+  ConnectionLostError,
   RemoteModelProvider,
   detectGenerationMode,
 } from './remote-provider.ts';
+import { POLL_INTERVAL_MS, fetchBuild, stopBuild } from './runs-client.ts';
+import type { BuildAnswer, BuildRun } from './runs-client.ts';
 import type { GenerationMode } from './remote-provider.ts';
 
 export type BuilderStatus =
@@ -185,6 +190,18 @@ export interface BuilderState {
    * sees it, and opening the project again does not bring it back.
    */
   draft: DraftPreview | null;
+  /**
+   * The Worker's id for the build in flight, once it has been admitted:
+   * what Stop names (`DELETE /api/runs/:id`). Null when nothing is running
+   * on the Worker, and for the deterministic fake, which runs here.
+   */
+  serverRunId: string | null;
+  /**
+   * One line about the build in flight that is neither progress nor a
+   * problem: that it carried on while the page was away, that it is being
+   * stopped, or that it could not be.
+   */
+  notice: string | null;
 }
 
 /** A sketch shown in the preview pane while the real site is built. */
@@ -217,6 +234,13 @@ export interface RestoredProject {
   model: string | null;
   knowledge: string;
   styleDna: StyleDna;
+  /**
+   * A build the Worker is still running in this project, from opening it
+   * (`GET /api/projects/:id`), or null for none. It carried on after the
+   * page that started it went away (docs/decisions.md, "Resolved
+   * 2026-09-29", keep building).
+   */
+  build?: { runId: string; startedAt: string } | null;
 }
 
 /** What a project remembers besides its code and its conversation. */
@@ -277,6 +301,11 @@ export interface SessionOptions {
   /** Ask for directions. Injectable so tests need no network. */
   requestMockupsImpl?: typeof requestMockups;
   requestChatTurnImpl?: typeof requestChatTurn;
+  /** Ask after a build and stop one. Injectable so tests need no network. */
+  fetchBuildImpl?: (runId: string) => Promise<BuildAnswer>;
+  stopBuildImpl?: (runId: string) => Promise<BuildAnswer>;
+  /** The pause between two questions about a build this page is not streaming. */
+  pollDelay?: () => Promise<void>;
   resolveProvider?: (
     plan: GenerationPlan,
     signal: AbortSignal,
@@ -293,8 +322,18 @@ export interface SessionOptions {
     mockup?: { label: string; html: string } | null,
     // Last for the same reason: the server project the build is for.
     projectId?: string | null,
+    // And the Worker's id for the build, once admitted.
+    onRun?: (runId: string) => void,
   ) => Promise<ModelProvider>;
 }
+
+/** What a reopened project says of a build that carried on without it. */
+export const STILL_RUNNING =
+  'This build is still running. It carried on while you were away, and its result will appear here when it finishes.';
+
+/** What the builder says when the stream drops and the build does not. */
+export const CONNECTION_DROPPED =
+  'The connection dropped, but the build is still running. Its result will appear here when it finishes.';
 
 const DEFAULT_BUDGET = {
   modelInputTokens: 50_000,
@@ -345,6 +384,8 @@ function initialState(budget: RunUsageReport): BuilderState {
     referenceUrl: '',
     opening: false,
     draft: null,
+    serverRunId: null,
+    notice: null,
   };
 }
 
@@ -365,12 +406,14 @@ async function defaultResolveProvider(
   styleDna?: StyleDna | null,
   mockup?: { label: string; html: string } | null,
   projectId?: string | null,
+  onRun?: (runId: string) => void,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
     ? new RemoteModelProvider({
         signal,
         ...(projectId ? { projectId } : {}),
+        ...(onRun ? { onRun } : {}),
         ...(onProgress ? { onProgress } : {}),
         ...(style ? { style } : {}),
         ...(knowledge ? { knowledge } : {}),
@@ -466,8 +509,14 @@ export class BuilderSession {
     styleDna?: StyleDna | null,
     mockup?: { label: string; html: string } | null,
     projectId?: string | null,
+    onRun?: (runId: string) => void,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
+  readonly #fetchBuild: (runId: string) => Promise<BuildAnswer>;
+  readonly #stopBuild: (runId: string) => Promise<BuildAnswer>;
+  readonly #pollDelay: () => Promise<void>;
+  /** A Stop is waiting on the Worker, so a second press does not send another. */
+  #stopping = false;
 
   constructor(options: SessionOptions = {}) {
     this.#delay =
@@ -481,6 +530,12 @@ export class BuilderSession {
     this.#resolveProvider = options.resolveProvider ?? defaultResolveProvider;
     this.#requestMockups = options.requestMockupsImpl ?? requestMockups;
     this.#requestChatTurn = options.requestChatTurnImpl ?? requestChatTurn;
+    this.#fetchBuild = options.fetchBuildImpl ?? ((id) => fetchBuild(id));
+    this.#stopBuild = options.stopBuildImpl ?? ((id) => stopBuild(id));
+    this.#pollDelay =
+      options.pollDelay ??
+      (() =>
+        new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS)));
     this.#state = initialState(this.#ledger.report());
   }
 
@@ -512,6 +567,12 @@ export class BuilderSession {
    *
    * No state is written, unlike `cancel`. There is nobody left to show it
    * to, and `#disposed` already refuses every later mutation.
+   *
+   * A build the Worker has admitted is the exception to "stop what it is
+   * paying for": aborting its request stops only the waiting, and the build
+   * finishes and saves to its project, which is what a page going away is
+   * meant to do now (docs/decisions.md, "Resolved 2026-09-29", keep
+   * building). Only Stop cancels one.
    */
   dispose(): void {
     this.#disposed = true;
@@ -624,11 +685,18 @@ export class BuilderSession {
    * Open a project: put back its conversation, its accepted code and its
    * settings, and build in it from now on.
    *
-   * Everything in flight is stopped first, as `reset` stops it, because it
-   * belongs to the project being left: a build that finished after this
-   * would otherwise land in the new project's screen, and a chat reply
-   * would be answering a conversation nobody can see any more. The Worker
-   * stops the run itself when its request is dropped.
+   * Everything in flight is let go of first, as `reset` lets go of it,
+   * because it belongs to the project being left: a build that finished
+   * after this would otherwise land in the new project's screen, and a chat
+   * reply would be answering a conversation nobody can see any more. A
+   * build the Worker has admitted is not stopped by that: it goes on,
+   * saves to the project it was started in, and is found again when that
+   * project is next opened (docs/decisions.md, "Resolved 2026-09-29", keep
+   * building).
+   *
+   * Which is the other thing opening does: a build still running here, or
+   * one that ended while no page was watching, is shown as running and
+   * asked after (`#watch`) until the Worker says how it ended.
    *
    * The accepted code is put into the in-memory store as the project's
    * accepted revision, not only onto the screen. The next build asserts
@@ -655,17 +723,7 @@ export class BuilderSession {
     this.#pendingBuildOptions = null;
     this.#mockupContext = null;
 
-    const store = new InMemoryGenerationStore();
-    if (project.snapshot) {
-      await store.saveStage({
-        runId: 'restored',
-        projectId: project.id,
-        baseRevision: null,
-        state: 'validating',
-        snapshot: project.snapshot,
-      });
-      await store.promote(project.id, 'restored', null, project.snapshot);
-    }
+    const store = await this.#storeHolding(project.id, project.snapshot);
     // Another project was opened while this one was being put back: the
     // later request wins, and this one leaves nothing behind.
     if (this.#disposed || epoch !== this.#epoch) return;
@@ -683,6 +741,14 @@ export class BuilderSession {
       return Number.isFinite(sequence) ? Math.max(max, sequence) : max;
     }, 0);
     const snapshot = project.snapshot;
+    // The build to ask after: the one the Worker says is running, or else
+    // the one the last turn was waiting on when its page went away, which
+    // may have ended since.
+    const last = transcript.at(-1);
+    const unseen =
+      last?.status === 'running' && last.serverRunId ? last.serverRunId : null;
+    const watching = project.build?.runId ?? unseen;
+    const startedAt = project.build ? Date.parse(project.build.startedAt) : NaN;
     this.#state = {
       ...initialState(this.#ledger.report()),
       models,
@@ -697,8 +763,156 @@ export class BuilderSession {
       model: project.model,
       knowledge: project.knowledge,
       styleDna: project.styleDna,
+      ...(watching
+        ? {
+            status: 'planning' as const,
+            running: true,
+            runId: last?.status === 'running' ? last.runId : null,
+            serverRunId: watching,
+            progress: Number.isFinite(startedAt)
+              ? { elapsedMs: Math.max(0, this.#now() - startedAt) }
+              : null,
+            notice: project.build ? STILL_RUNNING : null,
+          }
+        : {}),
     };
     this.#emit();
+    if (watching) void this.#watch(epoch, watching);
+  }
+
+  /** An in-memory store whose accepted revision is `snapshot`, or empty. */
+  async #storeHolding(
+    projectId: string,
+    snapshot: ProjectSnapshot | null,
+  ): Promise<InMemoryGenerationStore> {
+    const store = new InMemoryGenerationStore();
+    if (snapshot) {
+      await store.saveStage({
+        runId: 'restored',
+        projectId,
+        baseRevision: null,
+        state: 'validating',
+        snapshot,
+      });
+      await store.promote(projectId, 'restored', null, snapshot);
+    }
+    return store;
+  }
+
+  /**
+   * Ask after a build this page is not streaming until the Worker says it
+   * has ended, then show what it came to: one reopened while still running,
+   * or one whose connection dropped part way (docs/decisions.md, "Resolved
+   * 2026-09-29", keep building).
+   *
+   * A question that fails is asked again at the next interval rather than
+   * read as the build failing: the network that dropped the stream is the
+   * likeliest reason, and it usually comes back. Anything that ends the
+   * epoch (Stop, opening another project, Start over) ends this too.
+   */
+  async #watch(epoch: number, runId: string): Promise<void> {
+    for (;;) {
+      if (this.#disposed || epoch !== this.#epoch) return;
+      const answer = await this.#fetchBuild(runId);
+      if (this.#disposed || epoch !== this.#epoch) return;
+      if (answer.ok && answer.run.state !== 'running') {
+        await this.#settleUnseen(epoch, runId, answer.run, answer.snapshot);
+        return;
+      }
+      if (!answer.ok && answer.missing) {
+        // Nothing of it left to ask after: not a build that is running.
+        await this.#settleUnseen(
+          epoch,
+          runId,
+          { id: runId, state: 'failed', startedAt: '' },
+          null,
+        );
+        return;
+      }
+      if (answer.ok) {
+        const elapsedMs = this.#now() - Date.parse(answer.run.startedAt);
+        if (Number.isFinite(elapsedMs)) {
+          this.#patch(epoch, (state) => ({
+            ...state,
+            progress: { ...state.progress, elapsedMs: Math.max(0, elapsedMs) },
+          }));
+        }
+      }
+      await this.#pollDelay();
+    }
+  }
+
+  /**
+   * Show how a build this page did not stream ended, and settle its turn
+   * (`reconciledTranscript`): accepted at its revision when it moved the
+   * project there, with the code it moved it to; failed or cancelled
+   * otherwise, with the project as it was.
+   */
+  async #settleUnseen(
+    epoch: number,
+    runId: string,
+    run: BuildRun,
+    snapshot: ProjectSnapshot | null,
+  ): Promise<void> {
+    if (run.state === 'accepted') {
+      const code =
+        snapshot && snapshot.revision === run.revision ? snapshot : null;
+      if (code) {
+        const store = await this.#storeHolding(this.#projectId, code);
+        if (this.#disposed || epoch !== this.#epoch) return;
+        this.#store = store;
+      }
+      this.#patch(epoch, (state) => ({
+        ...state,
+        status: 'accepted',
+        running: false,
+        progress: null,
+        serverRunId: null,
+        notice: null,
+        problems: [],
+        runCount: state.runCount + 1,
+        ...(code
+          ? {
+              acceptedSnapshot: code,
+              acceptedBrief: null,
+              stagedFiles: code.files.map((file) => ({ ...file })),
+            }
+          : {}),
+        transcript: reconciledTranscript(state.transcript, runId, {
+          state: 'accepted',
+          revision: run.revision ?? null,
+          ...(code ? { fileCount: code.files.length } : {}),
+        }),
+        timeline: this.#append(
+          state.timeline,
+          'info',
+          `Checkpoint accepted at revision ${run.revision ?? ''}`.trim(),
+        ),
+      }));
+      return;
+    }
+    this.#stopDraft();
+    const failed = run.state !== 'cancelled';
+    this.#patch(epoch, (state) => ({
+      ...state,
+      status: failed ? 'failed' : 'cancelled',
+      running: false,
+      progress: null,
+      draft: null,
+      serverRunId: null,
+      notice: null,
+      problems: failed ? [UNSEEN_FAILURE] : [],
+      transcript: reconciledTranscript(state.transcript, runId, {
+        state: failed ? 'failed' : 'cancelled',
+      }),
+      timeline: this.#append(
+        state.timeline,
+        failed ? 'error' : 'info',
+        failed
+          ? `${UNSEEN_FAILURE} The accepted checkpoint is unchanged.`
+          : 'Run cancelled; the accepted checkpoint is unchanged',
+      ),
+    }));
   }
 
   /**
@@ -844,8 +1058,8 @@ export class BuilderSession {
    *
    * Aborting the fetch drops the connection, which is what tells the
    * endpoint to stop its own model call -- so this stops the spending
-   * rather than only the waiting, the same contract `cancel` has for a
-   * build.
+   * rather than only the waiting. A build is different: it outlives its
+   * connection, and `cancel` stops it by asking the Worker to.
    */
   cancelExplore(): void {
     if (this.#disposed || !this.#state.exploring) return;
@@ -1193,6 +1407,8 @@ export class BuilderSession {
       stagedFiles: [],
       problems: [],
       draft: picked,
+      serverRunId: null,
+      notice: null,
       transcript: this.#openTurn(state.transcript, runId, shown, said),
       timeline: this.#append(
         state.timeline,
@@ -1262,6 +1478,16 @@ export class BuilderSession {
         this.#state.styleDna,
         mockup,
         this.#state.projectId,
+        // Kept on the turn as well as on the session, so that the
+        // conversation saved while the build runs names the build a
+        // reopened project asks after.
+        (serverRunId) => {
+          this.#patch(epoch, (state) => ({
+            ...state,
+            serverRunId,
+            transcript: this.#closeTurn(state.transcript, { serverRunId }),
+          }));
+        },
       );
     } catch (error) {
       reservation.release();
@@ -1273,6 +1499,8 @@ export class BuilderSession {
         running: false,
         progress: null,
         draft: null,
+        serverRunId: null,
+        notice: null,
         problems: [message],
         transcript: this.#closeTurn(state.transcript, {
           status: 'failed',
@@ -1283,7 +1511,21 @@ export class BuilderSession {
       return;
     }
 
-    const provider = new ObservingModelProvider(resolved, observer, pause);
+    // Whether the stream dropped before it said how the build ended, which
+    // is not the build failing: the Worker goes on with it.
+    let detached = false;
+    const watched: ModelProvider = {
+      id: resolved.id,
+      generate: async (request) => {
+        try {
+          return await resolved.generate(request);
+        } catch (error) {
+          if (error instanceof ConnectionLostError) detached = true;
+          throw error;
+        }
+      },
+    };
+    const provider = new ObservingModelProvider(watched, observer, pause);
     const validator = withValidationDelay(createValidator(), pause);
     const runner = new DurableGenerationRunner(store);
 
@@ -1304,6 +1546,8 @@ export class BuilderSession {
         running: false,
         progress: null,
         draft: null,
+        serverRunId: null,
+        notice: null,
         problems: [message],
         transcript: this.#closeTurn(state.transcript, {
           status: 'failed',
@@ -1311,6 +1555,34 @@ export class BuilderSession {
         }),
         timeline: this.#append(state.timeline, 'error', message),
       }));
+      return;
+    }
+
+    // The stream dropped with the build admitted and still going on the
+    // Worker (docs/decisions.md, "Resolved 2026-09-29", keep building). Not
+    // a failure to report: the build is asked after until it ends, the same
+    // way a reopened project asks after one, and the draft stays up while
+    // it runs.
+    const serverRunId = this.#state.serverRunId;
+    if (
+      detached &&
+      serverRunId !== null &&
+      !controller.signal.aborted &&
+      !this.#disposed &&
+      epoch === this.#epoch
+    ) {
+      reservation.release();
+      if (this.#abort === controller) this.#abort = null;
+      this.#patch(epoch, (state) => ({
+        ...state,
+        notice: CONNECTION_DROPPED,
+        timeline: this.#append(
+          state.timeline,
+          'warn',
+          `Run ${runId}: the connection dropped; asking the Worker how it ends`,
+        ),
+      }));
+      void this.#watch(epoch, serverRunId);
       return;
     }
 
@@ -1336,6 +1608,8 @@ export class BuilderSession {
         status: 'accepted',
         running: false,
         progress: null,
+        serverRunId: null,
+        notice: null,
         acceptedSnapshot: accepted,
         // The mock preview is rendered from this brief. It only describes the
         // deterministic fake's own output, so a model-generated project must
@@ -1377,6 +1651,8 @@ export class BuilderSession {
       status: 'failed',
       running: false,
       progress: null,
+      serverRunId: null,
+      notice: null,
       // A sketch of a site that did not get built is not worth showing.
       draft: null,
       problems,
@@ -1402,16 +1678,23 @@ export class BuilderSession {
   /**
    * Stop the active run and keep the accepted checkpoint.
    *
-   * Aborting the request drops the connection, and the endpoint treats that
-   * as its signal to abort its own model call -- so this stops the spending,
-   * not merely the waiting.
+   * A build the Worker has admitted is stopped by asking it to
+   * (`DELETE /api/runs/:id`), because dropping the connection no longer
+   * does: a build outlives its page (docs/decisions.md, "Resolved
+   * 2026-09-29", keep building). Only once the Worker says it stopped is
+   * the request aborted and the run shown as cancelled. If the Worker
+   * cannot be reached, or cannot stop it, that is said, and the run goes on
+   * being shown as running, because it is.
+   *
+   * A build not admitted yet has no id to name, and aborting its request
+   * is still what keeps it from starting (`handlePlan`, above `create()`).
    *
    * The abandoned run still settles its budget reservation at the full
    * estimate. That over-charges a run cut short, which is the safe direction
    * for a ceiling; the figure in the footer catches up on the next run, since
    * the epoch bump below drops every later write from the run being left.
    */
-  cancel(): void {
+  async cancel(): Promise<void> {
     if (this.#disposed) return;
     if (this.#state.chatting) {
       // The agent has not decided anything yet, so there is no build to
@@ -1431,6 +1714,46 @@ export class BuilderSession {
     }
     if (!this.#state.running) return;
 
+    const serverRunId = this.#state.serverRunId;
+    if (serverRunId === null) {
+      this.#cancelled();
+      return;
+    }
+    if (this.#stopping) return;
+    this.#stopping = true;
+    const epoch = this.#epoch;
+    this.#patch(epoch, (state) => ({
+      ...state,
+      notice: 'Stopping the build…',
+    }));
+    let answer: BuildAnswer;
+    try {
+      answer = await this.#stopBuild(serverRunId);
+    } finally {
+      this.#stopping = false;
+    }
+    if (this.#disposed || epoch !== this.#epoch) return;
+    if (!answer.ok) {
+      const message = answer.message;
+      this.#patch(epoch, (state) => ({
+        ...state,
+        notice: message,
+        timeline: this.#append(state.timeline, 'error', message),
+      }));
+      return;
+    }
+    if (answer.run.state === 'cancelled') {
+      this.#cancelled();
+      return;
+    }
+    // It had already ended before the Stop arrived. How it ended reaches
+    // this page the way it would have anyway, by the stream or by
+    // `#watch`, so there is nothing to claim here.
+    this.#patch(epoch, (state) => ({ ...state, notice: null }));
+  }
+
+  /** Show the run in flight as cancelled, and let go of everything it had. */
+  #cancelled(): void {
     this.#abort?.abort();
     this.#abort = null;
     this.#stopDraft();
@@ -1442,6 +1765,8 @@ export class BuilderSession {
       running: false,
       progress: null,
       draft: null,
+      serverRunId: null,
+      notice: null,
       problems: [],
       transcript: this.#closeTurn(this.#state.transcript, {
         status: 'cancelled',

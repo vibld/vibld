@@ -281,7 +281,7 @@ function Builder() {
               onStyleChange={(style) => session.setStyle(style)}
               referenceUrl={state.referenceUrl}
               onReferenceUrlChange={(value) => session.setReferenceUrl(value)}
-              onCancel={() => session.cancel()}
+              onCancel={() => void session.cancel()}
               onCancelExplore={() => session.cancelExplore()}
               onModelChange={(model) => {
                 session.setModel(model);

@@ -111,14 +111,17 @@ export {
   MAX_TRANSCRIPT_TURNS,
   PROJECT_NAME_MAX_CHARS,
   TRANSCRIPT_STATUSES,
+  UNSEEN_FAILURE,
   cleanProjectName,
   clipTranscriptTurn,
   copyName,
   remixName,
   parseTranscript,
+  reconciledTranscript,
   settledTranscript,
 } from './project.ts';
 export type {
+  BuildOutcome,
   TranscriptParse,
   TranscriptStatus,
   TranscriptTurn,

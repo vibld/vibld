@@ -1,0 +1,296 @@
+import { runIdInPath } from './access-gate.ts';
+import { D1GenerationStore } from './generation-store.ts';
+import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
+import { ProjectStore, RUN_IN_FLIGHT_MS } from './project-store.ts';
+import type { RunStageRow } from './project-store.ts';
+import { isProjectId } from './request-guard.ts';
+
+/**
+ * `/api/runs/:id`: one of the caller's builds, asked after and stopped
+ * (docs/decisions.md, "Resolved 2026-09-29", keep building).
+ *
+ *     GET     /api/runs/:id    what became of it: running, accepted,
+ *                              failed or cancelled
+ *     DELETE  /api/runs/:id    stop it
+ *
+ * A build used to be stopped by its page going away: `handlePlan`
+ * terminated the Workflow whenever the connection dropped, so a phone
+ * locked three minutes into a build lost the build and still paid for the
+ * model call in flight. A build now runs to the end whether anybody is
+ * watching, and this route is the only thing that stops one. The builder
+ * calls it from Stop, and asks after a build it is no longer streaming
+ * (a reopened project, or a connection that dropped) until it ends.
+ *
+ * `:id` is the Workflow instance's id, which `handlePlan` sends the builder
+ * as the stream's first event. A run in somebody else's project, or no run
+ * at all, is answered 404, never 403, for the reason `project-handlers.ts`
+ * gives.
+ *
+ * In its own module rather than in `index.ts`, which cannot be loaded under
+ * `node --test`, so ownership, the stop and the settling of a run the
+ * engine ended without saying so are tested against the real schema.
+ */
+
+export interface RunControlEnv {
+  DB?: D1Database;
+  PROJECT_CONTENT?: R2Bucket;
+}
+
+export interface RunControlDeps {
+  resolvePrincipal: (
+    request: Request,
+  ) => Promise<PrincipalDenied | PrincipalGranted>;
+  /**
+   * The Workflow instance's own status (`running`, `complete`,
+   * `terminated`, ...), or undefined where it cannot be read. Absent where
+   * there is no Workflow binding.
+   */
+  instanceStatus?: (runId: string) => Promise<string | undefined>;
+  /** Terminate the Workflow instance. Absent where there is no binding. */
+  terminate?: (runId: string) => Promise<void>;
+  /** The per-address limiter a stop is counted against (`IP_BURST`). */
+  ipLimit?: RateLimit;
+  now?: () => Date;
+}
+
+export type RunState = 'running' | 'accepted' | 'failed' | 'cancelled';
+
+/** A build as the builder reads it. */
+export interface RunView {
+  id: string;
+  state: RunState;
+  /** When the run was created: what a reopened builder's clock counts from. */
+  startedAt: string;
+  /** The revision it was accepted at, for `accepted`. */
+  revision?: string | null;
+}
+
+/** What `WorkflowInstance.status()` says of an instance that has stopped. */
+const INSTANCE_ENDED = new Set(['complete', 'errored', 'terminated']);
+
+/** Stage states that end a run; the rest are a run still going. */
+const STAGE_ENDED = new Set(['accepted', 'failed', 'cancelled', 'idle']);
+
+const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+}
+
+const NOT_FOUND = () => json({ error: 'That build does not exist.' }, 404);
+
+const unended = (row: RunStageRow) => !STAGE_ENDED.has(row.state);
+
+/** A run's stages as one answer. `rows` is never empty. */
+export function viewOf(runId: string, rows: RunStageRow[]): RunView {
+  const own = rows.find((row) => row.run_id === runId) ?? rows[0]!;
+  const startedAt = own.created_at;
+  if (rows.some(unended)) return { id: runId, state: 'running', startedAt };
+  const accepted = rows.filter(
+    (row) => row.state === 'accepted' && row.snapshot_revision !== null,
+  );
+  if (accepted.length > 0) {
+    // The project's revision where it is one of this run's (the build, or
+    // the repair that followed it), and otherwise the run's latest: the
+    // project has moved on since, and the run was still accepted.
+    const current = own.accepted_revision;
+    const revision = accepted.some((row) => row.snapshot_revision === current)
+      ? current
+      : accepted.at(-1)!.snapshot_revision;
+    return { id: runId, state: 'accepted', startedAt, revision };
+  }
+  return {
+    id: runId,
+    state: own.state === 'cancelled' ? 'cancelled' : 'failed',
+    startedAt,
+  };
+}
+
+async function readStatus(
+  deps: Pick<RunControlDeps, 'instanceStatus'>,
+  runId: string,
+): Promise<string | undefined> {
+  if (!deps.instanceStatus) return undefined;
+  try {
+    return await deps.instanceStatus(runId);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A run, with its stages settled first if it stopped without saying so.
+ *
+ * A Workflow terminated or errored between steps writes nothing: its row
+ * stays at whatever it last said, which for the production run that
+ * prompted this was `planning`, three and a half minutes in, for good. So
+ * a row that has not ended is checked against the instance before it is
+ * believed. An instance that has ended settles it: `cancelled` for one
+ * that was terminated, which only a stop does, and `failed` for the rest.
+ * A row older than `RUN_IN_FLIGHT_MS` whose instance cannot be read at all
+ * settles as `failed` too, the reading `runInFlight` already gives it.
+ *
+ * `null` for a run that is not the caller's, or none at all.
+ */
+export async function describeRun(
+  load: () => Promise<RunStageRow[]>,
+  generation: Pick<D1GenerationStore, 'settleRun'>,
+  runId: string,
+  now: Date,
+  deps: Pick<RunControlDeps, 'instanceStatus'>,
+): Promise<RunView | null> {
+  let rows = await load();
+  if (rows.length === 0) return null;
+  const going = rows.filter(unended);
+  if (going.length > 0) {
+    const status = await readStatus(deps, runId);
+    const cutoff = now.getTime() - RUN_IN_FLIGHT_MS;
+    const stale = going.every((row) => Date.parse(row.updated_at) <= cutoff);
+    const ended = status !== undefined && INSTANCE_ENDED.has(status);
+    if (ended || (stale && status === undefined)) {
+      await generation.settleRun(
+        runId,
+        status === 'terminated' ? 'cancelled' : 'failed',
+      );
+      rows = await load();
+    }
+  }
+  return viewOf(runId, rows);
+}
+
+/**
+ * The build still running in a project, if there is one, for the builder
+ * opening it: its id, to ask after and to stop, and when it started.
+ *
+ * Every run the project has that has not ended is looked at, however old,
+ * so opening a project is also what settles a run the engine stopped
+ * without writing its end (`describeRun`).
+ */
+export async function buildInFlight(
+  projects: ProjectStore,
+  generation: Pick<D1GenerationStore, 'settleRun'>,
+  userId: string,
+  projectId: string,
+  now: Date,
+  deps: Pick<RunControlDeps, 'instanceStatus'>,
+): Promise<{ runId: string; startedAt: string } | null> {
+  for (const runId of await projects.unendedRuns(projectId)) {
+    const view = await describeRun(
+      () => projects.runStages(userId, runId),
+      generation,
+      runId,
+      now,
+      deps,
+    );
+    if (view?.state === 'running') {
+      return { runId, startedAt: view.startedAt };
+    }
+  }
+  return null;
+}
+
+export async function handleRun(
+  request: Request,
+  env: RunControlEnv,
+  deps: RunControlDeps,
+): Promise<Response> {
+  if (!env.DB || !env.PROJECT_CONTENT) {
+    return json(
+      { error: 'Builds are not configured for this deployment.' },
+      503,
+    );
+  }
+  const method = request.method.toUpperCase();
+  if (method !== 'GET' && method !== 'DELETE') {
+    return json({ error: 'Use GET, DELETE.' }, 405);
+  }
+
+  if (method === 'DELETE') {
+    // A DELETE carries no body, so only the origin is checked, as a
+    // project's DELETE is: a cross-site page that could reach this would be
+    // stopping somebody's build.
+    const origin = request.headers.get('origin');
+    if (origin !== null && origin !== new URL(request.url).origin) {
+      return json({ error: 'Cross-site requests are not allowed.' }, 403);
+    }
+    // Per address, before identity, as `/api/plan` is, and failing open for
+    // the reason it does. Only the stop: the builder asks after a build
+    // every poll, which this limit is not sized for.
+    if (deps.ipLimit) {
+      try {
+        const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
+        const result = await deps.ipLimit.limit({ key: `ip:${ip}` });
+        if (!result.success) {
+          return json({ error: 'Too many requests from this address.' }, 429);
+        }
+      } catch (error) {
+        console.error('IP rate limiter unavailable', error);
+      }
+    }
+  }
+
+  const resolved = await deps.resolvePrincipal(request);
+  if (resolved.denied) return resolved.denied;
+  const { userId } = resolved.principal;
+
+  const runId = runIdInPath(new URL(request.url).pathname);
+  if (!isProjectId(runId)) return NOT_FOUND();
+
+  const now = (deps.now ?? (() => new Date()))();
+  const projects = new ProjectStore(env.DB, env.PROJECT_CONTENT);
+  const generation = new D1GenerationStore(env.DB, env.PROJECT_CONTENT);
+  const load = () => projects.runStages(userId, runId);
+
+  if (method === 'GET') {
+    const view = await describeRun(load, generation, runId, now, deps);
+    if (!view) return NOT_FOUND();
+    // The code with the answer, when the build moved the project to it: a
+    // builder that was not streaming the build has none of it, and asking
+    // for the whole project again would be a second request for the same
+    // thing.
+    let snapshot = null;
+    if (view.state === 'accepted') {
+      const rows = await load();
+      const accepted = await generation.loadAccepted(rows[0]!.project_id);
+      if (accepted && accepted.revision === view.revision) {
+        snapshot = { revision: accepted.revision, files: accepted.files };
+      }
+    }
+    return json({ run: view, snapshot });
+  }
+
+  // DELETE: stop it.
+  const rows = await load();
+  if (rows.length === 0) return NOT_FOUND();
+  if (rows.some(unended)) {
+    if (deps.terminate) {
+      try {
+        await deps.terminate(runId);
+      } catch (error) {
+        // Terminating an instance that has already stopped is refused by
+        // the engine, and that is a stop that happened. Anything else is a
+        // build still running, and the caller is told so rather than shown
+        // a stop that did not happen.
+        const status = await readStatus(deps, runId);
+        const cutoff = now.getTime() - RUN_IN_FLIGHT_MS;
+        const gone =
+          status === undefined
+            ? rows
+                .filter(unended)
+                .every((row) => Date.parse(row.updated_at) <= cutoff)
+            : INSTANCE_ENDED.has(status);
+        if (!gone) {
+          console.error('build could not be stopped', { runId, error });
+          return json(
+            { error: 'The build could not be stopped. It is still running.' },
+            503,
+          );
+        }
+      }
+    }
+    await generation.settleRun(runId, 'cancelled');
+  }
+  // Idempotent: a build that had already ended is answered with how it
+  // ended, and a second stop is answered like the first.
+  return json({ run: viewOf(runId, await load()) });
+}

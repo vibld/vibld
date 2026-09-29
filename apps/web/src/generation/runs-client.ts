@@ -1,4 +1,4 @@
-import type { RunStop, RunTrace } from '@vibld/core';
+import type { ProjectSnapshot, RunStop, RunTrace } from '@vibld/core';
 import { cachedFraction, contextPressure } from '@vibld/core';
 import { getClerkToken } from '../auth/clerk-token.ts';
 
@@ -125,6 +125,122 @@ export async function fetchRuns(
   } catch {
     return null;
   }
+}
+
+/**
+ * How often the builder asks after something the Worker is doing without
+ * it: a build it is not streaming, and a live preview starting. The
+ * cadence `handlePlan` polls its own Workflow on (`worker/run-stage.ts`).
+ */
+export const POLL_INTERVAL_MS = 1500;
+
+/** One build, as `GET` and `DELETE /api/runs/:id` describe it. */
+export interface BuildRun {
+  id: string;
+  state: 'running' | 'accepted' | 'failed' | 'cancelled';
+  startedAt: string;
+  /** The revision it was accepted at, for `accepted`. */
+  revision?: string | null;
+}
+
+export type BuildAnswer =
+  | {
+      ok: true;
+      run: BuildRun;
+      /** The project's code, when the build moved it there. */
+      snapshot: ProjectSnapshot | null;
+    }
+  | {
+      ok: false;
+      message: string;
+      /** The Worker has no such build of the caller's (404). */
+      missing?: boolean;
+    };
+
+const BUILD_STATES = new Set(['running', 'accepted', 'failed', 'cancelled']);
+
+async function buildCall(
+  runId: string,
+  method: 'GET' | 'DELETE',
+  fetchImpl: typeof fetch,
+  getToken: () => Promise<string | null>,
+): Promise<BuildAnswer> {
+  const fallback =
+    method === 'DELETE'
+      ? 'Could not reach vibld to stop the build. It is still running.'
+      : 'Could not reach vibld to ask after the build.';
+  let response: Response;
+  try {
+    response = await fetchImpl(`/api/runs/${encodeURIComponent(runId)}`, {
+      method,
+      headers: await authHeaders(getToken),
+    });
+  } catch {
+    return { ok: false, message: fallback };
+  }
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = await response.json();
+    if (typeof parsed === 'object' && parsed !== null) {
+      body = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Not this Worker answering; said as the fallback below.
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      message:
+        typeof body.error === 'string' && body.error.length > 0
+          ? body.error
+          : fallback,
+      ...(response.status === 404 ? { missing: true } : {}),
+    };
+  }
+  const run = body.run as BuildRun | undefined;
+  if (
+    typeof run !== 'object' ||
+    run === null ||
+    typeof run.id !== 'string' ||
+    !BUILD_STATES.has(run.state)
+  ) {
+    return { ok: false, message: fallback };
+  }
+  const code = body.snapshot as ProjectSnapshot | null | undefined;
+  return {
+    ok: true,
+    run,
+    snapshot:
+      code && typeof code.revision === 'string' && Array.isArray(code.files)
+        ? code
+        : null,
+  };
+}
+
+/**
+ * What became of a build this page is not streaming: one it reopened, or
+ * one whose connection dropped (docs/decisions.md, "Resolved 2026-09-29",
+ * keep building).
+ */
+export function fetchBuild(
+  runId: string,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<BuildAnswer> {
+  return buildCall(runId, 'GET', fetchImpl, getToken);
+}
+
+/**
+ * Stop a build. The only thing that does: a page going away no longer
+ * does. Answers how the build stands afterwards, which is `cancelled` for
+ * a stop that landed and whatever it had already come to otherwise.
+ */
+export function stopBuild(
+  runId: string,
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<BuildAnswer> {
+  return buildCall(runId, 'DELETE', fetchImpl, getToken);
 }
 
 /** "8.2s", or "1m 04s" once seconds stop being the useful unit. */
