@@ -3,7 +3,10 @@ name: Read the Worker's recent logs
 # The builder shows "try again shortly" for any failure it cannot explain,
 # and the reason is only in the Worker's own logs (observability is on in
 # wrangler.jsonc). This prints the recent ones into the job log, so a
-# failure somebody saw can be diagnosed without opening the dashboard.
+# failure somebody saw can be diagnosed without opening the dashboard, and
+# the per-step timings the Workers log (generation.step, preview.step,
+# preview.updated) can be read as a table. scripts/worker-logs.mjs builds the
+# query and prints the result.
 on:
   workflow_dispatch:
     inputs:
@@ -20,7 +23,7 @@ on:
         required: true
         default: vibld-web-preview
       match:
-        description: Only events whose message contains this text (empty for all)
+        description: Only events with this text in any field, logged JSON included, e.g. preview.step (empty for all)
         required: false
         default: ''
 
@@ -35,6 +38,11 @@ jobs:
     timeout-minutes: 5
     environment: preview
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
       - name: Query Workers Observability
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -49,54 +57,22 @@ jobs:
           case "$SERVICE" in vibld-web-preview|vibld-preview) ;; *) echo "::error::service must be vibld-web-preview or vibld-preview"; exit 1 ;; esac
           to=$(( $(date +%s) * 1000 ))
           from=$(( to - MINUTES * 60 * 1000 ))
-          body=$(jq -n --argjson from "$from" --argjson to "$to" --arg service "$SERVICE" '{
-            queryId: "worker-logs",
-            timeframe: { from: $from, to: $to },
-            view: "events",
-            limit: 2000,
-            parameters: {
-              datasets: ["cloudflare-workers"],
-              filters: [
-                { key: "$metadata.service", operation: "eq", type: "string", value: $service }
-              ]
-            }
-          }')
+          # The match goes to Cloudflare as the query's needle, so it is
+          # applied to every field, the logged JSON included, before the
+          # row limit.
+          node scripts/worker-logs.mjs body "$from" "$to" "$SERVICE" "$MATCH" > body.json
           curl -sS -X POST \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/observability/telemetry/query" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H 'Content-Type: application/json' \
-            -d "$body" > response.json
+            --data-binary @body.json > response.json
           if [ "$(jq -r '.success' response.json)" != "true" ]; then
             echo "::error::The query was refused"
             jq -c '.errors' response.json
             exit 1
           fi
-          echo "Events returned: $(jq '.result.events.events | length' response.json)"
-          # Only fields about the request and the error. Never headers or
-          # bodies, which is where a token or a person's text would be.
-          jq -r --arg errorsOnly "$ERRORS_ONLY" --arg match "$MATCH" '
-            .result.events.events
-            | sort_by(.timestamp)
-            | map(select(
-                $match == ""
-                or ((.["$metadata"].message // "") | contains($match))
-              ))
-            | map(select(
-                $errorsOnly != "true"
-                or (.["$metadata"].error // "") != ""
-                or ((.["$metadata"].level // "") | test("error|warn"; "i"))
-                or ((.["$metadata"].statusCode // 0) >= 500)
-                or ((.["$workers"].outcome // "ok") != "ok")
-              ))
-            | .[]
-            | [
-                (.timestamp / 1000 | todate),
-                (.["$metadata"].statusCode // "-" | tostring),
-                (.["$workers"].outcome // "-"),
-                (.["$metadata"].level // "-"),
-                ((.["$metadata"].url // "") | sub("\\?.*$"; "")),
-                ((.["$metadata"].error // "") | .[0:400]),
-                ((.["$metadata"].message // "") | .[0:400])
-              ]
-            | join(" | ")
-          ' response.json
+          # One line per event, what our code logged beside the request's
+          # own fields (never headers or bodies), then a table of step
+          # timings (generation.step, preview.step, preview.updated) that
+          # also goes to the run's summary.
+          node scripts/worker-logs.mjs print response.json
