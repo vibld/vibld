@@ -1,0 +1,93 @@
+name: Import a generated project
+
+# Puts the output of a Try a generation run onto somebody's account as a
+# project they can open in the builder, so a result proved here does not
+# have to be generated a second time in the app to be seen there.
+#
+# Writes the snapshot to R2 first and the rows after it, the order the
+# generation store uses, so a row never names an object that is not there.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: The Try a generation run whose generated-project artifact to import
+        required: true
+      owner:
+        description: The Clerk user id of the account the project belongs to
+        required: true
+      name:
+        description: The project's name
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: import-project
+  cancel-in-progress: false
+
+jobs:
+  import:
+    name: Import into the account
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Download the generated project
+        uses: actions/download-artifact@v8
+        with:
+          name: generated-project
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/generated
+
+      - name: Build the snapshot and the rows
+        env:
+          IMPORT_OWNER: ${{ inputs.owner }}
+          IMPORT_NAME: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          node scripts/import-project.mjs "$RUNNER_TEMP/generated" "$RUNNER_TEMP/import"
+          cat "$RUNNER_TEMP/import/import.env" >> "$GITHUB_ENV"
+
+      - name: Write the snapshot to R2
+        # Where wrangler.jsonc names the database and the bucket.
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          pnpm dlx wrangler@4.137.0 r2 object put \
+            "vibld-control-plane/$SNAPSHOT_KEY" \
+            --file "$RUNNER_TEMP/import/snapshot.json" \
+            --content-type application/json --remote
+
+      - name: Create the project
+        # Where wrangler.jsonc names the database and the bucket.
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          pnpm dlx wrangler@4.137.0 d1 execute vibld-control-plane --remote \
+            --file "$RUNNER_TEMP/import/import.sql" --yes
+          {
+            echo "Imported as project \`$PROJECT_ID\`, revision \`$REVISION\`."
+            echo
+            echo "Open it at https://app.vibld.com/p/$PROJECT_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
