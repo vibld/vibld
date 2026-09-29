@@ -255,6 +255,51 @@ read, or a run never kept one, Stop charges the whole reservation, as
 before. A repair turn's reservation is left as it was: the repair step
 settles it itself at what it measured, and the reclaim is the backstop.
 
+**A build is shown as soon as its code exists, badged until it is
+checked.** Chris decided on 2026-09-29 (D69, "show early, badge it"). The
+builder used to show a build only when its whole Workflow had finished,
+after the verification build and any repair, which added 40 to 90 seconds
+to every build and 100 to 250 when a repair ran, although the project had
+already been promoted in `assemble`. Now, once the run has settled its
+spend, the Workflow records that the promoted revision is being checked (a
+`<runId>:verify` stage row, open until the check ends), and the builder is
+sent that revision's code at once, through the stream's `progress` events
+or `GET /api/runs/:id`. The preview and the code view show it with a badge,
+"Checking the build", then "Fixing a problem" while a repair runs; the
+badge goes when the check passes. The conversation's summary still lands
+when the run settles, and the lifecycle bar stays on "Check" until then. A
+project reopened mid-check shows the same code and badge. Billing and
+settlement are unchanged: the check is opened after the run's own spend is
+settled, and nothing is charged differently.
+
+Decided while implementing it, and Chris's to reverse:
+
+- A build whose code does not build keeps it. The accepted revision in D1
+  and R2 is what it always was: the first attempt, or a repair that did not
+  fix it. The builder no longer lets it look accepted: the badge says "Does
+  not build", the turn in the conversation and the Problems tab say the
+  check failed and that it is still the current version, and the agent is
+  told the same. Putting the previous revision back instead would be a
+  change to what a failed check does to the project.
+- A repair's code replaces the first attempt's on screen as soon as the
+  repair is promoted, still badged, rather than only when the run ends.
+- Stop while only the check is running stops nothing and says so: the
+  build is written, promoted and settled, and a Stop at that point never
+  terminated anything before either. Stop during a repair terminates it as
+  before.
+- A build stopped or broken after it promoted its code is handed to the
+  builder as that code, badged "Not checked", instead of being reported as
+  a failed build while the project held its code. "Not checked" (the build
+  service could not judge it) is said in the badge and the conversation
+  but is not listed as a problem.
+- While the check runs, export, publish and push act on the last finished
+  checkpoint, not on the code being checked; a project reopened mid-check
+  already has that code as its accepted revision, so there they act on it.
+- A deployment with no build service shows nothing early: nothing is
+  checked there, so its builds end as they always did.
+- A project cannot be deleted while its build is being checked, since a
+  repair may still promote into it.
+
 ### Resolved 2026-09-29
 
 **Builds are generated in bounded steps, and follow-ups as patches.** Every

@@ -84,7 +84,12 @@ export interface TranscriptTurn {
   summary: string | null;
   fileCount: number;
   revision: string | null;
-  /** The first problem, when the run failed. Cancellation is not a problem. */
+  /**
+   * The first problem, when the run failed. Cancellation is not a problem.
+   * On an accepted turn, what its build check found when the code it was
+   * accepted at did not pass (docs/decisions.md, D69): the code is kept,
+   * and the conversation says it does not build.
+   */
   problem: string | null;
   providerId: string | null;
   /**
@@ -270,6 +275,11 @@ export interface BuildOutcome {
   fileCount?: number;
   /** What the build says it made, for `accepted`, where that is known. */
   summary?: string;
+  /**
+   * What its check found, for `accepted`, where the code did not pass
+   * (D69). Absent for one that passed or was never checked.
+   */
+  problem?: string;
 }
 
 /**
@@ -301,6 +311,7 @@ export function reconciledTranscript(
         revision: outcome.revision ?? null,
         fileCount: outcome.fileCount ?? turn.fileCount,
         summary: outcome.summary ?? turn.summary,
+        ...(outcome.problem ? { problem: outcome.problem } : {}),
       };
     }
     if (outcome.state === 'cancelled') return { ...turn, status: 'cancelled' };

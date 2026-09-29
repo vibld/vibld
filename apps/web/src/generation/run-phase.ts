@@ -13,7 +13,10 @@ import type { BuilderStatus } from './session.ts';
  * The builder's own status says `planning` for all of it, because the page
  * only learns the plan when the Workflow is done with every step, so the
  * lifecycle bar said "Plan" while files were being written. This is what
- * it goes by instead, where the Worker says.
+ * it goes by instead, where the Worker says. The code itself arrives
+ * earlier now, once it is promoted and while `validating` and `repairing`
+ * check it (D69, `build-check.ts`), but the run is not over until they
+ * are, and the bar stays on "Check" until then.
  *
  * Framework-free, and it imports nothing but a type, so the Worker checks a
  * phase with the same list the builder reads it with.

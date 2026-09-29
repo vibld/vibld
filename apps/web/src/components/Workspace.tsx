@@ -117,6 +117,14 @@ export function Workspace({
   const files = state.stagedFiles;
   const selected =
     files.find((file) => file.path === requestedPath) ?? files[0] ?? null;
+  /**
+   * The list is a build's own code, shown while its check runs (D69, "show
+   * early, badge it"): marked as being checked rather than as staged.
+   */
+  const showingChecked =
+    state.running &&
+    (state.check?.state === 'checking' || state.check?.state === 'repairing') &&
+    files.length > 0;
   /** The list is showing work that has not been accepted yet. */
   const showingStaged =
     files.length > 0 &&
@@ -164,7 +172,10 @@ export function Workspace({
               : tab.id === 'console'
                 ? state.timeline.length || null
                 : tab.id === 'preview' && sandbox.status?.status === 'ready'
-                  ? servingOlderThan(sandbox, state.acceptedSnapshot?.revision)
+                  ? servingOlderThan(
+                      sandbox,
+                      (state.early ?? state.acceptedSnapshot)?.revision,
+                    )
                     ? 'older'
                     : 'live'
                   : null;
@@ -209,7 +220,9 @@ export function Workspace({
             <div className="codepane__files">
               <h2 className="pane-title">
                 Files
-                {showingStaged ? (
+                {showingChecked ? (
+                  <span className="pill pill--checking">being checked</span>
+                ) : showingStaged ? (
                   <span className="pill pill--staged">staged</span>
                 ) : null}
               </h2>
@@ -224,7 +237,12 @@ export function Workspace({
                    * sit beneath one set of files and act on another. The
                    * pill on the heading marks the list, not them.
                    */}
-                  {showingStaged ? (
+                  {showingChecked && showingStaged ? (
+                    <p className="pane-note">
+                      These act on the last finished checkpoint, not the files
+                      listed below, which are still being checked.
+                    </p>
+                  ) : showingStaged ? (
                     <p className="pane-note">
                       These act on the last accepted checkpoint, not the staged
                       files listed below.

@@ -8,6 +8,7 @@ import {
   DRAFT_BUILT_LABEL,
   DraftPreview as DraftView,
 } from './DraftPreview.tsx';
+import { BuildCheckBadge } from './BuildCheckBadge.tsx';
 import { LifecycleBar } from './LifecycleBar.tsx';
 import { ProgressMeter } from './ProgressMeter.tsx';
 
@@ -59,9 +60,16 @@ export function PreviewPanel({
 
   const statusMessage = describeStatus(sandbox.status);
   const running = sandbox.status !== null && sandbox.status.status !== 'failed';
+  // The code on screen: a build's own while it is being checked (D69, shown
+  // early with a badge), and otherwise the accepted checkpoint.
+  const code = state.early ?? state.acceptedSnapshot;
+  const checking =
+    state.running &&
+    code !== null &&
+    (state.check?.state === 'checking' || state.check?.state === 'repairing');
   const runAccepted = () => {
-    if (!state.acceptedSnapshot) return;
-    sandbox.run(state.acceptedSnapshot.files, state.acceptedSnapshot.revision);
+    if (!code) return;
+    sandbox.run(code.files, code.revision);
   };
 
   // A sandbox is a live copy of the checkpoint it was started from, and
@@ -71,16 +79,15 @@ export function PreviewPanel({
   // buttons were fixed for: the address is still live, it is just live on
   // the previous checkpoint. The mock beside it is rebuilt from the
   // accepted snapshot every time, so only the sandbox can say this.
-  const servingOlder = servingOlderThan(
-    sandbox,
-    state.acceptedSnapshot?.revision,
-  );
+  const servingOlder = servingOlderThan(sandbox, code?.revision);
 
   // The draft, while its build runs. Ahead of a ready sandbox as well: a
   // first build has no checkpoint of its own to be serving, so a sandbox
   // that is up now is left over from before, and the draft is the nearer
   // picture of what is coming.
-  const draftWhileBuilding = draft !== null && state.running;
+  // Not once the build's own code is here to run (D69): that is nearer
+  // than any sketch, even while it is being checked.
+  const draftWhileBuilding = draft !== null && state.running && !checking;
   // And after, until the live preview is running. Accepting the build does
   // not start a sandbox, so without this the sketch would give way to an
   // empty pane with a button in it, which is the waiting state the draft
@@ -88,14 +95,15 @@ export function PreviewPanel({
   // always has, with Try again.
   const draftAfterBuild =
     draft !== null &&
-    !state.running &&
-    state.status === 'accepted' &&
-    state.acceptedSnapshot !== null &&
+    ((!state.running && state.status === 'accepted') || checking) &&
+    code !== null &&
     sandbox.status?.status !== 'ready' &&
     sandbox.status?.status !== 'failed';
 
   return (
     <div className="preview">
+      <BuildCheckBadge check={state.check} />
+
       {servingOlder ? (
         <p className="pane-note" role="status">
           This sandbox is running the checkpoint it was started from, not the
@@ -154,7 +162,7 @@ export function PreviewPanel({
         // model-built project cannot use) above a small chip at the bottom
         // edge, so the way to see the app was the least visible thing here.
         <div className="preview__empty">
-          {!state.acceptedSnapshot ? (
+          {!code ? (
             <>
               <p className="preview__empty-title">Nothing to preview yet</p>
               <p className="preview__empty-text">
@@ -207,7 +215,7 @@ export function PreviewPanel({
         </div>
       )}
 
-      {state.acceptedSnapshot && (mockDocument || running) ? (
+      {code && (mockDocument || running) ? (
         <>
           <div className="preview__sandbox">
             {mockDocument || sandbox.status?.status === 'ready' ? (
@@ -252,7 +260,7 @@ export function PreviewPanel({
         </>
       ) : null}
 
-      {state.acceptedSnapshot ? (
+      {code ? (
         <>
           {/*
             A stop that could not be confirmed. Not "the sandbox is still

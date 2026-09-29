@@ -16,11 +16,14 @@ import {
   ASSEMBLE_STEP_TIMEOUT_MS,
   REPAIR_STEP_TIMEOUT_MS,
   SanitizingModelProvider,
+  CHECK_STAGE,
   assembleRun,
   buildInSteps,
   ceilingForRun,
+  checkVerdictOf,
   inputBudgetForRun,
   isBoundedRun,
+  openBuildCheck,
   preflightRun,
   runGeneration,
   settleBudget,
@@ -37,6 +40,7 @@ import type {
 } from './generation-run.ts';
 
 import type { RunPhase } from '../src/generation/run-phase.ts';
+import type { CheckVerdict } from '../src/generation/build-check.ts';
 
 export type { WorkflowParams } from './generation-run.ts';
 
@@ -62,7 +66,11 @@ export type { WorkflowParams } from './generation-run.ts';
  *   write-1 ...   one group of files each; a group that runs out of room
  *                 is split into write-N.1 and write-N.2, and so on
  *   assemble      the patch applied, validated, staged and promoted
- *   settle-budget, verify-and-repair, record-trace, as before
+ *   settle-budget as before
+ *   open-check    the promoted revision shown to the builder while it is
+ *                 checked (D69)
+ *   verify-and-repair, record-trace, as before
+ *   close-check   what the check found, recorded for the builder
  *
  * A step that has finished is never run again: when the instance resumes,
  * `run` replays from the top and every finished step returns its stored
@@ -99,7 +107,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
   async run(
     event: WorkflowEvent<WorkflowParams>,
     step: WorkflowStep,
-  ): Promise<DurableGenerationResult> {
+  ): Promise<DurableGenerationResult & { check?: CheckVerdict }> {
     const params = event.payload;
     const openStore = () =>
       new D1GenerationStore(this.env.DB, this.env.PROJECT_CONTENT);
@@ -372,6 +380,36 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
       },
     );
 
+    // Show early, badge it (D69). The revision `assemble` promoted is what
+    // the builder is shown from here on, streamed or asked
+    // (`checkingOf`), marked as being checked until `close-check` says
+    // what the check found. Nothing about the revision changes: it was
+    // accepted in `assemble`, and it is the accepted revision whatever the
+    // check finds, exactly as before. Only when the builder learns of it
+    // moves, from the end of the run to here.
+    //
+    // After settlement, so nothing this adds can come between a run and
+    // the settling of what it spent: a Stop that lands from here on finds
+    // the run's reservation already closed, as it always did.
+    //
+    // A step that cannot write the record is not a reason to fail a run
+    // whose project is already promoted: the builder then waits for the
+    // end, as every build did before.
+    const checking = await step
+      .do(
+        'open-check',
+        {
+          // Idempotent: the row is written once and never reopened.
+          retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
+          timeout: '30 seconds',
+        },
+        () => openBuildCheck(openStore(), this.env, params, generation.result),
+      )
+      .catch((error: unknown) => {
+        console.error('could not record a build check', error);
+        return false;
+      });
+
     // After settlement, and that ordering is the whole reason this is safe
     // rather than a convenience (internal issue 194).
     //
@@ -507,6 +545,34 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
     // The repaired project where there is one. The repair promoted its own
     // accepted revision, so returning the first attempt here would show the
     // reader the broken files while the store held the fixed ones (internal issue 194).
-    return repair.result ?? generation.result;
+    const final = repair.result ?? generation.result;
+    if (!checking) return final;
+
+    // What the check found, for the revision the run ended at (D69): the
+    // builder clears its badge for one that builds and says so plainly for
+    // one that does not. Last, so a builder asking after the run reads it
+    // as still being checked until the result below is there to read.
+    const check = checkVerdictOf(repair);
+    await step
+      .do(
+        'close-check',
+        {
+          retries: { limit: 2, delay: '5 seconds', backoff: 'exponential' },
+          timeout: '30 seconds',
+        },
+        () =>
+          openStore().closeCheck(
+            params.runId,
+            CHECK_STAGE[check],
+            final.accepted?.revision ?? null,
+          ),
+      )
+      .catch((error: unknown) => {
+        // The row is closed when the instance is seen to have ended
+        // (`settleRun`), as a check nothing finished; the verdict still
+        // reaches a builder streaming the run, in the result.
+        console.error('could not record what a build check found', error);
+      });
+    return { ...final, check };
   }
 }

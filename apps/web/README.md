@@ -452,6 +452,7 @@ of its own:
 | `write-1`, `write-2`…                                | One group of files each, shared files first. A group sees the request, the spec, the manifest and the files it depends on, and returns only its own. At most 32,000 output tokens. |
 | `assemble`                                           | The files applied, validated, staged and promoted by the same `runGeneration` every run used.                                                                                      |
 | `settle-budget`, `verify-and-repair`, `record-trace` | As before, over the summed usage of every call.                                                                                                                                    |
+| `open-check`, `close-check`                          | Around `verify-and-repair`: the promoted revision is shown to the builder with a badge while it is checked, and what the check found is recorded (D69).                            |
 
 - **Grouping.** The manifest is ordered by declared dependencies (config and
   styles, then `src/lib`, shadcn/ui components, shared components, pages,

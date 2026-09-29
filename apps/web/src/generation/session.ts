@@ -51,6 +51,8 @@ import { POLL_INTERVAL_MS, fetchBuild, stopBuild } from './runs-client.ts';
 import type { BuildAnswer, BuildRun } from './runs-client.ts';
 import type { GenerationMode } from './remote-provider.ts';
 import type { RunPhase } from './run-phase.ts';
+import { checkAfter, checkProblem } from './build-check.ts';
+import type { BuildCheck, CheckVerdict } from './build-check.ts';
 
 export type BuilderStatus =
   | 'idle'
@@ -209,6 +211,24 @@ export interface BuilderState {
    * stopped, or that it could not be.
    */
   notice: string | null;
+  /**
+   * The code a build in flight has already promoted and is checking
+   * (docs/decisions.md, D69, "show early, badge it"), shown in the preview
+   * and the code view while the check runs. Null otherwise.
+   *
+   * Beside `acceptedSnapshot` rather than in it: that is the last build
+   * this page saw end, which export, publish and push act on, and which
+   * the in-memory store holds as the base the build in flight is promoted
+   * against. The build's result replaces both when it lands.
+   */
+  early: ProjectSnapshot | null;
+  /**
+   * What is said about the code on screen (`build-check.ts`): that it is
+   * being checked or repaired, while a build runs, or, after one ends,
+   * that it does not build or was not checked. Null for code that passed,
+   * and for anything no check was asked about.
+   */
+  check: BuildCheck | null;
 }
 
 /** A sketch shown in the preview pane while the real site is built. */
@@ -315,7 +335,11 @@ export interface SessionOptions {
   requestMockupsImpl?: typeof requestMockups;
   requestChatTurnImpl?: typeof requestChatTurn;
   /** Ask after a build and stop one. Injectable so tests need no network. */
-  fetchBuildImpl?: (runId: string) => Promise<BuildAnswer>;
+  fetchBuildImpl?: (
+    runId: string,
+    /** The revision whose code the builder already has (D69). */
+    known?: string | null,
+  ) => Promise<BuildAnswer>;
   stopBuildImpl?: (runId: string) => Promise<BuildAnswer>;
   /** The pause between two questions about a build this page is not streaming. */
   pollDelay?: () => Promise<void>;
@@ -337,12 +361,18 @@ export interface SessionOptions {
     projectId?: string | null,
     // And the Worker's id for the build, once admitted.
     onRun?: (runId: string) => void,
+    // And what its check says as it goes (D69).
+    checks?: BuildCheckHooks,
   ) => Promise<ModelProvider>;
 }
 
 /** What a reopened project says of a build that carried on without it. */
 export const STILL_RUNNING =
   'This build is still running. It carried on while you were away, and its result will appear here when it finishes.';
+
+/** What Stop says of a build that is written and only being checked (D69). */
+export const CHECK_NOT_STOPPED =
+  'This build is already written and saved. Only its check is still running, and that finishes on its own.';
 
 /** What the builder says when the stream drops and the build does not. */
 export const CONNECTION_DROPPED =
@@ -400,7 +430,24 @@ function initialState(budget: RunUsageReport): BuilderState {
     draft: null,
     serverRunId: null,
     notice: null,
+    early: null,
+    check: null,
   };
+}
+
+/**
+ * What a build that is checked tells the session as it goes (D69): the
+ * code it has promoted and is checking, and, with its result, what the
+ * check found.
+ */
+export interface BuildCheckHooks {
+  onEarly: (snapshot: ProjectSnapshot) => void;
+  onCheck: (verdict: CheckVerdict, revision: string) => void;
+}
+
+/** What the badge says while a build is being checked, by where it is. */
+function checkingState(phase: RunPhase | undefined): BuildCheck['state'] {
+  return phase === 'repairing' ? 'repairing' : 'checking';
 }
 
 /**
@@ -421,6 +468,7 @@ async function defaultResolveProvider(
   mockup?: { label: string; html: string } | null,
   projectId?: string | null,
   onRun?: (runId: string) => void,
+  checks?: BuildCheckHooks,
 ): Promise<ModelProvider> {
   const mode = await detectGenerationMode();
   return mode === 'model'
@@ -428,6 +476,7 @@ async function defaultResolveProvider(
         signal,
         ...(projectId ? { projectId } : {}),
         ...(onRun ? { onRun } : {}),
+        ...(checks ? { onEarly: checks.onEarly, onCheck: checks.onCheck } : {}),
         ...(onProgress ? { onProgress } : {}),
         ...(style ? { style } : {}),
         ...(knowledge ? { knowledge } : {}),
@@ -524,9 +573,13 @@ export class BuilderSession {
     mockup?: { label: string; html: string } | null,
     projectId?: string | null,
     onRun?: (runId: string) => void,
+    checks?: BuildCheckHooks,
   ) => Promise<ModelProvider>;
   #abort: AbortController | null = null;
-  readonly #fetchBuild: (runId: string) => Promise<BuildAnswer>;
+  readonly #fetchBuild: (
+    runId: string,
+    known?: string | null,
+  ) => Promise<BuildAnswer>;
   readonly #stopBuild: (runId: string) => Promise<BuildAnswer>;
   readonly #pollDelay: () => Promise<void>;
   /** A Stop is waiting on the Worker, so a second press does not send another. */
@@ -544,7 +597,9 @@ export class BuilderSession {
     this.#resolveProvider = options.resolveProvider ?? defaultResolveProvider;
     this.#requestMockups = options.requestMockupsImpl ?? requestMockups;
     this.#requestChatTurn = options.requestChatTurnImpl ?? requestChatTurn;
-    this.#fetchBuild = options.fetchBuildImpl ?? ((id) => fetchBuild(id));
+    this.#fetchBuild =
+      options.fetchBuildImpl ??
+      ((id, known) => fetchBuild(id, undefined, undefined, known ?? null));
     this.#stopBuild = options.stopBuildImpl ?? ((id) => stopBuild(id));
     this.#pollDelay =
       options.pollDelay ??
@@ -828,7 +883,10 @@ export class BuilderSession {
   async #watch(epoch: number, runId: string): Promise<void> {
     for (;;) {
       if (this.#disposed || epoch !== this.#epoch) return;
-      const answer = await this.#fetchBuild(runId);
+      // The code already on screen, so a build being checked is not sent
+      // it again every poll (D69).
+      const shown = this.#state.early ?? this.#state.acceptedSnapshot;
+      const answer = await this.#fetchBuild(runId, shown?.revision ?? null);
       if (this.#disposed || epoch !== this.#epoch) return;
       if (answer.ok && answer.run.state !== 'running') {
         await this.#settleUnseen(epoch, runId, answer.run, answer.snapshot);
@@ -859,9 +917,60 @@ export class BuilderSession {
             },
           }));
         }
+        // Promoted and being checked (D69): its code on screen, badged.
+        const checking = answer.run.checking;
+        if (checking) {
+          this.#showChecking(epoch, checking.revision, answer.snapshot, phase);
+        }
       }
       await this.#pollDelay();
     }
+  }
+
+  /**
+   * Show the code a build in flight has promoted and is checking, with its
+   * badge (D69): `snapshot` where it came with the news, and otherwise
+   * the code already on screen when that is the revision.
+   *
+   * Code that is not on screen and did not come is not claimed: the badge
+   * would be about code nobody can see, so nothing changes until it
+   * arrives.
+   */
+  #showChecking(
+    epoch: number,
+    revision: string,
+    snapshot: ProjectSnapshot | null,
+    phase: RunPhase | undefined,
+  ): void {
+    this.#patch(epoch, (state) => {
+      if (!state.running) return state;
+      const onScreen = state.early ?? state.acceptedSnapshot;
+      const code =
+        snapshot && snapshot.revision === revision
+          ? snapshot
+          : onScreen?.revision === revision
+            ? onScreen
+            : null;
+      if (!code) return state;
+      const fresh = onScreen?.revision !== revision;
+      return {
+        ...state,
+        // Only what is not already the accepted checkpoint: a reopened
+        // project was handed this build's code as its own.
+        early: state.acceptedSnapshot?.revision === revision ? null : code,
+        stagedFiles: fresh
+          ? code.files.map((file) => ({ ...file }))
+          : state.stagedFiles,
+        check: { state: checkingState(phase), revision },
+        timeline: fresh
+          ? this.#append(
+              state.timeline,
+              'info',
+              `Showing revision ${revision} while its build is checked`,
+            )
+          : state.timeline,
+      };
+    });
   }
 
   /**
@@ -884,6 +993,9 @@ export class BuilderSession {
         if (this.#disposed || epoch !== this.#epoch) return;
         this.#store = store;
       }
+      // What its check found (D69): nothing to say for code that passed,
+      // and the rest said on screen and in the conversation.
+      const problem = checkProblem(run.check);
       this.#patch(epoch, (state) => ({
         ...state,
         status: 'accepted',
@@ -891,25 +1003,36 @@ export class BuilderSession {
         progress: null,
         serverRunId: null,
         notice: null,
-        problems: [],
+        problems: run.check === 'failed' && problem ? [problem] : [],
         runCount: state.runCount + 1,
+        early: null,
+        check: checkAfter(run.check, run.revision),
         ...(code
           ? {
               acceptedSnapshot: code,
               acceptedBrief: null,
               stagedFiles: code.files.map((file) => ({ ...file })),
             }
-          : {}),
+          : // No code to show for it, since the project has moved on: the
+            // early code goes with the badge (D69).
+            {
+              stagedFiles:
+                this.#withoutEarly(state).stagedFiles ?? state.stagedFiles,
+            }),
         transcript: reconciledTranscript(state.transcript, runId, {
           state: 'accepted',
           revision: run.revision ?? null,
           ...(code ? { fileCount: code.files.length } : {}),
           ...(run.summary ? { summary: run.summary } : {}),
+          ...(problem ? { problem } : {}),
         }),
-        timeline: this.#append(
-          state.timeline,
-          'info',
-          `Checkpoint accepted at revision ${run.revision ?? ''}`.trim(),
+        timeline: this.#checkTimeline(
+          this.#append(
+            state.timeline,
+            'info',
+            `Checkpoint accepted at revision ${run.revision ?? ''}`.trim(),
+          ),
+          run.check,
         ),
       }));
       return;
@@ -924,6 +1047,7 @@ export class BuilderSession {
       draft: null,
       serverRunId: null,
       notice: null,
+      ...this.#withoutEarly(state),
       problems: failed ? [UNSEEN_FAILURE] : [],
       transcript: reconciledTranscript(state.transcript, runId, {
         state: failed ? 'failed' : 'cancelled',
@@ -1272,6 +1396,9 @@ export class BuilderSession {
             ? `Built it: ${turn.summary}`
             : `Built it (${turn.fileCount} files).`,
         );
+        // What its build check found, where the code did not pass (D69),
+        // so the agent knows the project it is asked about does not build.
+        if (turn.problem) said.push(turn.problem);
       } else if (turn.status === 'failed') {
         said.push(
           `That did not work${turn.problem ? `: ${turn.problem}` : '.'} Nothing was changed.`,
@@ -1440,6 +1567,8 @@ export class BuilderSession {
       draft: picked,
       serverRunId: null,
       notice: null,
+      early: null,
+      check: null,
       transcript: this.#openTurn(state.transcript, runId, shown, said),
       timeline: this.#append(
         state.timeline,
@@ -1485,6 +1614,9 @@ export class BuilderSession {
 
     const store = new ObservingGenerationStore(this.#store, observer);
 
+    // What the build's check found, told with its result (D69).
+    // Held in an object because it is set from a callback.
+    const checked: { verdict?: CheckVerdict } = {};
     let resolved: ModelProvider;
     try {
       resolved = await this.#resolveProvider(
@@ -1500,7 +1632,21 @@ export class BuilderSession {
             wantsQuickDraft = false;
             this.#requestDraft(epoch, runId, trimmed, style);
           }
-          this.#patch(epoch, (state) => ({ ...state, progress }));
+          this.#patch(epoch, (state) => ({
+            ...state,
+            progress,
+            // The badge follows the build from checking to repairing (D69).
+            ...(state.check &&
+            (state.check.state === 'checking' ||
+              state.check.state === 'repairing')
+              ? {
+                  check: {
+                    ...state.check,
+                    state: checkingState(progress.phase),
+                  },
+                }
+              : {}),
+          }));
         },
         style,
         this.#state.knowledge,
@@ -1519,6 +1665,22 @@ export class BuilderSession {
             transcript: this.#closeTurn(state.transcript, { serverRunId }),
           }));
         },
+        {
+          // Show early, badge it (D69): the code the build has promoted,
+          // on screen while its check runs. The turn stays open, and the
+          // summary lands with the result, when the run settles.
+          onEarly: (snapshot) => {
+            this.#showChecking(
+              epoch,
+              snapshot.revision,
+              snapshot,
+              this.#state.progress?.phase,
+            );
+          },
+          onCheck: (verdict) => {
+            checked.verdict = verdict;
+          },
+        },
       );
     } catch (error) {
       reservation.release();
@@ -1532,6 +1694,7 @@ export class BuilderSession {
         draft: null,
         serverRunId: null,
         notice: null,
+        ...this.#withoutEarly(state),
         problems: [message],
         transcript: this.#closeTurn(state.transcript, {
           status: 'failed',
@@ -1579,6 +1742,7 @@ export class BuilderSession {
         draft: null,
         serverRunId: null,
         notice: null,
+        ...this.#withoutEarly(state),
         problems: [message],
         transcript: this.#closeTurn(state.transcript, {
           status: 'failed',
@@ -1634,6 +1798,11 @@ export class BuilderSession {
 
     if (result.state === 'accepted' && result.accepted) {
       const accepted = result.accepted;
+      // What the build's check found (D69), where it was checked: nothing
+      // to say for code that passed, and the rest said on screen, in the
+      // conversation and in the console.
+      const verdict = checked.verdict;
+      const problem = checkProblem(verdict);
       this.#patch(epoch, (state) => ({
         ...state,
         status: 'accepted',
@@ -1641,6 +1810,8 @@ export class BuilderSession {
         progress: null,
         serverRunId: null,
         notice: null,
+        early: null,
+        check: checkAfter(verdict, accepted.revision),
         acceptedSnapshot: accepted,
         // The mock preview is rendered from this brief. It only describes the
         // deterministic fake's own output, so a model-generated project must
@@ -1648,7 +1819,7 @@ export class BuilderSession {
         acceptedBrief: isFakeProvider(resolved) ? brief : null,
         providerId: resolved.id,
         stagedFiles: accepted.files.map((file) => ({ ...file })),
-        problems: [],
+        problems: verdict === 'failed' && problem ? [problem] : [],
         runCount: state.runCount + 1,
         budget,
         transcript: this.#closeTurn(state.transcript, {
@@ -1657,16 +1828,20 @@ export class BuilderSession {
           fileCount: accepted.files.length,
           revision: accepted.revision,
           providerId: resolved.id,
+          ...(problem ? { problem } : {}),
         }),
         // Warnings belong on the accepted path, which is the point of them:
         // the project works and still has something worth looking at. They
         // follow the acceptance line so the run reads as a success first.
         timeline: (result.warnings ?? []).reduce(
           (timeline, warning) => this.#append(timeline, 'warn', warning),
-          this.#append(
-            state.timeline,
-            'info',
-            `Checkpoint accepted at revision ${accepted.revision}`,
+          this.#checkTimeline(
+            this.#append(
+              state.timeline,
+              'info',
+              `Checkpoint accepted at revision ${accepted.revision}`,
+            ),
+            verdict,
           ),
         ),
       }));
@@ -1686,6 +1861,7 @@ export class BuilderSession {
       notice: null,
       // A sketch of a site that did not get built is not worth showing.
       draft: null,
+      ...this.#withoutEarly(state),
       problems,
       runCount: state.runCount + 1,
       budget,
@@ -1777,6 +1953,13 @@ export class BuilderSession {
       this.#cancelled();
       return;
     }
+    // Written, promoted and being checked (D69): there is nothing left to
+    // stop, and the check finishes on its own. Said, so the press is not a
+    // click that did nothing.
+    if (answer.run.state === 'running' && answer.run.checking) {
+      this.#patch(epoch, (state) => ({ ...state, notice: CHECK_NOT_STOPPED }));
+      return;
+    }
     // It had already ended before the Stop arrived. How it ended reaches
     // this page the way it would have anyway, by the stream or by
     // `#watch`, so there is nothing to claim here.
@@ -1798,6 +1981,7 @@ export class BuilderSession {
       draft: null,
       serverRunId: null,
       notice: null,
+      ...this.#withoutEarly(this.#state),
       problems: [],
       transcript: this.#closeTurn(this.#state.transcript, {
         status: 'cancelled',
@@ -1916,6 +2100,40 @@ export class BuilderSession {
     const last = transcript.at(-1);
     if (!last || last.status !== 'running') return transcript;
     return [...transcript.slice(0, -1), { ...last, ...patch }];
+  }
+
+  /**
+   * A build's early code taken off screen (D69), for a build that ended
+   * without a result to replace it: the files go back to the accepted
+   * checkpoint's, and the badge goes.
+   */
+  #withoutEarly(
+    state: BuilderState,
+  ): Pick<BuilderState, 'early' | 'check'> &
+    Partial<Pick<BuilderState, 'stagedFiles'>> {
+    return {
+      early: null,
+      check: null,
+      ...(state.early
+        ? {
+            stagedFiles: (state.acceptedSnapshot?.files ?? []).map((file) => ({
+              ...file,
+            })),
+          }
+        : {}),
+    };
+  }
+
+  /** The console's line for what a build's check found (D69). */
+  #checkTimeline(
+    timeline: TimelineEntry[],
+    verdict: CheckVerdict | undefined,
+  ): TimelineEntry[] {
+    if (verdict === 'passed') {
+      return this.#append(timeline, 'info', 'Build check passed');
+    }
+    const problem = checkProblem(verdict);
+    return problem ? this.#append(timeline, 'warn', problem) : timeline;
   }
 
   #append(

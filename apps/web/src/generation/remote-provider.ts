@@ -2,11 +2,14 @@ import type {
   GenerationPlan,
   GenerationRequest,
   ModelProvider,
+  ProjectSnapshot,
 } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import { getClerkToken } from '../auth/clerk-token.ts';
 import { isRunPhase } from './run-phase.ts';
+import { isCheckVerdict } from './build-check.ts';
+import type { CheckVerdict } from './build-check.ts';
 import type { GenerationProgress } from './session.ts';
 
 /**
@@ -139,6 +142,17 @@ export interface RemoteModelProviderOptions {
    */
   onRun?: (runId: string) => void;
   /**
+   * Called with the code the build has promoted and is now checking (D69,
+   * "show early, badge it"), before its result: the builder shows it with
+   * a badge. Again if a repair replaces it.
+   */
+  onEarly?: (snapshot: ProjectSnapshot) => void;
+  /**
+   * Called, just before the result is returned, with what the build's
+   * check found and the revision it ended at, for a build that was checked.
+   */
+  onCheck?: (verdict: CheckVerdict, revision: string) => void;
+  /**
    * The chosen visual direction, by id. The Worker validates it against the
    * closed set -- the browser is not trusted to have sent a real one.
    */
@@ -187,6 +201,8 @@ export class RemoteModelProvider implements ModelProvider {
   readonly #signal?: AbortSignal;
   readonly #onProgress?: RemoteModelProviderOptions['onProgress'];
   readonly #onRun?: RemoteModelProviderOptions['onRun'];
+  readonly #onEarly?: RemoteModelProviderOptions['onEarly'];
+  readonly #onCheck?: RemoteModelProviderOptions['onCheck'];
   readonly #style: StylePresetId | null;
   readonly #styleDna: StyleDna | null;
   readonly #knowledge: string | null;
@@ -203,6 +219,8 @@ export class RemoteModelProvider implements ModelProvider {
     this.#signal = options.signal;
     this.#onProgress = options.onProgress;
     this.#onRun = options.onRun;
+    this.#onEarly = options.onEarly;
+    this.#onCheck = options.onCheck;
     this.#style = options.style ?? null;
     this.#styleDna = options.styleDna ?? null;
     this.#knowledge = options.knowledge ?? null;
@@ -283,13 +301,19 @@ export class RemoteModelProvider implements ModelProvider {
         continue;
       }
       if (event === 'progress') {
-        const { characters, elapsedMs, stage, step, phase } = data as {
+        const { characters, elapsedMs, stage, step, phase, early } = data as {
           characters?: number;
           elapsedMs?: number;
           stage?: unknown;
           step?: unknown;
           phase?: unknown;
+          early?: unknown;
         };
+        // The code the build has promoted and is checking (D69), before
+        // the progress it came with, so the lifecycle bar and the badge
+        // move together.
+        const snapshot = earlySnapshot(early);
+        if (snapshot) this.#onEarly?.(snapshot);
         // Only the clock is required. Requiring a character count too meant
         // that once generation moved into a durable Workflow, which has no
         // live channel to report one (internal issue 183), every progress event was
@@ -322,11 +346,18 @@ export class RemoteModelProvider implements ModelProvider {
         );
       }
       if (event === 'plan') {
-        const plan = (data as { plan?: GenerationPlan }).plan;
+        const { plan, revision, check } = data as {
+          plan?: GenerationPlan;
+          revision?: unknown;
+          check?: unknown;
+        };
         if (!plan || !Array.isArray(plan.files)) {
           throw new Error(
             'The generation service returned an unexpected response.',
           );
+        }
+        if (isCheckVerdict(check) && typeof revision === 'string') {
+          this.#onCheck?.(check, revision);
         }
         return plan;
       }
@@ -336,6 +367,33 @@ export class RemoteModelProvider implements ModelProvider {
     // bare "Load failed".
     throw new ConnectionLostError();
   }
+}
+
+/**
+ * A progress event's `early` code (D69), or nothing when it is absent or
+ * not the shape the Worker sends. Every file is checked, because it is put
+ * on screen and into the code view as it is.
+ */
+function earlySnapshot(value: unknown): ProjectSnapshot | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { revision, files } = value as { revision?: unknown; files?: unknown };
+  if (typeof revision !== 'string' || revision.length === 0) return null;
+  if (!Array.isArray(files)) return null;
+  const valid = files.every(
+    (file: unknown) =>
+      typeof file === 'object' &&
+      file !== null &&
+      typeof (file as { path?: unknown }).path === 'string' &&
+      typeof (file as { content?: unknown }).content === 'string',
+  );
+  if (!valid) return null;
+  return {
+    revision,
+    files: (files as { path: string; content: string }[]).map((file) => ({
+      path: file.path,
+      content: file.content,
+    })),
+  };
 }
 
 export type GenerationMode = 'model' | 'fake';

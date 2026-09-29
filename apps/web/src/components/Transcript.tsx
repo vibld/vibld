@@ -91,6 +91,11 @@ function Reply({ turn }: { turn: TranscriptTurn }) {
           </>
         ) : null}
       </p>
+      {/* What its build check found, where the code did not pass (D69):
+          kept, and said, so the turn does not read as a clean success. */}
+      {turn.problem ? (
+        <p className="bubble__detail bubble__detail--check">{turn.problem}</p>
+      ) : null}
     </>
   );
 }

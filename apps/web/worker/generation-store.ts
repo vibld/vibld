@@ -28,6 +28,19 @@ import type {
 } from '@vibld/core';
 
 /**
+ * The stage row a run's check is recorded under (D69): `<runId>:verify`,
+ * beside the `:repair` and `:restore` rows its repair turn writes.
+ */
+export const CHECK_SUFFIX = ':verify';
+
+export function checkRunId(runId: string): string {
+  return `${runId}${CHECK_SUFFIX}`;
+}
+
+/** How a check ends: it builds, it does not, or nothing could say. */
+export type CheckStageState = 'accepted' | 'failed' | 'idle';
+
+/**
  * Where one revision of a project is stored. Exported for the one other
  * writer of this layout, duplicating a project (`project-store.ts`), which
  * puts the copy exactly where this store will look for it.
@@ -247,9 +260,90 @@ export class D1GenerationStore implements GenerationStore {
   }
 
   /**
+   * Record that run `runId` has promoted `revision` and is now checking it
+   * (D69): its own row, `runId:verify`, at `validating`, whose revision is
+   * the one the builder is shown while the check runs.
+   *
+   * A row of its own rather than a new state on the run's row, because
+   * that row is already `accepted`, which is true, and everything that asks
+   * whether a run has ended (`ProjectStore.runInFlight`, `unendedRuns`,
+   * `/api/runs/:id`) reads every row of a run and already counts one that
+   * has not ended as the run still going. So a reopened project finds a
+   * build that is still being checked, and a project is not deleted from
+   * under a repair that is about to promote into it.
+   *
+   * `DO NOTHING` on a row that exists, so a replayed step never reopens a
+   * check that has closed. The snapshot is already in R2, promoted, so
+   * nothing is written there.
+   */
+  async openCheck(record: {
+    runId: string;
+    projectId: string;
+    baseRevision: string | null;
+    revision: string;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    await this.#db
+      .prepare(
+        `INSERT INTO generation_stages
+           (run_id, project_id, base_revision, state, snapshot_revision, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'validating', ?4, ?5, ?5)
+         ON CONFLICT(run_id) DO NOTHING`,
+      )
+      .bind(
+        checkRunId(record.runId),
+        record.projectId,
+        record.baseRevision,
+        record.revision,
+        now,
+      )
+      .run();
+  }
+
+  /**
+   * End run `runId`'s check (D69) at what it found, `revision` being the
+   * one the run ended at:
+   *
+   *   accepted   it was built and it builds
+   *   failed     it was built and it does not
+   *   idle       nothing could judge whether it builds
+   *
+   * Only a check still open is closed, so asking twice is asking once and
+   * a check a Stop already ended is left as the Stop left it.
+   */
+  async closeCheck(
+    runId: string,
+    state: CheckStageState,
+    revision: string | null,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `UPDATE generation_stages
+            SET state = ?2, snapshot_revision = COALESCE(?3, snapshot_revision),
+                updated_at = ?4
+          WHERE run_id = ?1
+            AND state NOT IN ('accepted', 'failed', 'cancelled', 'idle')`,
+      )
+      .bind(checkRunId(runId), state, revision, new Date().toISOString())
+      .run();
+  }
+
+  /** One revision of a project, whether or not it is the accepted one. */
+  async loadRevision(
+    projectId: string,
+    revision: string,
+  ): Promise<ProjectSnapshot | undefined> {
+    return readSnapshot(this.#bucket, projectId, revision);
+  }
+
+  /**
    * End every stage of run `runId` that has not ended, as `state`: the
    * run's own row and the ones its repair turn writes under `runId:repair`
    * and `runId:restore`.
+   *
+   * Its check (`runId:verify`, D69) ends as `idle` whichever `state` says:
+   * a check that was stopped or cut off found nothing about the project,
+   * and `failed` there would read as "it does not build".
    *
    * For a run that stopped without writing its own end: one somebody
    * stopped (`cancelled`), or one the Workflow engine reports finished,
@@ -264,7 +358,10 @@ export class D1GenerationStore implements GenerationStore {
   async settleRun(runId: string, state: 'failed' | 'cancelled'): Promise<void> {
     await this.#db
       .prepare(
-        `UPDATE generation_stages SET state = ?2, updated_at = ?3
+        `UPDATE generation_stages
+            SET state = CASE WHEN run_id = ?1 || '${CHECK_SUFFIX}'
+                             THEN 'idle' ELSE ?2 END,
+                updated_at = ?3
           WHERE (run_id = ?1 OR substr(run_id, 1, length(?1) + 1) = ?1 || ':')
             AND state NOT IN ('accepted', 'failed', 'cancelled', 'idle')`,
       )

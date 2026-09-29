@@ -3,6 +3,8 @@ import { cachedFraction, contextPressure } from '@vibld/core';
 import { getClerkToken } from '../auth/clerk-token.ts';
 import { isRunPhase } from './run-phase.ts';
 import type { RunPhase } from './run-phase.ts';
+import { isCheckVerdict } from './build-check.ts';
+import type { CheckVerdict } from './build-check.ts';
 
 /**
  * The builder's half of run history (internal issue 167): fetching `/api/runs` and turning
@@ -150,6 +152,14 @@ export interface BuildRun {
    * can say; what the lifecycle bar goes by.
    */
   phase?: RunPhase;
+  /**
+   * The revision a `running` build has promoted and is checking (D69): the
+   * builder shows it with a badge until the check ends. Its code comes as
+   * the answer's `snapshot` unless the builder said it has it.
+   */
+  checking?: { revision: string };
+  /** What the check found, for an `accepted` build that was checked. */
+  check?: CheckVerdict;
 }
 
 export type BuildAnswer =
@@ -173,6 +183,8 @@ async function buildCall(
   method: 'GET' | 'DELETE',
   fetchImpl: typeof fetch,
   getToken: () => Promise<string | null>,
+  /** The revision the builder already has the code of, so it is not sent. */
+  known?: string | null,
 ): Promise<BuildAnswer> {
   const fallback =
     method === 'DELETE'
@@ -180,10 +192,14 @@ async function buildCall(
       : 'Could not reach vibld to ask after the build.';
   let response: Response;
   try {
-    response = await fetchImpl(`/api/runs/${encodeURIComponent(runId)}`, {
-      method,
-      headers: await authHeaders(getToken),
-    });
+    const query = known ? `?known=${encodeURIComponent(known)}` : '';
+    response = await fetchImpl(
+      `/api/runs/${encodeURIComponent(runId)}${query}`,
+      {
+        method,
+        headers: await authHeaders(getToken),
+      },
+    );
   } catch {
     return { ok: false, message: fallback };
   }
@@ -218,13 +234,20 @@ async function buildCall(
   const code = body.snapshot as ProjectSnapshot | null | undefined;
   // Kept only as a string: anything else in its place is dropped rather
   // than shown.
-  const { summary, phase, ...rest } = run;
+  const { summary, phase, checking, check, ...rest } = run;
   return {
     ok: true,
     run: {
       ...rest,
       ...(typeof summary === 'string' && summary.length > 0 ? { summary } : {}),
       ...(isRunPhase(phase) ? { phase } : {}),
+      ...(typeof checking === 'object' &&
+      checking !== null &&
+      typeof checking.revision === 'string' &&
+      checking.revision.length > 0
+        ? { checking: { revision: checking.revision } }
+        : {}),
+      ...(isCheckVerdict(check) ? { check } : {}),
     },
     snapshot:
       code && typeof code.revision === 'string' && Array.isArray(code.files)
@@ -242,8 +265,14 @@ export function fetchBuild(
   runId: string,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
+  /**
+   * The revision whose code the builder already has, for a build being
+   * checked (D69): the Worker leaves it out of the answer rather than
+   * sending the whole project every poll.
+   */
+  known: string | null = null,
 ): Promise<BuildAnswer> {
-  return buildCall(runId, 'GET', fetchImpl, getToken);
+  return buildCall(runId, 'GET', fetchImpl, getToken, known);
 }
 
 /**

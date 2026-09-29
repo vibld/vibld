@@ -1024,9 +1024,13 @@ describe('what the run finally answers with', () => {
     const source = await workflowSource();
     assert.match(
       source,
-      /return repair\.result \?\? generation\.result;/,
+      /const final = repair\.result \?\? generation\.result;/,
       'the Workflow returns the first attempt, so a repaired run shows the reader the broken files',
     );
+    // Both ways out return it: as it is, or with what its check found
+    // (D69).
+    assert.match(source, /if \(!checking\) return final;/);
+    assert.match(source, /return \{ \.\.\.final, check \};/);
   });
 
   it('keeps the whole project out of the log line', async () => {

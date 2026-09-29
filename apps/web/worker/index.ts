@@ -42,7 +42,12 @@ import {
   handleProjects,
 } from './project-handlers.ts';
 import type { ProjectLinks } from './project-handlers.ts';
-import { handleRun, settleStopped } from './run-control.ts';
+import {
+  checkingUpdate,
+  endedWith,
+  handleRun,
+  settleStopped,
+} from './run-control.ts';
 import {
   ProjectStore,
   liveSiteProjects,
@@ -56,6 +61,7 @@ import { MediaStore } from './media-store.ts';
 import { SUSPENDED_MESSAGE, spendableFor, tierOf } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { POLL_INTERVAL_MS, phaseFor, stageFor, stepFor } from './run-stage.ts';
+import { isCheckVerdict } from '../src/generation/build-check.ts';
 import { RunProgress } from './run-progress.ts';
 import {
   positiveInt,
@@ -1498,6 +1504,18 @@ async function handlePlan(
         console.error('failed to settle a run that ended', error);
       });
 
+  // The run's stage rows, which say when its revision has been promoted
+  // and is being checked (D69), and what it ended at.
+  const stages = () =>
+    new ProjectStore(env.DB!, env.PROJECT_CONTENT!).runStages(
+      principal.userId,
+      runId,
+    );
+  // The revision whose files this stream has already sent, so a build
+  // being checked is sent its code once, and again only when a repair
+  // replaces it.
+  let shownRevision: string | undefined;
+
   const run = (async () => {
     try {
       for (;;) {
@@ -1529,6 +1547,7 @@ async function handlePlan(
             accepted?: { revision: string; files: unknown[] };
             errors: string[];
             summary?: string;
+            check?: unknown;
           };
           if (result.state === 'accepted' && result.accepted) {
             await write(
@@ -1538,6 +1557,13 @@ async function handlePlan(
                   summary: result.summary ?? '',
                   files: result.accepted.files,
                 },
+                // The revision it ended at, and what its check found
+                // (D69), for a builder that was shown the code before the
+                // check ended and badged it.
+                revision: result.accepted.revision,
+                ...(isCheckVerdict(result.check)
+                  ? { check: result.check }
+                  : {}),
               }),
             );
           } else {
@@ -1571,12 +1597,29 @@ async function handlePlan(
           await settleStages(
             status.status === 'terminated' ? 'cancelled' : 'failed',
           );
+          // A run stopped or broken after it promoted its revision has
+          // still moved the project there (D69): the builder is handed
+          // that code, marked as not checked, rather than told the build
+          // failed while the project holds what it built.
+          const ended = await endedWith(
+            stages,
+            new D1GenerationStore(env.DB!, env.PROJECT_CONTENT!),
+            runId,
+          ).catch(() => undefined);
           if (!gone) {
             await write(
-              encodeEvent('error', {
-                error:
-                  status.error?.message ?? 'Generation failed unexpectedly.',
-              }),
+              ended
+                ? encodeEvent('plan', {
+                    providerId: effectiveModel,
+                    plan: { summary: '', files: ended.snapshot.files },
+                    revision: ended.snapshot.revision,
+                    ...(ended.check ? { check: ended.check } : {}),
+                  })
+                : encodeEvent('error', {
+                    error:
+                      status.error?.message ??
+                      'Generation failed unexpectedly.',
+                  }),
             );
           }
           return;
@@ -1607,7 +1650,28 @@ async function handlePlan(
         // Which part of its work the run is doing, as a word the builder
         // acts on: its lifecycle bar moves on from "Plan" by it
         // (`run-phase.ts`), where the builder's own status cannot.
-        const phase = phaseFor(status.status, progress);
+        let phase = phaseFor(status.status, progress);
+        // Show early, badge it (D69). Once the model steps are over, or
+        // where the channel has nothing to say (before the first report,
+        // and after an eviction, which forgets that the steps finished),
+        // the stage rows are asked whether the run has promoted its
+        // revision and is checking it: if so, the builder is sent that
+        // revision's code, once, and shows it with a badge until the
+        // result below says what the check found. Never a reason to end
+        // the relay: without it the builder waits for the end, as it did
+        // before.
+        const checking =
+          status.status === 'running' &&
+          (progress?.finished !== false || progress.report === undefined)
+            ? await checkingUpdate(
+                stages,
+                new D1GenerationStore(env.DB!, env.PROJECT_CONTENT!),
+                runId,
+                shownRevision,
+              ).catch(() => undefined)
+            : undefined;
+        phase ??= checking?.phase;
+        const early = checking?.snapshot;
         if (!gone) {
           await write(
             encodeEvent('progress', {
@@ -1616,8 +1680,14 @@ async function handlePlan(
               ...(characters > 0 ? { characters } : {}),
               ...(step ? { step } : {}),
               ...(phase ? { phase } : {}),
+              ...(early
+                ? {
+                    early: { revision: early.revision, files: early.files },
+                  }
+                : {}),
             }),
           );
+          if (early) shownRevision = early.revision;
         }
 
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));

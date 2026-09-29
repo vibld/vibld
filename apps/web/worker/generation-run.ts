@@ -39,6 +39,8 @@ import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import { createValidator } from '../src/generation/validator.ts';
 import type { RunPhase } from '../src/generation/run-phase.ts';
+import type { CheckVerdict } from '../src/generation/build-check.ts';
+import type { CheckStageState } from './generation-store.ts';
 import { ACCOUNT_BUDGET_KEY, microUsdOf, worstCaseMicroUsd } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 import type { UserBudget } from './budget.ts';
@@ -1947,6 +1949,87 @@ export async function verifyAndRepair(
       : outcome.result,
   };
 }
+
+/**
+ * Whether this deployment checks what a run builds: whether there is a
+ * build service to ask. Without one nothing is built, the run ends as it
+ * always did, and nothing is shown before it ends (D69).
+ */
+export function checksBuilds(
+  env: Pick<GenerationWorkflowEnv, 'PREVIEW' | 'PREVIEW_INTERNAL_SECRET'>,
+): boolean {
+  return Boolean(env.PREVIEW && env.PREVIEW_INTERNAL_SECRET);
+}
+
+/**
+ * Show a run's revision before it is checked (D69, "show early, badge
+ * it"): record that the run has promoted `result`'s revision and is
+ * checking it, which is what the builder reads it from, streamed or asked
+ * (`checkingOf` in `run-control.ts`).
+ *
+ * Only for a run whose result was accepted, on a deployment that checks
+ * builds. False when nothing was opened, and the run then ends as it
+ * always did, its result shown when it ends.
+ *
+ * The accepted revision itself is not touched: it was promoted in
+ * `assemble`, before any of this, and stays what it was. What changes is
+ * only when the builder is told about it.
+ */
+export async function openBuildCheck(
+  store: {
+    openCheck(record: {
+      runId: string;
+      projectId: string;
+      baseRevision: string | null;
+      revision: string;
+    }): Promise<void>;
+  },
+  env: Pick<GenerationWorkflowEnv, 'PREVIEW' | 'PREVIEW_INTERNAL_SECRET'>,
+  params: Pick<WorkflowParams, 'runId' | 'projectId' | 'baseRevision'>,
+  result: DurableGenerationResult,
+): Promise<boolean> {
+  if (!checksBuilds(env)) return false;
+  if (result.state !== 'accepted' || !result.accepted) return false;
+  await store.openCheck({
+    runId: params.runId,
+    projectId: params.projectId,
+    baseRevision: assertedBaseRevision(params) ?? null,
+    revision: result.accepted.revision,
+  });
+  return true;
+}
+
+/**
+ * What a run's check came to, for the revision the run ended at (D69).
+ *
+ *   passed      that revision was built and builds: the first attempt, a
+ *               repair that builds, or the first attempt put back after a
+ *               design repair that was no better
+ *   failed      it was built and does not: the first attempt with no
+ *               repair (none affordable, or one that timed out or was not
+ *               promoted), or a repair that does not build either
+ *   unchecked   nothing judged it: the build service could not be reached
+ *               or refused for reasons of its own, or a repair was
+ *               promoted and its build could not be asked
+ *
+ * Design errors are not part of it. They buy a repair when the project
+ * builds, and a project left with some still builds; what the person is
+ * told is whether the code on screen builds.
+ */
+export function checkVerdictOf(outcome: RepairOutcome): CheckVerdict {
+  if (outcome.repaired === true) return 'passed';
+  if (outcome.unverified) return 'unchecked';
+  if (outcome.built === true) return 'passed';
+  if (outcome.built === false) return 'failed';
+  return 'unchecked';
+}
+
+/** The state a run's check row ends at, for each verdict. */
+export const CHECK_STAGE: Record<CheckVerdict, CheckStageState> = {
+  passed: 'accepted',
+  failed: 'failed',
+  unchecked: 'idle',
+};
 
 /**
  * Make `original` the accepted revision again, in place of `repaired`.

@@ -2252,6 +2252,60 @@ body {
   }
 }
 
+/* --- Build check badge (D69) ----------------------------------------------
+   A build's code is shown before its check has finished, with this above
+   the preview saying so. Small: a label and one sentence. */
+.check-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.check-badge__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.check-badge__working {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--brand);
+  animation: pulse 1.4s var(--ease) infinite;
+}
+
+.check-badge--failed {
+  border-color: var(--caution);
+  background: var(--caution-bg);
+}
+
+.check-badge--failed .check-badge__label {
+  color: var(--caution);
+}
+
+.pill--checking {
+  border-color: var(--brand-24);
+  color: var(--text);
+}
+
+.bubble__detail--check {
+  color: var(--caution);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .check-badge__working {
+    animation: none;
+  }
+}
+
 .prompt__head {
   display: flex;
   align-items: baseline;

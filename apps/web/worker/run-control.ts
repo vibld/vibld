@@ -1,6 +1,7 @@
 import { runIdInPath } from './access-gate.ts';
 import type { UserBudget } from './budget.ts';
-import { D1GenerationStore } from './generation-store.ts';
+import { CHECK_SUFFIX, D1GenerationStore } from './generation-store.ts';
+import type { ProjectSnapshot } from '@vibld/core';
 import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
 import { ProjectStore, RUN_IN_FLIGHT_MS } from './project-store.ts';
 import type { RunStageRow } from './project-store.ts';
@@ -10,6 +11,7 @@ import type { HoldClaim, HoldSettler } from './run-progress.ts';
 import { phaseFor } from './run-stage.ts';
 import type { RunProgressState } from './generation-run.ts';
 import type { RunPhase } from '../src/generation/run-phase.ts';
+import type { CheckVerdict } from '../src/generation/build-check.ts';
 import { ACCOUNT_BUDGET_KEY } from './spend.ts';
 
 /**
@@ -100,6 +102,17 @@ export interface RunView {
    * Absent where the run has not said, or its channel cannot be read.
    */
   phase?: RunPhase;
+  /**
+   * The revision a `running` build has already promoted and is checking
+   * (D69), which the builder shows with a badge until the check ends.
+   * Absent for a build that has not got that far.
+   */
+  checking?: { revision: string };
+  /**
+   * What the check found, for an `accepted` build that was checked: the
+   * builder clears its badge for `passed` and says the rest plainly.
+   */
+  check?: CheckVerdict;
 }
 
 /** What `WorkflowInstance.status()` says of an instance that has stopped. */
@@ -118,23 +131,170 @@ const NOT_FOUND = () => json({ error: 'That build does not exist.' }, 404);
 
 const unended = (row: RunStageRow) => !STAGE_ENDED.has(row.state);
 
+/**
+ * The revision a run stands at: the project's where it is one of this
+ * run's (the build, or the repair that followed it), and otherwise the
+ * run's latest, since the project has moved on and the run was still
+ * accepted. Undefined for a run that has accepted nothing.
+ */
+function standingRevision(
+  own: RunStageRow,
+  rows: RunStageRow[],
+): string | undefined {
+  const accepted = rows.filter(
+    (row) =>
+      row.state === 'accepted' &&
+      row.snapshot_revision !== null &&
+      !row.run_id.endsWith(CHECK_SUFFIX),
+  );
+  if (accepted.length === 0) return undefined;
+  const current = own.accepted_revision;
+  return accepted.some((row) => row.snapshot_revision === current)
+    ? (current ?? undefined)
+    : (accepted.at(-1)!.snapshot_revision ?? undefined);
+}
+
+/**
+ * What a run that is still going has already promoted and is checking
+ * (D69, "show early, badge it"), and which part of the check it is in, or
+ * nothing for a run that has not got that far.
+ *
+ * Read from the run's stage rows, which the Workflow writes and which
+ * outlive the progress channel: its check row (`<runId>:verify`) is open
+ * from the moment the revision is promoted until the check ends. The
+ * revision is the one the run stands at, so a repair the check bought
+ * replaces the first attempt here as soon as it is promoted, and the first
+ * attempt comes back if the repair is undone. `repairing` while the repair
+ * turn's own row is open, and otherwise `validating`; the progress
+ * channel, where it can be read, says the same thing more exactly.
+ *
+ * Used by both ways the builder learns of a build: the stream
+ * (`handlePlan`) and asking (`GET /api/runs/:id`), so the two cannot come
+ * to show different code.
+ */
+export function checkingOf(
+  runId: string,
+  rows: RunStageRow[],
+): { revision: string; phase: 'validating' | 'repairing' } | undefined {
+  const check = rows.find((row) => row.run_id === `${runId}${CHECK_SUFFIX}`);
+  if (!check || !unended(check)) return undefined;
+  const own = rows.find((row) => row.run_id === runId) ?? check;
+  const revision = standingRevision(own, rows) ?? check.snapshot_revision;
+  if (!revision) return undefined;
+  const repair = rows.find((row) => row.run_id === `${runId}:repair`);
+  return {
+    revision,
+    phase: repair && unended(repair) ? 'repairing' : 'validating',
+  };
+}
+
+/**
+ * What a run's check found, from how its check row ended, or nothing for a
+ * run that was never checked or whose check has not ended.
+ */
+function verdictOf(
+  runId: string,
+  rows: RunStageRow[],
+): CheckVerdict | undefined {
+  const check = rows.find((row) => row.run_id === `${runId}${CHECK_SUFFIX}`);
+  switch (check?.state) {
+    case 'accepted':
+      return 'passed';
+    case 'failed':
+      return 'failed';
+    case 'idle':
+    case 'cancelled':
+      return 'unchecked';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * What the stream (`handlePlan`) tells a builder about a build that is
+ * being checked (D69): the revision it has promoted, which part of the
+ * check it is in, and that revision's files when the builder has not been
+ * sent them (`shown` is the revision it was last sent). Nothing for a
+ * build that is not being checked, and files only where they can be read;
+ * the builder then goes on showing what it had.
+ */
+export async function checkingUpdate(
+  load: () => Promise<RunStageRow[]>,
+  generation: Pick<D1GenerationStore, 'loadRevision'>,
+  runId: string,
+  shown: string | undefined,
+): Promise<
+  | {
+      revision: string;
+      phase: 'validating' | 'repairing';
+      snapshot?: ProjectSnapshot;
+    }
+  | undefined
+> {
+  const rows = await load();
+  const checking = checkingOf(runId, rows);
+  if (!checking) return undefined;
+  if (checking.revision === shown) return checking;
+  const snapshot = await generation
+    .loadRevision(rows[0]!.project_id, checking.revision)
+    .catch(() => undefined);
+  return snapshot ? { ...checking, snapshot } : checking;
+}
+
+/**
+ * What a build that ended without a result of its own had come to, for
+ * the stream to hand the builder: the code it moved the project to, and
+ * what its check found, where it had moved it (D69).
+ *
+ * A Workflow that is stopped or errors after it promoted its revision has
+ * still moved the project there, and the check that would have followed
+ * did not finish. Reporting that as a failed build left the builder
+ * showing the project as it was while the store held the new revision, so
+ * the next follow-up asserted a revision that was gone and was refused.
+ * Undefined where the run accepted nothing, which is a failure as before.
+ */
+export async function endedWith(
+  load: () => Promise<RunStageRow[]>,
+  generation: Pick<D1GenerationStore, 'loadRevision'>,
+  runId: string,
+): Promise<{ snapshot: ProjectSnapshot; check?: CheckVerdict } | undefined> {
+  const rows = await load();
+  if (rows.length === 0) return undefined;
+  const view = viewOf(runId, rows);
+  if (view.state !== 'accepted' || !view.revision) return undefined;
+  const snapshot = await generation.loadRevision(
+    rows[0]!.project_id,
+    view.revision,
+  );
+  if (!snapshot) return undefined;
+  return { snapshot, ...(view.check ? { check: view.check } : {}) };
+}
+
 /** A run's stages as one answer. `rows` is never empty. */
 export function viewOf(runId: string, rows: RunStageRow[]): RunView {
   const own = rows.find((row) => row.run_id === runId) ?? rows[0]!;
   const startedAt = own.created_at;
-  if (rows.some(unended)) return { id: runId, state: 'running', startedAt };
-  const accepted = rows.filter(
-    (row) => row.state === 'accepted' && row.snapshot_revision !== null,
-  );
-  if (accepted.length > 0) {
-    // The project's revision where it is one of this run's (the build, or
-    // the repair that followed it), and otherwise the run's latest: the
-    // project has moved on since, and the run was still accepted.
-    const current = own.accepted_revision;
-    const revision = accepted.some((row) => row.snapshot_revision === current)
-      ? current
-      : accepted.at(-1)!.snapshot_revision;
-    return { id: runId, state: 'accepted', startedAt, revision };
+  if (rows.some(unended)) {
+    const checking = checkingOf(runId, rows);
+    return {
+      id: runId,
+      state: 'running',
+      startedAt,
+      ...(checking
+        ? { checking: { revision: checking.revision }, phase: checking.phase }
+        : {}),
+    };
+  }
+  const revision = standingRevision(own, rows);
+  if (revision !== undefined) {
+    const check = verdictOf(runId, rows);
+    return {
+      id: runId,
+      state: 'accepted',
+      startedAt,
+      revision,
+      ...(check ? { check } : {}),
+    };
   }
   return {
     id: runId,
@@ -423,8 +583,26 @@ export async function handleRun(
       const progress = deps.progressOf
         ? await deps.progressOf(runId).catch(() => undefined)
         : undefined;
-      const phase = phaseFor('running', progress);
-      return json({ run: phase ? { ...view, phase } : view, snapshot: null });
+      // The channel's word where it has one, and otherwise the one the
+      // stage rows give a build that is being checked.
+      const phase = phaseFor('running', progress) ?? view.phase;
+      // The code a build being checked has promoted (D69), for a builder
+      // that is not streaming it: shown with a badge until the check
+      // ends. Not sent again to a builder that says it already has it
+      // (`?known=`), since it is asked for every poll and can be a whole
+      // project.
+      let snapshot = null;
+      if (view.checking) {
+        const known = new URL(request.url).searchParams.get('known');
+        if (known !== view.checking.revision) {
+          const rows = await load();
+          const code = await generation
+            .loadRevision(rows[0]!.project_id, view.checking.revision)
+            .catch(() => undefined);
+          if (code) snapshot = { revision: code.revision, files: code.files };
+        }
+      }
+      return json({ run: phase ? { ...view, phase } : view, snapshot });
     }
     // The code with the answer, when the build moved the project to it: a
     // builder that was not streaming the build has none of it, and asking
@@ -449,6 +627,19 @@ export async function handleRun(
   // DELETE: stop it.
   const rows = await load();
   if (rows.length === 0) return NOT_FOUND();
+  // A build whose only open row is its check (D69) has written, promoted
+  // and settled what it built, and is building it to check it: there is
+  // nothing of it left to stop that Stop ever stopped. It is answered as
+  // it stands, still being checked, and not terminated, which is what a
+  // Stop at this point always did, when the check had no row to be seen
+  // by. A repair the check bought has its own row, and is stopped as it
+  // always was.
+  const stoppable = rows.filter(
+    (row) => unended(row) && !row.run_id.endsWith(CHECK_SUFFIX),
+  );
+  if (stoppable.length === 0 && rows.some(unended)) {
+    return json({ run: viewOf(runId, rows) });
+  }
   if (rows.some(unended)) {
     if (deps.terminate) {
       try {
