@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  GROUP_MAX_TOKENS,
   MODEL_CATALOGUE,
+  OUTLINE_MAX_TOKENS,
+  callCeilingFor,
   RUN_ABANDONED_AFTER_MS,
   RUN_STEP_TIMEOUT_MS,
   RUN_WALL_CLOCK_BUDGET_MS,
@@ -71,6 +74,24 @@ describe('how long one run is allowed to take', () => {
         needed <= RUN_STEP_TIMEOUT_MS,
         `${model.id}: a run at half speed needs ${Math.round(needed)}ms of ${RUN_STEP_TIMEOUT_MS}ms`,
       );
+    }
+  });
+
+  it('fits every call of a bounded build inside one step, at half the measured rate', () => {
+    // A bounded build is many calls, each its own Workflow step with this
+    // timeout, and each step renews the run's reservation before it calls
+    // (`UserBudget.touch`). So the property that keeps a live run from
+    // being reclaimed is per call now: every call fits one step, and one
+    // step fits inside the reclaim window.
+    for (const model of MODEL_CATALOGUE) {
+      for (const ceiling of [OUTLINE_MAX_TOKENS, GROUP_MAX_TOKENS]) {
+        const tokens = callCeilingFor(model.id, ceiling);
+        const halfRate = outputTokensPerSecondFor(model.id) / 2;
+        assert.ok(
+          (tokens / halfRate) * 1000 <= RUN_STEP_TIMEOUT_MS,
+          `${model.id}: a ${tokens}-token call at half speed outlasts its step`,
+        );
+      }
     }
   });
 

@@ -95,6 +95,47 @@ describe('the cache breakpoint', () => {
   });
 });
 
+describe('the cache breakpoint a bounded build asks for', () => {
+  it('marks the end of the shared prefix, and sends the rest after it', async () => {
+    // A bounded build repeats the request, spec and manifest on every
+    // file-writing step. That part is byte-identical within a run, so it is
+    // the one part of a user message a marker can honestly go on.
+    const captured: Captured = {};
+    const client = createAnthropicPlanClient({
+      client: fakeAnthropic(captured),
+    });
+    let reported = 0;
+    await client.createPlan({
+      model: 'claude-haiku-4-5',
+      system: 'SYSTEM PROMPT',
+      cachePrefix: 'SHARED PLAN',
+      prompt: 'WRITE THESE',
+      maxTokens: 1000,
+      effort: 'high',
+      onPromptChars: (characters) => {
+        reported = characters;
+      },
+    });
+
+    const [message] = captured.messages as {
+      role: string;
+      content: { type: string; text: string; cache_control?: unknown }[];
+    }[];
+    assert.deepEqual(message?.content, [
+      {
+        type: 'text',
+        text: 'SHARED PLAN',
+        cache_control: { type: 'ephemeral' },
+      },
+      { type: 'text', text: 'WRITE THESE' },
+    ]);
+    assert.equal(
+      reported,
+      'SYSTEM PROMPT'.length + 'SHARED PLAN'.length + 'WRITE THESE'.length,
+    );
+  });
+});
+
 describe('reading Anthropic usage', () => {
   it('counts cached and written tokens as part of the input', async () => {
     // Anthropic's `input_tokens` is the uncached remainder: unlike OpenAI and

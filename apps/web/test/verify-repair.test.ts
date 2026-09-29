@@ -767,10 +767,19 @@ describe('a ledger that never answers', () => {
         `${call} can stay pending until the step dies`,
       );
     }
+    // The third is the heartbeat each model step sends (`touchReservation`),
+    // which waits on the same ledger and so is held to the same bound.
+    const touch = source.indexOf('.touch(id)');
+    assert.ok(touch > 0, 'the heartbeat is no longer where this expected it');
+    assert.match(
+      source.slice(Math.max(0, touch - 200), touch),
+      /withinDeadline\(\s*Promise\.resolve\(ledger\.getByName\(key\)$/,
+      'a heartbeat can stay pending until the step dies',
+    );
     assert.equal(
       source.match(/LEDGER_CALL_TIMEOUT_MS,/g)?.length,
-      2,
-      'one of the two ledger calls is bounded by something else',
+      3,
+      'one of the three ledger calls is bounded by something else',
     );
   });
 });

@@ -8,27 +8,38 @@
  * Writes the generated project to disk only when --out is given, so the
  * default is a dry read of what the model produced.
  *
+ * The build is the product's own: in bounded steps (`bounded-build.ts`), an
+ * outline and then a few files per call, each step printed as it starts. So
+ * this is the way to see the steps against a real model, and what they cost.
+ *
  * With --base <dir> the request carries an existing project, which is the
- * only way to exercise iteration against a real model. It prints what the
- * follow-up did to the project it was given -- and specifically what it
- * removed, because the generation machine replaces the file set with
- * whatever comes back, so a file the model leaves out is deleted.
+ * only way to exercise iteration against a real model. A follow-up is a
+ * patch: it prints what the patch kept, changed, added and removed, and
+ * specifically what it removed, because a removed file is deleted.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { PlanProvider } from '../src/plan-provider.ts';
+import { BoundedPlanProvider } from '../src/bounded-build.ts';
 import { createPlanClient, resolveModel } from '../src/select-client.ts';
 import { ProviderError } from '../src/errors.ts';
 import { parsePlanArgs } from '../src/cli-args.ts';
+import { isStylePresetId } from '../src/style-presets.ts';
 import { diffProjects, readProject } from '../src/read-project.ts';
 import type { PlanUsage } from '../src/client.ts';
 
-const { prompt, out, base } = parsePlanArgs(process.argv.slice(2));
+const { prompt, out, base, style } = parsePlanArgs(process.argv.slice(2));
 
 if (!prompt) {
   console.error(
-    'Usage: pnpm --filter @vibld/ai plan "<prompt>" [--out <dir>] [--base <dir>]',
+    'Usage: pnpm --filter @vibld/ai plan "<prompt>" [--out <dir>] [--base <dir>] [--style <preset id>]',
   );
+  process.exit(2);
+}
+
+// Refused rather than dropped: a run that silently built unstyled would be
+// paid for and answer a different question from the one asked.
+if (style !== undefined && !isStylePresetId(style)) {
+  console.error(`"${style}" is not a style preset id.`);
   process.exit(2);
 }
 
@@ -45,15 +56,27 @@ let usage: PlanUsage | undefined;
 // has always said the model wins, and the Worker has always behaved that way;
 // this is the one caller that did not.
 const model = resolveModel(process.env);
-const provider = new PlanProvider(createPlanClient(process.env, model), {
+const startedAt = Date.now();
+let steps = 0;
+const provider = new BoundedPlanProvider(createPlanClient(process.env, model), {
   model,
+  ...(style !== undefined && isStylePresetId(style) ? { style } : {}),
   onUsage: (reported) => {
     usage = reported;
+  },
+  // One line per step, with the time it started, so a slow step can be
+  // told from a stuck one in the job log.
+  onStep: (label) => {
+    steps += 1;
+    const at = ((Date.now() - startedAt) / 1000).toFixed(0).padStart(4);
+    console.log(`[${at}s] ${label}`);
+  },
+  onUnexpectedError: (error) => {
+    console.error('unexpected error from the model service:', error);
   },
 });
 
 try {
-  const startedAt = Date.now();
   const baseProject = base ? await readProject(base) : undefined;
   if (baseProject) {
     console.log(
@@ -75,7 +98,7 @@ try {
   }
   if (usage) {
     console.log(
-      `\ntokens: ${usage.inputTokens} in / ${usage.outputTokens} out` +
+      `\ntokens over ${steps} steps: ${usage.inputTokens} in / ${usage.outputTokens} out` +
         (usage.cacheReadInputTokens
           ? ` (${usage.cacheReadInputTokens} cached)`
           : ''),
@@ -91,7 +114,7 @@ try {
     );
     if (diff.removed.length > 0) {
       // Not a warning to skim past. A removed file is a deleted file: the
-      // machine promotes exactly the set the model returned.
+      // patch named it, and the machine promotes exactly what is left.
       console.log('\nREMOVED -- these files would be deleted:');
       for (const path of diff.removed) console.log(`  ${path}`);
     }
@@ -116,7 +139,13 @@ try {
   }
 } catch (error) {
   if (error instanceof ProviderError) {
-    console.error(`\n${error.name}: ${error.message}`);
+    console.error(`\n${error.name} (${error.stop}): ${error.message}`);
+    // A failed run was still billed for every step it made.
+    if (usage) {
+      console.error(
+        `tokens spent over ${steps} steps: ${usage.inputTokens} in / ${usage.outputTokens} out`,
+      );
+    }
     process.exit(1);
   }
   throw error;

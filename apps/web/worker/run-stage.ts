@@ -65,6 +65,33 @@ import type { RunProgressState } from './generation-run.ts';
  */
 export const POLL_INTERVAL_MS = 1500;
 
+/**
+ * The longest step description the poll loop passes on. The words are this
+ * repository's own ("Writing 3 of 7: ...") around a name read from a path
+ * the model chose, already reduced to plain letters (`describeGroup`), so
+ * this is a second bound on the same text rather than the only one.
+ */
+export const MAX_STEP_CHARS = 120;
+
+/**
+ * Which step of a bounded build is running, in the words the builder shows
+ * ("Planning the project", "Writing 3 of 7: services page"), or nothing.
+ *
+ * Only while the instance is running and the model steps have not all
+ * finished, for the reason `stageFor` believes `finished`: after the last
+ * step leaves, the run is validating, promoting and settling, and the last
+ * step's words would claim a file was still being written.
+ */
+export function stepFor(
+  status: string,
+  progress?: RunProgressState,
+): string | undefined {
+  if (status !== 'running' || progress?.finished !== false) return undefined;
+  const step = progress.report?.step;
+  if (typeof step !== 'string' || step.length === 0) return undefined;
+  return step.slice(0, MAX_STEP_CHARS);
+}
+
 export function stageFor(
   status: string,
   progress?: RunProgressState,

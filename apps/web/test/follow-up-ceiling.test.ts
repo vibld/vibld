@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 
 import {
   MODEL_CATALOGUE,
+  RUN_OUTPUT_RESERVE_MICRO_USD,
   RUN_STEP_TIMEOUT_MS,
   RUN_WALL_CLOCK_BUDGET_MS,
   maxTokensFor,
@@ -37,6 +38,12 @@ import { worstCaseMicroUsd } from '../worker/spend.ts';
  * The fix gives a follow-up the room a first run gets plus the cost of
  * carrying. What must not move is the clock: a ceiling the model cannot
  * reach in the time allowed is a timeout, whatever the caller can afford.
+ *
+ * Since bounded builds a follow-up is a patch and writes only what it
+ * changes, and the clock binds each call rather than the run. The carry is
+ * still reserved (one that rewrites most of a large project writes that
+ * much), and `maxTokensFor`, the single-response ceiling these pin, is still
+ * what one response may be given.
  */
 
 /** The project from the failing run, as it is stored. */
@@ -101,15 +108,24 @@ describe('what a follow-up may ask for', () => {
 
   it('reserves what the maintainer approved for that run', () => {
     // Approved as "about $2.30 instead of $1.60" for this project on this
-    // model. Since the reserve became $3.20 (ADR-0014), a first run on GPT-6
-    // Astra already gets that much: its ceiling is what it can write inside
-    // the clock, so a follow-up carrying this project asks for no more.
+    // model, when a run was one response and GPT-6 Astra's ceiling was what
+    // it could write inside the clock. A build is bounded steps now: the
+    // clock binds each call (`callCeilingFor`), not the run, so the run is
+    // given what the $3.20 reserve buys (ADR-0014), and a follow-up the
+    // carry on top, which is the money bound this test pinned all along.
     const env = { VIBLD_PROVIDER: 'openai' };
     const before = runCeilingFor(env, 'gpt-6-astra');
     const after = runCeilingFor(env, 'gpt-6-astra', 'build', LIVE_CARRY);
 
-    assert.equal(before.maxTokens * before.prices.outputMicroUsd, 2_295_000);
-    assert.equal(after.maxTokens, before.maxTokens);
+    assert.ok(
+      before.maxTokens * before.prices.outputMicroUsd <=
+        RUN_OUTPUT_RESERVE_MICRO_USD,
+    );
+    assert.equal(
+      before.maxTokens,
+      Math.floor(RUN_OUTPUT_RESERVE_MICRO_USD / before.prices.outputMicroUsd),
+    );
+    assert.equal(after.maxTokens, before.maxTokens + LIVE_CARRY);
   });
 
   it('lets the money bound grow where the clock does not bind', () => {
@@ -334,6 +350,19 @@ describe('the request sizes a follow-up before it reserves', () => {
       /\(\{\s*prices,\s*maxTokens\s*\}\s*=\s*sized\.ceiling\)/,
     );
     assert.match(handlePlan, /worstCase\s*=\s*sized\.worstCase/);
+  });
+
+  it('reserves for the input of the whole bounded build, and tells the run the same figure', () => {
+    // A bounded build makes many calls, each carrying the request, the spec
+    // and the manifest. The reservation covers all of them together, and
+    // the run refuses a call that would pass it, so the two must be the
+    // same number: priced for one and enforced at another is a run that
+    // can outspend its reservation.
+    assert.match(
+      handlePlan,
+      /worstCaseMicroUsd\(\s*ceiling\.prices,\s*ceiling\.maxTokens,\s*BOUNDED_BUILD_INPUT_CHARS,?\s*\)/,
+    );
+    assert.match(handlePlan, /maxInputChars:\s*BOUNDED_BUILD_INPUT_CHARS/);
   });
 });
 

@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 
-import { GenerationPlanSchema } from './plan-schema.ts';
+import {
+  BuildOutlineSchema,
+  FileGroupSchema,
+  GenerationPlanSchema,
+} from './plan-schema.ts';
 import { DraftMockupSetSchema, MockupSetSchema } from './mockup-schema.ts';
 import { ChatDecisionSchema } from './chat-schema.ts';
 
@@ -74,13 +78,11 @@ export function jsonSchemaFor(schema: ZodType): Record<string, unknown> {
   return strip(z.toJSONSchema(schema)) as Record<string, unknown>;
 }
 
-export const PLAN_JSON_INSTRUCTION = `OUTPUT FORMAT
-Reply with a single json object and nothing else. No prose, no markdown, no
-code fence. It must match this shape exactly:
-
-{
-  "summary": "one sentence describing what you built",
-  "spec": {
+/**
+ * The spec as the JSON-mode instructions spell it out, shared by the plan's
+ * and the outline's so the two cannot come to describe different specs.
+ */
+const SPEC_JSON_EXAMPLE = `{
     "intent": "one sentence: subject, audience, the page's single job",
     "tokens": {
       "colors": [{ "name": "background", "value": "#07121c", "use": "page background" }],
@@ -102,7 +104,15 @@ code fence. It must match this shape exactly:
     "do": ["a rule naming a real token"],
     "avoid": ["what not to add, and what it would break"],
     "checks": ["an observable fact a reviewer can confirm"]
-  },
+  }`;
+
+export const PLAN_JSON_INSTRUCTION = `OUTPUT FORMAT
+Reply with a single json object and nothing else. No prose, no markdown, no
+code fence. It must match this shape exactly:
+
+{
+  "summary": "one sentence describing what you built",
+  "spec": ${SPEC_JSON_EXAMPLE},
   "files": [
     { "path": "package.json", "content": "<the complete file>" }
   ]
@@ -110,6 +120,42 @@ code fence. It must match this shape exactly:
 
 "spec" comes before "files". "files" must contain every file of the
 project, each with its full content.`;
+
+/** The first step of a bounded build (`bounded-build.ts`). */
+export const OUTLINE_JSON_INSTRUCTION = `OUTPUT FORMAT
+Reply with a single json object and nothing else. No prose, no markdown, no
+code fence. It must match this shape exactly:
+
+{
+  "summary": "one sentence describing what you will build",
+  "spec": ${SPEC_JSON_EXAMPLE},
+  "manifest": [
+    {
+      "path": "src/pages/Services.tsx",
+      "purpose": "what the file is for, what it exports, what it shows",
+      "dependsOn": ["src/components/SiteLayout.tsx"],
+      "size": "small, medium or large"
+    }
+  ],
+  "delete": []
+}
+
+"spec" comes before "manifest". "manifest" plans files and holds no file
+content.`;
+
+/** Each later step of a bounded build: only the files it was asked for. */
+export const FILE_GROUP_JSON_INSTRUCTION = `OUTPUT FORMAT
+Reply with a single json object and nothing else. No prose, no markdown, no
+code fence. It must match this shape exactly:
+
+{
+  "files": [
+    { "path": "src/pages/Services.tsx", "content": "<the complete file>" }
+  ]
+}
+
+"files" holds exactly the files you were asked to write, each with its full
+content.`;
 
 export const MOCKUP_JSON_INSTRUCTION = `OUTPUT FORMAT
 Reply with a single json object and nothing else. No prose, no markdown, no
@@ -162,6 +208,23 @@ export const PLAN_OUTPUT: PlanOutput = {
   name: 'generation_plan',
   schema: GenerationPlanSchema,
   instruction: PLAN_JSON_INSTRUCTION,
+};
+
+/**
+ * A bounded build's first step: the spec and a manifest of files, no file
+ * content (`bounded-build.ts`).
+ */
+export const OUTLINE_OUTPUT: PlanOutput = {
+  name: 'build_outline',
+  schema: BuildOutlineSchema,
+  instruction: OUTLINE_JSON_INSTRUCTION,
+};
+
+/** Each later step of a bounded build: the few files it was asked for. */
+export const FILE_GROUP_OUTPUT: PlanOutput = {
+  name: 'file_group',
+  schema: FileGroupSchema,
+  instruction: FILE_GROUP_JSON_INSTRUCTION,
 };
 
 /** Three directions to choose between (internal issue 185). */

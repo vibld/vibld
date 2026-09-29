@@ -138,15 +138,15 @@ export type ParsedGenerationPlan = z.infer<typeof GenerationPlanReadSchema>;
  * like nothing was decided. Anything situational still belongs in
  * `motion.ts`/`patterns.ts`/`palettes.ts` rather than here.
  */
-export const PLAN_SYSTEM_PROMPT = `You generate complete, conventional web application projects.
+const PROMPT_HEAD = `You generate complete, conventional web application projects.`;
 
-OUTPUT
+const PLAN_OUTPUT_SECTION = `OUTPUT
 Return a plan with a one-sentence summary, the design spec (see SPEC), and
 the full set of files, in that order. Every file's content must be complete
 -- never abbreviate, never write a placeholder comment such as "rest of the
-code here".
+code here".`;
 
-SIZE
+const PLAN_SIZE_SECTION = `SIZE
 The whole reply, spec and files together, has to fit in one response with
 room to spare: aim for well under 40,000 tokens. A reply that runs out of
 room is thrown away, and the person gets nothing at all.
@@ -157,9 +157,9 @@ room is thrown away, and the person gets nothing at all.
 - Write each piece of copy once, in the file that shows it. The spec's copy
   lists are for the home page's sections only.
 - Reuse: a few shared components and a small set of shared Motion variants,
-  not bespoke animation code for every element.
+  not bespoke animation code for every element.`;
 
-STACK
+const RULES_BEFORE_SPEC = `STACK
 React 19, TypeScript and Vite, styled with Tailwind CSS v4, with shadcn/ui
 components, lucide-react icons and Motion for animation, unless the request
 names a different stack.
@@ -246,9 +246,9 @@ README.md is what someone who has never heard of Vibld reads first: what the
 project is, how to install it, how to run it, and how to build it, using the
 scripts package.json actually declares. It is the portability promise in
 practice (ADR-0002), so write it for a stranger with a terminal, not as a
-summary of the request.
+summary of the request.`;
 
-SPEC
+const PLAN_SPEC_SECTION = `SPEC
 Before any file, write the spec: the design this project is built to, as
 measured values rather than adjectives. "A deep navy glass nav" is not a
 spec; "rgba(10,22,31,.37) fill, 1px rgba(255,255,255,.22) border, 50px
@@ -287,9 +287,9 @@ block), mapped in \`@theme inline\` as --color-<name>: var(--<name>) so the
 utilities use it (bg-primary, text-muted-foreground); every copy string
 appears verbatim; every breakpoint is a responsive variant or @media at that
 width. When the project already exists, return its spec updated for this
-change.
+change.`;
 
-PATHS
+const RULES_AFTER_SPEC = `PATHS
 Every path is relative to the project root, uses forward slashes, and contains
 no "." or ".." segment and no leading slash. Keep the project under 40 files,
 counting the shadcn/ui components in src/components/ui/.
@@ -464,3 +464,196 @@ PORTABILITY
 The project must install, run and build with ordinary npm commands and no
 Vibld account, runtime or service. Never include an API key, token or other
 credential, and never call a network service at build time.`;
+
+/**
+ * The single-response build's system prompt, assembled from the sections
+ * above (the comment over them is its comment). `PlanProvider` sends it; a
+ * bounded build sends `OUTLINE_SYSTEM_PROMPT` and `GROUP_SYSTEM_PROMPT`,
+ * which share every section but OUTPUT, SIZE and, for the file steps, SPEC.
+ */
+export const PLAN_SYSTEM_PROMPT = [
+  PROMPT_HEAD,
+  PLAN_OUTPUT_SECTION,
+  PLAN_SIZE_SECTION,
+  RULES_BEFORE_SPEC,
+  PLAN_SPEC_SECTION,
+  RULES_AFTER_SPEC,
+].join('\n\n');
+
+/**
+ * The files every project must have, as `REQUIRED FILES` above names them.
+ *
+ * Written out as data as well as prose because a bounded build
+ * (`bounded-build.ts`) plans its files before writing any, and a plan that
+ * forgot one of these is completed in code rather than found missing after
+ * every file has been paid for. `bounded-build.test.ts` holds the prose and
+ * this list to each other.
+ */
+export const REQUIRED_PROJECT_FILES = [
+  'package.json',
+  'index.html',
+  'vite.config.ts',
+  'tsconfig.json',
+  'src/main.tsx',
+  'src/App.tsx',
+  'src/styles.css',
+  'src/lib/utils.ts',
+  'README.md',
+] as const;
+
+/**
+ * How many routes a bounded build plans at most.
+ *
+ * The single-response build had to stop at a home page and two further
+ * routes, because the whole project had to fit in one reply (internal PR 289). A
+ * bounded build writes a few files per reply, so the size of the project no
+ * longer decides whether it arrives. What still bounds it is money and
+ * time, and six routes is a full company site inside the output budget a
+ * single-response build already reserved.
+ */
+export const MAX_PLANNED_ROUTES = 6;
+
+const OUTLINE_OUTPUT_SECTION = `OUTPUT
+This is the first step of several. Here you plan the project; its files are
+written afterwards, a few at a time, by later steps that are given your plan
+and nothing else you decided. Return a one-sentence summary, the design spec
+(see SPEC), the manifest and the paths to delete, in that order, and no file
+content at all.
+- manifest: the files to write, in the order they should be written:
+  configuration and src/styles.css first, then src/lib, then the shadcn/ui
+  components, then shared components and layout, then pages, then
+  src/App.tsx, src/main.tsx and README.md. For each file give its path; its
+  purpose, specific enough that someone writing it without seeing the other
+  files produces one that fits (what it exports and what imports it, which
+  spec sections and copy it carries, which route it serves); dependsOn, the
+  manifest paths whose contents it needs to see, such as the files it
+  imports; and size: small (up to about 80 lines), medium (up to about 250)
+  or large (longer).
+- Say in src/App.tsx's purpose how pages are routed and linked, and in each
+  page's purpose which route it serves, so files written separately agree.
+- Never list DESIGN.md: it is written for you from the spec.
+- delete: paths of existing files to remove. Empty for a new project.`;
+
+const OUTLINE_SIZE_SECTION = `SIZE
+Each later step writes only a few files, so the project can be as large as
+the request needs. For a large request (a full company site, many pages,
+many features), plan every page it asks for, up to ${MAX_PLANNED_ROUTES} routes, each with its
+full set of sections, and name anything past that in the summary as a next
+step the person can ask for.
+- Keep every file under about 400 lines: split a long page into section
+  components.
+- The spec's copy lists are for the home page's sections. The copy of every
+  other page is written in that page's file, from its purpose.
+- Reuse: a few shared components and one file of shared Motion variants
+  (src/lib/motion.ts), not bespoke animation code for every element.`;
+
+const GROUP_OUTPUT_SECTION = `OUTPUT
+This is one step of several. The design spec and the manifest (the plan for
+every file) were decided in an earlier step and are given to you, with the
+files already written that the ones you are writing depend on. Return only
+the files you are asked to write, each with its complete content -- never
+abbreviate, never write a placeholder comment such as "rest of the code
+here".
+- Follow the manifest: import only from files it lists, files the project
+  already has, or the declared packages, and use the exports each file's
+  purpose names.
+- Write every file you are asked for, and no other. Never write DESIGN.md.`;
+
+const GROUP_SPEC_SECTION = `SPEC
+The spec is the design this project is built to, as measured values. Build
+the files to it exactly: every colour is a custom property on :root with the
+spec's value (dark values in a .dark block), mapped in \`@theme inline\` as
+--color-<name>: var(--<name>) so the utilities use it (bg-primary,
+text-muted-foreground); every copy string appears verbatim; every breakpoint
+is a responsive variant or @media at that width. Use the spec's names for
+tokens and type steps exactly: the files written in other steps do.`;
+
+/**
+ * The system prompt for a bounded build's first step: the spec and a
+ * manifest of files, with no file content (`bounded-build.ts`).
+ *
+ * The same rules as `PLAN_SYSTEM_PROMPT`, section for section, with two
+ * replaced. OUTPUT asks for a plan of the files rather than the files, and
+ * SIZE drops the single-response limit (internal PR 289), which existed only because
+ * the whole project had to fit in one reply.
+ */
+export const OUTLINE_SYSTEM_PROMPT = [
+  PROMPT_HEAD,
+  OUTLINE_OUTPUT_SECTION,
+  OUTLINE_SIZE_SECTION,
+  RULES_BEFORE_SPEC,
+  PLAN_SPEC_SECTION,
+  RULES_AFTER_SPEC,
+].join('\n\n');
+
+/**
+ * The system prompt for each later step of a bounded build, which writes a
+ * few of the manifest's files and returns only those.
+ *
+ * No SIZE section: how much one step writes is decided by the partition
+ * (`partitionManifest`), not by the model. SPEC says how to build to a spec
+ * rather than how to write one, because the spec already exists.
+ */
+export const GROUP_SYSTEM_PROMPT = [
+  PROMPT_HEAD,
+  GROUP_OUTPUT_SECTION,
+  RULES_BEFORE_SPEC,
+  GROUP_SPEC_SECTION,
+  RULES_AFTER_SPEC,
+].join('\n\n');
+
+/** How large a file is expected to be, as an outline names it. */
+export const MANIFEST_SIZES = ['small', 'medium', 'large'] as const;
+export type ManifestSize = (typeof MANIFEST_SIZES)[number];
+
+/** One file of a bounded build's plan. */
+export const ManifestEntrySchema = z.object({
+  path: z.string().min(1),
+  purpose: z.string(),
+  dependsOn: z.array(z.string()),
+  size: z.enum(MANIFEST_SIZES),
+});
+
+/**
+ * What the first step of a bounded build is asked to return: the summary,
+ * the spec, the manifest of files to write, and the files to remove.
+ *
+ * `spec` before `manifest` for the reason `GenerationPlanSchema` gives:
+ * structured output is written in schema order, so the design is decided
+ * before the files that carry it are planned.
+ */
+export const BuildOutlineSchema = z.object({
+  summary: z.string().min(1),
+  spec: DesignSpecSchema,
+  manifest: z.array(ManifestEntrySchema),
+  delete: z.array(z.string()),
+});
+
+/**
+ * What an outline is read with. Looser than what is asked for, in the way
+ * `GenerationPlanReadSchema` is and for the same reason: DeepSeek's JSON
+ * mode enforces no schema, and a manifest entry with an odd size or no
+ * dependencies is still a file worth writing. A path is the one thing an
+ * entry cannot do without.
+ */
+export const BuildOutlineReadSchema = z.object({
+  summary: z.string().min(1),
+  spec: DesignSpecSchema.optional().catch(undefined),
+  manifest: z.array(
+    z.object({
+      path: z.string().min(1),
+      purpose: z.string().catch(''),
+      dependsOn: z.array(z.string()).catch([]),
+      size: z.enum(MANIFEST_SIZES).catch('medium'),
+    }),
+  ),
+  delete: z.array(z.string()).catch([]),
+});
+
+export type BuildOutline = z.infer<typeof BuildOutlineReadSchema>;
+export type ManifestEntry = BuildOutline['manifest'][number];
+
+/** What each later step of a bounded build returns: its own files. */
+export const FileGroupSchema = z.object({
+  files: z.array(ProjectFileSchema),
+});

@@ -10,21 +10,27 @@ import {
   type RunTrace,
 } from '@vibld/core';
 import {
+  BoundedBuildError,
+  BoundedBuilder,
   DEFAULT_MAX_TOKENS,
   ProviderError,
   RUN_STEP_TIMEOUT_MS,
+  applyBoundedPatch,
   checkDesign,
   findModel,
   keepingRecordOf,
   repairPromptFor,
+  runBoundedBuild,
   withRecordOf,
 } from '@vibld/ai';
-import {
-  MAX_BASE_CONTENT_CHARS,
-  outputTokensToRewrite,
-  projectChars,
-} from '@vibld/ai/limits';
-import type { MediaManifestEntry, PlanUsage } from '@vibld/ai';
+import { MAX_BASE_CONTENT_CHARS, projectChars } from '@vibld/ai/limits';
+import type {
+  BoundedBuildResult,
+  DerivedPalette,
+  MediaManifestEntry,
+  PlanClient,
+  PlanUsage,
+} from '@vibld/ai';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import type { StyleDna } from '@vibld/ai/style-dna';
 import { createValidator } from '../src/generation/validator.ts';
@@ -41,6 +47,7 @@ import {
 import type { BuildFailureReason, buildProject } from './publish-client.ts';
 import { LEDGER_CALL_TIMEOUT_MS } from './reserve.ts';
 import type { reserveBudget } from './reserve.ts';
+import { BUILD_INPUT_CHARS } from './run-ceiling.ts';
 import { OUT_OF_TIME, retrying, sleep, withinDeadline } from '@vibld/core';
 
 /**
@@ -145,6 +152,9 @@ export interface WorkflowParams {
   /**
    * The output ceiling this run's reservation was computed against, captured
    * with the prices beside it rather than re-derived when the Workflow runs.
+   * For a bounded build it is the whole run's output, summed across its
+   * calls (`buildOutputBudgetFor`); each call is given what is left of it,
+   * up to its own ceiling.
    *
    * A Workflow is durable: it can start minutes after `handlePlan` reserved
    * for it, and `VIBLD_USD_MICRO_PER_OUTPUT_TOKEN` can move in between.
@@ -158,6 +168,16 @@ export interface WorkflowParams {
    * this field shipped, which is what `ceilingForRun` exists to handle.
    */
   maxTokens: number;
+  /**
+   * What every call of this run's bounded build may send together, in
+   * characters: the input side of the reservation, captured with it for the
+   * reason `maxTokens` is (`BOUNDED_BUILD_INPUT_CHARS`).
+   *
+   * Optional because a payload persisted before bounded builds has none,
+   * and `inputBudgetForRun` holds such a run to the one call's worth it was
+   * reserved for.
+   */
+  maxInputChars?: number;
   /**
    * What the caller was allowed to spend when this run was admitted, so a
    * repair turn can hold a reservation of its own without asking again
@@ -206,6 +226,42 @@ export function ceilingForRun(
 }
 
 /**
+ * Whether a run was enqueued as a bounded build.
+ *
+ * Every run `handlePlan` has created since bounded builds shipped carries
+ * `maxInputChars`, the input side of its reservation. A payload without it
+ * was enqueued before, was reserved for one response, and may already hold
+ * that response's result under the step name the old code used, so the
+ * Workflow runs it the old way rather than paying for it twice.
+ */
+export function isBoundedRun(
+  params: Pick<WorkflowParams, 'maxInputChars'>,
+): boolean {
+  return params.maxInputChars !== undefined;
+}
+
+/**
+ * The input a run's calls may send together, in characters.
+ *
+ * What the reservation was priced for where the payload says, and
+ * otherwise one single-call build's worth, `BUILD_INPUT_CHARS`: that is
+ * what a payload persisted before bounded builds was reserved against, and
+ * a run may not send more than it was funded for, whatever shape it now
+ * runs in. Such a run fails with its budget named if it needs more, rather
+ * than spending past its reservation.
+ */
+export function inputBudgetForRun(
+  params: Pick<WorkflowParams, 'maxInputChars'>,
+): number {
+  const reserved = params.maxInputChars;
+  return typeof reserved === 'number' &&
+    Number.isFinite(reserved) &&
+    reserved > 0
+    ? reserved
+    : BUILD_INPUT_CHARS;
+}
+
+/**
  * What a run has produced so far, as the model streams it.
  *
  * Two counts rather than one, because the production provider is a reasoning
@@ -221,6 +277,13 @@ export function ceilingForRun(
 export interface ProgressReport {
   characters: number;
   reasoningCharacters: number;
+  /**
+   * Which step of a bounded build is running, in the words the builder
+   * shows: "Planning the project", "Writing 3 of 7: services page".
+   * `characters` counts the whole run, not this step, so the meter does
+   * not go back to zero each time a step starts.
+   */
+  step?: string;
 }
 
 /**
@@ -419,6 +482,14 @@ export const REPAIR_STEP_TIMEOUT_MS =
   RUN_STEP_TIMEOUT_MS + REPAIR_BUILD_ALLOWANCE_MS;
 
 /**
+ * What the `assemble` step is given: applying the patch, validation, the
+ * stage writes and the promotion, all D1 and R2 and no model. Five minutes
+ * is generous for that, and short next to the reclaim window, which this
+ * step's own heartbeat restarts as it begins.
+ */
+export const ASSEMBLE_STEP_TIMEOUT_MS = 5 * 60_000;
+
+/**
  * How long the repair's second build waits out a busy workspace, and how
  * often it asks again (internal PR 196 review).
  *
@@ -466,9 +537,13 @@ export interface GenerationWorkflowEnv {
   PROJECT_CONTENT: R2Bucket;
   /**
    * `reserve` as well as `settle` since internal issue 194: the verify-and-repair step
-   * holds a reservation of its own for the second model call.
+   * holds a reservation of its own for the second model call. `touch`
+   * since bounded builds: each model step keeps the run's reservation from
+   * being taken for abandoned (`touchReservation`).
    */
-  USER_BUDGET: DurableObjectNamespace<Pick<UserBudget, 'reserve' | 'settle'>>;
+  USER_BUDGET: DurableObjectNamespace<
+    Pick<UserBudget, 'reserve' | 'settle' | 'touch'>
+  >;
   /** Read by `reserveBudget` when the repair holds its own reservation. */
   VIBLD_ACCOUNT_DAILY_MICRO_USD?: string;
   VIBLD_MAX_IN_FLIGHT?: string;
@@ -720,64 +795,74 @@ export function assertedBaseRevision(
 }
 
 /**
- * Add the arithmetic to a follow-up that was cut off at the output ceiling.
+ * The checks a run makes before a token is spent, and the refusal when one
+ * fails. Both are free: nothing has been asked of the model.
  *
- * `ProviderTruncationError` says the model hit its limit and the project is
- * incomplete, and then advises asking for a smaller project. On a *first*
- * run that is the whole story. On a follow-up it is close to useless: the
- * project is the size it is, the person asked for one change to it, and
- * "ask for something smaller" describes no action they can take.
- *
- * What they can act on is which model. A follow-up re-emits the complete set
- * of files, so the ceiling has to carry the project back out, and on the
- * cheaper-per-token models the ceiling is several times what it is on the
- * expensive ones. That is the move, and nothing in the message named it.
- *
- * Every figure is given as an estimate, because every figure is one (internal PR 208
- * review): four characters a token is a rule of thumb, and the share of
- * output that reaches the answer rather than the thinking is one measured
- * sample. That is fine here and was not fine as a refusal. Being roughly
- * right about a failure that has already happened costs nobody a run.
- *
- * It joins the provider's sentence rather than following it, because only
- * the first error survives the trip to the browser. See the comment at the
- * join itself.
+ * Its own function because two places ask it. The Workflow's `prepare` step
+ * asks before any model step runs, so a stale revision or an oversized
+ * project costs nothing. `runGeneration` asks again when it stages the
+ * result, because the project can move while the model steps run; there
+ * the same answer is a conflict with the bill already run up, and the
+ * caller settles what the steps spent.
  */
-export function explainTruncation(
-  result: DurableGenerationResult,
-  baseChars: number,
-  params: Pick<WorkflowParams, 'model' | 'maxTokens'>,
-): DurableGenerationResult {
-  if (result.stop !== 'model-truncated' || baseChars === 0) return result;
+export async function preflightRun(
+  store: GenerationStore,
+  params: Pick<WorkflowParams, 'projectId' | 'baseRevision'>,
+): Promise<{ refusal?: GenerationOutcome; base?: ProjectSnapshot }> {
+  // The project, read here rather than received (internal issue 181). `loadAccepted` was
+  // already the runner's fallback; now it is the only path, so the files
+  // never make the round trip through the browser.
+  const asserted = assertedBaseRevision(params);
+  const base = asserted
+    ? await store.loadAccepted(params.projectId)
+    : undefined;
 
-  // Only where carrying the project is plausibly what filled the ceiling
-  // (internal PR 208 review). A small project asked for a large expansion truncates on
-  // what the edit *added*, and this sentence would then report a couple of
-  // hundred tokens against a thirty-two thousand token ceiling and blame the
-  // rewrite, which is both wrong and unhelpful. There the provider's own
-  // advice, ask for less, is the right advice and is already given.
-  //
-  // Half is a cutoff for a sentence, not for a run. It decides how specific
-  // a failure message is and nothing else, so being wrong about it costs a
-  // reader a less useful line rather than costing them the run: the thing
-  // that made the same kind of estimate unacceptable as a gate.
-  const overhead = outputTokensToRewrite(baseChars);
-  const ceiling = ceilingForRun(params);
-  if (overhead * 2 < ceiling) return result;
+  // The assertion the caller made, checked before a token is spent. The
+  // authoritative check is still the compare-and-set at promotion, which
+  // catches a base that moves *during* the run; this catches one that had
+  // already moved before it started, and refuses for free rather than
+  // after paying for a generation that cannot be promoted.
+  if (asserted && base?.revision !== asserted) {
+    return {
+      refusal: {
+        result: {
+          state: 'failed',
+          stop: 'conflict',
+          accepted: base,
+          errors: ['Accepted revision changed before promotion'],
+          conflict: true,
+        },
+        outcome: 'failed',
+        providerRan: false,
+      },
+    };
+  }
 
-  const label = findModel(params.model)?.label ?? params.model;
-  const explanation = `Carrying this project back out takes roughly ${overhead} of the ${ceiling} output tokens ${label} had on this run, before anything you asked for: a follow-up returns the whole project, not just the part that changed. A model with a larger output budget has the room for it.`;
-  // Joined onto the first error rather than added as a second one, because
-  // a second one would never be read (internal PR 208 review). `/api/plan`'s SSE
-  // stream sends `result.errors[0]` and nothing else, so an explanation at
-  // index 1 reaches the browser never, and the person goes on seeing the
-  // advice this exists to replace. The order within the sentence is
-  // deliberate too: what happened, then what to do about it.
-  const [first, ...rest] = result.errors;
-  return {
-    ...result,
-    errors: [first ? `${first} ${explanation}` : explanation, ...rest],
-  };
+  // The project still goes into the prompt, so it still has to fit a
+  // model's context. Reading it here rather than receiving it removed the
+  // upload, not that budget, and the provider would refuse an oversized base
+  // either way -- but by then the run is paid for. The guard used to refuse
+  // this for free and cannot any more, because it no longer sees the files.
+  // So the refusal moves here, and stays free.
+  const baseChars = projectChars(base?.files ?? []);
+  if (baseChars > MAX_BASE_CONTENT_CHARS) {
+    return {
+      refusal: {
+        result: {
+          state: 'failed',
+          stop: 'context-exceeded',
+          accepted: base,
+          errors: [
+            `This project is ${baseChars} characters and ${MAX_BASE_CONTENT_CHARS} is the most that can be sent with a follow-up. Ask for a smaller change on a smaller project, or start a new one.`,
+          ],
+          conflict: false,
+        },
+        outcome: 'failed',
+        providerRan: false,
+      },
+    };
+  }
+  return base ? { base } : {};
 }
 
 export async function runGeneration(
@@ -791,81 +876,16 @@ export async function runGeneration(
   const runner = new DurableGenerationRunner(store);
 
   try {
-    // The project, read here rather than received (internal issue 181). `loadAccepted`
-    // was already the runner's fallback; now it is the only path, so the
-    // files never make the round trip through the browser.
-    const asserted = assertedBaseRevision(params);
-    const base = asserted
-      ? await store.loadAccepted(params.projectId)
-      : undefined;
+    const checked = await preflightRun(store, params);
+    if (checked.refusal) return checked.refusal;
+    const base = checked.base;
 
-    // The assertion the caller made, checked before a token is spent. The
-    // authoritative check is still the compare-and-set at promotion, which
-    // catches a base that moves *during* the run; this catches one that had
-    // already moved before it started, and refuses for free rather than
-    // after paying for a generation that cannot be promoted.
-    if (asserted && base?.revision !== asserted) {
-      return {
-        result: {
-          state: 'failed',
-          stop: 'conflict',
-          accepted: base,
-          errors: ['Accepted revision changed before promotion'],
-          conflict: true,
-        },
-        outcome: 'failed',
-        providerRan: false,
-      };
-    }
-
-    // The project still goes into the prompt, so it still has to fit a
-    // model's context. Reading it here rather than receiving it removed the
-    // upload, not that budget, and the provider would throw on an oversized
-    // base either way -- but by then the run is paid for. The guard used to
-    // refuse this for free and cannot any more, because it no longer sees
-    // the files. So the refusal moves here, and stays free.
-    const baseChars = projectChars(base?.files ?? []);
-    if (baseChars > MAX_BASE_CONTENT_CHARS) {
-      return {
-        result: {
-          state: 'failed',
-          stop: 'context-exceeded',
-          accepted: base,
-          errors: [
-            `This project is ${baseChars} characters and ${MAX_BASE_CONTENT_CHARS} is the most that can be sent with a follow-up. Ask for a smaller change on a smaller project, or start a new one.`,
-          ],
-          conflict: false,
-        },
-        outcome: 'failed',
-        providerRan: false,
-      };
-    }
-
-    // What this deliberately does *not* do: refuse the run here.
-    //
-    // It was written as a refusal first, and the arithmetic looked airtight
-    // (internal PR 208 review). A follow-up is asked to return the complete set of
-    // files, so the ceiling has to carry the project back out, and the live
-    // failure of 2026-09-23 was a 63,903-character project against a
-    // 32,000-token ceiling: doomed before a token was spent, and ten and a
-    // half minutes and a full charge were spent anyway.
-    //
-    // Two things make that a refusal nobody is entitled to. A follow-up may
-    // *shrink* a project -- "delete the blog", "cut it back to one page" --
-    // and the complete set of files it returns is then far smaller than the
-    // base, so the base is no lower bound on the output at all. Refusing on
-    // it builds a trap door: a project that outgrows a model's ceiling could
-    // never be edited back down by that model. And both terms of the
-    // estimate are estimates. Four characters a token is a rule of thumb
-    // that token-efficient content beats, and the reasoning share is one
-    // sample on one kind of run. A product of two estimates does not prove
-    // anything cannot fit.
-    //
-    // So the numbers are kept for the one thing they can honestly do: say
-    // what happened once a run has actually been cut off, instead of
-    // leaving somebody with a truncation and no idea which way to move.
-    // The ten minutes are still spent. Sizing the run to the job rather
-    // than explaining it afterwards is internal issue 209.
+    // What this deliberately does *not* do: refuse a follow-up because its
+    // project looks too large for the room the run has (internal PR 208 review). A
+    // follow-up may shrink a project, and both terms of any such estimate
+    // are estimates. It is also moot now: a follow-up is a patch
+    // (`bounded-build.ts`) and writes only the files it changes, each group
+    // in a response of its own.
     const result = await runner.run(
       {
         prompt: params.prompt,
@@ -877,7 +897,7 @@ export async function runGeneration(
       createValidator(),
     );
     return {
-      result: explainTruncation(result, baseChars, params),
+      result,
       outcome: result.state === 'accepted' ? 'ok' : 'failed',
       providerRan: true,
     };
@@ -902,6 +922,223 @@ export async function runGeneration(
       providerRan: true,
     };
   }
+}
+
+/**
+ * A bounded build that has already run, behind the `ModelProvider` the
+ * staging and promotion path takes.
+ *
+ * The Workflow runs the model steps first, each durable on its own, and then
+ * hands their result to `runGeneration`, so a bounded build is validated,
+ * staged and promoted by exactly the code every run always went through.
+ * `generate` asks no model: it applies the patch to the project the runner
+ * read, or raises the failure the steps ended on, with its stop, so the run
+ * record says why.
+ */
+export class PreparedPlanProvider implements ModelProvider {
+  readonly id: string;
+  readonly #built: BoundedBuildResult;
+
+  constructor(id: string, built: BoundedBuildResult) {
+    this.id = id;
+    this.#built = built;
+  }
+
+  async generate(request: GenerationRequest): Promise<GenerationPlan> {
+    const built = this.#built;
+    if (!built.ok || !built.patch) {
+      throw new BoundedBuildError(
+        built.failure?.stop ?? 'provider-error',
+        built.failure?.message ?? 'Generation failed unexpectedly.',
+      );
+    }
+    return applyBoundedPatch(built.patch, request.base);
+  }
+}
+
+/**
+ * What a run came to once its model steps are over: the refusal the free
+ * checks made, or the steps' result staged, validated and promoted by
+ * `runGeneration`, with what the steps spent.
+ *
+ * Whether the model was asked is the steps' to say, not the staging's:
+ * every model call of the run was made by a step. A project that moved
+ * while the steps ran is refused by `runGeneration` as though nothing had
+ * been spent, and the steps did spend; a run whose steps stopped before any
+ * call spent nothing, however the staging then reads it. `usage` is absent
+ * only when no call was made, which `settleBudget` reads with `providerRan`
+ * to decide between nothing and the worst case.
+ */
+export async function assembleRun(
+  store: GenerationStore,
+  params: WorkflowParams,
+  prepared: { refusal?: GenerationOutcome },
+  built: BoundedBuildResult | undefined,
+): Promise<GenerationOutcome & { usage?: PlanUsage; calls: number }> {
+  if (prepared.refusal || !built) {
+    return {
+      ...(prepared.refusal ?? {
+        result: {
+          state: 'failed',
+          stop: 'provider-error',
+          errors: ['Generation failed unexpectedly.'],
+          conflict: false,
+        },
+        outcome: 'failed',
+        providerRan: false,
+      }),
+      calls: 0,
+    };
+  }
+  const staged = await runGeneration(
+    store,
+    new SanitizingModelProvider(new PreparedPlanProvider(params.model, built)),
+    params,
+  );
+  return {
+    ...staged,
+    providerRan: built.calls > 0,
+    ...(built.calls > 0 ? { usage: built.usage } : {}),
+    calls: built.calls,
+  };
+}
+
+/**
+ * Tell both ledger layers the run is still alive (`UserBudget.touch`).
+ *
+ * Best effort, and never a reason to stop: a heartbeat that fails leaves
+ * the reservation to be reclaimed at its worst case if the run then outlives
+ * the window, which is the outcome every run had before this existed, and
+ * failing the run instead would cost the caller the files as well.
+ */
+export async function touchReservation(
+  ledger: DurableObjectNamespace<Pick<UserBudget, 'touch'>>,
+  params: Pick<
+    WorkflowParams,
+    'userId' | 'reservationId' | 'reservationKey' | 'accountReservationId'
+  >,
+): Promise<void> {
+  const layers: [string, number | undefined][] = [
+    [params.reservationKey ?? params.userId, params.reservationId],
+    [ACCOUNT_BUDGET_KEY, params.accountReservationId],
+  ];
+  await Promise.all(
+    layers.map(async ([key, id]) => {
+      if (id === undefined) return;
+      try {
+        await withinDeadline(
+          Promise.resolve(ledger.getByName(key).touch(id)),
+          LEDGER_CALL_TIMEOUT_MS,
+        );
+      } catch (error) {
+        console.error('could not keep a reservation alive', {
+          key: key === ACCOUNT_BUDGET_KEY ? key : 'user',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }),
+  );
+}
+
+/** What the model steps of a run need beyond its params. */
+export interface BuildStepDeps {
+  client: PlanClient;
+  /** Opened inside each step, where the project a follow-up edits is read. */
+  store: () => Pick<GenerationStore, 'loadAccepted'>;
+  /** The run's ledger, for the heartbeat. Absent: no heartbeat is sent. */
+  ledger?: DurableObjectNamespace<Pick<UserBudget, 'touch'>>;
+  /** Where progress goes, never awaited. Absent: nothing is reported. */
+  report?: (report: ProgressReport) => void;
+  /** The palette derived from the reference page, when there is one. */
+  palette?: DerivedPalette | null;
+}
+
+/**
+ * Where each model call of a bounded build is run: a Workflow's `step.do`,
+ * or a stand-in that caches by name in a test.
+ */
+export type StepRunner = <T>(name: string, run: () => Promise<T>) => Promise<T>;
+
+/**
+ * The model steps of one run: the outline, then each group of files, each
+ * made through `step` so the Workflow runs it as its own durable step.
+ *
+ * Returns what the steps came to, success or not, with the usage of every
+ * call summed; it never throws for anything a call did. On a replay the
+ * steps already done return their stored results and the model is not
+ * asked again, so this comes to the same answer however often the Workflow
+ * is resumed.
+ *
+ * Inside each step, before the call: the run's reservation is kept alive
+ * (`touchReservation`), because the steps together can outlast the
+ * reclaim window that one step fits inside; and the step's words are
+ * reported, so the builder can say what is being written.
+ */
+export async function buildInSteps(
+  deps: BuildStepDeps,
+  params: WorkflowParams,
+  step: StepRunner,
+): Promise<BoundedBuildResult> {
+  const builder = new BoundedBuilder(deps.client, {
+    model: params.model,
+    ...(params.style ? { style: params.style } : {}),
+    ...(params.styleDna && Object.keys(params.styleDna).length > 0
+      ? { styleDna: params.styleDna }
+      : {}),
+    ...(params.knowledge ? { knowledge: params.knowledge } : {}),
+    ...(params.chosenMockup ? { chosenMockup: params.chosenMockup } : {}),
+    ...(params.referenceContext
+      ? { referenceContext: params.referenceContext }
+      : {}),
+    // Empty is passed too: the build is told there are no files.
+    ...(params.media ? { media: params.media } : {}),
+    ...(deps.palette ? { palette: deps.palette } : {}),
+    onUnexpectedError: (error) => {
+      console.error('plan generation failed', error);
+    },
+  });
+  const asserted = assertedBaseRevision(params);
+  const report = deps.report;
+  return runBoundedBuild(
+    builder,
+    {
+      prompt: params.prompt,
+      ...(asserted
+        ? {
+            baseRevision: asserted,
+            loadBase: () => deps.store().loadAccepted(params.projectId),
+          }
+        : {}),
+      budget: {
+        outputTokens: ceilingForRun(params),
+        inputChars: inputBudgetForRun(params),
+      },
+    },
+    {
+      step,
+      beforeCall: async (label, before) => {
+        report?.({ characters: before, reasoningCharacters: 0, step: label });
+        if (deps.ledger) await touchReservation(deps.ledger, params);
+      },
+      ...(report
+        ? {
+            progress: (label: string, before: number) => {
+              const throttled = throttleProgress((progress) =>
+                report({ ...progress, step: label }),
+              );
+              return (progress: {
+                characters: number;
+                reasoningCharacters?: number;
+              }) =>
+                throttled({
+                  characters: before + progress.characters,
+                  reasoningCharacters: progress.reasoningCharacters ?? 0,
+                });
+            },
+          }
+        : {}),
+    },
+  );
 }
 
 interface SettlementOutcome {
@@ -1634,8 +1871,26 @@ export function traceOf(
   params: Pick<WorkflowParams, 'projectId' | 'runId' | 'model'>,
   result: Pick<DurableGenerationResult, 'stop'>,
   usage: PlanUsage | undefined,
-  timing: { costMicroUsd: number; elapsedMs: number; endedAt: string },
+  timing: {
+    costMicroUsd: number;
+    elapsedMs: number;
+    endedAt: string;
+    /**
+     * How many model calls the tokens above were spent across. A bounded
+     * build is one row for the whole run, its tokens and cost summed, so
+     * the row says what the run cost as billing charged it. Its context
+     * figure is then the window once per call, which makes "of context"
+     * the average share of the window each call used, rather than a sum of
+     * several calls' tokens read against one call's window. One when
+     * absent, which is what every run was before.
+     */
+    calls?: number;
+  },
 ): RunTrace {
+  const calls =
+    typeof timing.calls === 'number' && timing.calls > 1
+      ? Math.floor(timing.calls)
+      : 1;
   return {
     runId: params.runId,
     projectId: params.projectId,
@@ -1649,7 +1904,7 @@ export function traceOf(
     inputTokens: usage?.inputTokens ?? 0,
     cachedInputTokens: usage?.cacheReadInputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? 0,
-    contextWindow: findModel(params.model)?.contextWindow ?? 0,
+    contextWindow: (findModel(params.model)?.contextWindow ?? 0) * calls,
     costMicroUsd: timing.costMicroUsd,
     elapsedMs: timing.elapsedMs,
     endedAt: timing.endedAt,

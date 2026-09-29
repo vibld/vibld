@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  BOUNDED_RUN_MAX_OUTPUT_TOKENS,
+  GROUP_MAX_TOKENS,
   MODEL_CATALOGUE,
   RUN_OUTPUT_RESERVE_MICRO_USD,
+  buildOutputBudgetFor,
+  callCeilingFor,
   maxTokensFor,
   mockupMaxTokensFor,
 } from '@vibld/ai';
@@ -98,9 +102,16 @@ describe('what one run may ask for', () => {
             maxTokens * prices.outputMicroUsd
           }`,
         );
+        // A build's figure is summed across the calls of a bounded build,
+        // so it may pass what one response can hold; what may not is any
+        // one call, and every call is clamped on its own.
         assert.ok(
-          maxTokens <= model.maxOutputTokens,
-          `${model.id} at x${factor}: asked for ${maxTokens}, past its own ${model.maxOutputTokens}`,
+          maxTokens <= BOUNDED_RUN_MAX_OUTPUT_TOKENS,
+          `${model.id} at x${factor}: a run was given ${maxTokens}`,
+        );
+        assert.ok(
+          callCeilingFor(model.id, GROUP_MAX_TOKENS) <= model.maxOutputTokens,
+          `${model.id}: one call may ask past its own ${model.maxOutputTokens}`,
         );
       }
     }
@@ -119,7 +130,7 @@ describe('what one run may ask for', () => {
       );
       assert.equal(
         maxTokens,
-        maxTokensFor(FLASH),
+        buildOutputBudgetFor(FLASH),
         `"${bad}" was treated as a price`,
       );
     }
@@ -139,13 +150,13 @@ describe('what one run may ask for', () => {
         model.id,
       );
       assert.notEqual(
-        maxTokensFor(model.id, override),
-        maxTokensFor(model.id),
+        buildOutputBudgetFor(model.id, override),
+        buildOutputBudgetFor(model.id),
         `${model.id}: the override moved nothing, so this test proves nothing`,
       );
       assert.equal(
         maxTokens,
-        maxTokensFor(model.id, prices.outputMicroUsd),
+        buildOutputBudgetFor(model.id, prices.outputMicroUsd),
         `${model.id}: the ceiling was not derived from the price returned with it`,
       );
     }

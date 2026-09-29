@@ -112,6 +112,26 @@ export class ProviderTruncationError extends ProviderError {
   }
 }
 
+/**
+ * A bounded build that could not finish, carrying whichever stop its steps
+ * ended on (`bounded-build.ts`).
+ *
+ * One class rather than a subclass per stop, because the stop was already
+ * decided by the step that failed, and was carried out of a durable
+ * Workflow step as data: the error is rebuilt from that record, not thrown
+ * where it happened. The message is always one this package wrote, so it is
+ * as safe to show as any other `ProviderError`'s.
+ */
+export class BoundedBuildError extends ProviderError {
+  override readonly stop: RunStop;
+
+  constructor(stop: RunStop, message: string) {
+    super(message);
+    this.name = 'BoundedBuildError';
+    this.stop = stop;
+  }
+}
+
 /** The response did not match the plan schema. */
 export class ProviderShapeError extends ProviderError {
   override readonly stop: RunStop = 'model-shape';

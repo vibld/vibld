@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { InMemoryGenerationStore } from '@vibld/core';
-import { PlanProvider, createPlanClient, findModel } from '@vibld/ai';
+import { BoundedPlanProvider, createPlanClient, findModel } from '@vibld/ai';
 import type { ModelProvider, ProjectSnapshot } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 
@@ -172,6 +172,13 @@ export interface LiveRun {
   usage: { inputTokens: number; outputTokens: number };
 }
 
+/**
+ * A live run is built the way the product builds: in bounded steps
+ * (`@vibld/ai`'s `bounded-build.ts`), an outline and then a few files per
+ * call, with a follow-up or a repair as a patch. A bakeoff measured through
+ * a single response would be measuring a path the product no longer takes.
+ * `onUsage` is told once per generation, with every call summed.
+ */
 export function createLiveRun(
   env: LiveEnv,
   model: string,
@@ -179,7 +186,7 @@ export function createLiveRun(
   style?: StylePresetId,
 ): LiveRun {
   const usage = { inputTokens: 0, outputTokens: 0 };
-  const provider = new PlanProvider(createPlanClient(env, model), {
+  const provider = new BoundedPlanProvider(createPlanClient(env, model), {
     model,
     ...(style ? { style } : {}),
     onUsage: (reported) => {

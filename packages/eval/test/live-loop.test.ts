@@ -64,12 +64,14 @@ describe('a live run with repeats', () => {
     try {
       const { stdout, status } = runEval(out);
 
-      // Three requests for three runs. A repair loop or a retry landing here
-      // later would change this number, and it should: the cost line and the
-      // stability tally both assume one generation per run.
+      // Two requests for each of three runs. A build is bounded steps now,
+      // an outline and then the files in groups, and this case's project is
+      // small enough to be one group. A repair loop or a retry landing here
+      // later would change this number, and it should: the cost line and
+      // the stability tally both assume one generation per run.
       assert.equal(
         (stdout.match(/fake-model-service call /g) ?? []).length,
-        3,
+        6,
         stdout,
       );
 

@@ -4,7 +4,9 @@ import {
   DRAFT_MOCKUP_JSON_INSTRUCTION,
   DRAFT_MOCKUP_STYLE_PREAMBLE,
   DRAFT_MOCKUP_SYSTEM_PROMPT,
+  GROUP_SYSTEM_PROMPT,
   MAX_CHOSEN_MOCKUP_CHARS,
+  OUTLINE_SYSTEM_PROMPT,
   MAX_MOCKUP_LABEL_CHARS,
   MOCKUP_STYLE_PREAMBLE,
   MOCKUP_SYSTEM_PROMPT,
@@ -219,7 +221,15 @@ describe('what a build reserves for its own prompt text', () => {
           KITCHEN_SINK.length,
       ),
     );
-    return PLAN_SYSTEM_PROMPT.length + guidance;
+    // Whichever system prompt is longest: the single-response one, or
+    // either step of a bounded build, each of which sends the guidance too.
+    return (
+      Math.max(
+        PLAN_SYSTEM_PROMPT.length,
+        OUTLINE_SYSTEM_PROMPT.length,
+        GROUP_SYSTEM_PROMPT.length,
+      ) + guidance
+    );
   }
 
   it('covers the system prompt and the largest guidance', () => {

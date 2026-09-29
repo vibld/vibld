@@ -15,6 +15,12 @@ export interface PlanArgs {
   prompt: string;
   out?: string;
   base?: string;
+  /**
+   * A style preset id, as the builder sends one. Checked against the
+   * catalogue by the caller, so a mistyped id is refused rather than
+   * quietly building unstyled.
+   */
+  style?: string;
 }
 
 export interface MockupArgs {
@@ -54,11 +60,12 @@ function parse(
 }
 
 export function parsePlanArgs(argv: string[]): PlanArgs {
-  const { prompt, values } = parse(argv, ['--out', '--base']);
+  const { prompt, values } = parse(argv, ['--out', '--base', '--style']);
   return {
     prompt,
     ...(values['--out'] === undefined ? {} : { out: values['--out'] }),
     ...(values['--base'] === undefined ? {} : { base: values['--base'] }),
+    ...(values['--style'] === undefined ? {} : { style: values['--style'] }),
   };
 }
 

@@ -90,7 +90,16 @@ const STAGE_WORDS: Record<GenerationStage, string> = {
  */
 export function describeProgress(progress: GenerationProgress): string {
   const parts: string[] = [];
-  if (progress.stage) parts.push(STAGE_WORDS[progress.stage]);
+  // The step, where there is one, says more than the stage it is part of:
+  // "Writing 3 of 7: services page" is the same claim as "Building your
+  // project", made specific. Thinking is still said, because it is the one
+  // explanation for a count that is not moving.
+  if (progress.step) {
+    parts.push(progress.step);
+    if (progress.stage === 'thinking') parts.push(STAGE_WORDS.thinking);
+  } else if (progress.stage) {
+    parts.push(STAGE_WORDS[progress.stage]);
+  }
   if (typeof progress.characters === 'number' && progress.characters > 0) {
     parts.push(`${formatCharacters(progress.characters)} characters written`);
   }
@@ -125,6 +134,11 @@ export function reassurance(progress: GenerationProgress): string | null {
     // same claim back a line lower (internal PR 188 review). All that is known here is
     // that the run has not finished, so that is all this says.
     return `${STILL_GOING}. It can take several minutes, and you can cancel at any time.`;
+  }
+  if (progress.step) {
+    // A step means the build is being written a few files at a time, and
+    // a large one takes as many steps as it has pages.
+    return 'The project is written a few files at a time, so a large site can take a quarter of an hour or more. You can cancel at any time.';
   }
   return 'Building a whole project takes several minutes. You can cancel at any time.';
 }
@@ -164,5 +178,9 @@ export function progressAnnouncement(
   const lead = progress.stage
     ? STAGE_ANNOUNCEMENTS[progress.stage]
     : STILL_GOING;
-  return `${lead}, ${formatElapsed(buckets * ANNOUNCE_INTERVAL_MS)} elapsed.`;
+  // The step goes after the lead rather than in place of it, so the spoken
+  // line still opens on the stage and changes only when there is news: a
+  // new step is news, in the way a change of stage is.
+  const step = progress.step ? `. ${progress.step}` : '';
+  return `${lead}, ${formatElapsed(buckets * ANNOUNCE_INTERVAL_MS)} elapsed${step}.`;
 }

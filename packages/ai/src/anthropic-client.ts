@@ -143,8 +143,11 @@ export function createAnthropicPlanClient(
         : request.maxTokens;
 
       // The schema travels in `output_config` rather than in the prompt, so
-      // what goes as prompt is exactly these two (internal PR 189 review).
-      request.onPromptChars?.(request.system.length + request.prompt.length);
+      // what goes as prompt is exactly these (internal PR 189 review).
+      const prefix = request.cachePrefix ?? '';
+      request.onPromptChars?.(
+        request.system.length + prefix.length + request.prompt.length,
+      );
 
       const stream = client.messages.stream(
         {
@@ -189,7 +192,28 @@ export function createAnthropicPlanClient(
             // directions and the API constrained the reply to a plan.
             format: formatFor(outputFor(request).schema),
           },
-          messages: [{ role: 'user', content: request.prompt }],
+          // A second breakpoint, at the end of the part of the user message
+          // that a bounded build repeats on every step (internal issue 166's reasoning,
+          // one level down). Within one run the request, the spec and the
+          // manifest are byte-identical from one step to the next, so this
+          // marker matches: each step after the first reads them at a tenth
+          // of the input rate instead of paying for them again. Without a
+          // prefix the message is the plain string it always was.
+          messages: [
+            {
+              role: 'user',
+              content: prefix
+                ? [
+                    {
+                      type: 'text',
+                      text: prefix,
+                      cache_control: { type: 'ephemeral' },
+                    },
+                    { type: 'text', text: request.prompt },
+                  ]
+                : request.prompt,
+            },
+          ],
         },
         request.signal ? { signal: request.signal } : undefined,
       );

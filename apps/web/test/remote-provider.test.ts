@@ -295,6 +295,32 @@ describe('streamed progress', () => {
     assert.deepEqual(seen, [{ elapsedMs: 10 }]);
   });
 
+  it('passes on which step of the build is running, as text and bounded', async () => {
+    const seen: GenerationProgress[] = [];
+    const provider = new RemoteModelProvider({
+      fetchImpl: (async () =>
+        sseResponse([
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 10, stage: 'running', step: 'Writing 3 of 7: services page' })}\n\n`,
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 20, step: 'x'.repeat(500) })}\n\n`,
+          `event: progress\ndata: ${JSON.stringify({ elapsedMs: 30, step: 42 })}\n\n`,
+          PLAN_FRAME,
+        ])) as unknown as typeof fetch,
+      onProgress: (progress) => seen.push(progress),
+    });
+
+    await provider.generate({ prompt: 'a landing page' });
+
+    assert.deepEqual(seen, [
+      {
+        elapsedMs: 10,
+        stage: 'running',
+        step: 'Writing 3 of 7: services page',
+      },
+      { elapsedMs: 20, step: 'x'.repeat(120) },
+      { elapsedMs: 30 },
+    ]);
+  });
+
   it('still drops an event with no clock at all', async () => {
     // Elapsed time is the one thing the meter cannot render without.
     const seen: GenerationProgress[] = [];

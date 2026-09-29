@@ -6,13 +6,13 @@ import { describe, it } from 'node:test';
 import { FakeModelProvider } from '@vibld/core';
 import type { GenerationPlan, ModelProvider, ProjectFile } from '@vibld/core';
 import {
+  BoundedBuildError,
   DEFAULT_MAX_TOKENS,
   ProviderError,
   ProviderRefusalError,
   ProviderTruncationError,
   maxTokensFor,
 } from '@vibld/ai';
-import { outputTokensToRewrite } from '@vibld/ai/limits';
 
 import {
   SanitizingModelProvider,
@@ -714,158 +714,35 @@ describe('which project a follow-up edits', () => {
     assert.equal(asked, false, 'a doomed run still spent a model call');
   });
 
-  it('tells a truncated follow-up how much room its rewrite needed', async () => {
+  it("passes a truncated follow-up's failure through as the steps worded it", async () => {
+    // A follow-up used to re-emit the whole project, so a truncated one was
+    // explained by how much of the room carrying the project took (internal PR 208).
+    // It is a patch now, written in bounded steps, and the only truncation
+    // that can end a run is one file too large for a response of its own,
+    // which the failure already names. There is nothing left to add, and
+    // the old sentence ("a follow-up returns the whole project") would now
+    // be false.
     const { store, revision } = await seeded();
-    const base = await store.loadAccepted(BASE_PARAMS.projectId);
-    assert.ok(base, 'the seed run left nothing to rewrite');
-    const baseChars = base.files.reduce(
-      (sum, file) => sum + file.path.length + file.content.length,
-      0,
+    const said =
+      'src/pages/Everything.tsx did not fit in a response of 32000 tokens on its own, so the project is incomplete.';
+    const { result } = await runGeneration(
+      store,
+      {
+        id: 'bounded',
+        generate: async () => {
+          throw new BoundedBuildError('model-truncated', said);
+        },
+      },
+      {
+        ...BASE_PARAMS,
+        runId: 'run-cut-off',
+        baseRevision: revision,
+        maxTokens: 1000,
+      },
     );
 
-    const provider: ModelProvider = {
-      id: 'truncating',
-      generate: async () => {
-        // Deliberately not the run's own ceiling below. The provider's
-        // message names its limit too, so a test that shared one number
-        // between them would pass on the provider's sentence alone and
-        // never notice this one going missing.
-        throw new ProviderTruncationError(1000);
-      },
-    };
-
-    // A ceiling the project nearly fills, which is the case this explains,
-    // and one token away from the figure it reports so neither assertion
-    // below can pass on the other's number.
-    const overhead = outputTokensToRewrite(baseChars);
-    const ceiling = overhead + 1;
-
-    const { result, outcome } = await runGeneration(store, provider, {
-      ...BASE_PARAMS,
-      runId: 'run-cut-off',
-      baseRevision: revision,
-      maxTokens: ceiling,
-    });
-
-    assert.equal(outcome, 'failed');
     assert.equal(result.stop, 'model-truncated');
-    // The first error and only the first, because that is the one and only
-    // string `/api/plan`'s SSE stream sends the browser (internal PR 208 review). An
-    // explanation anywhere else in this array is an explanation nobody
-    // reads.
-    const said = result.errors[0] ?? '';
-
-    // Added to what the provider said, never in place of it. Its sentence
-    // is the one that reports the project is incomplete, and replacing it
-    // would trade the failure for the advice.
-    assert.ok(
-      said.includes('1000'),
-      'the provider was talked over rather than added to',
-    );
-    // What carrying the project costs and what the run had, because "ask
-    // for something smaller" is not an action available to somebody editing
-    // a project that is already the size it is. In tokens rather than
-    // characters: the reader is comparing it against a ceiling, and a
-    // character count is one conversion away from meaning anything.
-    assert.ok(
-      said.includes(String(overhead)),
-      'the failure did not estimate what carrying the project costs',
-    );
-    assert.ok(
-      said.includes(String(ceiling)),
-      'the failure did not say what room the run actually had',
-    );
-  });
-
-  it('draws the line at the project taking half the room', async () => {
-    const { store, revision } = await seeded();
-    const base = await store.loadAccepted(BASE_PARAMS.projectId);
-    assert.ok(base, 'the seed run left nothing to rewrite');
-    const overhead = outputTokensToRewrite(
-      base.files.reduce(
-        (sum, file) => sum + file.path.length + file.content.length,
-        0,
-      ),
-    );
-
-    async function errorAt(ceiling: number, runId: string): Promise<string> {
-      const { result } = await runGeneration(
-        store,
-        {
-          id: 'truncating',
-          generate: async () => {
-            throw new ProviderTruncationError(ceiling);
-          },
-        },
-        {
-          ...BASE_PARAMS,
-          runId,
-          baseRevision: revision,
-          maxTokens: ceiling,
-        },
-      );
-      return result.errors[0] ?? '';
-    }
-
-    // Both sides of the cutoff, one token apart, so the line is held here
-    // rather than wherever a later edit happens to move it. Half is a
-    // choice about how specific a message is, and a choice nothing tests is
-    // one nobody can rely on.
-    const at = await errorAt(overhead * 2, 'run-at-half');
-    const past = await errorAt(overhead * 2 + 1, 'run-past-half');
-
-    assert.ok(
-      at.includes(String(overhead)),
-      'a project taking exactly half the room went unexplained',
-    );
-    assert.equal(
-      past,
-      new ProviderTruncationError(overhead * 2 + 1).message,
-      'a project taking less than half the room was blamed anyway',
-    );
-  });
-
-  it('does not blame the rewrite when the project is a small part of the room', async () => {
-    const { store, revision } = await seeded();
-    const base = await store.loadAccepted(BASE_PARAMS.projectId);
-    assert.ok(base, 'the seed run left nothing to rewrite');
-    const baseChars = base.files.reduce(
-      (sum, file) => sum + file.path.length + file.content.length,
-      0,
-    );
-
-    const provider: ModelProvider = {
-      id: 'truncating',
-      generate: async () => {
-        throw new ProviderTruncationError(500_000);
-      },
-    };
-
-    // A small project asked for a large expansion runs out of room on what
-    // the edit added, not on carrying the base (internal PR 208 review). Saying
-    // otherwise would name a couple of hundred tokens as the reason a
-    // half-million-token ceiling filled up.
-    const { result } = await runGeneration(store, provider, {
-      ...BASE_PARAMS,
-      runId: 'run-expanded',
-      baseRevision: revision,
-      maxTokens: 500_000,
-    });
-
-    assert.ok(
-      outputTokensToRewrite(baseChars) * 2 < 500_000,
-      'the fixture stopped exercising the case this leaves alone',
-    );
-    // The provider's sentence, untouched. Asserted by comparing it rather
-    // than by counting the array: the explanation is joined onto the first
-    // error, so the array is one entry long whether or not anything was
-    // added to it, and a length check here would pass on a message that had
-    // been rewritten underneath it.
-    assert.equal(
-      result.errors[0],
-      new ProviderTruncationError(500_000).message,
-      'a truncation the base did not cause was blamed on the base',
-    );
+    assert.deepEqual(result.errors, [said]);
   });
 
   it('leaves a first run that was cut off to say so on its own', async () => {

@@ -315,6 +315,35 @@ export function maxTokensFor(
 ): number {
   const known = findModel(model);
   if (!known) return DEFAULT_MAX_TOKENS;
+  const affordable = affordableOutputTokens(model, outputMicroUsd, carryTokens);
+  // What the model can actually produce inside the wall-clock budget, at
+  // its own measured speed where there is one. The cheap models are fast
+  // but not infinitely fast, and the slowest one offered is five and a half
+  // times slower than the rate this used to assume for all of them.
+  const reachable = Math.floor(
+    (RUN_WALL_CLOCK_BUDGET_MS / 1000) * outputTokensPerSecondFor(known.id),
+  );
+  return Math.min(known.maxOutputTokens, affordable, reachable);
+}
+
+/**
+ * The money bound alone: what `RUN_OUTPUT_RESERVE_MICRO_USD` buys from a
+ * model at the price in force, plus what a follow-up carries.
+ *
+ * `maxTokensFor` clamps this to what one response can hold and to what one
+ * response can write in time. A bounded build (`bounded-build.ts`) is many
+ * responses, each clamped on its own, so its run as a whole is bounded by
+ * this and a flat cap rather than by any one response
+ * (`buildOutputBudgetFor`). The price and the carry are read the same way
+ * for both, which is why they are read here once.
+ */
+export function affordableOutputTokens(
+  model: string,
+  outputMicroUsd?: number,
+  carryTokens = 0,
+): number {
+  const known = findModel(model);
+  if (!known) return DEFAULT_MAX_TOKENS;
   const price =
     outputMicroUsd !== undefined &&
     Number.isFinite(outputMicroUsd) &&
@@ -328,14 +357,7 @@ export function maxTokensFor(
     Number.isFinite(carryTokens) && carryTokens > 0
       ? Math.floor(carryTokens)
       : 0;
-  // What the model can actually produce inside the wall-clock budget, at
-  // its own measured speed where there is one. The cheap models are fast
-  // but not infinitely fast, and the slowest one offered is five and a half
-  // times slower than the rate this used to assume for all of them.
-  const reachable = Math.floor(
-    (RUN_WALL_CLOCK_BUDGET_MS / 1000) * outputTokensPerSecondFor(known.id),
-  );
-  return Math.min(known.maxOutputTokens, affordable + carry, reachable);
+  return affordable + carry;
 }
 
 /**

@@ -233,10 +233,11 @@ export class RemoteModelProvider implements ModelProvider {
 
     for await (const { event, data } of readPlanEvents(response.body)) {
       if (event === 'progress') {
-        const { characters, elapsedMs, stage } = data as {
+        const { characters, elapsedMs, stage, step } = data as {
           characters?: number;
           elapsedMs?: number;
           stage?: unknown;
+          step?: unknown;
         };
         // Only the clock is required. Requiring a character count too meant
         // that once generation moved into a durable Workflow, which has no
@@ -251,6 +252,11 @@ export class RemoteModelProvider implements ModelProvider {
             stage === 'running' ||
             stage === 'thinking'
               ? { stage }
+              : {}),
+            // Display text, bounded here as well as where it is sent: it
+            // is shown as text and nothing else.
+            ...(typeof step === 'string' && step.length > 0
+              ? { step: step.slice(0, 120) }
               : {}),
           });
         }

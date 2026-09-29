@@ -10,6 +10,51 @@ import {
   reassurance,
 } from '../src/generation/progress.ts';
 
+describe('a build written in bounded steps', () => {
+  const step = 'Writing 3 of 7: services page';
+
+  it('names the step in place of the stage it is part of', () => {
+    assert.equal(
+      describeProgress({
+        elapsedMs: 125_000,
+        stage: 'running',
+        step,
+        characters: 48_000,
+      }),
+      `${step} · 48,000 characters written · 2:05`,
+    );
+  });
+
+  it('still says a model is thinking, beside the step', () => {
+    assert.equal(
+      describeProgress({
+        elapsedMs: 5_000,
+        stage: 'thinking',
+        step: 'Planning the project',
+      }),
+      'Planning the project · Thinking it through · 0:05',
+    );
+  });
+
+  it('explains a long wait in terms of the steps', () => {
+    assert.match(
+      reassurance({ elapsedMs: REASSURE_AFTER_MS, stage: 'running', step })!,
+      /a few files at a time/,
+    );
+  });
+
+  it('is spoken with the step after the stage', () => {
+    assert.equal(
+      progressAnnouncement({
+        elapsedMs: ANNOUNCE_INTERVAL_MS,
+        stage: 'running',
+        step,
+      }),
+      `Still building your project, 0:30 elapsed. ${step}.`,
+    );
+  });
+});
+
 describe('formatElapsed', () => {
   it('reads as a clock', () => {
     assert.equal(formatElapsed(0), '0:00');

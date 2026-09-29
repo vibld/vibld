@@ -252,8 +252,11 @@ export function createOpenaiPlanClient(
         : request.maxTokens;
 
       // The schema travels in `text.format` rather than in the prompt, so
-      // what goes as prompt is exactly these two (internal PR 189 review).
-      request.onPromptChars?.(request.system.length + request.prompt.length);
+      // what goes as prompt is exactly these (internal PR 189 review). A cache prefix
+      // is sent as the start of the one user message: OpenAI caches a
+      // matching prefix without being told where it ends.
+      const userText = (request.cachePrefix ?? '') + request.prompt;
+      request.onPromptChars?.(request.system.length + userText.length);
 
       const response = await doFetch(`${baseUrl}/responses`, {
         method: 'POST',
@@ -291,7 +294,7 @@ export function createOpenaiPlanClient(
           },
           input: [
             { role: 'system', content: request.system },
-            { role: 'user', content: request.prompt },
+            { role: 'user', content: userText },
           ],
         }),
         ...(request.signal ? { signal: request.signal } : {}),
@@ -365,7 +368,7 @@ export function createOpenaiPlanClient(
       }
 
       const refusal = final ? readRefusal(final) : null;
-      const promptCharacters = request.system.length + request.prompt.length;
+      const promptCharacters = request.system.length + userText.length;
 
       return {
         plan,

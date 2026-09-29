@@ -253,6 +253,13 @@ export interface GenerationProgress {
   characters?: number;
   elapsedMs: number;
   stage?: GenerationStage;
+  /**
+   * Which step of the build is running, in words ("Writing 3 of 7:
+   * services page"), when the Worker knows. A build is written in bounded
+   * steps, an outline and then a few files at a time, and a long one is
+   * easier to wait through when it says how far it has got.
+   */
+  step?: string;
 }
 
 export interface SessionOptions {

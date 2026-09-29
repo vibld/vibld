@@ -10,7 +10,12 @@ import {
 } from '../src/deepseek-client.ts';
 import { ProviderShapeError, ProviderTruncationError } from '../src/errors.ts';
 import type { PlanUsage } from '../src/client.ts';
-import { MOCKUP_OUTPUT, PLAN_OUTPUT } from '../src/plan-output.ts';
+import {
+  MOCKUP_OUTPUT,
+  OUTLINE_JSON_INSTRUCTION,
+  OUTLINE_OUTPUT,
+  PLAN_OUTPUT,
+} from '../src/plan-output.ts';
 import type { PlanOutput } from '../src/plan-output.ts';
 
 const PLAN = {
@@ -168,6 +173,37 @@ describe('createDeepseekPlanClient', () => {
     assert.ok(sent.messages[0].content.includes(JSON_MODE_INSTRUCTION));
     assert.ok(sent.messages[0].content.startsWith('SYSTEM'));
     assert.equal(sent.messages[1].content, 'a landing page');
+  });
+
+  it('sends a cache prefix as the start of the user message, and the outline instruction', async () => {
+    // DeepSeek caches a matching prefix by itself, so a bounded build's
+    // shared part only has to come first. The instruction is the one the
+    // request asked for, not the plan's.
+    const { impl, calls } = fetchReturning(
+      sse(contentFrames(JSON.stringify(PLAN))),
+    );
+    const client = createDeepseekPlanClient({ apiKey: 'k', fetchImpl: impl });
+    let reported = 0;
+    await client.createPlan({
+      system: 'SYSTEM',
+      cachePrefix: 'SHARED PLAN\n\n',
+      prompt: 'write these',
+      model: 'deepseek-flash',
+      maxTokens: 32_000,
+      effort: 'high',
+      output: OUTLINE_OUTPUT,
+      onPromptChars: (characters) => {
+        reported = characters;
+      },
+    });
+
+    const sent = JSON.parse(String(calls[0]!.body));
+    assert.equal(sent.messages[1].content, 'SHARED PLAN\n\nwrite these');
+    assert.ok(sent.messages[0].content.includes(OUTLINE_JSON_INSTRUCTION));
+    assert.equal(
+      reported,
+      sent.messages[0].content.length + sent.messages[1].content.length,
+    );
   });
 
   it('sends the key as a bearer token and never in the URL', async () => {

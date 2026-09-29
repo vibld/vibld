@@ -114,6 +114,46 @@ describe('the spend ledger', () => {
     );
   });
 
+  it('keeps a run that is still reporting in, however long it has been running', () => {
+    // A bounded build is many steps, each inside its own timeout, and the
+    // whole can outlast the reclaim window. Each step says the run is alive
+    // before it calls the model, so the window counts from the last step.
+    const budget = ledger();
+    const { id } = budget.reserve(300_000, CEILING, MAX_IN_FLIGHT, DAY);
+    assert.ok(id !== undefined);
+
+    const clock = Date.now;
+    try {
+      // Three steps, each well inside the window, together well past it.
+      for (let step = 1; step <= 3; step += 1) {
+        Date.now = () => clock() + step * (RUN_ABANDONED_AFTER_MS - 60_000);
+        budget.touch(id);
+      }
+      Date.now = () => clock() + 3 * (RUN_ABANDONED_AFTER_MS - 60_000) + 60_000;
+      budget.reserve(1, CEILING, MAX_IN_FLIGHT, DAY);
+    } finally {
+      Date.now = clock;
+    }
+
+    assert.equal(
+      budget.usageFor(DAY).inFlight,
+      2,
+      'a run that was still working was taken for dead',
+    );
+    budget.settle(id, 120_000);
+    assert.equal(budget.usageFor(DAY).spentMicroUsd, 120_001);
+  });
+
+  it('does not put a settled or reclaimed run back in flight when a late step reports in', () => {
+    const budget = ledger();
+    const settled = budget.reserve(300_000, CEILING, MAX_IN_FLIGHT, DAY).id;
+    assert.ok(settled !== undefined);
+    budget.settle(settled, 100_000);
+    budget.touch(settled);
+    assert.equal(budget.usageFor(DAY).inFlight, 0);
+    assert.equal(budget.usageFor(DAY).spentMicroUsd, 100_000);
+  });
+
   it('is unchanged by settling the same run twice', () => {
     // The settle step retries. It used to be idempotent by accident, via
     // the `settled IS NULL` guard that this removes; it has to stay

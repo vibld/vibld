@@ -23,10 +23,10 @@
  */
 
 import {
+  buildOutputBudgetFor,
   cacheRatesFor,
   chatMaxTokensFor,
   findModel,
-  maxTokensFor,
   mockupMaxTokensFor,
   providerForRequest,
 } from '@vibld/ai';
@@ -121,6 +121,35 @@ export const BUILD_INPUT_CHARS =
   MAX_BUILD_FIXED_PROMPT_CHARS +
   MAX_MEDIA_SECTION_CHARS;
 
+/**
+ * How many single-call builds' worth of input one bounded build may send,
+ * across all its calls.
+ *
+ * A bounded build (`packages/ai/src/bounded-build.ts`) makes an outline call
+ * and then one call per group of files, and each group call carries the
+ * request, the spec, the manifest and the files it depends on. Estimated
+ * offline for the prompt that failed on 2026-09-29, with the scripted client
+ * and a six-route site of realistic size, that is ten calls and about
+ * 460,000 characters, most of it the shared prefix the provider serves from
+ * its cache; a real spec and manifest run longer than the script's, which
+ * could take it past 600,000. Four builds' worth is 1,026,000 characters:
+ * room for that with half again to spare. An estimate, not a measurement:
+ * re-measure once a real run has been traced.
+ *
+ * It is enforced, not only reserved for. The run refuses to make a call
+ * whose prompt would pass what is left of this, so the reservation below
+ * is a bound on what the run sends and not an estimate of it.
+ */
+export const BOUNDED_INPUT_MULTIPLE = 4;
+
+/**
+ * Every character a bounded build may send the model, across every call it
+ * makes. What `handlePlan` reserves for, and what the Workflow is told it
+ * may spend (`WorkflowParams.maxInputChars`).
+ */
+export const BOUNDED_BUILD_INPUT_CHARS =
+  BUILD_INPUT_CHARS * BOUNDED_INPUT_MULTIPLE;
+
 export const MOCKUP_INPUT_CHARS =
   DEFAULT_LIMITS.maxPromptChars +
   MAX_MOCKUP_DIRECTION_CHARS +
@@ -146,6 +175,12 @@ export const CHAT_INPUT_CHARS =
  * (internal issue 209), from `carryTokensFor` below. A build gets the room a first run
  * would, plus that. A mockup run ignores it: three sketches carry nothing
  * back, and a mockup's ceiling is a runaway guard rather than a budget.
+ *
+ * A build's figure is the budget of the whole bounded build
+ * (`buildOutputBudgetFor`), summed across its calls, rather than one
+ * response's ceiling: each call is clamped on its own inside the run. So it
+ * can exceed what the model writes in one response, and on the models the
+ * money binds it does, which is the room a large site was missing.
  */
 export function runCeilingFor(
   env: RunCeilingEnv,
@@ -176,7 +211,7 @@ export function runCeilingFor(
         ? mockupMaxTokensFor(model, prices.outputMicroUsd)
         : kind === 'chat'
           ? chatMaxTokensFor(model, prices.outputMicroUsd)
-          : maxTokensFor(model, prices.outputMicroUsd, carryTokens),
+          : buildOutputBudgetFor(model, prices.outputMicroUsd, carryTokens),
   };
 }
 

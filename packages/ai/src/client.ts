@@ -13,7 +13,23 @@ import type { PlanOutput } from './plan-output.ts';
 
 export interface PlanRequest {
   system: string;
+  /**
+   * The user message, or its second half when `cachePrefix` is set. What is
+   * sent is always `cachePrefix + prompt`.
+   */
   prompt: string;
+  /**
+   * The first part of the user message, when it is byte-identical across
+   * the calls of one run, so a client that places cache breakpoints can
+   * place one at its end.
+   *
+   * A bounded build (`bounded-build.ts`) sends every file-writing step the
+   * same request, spec and manifest before the part that differs, and that
+   * shared part is most of each step's input. Anthropic caches a prefix only
+   * where it is marked; OpenAI and DeepSeek cache matching prefixes on their
+   * own, so they send the two halves as one string and need nothing else.
+   */
+  cachePrefix?: string;
   model: string;
   maxTokens: number;
   effort: PlanEffort;

@@ -121,30 +121,52 @@ describe('the link between a running step and the reader watching it', () => {
   const workflow = worker('generation-workflow.ts');
   const entrypoint = worker('index.ts');
 
-  it('has the generate step report through the channel', () => {
+  it('has every model step report through the channel', () => {
+    // The model steps are a bounded build's now (`buildInSteps`), so the
+    // join is the reporter the Workflow hands them, and the throttle they
+    // wrap each call's stream in. `bounded-steps.test.ts` runs that half.
     assert.match(
       workflow,
-      /onProgress/,
-      'the provider streams into nothing again, which is the whole of #183',
+      /const report = channel\s*\?\s*\(progress: ProgressReport\) => \{\s*void channel\.report\(progress\)/,
+      'the steps stream into nothing again, which is the whole of #183',
     );
     assert.match(
       workflow,
-      /throttleProgress\(/,
+      /buildInSteps\(\s*\{[\s\S]*?\.\.\.\(report \? \{ report \} : \{\}\)/,
+      'the reporter is built and never handed to the steps',
+    );
+    assert.match(
+      worker('generation-run.ts'),
+      /progress: \(label: string, before: number\) => \{\s*const throttled = throttleProgress\(/,
       'reporting every delta would spend thousands of requests a run',
     );
     assert.match(workflow, /RUN_PROGRESS/);
   });
 
-  it('has the generate step say when it has left', () => {
-    // internal PR 193 review, P2. The step is the only thing that knows the model call
-    // is over; the instance reports `running` for another minute of
-    // settlement and trace writes. In a finally, because a refused or
-    // emptied completion is exactly the case that leaves a last report of
-    // reasoning and no answer.
+  it('has the model steps say when they are over, however they ended', () => {
+    // internal PR 193 review, P2. Only the Workflow knows the model calls are over;
+    // the instance reports `running` for another minute of staging,
+    // settlement and trace writes. Said at the start of `assemble`, which
+    // runs whether the steps finished, failed or were never started: a
+    // failure comes back from them as data rather than as a throw, so there
+    // is no path past this line that skips it.
     assert.match(
       workflow,
-      /finally \{[\s\S]*channel\?\.finish\(\)/,
+      /const finished = \(\) =>\s*channel\?\.finish\(\)/,
+      'nothing tells the channel the model calls are over',
+    );
+    assert.match(
+      workflow,
+      /'assemble',[\s\S]*?async \(\) => \{\s*await finished\(\);/,
       'a run that ends without writing an answer goes on being described as thinking',
+    );
+    // And on the path a run enqueued before bounded builds takes, in a
+    // finally, because a refused or emptied completion is the case that
+    // leaves a last report of reasoning and no answer.
+    assert.match(
+      workflow,
+      /'generate',[\s\S]*?finally \{\s*await finished\(\);/,
+      'a legacy run that ends without an answer goes on being described as thinking',
     );
   });
 
@@ -163,6 +185,11 @@ describe('the link between a running step and the reader watching it', () => {
       entrypoint,
       /characters > 0 \? \{ characters \} : \{\}/,
       'the count is sent unconditionally, so a run that has written nothing reports a confident zero',
+    );
+    assert.match(
+      entrypoint,
+      /stepFor\(status\.status, progress\)[\s\S]*step \? \{ step \} : \{\}/,
+      'the step is read but never sent, so a long build says nothing about how far it has got',
     );
   });
 });

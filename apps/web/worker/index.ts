@@ -54,7 +54,7 @@ import { sharePreviewKey } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
 import { SUSPENDED_MESSAGE, spendableFor } from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
-import { POLL_INTERVAL_MS, stageFor } from './run-stage.ts';
+import { POLL_INTERVAL_MS, stageFor, stepFor } from './run-stage.ts';
 import { RunProgress } from './run-progress.ts';
 import {
   positiveInt,
@@ -83,7 +83,7 @@ import {
 } from './spend.ts';
 import type { TokenPrices } from './spend.ts';
 import {
-  BUILD_INPUT_CHARS,
+  BOUNDED_BUILD_INPUT_CHARS,
   MOCKUP_INPUT_CHARS,
   carryTokensFor,
   runCeilingFor,
@@ -1083,9 +1083,17 @@ async function handlePlan(
   // tokens while letting the model emit 384000 is a run that outspends its
   // own reservation six times over.
   //
-  // A follow-up is sized to carry the project it edits as well (internal issue 209): it
-  // returns the complete set of files, so a reservation sized for building
-  // something new left a large project no room for the change itself.
+  // A build is bounded steps now (`packages/ai/src/bounded-build.ts`), so
+  // both numbers cover the whole run rather than one call: the output
+  // budget is summed across its calls, and the input is what all of them
+  // may send together. The Workflow is told both and refuses a call that
+  // would pass either, so the run cannot outspend this however many steps
+  // it takes.
+  //
+  // A follow-up is sized to carry the project it edits as well (internal issue 209). A
+  // follow-up is a patch now and no longer re-emits every file, but one
+  // that rewrites most of a large project still writes as much as that, so
+  // the room stays until the maintainer decides otherwise.
   const carry =
     env.DB && env.PROJECT_CONTENT
       ? await carryTokensFor(
@@ -1101,7 +1109,7 @@ async function handlePlan(
       worstCase: worstCaseMicroUsd(
         ceiling.prices,
         ceiling.maxTokens,
-        BUILD_INPUT_CHARS,
+        BOUNDED_BUILD_INPUT_CHARS,
       ),
     };
   };
@@ -1279,6 +1287,9 @@ async function handlePlan(
         worstCaseMicroUsd: worstCase,
         prices,
         maxTokens,
+        // The input the reservation above was priced for, across every
+        // call of the bounded build.
+        maxInputChars: BOUNDED_BUILD_INPUT_CHARS,
         // The figures this run was admitted on, carried so a repair turn
         // can hold its own reservation without reconstructing a Principal
         // inside the Workflow (internal issue 194).
@@ -1463,12 +1474,18 @@ async function handlePlan(
           .catch(() => undefined);
         const stage = stageFor(status.status, progress);
         const characters = progress?.report?.characters ?? 0;
+        // Which step of the bounded build is running ("Writing 3 of 7:
+        // services page"), where one is and the model steps have not all
+        // finished. `stepFor` says nothing otherwise, and the stage word
+        // carries the line as it did before.
+        const step = stepFor(status.status, progress);
         if (!cancelled) {
           await write(
             encodeEvent('progress', {
               elapsedMs: Date.now() - waitingSince,
               ...(stage ? { stage } : {}),
               ...(characters > 0 ? { characters } : {}),
+              ...(step ? { step } : {}),
             }),
           );
         }

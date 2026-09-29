@@ -40,6 +40,13 @@ describe('parsePlanArgs', () => {
       'make it dark',
     );
   });
+
+  it('reads a style preset, the way the builder sends one', () => {
+    assert.deepEqual(
+      parsePlanArgs(['a', 'site', '--style', 'glassmorphism', '--out', 'o']),
+      { prompt: 'a site', out: 'o', style: 'glassmorphism' },
+    );
+  });
 });
 
 describe('parseMockupArgs', () => {

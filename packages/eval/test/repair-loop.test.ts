@@ -157,7 +157,9 @@ describe('the repair job', () => {
       const result = repair(paths, out, { VIBLD_EVAL_LIVE: '1' });
 
       assert.equal(result.status, 0, result.stdout);
-      assert.equal(result.calls, 1, result.stdout);
+      // One repair, as the product makes it: a patch in bounded steps, an
+      // outline of what to change and then one group of files.
+      assert.equal(result.calls, 2, result.stdout);
 
       const written = parseRepairResults(
         readFileSync(join(out, REPAIR_RESULTS_FILE), 'utf8'),

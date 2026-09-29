@@ -10,7 +10,11 @@ import {
   readResponseStream,
 } from '../src/openai-client.ts';
 import type { PlanRequest } from '../src/client.ts';
-import { MOCKUP_OUTPUT, jsonSchemaFor } from '../src/plan-output.ts';
+import {
+  FILE_GROUP_OUTPUT,
+  MOCKUP_OUTPUT,
+  jsonSchemaFor,
+} from '../src/plan-output.ts';
 
 const REQUEST: PlanRequest = {
   system: 'system',
@@ -247,6 +251,28 @@ describe('createOpenaiPlanClient', () => {
    * API, `MockupSetSchema` rejects what arrives, and the caller pays for a
    * refusal they did not cause.
    */
+  it('sends a cache prefix as the start of the user message, with the schema asked for', async () => {
+    // OpenAI caches a matching prefix without being told where it ends, so
+    // a bounded build's shared part only has to come first.
+    const seen: unknown[] = [];
+    await clientWith(sse(completed()), seen).createPlan({
+      ...REQUEST,
+      cachePrefix: 'SHARED PLAN\n\n',
+      prompt: 'write these',
+      output: FILE_GROUP_OUTPUT,
+    });
+    const body = (seen[0] as { body: Record<string, unknown> }).body as {
+      input: { role: string; content: string }[];
+      text: { format: { name: string; schema: unknown } };
+    };
+    assert.equal(body.input[1]?.content, 'SHARED PLAN\n\nwrite these');
+    assert.equal(body.text.format.name, 'file_group');
+    assert.deepEqual(
+      body.text.format.schema,
+      jsonSchemaFor(FILE_GROUP_OUTPUT.schema),
+    );
+  });
+
   it('posts the mockup schema when a mockup set was asked for', async () => {
     const seen: Record<string, never>[] = [];
     await clientWith(sse(completed()), seen).createPlan({

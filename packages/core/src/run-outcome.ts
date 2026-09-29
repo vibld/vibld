@@ -261,9 +261,15 @@ export function stopIsRecordable(stop: RunStop): boolean {
  * must not turn into a second channel carrying what the telemetry decision
  * keeps out of the first.
  *
+ * A build is several model calls since bounded builds (an outline, then a
+ * few files per call), and one trace still describes the whole run: its
+ * tokens and cost summed across the calls, as billing charged them, and its
+ * `contextWindow` the model's window once per call, so `contextPressure`
+ * reads as the average share each call used.
+ *
  * Deliberately absent, because this system has no such mechanism and a
  * column that is always the same number is a claim about machinery that is
- * not there: a round count (generation is one call, not a tool loop), failed
+ * not there: a round count (the calls follow a fixed plan, not a loop), failed
  * tool attempts (there are no tools), stream retries (a failed stream fails
  * the run) and a structured-output repair count (the provider enforces the
  * schema and a mismatch throws). Each becomes worth adding on the day the

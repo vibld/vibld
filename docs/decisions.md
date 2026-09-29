@@ -205,6 +205,36 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-29
+
+**Builds are generated in bounded steps, and follow-ups as patches.** Every
+build used to ask the model for the whole project in one response, so the
+size of the project decided whether a run produced anything: the first full
+company site asked of Claude Opus 5.5 wrote for nineteen minutes, stopped at
+the model's 128,000-token ceiling as `model-truncated` and was thrown away at
+$2.62 (trace `9eb10950`), and a follow-up re-emitted every file to change
+one. Chris asked on 2026-09-29 for this to be fixed. A build is now an
+outline call (the spec and a manifest of files, no content, at most 16,000
+output tokens) and then one call per group of files (shared files first,
+each group estimated at no more than 12,000 tokens and given at most 32,000,
+seeing the request, the spec, the manifest and the files it depends on).
+Each call is its own durable Workflow step, never retried because it is
+paid, so a group written before an eviction is not written twice. A group
+that runs out of room is split in two and asked again, down to one file; a
+single file that still does not fit fails the run with its path named, and
+the run is charged for what its calls spent. A follow-up, and a repair turn,
+plans only the files to add or replace and the paths to delete, and every
+other file carries over from the revision it edits. A first build may plan
+up to six routes, which relaxes internal PR 289's "at most two further routes". The
+run reserves once for all its calls: the output that the $3.20 reserve buys
+(up to 256,000 tokens, where one response was held to the model's maximum)
+and four single-call builds' worth of input, and it refuses any call that
+would pass either. Every model step renews the reservation before it calls,
+so a run longer than the reclaim window is not taken for abandoned. The
+request, spec and manifest are marked for Anthropic's prompt cache; OpenAI
+and DeepSeek cache the same prefix on their own. `apps/web/README.md`,
+"Bounded steps", has the detail.
+
 ### Resolved 2026-09-28
 
 **The legal pages carry Chris's decisions for the open paid beta.** Chris

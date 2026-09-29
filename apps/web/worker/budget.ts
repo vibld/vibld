@@ -179,6 +179,32 @@ export class UserBudget extends DurableObject {
   }
 
   /**
+   * Say that a reserved run is still alive, so the reclaim above does not
+   * take it for dead.
+   *
+   * The reclaim counts from `started`, and it was sized for a run that was
+   * one model call: `RUN_ABANDONED_AFTER_MS` outlasts one step's timeout. A
+   * bounded build (`packages/ai/src/bounded-build.ts`) is many steps, each
+   * inside that timeout, and together they can take longer than the window.
+   * Reclaiming such a run releases its in-flight slot and bills its worst
+   * case while it is still working. So every step moves `started` to now
+   * before it calls the model, and the window keeps meaning what it meant:
+   * this long since the run was last heard from, not since it began.
+   *
+   * Only an unsettled row moves. A row already settled, or already
+   * reclaimed, stays as it is: a late heartbeat must not put a finished run
+   * back in flight.
+   */
+  touch(id: number): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE runs SET started = ?
+         WHERE id = ? AND settled IS NULL`,
+      Date.now(),
+      id,
+    );
+  }
+
+  /**
    * Delete this ledger's history, for an account being purged
    * (docs/decisions.md L32, `account-deletion.ts`).
    *

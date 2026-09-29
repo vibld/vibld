@@ -389,18 +389,19 @@ connection it already holds open, so `remote-provider.ts`'s client contract
 the builder names (`projectId` in the body), checked as the caller's first;
 see "Projects" below.
 
-Two things this costs, both accepted rather than solved here:
+What this costs, accepted rather than solved here:
 
-- **No live character progress for a real generation.** There is no channel
-  between a Workflow step and the Worker polling it -- only the step's return
-  value once it finishes. The stream still emits keepalives, so a long run
-  reads as "still going", not as "how far along". The old in-request
-  `onProgress` callback only ever existed for exactly this endpoint, so the
-  fake provider (which never streamed live progress either) is unaffected.
+- **Progress travels through a side channel.** A Workflow step has no
+  channel of its own, only its return value once it finishes, so each model
+  step reports through the `RUN_PROGRESS` Durable Object
+  (`worker/run-progress.ts`), which the poll loop reads (internal issue 183). Without the
+  binding the stream still emits keepalives and the clock, so a long run
+  reads as "still going" rather than as "how far along".
 - **Cancelling stops the _next_ step, not the current one.** `handlePlan`
   calls `WorkflowInstance.terminate()` on disconnect, but termination lands
   at a step boundary; a cancel that arrives mid-model-call cannot stop that
-  one call from finishing (or being billed for). `budget.ts`'s existing
+  one call from finishing (or being billed for). With bounded steps (below)
+  the next boundary is at most one group of files away. `budget.ts`'s
   abandoned-reservation reclaim is the backstop either way -- the same one a
   Worker dying mid-request already relied on before this change.
 - **The browser still keeps its own working copy.** `BuilderSession` runs
@@ -409,6 +410,58 @@ Two things this costs, both accepted rather than solved here:
   refuses a build whose base has moved. Opening a project seeds that
   in-memory store from the server's accepted snapshot, so a reload resumes
   the project where the server has it rather than starting empty.
+
+### Bounded steps (resolved 2026-09-29)
+
+A build is never one model response. One response had to hold the spec and
+every file, so the size of the project decided whether the run produced
+anything: the first full company site asked of Claude Opus 5.5 wrote for
+nineteen minutes, stopped at the model's 128,000-token ceiling and was thrown
+away. `@vibld/ai`'s `bounded-build.ts` splits a build into calls none of
+which can be large, and `GenerationWorkflow` runs each call as a durable step
+of its own:
+
+| Step                                                 | What it does                                                                                                                                                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prepare`                                            | The free checks: a stale base revision, a project too large to send. A refusal here costs nothing.                                                                                 |
+| `outline`                                            | The spec and a manifest of files (path, purpose, what it depends on, small/medium/large), no file content. At most 16,000 output tokens.                                           |
+| `write-1`, `write-2`…                                | One group of files each, shared files first. A group sees the request, the spec, the manifest and the files it depends on, and returns only its own. At most 32,000 output tokens. |
+| `assemble`                                           | The files applied, validated, staged and promoted by the same `runGeneration` every run used.                                                                                      |
+| `settle-budget`, `verify-and-repair`, `record-trace` | As before, over the summed usage of every call.                                                                                                                                    |
+
+- **Grouping.** The manifest is ordered by declared dependencies (config and
+  styles, then `src/lib`, shadcn/ui components, shared components, pages,
+  then `App.tsx` and the README), then packed into groups estimated at no
+  more than 12,000 output tokens (small 1,000, medium 3,000, large 6,000).
+- **Running out of room.** A group that truncates is split in two and each
+  half asked again (`write-3.1`, `write-3.2`), down to a single file. A
+  single file that still does not fit fails the run with its path named. A
+  group that leaves a file out is asked for the rest (`.rest`); a reply in
+  the wrong shape is asked for once more (`.again`). The outline is asked
+  for once more at low effort if it truncates.
+- **Follow-ups are patches.** The outline sees the whole project and plans
+  only the files to add or replace, plus the paths to delete; every other
+  file carries over untouched. A repair turn is a patch the same way.
+  `DESIGN.md` is still rendered from the spec, or carried over when there
+  is none, and a repair keeps the first attempt's.
+- **Money.** `handlePlan` reserves once for the whole run: the output
+  budget summed across calls (`buildOutputBudgetFor`: what the $3.20 reserve
+  buys, up to 256,000 tokens) and the input of every call together
+  (`BOUNDED_BUILD_INPUT_CHARS`, four single-call builds' worth). The run is
+  told both and refuses a call that would pass either, so it cannot spend
+  past its reservation; it settles once, at the summed usage. A call that
+  reported nothing is counted at its own worst case.
+- **Time.** Each call fits its step's timeout at the model's measured speed
+  (`callCeilingFor`). A whole run can take longer than one step, so every
+  model step renews the reservation first (`UserBudget.touch`) and the
+  reclaim counts from the last step, not from the start.
+- **Caching.** The request, spec and manifest open every file-writing call
+  byte for byte, and Anthropic is told to cache them (`cachePrefix`); OpenAI
+  and DeepSeek cache a matching prefix on their own.
+- **Progress.** Each step says what it is ("Writing 3 of 7: services page")
+  and the builder shows it; the character count runs across the whole build.
+- **One trace per run,** its tokens and cost summed, its context window
+  counted once per call.
 
 ### Setup
 
@@ -437,6 +490,10 @@ from a prompt you type in the UI, prints the result to the run summary, and
 optionally installs and builds the generated project as the ADR-0002
 portability check. It needs `ANTHROPIC_API_KEY` on the `preview` environment
 and spends model tokens on each run.
+
+It builds in bounded steps, as the product does, and prints each step with
+the second it started. **Replay** `north-star` runs the request that ran out
+of room on 2026-09-29, word for word, with its glassmorphism style.
 
 ## Clerk authentication (the cutover -- docs/decisions.md L5)
 

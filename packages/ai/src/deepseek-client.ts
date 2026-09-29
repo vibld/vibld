@@ -233,7 +233,10 @@ export function createDeepseekPlanClient(
       // paragraph is this client's alone, which is why measuring it here is
       // the only way to be right (internal PR 189 review).
       const systemSent = `${request.system}\n\n${outputFor(request).instruction}`;
-      request.onPromptChars?.(systemSent.length + request.prompt.length);
+      // A cache prefix is the start of the one user message: DeepSeek
+      // caches a matching prefix on its own.
+      const userText = (request.cachePrefix ?? '') + request.prompt;
+      request.onPromptChars?.(systemSent.length + userText.length);
 
       const response = await doFetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
@@ -258,7 +261,7 @@ export function createDeepseekPlanClient(
               // followed by a paragraph contradicting it.
               content: systemSent,
             },
-            { role: 'user', content: request.prompt },
+            { role: 'user', content: userText },
           ],
         }),
         ...(request.signal ? { signal: request.signal } : {}),
@@ -292,7 +295,7 @@ export function createDeepseekPlanClient(
       // I fixed the report and not this, one round earlier, which is the
       // fourth time this review has caught me repairing the case in front
       // of me and not the one beside it. Both now read one variable.
-      const promptCharacters = systemSent.length + request.prompt.length;
+      const promptCharacters = systemSent.length + userText.length;
 
       return {
         plan: readJsonPlan(text),

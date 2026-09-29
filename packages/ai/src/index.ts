@@ -9,6 +9,7 @@ export {
   RUN_STEP_TIMEOUT_MS,
   RUN_ABANDONED_AFTER_MS,
   MEASURED_OUTPUT_TOKENS_PER_SECOND,
+  affordableOutputTokens,
   maxTokensFor,
   outputTokensPerSecondFor,
   readCompletion,
@@ -36,6 +37,59 @@ export type {
   PlanUsage,
 } from './client.ts';
 export {
+  BOUNDED_RUN_MAX_OUTPUT_TOKENS,
+  BoundedBuilder,
+  BoundedPlanProvider,
+  DEFAULT_BOUNDED_INPUT_CHARS,
+  buildOutputBudgetFor,
+  GROUP_CONTEXT_MAX_CHARS,
+  GROUP_ESTIMATE_TOKENS,
+  GROUP_MAX_TOKENS,
+  MAX_PLANNED_FILES,
+  MIN_CALL_TOKENS,
+  OUTLINE_LABEL,
+  OUTLINE_MAX_TOKENS,
+  SIZE_ESTIMATE_TOKENS,
+  applyBoundedPatch,
+  callCeilingFor,
+  describeGroup,
+  estimateTokens,
+  groupLabel,
+  groupPrompt,
+  normaliseOutline,
+  orderManifest,
+  partitionManifest,
+  rankOf,
+  runBoundedBuild,
+  splitGroup,
+} from './bounded-build.ts';
+export type {
+  BaseSource,
+  BoundedBuildBudget,
+  BoundedBuildHooks,
+  BoundedBuildInput,
+  BoundedBuildResult,
+  BoundedBuilderOptions,
+  BoundedPatch,
+  BoundedPlanProviderOptions,
+  CallLimits,
+  CallRecord,
+  GroupInput,
+  NormalisedOutline,
+  OutlineValue,
+} from './bounded-build.ts';
+export {
+  createScriptedBuildClient,
+  requestedPaths,
+} from './scripted-client.ts';
+export type {
+  ScriptedBuild,
+  ScriptedClient,
+  ScriptedClientOptions,
+  ScriptedFile,
+} from './scripted-client.ts';
+export {
+  BoundedBuildError,
   CHAT_SUBJECT,
   ProviderContextError,
   ProviderError,
@@ -44,10 +98,24 @@ export {
   ProviderTruncationError,
 } from './errors.ts';
 export {
+  BuildOutlineReadSchema,
+  BuildOutlineSchema,
+  FileGroupSchema,
+  GROUP_SYSTEM_PROMPT,
   GenerationPlanReadSchema,
   GenerationPlanSchema,
+  MANIFEST_SIZES,
+  MAX_PLANNED_ROUTES,
+  ManifestEntrySchema,
+  OUTLINE_SYSTEM_PROMPT,
   PLAN_SYSTEM_PROMPT,
   ProjectFileSchema,
+  REQUIRED_PROJECT_FILES,
+} from './plan-schema.ts';
+export type {
+  BuildOutline,
+  ManifestEntry,
+  ManifestSize,
 } from './plan-schema.ts';
 export {
   DESIGN_MD_PATH,
@@ -104,6 +172,10 @@ export {
   CHAT_OUTPUT,
   DRAFT_MOCKUP_JSON_INSTRUCTION,
   DRAFT_MOCKUP_OUTPUT,
+  FILE_GROUP_JSON_INSTRUCTION,
+  FILE_GROUP_OUTPUT,
+  OUTLINE_JSON_INSTRUCTION,
+  OUTLINE_OUTPUT,
   MOCKUP_JSON_INSTRUCTION,
   MOCKUP_OUTPUT,
   PLAN_JSON_INSTRUCTION,

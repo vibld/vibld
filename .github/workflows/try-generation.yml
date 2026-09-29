@@ -3,6 +3,10 @@ name: Try a generation
 # Runs one real model generation and writes the result into the run summary,
 # so the adapter can be exercised from the GitHub UI on any device without a
 # terminal. Manual only: every run spends model tokens.
+#
+# The build is the product's own: bounded steps (docs/decisions.md, "Resolved
+# 2026-09-29"), an outline and then a few files per call, each step printed
+# with the time it started. A follow-up is a patch.
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +14,14 @@ on:
         description: What should Vibld build?
         required: true
         default: A landing page for a cybersecurity SaaS with pricing, an FAQ and a contact form. Heavy animation. Navy, dark purple and neon yellow.
+      replay:
+        description: >-
+          Run a recorded request instead of the prompt above. north-star is
+          the full company site that ran out of room in one response on
+          2026-09-29 (trace 9eb10950), with its glassmorphism style.
+        type: choice
+        options: [none, north-star]
+        default: none
       provider:
         description: Which service answers when no model is named below
         type: choice
@@ -33,8 +45,9 @@ on:
         default: false
       style:
         description: >-
-          Optional style preset id for a mockup run, the way the builder sends
-          one once somebody has picked a direction. Ignored for a build.
+          Optional style preset id, the way the builder sends one once
+          somebody has picked a direction. Used by a build and a mockup run
+          alike.
         required: false
         default: ''
       max_tokens:
@@ -74,7 +87,11 @@ jobs:
     # job reads, so there it could only fail.
     if: github.repository == 'vibld/vibld-internal'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # A large bounded build is many steps and can write for twenty minutes
+    # or more on the slower models, before a follow-up and a portability
+    # build. Fifteen minutes was sized for one response and would kill the
+    # very run this workflow exists to check.
+    timeout-minutes: 75
     environment: preview
     steps:
       - name: Checkout
@@ -212,23 +229,41 @@ jobs:
           # interpolating ${{ inputs.prompt }} into this script would let a
           # crafted prompt run shell commands in a step that holds the API key.
           PROMPT: ${{ inputs.prompt }}
+          STYLE: ${{ inputs.style }}
+          REPLAY: ${{ inputs.replay }}
           VIBLD_PROVIDER: ${{ inputs.provider }}
           VIBLD_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          # The request that failed on 2026-09-29, word for word, with the
+          # style it was built in. Chosen from a closed list, so nothing here
+          # is dispatch text.
+          if [ "$REPLAY" = "north-star" ]; then
+            PROMPT='A full website for North Star Systems, a security consultancy based in Atlanta. Offering cybersecurity services and solutions, fractional and vCISO/vCIO/vCTO, audit and security program readiness, gap analysis, and pentesting. Our own GRC application is keelgrc.com. Heavy animation and fluid motion.'
+            STYLE=glassmorphism
+          fi
+
           {
             echo '## Prompt'
             echo
             printf '> %s\n' "$PROMPT"
+            if [ -n "${STYLE// /}" ]; then
+              echo
+              printf 'Style: %s\n' "$STYLE"
+            fi
             echo
             echo '## Result'
             echo
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          pnpm --filter @vibld/ai plan "$PROMPT" --out "$RUNNER_TEMP/generated" \
+          args=("$PROMPT" --out "$RUNNER_TEMP/generated")
+          if [ -n "${STYLE// /}" ]; then
+            args+=(--style "$STYLE")
+          fi
+          pnpm --filter @vibld/ai plan "${args[@]}" \
             2>&1 | tee "$RUNNER_TEMP/plan.log"
 
           {
@@ -236,10 +271,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # A second generation, given the first project. The point is the
-      # removed count: the generation machine promotes exactly the file set
-      # the model returns, so a file left out is a file deleted. Skipped
-      # unless a follow-up prompt was given, because it spends tokens.
+      # A second generation, given the first project. A follow-up is a
+      # patch: it names the files it adds, replaces and deletes, and every
+      # other file carries over. The point is the counts, and the removed one
+      # most: a file the patch deletes is a file gone. Skipped unless a
+      # follow-up prompt was given, because it spends tokens.
       - name: Iterate on the generated project
         if: ${{ inputs.follow_up != '' && !inputs.mockups }}
         shell: bash
@@ -249,12 +285,17 @@ jobs:
           # this script would let a crafted prompt run commands in a step
           # that holds the API key.
           FOLLOW_UP: ${{ inputs.follow_up }}
+          STYLE: ${{ inputs.style }}
+          REPLAY: ${{ inputs.replay }}
           VIBLD_PROVIDER: ${{ inputs.provider }}
           VIBLD_MODEL: ${{ inputs.model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          if [ "$REPLAY" = "north-star" ]; then
+            STYLE=glassmorphism
+          fi
           {
             echo
             echo '## Follow-up'
@@ -264,9 +305,13 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          pnpm --filter @vibld/ai plan "$FOLLOW_UP" \
-            --base "$RUNNER_TEMP/generated" \
-            --out "$RUNNER_TEMP/iterated" \
+          # The same style the first project was built in, as the builder
+          # sends it on every turn.
+          args=("$FOLLOW_UP" --base "$RUNNER_TEMP/generated" --out "$RUNNER_TEMP/iterated")
+          if [ -n "${STYLE// /}" ]; then
+            args+=(--style "$STYLE")
+          fi
+          pnpm --filter @vibld/ai plan "${args[@]}" \
             2>&1 | tee "$RUNNER_TEMP/follow-up.log"
 
           {

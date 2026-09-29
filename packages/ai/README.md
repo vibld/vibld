@@ -40,6 +40,27 @@ The adapter guarantees _shape_ only. Path canonicalization, file limits and
 required files stay with the validator in the generation pipeline, which runs
 before any checkpoint is promoted (ADR-0007). Model output is untrusted input.
 
+## Bounded builds
+
+A build is never one response (docs/decisions.md, "Resolved 2026-09-29").
+`bounded-build.ts` asks for an outline first (the spec and a manifest of
+files), then writes the files a group at a time, each group in a call of at
+most 32,000 output tokens that sees only the files it depends on. A group
+that truncates is split and asked again, down to one file, so only a single
+file too large for a response of its own can fail a build for size. A
+follow-up is a patch: the outline names the files to add, replace and
+delete, and every other file carries over.
+
+`BoundedPlanProvider` runs every step in turn behind the `ModelProvider`
+contract (the CLI below, the eval harness, the repair turn), and
+`runBoundedBuild` takes the step runner as a hook, which is how the Worker
+makes each call a durable Workflow step. `PlanProvider`, the single-response
+provider, is still here and still tested, and nothing in production calls it.
+
+`createScriptedBuildClient` is a `PlanClient` that answers a bounded build
+from a script, truncating any reply longer than the call's ceiling, so the
+whole orchestration can be exercised with no network and no key.
+
 ## Trying it
 
 Nothing else in the repository makes a live model call. This CLI is the only
@@ -51,7 +72,13 @@ ANTHROPIC_API_KEY=... pnpm --filter @vibld/ai plan "a landing page for a cyberse
 # write the generated project out and build it like any npm project
 ANTHROPIC_API_KEY=... pnpm --filter @vibld/ai plan "..." --out /tmp/generated
 cd /tmp/generated && npm install && npm run build
+
+# with a style preset, as the builder sends one
+ANTHROPIC_API_KEY=... pnpm --filter @vibld/ai plan "..." --style glassmorphism
 ```
+
+Each step of the bounded build is printed as it starts, with the second it
+started at.
 
 That second form is the portability check from ADR-0002: the output must build
 with ordinary npm commands and no Vibld anything.
