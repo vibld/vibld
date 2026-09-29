@@ -35,6 +35,32 @@ export interface AccessStatus {
    * the wrong thing to tell somebody whose account is being deleted.
    */
   deletion?: { purgeAfter: string };
+  /**
+   * Present when a platform admin banned this account (docs/decisions.md
+   * D73): every route refuses it, and saying "we could not check your
+   * account" would invite retrying something that will not change.
+   */
+  banned?: { message: string };
+}
+
+/**
+ * The refusal every route gives a banned account (`accountBanned` in
+ * `worker/principal.ts`), recognised so the shell says so.
+ */
+export function readBanRefusal(
+  status: number,
+  body: unknown,
+): { message: string } | null {
+  if (status !== 403 || typeof body !== 'object' || body === null) return null;
+  const value = body as { reason?: unknown; error?: unknown };
+  return value.reason === 'account-banned'
+    ? {
+        message:
+          typeof value.error === 'string'
+            ? value.error
+            : 'This account has been banned.',
+      }
+    : null;
 }
 
 /** What the shell assumes when it cannot find out. Closed, deliberately. */
@@ -59,10 +85,18 @@ export async function fetchAccess(): Promise<AccessStatus> {
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
     if (!response.ok) {
-      const deletion = readDeletionRefusal(
-        response.status,
-        await response.json().catch(() => null),
-      );
+      const body: unknown = await response.json().catch(() => null);
+      const banned = readBanRefusal(response.status, body);
+      if (banned) {
+        return {
+          allowed: false,
+          mode: 'invite',
+          message: null,
+          decided: true,
+          banned,
+        };
+      }
+      const deletion = readDeletionRefusal(response.status, body);
       return deletion
         ? {
             allowed: false,

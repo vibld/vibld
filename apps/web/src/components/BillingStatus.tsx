@@ -2,6 +2,7 @@ import { Show } from '@clerk/react';
 import { useEffect, useId, useState } from 'react';
 import {
   TIER_LABELS,
+  describeGift,
   fetchBillingStatus,
   formatUsd,
   openBillingPortal,
@@ -97,6 +98,16 @@ export function BillingStatusPanel() {
       </p>
 
       {/*
+       * A plan an admin gave, and until when (D73): the tier above can be
+       * one nobody is paying for, and it ends on its own.
+       */}
+      {describeGift(status) ? (
+        <p className="pane-note" role="status">
+          {describeGift(status)}
+        </p>
+      ) : null}
+
+      {/*
        * Said here as well as on the refusal, because the refusal only
        * arrives once somebody has typed a prompt and pressed build.
        */}
@@ -169,15 +180,17 @@ export function BillingStatusPanel() {
       ) : null}
 
       {/*
-       * Only for a plan that is live and not already ending. The tier is
+       * Only for a plan that is live and not already ending. `planTier` is
        * what the status route reads from an active subscription, so "free"
-       * means there is nothing here to cancel, and a plan already set to
+       * means there is nothing here to cancel (a gifted plan is not one),
+       * and a plan already set to
        * end says so in the readout above and is managed from the portal.
        * Cancelling goes through vibld rather than the portal's own page so
        * that a monthly plan is offered its retention coupon and an annual
        * one is not (`/api/billing/cancel`).
        */}
-      {status.tier !== 'free' && !status.cancelAtPeriodEnd ? (
+      {(status.planTier ?? status.tier) !== 'free' &&
+      !status.cancelAtPeriodEnd ? (
         <button
           type="button"
           className="chip"

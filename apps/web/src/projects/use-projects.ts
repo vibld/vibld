@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-import { isAdminPath } from '../admin/route.ts';
+import { isAdminArea } from '../admin/route.ts';
 import { navigate } from '../admin/use-pathname.ts';
 import type { BuilderSession, BuilderState } from '../generation/session.ts';
 import { loadKnowledge } from '../generation/knowledge-store.ts';
@@ -327,7 +327,7 @@ export function useProjects(
     if (mode !== 'server') return;
     const action = pathAction(
       pathname,
-      isAdminPath(pathname),
+      isAdminArea(pathname),
       currentRef.current?.id ?? null,
       listRef.current?.projects ?? null,
     );

@@ -332,6 +332,89 @@ unchanged. The output still installs and builds with plain npm (ADR-0002):
 the eval's stub now takes its configuration from the same templates, so
 CI's build of it builds them.
 
+**Admins can gift a plan, ban, delete and override one account, and every
+admin action is logged.** Chris decided on 2026-09-29 (D73). Each account
+has an admin page, `/admin/users/<Clerk user id>`, opened by email from the
+admin page: identity, plan and whether it is gifted, projects with their
+sites, spend this month and credit, recent runs with how each ended, ban
+state, and every admin action taken on it. The routes are
+`/api/admin/user/{detail,gift,gift/revoke,overrides,ban,unban,delete}` and
+`/api/admin/audit`, all behind `requireAdmin`; the state is in D1
+(`0038_admin_controls.sql`: `plan_gifts`, `user_overrides`, `user_bans`,
+`admin_audit_log`).
+
+- **Gift.** A Build or Ship tier with an optional last day and no Stripe
+  charge. `planOf` in `spendable.ts` is now the one reading of the tier, so
+  a gift counts wherever a subscription did: the models (`tierOf`), the
+  monthly allowance (`spendableFor`), the active-project limit and the
+  billing panel, which says the plan is gifted and until when. Revocable.
+- **Ban.** Written to D1 first, so `principal.ts` refuses every
+  authenticated request from the account with 403 `account-banned` even on
+  a live session; then Clerk is asked to ban the user (Backend API
+  `POST /v1/users/{id}/ban`, with `CLERK_SECRET_KEY`), running builds are
+  stopped by the same steps as Stop (`stopBuild` in `run-control.ts`), the
+  account's preview and share-link previews are stopped, and each live
+  site is held by the operator hold. Who and why are recorded.
+- **Delete.** The existing account deletion (L32), asked for by an admin,
+  who types the account's email to confirm; the Worker checks it against
+  Clerk. No second deletion path.
+- **Overrides.** A per-account active-project limit and monthly spend cap,
+  taking precedence over the tier's wherever those are read.
+- **Audit log.** One append-only row per admin action: gift, revoke,
+  overrides, ban, unban, delete, and the older credit grant, suspension
+  lift, site hold and release, and share-link hold and release. Shown on
+  the account page and, most recent first, on the admin page.
+
+Decided while implementing it, and Chris's to reverse:
+
+- A gift and a subscription: the account has the higher of the two while
+  the gift is in force. A gift at or below what the account pays for
+  changes nothing, but the billing panel still mentions it. Giving a new
+  gift revokes the one before it rather than stacking. A last day typed as
+  a date means through the end of that day, UTC.
+- The billing panel offers "Cancel plan" only where there is a real
+  subscription, and still offers "Upgrade" only to an account whose
+  effective tier is Free, so a gifted Build account is not offered Ship.
+- On a deployment that sells no plans (billing not configured), a gift
+  changes no models, as a subscription would not.
+- Overrides replace the tier's figure in both directions, above a gift or
+  subscription as well as below. The spend cap replaces the monthly
+  allowance only: top-up credit is still spendable on top, and a
+  suspension still refuses everything. The limits are 0 to 1,000 projects
+  and $0 to $10,000; "no limit" is not an override value. The project-limit
+  refusal still reads "A free account can have N active projects" when N is
+  an override.
+- A ban refuses every route, the deletion routes and the billing portal
+  included, and needs a reason; the person is told they are banned and to
+  email support@vibld.com, not the reason. It does not cancel a Stripe
+  subscription, revoke the GitHub grant or delete anything. The account's
+  share links stop serving with it and, never having been held, serve
+  again when it is lifted. Each effect is attempted and reported on its
+  own; banning again retries the ones that failed. The ban adds one D1 read
+  to every authenticated request, made alongside the deletion check, and
+  fails closed like it.
+- Unban lifts the Clerk ban and the refusal and does not republish the
+  sites the ban held: the page names them, and each is released from Site
+  takedown.
+- An admin's deletion keeps L32's 30 days, and the owner can still keep the
+  account by signing in before the purge unless it is also banned; the page
+  says so. The sites are held by the operator hold, since only the owner may
+  use the owner's takedown (ADR-0013).
+- Nothing stops an admin banning or deleting their own account or another
+  admin's.
+- Invites, invite revocations and the read-only lookups are not in the audit
+  log: D73 did not list them, and an invite's subject is an email address.
+  The log stores the acting admin's email, as `billing_admin_credits` does,
+  and never the target's email or a share token (a share-link hold records
+  `project:<id>`). The older actions' rows are written once the action has
+  succeeded; if the row cannot be written the action stands and the answer
+  says `audited: false`. The new actions write the change and its row in
+  one batch.
+- The log is append-only in D1 itself: triggers refuse a delete and any
+  update except to `target_user_id`, which the account purge re-keys to the
+  tombstone. Rows are kept after the purge, with no 12-month expiry. The
+  purge deletes an account's gifts, overrides and ban.
+
 ### Resolved 2026-09-29
 
 **Builds are generated in bounded steps, and follow-ups as patches.** Every

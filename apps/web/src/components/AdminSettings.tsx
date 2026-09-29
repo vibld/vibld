@@ -1,3 +1,4 @@
+import { AdminAccounts } from './AdminAccounts.tsx';
 import { AdminPanel } from './AdminPanel.tsx';
 import { DeletionsPanel } from './DeletionsPanel.tsx';
 import { InvitePanel } from './InvitePanel.tsx';
@@ -75,6 +76,7 @@ export function AdminSettings({ isAdmin }: { isAdmin: boolean | null }) {
       </div>
 
       <div className="adminpage__tools">
+        <AdminAccounts />
         <AdminPanel />
         <InvitePanel />
         <ParkedQueuePanel />

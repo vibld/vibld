@@ -532,6 +532,11 @@ export class AccountDeletionStore {
    * Everything else keyed to the person that is not kept: the GitHub grant
    * and its push history (repository names are theirs), their referral code,
    * and the invite they redeemed, which is keyed by their email address.
+   *
+   * And what an admin set for the account (docs/decisions.md D73): a gifted
+   * plan, overrides of its limits, and a ban. None of them is money, and
+   * none means anything once the account is gone; what was done, and by
+   * whom, stays in the audit log, re-keyed with the credit records below.
    */
   async deleteAccountRows(userId: string): Promise<void> {
     for (const sql of [
@@ -539,12 +544,15 @@ export class AccountDeletionStore {
       `DELETE FROM github_bindings WHERE user_id = ?1`,
       `DELETE FROM referral_codes WHERE user_id = ?1`,
       `DELETE FROM access_invites WHERE redeemed_by_user_id = ?1`,
+      `DELETE FROM plan_gifts WHERE user_id = ?1`,
+      `DELETE FROM user_overrides WHERE user_id = ?1`,
+      `DELETE FROM user_bans WHERE user_id = ?1`,
     ]) {
       await this.#db.prepare(sql).bind(userId).run();
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 4;
+  static readonly ACCOUNT_ROW_QUERIES = 7;
 
   /**
    * The published site's catalogue, for a site that is already down.
@@ -622,8 +630,8 @@ export class AccountDeletionStore {
 
   /**
    * The rest of what is kept: credit grants (including referral payouts,
-   * which are paid as credit), both sides of a referral, and parked Stripe
-   * payloads. A step of its own so that no one step of the purge costs more
+   * which are paid as credit), both sides of a referral, parked Stripe
+   * payloads, and the admin audit log. A step of its own so that no one step of the purge costs more
    * than the smallest nightly share can buy.
    *
    * Two credit ids embed the user id (`referral:<side>:<user>` and the
@@ -682,9 +690,20 @@ export class AccountDeletionStore {
       )
       .bind(userId, tombstone)
       .run();
+    // The admin audit log (D73) is kept, like the credit an admin granted:
+    // it is the record of what was done to an account, and it stays after
+    // the account. The one column it lets change is this one, so it keeps
+    // what was done without keeping whose account it was.
+    await this.#db
+      .prepare(
+        `UPDATE admin_audit_log SET target_user_id = ?2
+          WHERE target_user_id = ?1`,
+      )
+      .bind(userId, tombstone)
+      .run();
   }
 
-  static readonly CREDIT_ROW_QUERIES = 4;
+  static readonly CREDIT_ROW_QUERIES = 5;
 
   /**
    * The last step: the request itself becomes the audit record L32 keeps,

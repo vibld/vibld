@@ -4,6 +4,7 @@ import { resolvePrincipal } from '../worker/principal.ts';
 import { resetClerkKeyCache } from '../worker/clerk-auth.ts';
 import type { ClerkJwk } from '../worker/clerk-auth.ts';
 import { AccountDeletionStore } from '../worker/account-deletion-store.ts';
+import { AdminStore } from '../worker/admin-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
 
@@ -320,5 +321,111 @@ describe('resolvePrincipal for an account scheduled for deletion', () => {
     const result = await signedIn(broken);
     assert.ok(result.denied);
     assert.equal(result.denied.status, 503);
+  });
+});
+
+/**
+ * An account a platform admin banned (docs/decisions.md D73) is refused on
+ * every authenticated request, whatever session it still holds: a Clerk ban
+ * ends the sessions Clerk knows of, and a token already issued stays valid
+ * until it expires. Here, for the reason the deletion refusal is here.
+ */
+describe('resolvePrincipal for a banned account', () => {
+  beforeEach(() => resetClerkKeyCache());
+
+  async function signedIn(db: D1Database, allow = false) {
+    resetClerkKeyCache();
+    const { privateKey, jwk } = await makeKeypair('k1');
+    const liveNow = Math.floor(Date.now() / 1000);
+    const token = await sign(
+      privateKey,
+      { alg: 'RS256', kid: 'k1' },
+      { ...validPayload, exp: liveNow + 3600, iat: liveNow - 10 },
+    );
+    const restore = stubGlobalFetch(jwk);
+    try {
+      return await resolvePrincipal(
+        requestWithToken(token),
+        { CLERK_FRONTEND_API_URL: ISSUER, DB: db },
+        { allowPendingDeletion: allow },
+      );
+    } finally {
+      restore();
+    }
+  }
+
+  function database(): D1Database {
+    return new SqliteD1Database(schemaSql()) as unknown as D1Database;
+  }
+
+  function audit(action: 'ban' | 'unban') {
+    return {
+      at: '2026-09-29T00:00:00.000Z',
+      adminEmail: 'admin@vibld.com',
+      action,
+      targetUserId: validPayload.sub,
+      target: null,
+      reason: 'test',
+      detail: null,
+    };
+  }
+
+  it('refuses with a 403 and its own reason, even with a valid token', async () => {
+    const db = database();
+    await new AdminStore(db).recordBan(
+      validPayload.sub,
+      'admin@vibld.com',
+      'Phishing pages',
+      '2026-09-29T00:00:00.000Z',
+      audit('ban'),
+    );
+    const result = await signedIn(db);
+    assert.ok(result.denied);
+    assert.equal(result.denied.status, 403);
+    const body = (await result.denied.json()) as {
+      error: string;
+      reason: string;
+    };
+    assert.equal(body.reason, 'account-banned');
+    assert.match(body.error, /banned/);
+    // The reason is the admins' record, not something the person is told.
+    assert.doesNotMatch(body.error, /Phishing/);
+  });
+
+  it('refuses the deletion routes too, which nothing else reaches past', async () => {
+    const db = database();
+    await new AdminStore(db).recordBan(
+      validPayload.sub,
+      'admin@vibld.com',
+      'x',
+      '2026-09-29T00:00:00.000Z',
+      audit('ban'),
+    );
+    const result = await signedIn(db, true);
+    assert.ok(result.denied);
+    assert.equal(result.denied.status, 403);
+  });
+
+  it('lets the account back in once the ban is lifted', async () => {
+    const db = database();
+    const store = new AdminStore(db);
+    await store.recordBan(
+      validPayload.sub,
+      'admin@vibld.com',
+      'x',
+      '2026-09-29T00:00:00.000Z',
+      audit('ban'),
+    );
+    assert.equal(
+      await store.liftBan(
+        validPayload.sub,
+        'admin@vibld.com',
+        null,
+        '2026-09-30T00:00:00.000Z',
+        audit('unban'),
+      ),
+      true,
+    );
+    assert.equal((await signedIn(db)).denied, null);
   });
 });

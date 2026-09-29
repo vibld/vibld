@@ -1,10 +1,13 @@
+import { AdminStore } from './admin-store.ts';
 import { BillingStore } from './billing-store.ts';
+import type { SubscriptionRecord } from './billing-store.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
-  monthlyAllowanceMicroUsd,
-  tierFor,
+  activeProjectLimitFor,
+  effectiveTier,
+  monthlyAllowanceFor,
 } from './entitlement.ts';
-import type { Tier } from './entitlement.ts';
+import type { EffectiveTier, Tier } from './entitlement.ts';
 import { billingConfigured } from './billing-handlers.ts';
 import type { Principal } from './principal.ts';
 
@@ -69,16 +72,20 @@ export async function spendableFor(
   if (await billing.isSuspended(principal.userId)) {
     return { monthlyAllowance: 0, topupCeiling: 0, suspended: true };
   }
-  const subscription = await billing.findActiveSubscription(principal.userId);
+  const [plan, overrides] = await Promise.all([
+    planOf(env.DB!, principal.userId),
+    new AdminStore(env.DB!).overrides(principal.userId),
+  ]);
   const freeAllowance = positiveInt(
     env.VIBLD_FREE_MONTHLY_MICRO_USD,
     DEFAULT_FREE_INCLUDED_MICRO_USD,
   );
   return {
-    monthlyAllowance: monthlyAllowanceMicroUsd(
-      tierFor(subscription),
-      freeAllowance,
-    ),
+    // An admin's cap for this account, where one is set, in place of the
+    // tier's included amount (D73). Read here, beside the tier, for the
+    // reason this function exists: one answer to "what may this account
+    // spend" for every route that reserves.
+    monthlyAllowance: monthlyAllowanceFor(plan.tier, freeAllowance, overrides),
     // Stripe top-ups and admin-granted credit (L4) combined -- see
     // `totalSpendableCreditMicroUsd`'s own comment.
     topupCeiling: await billing.totalSpendableCreditMicroUsd(principal.userId),
@@ -105,7 +112,47 @@ export async function tierOf(
   principal: Principal,
 ): Promise<Tier | null> {
   if (!billingConfigured(env) || !env.DB) return null;
-  return tierFor(
-    await new BillingStore(env.DB).findActiveSubscription(principal.userId),
+  return (await planOf(env.DB, principal.userId)).tier;
+}
+
+/** What `planOf` answers: the tier, and the two things it was read from. */
+export interface Plan extends EffectiveTier {
+  subscription: SubscriptionRecord | undefined;
+}
+
+/**
+ * The tier this account has now: its subscription's, or a gifted plan's
+ * where that is higher and still in force (D73, `effectiveTier`).
+ *
+ * The one reading of the tier every caller makes, so a gift counts
+ * wherever a paid subscription does: the models a plan unlocks
+ * (`tierOf`), the monthly allowance (`spendableFor`), the active-project
+ * limit (`project-handlers.ts`, `share-handlers.ts`) and the billing
+ * panel. Two reads, the subscription mirror and the gift, made together.
+ */
+export async function planOf(
+  db: D1Database,
+  userId: string,
+  now: number = Date.now(),
+): Promise<Plan> {
+  const [subscription, gift] = await Promise.all([
+    new BillingStore(db).findActiveSubscription(userId),
+    new AdminStore(db).currentGift(userId),
+  ]);
+  return { ...effectiveTier(subscription, gift, now), subscription };
+}
+
+/**
+ * How many active projects this account may have: an admin's override
+ * where one is set, and the tier's limit otherwise (D73).
+ */
+export async function projectLimitOf(
+  db: D1Database,
+  userId: string,
+  tier: Tier,
+): Promise<number | null> {
+  return activeProjectLimitFor(
+    tier,
+    await new AdminStore(db).overrides(userId),
   );
 }

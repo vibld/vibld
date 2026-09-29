@@ -21,6 +21,7 @@
 
 import { fetchClerkKeys, verifyClerkJwt } from './clerk-auth.ts';
 import { AccountDeletionStore } from './account-deletion-store.ts';
+import { AdminStore } from './admin-store.ts';
 import type { RunRefusal } from '@vibld/core';
 
 export interface Principal {
@@ -90,6 +91,27 @@ export function deletionScheduled(purgeAfter: string): Response {
         'This account is scheduled for deletion. Sign in and choose to keep it before the date shown, or it will be deleted.',
       reason: 'deletion-scheduled' satisfies RunRefusal,
       purgeAfter,
+    },
+    403,
+  );
+}
+
+/**
+ * The refusal every route gives an account a platform admin banned
+ * (docs/decisions.md D73).
+ *
+ * 403 for the reason `deletionScheduled` gives, and without the reason for
+ * the ban: that was written for the admins who read the audit log, not for
+ * the person refused.
+ */
+export const BANNED_MESSAGE =
+  'This account has been banned from vibld. If you think this is a mistake, email support@vibld.com.';
+
+export function accountBanned(): Response {
+  return json(
+    {
+      error: BANNED_MESSAGE,
+      reason: 'account-banned' satisfies RunRefusal,
     },
     403,
   );
@@ -175,14 +197,25 @@ export async function resolvePrincipal(
   // assumed absent, because the other answer lets an account that asked to
   // leave carry on while D1 is unwell, and the routes that matter most need
   // D1 to do anything anyway.
-  if (!options.allowPendingDeletion && env.DB) {
+  //
+  // A ban (D73) is checked here for the same reason, and ahead of the
+  // deletion: a Clerk ban ends the sessions it knows of, but a token already
+  // issued stays valid until it expires, and this is what refuses it. No
+  // route is exempt, the deletion routes included, because a banned account
+  // is refused everything. The two reads are made together, so the ban
+  // adds a query to every request but not a round trip's wait.
+  if (env.DB) {
     let pending: { purgeAfter: string } | null;
+    let banned: boolean;
     try {
-      pending = await new AccountDeletionStore(env.DB).pending(
-        principal.userId,
-      );
+      [pending, banned] = await Promise.all([
+        options.allowPendingDeletion
+          ? null
+          : new AccountDeletionStore(env.DB).pending(principal.userId),
+        new AdminStore(env.DB).isBanned(principal.userId),
+      ]);
     } catch (error) {
-      console.error('could not check for a deletion request', error);
+      console.error('could not check this account', error);
       return {
         denied: json(
           { error: 'Could not check this account right now. Try again.' },
@@ -190,6 +223,7 @@ export async function resolvePrincipal(
         ),
       };
     }
+    if (banned) return { denied: accountBanned() };
     if (pending) return { denied: deletionScheduled(pending.purgeAfter) };
   }
 

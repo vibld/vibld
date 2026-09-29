@@ -102,6 +102,20 @@ export function AccessGate({
   // true of it. The wind-down controls are not offered here, because every
   // route behind them now refuses this account; the deletion already does
   // all of what they would.
+  // Banned by an admin (D73). Nothing behind the gate will answer this
+  // account, so the screen says that and offers only signing out.
+  if (status.banned) {
+    return (
+      <div className="auth-gate">
+        <GateBrand />
+        <div className="banner" role="status">
+          <p className="banner__title">This account has been banned</p>
+          <p className="banner__detail">{status.banned.message}</p>
+        </div>
+        {signOut}
+      </div>
+    );
+  }
   if (status.deletion) {
     return (
       <DeletionScheduledNotice

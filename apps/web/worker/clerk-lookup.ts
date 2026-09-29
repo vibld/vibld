@@ -124,3 +124,122 @@ export async function fetchClerkUserCreatedAt(
     ? createdAt
     : null;
 }
+
+/** What a ban or an unban at Clerk came to. */
+export type ClerkBanResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Ban or unban a user at Clerk (Backend API `POST /v1/users/{id}/ban` and
+ * `/unban`), with the same secret the lookup above uses (docs/decisions.md
+ * D73).
+ *
+ * Clerk documents a ban as revoking every session the user has and refusing
+ * any new sign-in, which is the half of a ban this Worker cannot do on its
+ * own. The other half, refusing a token already issued, is `principal.ts`
+ * reading `user_bans`. A 404 is reported rather than taken as success: a
+ * user Clerk does not have cannot sign in anyway, but the admin should know
+ * the id did not match.
+ *
+ * Not verified against a live call from this environment: there is no
+ * Clerk secret here. The paths are the ones Clerk documents, and the
+ * method and bearer header are the ones this file already uses.
+ */
+export async function setClerkBan(
+  env: ClerkLookupEnv,
+  userId: string,
+  banned: boolean,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ClerkBanResult> {
+  const verb = banned ? 'ban' : 'unban';
+  if (!clerkLookupConfigured(env)) {
+    return {
+      ok: false,
+      error: `CLERK_SECRET_KEY is not set, so Clerk was not asked to ${verb} the user.`,
+    };
+  }
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}/${verb}`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+  } catch {
+    return { ok: false, error: `Could not reach Clerk to ${verb} the user.` };
+  }
+  if (response.ok) return { ok: true };
+  return {
+    ok: false,
+    error: `Clerk refused to ${verb} the user (${response.status}).`,
+  };
+}
+
+/** The parts of a Clerk user the admin user page shows. */
+export interface ClerkUserSummary {
+  email: string | null;
+  createdAt: number | null;
+  lastSignInAt: number | null;
+  /** Clerk's own ban flag, which can disagree with ours if a call failed. */
+  banned: boolean | null;
+}
+
+/**
+ * Read one Clerk user by id, for the admin user page and for checking the
+ * address an admin typed to confirm a deletion. Null when that cannot be
+ * established, which the caller reports rather than guesses at.
+ *
+ * The primary address is the one named by `primary_email_address_id`; an
+ * account with no primary falls back to its first address.
+ */
+export async function fetchClerkUser(
+  env: ClerkLookupEnv,
+  userId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ClerkUserSummary | null> {
+  if (!clerkLookupConfigured(env)) return null;
+  let response: Response;
+  try {
+    response = await fetchImpl(
+      `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}`,
+      {
+        headers: { authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
+        signal: AbortSignal.timeout(8_000),
+      },
+    );
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return null;
+  }
+  if (typeof body !== 'object' || body === null) return null;
+  const user = body as {
+    primary_email_address_id?: unknown;
+    email_addresses?: unknown;
+    created_at?: unknown;
+    last_sign_in_at?: unknown;
+    banned?: unknown;
+  };
+  const addresses = Array.isArray(user.email_addresses)
+    ? (user.email_addresses as { id?: unknown; email_address?: unknown }[])
+    : [];
+  const primary =
+    addresses.find((entry) => entry.id === user.primary_email_address_id) ??
+    addresses[0];
+  const number = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return {
+    email:
+      typeof primary?.email_address === 'string' ? primary.email_address : null,
+    createdAt: number(user.created_at),
+    lastSignInAt: number(user.last_sign_in_at),
+    banned: typeof user.banned === 'boolean' ? user.banned : null,
+  };
+}

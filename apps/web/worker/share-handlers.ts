@@ -8,8 +8,7 @@ import {
   shareTokenInPath,
 } from './access-gate.ts';
 import { BillingStore } from './billing-store.ts';
-import { SUSPENDED_MESSAGE } from './spendable.ts';
-import { ACTIVE_PROJECT_LIMIT, tierFor } from './entitlement.ts';
+import { SUSPENDED_MESSAGE, planOf, projectLimitOf } from './spendable.ts';
 import type { Tier } from './entitlement.ts';
 import {
   MediaRoomError,
@@ -379,10 +378,9 @@ async function remix(
   if (!source) return GONE();
 
   const tierOf =
-    deps.tierOf ??
-    (async (who: string) =>
-      tierFor(await new BillingStore(env.DB!).findActiveSubscription(who)));
-  const limit = ACTIVE_PROJECT_LIMIT[await tierOf(userId)];
+    deps.tierOf ?? (async (who: string) => (await planOf(env.DB!, who)).tier);
+  // The tier's limit, or an admin's override of it for this account (D73).
+  const limit = await projectLimitOf(env.DB!, userId, await tierOf(userId));
   const newId = deps.newId ?? (() => crypto.randomUUID());
   const now = clock().toISOString();
   const id = newId();

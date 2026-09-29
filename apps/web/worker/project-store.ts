@@ -862,7 +862,10 @@ export class ProjectStore {
    * - the owner has asked for the account to be deleted (`account_deletions`,
    *   the reading `AccountDeletionStore.pending` makes): from the request
    *   on, the account is refused everything, and its work staying viewable
-   *   by strangers would be the one exception.
+   *   by strangers would be the one exception;
+   * - the owner is banned (`user_bans`, docs/decisions.md D73): a ban stops
+   *   everything the account offers to others, and lifting it lets the
+   *   links serve again, since the link was never held.
    *
    * `null` for every one of them alike, so what a stranger is told does not
    * say which: "held" or "suspended" is a fact about somebody else.
@@ -880,7 +883,10 @@ export class ProjectStore {
             AND NOT EXISTS (
               SELECT 1 FROM account_deletions AS d
                WHERE d.user_id = p.user_id AND d.cancelled_at IS NULL
-                 AND d.purged_at IS NULL)`,
+                 AND d.purged_at IS NULL)
+            AND NOT EXISTS (
+              SELECT 1 FROM user_bans AS b
+               WHERE b.user_id = p.user_id AND b.lifted_at IS NULL)`,
       )
       .bind(token)
       .first<ProjectRow>();

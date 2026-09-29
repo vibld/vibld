@@ -88,7 +88,15 @@ export type RunRefusal =
    * `access-refused` because the person is still admitted and can still
    * reach billing and their own account.
    */
-  | 'account-suspended';
+  | 'account-suspended'
+  /**
+   * A platform admin banned this account (docs/decisions.md D73). Every
+   * authenticated request from it is refused, whatever session it still
+   * holds, until an admin lifts the ban. Distinct from `access-refused`
+   * because an invite does not undo it, and from `account-suspended`
+   * because billing is not what it is about and nothing is reachable.
+   */
+  | 'account-banned';
 
 /**
  * Why a started run ended. Exactly one is recorded per run.
@@ -177,6 +185,7 @@ export const RUN_REFUSALS = [
   'accounting-unavailable',
   'deletion-scheduled',
   'account-suspended',
+  'account-banned',
 ] as const satisfies readonly RunRefusal[];
 
 /** Every stop, for the same reason. */

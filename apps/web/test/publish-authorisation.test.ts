@@ -206,7 +206,9 @@ describe('nothing but a person can publish', () => {
     const { from, to } = rangeOf(index, 'async function handleAdminHold(');
     const body = index.slice(from, to);
     const admin = body.indexOf('requireAdmin(');
-    const held = body.indexOf('holdProject(');
+    // Through `operatorHold`, the one function that calls `holdProject`,
+    // which a ban and an admin's deletion of an account share (D73).
+    const held = body.indexOf('operatorHold(');
     const released = body.indexOf('releaseProject(');
     assert.notEqual(admin, -1, 'handleAdminHold checks nobody');
     assert.ok(admin < released, 'it releases before checking who is asking');

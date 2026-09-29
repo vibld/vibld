@@ -42,6 +42,42 @@ export interface BillingStatus {
    * operator lifts it. Optional for the same reason `signupCredit` is.
    */
   suspended?: boolean;
+  /**
+   * The tier this account's own subscription pays for, apart from any gift
+   * (docs/decisions.md D73). Optional for the same reason; absent, `tier`
+   * is the subscription's, as it always was.
+   */
+  planTier?: Tier;
+  /**
+   * A plan an admin gave this account with no charge, while it is in
+   * force, and whether it is the one that decides `tier` above.
+   */
+  gift?: {
+    tier: 'build' | 'ship';
+    endsAt: string | null;
+    inUse: boolean;
+  } | null;
+}
+
+/**
+ * The line that says a plan is gifted and until when, or null when there
+ * is no gift in force. Said even where the account also pays for as much,
+ * so nobody is surprised when the gift ends and nothing changes, or does.
+ */
+export function describeGift(status: BillingStatus): string | null {
+  const gift = status.gift;
+  if (!gift) return null;
+  const until = gift.endsAt
+    ? `until ${new Date(gift.endsAt).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'UTC',
+      })}`
+    : 'with no end date';
+  return `${TIER_LABELS[gift.tier]} plan gifted ${until}${
+    gift.inUse ? '' : ', alongside the plan you pay for'
+  }.`;
 }
 
 async function authHeaders(

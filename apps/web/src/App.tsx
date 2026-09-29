@@ -1,7 +1,13 @@
 import { AccessGate } from './components/AccessGate.tsx';
 import { AdminSettings } from './components/AdminSettings.tsx';
+import { AdminUserPage } from './components/AdminUserPage.tsx';
 import { MockupChooser } from './components/MockupChooser.tsx';
-import { ADMIN_PATH, isAdminPath } from './admin/route.ts';
+import {
+  ADMIN_PATH,
+  adminUserIdFromPath,
+  isAdminArea,
+  isAdminPath,
+} from './admin/route.ts';
 import { useRef } from 'react';
 import { navigate, usePathname } from './admin/use-pathname.ts';
 import { useFocusOnChange } from './admin/use-focus-on-change.ts';
@@ -91,7 +97,10 @@ function Builder() {
   // stepped into settings during one would otherwise come back to an empty
   // shell (internal issue 184).
   const pathname = usePathname();
-  const onAdminPage = isAdminPath(pathname);
+  // The tools page, or one account's page under it (D73). Both replace the
+  // builder the same way.
+  const onAdminPage = isAdminArea(pathname);
+  const adminUserId = adminUserIdFromPath(pathname);
   // Projects live on the Worker where the deployment generates with a
   // model, and not at all where it runs the in-browser fake: see
   // `use-projects.ts` for why, and for what each address means.
@@ -229,7 +238,12 @@ function Builder() {
         ref={body}
         tabIndex={-1}
       >
-        {onAdminPage ? <AdminSettings isAdmin={state.isAdmin} /> : null}
+        {isAdminPath(pathname) ? (
+          <AdminSettings isAdmin={state.isAdmin} />
+        ) : null}
+        {adminUserId !== null ? (
+          <AdminUserPage isAdmin={state.isAdmin} userId={adminUserId} />
+        ) : null}
         {onProjectsPage ? <ProjectsView projects={projects} /> : null}
         <section
           className="column column--left"

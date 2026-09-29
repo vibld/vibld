@@ -77,6 +77,13 @@ describe('the refusal identifiers this Worker answers with', () => {
     assert.ok(used.has('account-suspended'), 'no account-suspended refusal');
   });
 
+  it('tell a banned account apart from a suspended or uninvited one', async () => {
+    // A ban (docs/decisions.md D73) is lifted by an admin, not by paying or
+    // by an invite, so it must not arrive as either of those refusals.
+    const { used } = await wireReasons();
+    assert.ok(used.has('account-banned'), 'no account-banned refusal');
+  });
+
   it('tell an unreadable ledger apart from a spent one', async () => {
     const { used } = await wireReasons();
     assert.ok(used.has('accounting-unavailable'));
@@ -112,9 +119,13 @@ describe('the refusal identifiers this Worker answers with', () => {
     // `deletion-scheduled` is not a missing identity: it is answered only
     // after the token verified, to an account that asked to be deleted
     // (docs/decisions.md L32), and it is still held to the vocabulary above.
+    // `account-banned` is the same kind of answer, to an account an admin
+    // banned (D73).
     const identity = reasons.filter(
       (reason) =>
-        reason !== 'not-configured' && reason !== 'deletion-scheduled',
+        reason !== 'not-configured' &&
+        reason !== 'deletion-scheduled' &&
+        reason !== 'account-banned',
     );
     assert.ok(identity.length >= 2, 'expected both identity paths to answer');
     assert.equal(

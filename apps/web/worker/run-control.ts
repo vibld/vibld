@@ -625,8 +625,50 @@ export async function handleRun(
   }
 
   // DELETE: stop it.
+  const stopped = await stopBuild(
+    projects,
+    generation,
+    userId,
+    runId,
+    now,
+    deps,
+  );
+  if (stopped.kind === 'missing') return NOT_FOUND();
+  if (stopped.kind === 'still-running') {
+    return json(
+      { error: 'The build could not be stopped. It is still running.' },
+      503,
+    );
+  }
+  return json({ run: stopped.view });
+}
+
+/** What stopping one build came to. */
+export type StopOutcome =
+  | { kind: 'missing' }
+  | { kind: 'stopped'; view: RunView }
+  | { kind: 'still-running' };
+
+/**
+ * Stop one of this account's builds: terminate its Workflow, mark it
+ * cancelled and settle what it spent.
+ *
+ * The body of `DELETE /api/runs/:id`, apart from the route so that a ban
+ * (docs/decisions.md D73, `admin-users.ts`) stops an account's builds by the
+ * same steps its owner's Stop takes, rather than a second copy of them that
+ * could come to settle a stopped run differently.
+ */
+export async function stopBuild(
+  projects: ProjectStore,
+  generation: Pick<D1GenerationStore, 'settleRun'>,
+  userId: string,
+  runId: string,
+  now: Date,
+  deps: Pick<RunControlDeps, 'terminate' | 'instanceStatus' | 'settleStopped'>,
+): Promise<StopOutcome> {
+  const load = () => projects.runStages(userId, runId);
   const rows = await load();
-  if (rows.length === 0) return NOT_FOUND();
+  if (rows.length === 0) return { kind: 'missing' };
   // A build whose only open row is its check (D69) has written, promoted
   // and settled what it built, and is building it to check it: there is
   // nothing of it left to stop that Stop ever stopped. It is answered as
@@ -638,7 +680,7 @@ export async function handleRun(
     (row) => unended(row) && !row.run_id.endsWith(CHECK_SUFFIX),
   );
   if (stoppable.length === 0 && rows.some(unended)) {
-    return json({ run: viewOf(runId, rows) });
+    return { kind: 'stopped', view: viewOf(runId, rows) };
   }
   if (rows.some(unended)) {
     if (deps.terminate) {
@@ -659,10 +701,7 @@ export async function handleRun(
             : INSTANCE_ENDED.has(status);
         if (!gone) {
           console.error('build could not be stopped', { runId, error });
-          return json(
-            { error: 'The build could not be stopped. It is still running.' },
-            503,
-          );
+          return { kind: 'still-running' };
         }
       }
     }
@@ -685,5 +724,45 @@ export async function handleRun(
       console.error('could not settle a stopped run', { runId, error });
     }
   }
-  return json({ run: view });
+  return { kind: 'stopped', view };
+}
+
+/**
+ * Stop every build this account has running, in every project, for a ban
+ * (D73). Each is stopped on its own, so one the engine will not end does
+ * not keep the others going; the ids of those still running are returned
+ * so the admin is told.
+ */
+export async function stopAccountBuilds(
+  projects: ProjectStore,
+  generation: Pick<D1GenerationStore, 'settleRun'>,
+  userId: string,
+  now: Date,
+  deps: Pick<RunControlDeps, 'terminate' | 'instanceStatus' | 'settleStopped'>,
+): Promise<{ stopped: string[]; failed: string[] }> {
+  const stopped: string[] = [];
+  const failed: string[] = [];
+  for (const project of await projects.list(userId)) {
+    for (const runId of await projects.unendedRuns(project.id)) {
+      try {
+        const outcome = await stopBuild(
+          projects,
+          generation,
+          userId,
+          runId,
+          now,
+          deps,
+        );
+        if (outcome.kind === 'still-running') failed.push(runId);
+        else if (outcome.kind === 'stopped') stopped.push(runId);
+      } catch (error) {
+        console.error('could not stop a build for a ban', {
+          runId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        failed.push(runId);
+      }
+    }
+  }
+  return { stopped, failed };
 }

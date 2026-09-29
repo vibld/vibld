@@ -83,3 +83,92 @@ export function monthlyAllowanceMicroUsd(
 export function allowancePeriodKey(at: number): string {
   return monthKey(at);
 }
+
+/**
+ * How the tiers order, for "the higher of the two" (D73). Free is the
+ * floor every account has without paying.
+ */
+export const TIER_RANK: Record<Tier, number> = { free: 0, build: 1, ship: 2 };
+
+/** A paid tier an admin gave with no Stripe charge (`plan_gifts`). */
+export interface PlanGift {
+  tier: Exclude<Tier, 'free'>;
+  /** Exclusive end, ISO 8601, or null for no end date. */
+  endsAt: string | null;
+  revokedAt: string | null;
+}
+
+/**
+ * Whether a gift is giving its tier at this instant: not revoked, and not
+ * past its end date. An end date that cannot be read is treated as passed,
+ * so a malformed row withholds a plan rather than handing one out for ever.
+ */
+export function giftInForce(gift: PlanGift, now: number): boolean {
+  if (gift.revokedAt !== null) return false;
+  if (gift.endsAt === null) return true;
+  const end = Date.parse(gift.endsAt);
+  return Number.isFinite(end) && now < end;
+}
+
+export interface EffectiveTier {
+  tier: Tier;
+  /**
+   * True when the gift is what gives this tier: it is in force and ranks
+   * above the subscription's. A gift equal to what somebody already pays
+   * for changes nothing, so it is not what their plan is.
+   */
+  gifted: boolean;
+  /** The gift in force, whether or not it is the one that decides. */
+  gift: PlanGift | null;
+}
+
+/**
+ * The tier an account has, from its subscription and any gift (D73): the
+ * higher of the two while the gift is in force, and the subscription's
+ * alone otherwise.
+ *
+ * Pure and beside `tierFor` because it is the same question. Every place
+ * that read `tierFor(subscription)` for a limit, an allowance or a model
+ * now reads this, so a gift counts wherever a paid plan does.
+ */
+export function effectiveTier(
+  subscription: Pick<SubscriptionRecord, 'tier' | 'status'> | undefined,
+  gift: PlanGift | null,
+  now: number,
+): EffectiveTier {
+  const paid = tierFor(subscription);
+  const active = gift && giftInForce(gift, now) ? gift : null;
+  if (active && TIER_RANK[active.tier] > TIER_RANK[paid]) {
+    return { tier: active.tier, gifted: true, gift: active };
+  }
+  return { tier: paid, gifted: false, gift: active };
+}
+
+/**
+ * What an admin set for one account in place of its plan's defaults
+ * (`user_overrides`, D73). Null in either field is "the plan decides".
+ */
+export interface UserOverrides {
+  activeProjectLimit: number | null;
+  monthlySpendCapMicroUsd: number | null;
+}
+
+/** The active-project limit, with an override taking precedence. */
+export function activeProjectLimitFor(
+  tier: Tier,
+  overrides: UserOverrides | null,
+): number | null {
+  return overrides?.activeProjectLimit ?? ACTIVE_PROJECT_LIMIT[tier];
+}
+
+/** The monthly allowance, with an override taking precedence. */
+export function monthlyAllowanceFor(
+  tier: Tier,
+  freeIncludedMicroUsd: number,
+  overrides: UserOverrides | null,
+): number {
+  return (
+    overrides?.monthlySpendCapMicroUsd ??
+    monthlyAllowanceMicroUsd(tier, freeIncludedMicroUsd)
+  );
+}

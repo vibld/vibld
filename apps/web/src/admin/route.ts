@@ -41,6 +41,38 @@ export function isAdminPath(pathname: string): boolean {
  * caller itself at the trusted boundary (ADR-0006); this only decides what
  * is worth drawing.
  */
+/**
+ * One account's admin page (docs/decisions.md D73): `/admin/users/<id>`,
+ * by the Clerk user id everything keys on, so the address can be copied
+ * into a note or a ticket and opened again. Never by email: an address in
+ * a URL ends up in history and in logs.
+ */
+export const ADMIN_USERS_PATH = `${ADMIN_PATH}/users`;
+
+export function adminUserPath(userId: string): string {
+  return `${ADMIN_USERS_PATH}/${encodeURIComponent(userId)}`;
+}
+
+/** The user id an account page's path names, or null for any other path. */
+export function adminUserIdFromPath(pathname: string): string | null {
+  const match = /^\/admin\/users\/([^/]+)\/?$/.exec(pathname);
+  if (!match) return null;
+  try {
+    const id = decodeURIComponent(match[1]!);
+    return /^user_[A-Za-z0-9]+$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a path is one of the admin pages, the tools or an account's. The
+ * builder steps aside for both, and neither is a project's address.
+ */
+export function isAdminArea(pathname: string): boolean {
+  return isAdminPath(pathname) || adminUserIdFromPath(pathname) !== null;
+}
+
 export type AdminPageView = 'checking' | 'denied' | 'admin';
 
 export function adminPageView(isAdmin: boolean | null): AdminPageView {

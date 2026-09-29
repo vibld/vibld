@@ -47,6 +47,7 @@ import {
   endedWith,
   handleRun,
   settleStopped,
+  stopAccountBuilds,
 } from './run-control.ts';
 import {
   ProjectStore,
@@ -56,9 +57,14 @@ import {
 } from './project-store.ts';
 import type { SiteProject } from './project-store.ts';
 import { handleShare, handleShareHold } from './share-handlers.ts';
-import { sharePreviewKey } from './share-link.ts';
+import { sharePreviewKey, shareTokenFromLink } from './share-link.ts';
 import { MediaStore } from './media-store.ts';
-import { SUSPENDED_MESSAGE, spendableFor, tierOf } from './spendable.ts';
+import {
+  SUSPENDED_MESSAGE,
+  planOf,
+  spendableFor,
+  tierOf,
+} from './spendable.ts';
 import { sanitizedProviderFailure, settleBudget } from './generation-run.ts';
 import { POLL_INTERVAL_MS, phaseFor, stageFor, stepFor } from './run-stage.ts';
 import { isCheckVerdict } from '../src/generation/build-check.ts';
@@ -74,7 +80,9 @@ import { whenClientGone } from './client-gone.ts';
 import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
 import {
   clerkLookupConfigured,
+  fetchClerkUser,
   findClerkUserIdByEmail,
+  setClerkBan,
 } from './clerk-lookup.ts';
 import {
   FREE_PLAN_MODELS_NOTE,
@@ -109,7 +117,7 @@ import type { BuildSize } from './run-ceiling.ts';
 import {
   DEFAULT_FREE_INCLUDED_MICRO_USD,
   allowancePeriodKey,
-  monthlyAllowanceMicroUsd,
+  monthlyAllowanceFor,
   tierFor,
 } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
@@ -201,8 +209,13 @@ import {
   accountDeletionConfigured,
   deletionDepsFor,
   findDeletionWork,
+  requestAccountDeletion,
   runDeletionNight,
 } from './account-deletion.ts';
+import { AccountDeletionStore } from './account-deletion-store.ts';
+import { AdminStore } from './admin-store.ts';
+import { appendAudit, handleAdminUsers, withAudit } from './admin-users.ts';
+import type { AdminUsersDeps } from './admin-users.ts';
 import type { DeletionLookup } from './account-deletion.ts';
 import {
   handleAccountDelete,
@@ -655,13 +668,24 @@ async function handleBillingStatus(
     // The check is inside `signupCreditStatus` rather than here, so that no
     // caller can be the one that forgets it.
     const signupCredit = await signupCreditStatus(billing, principal, env);
-    const subscription = await billing.findActiveSubscription(principal.userId);
-    const tier = tierFor(subscription);
+    // The tier the account has, with a gifted plan counted where it is the
+    // higher (D73), and an admin's spend cap in place of the tier's
+    // allowance where one is set: the same readings `spendableFor` makes,
+    // so the panel shows what a run is actually held to.
+    const [plan, overrides] = await Promise.all([
+      planOf(env.DB, principal.userId, now),
+      new AdminStore(env.DB).overrides(principal.userId),
+    ]);
+    const { subscription, tier } = plan;
     const freeAllowance = positiveInt(
       env.VIBLD_FREE_MONTHLY_MICRO_USD,
       DEFAULT_FREE_INCLUDED_MICRO_USD,
     );
-    const allowanceMicroUsd = monthlyAllowanceMicroUsd(tier, freeAllowance);
+    const allowanceMicroUsd = monthlyAllowanceFor(
+      tier,
+      freeAllowance,
+      overrides,
+    );
     const usage = await env.USER_BUDGET.getByName(principal.userId).usageFor(
       allowancePeriodKey(now),
     );
@@ -695,6 +719,18 @@ async function handleBillingStatus(
       billingConfigured: billingConfigured(env),
       signupCredit,
       suspended,
+      // The paid plan on its own, so the panel offers "Cancel plan" only
+      // where there is a subscription to cancel, which a gift is not.
+      planTier: tierFor(subscription),
+      // A gifted plan in force, and whether it is the one that decides the
+      // tier above, for the panel to say it is gifted and until when.
+      gift: plan.gift
+        ? {
+            tier: plan.gift.tier,
+            endsAt: plan.gift.endsAt,
+            inUse: plan.gifted,
+          }
+        : null,
     });
   } catch (error) {
     console.error('billing status unavailable', error);
@@ -834,8 +870,24 @@ async function handleAdminLiftSuspension(
   if (admin.denied) return admin.denied;
   const unconfigured = creditToolDenial(env);
   if (unconfigured) return unconfigured;
-  return handleLiftSuspension(request, env, admin.adminEmail, (email) =>
-    findClerkUserIdByEmail(env, email),
+  const response = await handleLiftSuspension(
+    request,
+    env,
+    admin.adminEmail,
+    (email) => findClerkUserIdByEmail(env, email),
+  );
+  return withAudit(env.DB!, response, (body) =>
+    typeof body.userId === 'string'
+      ? {
+          at: new Date().toISOString(),
+          adminEmail: admin.adminEmail,
+          action: 'suspension-lift',
+          targetUserId: body.userId,
+          target: null,
+          reason: null,
+          detail: { lifted: body.lifted ?? null },
+        }
+      : null,
   );
 }
 
@@ -870,16 +922,27 @@ async function handleAdminTopup(request: Request, env: Env): Promise<Response> {
     admin.adminEmail,
     parsed.value.note,
   );
-  // The row itself is the audit trail; this line is only for a live
+  // The grant's own row is the credit record; the audit log (D73) is where
+  // every admin action is listed together. This line is only for a live
   // `wrangler tail` to catch the same grant in real time.
   console.log(
     `admin credit granted: ${admin.adminEmail} -> ${lookup.userId} (${parsed.value.amountUsdCents}c)`,
   );
+  const audited = await appendAudit(env.DB!, {
+    at: new Date().toISOString(),
+    adminEmail: admin.adminEmail,
+    action: 'topup',
+    targetUserId: lookup.userId,
+    target: null,
+    reason: parsed.value.note,
+    detail: { creditUsdCents: parsed.value.amountUsdCents },
+  });
 
   return json({
     ok: true,
     userId: lookup.userId,
     creditUsdCents: parsed.value.amountUsdCents,
+    audited,
   });
 }
 
@@ -2635,7 +2698,7 @@ async function handleAdminHold(
   // database rather than the publish service, which is why it is decided
   // before the publish service is asked for.
   if (share !== undefined) {
-    return handleShareHold(env, {
+    const response = await handleShareHold(env, {
       link: share,
       reason,
       by: guard.adminEmail,
@@ -2651,6 +2714,24 @@ async function handleAdminHold(
           }
         : null,
     });
+    // The project and its owner, never the token: the token is the link,
+    // and the audit log is not a list of working links (D73).
+    return withAudit(env.DB!, response, async () => {
+      const token =
+        typeof share === 'string' ? shareTokenFromLink(share) : null;
+      const owner = token
+        ? await new AdminStore(env.DB!).shareOwner(token)
+        : null;
+      return {
+        at: new Date().toISOString(),
+        adminEmail: guard.adminEmail,
+        action: release ? 'share-release' : 'share-hold',
+        targetUserId: owner?.userId ?? null,
+        target: owner ? `project:${owner.projectId}` : 'share link',
+        reason: typeof reason === 'string' ? reason.trim() || null : null,
+        detail: null,
+      };
+    });
   }
 
   if (!publishServiceConfigured(env)) {
@@ -2663,11 +2744,30 @@ async function handleAdminHold(
     return json({ error: '"slug" is required.' }, 400);
   }
 
+  // Each hold and release is listed in the admin audit log (D73), under
+  // the account the slug belongs to, once the publish service has done it.
+  const audit = (response: Response, action: 'site-hold' | 'site-release') =>
+    withAudit(env.DB!, response, async (body) => ({
+      at: new Date().toISOString(),
+      adminEmail: guard.adminEmail,
+      action,
+      targetUserId: await new AdminStore(env.DB!).siteOwner(slug.trim()),
+      target: typeof body.slug === 'string' ? body.slug : slug.trim(),
+      reason:
+        action === 'site-hold' && typeof reason === 'string'
+          ? reason.trim()
+          : null,
+      detail: typeof body.state === 'string' ? { state: body.state } : null,
+    }));
+
   if (release) {
     const lifted = await releaseProject(env, slug.trim(), guard.adminEmail);
-    return lifted.ok
-      ? json({ slug: lifted.slug, state: lifted.state })
-      : json({ error: lifted.error }, lifted.status);
+    return audit(
+      lifted.ok
+        ? json({ slug: lifted.slug, state: lifted.state })
+        : json({ error: lifted.error }, lifted.status),
+      'site-release',
+    );
   }
 
   // Refused here as well as in the publish service, so the reason is asked
@@ -2677,15 +2777,132 @@ async function handleAdminHold(
     return json({ error: 'Say why this site is being taken down.' }, 400);
   }
 
-  const result = await holdProject(
+  const result = await operatorHold(
     env,
     slug.trim(),
     guard.adminEmail,
     reason.trim(),
   );
-  return result.ok
-    ? json({ slug: result.slug, state: result.state })
-    : json({ error: result.error }, result.status);
+  return audit(
+    result.ok
+      ? json({ slug: result.slug, state: result.state })
+      : json({ error: result.error }, result.status),
+    'site-hold',
+  );
+}
+
+/**
+ * The operator hold, called from here and nowhere else
+ * (`publish-authorisation.test.ts`). Used by the admin takedown route above,
+ * and by a ban or an admin's deletion of an account (`admin-users.ts`),
+ * which take every site the account has down by the same hold, for the
+ * reason the takedown route exists. None of them reaches the owner's own
+ * takedown.
+ */
+function operatorHold(
+  env: Env,
+  slug: string,
+  by: string,
+  reason: string,
+): ReturnType<typeof holdProject> {
+  return holdProject(env, slug, by, reason);
+}
+
+/**
+ * What the Workflow engine offers for stopping a build: its status, its
+ * termination, and closing the reservation of a run that was stopped.
+ * Shared by `/api/runs/:id` and a ban, which stops builds by the same
+ * steps (`stopBuild` in `run-control.ts`).
+ */
+function stopDeps(env: Env) {
+  return {
+    ...(env.GENERATION_WORKFLOW
+      ? {
+          instanceStatus: async (runId: string) =>
+            (await env.GENERATION_WORKFLOW!.get(runId))
+              .status()
+              .then((status) => status.status as string),
+          terminate: async (runId: string) => {
+            await (await env.GENERATION_WORKFLOW!.get(runId)).terminate();
+          },
+        }
+      : {}),
+    ...(env.RUN_PROGRESS && env.USER_BUDGET
+      ? {
+          settleStopped: async (runId: string, userId: string) => {
+            await settleStopped(
+              env.RUN_PROGRESS!.getByName(runId),
+              env.USER_BUDGET!,
+              userId,
+              runId,
+            );
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * What the admin controls over one account act through (D73,
+ * `admin-users.ts`): the platform-admin check every `/api/admin/*` route
+ * makes, Clerk, the ledger, and the same stop, preview and hold paths the
+ * rest of the Worker uses. Each is null where the deployment lacks it.
+ */
+function adminUsersDeps(env: Env): AdminUsersDeps {
+  return {
+    authorize: (req) => requireAdmin(req, env),
+    lookupByEmail: (email) => findClerkUserIdByEmail(env, email),
+    clerkUser: (userId) => fetchClerkUser(env, userId),
+    setClerkBan: (userId, banned) => setClerkBan(env, userId, banned),
+    usage: env.USER_BUDGET
+      ? async (userId, now) => {
+          const [month, topup] = await Promise.all([
+            env
+              .USER_BUDGET!.getByName(userId)
+              .usageFor(allowancePeriodKey(now.getTime())),
+            env
+              .USER_BUDGET!.getByName(topupKeyFor(userId))
+              .usageFor('lifetime'),
+          ]);
+          return {
+            monthMicroUsd: month.spentMicroUsd,
+            topupMicroUsd: topup.spentMicroUsd,
+          };
+        }
+      : null,
+    stopBuilds:
+      env.DB && env.PROJECT_CONTENT && env.GENERATION_WORKFLOW
+        ? (userId) =>
+            stopAccountBuilds(
+              new ProjectStore(env.DB!, env.PROJECT_CONTENT!),
+              new D1GenerationStore(env.DB!, env.PROJECT_CONTENT!),
+              userId,
+              new Date(),
+              stopDeps(env),
+            )
+        : null,
+    // The account's own sandbox, then the one each of its share links may
+    // have started: the same two the account deletion's preview step stops.
+    stopPreviews: previewConfigured(env)
+      ? async (userId) => {
+          const own = await stopPreview(env, userId);
+          if (!own.ok) return own;
+          const tokens = await new AccountDeletionStore(env.DB!).shareTokens(
+            userId,
+          );
+          for (const token of tokens) {
+            const shared = await stopPreview(env, await sharePreviewKey(token));
+            if (!shared.ok) return shared;
+          }
+          return { ok: true };
+        }
+      : null,
+    holdSite: publishServiceConfigured(env)
+      ? (slug, by, reason) => operatorHold(env, slug, by, reason)
+      : null,
+    requestDeletion: (userId, takeDown) =>
+      requestAccountDeletion(deletionDepsFor(env), userId, { takeDown }),
+  };
 }
 
 /**
@@ -3298,15 +3515,14 @@ async function route(
   if (pathname === '/api/runs/:id') {
     return handleRun(request, env, {
       resolvePrincipal: (req) => resolvePrincipal(req, env),
-      ...(instanceStatus ? { instanceStatus } : {}),
+      // Terminating, the instance's status and settling a stopped run:
+      // the same three a ban stops an account's builds with.
+      ...stopDeps(env),
       ...(env.GENERATION_WORKFLOW
         ? {
             instanceOutput: async (runId: string) =>
               (await (await env.GENERATION_WORKFLOW!.get(runId)).status())
                 .output,
-            terminate: async (runId: string) => {
-              await (await env.GENERATION_WORKFLOW!.get(runId)).terminate();
-            },
           }
         : {}),
       ...(env.IP_BURST ? { ipLimit: env.IP_BURST } : {}),
@@ -3314,18 +3530,6 @@ async function route(
         ? {
             progressOf: (runId: string) =>
               env.RUN_PROGRESS!.getByName(runId).read(),
-          }
-        : {}),
-      ...(env.RUN_PROGRESS && env.USER_BUDGET
-        ? {
-            settleStopped: async (runId: string, userId: string) => {
-              await settleStopped(
-                env.RUN_PROGRESS!.getByName(runId),
-                env.USER_BUDGET!,
-                userId,
-                runId,
-              );
-            },
           }
         : {}),
     });
@@ -3565,6 +3769,22 @@ async function route(
 
   if (pathname === '/api/admin/publish/release') {
     return handleAdminHold(request, env, true);
+  }
+
+  // One account (D73): its page, a gifted plan, overrides, a ban, a
+  // deletion, and the audit log. `handleAdminUsers` asks `requireAdmin`
+  // before it reads anything, the same check as every route above.
+  if (
+    pathname === '/api/admin/user/detail' ||
+    pathname === '/api/admin/user/gift' ||
+    pathname === '/api/admin/user/gift/revoke' ||
+    pathname === '/api/admin/user/overrides' ||
+    pathname === '/api/admin/user/ban' ||
+    pathname === '/api/admin/user/unban' ||
+    pathname === '/api/admin/user/delete' ||
+    pathname === '/api/admin/audit'
+  ) {
+    return handleAdminUsers(request, env, adminUsersDeps(env));
   }
 
   return json({ error: 'Not found.' }, 404);

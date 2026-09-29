@@ -1174,7 +1174,9 @@ describe('the purge', () => {
     await requestAccountDeletion(w.deps, USER);
     w.clock.now = new Date(PURGE_AT);
     let nights = 0;
-    while (w.clerk.deleted.length === 0) {
+    // Until the request itself has become the audit record, which is the
+    // purge's last write and can land the night after the Clerk user goes.
+    while ((await w.store.find(USER)) !== null) {
       nights += 1;
       assert.ok(nights < 20, 'the purge never finished');
       const before = w.statements();
@@ -1228,7 +1230,9 @@ describe('the purge', () => {
     }
     w.clock.now = new Date(PURGE_AT);
     let nights = 0;
-    while (w.clerk.deleted.length === 0) {
+    // Until the request itself has become the audit record, which is the
+    // purge's last write and can land the night after the Clerk user goes.
+    while ((await w.store.find(USER)) !== null) {
       nights += 1;
       assert.ok(nights < 20, 'the purge never finished');
       const before = w.statements();
@@ -1279,6 +1283,12 @@ describe('the purge', () => {
       'billing_admin_credits.user_id',
       'access_invites.redeemed_by_user_id',
       'published_projects.user_id',
+      // D73: deleted in `deleteAccountRows`, and the audit log re-keyed to
+      // the tombstone in `tombstoneCreditRows`.
+      'plan_gifts.user_id',
+      'user_overrides.user_id',
+      'user_bans.user_id',
+      'admin_audit_log.target_user_id',
     ]);
     const tables =
       (

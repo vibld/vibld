@@ -17,10 +17,9 @@ import {
   projectIdInPath,
   routeKeyFor,
 } from './access-gate.ts';
-import { BillingStore } from './billing-store.ts';
 import { D1GenerationStore } from './generation-store.ts';
-import { ACTIVE_PROJECT_LIMIT, tierFor } from './entitlement.ts';
 import type { Tier } from './entitlement.ts';
+import { planOf, projectLimitOf } from './spendable.ts';
 import type { PrincipalDenied, PrincipalGranted } from './principal.ts';
 import { ProjectStore, mayReplace } from './project-store.ts';
 import type {
@@ -78,8 +77,9 @@ export interface ProjectsDeps {
   newId?: () => string;
   /**
    * The caller's tier. Defaults to the reading every paid route makes,
-   * `tierFor` over the mirrored subscription, so the limit and the
-   * allowance can never be decided from two different answers.
+   * `planOf` over the mirrored subscription and any gifted plan (D73), so
+   * the limit and the allowance can never be decided from two different
+   * answers.
    */
   tierOf?: (userId: string) => Promise<Tier>;
   /** Where the links in a project's view point. */
@@ -414,9 +414,10 @@ export async function handleProjects(
   const now = () => clock().toISOString();
   const newId = deps.newId ?? (() => crypto.randomUUID());
   const tierOf =
-    deps.tierOf ??
-    (async (who: string) =>
-      tierFor(await new BillingStore(db).findActiveSubscription(who)));
+    deps.tierOf ?? (async (who: string) => (await planOf(db, who)).tier);
+  // The tier's limit, or an admin's override of it for this account (D73).
+  const limitOf = async (who: string) =>
+    projectLimitOf(db, who, await tierOf(who));
   const store = new ProjectStore(db, env.PROJECT_CONTENT);
   const links: ProjectLinks = deps.links ?? {
     origin: new URL(request.url).origin,
@@ -435,9 +436,10 @@ export async function handleProjects(
 
   if (route === '/api/projects') {
     if (method === 'GET') {
-      const [projects, tier] = await Promise.all([
+      const [projects, tier, maxActive] = await Promise.all([
         store.list(userId),
         tierOf(userId),
+        limitOf(userId),
       ]);
       return json({
         projects: projects.map(view),
@@ -445,7 +447,7 @@ export async function handleProjects(
           tier,
           active: projects.filter((project) => project.archivedAt === null)
             .length,
-          maxActive: ACTIVE_PROJECT_LIMIT[tier],
+          maxActive,
         },
       });
     }
@@ -469,7 +471,7 @@ export async function handleProjects(
         ...parsed.value,
       };
     }
-    const limit = ACTIVE_PROJECT_LIMIT[await tierOf(userId)];
+    const limit = await limitOf(userId);
     const id = newId();
     const created = await store.create(
       userId,
@@ -492,7 +494,7 @@ export async function handleProjects(
   if (!project) return NOT_FOUND();
 
   if (route === PROJECT_DUPLICATE_ROUTE) {
-    const limit = ACTIVE_PROJECT_LIMIT[await tierOf(userId)];
+    const limit = await limitOf(userId);
     const copy = await store.duplicate(
       project,
       userId,
@@ -658,7 +660,7 @@ export async function handleProjects(
   // The one change that can be refused, first, so a refused unarchive
   // writes nothing else either and the builder is told plainly why.
   if (patch.value.archived === false && project.archivedAt !== null) {
-    const limit = ACTIVE_PROJECT_LIMIT[await tierOf(userId)];
+    const limit = await limitOf(userId);
     const outcome = await store.unarchive(userId, project.id, at, limit);
     if (outcome === 'missing') return NOT_FOUND();
     if (outcome === 'limit') return limitRefusal(limit!);
