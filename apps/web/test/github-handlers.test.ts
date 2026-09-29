@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -12,11 +10,9 @@ import {
 import { blobSha } from '../worker/github-push.ts';
 import { GitHubStore } from '../worker/github-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
-const SCHEMA = readFileSync(
-  join(import.meta.dirname, '..', 'migrations', '0005_github.sql'),
-  'utf8',
-);
+const SCHEMA = schemaSql();
 
 const PRIVATE_KEY = generateKeyPairSync('rsa', { modulusLength: 2048 })
   .privateKey.export({ type: 'pkcs1', format: 'pem' })
@@ -26,6 +22,7 @@ const PRINCIPAL = { userId: 'user_1', policyIdentity: 'chris@example.com' };
 
 const GRANT = {
   userId: 'user_1',
+  projectId: 'p1',
   installationId: 4242,
   owner: 'acme',
   repo: 'site',
@@ -37,11 +34,16 @@ const GRANT = {
 
 const NOW = new Date('2026-09-13T12:00:00.000Z');
 
+/**
+ * A push from project `p1`, which is where `GRANT` is bound (D72). A test
+ * about a request that names no project says `projectId: undefined`.
+ */
 function pushRequest(body: unknown = undefined): Request {
   return new Request('https://app.vibld.com/api/github/push', {
     method: 'POST',
-    body: JSON.stringify(
-      body ?? {
+    body: JSON.stringify({
+      projectId: 'p1',
+      ...((body ?? {
         files: [{ path: 'index.html', content: '<h1>hi</h1>' }],
         revision: 'r7',
         // The destination is part of a well-formed push: the route reads
@@ -50,8 +52,8 @@ function pushRequest(body: unknown = undefined): Request {
         // then.
         owner: 'acme',
         repo: 'site',
-      },
-    ),
+      }) as Record<string, unknown>),
+    }),
   });
 }
 
@@ -163,7 +165,7 @@ describe('pushing without a usable connection', () => {
     const db = new SqliteD1Database(SCHEMA);
     const store = new GitHubStore(db as unknown as D1Database);
     await store.bind(GRANT);
-    await store.revoke('user_1');
+    await store.disconnectAccount('user_1');
     const response = await handleGitHubPush(
       pushRequest(),
       env(db),
@@ -614,7 +616,7 @@ describe('the status the builder reads', () => {
     const db = new SqliteD1Database(SCHEMA);
     await new GitHubStore(db as unknown as D1Database).bind(GRANT);
     const response = await handleGitHubStatus(
-      new Request('https://app.vibld.com/api/github/status'),
+      new Request('https://app.vibld.com/api/github/status?project=p1'),
       env(db),
       PRINCIPAL,
       NOW,
@@ -630,7 +632,7 @@ describe('the status the builder reads', () => {
   it('reports why there is no usable connection', async () => {
     const db = new SqliteD1Database(SCHEMA);
     const response = await handleGitHubStatus(
-      new Request('https://app.vibld.com/api/github/status'),
+      new Request('https://app.vibld.com/api/github/status?project=p1'),
       env(db),
       PRINCIPAL,
       NOW,
@@ -938,9 +940,12 @@ describe('previewing a push', () => {
   function diffRequest(body: unknown = undefined): Request {
     return new Request('https://app.vibld.com/api/github/diff', {
       method: 'POST',
-      body: JSON.stringify(
-        body ?? { files: [{ path: 'index.html', content: '<h1>hi</h1>' }] },
-      ),
+      body: JSON.stringify({
+        projectId: 'p1',
+        ...((body ?? {
+          files: [{ path: 'index.html', content: '<h1>hi</h1>' }],
+        }) as Record<string, unknown>),
+      }),
     });
   }
 

@@ -1,20 +1,31 @@
 /**
- * Which repository a user's work pushes to, and what a push has already
- * done.
+ * Which repository each project pushes to, whether the account is connected
+ * to GitHub at all, and what a push has already done.
  *
- * A thin wrapper over the two tables `migrations/0005_github.sql` declares,
- * the same shape `billing-store.ts` has: no SQL anywhere else, nothing
- * GitHub-shaped in here (no tokens, no API types), so it is testable against
- * a real SQLite schema with no network and no credential.
+ * A thin wrapper over the tables `migrations/0005_github.sql` and
+ * `0039_github_per_project.sql` declare, the same shape `billing-store.ts`
+ * has: no SQL anywhere else, nothing GitHub-shaped in here (no tokens, no
+ * API types), so it is testable against a real SQLite schema with no network
+ * and no credential.
  *
  * Nothing stored here is a secret. The App's private key is a Worker secret
  * and an installation token is minted per push and never written down, so
  * what is left is a binding: an installation id, a repository, a branch, and
  * when the grant was made (ADR-0006).
+ *
+ * `github_bindings`, the one-row-per-user table 0005 made, is not read here
+ * any more (D72). 0039 copied each row onto a project, and the account purge
+ * is the only thing that still touches it.
  */
 
 export interface RepositoryBinding {
   userId: string;
+  /**
+   * The project this binding belongs to (D72). A repository is chosen per
+   * project, so two projects can push to two repositories and ending one
+   * binding leaves the others alone.
+   */
+  projectId: string;
   installationId: number;
   owner: string;
   repo: string;
@@ -26,6 +37,7 @@ export interface RepositoryBinding {
 }
 
 interface BindingRow {
+  project_id: string;
   user_id: string;
   installation_id: number;
   owner: string;
@@ -37,9 +49,42 @@ interface BindingRow {
   revoked_at: string | null;
 }
 
+/**
+ * The account's half of the connection (D72): that this person completed
+ * the GitHub sign-in, as whom, and through which installation on their own
+ * account a repository created for them would be pushed.
+ *
+ * Kept apart from the bindings because it outlives any one of them. A
+ * project can be unbound while the account stays connected, and ending the
+ * account's connection ends every binding it has.
+ */
+export interface AccountConnection {
+  userId: string;
+  /** Null for a connection copied out of 0005, until the next sign-in. */
+  login: string | null;
+  installationId: number | null;
+  connectedAt: string;
+  grantedByEmail: string;
+  revokedAt: string | null;
+}
+
+interface ConnectionRow {
+  user_id: string;
+  login: string | null;
+  installation_id: number | null;
+  connected_at: string;
+  granted_by_email: string;
+  revoked_at: string | null;
+}
+
 /** What an attempt at one checkpoint has established so far. */
 export interface PushAttempt {
   userId: string;
+  /**
+   * The project that made this push, or null for one older than D72 that
+   * the migration could not attribute. Not part of the key (see `PushKey`).
+   */
+  projectId: string | null;
   owner: string;
   repo: string;
   revision: string;
@@ -72,6 +117,7 @@ export function isPullRequestState(value: unknown): value is PullRequestState {
 
 interface PushRow {
   user_id: string;
+  project_id: string | null;
   owner: string;
   repo: string;
   revision: string;
@@ -90,6 +136,7 @@ interface PushRow {
 function toBinding(row: BindingRow): RepositoryBinding {
   return {
     userId: row.user_id,
+    projectId: row.project_id,
     installationId: row.installation_id,
     owner: row.owner,
     repo: row.repo,
@@ -101,9 +148,21 @@ function toBinding(row: BindingRow): RepositoryBinding {
   };
 }
 
+function toConnection(row: ConnectionRow): AccountConnection {
+  return {
+    userId: row.user_id,
+    login: row.login,
+    installationId: row.installation_id,
+    connectedAt: row.connected_at,
+    grantedByEmail: row.granted_by_email,
+    revokedAt: row.revoked_at,
+  };
+}
+
 function toAttempt(row: PushRow): PushAttempt {
   return {
     userId: row.user_id,
+    projectId: row.project_id,
     owner: row.owner,
     repo: row.repo,
     revision: row.revision,
@@ -131,6 +190,11 @@ function toAttempt(row: PushRow): PushAttempt {
  * The destination is part of the identity rather than a detail of it. The
  * recorded parent only means anything inside the repository it came from, so
  * "revision r7" is not one operation, "r7 into acme/site" is.
+ *
+ * The project is deliberately not (D72). A revision is a hash of the files,
+ * so two projects holding the same files and pushing to the same repository
+ * build the same tree onto the same branch: one operation, and giving it two
+ * keys would record two parents for one branch.
  */
 export interface PushKey {
   userId: string;
@@ -155,21 +219,93 @@ export class GitHubStore {
   }
 
   /**
-   * Record the repository a user approved.
+   * Record that this person completed the GitHub sign-in (D72).
+   *
+   * Upserted, and a fresh sign-in clears a revocation: connecting again is
+   * how somebody undoes a disconnect. It does not bring back any project's
+   * binding, which each project chooses again, because a disconnect was an
+   * instruction to stop pushing and a sign-in is not an instruction to
+   * start.
+   *
+   * A login or installation that could not be read this time does not
+   * erase one recorded before: the sign-in still proved the same person,
+   * and a GitHub that briefly did not say who is not news that they are
+   * nobody.
+   */
+  async connect(
+    connection: Omit<AccountConnection, 'revokedAt'>,
+  ): Promise<void> {
+    await this.#db
+      .prepare(
+        `INSERT INTO github_connections (
+           user_id, login, installation_id, connected_at, granted_by_email,
+           revoked_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, NULL)
+         ON CONFLICT(user_id) DO UPDATE SET
+           login = coalesce(excluded.login, github_connections.login),
+           installation_id = coalesce(excluded.installation_id,
+                                      github_connections.installation_id),
+           connected_at = excluded.connected_at,
+           granted_by_email = excluded.granted_by_email,
+           revoked_at = NULL`,
+      )
+      .bind(
+        connection.userId,
+        connection.login,
+        connection.installationId,
+        connection.connectedAt,
+        connection.grantedByEmail,
+      )
+      .run();
+  }
+
+  /** The account's connection as stored, whatever state it is in. */
+  async connection(userId: string): Promise<AccountConnection | null> {
+    const row = await this.#db
+      .prepare(`SELECT * FROM github_connections WHERE user_id = ?1`)
+      .bind(userId)
+      .first<ConnectionRow>();
+    return row ? toConnection(row) : null;
+  }
+
+  /**
+   * Whether this person owns this project.
+   *
+   * Asked before a binding is written, because the binding is what every
+   * later push trusts: a repository bound onto a project id somebody else
+   * guessed would be written against their project. Reads need no such
+   * check, since every one of them asks for the project and the owner
+   * together.
+   */
+  async ownsProject(userId: string, projectId: string): Promise<boolean> {
+    const row = await this.#db
+      .prepare(`SELECT 1 AS found FROM projects WHERE id = ?1 AND user_id = ?2`)
+      .bind(projectId, userId)
+      .first<{ found: number }>();
+    return row !== null;
+  }
+
+  /**
+   * Record the repository a user approved for one project.
    *
    * Replaces rather than refuses: connecting a different repository is an
    * ordinary thing to do, and it is the user's own grant to change. The
    * grant metadata is rewritten with it, so a reconnect is a fresh grant
    * with a fresh expiry rather than an old one silently extended.
+   *
+   * The update only applies to a row that is already this person's. The
+   * caller has checked ownership (`ownsProject`), and this is the same
+   * rule said again where the write happens, so a row can never change
+   * hands through here.
    */
   async bind(binding: Omit<RepositoryBinding, 'revokedAt'>): Promise<void> {
     await this.#db
       .prepare(
-        `INSERT INTO github_bindings (
-           user_id, installation_id, owner, repo, default_branch,
+        `INSERT INTO github_project_bindings (
+           project_id, user_id, installation_id, owner, repo, default_branch,
            granted_at, granted_by_email, expires_at, revoked_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)
-         ON CONFLICT(user_id) DO UPDATE SET
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)
+         ON CONFLICT(project_id) DO UPDATE SET
            installation_id = excluded.installation_id,
            owner = excluded.owner,
            repo = excluded.repo,
@@ -177,9 +313,11 @@ export class GitHubStore {
            granted_at = excluded.granted_at,
            granted_by_email = excluded.granted_by_email,
            expires_at = excluded.expires_at,
-           revoked_at = NULL`,
+           revoked_at = NULL
+         WHERE github_project_bindings.user_id = excluded.user_id`,
       )
       .bind(
+        binding.projectId,
         binding.userId,
         binding.installationId,
         binding.owner,
@@ -192,24 +330,35 @@ export class GitHubStore {
       .run();
   }
 
-  /** The binding as stored, whatever state it is in. */
-  async binding(userId: string): Promise<RepositoryBinding | null> {
+  /** A project's binding as stored, whatever state it is in. */
+  async binding(
+    userId: string,
+    projectId: string,
+  ): Promise<RepositoryBinding | null> {
     const row = await this.#db
-      .prepare(`SELECT * FROM github_bindings WHERE user_id = ?1`)
-      .bind(userId)
+      .prepare(
+        `SELECT * FROM github_project_bindings
+          WHERE project_id = ?1 AND user_id = ?2`,
+      )
+      .bind(projectId, userId)
       .first<BindingRow>();
     return row ? toBinding(row) : null;
   }
 
   /**
-   * The binding a push may actually use, or why it may not.
+   * The binding a push from this project may actually use, or why it may
+   * not.
    *
    * Expiry and revocation are checked here rather than by each caller,
    * because "is this grant still good?" is one question with one answer and
    * a caller that forgets to ask is a caller that pushes on a revoked grant.
    */
-  async usableBinding(userId: string, now = new Date()): Promise<BindingState> {
-    const binding = await this.binding(userId);
+  async usableBinding(
+    userId: string,
+    projectId: string,
+    now = new Date(),
+  ): Promise<BindingState> {
+    const binding = await this.binding(userId, projectId);
     if (!binding) return { usable: false, reason: 'none' };
     if (binding.revokedAt) return { usable: false, reason: 'revoked' };
     const expiry = Date.parse(binding.expiresAt);
@@ -222,29 +371,44 @@ export class GitHubStore {
   }
 
   /**
-   * Revoke a grant, keeping the row.
+   * Disconnect the account from GitHub: its connection and every project's
+   * binding (D72).
    *
-   * Idempotent, and it never moves the timestamp: revoking twice is the same
-   * revocation, and the first one is when it happened.
+   * Idempotent, and it never moves a timestamp: revoking twice is the same
+   * revocation, and the first one is when it happened. One batch, so a
+   * failure cannot leave the account disconnected with projects still
+   * pushing, or the other way round.
    */
-  async revoke(userId: string, at = new Date()): Promise<void> {
-    await this.#db
-      .prepare(
-        `UPDATE github_bindings SET revoked_at = ?2
-         WHERE user_id = ?1 AND revoked_at IS NULL`,
-      )
-      .bind(userId, at.toISOString())
-      .run();
+  async disconnectAccount(userId: string, at = new Date()): Promise<void> {
+    const when = at.toISOString();
+    await this.#db.batch([
+      this.#db
+        .prepare(
+          `UPDATE github_project_bindings SET revoked_at = ?2
+            WHERE user_id = ?1 AND revoked_at IS NULL`,
+        )
+        .bind(userId, when),
+      this.#db
+        .prepare(
+          `UPDATE github_connections SET revoked_at = ?2
+            WHERE user_id = ?1 AND revoked_at IS NULL`,
+        )
+        .bind(userId, when),
+    ]);
   }
 
   /**
-   * Revoke a grant, but only if it is still the repository the caller named.
+   * Revoke one project's grant, but only if it is still the repository the
+   * caller named.
    *
    * The check and the write in one statement, because apart they are a
    * race: a bind landing between reading the binding and revoking it would
    * have the revocation take the newly bound repository, which is the exact
    * outcome naming one is meant to prevent. The name is part of the `WHERE`
    * clause, so the database decides.
+   *
+   * Only this project's row. Another project bound to the same repository
+   * keeps pushing (D72): disconnecting is something done to a project.
    *
    * Returns whether a row changed. False does not say why: nothing bound,
    * already revoked, and bound elsewhere all look the same from here, and
@@ -257,16 +421,23 @@ export class GitHubStore {
    */
   async revokeRepository(
     userId: string,
+    projectId: string,
     repository: { owner: string; repo: string },
     at = new Date(),
   ): Promise<boolean> {
     const result = await this.#db
       .prepare(
-        `UPDATE github_bindings SET revoked_at = ?2
-         WHERE user_id = ?1 AND revoked_at IS NULL
-           AND lower(owner) = lower(?3) AND lower(repo) = lower(?4)`,
+        `UPDATE github_project_bindings SET revoked_at = ?3
+         WHERE project_id = ?1 AND user_id = ?2 AND revoked_at IS NULL
+           AND lower(owner) = lower(?4) AND lower(repo) = lower(?5)`,
       )
-      .bind(userId, at.toISOString(), repository.owner, repository.repo)
+      .bind(
+        projectId,
+        userId,
+        at.toISOString(),
+        repository.owner,
+        repository.repo,
+      )
       .run();
     return (result.meta?.changes ?? 0) > 0;
   }
@@ -281,13 +452,17 @@ export class GitHubStore {
    * the first one committed against.
    */
   async beginPush(
-    attempt: PushKey & Pick<PushAttempt, 'baseSha' | 'branch' | 'startedAt'>,
+    attempt: PushKey &
+      Pick<PushAttempt, 'baseSha' | 'branch' | 'startedAt'> & {
+        projectId: string;
+      },
   ): Promise<PushAttempt> {
     await this.#db
       .prepare(
         `INSERT INTO github_pushes (
-           user_id, owner, repo, revision, base_sha, branch, started_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           user_id, owner, repo, revision, base_sha, branch, started_at,
+           project_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(user_id, owner, repo, revision) DO NOTHING`,
       )
       .bind(
@@ -298,6 +473,7 @@ export class GitHubStore {
         attempt.baseSha,
         attempt.branch,
         attempt.startedAt,
+        attempt.projectId,
       )
       .run();
 
@@ -346,7 +522,6 @@ export class GitHubStore {
       .run();
   }
 
-  /** An attempt, for a caller deciding whether there is anything to resume. */
   /**
    * Has this delivery been seen before?
    *
@@ -383,9 +558,10 @@ export class GitHubStore {
    * Record what became of the pull request on a branch.
    *
    * Matched on the branch, because that is all a delivery knows: it names a
-   * repository and a head ref and nothing about who pushed it. The branch is
-   * derived from the checkpoint (`branchForRevision`), so it identifies the
-   * push without the user.
+   * repository and a head ref and nothing about who pushed it, or from which
+   * project. The branch is derived from the checkpoint (`branchForRevision`),
+   * so it identifies the push without the user, and every project that
+   * pushed that checkpoint there hears about it.
    *
    * The `updated_at` comparison is the part that matters. Webhook delivery
    * is at-least-once and unordered, so `closed` can arrive after `merged`,
@@ -425,25 +601,31 @@ export class GitHubStore {
   }
 
   /**
-   * The most recent push by this user that opened a pull request.
+   * The most recent push from this project that opened a pull request.
    *
    * What the builder shows after a reload, when the push that opened it
    * happened in a session that is over. Newest first by when the push
-   * started, because that is the order the user made them in.
+   * started, because that is the order the user made them in. Per project
+   * (D72), so one project never reports another's pull request as its own.
    */
-  async lastPullRequest(userId: string): Promise<PushAttempt | null> {
+  async lastPullRequest(
+    userId: string,
+    projectId: string,
+  ): Promise<PushAttempt | null> {
     const row = await this.#db
       .prepare(
         `SELECT * FROM github_pushes
-          WHERE user_id = ?1 AND pull_request_url IS NOT NULL
+          WHERE user_id = ?1 AND project_id = ?2
+            AND pull_request_url IS NOT NULL
           ORDER BY started_at DESC
           LIMIT 1`,
       )
-      .bind(userId)
+      .bind(userId, projectId)
       .first<PushRow>();
     return row ? toAttempt(row) : null;
   }
 
+  /** An attempt, for a caller deciding whether there is anything to resume. */
   async push(key: PushKey): Promise<PushAttempt | null> {
     const row = await this.#db
       .prepare(

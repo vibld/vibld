@@ -315,12 +315,13 @@ const STEPS: Record<
       : STEP_FAILED.sites;
   },
 
-  // This deployment's grant only. The GitHub App installation belongs to
-  // the person's GitHub account, may cover repositories shared with other
+  // This deployment's grants only: the account's connection and every
+  // project's binding (D72). The GitHub App installation belongs to the
+  // person's GitHub account, may cover repositories shared with other
   // people, and is theirs to remove on GitHub; deleting it from here would
   // be acting on somebody else's account.
   github: async (deps, userId) => {
-    await deps.github.revoke(userId, deps.now());
+    await deps.github.disconnectAccount(userId, deps.now());
     return true;
   },
 
@@ -335,10 +336,12 @@ export const QUERIES_PER_RETRY =
   // The customer mapping, then the mirror when there is no mapping.
   2 +
   // Preview: the share links whose previews to stop. Sites: the live-site
-  // read. GitHub: the revoke.
+  // read. GitHub: the revoke, which is two statements since D72 (every
+  // project's binding and the account's connection). They go in one batch,
+  // and are counted as two so the bound holds however a batch is billed.
   1 +
   1 +
-  1 +
+  2 +
   // Referrals: the reversal and the code.
   2 +
   // The attempt record.

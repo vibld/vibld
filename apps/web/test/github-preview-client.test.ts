@@ -29,6 +29,7 @@ describe('asking what a push would change', () => {
   it('reads the whole preview, destination included', async () => {
     const result = await previewSnapshot(
       FILES,
+      'p1',
       async () => reply(FULL),
       noToken,
     );
@@ -46,6 +47,7 @@ describe('asking what a push would change', () => {
     const { removed: _removed, ...withoutRemoved } = FULL;
     const result = await previewSnapshot(
       FILES,
+      'p1',
       async () => reply(withoutRemoved),
       noToken,
     );
@@ -56,6 +58,7 @@ describe('asking what a push would change', () => {
   it('refuses a list with something in it that is not a path', async () => {
     const result = await previewSnapshot(
       FILES,
+      'p1',
       async () => reply({ ...FULL, removed: ['LICENSE', 7] }),
       noToken,
     );
@@ -66,6 +69,7 @@ describe('asking what a push would change', () => {
   it("passes the route's own sentence through on a refusal", async () => {
     const result = await previewSnapshot(
       FILES,
+      'p1',
       async () => reply({ error: 'vibld no longer has access.' }, 409),
       noToken,
     );
@@ -80,6 +84,7 @@ describe('asking what a push would change', () => {
   it('answers a sentence when the request never got out', async () => {
     const result = await previewSnapshot(
       FILES,
+      'p1',
       async () => {
         throw new Error('offline');
       },
@@ -89,10 +94,11 @@ describe('asking what a push would change', () => {
     assert.equal(result.ok, false);
   });
 
-  it('sends the files and nothing else', async () => {
+  it('sends the files and the project, and nothing else', async () => {
     let sent: unknown;
     await previewSnapshot(
       FILES,
+      'p1',
       async (_input, init) => {
         sent = JSON.parse(String(init?.body));
         return reply(FULL);
@@ -100,7 +106,8 @@ describe('asking what a push would change', () => {
       noToken,
     );
 
-    // No revision: a preview is not a push and must not key one.
-    assert.deepEqual(sent, { files: FILES });
+    // No revision: a preview is not a push and must not key one. The
+    // project, because the diff is against that project's repository (D72).
+    assert.deepEqual(sent, { projectId: 'p1', files: FILES });
   });
 });

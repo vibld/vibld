@@ -19,6 +19,8 @@ import { BillingStatusWidget } from './components/BillingStatus.tsx';
 import { SignupCreditBanner } from './components/SignupCreditOffer.tsx';
 import { ReferralClaim, ReferralSection } from './components/ReferralPanel.tsx';
 import { GitHubPanel } from './components/GitHubPanel.tsx';
+import { ShipMenu } from './components/ShipMenu.tsx';
+import { shipNote } from './generation/ship-note.ts';
 import { describeMode } from './generation/labels.ts';
 import { ThemeToggle } from './components/ThemeToggle.tsx';
 import { footerNote } from './generation/pane-gaps.ts';
@@ -109,6 +111,10 @@ function Builder() {
   // Either page replaces the builder's two columns, which stay mounted
   // underneath with everything they hold.
   const onPage = onAdminPage || onProjectsPage;
+  // The open server project: whose site Ship publishes, and whose
+  // repository the GitHub controls are about (D72). Null where there are
+  // no server projects, or while one is opening.
+  const openProject = projects.mode === 'server' ? projects.current : null;
   // Where focus goes when the view changes under a reader who never left
   // the document. See `useFocusOnChange`.
   const body = useRef<HTMLElement | null>(null);
@@ -146,7 +152,16 @@ function Builder() {
           the list. Nothing here is configuration, which stays behind the
           gear.
         */}
-        <ProjectBar projects={projects} />
+        <ProjectBar
+          projects={projects}
+          ship={
+            <ShipMenu
+              project={openProject}
+              snapshot={state.acceptedSnapshot}
+              note={shipNote(state)}
+            />
+          }
+        />
         <div className="shell__controls">
           <ThemeToggle />
           <SettingsMenu>
@@ -165,7 +180,10 @@ function Builder() {
                 closed: the OAuth callback puts its code in the fragment and
                 redirects here, and whatever claims that has to be running.
               */}
-                  <GitHubPanel />
+                  <GitHubPanel
+                    projectId={openProject?.id ?? null}
+                    projectName={openProject?.name ?? ''}
+                  />
                 </section>
                 {/*
               The only way into the admin page, and it exists only for an
@@ -323,11 +341,7 @@ function Builder() {
           technology the builder is not on screen; `hidden-attribute.test`
           holds the stylesheet to honouring it.
         */}
-        <Workspace
-          state={state}
-          hidden={onPage}
-          project={projects.mode === 'server' ? projects.current : null}
-        />
+        <Workspace state={state} hidden={onPage} />
       </main>
 
       {/*

@@ -282,9 +282,15 @@ const SAVE_ATTEMPTS = 3;
 
 /**
  * The rows one project has, in the order they are deleted: its run
- * history, its runs' stages, its accepted pointer, and last the row that
- * says whose it is, so a failure part way through leaves a project that
- * still has an owner and can be deleted again.
+ * history, its runs' stages, its accepted pointer, its GitHub repository
+ * binding (D72), and last the row that says whose it is, so a failure part
+ * way through leaves a project that still has an owner and can be deleted
+ * again.
+ *
+ * The binding goes, and the repository stays: it is on the person's GitHub
+ * account, and deleting a project here is not an instruction to delete
+ * anything there. Its push history stays too, keyed by the account rather
+ * than the project, until the account itself is purged.
  *
  * Shared with the account purge (`account-deletion-store.ts`), so deleting
  * one project and deleting all of them are the same statements.
@@ -293,6 +299,7 @@ export const PROJECT_ROW_DELETIONS: readonly string[] = [
   `DELETE FROM generation_run_traces WHERE project_id = ?1`,
   `DELETE FROM generation_stages WHERE project_id = ?1`,
   `DELETE FROM generation_projects WHERE id = ?1`,
+  `DELETE FROM github_project_bindings WHERE project_id = ?1`,
   `DELETE FROM projects WHERE id = ?1`,
 ];
 

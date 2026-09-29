@@ -1,23 +1,35 @@
 import { Show } from '@clerk/react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
-  beginConnect,
-  beginInstall,
-  bindRepository,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import {
   claimHandoff,
   completeClaimedConnect,
-  disconnectRepository,
   holdHandoff,
-  noteConnectionChanged,
-  onConnectionChanged,
 } from '../github/github-client.ts';
 import type {
   ConnectOffer,
   RepositoryChoice,
 } from '../github/github-client.ts';
 import { decidePanel } from '../github/panel-view.ts';
-import { githubStatus } from '../github/github-status.ts';
 import type { PanelPhase } from '../github/panel-view.ts';
+import { githubStatus } from '../github/github-status.ts';
+import { connectFlow } from '../github/connect-flow.ts';
+import type { ConnectFlowState } from '../github/connect-flow.ts';
+import {
+  chooseRepository,
+  disconnectEverything,
+  disconnectProject,
+  receiveCompletion,
+  startConnect,
+  startInstall,
+} from '../github/connect-actions.ts';
+import { repositoryNameFor } from '../github/repo-name.ts';
+import { useProjectStatus } from '../github/use-project-status.ts';
 import { clerkConfigured } from '../auth/clerk-token.ts';
 
 /**
@@ -36,15 +48,26 @@ import { clerkConfigured } from '../auth/clerk-token.ts';
  * what stops a crafted link completing somebody else's authorization inside
  * this session.
  *
+ * Per project since D72: the panel is about the open project's repository,
+ * with the account's own connection named beside it. What the controls do
+ * lives in `connect-actions.ts`, shared with the Ship menu, which offers the
+ * same "create or pick" on a project's first push.
+ *
  * Mounted inside `Show when="signed-in"` like `BillingStatusWidget`, so a
  * fresh mount is always a fresh fetch and there is no sign-in re-fetch to
  * keep in step.
  */
-export function GitHubPanel() {
+export function GitHubPanel({
+  projectId = null,
+  projectName = '',
+}: {
+  projectId?: string | null;
+  projectName?: string;
+}) {
   if (!clerkConfigured) return null;
   return (
     <Show when="signed-in">
-      <GitHubConnection />
+      <GitHubConnection projectId={projectId} projectName={projectName} />
     </Show>
   );
 }
@@ -57,22 +80,19 @@ export function GitHubPanel() {
  * status fetch, so a test mounts this directly and the gate above stays
  * what it looks like: two lines with nothing in them to get wrong.
  */
-export function GitHubConnection() {
-  // Shared with the push button (internal PR 34), so the two cannot describe the same
-  // connection differently. The supersede rule this used to hold in a local
-  // gate lives in the store now, along with "a probe only commits what it
-  // got": both are properties of the connection rather than of this panel,
-  // and a second copy of either here would be a second place for it to be
-  // wrong.
-  const status = useSyncExternalStore(
-    githubStatus.subscribe,
-    githubStatus.read,
-  );
-  const [phase, setPhase] = useState<PanelPhase>({ at: 'loading' });
-
-  async function refreshStatus() {
-    await githubStatus.refresh();
-  }
+export function GitHubConnection({
+  projectId = null,
+  projectName = '',
+}: {
+  projectId?: string | null;
+  projectName?: string;
+}) {
+  useProjectStatus(projectId);
+  // Read inside the effect below, which runs once per mount: a completion
+  // that arrives after the open project changed still needs somewhere to
+  // go when the browser did not remember which project it was for.
+  const openProject = useRef(projectId);
+  openProject.current = projectId;
 
   // Finishing a return from GitHub, if that is what this page load is.
   useEffect(() => {
@@ -102,30 +122,19 @@ export function GitHubConnection() {
     // spend the stored state on the first and fail the second's own check.
     const completing = handoff ? completeClaimedConnect(handoff) : null;
     if (handoff) {
-      setPhase({ at: 'working', note: 'Finishing the GitHub connection…' });
+      connectFlow.set({
+        phase: { at: 'working', note: 'Finishing the GitHub connection…' },
+        projectId: openProject.current,
+      });
+    } else if (connectFlow.read().phase.at === 'loading') {
+      connectFlow.set({ phase: { at: 'idle' }, projectId: null });
     }
 
-    // Alongside, never in front of it. The status only decides what the panel
-    // offers once there is nothing in flight, and it is gated so that landing
-    // late cannot undo a binding written while it was away.
-    void githubStatus.refresh();
-
     void (async () => {
-      if (!completing) {
-        if (!cancelled) setPhase({ at: 'idle' });
-        return;
-      }
+      if (!completing) return;
       const finished = await completing;
       if (cancelled) return;
-      if (!finished.ok) {
-        setPhase({
-          at: 'problem',
-          error: finished.error,
-          ...(finished.install ? { install: true } : {}),
-        });
-        return;
-      }
-      setPhase({ at: 'choosing', offer: finished.offer });
+      await receiveCompletion(finished, openProject.current, () => cancelled);
     })();
 
     return () => {
@@ -134,153 +143,81 @@ export function GitHubConnection() {
     };
   }, []);
 
-  /**
-   * Hear about a connection this panel did not change itself.
-   *
-   * It publishes on this already, through `bindRepository` and
-   * `disconnectRepository`, and until now it never listened: a rebind found
-   * by a push in another tab or on another device refreshed the push button
-   * and left the header saying the old repository was still connected. That
-   * is worse than looking out of date, because Disconnect on a stale panel
-   * disconnects whatever is bound now rather than the thing it is naming.
-   *
-   * Its own writes come back through here too, harmlessly: the refresh they
-   * trigger begins before they supersede the gate, so the write's own reply
-   * is what wins and this only arrives late enough to be discarded.
-   */
-  useEffect(() => onConnectionChanged(() => void refreshStatus()), []);
-
-  /**
-   * Go and install the App, carrying a state that comes back.
-   *
-   * Not an anchor. A plain link to the installation page returns with an
-   * `installation_id` and no `state`, which the callback reports as
-   * incomplete and the app discards, so the installation happens and nothing
-   * hears about it. The id coming back is the whole point for an account the
-   * read budget skipped: a named installation is read directly and outside
-   * the budget, and without it installing again changes nothing, because
-   * GitHub's list may order that account past the budget once more.
-   */
-  async function install() {
-    setPhase({ at: 'working', note: 'Sending you to GitHub…' });
-    const started = await beginInstall();
-    if (!started.ok) {
-      setPhase({ at: 'problem', error: started.error });
-      return;
-    }
-    globalThis.location.assign(started.url);
-  }
-
-  async function connect() {
-    setPhase({ at: 'working', note: 'Sending you to GitHub…' });
-    const started = await beginConnect();
-    if (!started.ok) {
-      setPhase({ at: 'problem', error: started.error });
-      return;
-    }
-    globalThis.location.assign(started.url);
-  }
-
-  async function choose(choice: RepositoryChoice, ticket: string) {
-    setPhase({
-      at: 'working',
-      note: `Connecting ${choice.owner}/${choice.repo}…`,
-    });
-    const bound = await bindRepository(ticket, choice);
-    if (!bound.ok) {
-      setPhase({ at: 'problem', error: bound.error });
-      return;
-    }
-    // Built from the reply rather than from a refresh. The write has already
-    // landed, so a status request that fails here must not leave somebody
-    // staring at nothing, unable to tell whether their repository connected.
-    // A refresh is still attempted, and only used if it answers.
-    //
-    // Superseding first, so a probe started before this write cannot land
-    // afterwards and put `connected: false` back over a repository that is
-    // connected. What the reply does not say, it does not say: `canPush`
-    // stays undefined here when nothing has reported it, and `decidePanel`
-    // keeps that as unknown rather than reading it as a no.
-    githubStatus.amend((previous) => ({
-      configured: true,
-      canPush: previous?.canPush,
-      canConnect: previous?.canConnect,
-      connected: true,
-      owner: bound.bound.owner,
-      repo: bound.bound.repo,
-      defaultBranch: bound.bound.defaultBranch,
-      ...(bound.bound.expiresAt ? { expiresAt: bound.bound.expiresAt } : {}),
-    }));
-    setPhase({ at: 'idle' });
-    await refreshStatus();
-  }
-
-  async function disconnect(to: { owner: string; repo: string }) {
-    setPhase({ at: 'working', note: 'Disconnecting…' });
-    const done = await disconnectRepository(to);
-    if (!done.ok) {
-      setPhase({
-        at: 'problem',
-        error: done.error,
-        // What the sentence is about, so it stops being drawn once the
-        // connection is known to be somewhere else again.
-        ...(done.movedTo ? { about: done.movedTo } : {}),
-      });
-      // The route is the only thing that can tell this browser its idea of
-      // the connection is out of date, so a refusal about the destination
-      // sends it back to read one. Announced rather than refreshed here,
-      // because the push button keeps its own copy of the status and would
-      // otherwise go on offering a push to the repository this just found
-      // out about, until somebody clicked it and was refused in turn. Same
-      // discovery, same announcement, as the push route's own mismatch.
-      if (done.movedTo) {
-        // Forgotten before it is read again, and not left to the refresh to
-        // replace. `refreshStatus` only commits a status it actually got,
-        // so a probe that fails would leave this panel showing "Connected
-        // to acme/site" beside an error the server has just written saying
-        // it is connected to somewhere else, and still offering to
-        // disconnect the wrong one. The push button was given this on internal PR 123
-        // for the same reason; the panel was not.
-        githubStatus.forget();
-        noteConnectionChanged();
-      }
-      return;
-    }
-    // Same rule as binding: the write landed, so say so without depending on
-    // a second request succeeding, and supersede any read still in flight so
-    // it cannot put the disconnected repository back.
-    githubStatus.amend((previous) =>
-      previous
-        ? { ...previous, connected: false, reason: 'revoked' }
-        : previous,
-    );
-    setPhase({ at: 'idle' });
-    await refreshStatus();
-  }
-
-  // Every decision about what appears lives in `decidePanel`, which is a
-  // plain function with tests. Four findings on this feature were decisions
-  // made in this file, where the test runner cannot reach them: it strips
-  // TypeScript types and errors on JSX, so a component is typechecked and
-  // never exercised. Below this line nothing reads `phase` or `status`, only
-  // the view, so there is nothing left here to get wrong that a test could
-  // not have caught.
-  const view = decidePanel(phase, status);
-  if (!view.show) return null;
-  // Held in a const for the same reason `picker` is: the callback below has
-  // to close over a definite destination rather than a field TypeScript can
-  // no longer prove is there by the time it runs.
-  const summaryDisconnect =
-    view.summary?.connected === true ? view.summary.disconnect : undefined;
-  // Held in a const so the callback below closes over a definite offer rather
-  // than reaching back into the view for a ticket TypeScript can no longer
-  // prove is there.
-  const picker = view.picker;
-
   return (
     <section className="github-panel">
       <h3>GitHub</h3>
+      <ProjectRepository
+        projectId={projectId}
+        projectName={projectName}
+        from="settings"
+        showAccount
+      />
+    </section>
+  );
+}
 
+/**
+ * The flow's phase, as it applies to this project.
+ *
+ * A picker or a failure belongs to the project the trip was for. Shown
+ * under another project's name it would bind that project's repository to
+ * this one at a click, so another project's flow reads as idle here.
+ */
+function phaseFor(
+  flow: ConnectFlowState,
+  projectId: string | null,
+  loadingIsIdle: boolean,
+): PanelPhase {
+  if (flow.projectId !== null && flow.projectId !== projectId) {
+    return { at: 'idle' };
+  }
+  if (loadingIsIdle && flow.phase.at === 'loading') return { at: 'idle' };
+  return flow.phase;
+}
+
+/**
+ * One project's repository: what it pushes to, or how to give it one.
+ *
+ * Drawn in the settings panel and in the Ship menu, from the same shared
+ * state, so the two cannot disagree. `showSummary` is off in the Ship menu,
+ * where the push button beside it already names the repository.
+ */
+export function ProjectRepository({
+  projectId,
+  projectName,
+  from,
+  showAccount = false,
+  showSummary = true,
+}: {
+  projectId: string | null;
+  projectName: string;
+  from: 'ship' | 'settings';
+  showAccount?: boolean;
+  showSummary?: boolean;
+}) {
+  const status = useSyncExternalStore(
+    githubStatus.subscribe,
+    githubStatus.read,
+  );
+  const flow = useSyncExternalStore(connectFlow.subscribe, connectFlow.read);
+  // Only the settings panel waits for the handoff check before drawing;
+  // it is the one that runs it. The Ship menu has nothing to wait for.
+  const phase = phaseFor(flow, projectId, from === 'ship');
+  const target = flow.projectId ?? projectId;
+
+  // Every decision about what appears lives in `decidePanel`, which is a
+  // plain function with tests. Below this line nothing reads `phase` or
+  // `status`, only the view.
+  const view = decidePanel(phase, status);
+  if (!view.show) return null;
+  // Held in consts so the callbacks below close over definite values rather
+  // than fields TypeScript can no longer prove are there when they run.
+  const summaryDisconnect =
+    view.summary?.connected === true ? view.summary.disconnect : undefined;
+  const picker = view.picker;
+
+  return (
+    <div className="github-project">
       {view.working && <p role="status">{view.working}</p>}
 
       {view.problem && (
@@ -290,7 +227,10 @@ export function GitHubConnection() {
             {view.problem.install && (
               <>
                 {' '}
-                <button type="button" onClick={() => void install()}>
+                <button
+                  type="button"
+                  onClick={() => void startInstall({ projectId, from })}
+                >
                   Install the vibld app
                 </button>
               </>
@@ -298,7 +238,10 @@ export function GitHubConnection() {
           </p>
           {view.problem.retry && (
             <p>
-              <button type="button" onClick={() => void connect()}>
+              <button
+                type="button"
+                onClick={() => void startConnect({ projectId, from })}
+              >
                 Try connecting again
               </button>
             </p>
@@ -306,10 +249,12 @@ export function GitHubConnection() {
         </>
       )}
 
-      {picker && (
+      {picker && target && (
         <RepositoryPicker
           offer={picker}
-          onChoose={(choice) => void choose(choice, picker.ticket)}
+          onChoose={(choice) =>
+            void chooseRepository(choice, picker.ticket, target, from)
+          }
         />
       )}
 
@@ -319,7 +264,10 @@ export function GitHubConnection() {
           {view.omitted.length === 1 ? 'account' : 'accounts'}:{' '}
           <strong>{view.omitted.join(', ')}</strong>. To connect a repository on
           one of those,{' '}
-          <button type="button" onClick={() => void install()}>
+          <button
+            type="button"
+            onClick={() => void startInstall({ projectId, from })}
+          >
             install the vibld app on that account
           </button>
           .
@@ -334,7 +282,7 @@ export function GitHubConnection() {
         </p>
       )}
 
-      {view.summary?.connected === true && (
+      {showSummary && view.summary?.connected === true && (
         <p>
           {view.summary.pushing === 'yes' ? 'Pushing to ' : 'Connected to '}
           <strong>
@@ -343,10 +291,16 @@ export function GitHubConnection() {
           on <code>{view.summary.defaultBranch}</code>.
           {view.summary.pushing === 'no' &&
             ' Pushing is not configured on this deployment.'}{' '}
-          {summaryDisconnect && (
+          {summaryDisconnect && projectId && (
             <button
               type="button"
-              onClick={() => void disconnect(summaryDisconnect)}
+              title="Stop this project pushing there. Other projects keep their repositories."
+              onClick={() =>
+                void disconnectProject(
+                  { projectId, ...summaryDisconnect },
+                  from,
+                )
+              }
             >
               Disconnect
             </button>
@@ -354,21 +308,163 @@ export function GitHubConnection() {
         </p>
       )}
 
-      {view.summary?.connected === false && (
-        <p>
-          No repository connected.{' '}
-          {view.summary.canConnect ? (
-            <button type="button" onClick={() => void connect()}>
-              Connect a repository
-            </button>
-          ) : (
-            // Said rather than shown as a button that cannot work: pushing
-            // and connecting are configured separately.
+      {view.summary?.connected === false &&
+        view.chooser === undefined &&
+        (view.summary.canConnect ? null : (
+          // Said rather than shown as a button that cannot work: pushing
+          // and connecting are configured separately.
+          <p>
+            No repository connected.{' '}
             <span>Connecting is not configured on this deployment.</span>
-          )}
-        </p>
+          </p>
+        ))}
+
+      {view.chooser &&
+        (projectId ? (
+          <RepositoryChooser
+            // Keyed by the suggested name, so a new suggestion replaces what
+            // is in the field rather than being ignored by state that was
+            // initialised from the last one.
+            key={`${projectId}:${view.chooser.name ?? ''}`}
+            projectId={projectId}
+            projectName={projectName}
+            suggested={view.chooser.name}
+            from={from}
+          />
+        ) : (
+          <p>Open a project to choose the repository it pushes to.</p>
+        ))}
+
+      {showAccount && view.account && (
+        <AccountLine login={view.account.login} projectId={projectId} />
       )}
-    </section>
+    </div>
+  );
+}
+
+/**
+ * The two ways a project gets a repository (D72): create one, named from
+ * the project and private unless unticked, or use one that exists.
+ *
+ * Both go to GitHub and back, because the user token that can create a
+ * repository or list the ones this person may push to exists only during
+ * that return. For somebody who has already authorised the App, GitHub
+ * sends them straight back.
+ */
+function RepositoryChooser({
+  projectId,
+  projectName,
+  suggested,
+  from,
+}: {
+  projectId: string;
+  projectName: string;
+  suggested?: string;
+  from: 'ship' | 'settings';
+}) {
+  const [name, setName] = useState(
+    () => suggested ?? repositoryNameFor(projectName),
+  );
+  const [hidden, setHidden] = useState(true);
+  const nameId = useId();
+  const privateId = useId();
+  const trimmed = name.trim();
+
+  return (
+    <fieldset className="github-chooser">
+      <legend>This project has no GitHub repository yet.</legend>
+      <div className="github-chooser__create">
+        <label htmlFor={nameId}>New repository name</label>
+        <input
+          id={nameId}
+          className="github-chooser__name"
+          value={name}
+          maxLength={100}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(event) => setName(event.target.value)}
+        />
+        <label htmlFor={privateId} className="github-chooser__private">
+          <input
+            id={privateId}
+            type="checkbox"
+            checked={hidden}
+            onChange={(event) => setHidden(event.target.checked)}
+          />{' '}
+          Private
+        </label>
+        <button
+          type="button"
+          disabled={trimmed.length === 0}
+          onClick={() =>
+            void startConnect({
+              projectId,
+              create: { name: trimmed, private: hidden },
+              from,
+            })
+          }
+        >
+          Create a new repository
+        </button>
+      </div>
+      <p className="github-chooser__existing">
+        <button
+          type="button"
+          onClick={() => void startConnect({ projectId, from })}
+        >
+          Use an existing repository
+        </button>
+      </p>
+    </fieldset>
+  );
+}
+
+/**
+ * The account's own connection, and the one control that ends all of it.
+ *
+ * Asked twice. Disconnecting GitHub unbinds every project at once (D72),
+ * and each one then goes back to GitHub to choose its repository again, so
+ * a single stray click is worth one more.
+ */
+function AccountLine({
+  login,
+  projectId,
+}: {
+  login?: string;
+  projectId: string | null;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <p className="github-panel__account">
+      {login ? (
+        <>
+          Signed in to GitHub as <strong>{login}</strong>.
+        </>
+      ) : (
+        'Signed in to GitHub.'
+      )}{' '}
+      {confirming ? (
+        <>
+          Every project stops pushing, and each chooses its repository again.{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setConfirming(false);
+              void disconnectEverything(projectId, 'settings');
+            }}
+          >
+            Disconnect every project
+          </button>{' '}
+          <button type="button" onClick={() => setConfirming(false)}>
+            Keep it
+          </button>
+        </>
+      ) : (
+        <button type="button" onClick={() => setConfirming(true)}>
+          Disconnect GitHub
+        </button>
+      )}
+    </p>
   );
 }
 

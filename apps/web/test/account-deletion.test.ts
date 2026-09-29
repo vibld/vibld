@@ -92,6 +92,10 @@ function countingDb(): { db: D1Database; statements: () => number } {
     });
   const db = {
     prepare: (query: string) => counted(inner.prepare(query)),
+    // Each statement in a batch is counted as it runs, because the fake's
+    // batch runs them one by one: disconnecting GitHub (D72) is one batch of
+    // two, the account's connection and every project's binding.
+    batch: (batched: D1PreparedStatement[]) => inner.batch(batched),
   } as unknown as D1Database;
   return { db, statements: () => statements };
 }
@@ -401,6 +405,24 @@ async function seed(w: World, { siteLive = false } = {}) {
     at,
     EMAIL,
   );
+  // The per-project shape (D72): the account's connection, and one
+  // project's binding. The row above is the one 0039 left in place.
+  await exec(
+    db,
+    `INSERT INTO github_connections VALUES (?1, 'leaver', 7, ?2, ?3, NULL)`,
+    USER,
+    at,
+    EMAIL,
+  );
+  await exec(
+    db,
+    `INSERT INTO github_project_bindings VALUES (
+       'leaver-project', ?1, 7, 'leaver', 'site', 'main', ?2, ?3,
+       '2027-01-01T00:00:00.000Z', NULL)`,
+    USER,
+    at,
+    EMAIL,
+  );
   await exec(
     db,
     `INSERT INTO github_pushes (user_id, owner, repo, revision, base_sha, branch, started_at)
@@ -674,23 +696,34 @@ describe('the immediate steps', () => {
     assert.notEqual((await w.store.find(USER))!.done.sites, null);
   });
 
-  it('revokes the GitHub grant, and doing it twice changes nothing', async () => {
+  it('revokes the GitHub grants, and doing it twice changes nothing', async () => {
+    // The account's connection and every project's binding (D72).
     const w = world();
     await seed(w);
     await requestAccountDeletion(w.deps, USER);
-    const first = await w.db
-      .prepare(`SELECT revoked_at FROM github_bindings WHERE user_id = ?1`)
-      .bind(USER)
-      .first<{ revoked_at: string }>();
-    assert.equal(first?.revoked_at, REQUESTED);
+    const revoked = async () => [
+      (
+        await w.db
+          .prepare(
+            `SELECT revoked_at FROM github_project_bindings WHERE user_id = ?1`,
+          )
+          .bind(USER)
+          .first<{ revoked_at: string }>()
+      )?.revoked_at,
+      (
+        await w.db
+          .prepare(
+            `SELECT revoked_at FROM github_connections WHERE user_id = ?1`,
+          )
+          .bind(USER)
+          .first<{ revoked_at: string }>()
+      )?.revoked_at,
+    ];
+    assert.deepEqual(await revoked(), [REQUESTED, REQUESTED]);
 
     w.clock.now = new Date('2026-09-03T00:00:00.000Z');
-    await w.deps.github.revoke(USER, w.clock.now);
-    const second = await w.db
-      .prepare(`SELECT revoked_at FROM github_bindings WHERE user_id = ?1`)
-      .bind(USER)
-      .first<{ revoked_at: string }>();
-    assert.equal(second?.revoked_at, REQUESTED);
+    await w.deps.github.disconnectAccount(USER, w.clock.now);
+    assert.deepEqual(await revoked(), [REQUESTED, REQUESTED]);
   });
 
   it('cancels unpaid referral rewards, leaves paid ones, and retires the code', async () => {
@@ -888,6 +921,8 @@ describe('the purge', () => {
       ['projects', 'user_id'],
       ['project_media', 'user_id'],
       ['github_bindings', 'user_id'],
+      ['github_project_bindings', 'user_id'],
+      ['github_connections', 'user_id'],
       ['github_pushes', 'user_id'],
       ['referral_codes', 'user_id'],
     ] as const) {
@@ -1276,6 +1311,8 @@ describe('the purge', () => {
       'projects.user_id',
       'project_media.user_id',
       'github_bindings.user_id',
+      'github_project_bindings.user_id',
+      'github_connections.user_id',
       'github_pushes.user_id',
       'referral_codes.user_id',
       'referral_attributions.referred_user_id',

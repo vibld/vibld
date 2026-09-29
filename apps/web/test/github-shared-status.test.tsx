@@ -58,8 +58,8 @@ async function mountBoth(answers: () => Response) {
     root = createRoot(container);
     root.render(
       <>
-        <GitHubConnection />
-        <GitHubPushButton snapshot={SNAPSHOT} />
+        <GitHubConnection projectId="p1" projectName="North Star" />
+        <GitHubPushButton snapshot={SNAPSHOT} projectId="p1" />
       </>,
     );
   });

@@ -1,29 +1,19 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { isSignedByGitHub, pullRequestFrom } from '../worker/github-webhook.ts';
 import { handleGitHubWebhook } from '../worker/github-handlers.ts';
 import { GitHubStore } from '../worker/github-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
 const SECRET = 'not-the-real-one';
 
-function migration(file: string): string {
-  return readFileSync(
-    join(import.meta.dirname, '..', 'migrations', file),
-    'utf8',
-  );
-}
-
-// Both, because the pull request columns the webhook writes are added by the
-// second one to the table the first one declares.
-const SCHEMA = [
-  migration('0005_github.sql'),
-  migration('0015_github_pull_requests.sql'),
-].join('\n');
+// The whole schema: the pull request columns the webhook writes are added by
+// 0015 to the table 0005 declares, and 0039 adds the project a push came
+// from (D72), which `beginPush` now records.
+const SCHEMA = schemaSql();
 
 function sign(body: string, secret = SECRET): string {
   return `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
@@ -73,6 +63,7 @@ const PUSH = {
   baseSha: 'base',
   branch: 'vibld/r7',
   startedAt: '2026-09-17T11:00:00.000Z',
+  projectId: 'p1',
 };
 
 async function storeWithPush(db: SqliteD1Database): Promise<GitHubStore> {

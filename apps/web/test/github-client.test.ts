@@ -279,7 +279,7 @@ describe('binding the chosen repository', () => {
     const sent: unknown[] = [];
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      { projectId: 'p1', owner: 'acme', repo: 'site', defaultBranch: 'main' },
       (async (_url: string, init?: RequestInit) => {
         sent.push(JSON.parse(String(init?.body)));
         return json({ owner: 'acme', repo: 'site' });
@@ -289,6 +289,7 @@ describe('binding the chosen repository', () => {
     assert.equal(result.ok, true);
     assert.deepEqual(sent[0], {
       ticket: 'the-ticket',
+      projectId: 'p1',
       owner: 'acme',
       repo: 'site',
     });
@@ -301,7 +302,7 @@ describe('binding the chosen repository', () => {
     // tell whether their repository connected.
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'ACME', repo: 'Site', defaultBranch: 'main' },
+      { projectId: 'p1', owner: 'ACME', repo: 'Site', defaultBranch: 'main' },
       (async () =>
         json({
           owner: 'acme',
@@ -327,7 +328,7 @@ describe('binding the chosen repository', () => {
     // An unreadable reply does not undo a write that succeeded.
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      { projectId: 'p1', owner: 'acme', repo: 'site', defaultBranch: 'main' },
       (async () =>
         new Response('not json', { status: 200 })) as unknown as typeof fetch,
       TOKEN,
@@ -346,7 +347,7 @@ describe('binding the chosen repository', () => {
     // visible showed it wrongly, and a failed refresh left that on screen.
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
+      { projectId: 'p1', owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
       (async () =>
         new Response('not json', { status: 200 })) as unknown as typeof fetch,
       TOKEN,
@@ -358,7 +359,7 @@ describe('binding the chosen repository', () => {
   it('keeps it when the reply names no branch at all', async () => {
     const result = await bindRepository(
       'the-ticket',
-      { owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
+      { projectId: 'p1', owner: 'acme', repo: 'site', defaultBranch: 'trunk' },
       (async () =>
         json({ owner: 'acme', repo: 'site' })) as unknown as typeof fetch,
       TOKEN,
@@ -370,7 +371,7 @@ describe('binding the chosen repository', () => {
   it('surfaces the server’s sentence when it refuses', async () => {
     const result = await bindRepository(
       'stale',
-      { owner: 'acme', repo: 'site', defaultBranch: 'main' },
+      { projectId: 'p1', owner: 'acme', repo: 'site', defaultBranch: 'main' },
       (async () =>
         json(
           { error: 'That connection attempt has expired. Start again.' },
@@ -384,7 +385,7 @@ describe('binding the chosen repository', () => {
 });
 
 describe('ending a connection', () => {
-  const TO = { owner: 'acme', repo: 'site' };
+  const TO = { projectId: 'p1', owner: 'acme', repo: 'site' };
 
   it('says which repository it is ending', async () => {
     // The route acts on whatever is bound when the request arrives, so a
@@ -399,7 +400,8 @@ describe('ending a connection', () => {
       TOKEN,
     );
     assert.equal(done.ok, true);
-    assert.deepEqual(sent[0], { owner: 'acme', repo: 'site' });
+    // And which project's repository (D72): only that project's is ended.
+    assert.deepEqual(sent[0], { projectId: 'p1', owner: 'acme', repo: 'site' });
   });
 
   it('carries where the connection actually points when it was refused', async () => {
@@ -437,6 +439,7 @@ describe('ending a connection', () => {
 describe('the status the panel reads', () => {
   it('passes the two capabilities through', async () => {
     const status = await fetchGitHubStatus(
+      'p1',
       (async () =>
         json({
           configured: true,
@@ -453,6 +456,7 @@ describe('the status the panel reads', () => {
     // Nobody asked for this, so a panel that renders nothing is the right
     // outcome, the same rule `fetchBillingStatus` follows.
     const status = await fetchGitHubStatus(
+      'p1',
       (async () => {
         throw new Error('offline');
       }) as unknown as typeof fetch,
@@ -487,7 +491,7 @@ describe('pushing an accepted checkpoint', () => {
   };
 
   /** Where the button believed it was pushing when it was clicked. */
-  const TO = { owner: 'acme', repo: 'site' };
+  const TO = { projectId: 'p1', owner: 'acme', repo: 'site' };
 
   it('sends the revision and the files the route keys on', async () => {
     const sent: unknown[] = [];
@@ -505,7 +509,13 @@ describe('pushing an accepted checkpoint', () => {
     // request arrives, so a push that does not say where it meant to go is
     // asking for whatever is connected by then, which is how a button
     // labelled one repository writes to another.
-    assert.deepEqual(sent[0], { ...SNAPSHOT, owner: 'acme', repo: 'site' });
+    // The project goes too (D72): the route reads that project's binding.
+    assert.deepEqual(sent[0], {
+      projectId: 'p1',
+      ...SNAPSHOT,
+      owner: 'acme',
+      repo: 'site',
+    });
   });
 
   it('reads back what was written', async () => {
@@ -766,7 +776,12 @@ describe('pushing an accepted checkpoint', () => {
  * and forgetting is silent.
  */
 describe('telling the rest of the builder the connection moved', () => {
-  const CHOICE = { owner: 'acme', repo: 'site', defaultBranch: 'main' };
+  const CHOICE = {
+    projectId: 'p1',
+    owner: 'acme',
+    repo: 'site',
+    defaultBranch: 'main',
+  };
   const bound = (async () =>
     json({
       owner: 'acme',
@@ -790,7 +805,7 @@ describe('telling the rest of the builder the connection moved', () => {
       told += 1;
     });
     await disconnectRepository(
-      { owner: 'acme', repo: 'site' },
+      { projectId: 'p1', owner: 'acme', repo: 'site' },
       (async () => json({ ok: true })) as unknown as typeof fetch,
       TOKEN,
     );

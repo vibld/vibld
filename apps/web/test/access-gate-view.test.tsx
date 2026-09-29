@@ -128,9 +128,10 @@ describe('the access gate', () => {
       },
       '/api/github/status': {
         configured: true,
-        connected: true,
-        owner: 'chris',
-        repo: 'thing',
+        // The account's own connection (D72), which is what this screen
+        // offers to end: every project's repository hangs off it.
+        account: { connected: true, login: 'chris' },
+        connected: false,
       },
       '/api/media': {
         media: [
@@ -162,7 +163,11 @@ describe('the access gate', () => {
     assert.match(view.text, /manage or cancel a subscription/i);
     assert.match(view.text, /stop the running sandbox/i, 'sandbox unreachable');
     assert.match(view.text, /public link/i, 'public code unreachable');
-    assert.match(view.text, /disconnect chris\/thing/i, 'grant unreachable');
+    assert.match(
+      view.text,
+      /disconnect github \(chris\) from every project/i,
+      'grant unreachable',
+    );
     assert.match(view.text, /unspent credit/i, 'no sight of their money');
   });
 
@@ -464,9 +469,10 @@ describe('the access gate', () => {
         },
         '/api/github/status': {
           configured: true,
-          connected: true,
-          owner: 'chris',
-          repo: 'thing',
+          // The account's own connection (D72), which is what this screen
+          // offers to end: every project's repository hangs off it.
+          account: { connected: true, login: 'chris' },
+          connected: false,
         },
       };
       return new Response(JSON.stringify(byUrl[path] ?? {}), {
@@ -482,7 +488,11 @@ describe('the access gate', () => {
     assert.match(view.text, /manage or cancel a subscription/i);
     assert.match(view.text, /stop the running sandbox/i, 'sandbox unreachable');
     assert.match(view.text, /public link/i, 'public code unreachable');
-    assert.match(view.text, /disconnect chris\/thing/i, 'grant unreachable');
+    assert.match(
+      view.text,
+      /disconnect github \(chris\) from every project/i,
+      'grant unreachable',
+    );
     assert.match(view.text, /unspent credit/i, 'no sight of their money');
   });
 

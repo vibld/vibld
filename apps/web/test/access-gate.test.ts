@@ -111,6 +111,11 @@ describe('the invite gate', () => {
       false,
       'cannot hand the grant back',
     );
+    assert.equal(
+      isGated('/api/github/disconnect-account', 'POST'),
+      false,
+      'cannot hand every grant back at once',
+    );
   });
 
   it('leaves a revoked account able to read what it already did', () => {

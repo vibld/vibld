@@ -2652,6 +2652,123 @@ a.projectlist__name:hover {
   color: var(--text);
 }
 
+/* The Ship menu (`ShipMenu`, D72): export, publish and push to GitHub,
+ * beside Share. The same pill as Share so the two read as one row of the
+ * project's outward-facing controls, and the same anchored panel. Wider,
+ * because it holds three sections and the GitHub chooser, and capped in
+ * height so a long repository list scrolls inside it. */
+.projectbar__ship {
+  position: relative;
+}
+
+.projectbar__shipbutton {
+  cursor: pointer;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--brand-40);
+  border-radius: 999px;
+  background: var(--brand-8);
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.projectbar__shipbutton[aria-expanded='true'] {
+  border-color: var(--brand);
+}
+
+.projectbar__shippanel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  width: min(28rem, calc(100vw - 2rem));
+  max-height: min(36rem, calc(100vh - 6rem));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--edge-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow);
+}
+
+.ship__section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.ship__section + .ship__section {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--edge);
+}
+
+.ship__heading {
+  margin: 0;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+/* "Create a new repository" or "Use an existing repository" (D72). */
+.github-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.github-chooser legend {
+  padding: 0 0.25rem;
+  font-size: var(--text-sm);
+}
+
+.github-chooser__create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.github-chooser__create > label:first-child {
+  flex: 1 1 100%;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.github-chooser__name {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
+.github-chooser__private {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--text-xs);
+}
+
+.github-chooser__existing {
+  margin: 0;
+}
+
 /* A shared project, as somebody its owner sent the link to sees it
  * (`SharedProjectPage`): the preview above, the code below, and nothing of
  * the builder around it. */

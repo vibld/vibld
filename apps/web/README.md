@@ -837,8 +837,9 @@ their content where the previous owner sent people.
 
 ### In the builder shell
 
-The Code tab's `PublishButton` (next to `ExportButton`, both keyed on
-`state.acceptedSnapshot`) calls `/api/publish`
+The Ship menu's `PublishButton` (in the top bar beside Share, next to
+`ExportButton` and the GitHub push, all keyed on `state.acceptedSnapshot`;
+docs/decisions.md D72) calls `/api/publish`
 (`src/generation/publish-client.ts`, the browser-side mirror of
 `worker/publish-client.ts`).
 
@@ -1683,12 +1684,25 @@ retention period.
 
 ## Pushing to GitHub (internal issue 13, docs/decisions.md L30/L42a)
 
-A checkpoint can be pushed to a repository the user connected: a branch
-`vibld/<revision>`, one commit carrying the generated files, and a pull
-request against the repository's default branch. `/api/github/status` (GET)
-tells the builder what is connected; `/api/github/push` (POST) does the
-push. Both take the same `files` shape `/api/preview` does, plus a
-`revision`.
+A checkpoint can be pushed to the repository its project is connected to: a
+branch `vibld/<revision>`, one commit carrying the generated files, and a
+pull request against the repository's default branch. `/api/github/status`
+(GET, `?project=<id>`) tells the builder whether the account is signed in to
+GitHub and what the project is connected to; `/api/github/push` (POST) does
+the push. Both take the same `files` shape `/api/preview` does, plus a
+`revision` and the `projectId`.
+
+**A repository per project** (docs/decisions.md D72). The account keeps the
+GitHub sign-in (`github_connections`) and each project has its own binding
+(`github_project_bindings`), so two projects can push to two repositories
+and disconnecting one (`/api/github/disconnect`, naming the project and the
+repository) leaves the others alone. `/api/github/disconnect-account` ends
+the sign-in and every project's binding. A project with no repository offers
+"Create a new repository" (named from the project, private by default,
+created with the user token during `/api/github/complete`, which is the only
+request holding one) or "Use an existing repository" (the picker below).
+`0039_github_per_project.sql` moved each account's old binding onto its most
+recently worked-on project; `github_bindings` is no longer read.
 
 Nothing about it is stored as a user credential. ADR-0006 separates two
 classes, and the App's private key is the Vibld-infrastructure kind: a
@@ -1697,7 +1711,7 @@ token scoped to the single repository the user approved** (`repositories`
 and `permissions` are both sent on the mint, so a token cannot reach the
 rest of an installation). That token lives for the length of one push and
 is never written down. What persists is the binding itself in
-`github_bindings`: an installation id, a repository, a branch, who approved
+`github_project_bindings`: an installation id, a repository, a branch, who approved
 it and when, and when the grant expires (90 days). A revoked grant keeps
 its row and blocks new work rather than disappearing.
 
@@ -1721,7 +1735,8 @@ repository.
 
 1. Create the App at https://github.com/settings/apps/new. Repository
    permissions: **Contents: Read and write** and **Pull requests: Read and
-   write**, nothing else. Webhook: unchecked. "Where can this GitHub App be
+   write**, and, only if "Create a new repository" should work,
+   **Administration: Read and write** (D72); nothing else. Webhook: unchecked. "Where can this GitHub App be
    installed": **Any account**.
 2. On the App's page, **Generate a private key**. The `.pem` downloads once.
    Paste its whole contents (including the `BEGIN`/`END` lines) into a new

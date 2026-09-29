@@ -9,7 +9,7 @@ import {
   openBillingPortal,
 } from '../billing/billing-client.ts';
 import {
-  disconnectRepository,
+  disconnectAccount,
   fetchGitHubStatus,
 } from '../github/github-client.ts';
 import { fetchMedia, removeMedia } from '../generation/media-client.ts';
@@ -405,9 +405,11 @@ function WindDown() {
   );
   const [sandbox, setSandbox] = useState(false);
   const [shares, setShares] = useState<string[]>([]);
-  const [repo, setRepo] = useState<{ owner: string; repo: string } | null>(
-    null,
-  );
+  // The account's GitHub connection (D72), which is what holds a grant to
+  // anybody's repositories now: every project's binding hangs off it, and
+  // ending it ends all of them. No project is open on this screen, so there
+  // is no one repository to name.
+  const [github, setGithub] = useState<{ login?: string } | null>(null);
   // The uploaded images and video, which stay stored until removed.
   const [media, setMedia] = useState<{ id: string; path: string }[]>([]);
   const [note, setNote] = useState<string | null>(null);
@@ -415,13 +417,14 @@ function WindDown() {
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [billing, preview, shareList, github, library] = await Promise.all([
-        fetchBillingStatus().catch(() => null),
-        fetchPreviewStatus().catch(() => null),
-        fetchPreviewShares().catch(() => []),
-        fetchGitHubStatus().catch(() => null),
-        fetchMedia().catch(() => null),
-      ]);
+      const [billing, preview, shareList, githubStatus, library] =
+        await Promise.all([
+          fetchBillingStatus().catch(() => null),
+          fetchPreviewStatus().catch(() => null),
+          fetchPreviewShares().catch(() => []),
+          fetchGitHubStatus().catch(() => null),
+          fetchMedia().catch(() => null),
+        ]);
       if (!live) return;
       setMedia(
         (library?.media ?? []).map((item) => ({
@@ -441,9 +444,11 @@ function WindDown() {
           .filter((s) => !s.revoked && s.expiresAt > now)
           .map((s) => s.shareId),
       );
-      setRepo(
-        github?.connected && github.owner && github.repo
-          ? { owner: github.owner, repo: github.repo }
+      setGithub(
+        githubStatus?.account?.connected
+          ? githubStatus.account.login
+            ? { login: githubStatus.account.login }
+            : {}
           : null,
       );
     })();
@@ -518,19 +523,20 @@ function WindDown() {
           </button>
         </p>
       ) : null}
-      {repo ? (
+      {github ? (
         <p className="banner__detail">
           <button
             type="button"
             onClick={() =>
-              void run('Disconnecting the repository', async () => {
-                const result = await disconnectRepository(repo);
+              void run('Disconnecting GitHub', async () => {
+                const result = await disconnectAccount();
                 if (!result.ok) throw new Error(result.error);
-                setRepo(null);
+                setGithub(null);
               })
             }
           >
-            Disconnect {repo.owner}/{repo.repo}
+            Disconnect GitHub{github.login ? ` (${github.login})` : ''} from
+            every project
           </button>
         </p>
       ) : null}

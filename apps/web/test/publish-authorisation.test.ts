@@ -276,10 +276,13 @@ function migration(file: string): string {
   );
 }
 
-const SCHEMA = [
-  migration('0005_github.sql'),
-  migration('0015_github_pull_requests.sql'),
-].join('\n');
+// Every migration, as the deployment has them: 0039 (D72) adds the project
+// a push came from, which `beginPush` records.
+const SCHEMA = readdirSync(join(import.meta.dirname, '..', 'migrations'))
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map(migration)
+  .join('\n');
 
 function sign(body: string): string {
   return `sha256=${createHmac('sha256', SECRET).update(body).digest('hex')}`;
@@ -299,6 +302,7 @@ describe('a delivery that asks to be published', () => {
       baseSha: 'base',
       branch: 'vibld/r7',
       startedAt: '2026-09-17T11:00:00.000Z',
+      projectId: 'p1',
     });
     await store.finishPush(
       { userId: 'user_1', owner: 'acme', repo: 'site', revision: 'r7' },

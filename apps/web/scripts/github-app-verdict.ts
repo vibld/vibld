@@ -7,8 +7,20 @@
  * from a review finding, so they are worth running.
  */
 
-/** What this feature actually uses. */
+/** What pushing needs. Without these no push can succeed. */
 export const NEEDED = { contents: 'write', pull_requests: 'write' };
+
+/**
+ * What "Create a new repository" needs (D72), and nothing else does.
+ *
+ * Optional, and reported rather than required. GitHub's `POST /user/repos`
+ * needs the App to hold Administration: write, and without it the builder
+ * says creating is unavailable and offers "Use an existing repository",
+ * which still works. Whether to grant it is the maintainer's call, because
+ * it is a wider permission than pushing needs: so its absence never blocks
+ * a deploy, and its presence is not a fault either.
+ */
+export const OPTIONAL = { administration: 'write' };
 
 /**
  * Everything the App may hold, and nothing else.
@@ -19,7 +31,11 @@ export const NEEDED = { contents: 'write', pull_requests: 'write' };
  * for a key rather than for a token, so an extra scope is a failure rather
  * than a note.
  */
-export const ALLOWED = new Set(['metadata', ...Object.keys(NEEDED)]);
+export const ALLOWED = new Set([
+  'metadata',
+  ...Object.keys(NEEDED),
+  ...Object.keys(OPTIONAL),
+]);
 
 /** One installation, as `GET /app/installations` describes it. */
 export interface Installation {
@@ -31,6 +47,12 @@ export interface Installation {
 export interface Verdict {
   missing: { name: string; level: string; has: string }[];
   extra: string[];
+  /**
+   * Whether the App holds what "Create a new repository" needs (D72). Not a
+   * fault either way; the check reports it so nobody has to guess why the
+   * builder says creating is unavailable.
+   */
+  canCreate: boolean;
   lagging: { account: string; short: string[] }[];
   /** How many installations exist, or null when they could not be read. */
   installed: number | null;
@@ -65,9 +87,14 @@ export function appVerdict(
     }))
     .filter((one) => one.short.length > 0);
 
+  const canCreate = Object.entries(OPTIONAL).every(
+    ([name, level]) => held[name] === level,
+  );
+
   return {
     missing,
     extra,
+    canCreate,
     lagging,
     installed: installed === null ? null : installed.length,
   };

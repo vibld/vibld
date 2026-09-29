@@ -529,9 +529,14 @@ export class AccountDeletionStore {
   static readonly PROJECT_ROW_QUERIES = 5;
 
   /**
-   * Everything else keyed to the person that is not kept: the GitHub grant
-   * and its push history (repository names are theirs), their referral code,
-   * and the invite they redeemed, which is keyed by their email address.
+   * Everything else keyed to the person that is not kept: the GitHub
+   * connection, every project's binding and the push history (repository
+   * names are theirs), their referral code, and the invite they redeemed,
+   * which is keyed by their email address.
+   *
+   * `github_bindings` is still deleted although nothing reads it since D72:
+   * 0039 left it in place, and the repository names in it are as much this
+   * person's as the ones copied out of it.
    *
    * And what an admin set for the account (docs/decisions.md D73): a gifted
    * plan, overrides of its limits, and a ban. None of them is money, and
@@ -541,6 +546,8 @@ export class AccountDeletionStore {
   async deleteAccountRows(userId: string): Promise<void> {
     for (const sql of [
       `DELETE FROM github_pushes WHERE user_id = ?1`,
+      `DELETE FROM github_project_bindings WHERE user_id = ?1`,
+      `DELETE FROM github_connections WHERE user_id = ?1`,
       `DELETE FROM github_bindings WHERE user_id = ?1`,
       `DELETE FROM referral_codes WHERE user_id = ?1`,
       `DELETE FROM access_invites WHERE redeemed_by_user_id = ?1`,
@@ -552,7 +559,7 @@ export class AccountDeletionStore {
     }
   }
 
-  static readonly ACCOUNT_ROW_QUERIES = 7;
+  static readonly ACCOUNT_ROW_QUERIES = 9;
 
   /**
    * The published site's catalogue, for a site that is already down.

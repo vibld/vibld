@@ -157,3 +157,29 @@ describe('an App nobody has installed', () => {
     assert.equal(blocking(appVerdict(WRITE, [])), false);
   });
 });
+
+/**
+ * "Create a new repository" (D72) needs Administration: write, which pushing
+ * does not. Granting it is the maintainer's decision, so the check reports
+ * it and never fails a deploy over it either way.
+ */
+describe('the permission creating a repository needs', () => {
+  it('is allowed, rather than failing the deploy as an extra scope', () => {
+    const verdict = appVerdict({ ...WRITE, administration: 'write' }, []);
+    assert.deepEqual(verdict.extra, []);
+    assert.equal(verdict.canCreate, true);
+    assert.equal(blocking(verdict), false);
+  });
+
+  it('is reported as absent, and does not block, when it is not held', () => {
+    const verdict = appVerdict(WRITE, []);
+    assert.equal(verdict.canCreate, false);
+    assert.equal(blocking(verdict), false);
+  });
+
+  it('is not satisfied by read access', () => {
+    const verdict = appVerdict({ ...WRITE, administration: 'read' }, []);
+    assert.equal(verdict.canCreate, false);
+    assert.deepEqual(verdict.extra, []);
+  });
+});

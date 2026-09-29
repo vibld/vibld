@@ -170,12 +170,19 @@ if (verdict.extra.length) {
   );
 }
 
+// Reported, never a fault (D72). Without it the builder answers "Create a
+// new repository" with a sentence pointing at "Use an existing repository".
+const creating = verdict.canCreate
+  ? 'Administration is write, so "Create a new repository" can work.'
+  : `Administration is not write, so "Create a new repository" is refused and the builder offers "Use an existing repository" instead. To allow it, set Repository permissions > Administration to "Read and write" at https://github.com/settings/apps/${app.slug}/permissions, then accept the change on each installation.`;
+console.log(creating);
+
 const summary = process.env.GITHUB_STEP_SUMMARY;
 if (summary) {
   const { appendFileSync } = await import('node:fs');
   const head = faults.length
     ? `GitHub App **${app.slug}**: ${faults.join('. ')}.`
-    : `GitHub App **${app.slug}**: contents and pull requests are both write, and nothing else is held.`;
+    : `GitHub App **${app.slug}**: contents and pull requests are both write, and nothing is held that vibld does not use.`;
   const partial =
     installed.ok && installed.more
       ? ` Only the first ${installed.found.length} installations were checked.`
@@ -188,7 +195,7 @@ if (summary) {
         .map((one) => `**${one.account}** (${one.short.join(', ')})`)
         .join(', ')}.`
     : '';
-  appendFileSync(summary, `${head}${partial}${none}${lag}\n`);
+  appendFileSync(summary, `${head}${partial}${none}${lag}\n\n${creating}\n`);
 }
 
 // Loud, and not fatal, for the same reason `lagging` is below: installing
@@ -230,7 +237,7 @@ if (blocking(verdict)) {
 }
 
 console.log(
-  'Contents and pull requests are both read and write, and nothing else is held.',
+  'Contents and pull requests are both read and write, and nothing is held that vibld does not use.',
 );
 if (neverInstalled(verdict)) {
   console.log(

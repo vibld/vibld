@@ -21,6 +21,15 @@ export interface GitHubStatus {
   configured: boolean;
   canPush?: boolean;
   canConnect?: boolean;
+  /**
+   * The account's half of the connection (D72): whether this person has
+   * signed in through GitHub, and as whom. Separate from `connected`, which
+   * is about the open project's repository.
+   */
+  account?: { connected: boolean; login?: string };
+  /** The project this answer is about, when it names one. */
+  projectId?: string;
+  /** Whether the open project has a repository it can push to. */
   connected?: boolean;
   reason?: 'none' | 'revoked' | 'expired';
   owner?: string;
@@ -53,9 +62,29 @@ export interface RepositoryChoice {
   defaultBranch: string;
 }
 
+/**
+ * Why "Create a new repository" did not make one, with what to offer next.
+ *
+ * `suggestion` is a free name to put in the field in place of a taken one;
+ * `install` means the remedy is installing the App on the person's own
+ * account, which is where a new repository has to go.
+ */
+export interface CreateProblem {
+  error: string;
+  suggestion?: string;
+  install?: boolean;
+}
+
 export interface ConnectOffer {
   repositories: RepositoryChoice[];
   ticket: string;
+  /**
+   * The repository "Create a new repository" just made, also listed in
+   * `repositories` and so in the ticket. The builder binds it straight away.
+   */
+  created?: RepositoryChoice;
+  /** Why creating did not work, when that is what was asked for. */
+  createProblem?: CreateProblem;
   /**
    * Accounts the server's read budget did not reach, by login.
    *
@@ -93,6 +122,63 @@ export interface CallbackHandoff {
  * is the entire span this has to cover.
  */
 const STATE_KEY = 'vibld.github.state';
+
+/**
+ * What the trip to GitHub was for (D72), kept beside the state while the
+ * browser is away: which project it is choosing a repository for, whether
+ * it asked to create one, and which surface started it, so that surface is
+ * the one that opens with the answer.
+ *
+ * Kept in the browser rather than signed into the state. None of it is
+ * authority: the project is checked against the caller when the binding is
+ * written, and the name is only a request GitHub answers for itself.
+ */
+export interface ConnectIntent {
+  projectId: string | null;
+  create?: { name: string; private: boolean };
+  from?: 'ship' | 'settings';
+}
+
+const INTENT_KEY = 'vibld.github.intent';
+
+export function rememberIntent(
+  intent: ConnectIntent,
+  storage: Storage | null = safeStorage(),
+): void {
+  try {
+    storage?.setItem(INTENT_KEY, JSON.stringify(intent));
+  } catch {
+    // Without it the completion still offers the picker, just for nobody in
+    // particular; the panel then binds the project that is open.
+  }
+}
+
+/** The remembered intent, removed as it is read, like the state. */
+export function takeRememberedIntent(
+  storage: Storage | null = safeStorage(),
+): ConnectIntent | null {
+  try {
+    const raw = storage?.getItem(INTENT_KEY) ?? null;
+    storage?.removeItem(INTENT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ConnectIntent>;
+    const create =
+      parsed.create &&
+      typeof parsed.create.name === 'string' &&
+      typeof parsed.create.private === 'boolean'
+        ? { name: parsed.create.name, private: parsed.create.private }
+        : undefined;
+    return {
+      projectId: typeof parsed.projectId === 'string' ? parsed.projectId : null,
+      ...(create ? { create } : {}),
+      ...(parsed.from === 'ship' || parsed.from === 'settings'
+        ? { from: parsed.from }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function rememberState(
   state: string,
@@ -292,13 +378,20 @@ async function problemFrom(response: Response): Promise<string> {
   return 'Something went wrong talking to GitHub. Try again shortly.';
 }
 
-/** What the builder needs to decide which affordances to show. */
+/**
+ * What the builder needs to decide which affordances to show, for the open
+ * project (D72). With no project the answer is about the account alone.
+ */
 export async function fetchGitHubStatus(
+  projectId: string | null = null,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<GitHubStatus | null> {
+  const path = projectId
+    ? `/api/github/status?project=${encodeURIComponent(projectId)}`
+    : '/api/github/status';
   try {
-    const response = await fetchImpl('/api/github/status', {
+    const response = await fetchImpl(path, {
       headers: await authHeaders(getToken),
     });
     if (!response.ok) return null;
@@ -321,6 +414,7 @@ async function issueState(
   fetchImpl: typeof fetch,
   getToken: () => Promise<string | null>,
   storage: Storage | null,
+  intent: ConnectIntent,
 ): Promise<
   { ok: true; url: string; state: string } | { ok: false; error: string }
 > {
@@ -339,15 +433,22 @@ async function issueState(
     return { ok: false, error: 'vibld could not start that connection.' };
   }
   rememberState(body.state, storage);
+  rememberIntent(intent, storage);
   return { ok: true, url: body.url, state: body.state };
 }
 
+/**
+ * Begin connecting, for a project: to pick one of its repositories, or,
+ * with `create`, to have GitHub make one (D72). Both need the trip, because
+ * the user token that lists and creates repositories exists only inside it.
+ */
 export async function beginConnect(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
   storage: Storage | null = safeStorage(),
+  intent: ConnectIntent = { projectId: null },
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
-  const started = await issueState(fetchImpl, getToken, storage);
+  const started = await issueState(fetchImpl, getToken, storage, intent);
   return started.ok ? { ok: true, url: started.url } : started;
 }
 
@@ -385,17 +486,27 @@ export async function beginInstall(
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
   storage: Storage | null = safeStorage(),
+  intent: ConnectIntent = { projectId: null },
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
-  const started = await issueState(fetchImpl, getToken, storage);
+  const started = await issueState(fetchImpl, getToken, storage, intent);
   if (!started.ok) return started;
   const url = new URL(INSTALL_URL);
   url.searchParams.set('state', started.state);
   return { ok: true, url: url.toString() };
 }
 
+/**
+ * `intent` is what the trip was for, when this browser remembered it: the
+ * project the answer belongs to, and whether it asked to create one.
+ */
 export type CompleteResult =
-  | { ok: true; offer: ConnectOffer }
-  | { ok: false; error: string; install?: boolean };
+  | { ok: true; offer: ConnectOffer; intent: ConnectIntent | null }
+  | {
+      ok: false;
+      error: string;
+      install?: boolean;
+      intent?: ConnectIntent | null;
+    };
 
 /**
  * Finish the exchange, but only for a `state` this browser issued.
@@ -413,6 +524,10 @@ export async function completeConnect(
   storage: Storage | null = safeStorage(),
 ): Promise<CompleteResult> {
   const remembered = takeRememberedState(storage);
+  // Taken with the state, and for the same reason: it belongs to exactly
+  // one trip, and one left behind would attach a later, unrelated return
+  // to this project or to a name nobody typed this time.
+  const intent = takeRememberedIntent(storage);
   if (!remembered || remembered !== handoff.state) {
     return {
       ok: false,
@@ -433,10 +548,15 @@ export async function completeConnect(
         code: handoff.code,
         state: handoff.state,
         ...(handoff.installation ? { installation: handoff.installation } : {}),
+        ...(intent?.create ? { create: intent.create } : {}),
       }),
     });
   } catch {
-    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
+    return {
+      ok: false,
+      error: 'Could not reach vibld. Try again shortly.',
+      intent,
+    };
   }
 
   if (!response.ok) {
@@ -452,7 +572,12 @@ export async function completeConnect(
     } catch {
       // Keep the generic sentence.
     }
-    return { ok: false, error, ...(install ? { install: true } : {}) };
+    return {
+      ok: false,
+      error,
+      ...(install ? { install: true } : {}),
+      intent,
+    };
   }
 
   const body = (await response.json()) as {
@@ -460,10 +585,18 @@ export async function completeConnect(
     ticket?: unknown;
     omitted?: unknown;
     truncated?: unknown;
+    created?: unknown;
+    createProblem?: unknown;
   };
   if (!Array.isArray(body.repositories) || typeof body.ticket !== 'string') {
-    return { ok: false, error: 'vibld could not read GitHub’s reply.' };
+    return {
+      ok: false,
+      error: 'vibld could not read GitHub’s reply.',
+      intent,
+    };
   }
+  const created = choiceFrom(body.created);
+  const createProblem = createProblemFrom(body.createProblem);
   const omitted = Array.isArray(body.omitted)
     ? body.omitted.filter((entry): entry is string => typeof entry === 'string')
     : [];
@@ -474,7 +607,35 @@ export async function completeConnect(
       ticket: body.ticket,
       ...(omitted.length > 0 ? { omitted } : {}),
       ...(body.truncated === true ? { truncated: true } : {}),
+      ...(created ? { created } : {}),
+      ...(createProblem ? { createProblem } : {}),
     },
+    intent,
+  };
+}
+
+/** A created repository, all of it or none of it. */
+function choiceFrom(value: unknown): RepositoryChoice | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { installationId, owner, repo, defaultBranch } = value as Record<
+    string,
+    unknown
+  >;
+  if (typeof installationId !== 'number') return null;
+  if (typeof owner !== 'string' || !owner) return null;
+  if (typeof repo !== 'string' || !repo) return null;
+  if (typeof defaultBranch !== 'string' || !defaultBranch) return null;
+  return { installationId, owner, repo, defaultBranch };
+}
+
+function createProblemFrom(value: unknown): CreateProblem | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { error, suggestion, install } = value as Record<string, unknown>;
+  if (typeof error !== 'string' || !error) return null;
+  return {
+    error,
+    ...(typeof suggestion === 'string' && suggestion ? { suggestion } : {}),
+    ...(install === true ? { install: true } : {}),
   };
 }
 
@@ -552,7 +713,13 @@ export async function bindRepository(
   // answer already in hand, so a repository on `trunk` whose reply was
   // unreadable and whose refresh then failed was shown as `main`: the
   // fallback added to keep a success visible, showing it wrongly.
-  choice: Pick<RepositoryChoice, 'owner' | 'repo' | 'defaultBranch'>,
+  //
+  // `projectId` is the project it becomes that project's repository for
+  // (D72). Carried with the choice, so no call site can send one without
+  // the other.
+  choice: Pick<RepositoryChoice, 'owner' | 'repo' | 'defaultBranch'> & {
+    projectId: string;
+  },
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<
@@ -566,7 +733,12 @@ export async function bindRepository(
         'content-type': 'application/json',
         ...(await authHeaders(getToken)),
       },
-      body: JSON.stringify({ ticket, owner: choice.owner, repo: choice.repo }),
+      body: JSON.stringify({
+        ticket,
+        projectId: choice.projectId,
+        owner: choice.owner,
+        repo: choice.repo,
+      }),
     });
   } catch {
     return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
@@ -733,7 +905,9 @@ export type PushResult =
  */
 export async function pushSnapshot(
   snapshot: { revision: string; files: { path: string; content: string }[] },
-  to: { owner: string; repo: string },
+  // The project as well as the repository (D72): the route reads that
+  // project's binding, and the destination is checked against it.
+  to: { projectId: string; owner: string; repo: string },
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<PushResult> {
@@ -746,6 +920,7 @@ export async function pushSnapshot(
         ...(await authHeaders(getToken)),
       },
       body: JSON.stringify({
+        projectId: to.projectId,
         revision: snapshot.revision,
         files: snapshot.files,
         owner: to.owner,
@@ -823,7 +998,9 @@ export async function pushSnapshot(
  * most out-of-date idea of the connection that skip the check.
  */
 export async function disconnectRepository(
-  to: { owner: string; repo: string },
+  // Which project's repository this ends (D72). Only that project's: every
+  // other project keeps its own.
+  to: { projectId: string; owner: string; repo: string },
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<{ ok: true } | { ok: false; error: string; movedTo?: Destination }> {
@@ -835,7 +1012,11 @@ export async function disconnectRepository(
         'content-type': 'application/json',
         ...(await authHeaders(getToken)),
       },
-      body: JSON.stringify({ owner: to.owner, repo: to.repo }),
+      body: JSON.stringify({
+        projectId: to.projectId,
+        owner: to.owner,
+        repo: to.repo,
+      }),
     });
   } catch {
     return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
@@ -855,6 +1036,32 @@ export async function disconnectRepository(
     }
     return { ok: false, error, ...(movedTo ? { movedTo } : {}) };
   }
+  announceConnectionChanged();
+  return { ok: true };
+}
+
+/**
+ * Disconnect GitHub from the account: the sign-in, and every project's
+ * repository with it (D72).
+ */
+export async function disconnectAccount(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+  getToken: () => Promise<string | null> = getClerkToken,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let response: Response;
+  try {
+    response = await fetchImpl('/api/github/disconnect-account', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(await authHeaders(getToken)),
+      },
+      body: '{}',
+    });
+  } catch {
+    return { ok: false, error: 'Could not reach vibld. Try again shortly.' };
+  }
+  if (!response.ok) return { ok: false, error: await problemFrom(response) };
   announceConnectionChanged();
   return { ok: true };
 }
@@ -935,6 +1142,8 @@ function previewFrom(value: unknown): PushPreview | null {
  */
 export async function previewSnapshot(
   files: { path: string; content: string }[],
+  /** The project whose repository the diff is against (D72). */
+  projectId: string,
   fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
   getToken: () => Promise<string | null> = getClerkToken,
 ): Promise<PreviewResult> {
@@ -946,7 +1155,7 @@ export async function previewSnapshot(
         'content-type': 'application/json',
         ...(await authHeaders(getToken)),
       },
-      body: JSON.stringify({ files }),
+      body: JSON.stringify({ projectId, files }),
     });
   } catch {
     return { ok: false, error: 'Could not reach vibld. Try again shortly.' };

@@ -332,6 +332,85 @@ unchanged. The output still installs and builds with plain npm (ADR-0002):
 the eval's stub now takes its configuration from the same templates, so
 CI's build of it builds them.
 
+**A repository per project, created or picked.** Chris decided on
+2026-09-29 (D72, "Per project, create or pick"). The GitHub connection used
+to be one row per account (`github_bindings`, 0005), so every project pushed
+to the same repository. The connection is now split in two. The account
+keeps the GitHub sign-in (`github_connections`: the login and the App
+installation on the person's own account), and each project has its own
+repository binding (`github_project_bindings`, keyed by project id, with the
+same grant, expiry and revocation rules 0005 had). A project with no
+repository offers two choices on its first push: "Create a new repository",
+named from the project's name, slugified and editable, private unless
+unticked, created on the person's own GitHub account through the App's
+installation there; or "Use an existing repository", the existing picker of
+repositories the installation reaches and the person can push to. Both go
+through the GitHub sign-in, because the user token that can create or list
+repositories exists only during that return. A name that is taken comes
+back with a free one suggested in the field (`name-2`, `name-3` and so on),
+and the picker is offered beside it. Disconnecting a project's repository
+touches no other project, even one bound to the same repository;
+"Disconnect GitHub" on the account ends every project's binding and the
+sign-in. Push history, the last pull request shown for a project and
+webhooks work per project: a push records the project it came from, and a
+webhook still finds the push by repository and branch.
+`0039_github_per_project.sql` moves each existing account binding onto that
+account's most recently worked-on project (Chris's is North Star) and leaves
+every other project unbound; the old table stays, and nothing reads it.
+
+Export, Publish and Push to GitHub moved into a **Ship** menu in the
+project's top bar, beside Share, because a real user could not find them at
+the top of the Code tab's file list. They are the same components with the
+same rules (the accepted checkpoint only, one publish button per project
+keyed by its id). They are no longer in the Code tab, which now says where
+they went and, when the list is not the accepted checkpoint, what they act
+on. The menu is a button with `aria-expanded` and `aria-controls`, closes on
+Escape (returning focus to the button) and on a click outside, and hides its
+panel rather than unmounting it, so a publish or push in flight survives
+closing it.
+
+Creating a repository needs a GitHub App permission the App did not request
+before (L42a lists Contents, Pull requests and Metadata only):
+**Repository permissions > Administration: Read and write**, set at
+https://github.com/settings/apps/vibld/permissions and then accepted on each
+installation. GitHub's `POST /user/repos` accepts only a user access token
+and needs that permission; an installation token cannot create a repository
+on a personal account at all. Until it is granted, "Create a new repository"
+answers that vibld is not allowed to create repositories yet and points at
+"Use an existing repository", which works as before. The App check
+(`scripts/github-app-verdict.ts`) allows the permission without failing the
+deploy and reports whether it is there.
+
+Decided while implementing it, and Chris's to reverse:
+
+- "Most recently worked-on" for the migration is the later of the project's
+  own `updated_at` and its build pointer's (`generation_projects`), the pair
+  the project list sorts by, with archived projects ranked last because
+  archiving moves `updated_at`. Revoked and expired bindings move in that
+  state. An account with a binding and no project keeps its connection and
+  binds nothing. The migration was checked against test data only, not
+  against the production database.
+- Old tabs are not guessed for: a push, preview, bind or disconnect that
+  names no project is refused with "reload" rather than sent to the most
+  recent project, as publishing does for a page from before projects.
+- The same checkpoint pushed from two projects to one repository is one
+  push, recorded against the project that pushed it first, because a
+  revision is a hash of the files and builds the same branch.
+- Deleting a project deletes its binding (the repository stays on GitHub).
+  Duplicating or remixing a project does not copy it.
+- A created repository is initialised with a README, because a push needs a
+  default branch to commit onto. It is bound to the project straight away.
+  If the installation on the person's account covers only selected
+  repositories, the new one is not added to it by GitHub; the builder then
+  says so, with the installation's settings link, instead of binding it.
+- Repositories are only created on the person's own account, not on an
+  organisation, even where the installation there could.
+- "Disconnect GitHub" asks for a second click, since every project then has
+  to choose its repository again. The locked-out account screen offers the
+  same account-wide disconnect instead of one repository.
+- Returning from GitHub opens the Ship menu when the trip started there; a
+  trip started from the settings panel answers there, as before.
+
 **Admins can gift a plan, ban, delete and override one account, and every
 admin action is logged.** Chris decided on 2026-09-29 (D73). Each account
 has an admin page, `/admin/users/<Clerk user id>`, opened by email from the

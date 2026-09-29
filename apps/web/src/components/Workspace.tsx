@@ -1,19 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import type { ProjectFile } from '@vibld/core';
 import type { BuilderState, DraftPreview } from '../generation/session.ts';
-import type { ProjectSummary } from '../projects/projects-client.ts';
+import {
+  showingChecked as isShowingChecked,
+  showingStaged as isShowingStaged,
+} from '../generation/ship-note.ts';
 import {
   servingOlderThan,
   usePreviewSandbox,
 } from '../generation/use-preview-sandbox.ts';
 import { CodeViewer } from './CodeViewer.tsx';
-import { ExportButton } from './ExportButton.tsx';
 import { FileList } from './FileList.tsx';
 import { PreviewPanel } from './PreviewPanel.tsx';
 import { noteFor } from '../generation/pane-gaps.ts';
-import { PublishButton } from './PublishButton.tsx';
-import { GitHubPushButton } from './GitHubPushButton.tsx';
 import { RunHistory } from './RunHistory.tsx';
 
 const TABS = [
@@ -26,39 +25,11 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 
-/**
- * Whether the listed files are the accepted checkpoint's own.
- *
- * Compared rather than inferred from `status`. A submission refused before
- * it starts (the budget reservation in `BuilderSession.submit`) leaves the
- * status `failed` and never touches `stagedFiles`, so after an accepted
- * checkpoint the list is still that checkpoint while the status says
- * otherwise. Reading the status there marks the list "staged" and tells
- * somebody the buttons act on something else, both about the very files
- * they are looking at.
- */
-function sameFiles(listed: ProjectFile[], accepted: ProjectFile[]): boolean {
-  return (
-    listed.length === accepted.length &&
-    listed.every(
-      (file, index) =>
-        file.path === accepted[index]?.path &&
-        file.content === accepted[index]?.content,
-    )
-  );
-}
-
 export function Workspace({
   state,
   hidden = false,
-  project = null,
 }: {
   state: BuilderState;
-  /**
-   * The open server project, whose site the publish button acts on. Null
-   * where there are no server projects, or while one is opening.
-   */
-  project?: ProjectSummary | null;
   /**
    * Off screen without being taken apart. The preview sandbox, the chosen
    * tab and the selected file are all live state this component owns, and
@@ -121,15 +92,9 @@ export function Workspace({
    * The list is a build's own code, shown while its check runs (D69, "show
    * early, badge it"): marked as being checked rather than as staged.
    */
-  const showingChecked =
-    state.running &&
-    (state.check?.state === 'checking' || state.check?.state === 'repairing') &&
-    files.length > 0;
+  const showingChecked = isShowingChecked(state);
   /** The list is showing work that has not been accepted yet. */
-  const showingStaged =
-    files.length > 0 &&
-    (state.acceptedSnapshot === null ||
-      !sameFiles(files, state.acceptedSnapshot.files));
+  const showingStaged = isShowingStaged(state);
 
   function onTabKeyDown(
     event: KeyboardEvent<HTMLButtonElement>,
@@ -227,41 +192,22 @@ export function Workspace({
                 ) : null}
               </h2>
               {state.acceptedSnapshot ? (
-                <>
-                  {/*
-                   * All three take the accepted checkpoint, deliberately:
-                   * staged files have not been validated, and exporting or
-                   * publishing a project that is about to be rejected is
-                   * worse than offering nothing. But the list under them is
-                   * showing the staged files, so without this the buttons
-                   * sit beneath one set of files and act on another. The
-                   * pill on the heading marks the list, not them.
-                   */}
-                  {showingChecked && showingStaged ? (
-                    <p className="pane-note">
-                      These act on the last finished checkpoint, not the files
-                      listed below, which are still being checked.
-                    </p>
-                  ) : showingStaged ? (
-                    <p className="pane-note">
-                      These act on the last accepted checkpoint, not the staged
-                      files listed below.
-                    </p>
-                  ) : null}
-                  <ExportButton snapshot={state.acceptedSnapshot} />
-                  {/*
-                   * One per project, by key: each project has its own site,
-                   * and a slug or a "taken down" learned in one must never
-                   * be shown against another.
-                   */}
-                  <PublishButton
-                    key={project?.id ?? 'local'}
-                    snapshot={state.acceptedSnapshot}
-                    projectId={project?.id ?? null}
-                    site={project?.site ?? null}
-                  />
-                  <GitHubPushButton snapshot={state.acceptedSnapshot} />
-                </>
+                /*
+                 * Export, publish and push used to sit here, and a real
+                 * person looking for them could not find them (D72): they
+                 * are under Ship, in the top bar, now, and only there, so
+                 * one project never has two publish buttons disagreeing
+                 * about its site. This says where they went, and, when the
+                 * list below is not what they act on, says that too.
+                 */
+                <p className="pane-note">
+                  Export, publish and push to GitHub are under Ship, at the top.
+                  {showingChecked && showingStaged
+                    ? ' They act on the last finished checkpoint, not the files listed below, which are still being checked.'
+                    : showingStaged
+                      ? ' They act on the last accepted checkpoint, not the staged files listed below.'
+                      : null}
+                </p>
               ) : null}
               <FileList
                 files={files}

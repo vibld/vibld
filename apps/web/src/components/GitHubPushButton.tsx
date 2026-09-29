@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectSnapshot } from '@vibld/core';
 import {
   noteConnectionChanged,
@@ -17,6 +11,7 @@ import {
 // second copy of it here would be a second place for it to be wrong.
 import { createStatusGate } from '../github/panel-view.ts';
 import { githubStatus } from '../github/github-status.ts';
+import { useProjectStatus } from '../github/use-project-status.ts';
 import {
   afterConnectionChanged,
   decidePreview,
@@ -80,15 +75,22 @@ function DiffList({
   );
 }
 
-export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
-  // The panel's copy, not a second one (internal PR 34). Before this each kept its own
-  // and probed separately, so the two could name different repositories at
-  // the same moment: the panel's disconnect path carries a comment saying
-  // exactly that.
-  const status = useSyncExternalStore(
-    githubStatus.subscribe,
-    githubStatus.read,
-  );
+export function GitHubPushButton({
+  snapshot,
+  projectId,
+}: {
+  snapshot: ProjectSnapshot;
+  /**
+   * The project this checkpoint belongs to, whose repository it pushes to
+   * (D72). Null where there are no server projects, which is also where
+   * there is nothing to bind a repository to, so nothing is offered.
+   */
+  projectId: string | null;
+}) {
+  // The panel's copy, not a second one (internal PR 34), pointed at this project.
+  // Before internal PR 34 each kept its own and probed separately, so the two could
+  // name different repositories at the same moment.
+  const status = useProjectStatus(projectId);
   const [phase, setPhase] = useState<PushPhase>({ at: 'idle' });
   const [previewPhase, setPreviewPhase] = useState<PreviewPhase>({
     at: 'none',
@@ -162,10 +164,11 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
    * until the checkpoint or the destination moves.
    */
   async function preview(to: Destination) {
+    if (!projectId) return;
     const revision = snapshot.revision;
     const current = previews.current.begin();
     setPreviewPhase({ at: 'loading', to, revision });
-    const result = await previewSnapshot(snapshot.files);
+    const result = await previewSnapshot(snapshot.files, projectId);
     if (!current()) return;
     setPreviewPhase(
       result.ok
@@ -175,9 +178,10 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
   }
 
   async function push(to: Destination) {
+    if (!projectId) return;
     const current = pushes.current.begin();
     setPhase({ at: 'pushing', to });
-    const pushed = await pushSnapshot(snapshot, to);
+    const pushed = await pushSnapshot(snapshot, { ...to, projectId });
     // The checkpoint this was for is no longer the one on screen. The push
     // itself stands -- the route keys it on the revision and the branch is
     // there -- but saying so beside a different project would be describing
@@ -217,7 +221,7 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
     setPhase({ at: 'done', to, pushed: pushed.pushed });
   }
 
-  if (!clerkConfigured) return null;
+  if (!clerkConfigured || !projectId) return null;
   const view = decidePush(phase, status);
   if (!view.show) return null;
   const previewView = decidePreview(
@@ -378,7 +382,7 @@ export function GitHubPushButton({ snapshot }: { snapshot: ProjectSnapshot }) {
             </>
           )}
           {view.problem.reconnect &&
-            ' Reconnect the repository in the GitHub panel.'}
+            ' Choose this project’s repository again to keep pushing.'}
         </p>
       )}
     </div>

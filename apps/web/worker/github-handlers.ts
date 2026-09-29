@@ -16,7 +16,7 @@ import { mediaObjectKey } from '@vibld/core';
 import type { ProjectFile } from '@vibld/core';
 import { MediaStore } from './media-store.ts';
 import { mediaPathsToKeep, planMediaExport } from './media-export.ts';
-import { parsePreviewRequest } from './request-guard.ts';
+import { isProjectId, parsePreviewRequest } from './request-guard.ts';
 import {
   githubAppCredentials,
   mintInstallationToken,
@@ -33,6 +33,12 @@ import {
   type PushTarget,
 } from './github-push.ts';
 import { GitHubStore, type BindingState } from './github-store.ts';
+import {
+  createUserRepository,
+  freeName,
+  repositoryNameProblem,
+  viewerLogin,
+} from './github-create.ts';
 import { isSignedByGitHub, pullRequestFrom } from './github-webhook.ts';
 import {
   authorizeUrl,
@@ -44,6 +50,7 @@ import {
   userInstallations,
   verifyChoice,
   verifyState,
+  type ConnectableRepository,
   type GitHubOAuthEnv,
 } from './github-connect.ts';
 import type { Principal } from './principal.ts';
@@ -228,6 +235,32 @@ function parseExpectedRepository(
 }
 
 /**
+ * Which project a request is about (D72). Required on every route that
+ * reads or writes a binding.
+ *
+ * Required rather than defaulted to "the account's", because there is no
+ * account binding any more: a builder old enough to send no project is
+ * holding a page from before repositories were per project, and guessing a
+ * project for its push is how work ends up in the wrong repository. It is
+ * told to reload, which is the same answer an older builder gets from
+ * publishing (`resolveSiteProject`).
+ */
+function parseProjectId(body: unknown): string | null {
+  const { projectId } = (body ?? {}) as { projectId?: unknown };
+  return isProjectId(projectId) ? projectId : null;
+}
+
+function outOfDate(): Response {
+  return json(
+    {
+      error:
+        'This page is out of date and does not say which project this is for. Reload it, then try again.',
+    },
+    400,
+  );
+}
+
+/**
  * What a push would do to the connected repository, before it does it.
  *
  * Internal issue 13 asks for the destination and the diff to be reviewable, and the push is
@@ -279,16 +312,18 @@ export async function handleGitHubDiff(
     }
   }
 
-  const state = await store.usableBinding(principal.userId, now);
-  if (!state.usable) return bindingProblem(state);
-  const { binding } = state;
-
   let body: unknown;
   try {
     body = await request.json();
   } catch {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
+
+  const projectId = parseProjectId(body);
+  if (!projectId) return outOfDate();
+  const state = await store.usableBinding(principal.userId, projectId, now);
+  if (!state.usable) return bindingProblem(state);
+  const { binding } = state;
 
   const files = parsePreviewRequest(body);
   if (!files.ok) return json({ error: files.error }, files.status);
@@ -371,16 +406,19 @@ export async function handleGitHubPush(
     }
   }
 
-  const state = await store.usableBinding(principal.userId, now);
-  if (!state.usable) return bindingProblem(state);
-  const { binding } = state;
-
   let body: unknown;
   try {
     body = await request.json();
   } catch {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
+
+  // The project first: which binding to read depends on it (D72).
+  const projectId = parseProjectId(body);
+  if (!projectId) return outOfDate();
+  const state = await store.usableBinding(principal.userId, projectId, now);
+  if (!state.usable) return bindingProblem(state);
+  const { binding } = state;
 
   const files = parsePreviewRequest(body);
   if (!files.ok) return json({ error: files.error }, files.status);
@@ -482,6 +520,7 @@ export async function handleGitHubPush(
 
   const attempt = await store.beginPush({
     ...key,
+    projectId,
     baseSha,
     branch: branchForRevision(revision)!,
     startedAt: now.toISOString(),
@@ -548,8 +587,14 @@ export async function handleGitHubPush(
 }
 
 /**
- * What the builder needs to show the GitHub panel: the connected repository,
- * or why there is not one.
+ * What the builder needs to show the GitHub panel: whether the account is
+ * connected to GitHub, and the open project's repository, or why it has
+ * none (D72).
+ *
+ * The project is named on the query string (`?project=`). Without one the
+ * answer is about the account alone and says no repository is connected,
+ * which is what an older builder then offers to fix, and its bind is told
+ * to reload.
  */
 export async function handleGitHubStatus(
   request: Request,
@@ -571,12 +616,35 @@ export async function handleGitHubStatus(
   }
 
   const store = new GitHubStore(env.DB!);
-  const state = await store.usableBinding(principal.userId, now);
+  const requested = new URL(request.url).searchParams.get('project');
+  if (requested !== null && !isProjectId(requested)) {
+    return json({ error: '"project" is not a project id.' }, 400);
+  }
+
+  // The account half, reported beside the project's. A person whose account
+  // is connected and whose project has no repository yet is offered "create
+  // or pick" for that project; one whose account is not connected is
+  // offered the sign-in first. Both go through GitHub, but saying which is
+  // the difference between "connect GitHub" and "choose a repository".
+  const connection = await store.connection(principal.userId);
+  const account =
+    connection && connection.revokedAt === null
+      ? {
+          connected: true,
+          ...(connection.login ? { login: connection.login } : {}),
+        }
+      : { connected: false };
+
+  const state = requested
+    ? await store.usableBinding(principal.userId, requested, now)
+    : ({ usable: false, reason: 'none' } as const);
   if (!state.usable) {
     return json({
       configured: true,
       canPush,
       canConnect,
+      account,
+      ...(requested ? { projectId: requested } : {}),
       connected: false,
       reason: state.reason,
     });
@@ -588,10 +656,14 @@ export async function handleGitHubStatus(
   // whether there is anything left to do.
   //
   // Only when it is about the repository that is connected now. A pull
-  // request in a repository this user has since disconnected is not news
+  // request in a repository this project has since disconnected is not news
   // about the destination on screen, and drawing it there would attach it to
-  // the wrong name.
-  const last = await store.lastPullRequest(principal.userId);
+  // the wrong name. And only this project's (D72): another project pushing
+  // to the same repository opens its own.
+  const last = await store.lastPullRequest(
+    principal.userId,
+    state.binding.projectId,
+  );
   const here =
     last &&
     last.pullRequestUrl &&
@@ -602,6 +674,8 @@ export async function handleGitHubStatus(
     configured: true,
     canPush,
     canConnect,
+    account,
+    projectId: state.binding.projectId,
     connected: true,
     owner: state.binding.owner,
     repo: state.binding.repo,
@@ -821,12 +895,14 @@ export async function handleGitHubComplete(
   } catch {
     return json({ error: 'Body must be valid JSON.' }, 400);
   }
-  const { code, state, installation } = (body ?? {}) as {
+  const { code, state, installation, create } = (body ?? {}) as {
     code?: unknown;
     state?: unknown;
     installation?: unknown;
+    create?: unknown;
   };
   const hinted = Number(installation);
+  const creating = parseCreate(create);
   if (
     typeof code !== 'string' ||
     typeof state !== 'string' ||
@@ -939,13 +1015,49 @@ export async function handleGitHubComplete(
   }
   if (!repositories.ok) return githubProblem(repositories);
 
-  const offered = [...repositories.value.repositories].sort((a, b) =>
+  // Who this is, for the account's half of the connection (D72) and for a
+  // repository created below, which goes on this person's own account. The
+  // installation on that account is the one a created repository would be
+  // pushed through, found among the ones GitHub listed for this person.
+  const login = await viewerLogin(token.token, doFetch);
+  const own = login
+    ? listed.find(
+        (candidate) => candidate.account.toLowerCase() === login.toLowerCase(),
+      )
+    : undefined;
+
+  const store = new GitHubStore(env.DB!);
+  await store.connect({
+    userId: principal.userId,
+    login,
+    installationId: own?.id ?? null,
+    connectedAt: now.toISOString(),
+    grantedByEmail: principal.policyIdentity,
+  });
+
+  const choices: ConnectableRepository[] = [...repositories.value.repositories];
+  // "Create a new repository", when that is what this sign-in was for. Its
+  // failure never fails the connection: the picker below is still offered,
+  // with the reason beside it, because "use an existing repository" is the
+  // other half of the same choice and is usually still available.
+  const made = creating
+    ? await createForProject(env, token.token, login, own, creating, doFetch)
+    : null;
+  if (made?.created) choices.push(made.created);
+
+  const offered = choices.sort((a, b) =>
     `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`),
   );
 
   return json({
     installations: listed,
     repositories: offered,
+    ...(login ? { login } : {}),
+    // The repository just created, which is also in `repositories` and so
+    // in the ticket: the builder binds it to the project straight away,
+    // through the same bind every other choice goes through.
+    ...(made?.created ? { created: made.created } : {}),
+    ...(made?.problem ? { createProblem: made.problem } : {}),
     // The accounts the read budget did not reach, so the panel can say so
     // rather than presenting a short list as the whole truth. Omitted from
     // the body when there are none, which is almost always.
@@ -968,6 +1080,128 @@ export async function handleGitHubComplete(
       now.getTime(),
     ),
   });
+}
+
+/** What "Create a new repository" asked for, if it asked. */
+interface CreateRequest {
+  name: string;
+  private: boolean;
+}
+
+/**
+ * The creation request on a completion, read leniently.
+ *
+ * A malformed one is not a reason to refuse the completion: the code is
+ * spent by now, and throwing away the picker over a bad name would cost the
+ * person a second trip to GitHub for nothing. The name is checked when the
+ * repository is made, and a bad one is reported there, beside the picker.
+ * Private unless it says `false` (D72).
+ */
+function parseCreate(value: unknown): CreateRequest | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { name, private: hidden } = value as {
+    name?: unknown;
+    private?: unknown;
+  };
+  if (typeof name !== 'string') return null;
+  return { name: name.trim(), private: hidden !== false };
+}
+
+/**
+ * Why a repository was not created, with what to offer instead.
+ *
+ * `suggestion` is a free name to put in the field in place of a taken one.
+ * `install` says the remedy is installing the App on the person's own
+ * account, which is where a created repository has to go.
+ */
+export interface CreateProblem {
+  error: string;
+  suggestion?: string;
+  install?: boolean;
+}
+
+/**
+ * Create the repository, and check that the App can push to it.
+ *
+ * The second half matters as much as the first. An installation limited to
+ * "selected repositories" does not gain a repository because the App created
+ * it, so the new repository can exist and still refuse every push. Minting
+ * a token scoped to it answers that before anyone is told it is ready: 422
+ * there is GitHub saying the installation does not cover it.
+ */
+async function createForProject(
+  env: GitHubHandlerEnv,
+  token: string,
+  login: string | null,
+  own: { id: number; account: string } | undefined,
+  request: CreateRequest,
+  doFetch: typeof fetch,
+): Promise<{ created?: ConnectableRepository; problem?: CreateProblem }> {
+  const invalid = repositoryNameProblem(request.name);
+  if (invalid) return { problem: { error: invalid } };
+  if (!login) {
+    return {
+      problem: {
+        error:
+          'GitHub did not say which account you signed in as, so vibld could not create a repository. Try again.',
+      },
+    };
+  }
+  if (!own) {
+    return {
+      problem: {
+        error: `The vibld app is not installed on your own GitHub account (${login}), which is where a new repository would go. Install it there, or choose "Use an existing repository".`,
+        install: true,
+      },
+    };
+  }
+
+  const outcome = await createUserRepository(
+    token,
+    { name: request.name, private: request.private },
+    doFetch,
+  );
+  if (!outcome.ok) {
+    if (outcome.kind === 'taken') {
+      const suggestion = await freeName(token, login, request.name, doFetch);
+      return {
+        problem: {
+          error: suggestion
+            ? `${outcome.error} Try ${suggestion} instead, or choose "Use an existing repository".`
+            : `${outcome.error} Choose another name, or "Use an existing repository".`,
+          ...(suggestion ? { suggestion } : {}),
+        },
+      };
+    }
+    return { problem: { error: outcome.error } };
+  }
+
+  const created: ConnectableRepository = {
+    ...outcome.repository,
+    installationId: own.id,
+  };
+  const credentials = githubAppCredentials(env);
+  if (credentials) {
+    const reach = await mintInstallationToken(
+      credentials,
+      own.id,
+      { owner: created.owner, repo: created.repo },
+      doFetch,
+    );
+    if (!reach.ok && reach.reason === 'access') {
+      return {
+        problem: {
+          error:
+            `Created ${created.owner}/${created.repo}, but the vibld app can only reach the repositories you selected for it. ` +
+            `Add ${created.repo} at https://github.com/settings/installations/${own.id}, then choose "Use an existing repository".`,
+        },
+      };
+    }
+    // Anything else (a rate limit, an unreachable GitHub) says nothing about
+    // whether the installation covers it, and the push will say if it does
+    // not. The repository exists either way, so it is offered.
+  }
+  return { created };
 }
 
 /**
@@ -1024,6 +1258,8 @@ export async function handleGitHubBind(
     owner?: unknown;
     repo?: unknown;
   };
+  const projectId = parseProjectId(body);
+  if (!projectId) return outOfDate();
   if (
     typeof ticket !== 'string' ||
     typeof owner !== 'string' ||
@@ -1054,8 +1290,15 @@ export async function handleGitHubBind(
   }
 
   const store = new GitHubStore(env.DB!);
+  // The project has to be this person's (D72). "Not found" rather than
+  // "not yours", the answer every project route gives, so this cannot be
+  // used to ask whether somebody else's project id exists.
+  if (!(await store.ownsProject(principal.userId, projectId))) {
+    return json({ error: 'That project does not exist.' }, 404);
+  }
   await store.bind({
     userId: principal.userId,
+    projectId,
     // The installation the matched entry came from, so a repository is
     // always pushed through the installation it was actually read from.
     installationId: match.installationId,
@@ -1068,6 +1311,7 @@ export async function handleGitHubBind(
   });
 
   return json({
+    projectId,
     owner: match.owner,
     repo: match.repo,
     defaultBranch: match.defaultBranch,
@@ -1076,11 +1320,15 @@ export async function handleGitHubBind(
 }
 
 /**
- * Stop pushing to the connected repository.
+ * Stop one project pushing to its repository (D72).
  *
  * Marks the grant revoked rather than deleting it, and says nothing about
  * whether there was one: "disconnected" is the same answer either way, so
  * this cannot be used to ask whether somebody has connected something.
+ *
+ * Only the named project. Every other project keeps its repository, even
+ * one bound to the same repository, and the account stays connected: ending
+ * all of it is `handleGitHubDisconnectAccount`.
  */
 export async function handleGitHubDisconnect(
   request: Request,
@@ -1124,12 +1372,16 @@ export async function handleGitHubDisconnect(
       400,
     );
   }
+  const projectId = parseProjectId(body);
+  if (!projectId) return outOfDate();
 
   // One statement rather than a read and then a write. Apart, a bind landing
   // in between would have the revocation take the newly bound repository,
   // which is the outcome naming one exists to prevent.
   const store = new GitHubStore(env.DB!);
-  if (await store.revokeRepository(principal.userId, expected, now)) {
+  if (
+    await store.revokeRepository(principal.userId, projectId, expected, now)
+  ) {
     return json({ connected: false });
   }
 
@@ -1143,7 +1395,7 @@ export async function handleGitHubDisconnect(
   // saying "No repository connected" beside an error naming the repository
   // it is connected to, and would put a name in front of somebody that the
   // status route does not give them.
-  const state = await store.usableBinding(principal.userId, now);
+  const state = await store.usableBinding(principal.userId, projectId, now);
 
   // Nothing to disconnect, or nothing left of it. The end state asked for is
   // the state already in place, so this is a success rather than a quarrel
@@ -1182,6 +1434,33 @@ export async function handleGitHubDisconnect(
     },
     409,
   );
+}
+
+/**
+ * Disconnect GitHub from the account (D72): the sign-in, and every
+ * project's repository with it.
+ *
+ * Nothing to name and nothing to guard. The per-project route needs the
+ * repository in the request because it must not end a binding the caller is
+ * not looking at; this one ends all of them by definition, so there is no
+ * wrong one for it to reach. The same answer whether or not anything was
+ * connected, for the reason the per-project route gives.
+ */
+export async function handleGitHubDisconnectAccount(
+  request: Request,
+  env: GitHubHandlerEnv,
+  principal: Principal,
+  now: Date = new Date(),
+): Promise<Response> {
+  if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+  if (!githubConfigured(env) && !githubConnectConfigured(env)) {
+    return json(
+      { error: 'GitHub is not configured for this deployment.' },
+      503,
+    );
+  }
+  await new GitHubStore(env.DB!).disconnectAccount(principal.userId, now);
+  return json({ connected: false });
 }
 
 /**

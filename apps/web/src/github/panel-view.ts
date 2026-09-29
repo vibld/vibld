@@ -84,6 +84,18 @@ export type PanelView =
       picker?: ConnectOffer;
       summary?: PanelSummary;
       /**
+       * Offer "Create a new repository" or "Use an existing repository" for
+       * the project (D72): its first push, or a creation that did not work.
+       * `name` replaces the name made from the project's, when GitHub has
+       * said that one is taken and a free one was found.
+       */
+      chooser?: { name?: string };
+      /**
+       * The account's own connection, when it has one: who it is signed in
+       * as, for the line that offers to disconnect GitHub altogether.
+       */
+      account?: { login?: string };
+      /**
        * Accounts the server could not read, named so the offer is not
        * presented as the whole truth.
        *
@@ -145,6 +157,14 @@ export function decidePanel(
   const choosing =
     phase.at === 'choosing' && phase.offer.repositories.length > 0;
 
+  // "Create a new repository" asked for and not made (D72). Its sentence is
+  // the problem to show, in place of the one about an empty offer: the
+  // offer may well be empty, since the repository the person wanted was the
+  // one that did not get made, and "none of your repositories are
+  // pushable" would be answering a question they did not ask.
+  const createProblem =
+    phase.at === 'choosing' ? phase.offer.createProblem : undefined;
+
   // Otherwise: nothing to offer on a deployment without GitHub configured,
   // the same silence `BillingStatusWidget` keeps when billing is not.
   if (!busy && !status?.configured) return HIDDEN;
@@ -153,7 +173,19 @@ export function decidePanel(
 
   if (phase.at === 'working') view.working = phase.note;
 
-  if (phase.at === 'choosing' && !choosing) {
+  if (createProblem) {
+    view.problem = {
+      error: createProblem.error,
+      install: createProblem.install === true,
+      // The chooser below is the retry, with the name GitHub will accept
+      // already in it, so a second "try connecting again" would be two
+      // buttons for one thing.
+      retry: false,
+    };
+    view.chooser = createProblem.suggestion
+      ? { name: createProblem.suggestion }
+      : {};
+  } else if (phase.at === 'choosing' && !choosing) {
     view.problem = {
       error: NOTHING_PUSHABLE,
       // The remedy is on GitHub, so the link to it belongs here.
@@ -201,6 +233,10 @@ export function decidePanel(
     view.truncated = true;
   }
 
+  if (status?.account?.connected) {
+    view.account = status.account.login ? { login: status.account.login } : {};
+  }
+
   // Beside a failure, so a failed disconnect still shows what is connected,
   // but not beside a choice or a step in progress, which are about to replace
   // whatever it would say.
@@ -236,6 +272,17 @@ export function decidePanel(
           // the retry above uses, for the same reason.
           canConnect: status.canConnect !== false,
         };
+    // A project with no repository is offered the two ways to get one
+    // (D72), rather than one "Connect" button that could only mean the
+    // second. Not while a creation failure already put the chooser up with
+    // a better name in it, and not on a deployment that cannot connect.
+    if (
+      status.connected !== true &&
+      status.canConnect !== false &&
+      view.chooser === undefined
+    ) {
+      view.chooser = {};
+    }
   }
 
   return view;

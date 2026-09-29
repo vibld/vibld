@@ -179,6 +179,7 @@ import {
   handleGitHubComplete,
   handleGitHubConnect,
   handleGitHubDisconnect,
+  handleGitHubDisconnectAccount,
   handleGitHubDiff,
   handleGitHubWebhook,
   handleGitHubPush,
@@ -3662,6 +3663,14 @@ async function route(
   if (pathname === '/api/github/disconnect') {
     return handleGitHub(request, env, (principal) =>
       handleGitHubDisconnect(request, env, principal),
+    );
+  }
+
+  // The account-wide disconnect (D72): the sign-in and every project's
+  // repository. `/api/github/disconnect` above ends one project's.
+  if (pathname === '/api/github/disconnect-account') {
+    return handleGitHub(request, env, (principal) =>
+      handleGitHubDisconnectAccount(request, env, principal),
     );
   }
 

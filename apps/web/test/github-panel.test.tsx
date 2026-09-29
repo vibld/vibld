@@ -61,7 +61,9 @@ describe('the connect panel, as it is actually wired', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => root.render(<GitHubConnection />));
+    await act(async () =>
+      root.render(<GitHubConnection projectId="p1" projectName="North Star" />),
+    );
     assert.match(container.textContent ?? '', /acme\/site/);
 
     // What a rebind in another tab looks like from in here.
@@ -119,7 +121,9 @@ describe('ending a connection from the panel', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => root.render(<GitHubConnection />));
+    await act(async () =>
+      root.render(<GitHubConnection projectId="p1" projectName="North Star" />),
+    );
 
     const button = [...container.querySelectorAll('button')].find((el) =>
       el.textContent?.includes('Disconnect'),
@@ -131,7 +135,12 @@ describe('ending a connection from the panel', () => {
 
     const ended = sent.find((call) => call.url.includes('/disconnect'));
     assert.ok(ended, 'nothing was sent to the disconnect route');
-    assert.deepEqual(ended.body, { owner: 'acme', repo: 'site' });
+    // And which project's: only that project's repository is ended (D72).
+    assert.deepEqual(ended.body, {
+      projectId: 'p1',
+      owner: 'acme',
+      repo: 'site',
+    });
 
     act(() => root.unmount());
     container.remove();
@@ -162,7 +171,9 @@ describe('a disconnect the route refuses', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
-    await act(async () => root.render(<GitHubConnection />));
+    await act(async () =>
+      root.render(<GitHubConnection projectId="p1" projectName="North Star" />),
+    );
     return {
       container,
       async clickDisconnect() {

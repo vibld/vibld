@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { PROJECT_NAME_MAX_CHARS } from '@vibld/core';
 
 import { PROJECTS_PATH } from '../projects/project-route.ts';
@@ -30,21 +31,45 @@ const STATUS_LABEL: Record<SaveStatus, string> = {
 export function ProjectBar({
   projects,
   reload = () => window.location.reload(),
+  ship = null,
 }: {
   projects: ProjectsController;
   /** What the Reload button does; replaced in tests. */
   reload?: () => void;
+  /**
+   * The Ship menu (D72), drawn beside Share: export, publish and push to
+   * GitHub. Passed in rather than built here, because it needs the builder's
+   * accepted checkpoint and this bar only knows about projects.
+   *
+   * Drawn without a project too. A deployment without server projects can
+   * still export and publish, and the Code tab no longer offers either, so
+   * the menu is the one place they are.
+   */
+  ship?: ReactNode;
 }) {
   if (projects.mode === 'local' && projects.notice) {
     // A model deployment whose projects could not be read: the builder
     // still works, and says plainly that nothing is being kept.
     return (
-      <p className="projectbar__offline" role="status">
-        Projects are unavailable, so this session is not being saved.
-      </p>
+      <>
+        <p className="projectbar__offline" role="status">
+          Projects are unavailable, so this session is not being saved.
+        </p>
+        {ship ? (
+          <nav className="projectbar" aria-label="Project">
+            {ship}
+          </nav>
+        ) : null}
+      </>
     );
   }
-  if (projects.mode !== 'server') return null;
+  if (projects.mode !== 'server') {
+    return ship ? (
+      <nav className="projectbar" aria-label="Project">
+        {ship}
+      </nav>
+    ) : null;
+  }
   const { current } = projects;
 
   return (
@@ -103,6 +128,7 @@ export function ProjectBar({
             busy={projects.busy === current.id}
             onChange={(on) => void projects.setShared(current.id, on)}
           />
+          {ship}
         </>
       ) : null}
     </nav>

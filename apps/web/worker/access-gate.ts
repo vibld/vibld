@@ -263,6 +263,10 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // left a revoked account able to see its binding through the status route
   // and unable to remove it, which is the wrong way round.
   '/api/github/disconnect': 'withdrawing a grant, not making one',
+  // The same, for every project's grant and the sign-in at once (D72). The
+  // locked-out account screen offers it, so a revoked account can take back
+  // every GitHub grant it made without being let back in.
+  '/api/github/disconnect-account': 'withdrawing every grant, not making one',
   // Stripe's own POST, authenticated by signature rather than by session.
   // Gating it would mean dropping webhooks for uninvited accounts, which is
   // how a payment that succeeded ends up unmirrored.

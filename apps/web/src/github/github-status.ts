@@ -44,14 +44,28 @@ export interface GitHubStatusStore {
   amend(next: (previous: GitHubStatus | null) => GitHubStatus | null): void;
   /** Drop what is known, because something has contradicted it. */
   forget(): void;
+  /**
+   * The project whose repository this describes (D72), or null for none.
+   *
+   * A repository is per project now, so the one status every surface reads
+   * is the open project's. Switching project drops what was known, at once:
+   * the last project's repository shown under the next project's name is a
+   * push button pointing somewhere it should not. It does not read the new
+   * one; the surfaces that show it ask, as they already do on mount.
+   */
+  project(): string | null;
+  setProject(projectId: string | null): void;
 }
 
 export function createGitHubStatusStore(
-  load: () => Promise<GitHubStatus | null> = fetchGitHubStatus,
+  load: (
+    projectId: string | null,
+  ) => Promise<GitHubStatus | null> = fetchGitHubStatus,
 ): GitHubStatusStore {
   let value: GitHubStatus | null = null;
   let generation = 0;
   let inFlight: Promise<void> | null = null;
+  let projectId: string | null = null;
   const listeners = new Set<() => void>();
 
   const announce = () => {
@@ -69,8 +83,8 @@ export function createGitHubStatusStore(
     refresh() {
       if (inFlight) return inFlight;
       const mine = ++generation;
-      inFlight = (async () => {
-        const read = await load();
+      const run: Promise<void> = (async () => {
+        const read = await load(projectId);
         // Two guards, not one. `mine === generation` is the supersede rule:
         // a local write since this started knows more than this does. `read`
         // being null is the commit-what-you-got rule: a failed probe is not
@@ -80,9 +94,13 @@ export function createGitHubStatusStore(
           announce();
         }
       })().finally(() => {
-        inFlight = null;
+        // Only its own. A project switch drops the join while this is still
+        // in flight, and a read of the next project may have started since:
+        // clearing that one here would let a third ask start a duplicate.
+        if (inFlight === run) inFlight = null;
       });
-      return inFlight;
+      inFlight = run;
+      return run;
     },
     amend(next) {
       generation += 1;
@@ -91,6 +109,19 @@ export function createGitHubStatusStore(
     },
     forget() {
       generation += 1;
+      value = null;
+      announce();
+    },
+    project: () => projectId,
+    setProject(next) {
+      if (next === projectId) return;
+      projectId = next;
+      // Superseding as well as clearing: a read for the last project still
+      // in flight must not land afterwards under this one. The join in
+      // `refresh` is dropped with it, so the next ask reads this project
+      // rather than waiting on a read of the last.
+      generation += 1;
+      inFlight = null;
       value = null;
       announce();
     },

@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -18,11 +16,17 @@ import {
 } from '../worker/github-connect.ts';
 import { GitHubStore } from '../worker/github-store.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
+import { schemaSql } from './fakes/schema.ts';
 
-const SCHEMA = readFileSync(
-  join(import.meta.dirname, '..', 'migrations', '0005_github.sql'),
-  'utf8',
-);
+/**
+ * The whole schema, and one project, `p1`, that belongs to `user_1`: a
+ * repository is bound to a project now (D72), and only to one the caller
+ * owns.
+ */
+const SCHEMA = `${schemaSql()}
+INSERT INTO projects (id, user_id, name, created_at, updated_at, last_opened_at)
+VALUES ('p1', 'user_1', 'North Star', '2026-09-01T00:00:00.000Z',
+        '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');`;
 
 const CREDENTIALS = {
   clientId: 'Iv1.abc123',
@@ -252,6 +256,7 @@ describe('binding the repository the user chose', () => {
         method: 'POST',
         // The browser names a branch; the binding must take GitHub's.
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: await ticketFor(),
           owner: 'acme',
           repo: 'site',
@@ -266,6 +271,7 @@ describe('binding the repository the user chose', () => {
 
     const stored = await new GitHubStore(db as unknown as D1Database).binding(
       'user_1',
+      'p1',
     );
     assert.equal(stored?.owner, 'acme');
     assert.equal(stored?.repo, 'site');
@@ -282,6 +288,7 @@ describe('binding the repository the user chose', () => {
       new Request('https://app.vibld.com/api/github/bind', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: await ticketFor(),
           owner: 'someone-else',
           repo: 'private',
@@ -293,7 +300,10 @@ describe('binding the repository the user chose', () => {
     );
     assert.equal(response.status, 403);
     assert.equal(
-      await new GitHubStore(db as unknown as D1Database).binding('user_1'),
+      await new GitHubStore(db as unknown as D1Database).binding(
+        'user_1',
+        'p1',
+      ),
       null,
     );
   });
@@ -304,6 +314,7 @@ describe('binding the repository the user chose', () => {
       new Request('https://app.vibld.com/api/github/bind', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: await ticketFor('user_2'),
           owner: 'acme',
           repo: 'site',
@@ -315,7 +326,10 @@ describe('binding the repository the user chose', () => {
     );
     assert.equal(response.status, 400);
     assert.equal(
-      await new GitHubStore(db as unknown as D1Database).binding('user_1'),
+      await new GitHubStore(db as unknown as D1Database).binding(
+        'user_1',
+        'p1',
+      ),
       null,
     );
   });
@@ -339,6 +353,7 @@ describe('binding the repository the user chose', () => {
       new Request('https://app.vibld.com/api/github/bind', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: forged,
           owner: 'someone-else',
           repo: 'private',
@@ -350,7 +365,10 @@ describe('binding the repository the user chose', () => {
     );
     assert.equal(response.status, 400);
     assert.equal(
-      await new GitHubStore(db as unknown as D1Database).binding('user_1'),
+      await new GitHubStore(db as unknown as D1Database).binding(
+        'user_1',
+        'p1',
+      ),
       null,
     );
   });
@@ -361,6 +379,7 @@ describe('binding the repository the user chose', () => {
       new Request('https://app.vibld.com/api/github/bind', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: await ticketFor(),
           owner: 'acme',
           repo: 'site',
@@ -381,6 +400,7 @@ describe('binding the repository the user chose', () => {
       new Request('https://app.vibld.com/api/github/bind', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: await ticketFor(),
           owner: 'ACME',
           repo: 'Site',
@@ -393,6 +413,7 @@ describe('binding the repository the user chose', () => {
     assert.equal(response.status, 200);
     const stored = await new GitHubStore(db as unknown as D1Database).binding(
       'user_1',
+      'p1',
     );
     // Stored as GitHub spells it, not as the request did.
     assert.equal(stored?.owner, 'acme');
@@ -419,6 +440,7 @@ describe('binding the repository the user chose', () => {
 /** A binding row for the tests that need one already in place. */
 const GRANT_ROW = {
   userId: 'user_1',
+  projectId: 'p1',
   installationId: 42,
   owner: 'acme',
   repo: 'site',
@@ -465,10 +487,11 @@ function afterFirstUpdate(
   } as unknown as D1Database;
 }
 
-function disconnectRequest(body: unknown): Request {
+/** A disconnect of project `p1`'s repository (D72). */
+function disconnectRequest(body: Record<string, unknown>): Request {
   return new Request('https://app.vibld.com/api/github/disconnect', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ projectId: 'p1', ...body }),
   });
 }
 
@@ -478,6 +501,7 @@ describe('disconnecting', () => {
     const store = new GitHubStore(db as unknown as D1Database);
     await store.bind({
       userId: 'user_1',
+      projectId: 'p1',
       installationId: 42,
       owner: 'acme',
       repo: 'site',
@@ -495,10 +519,10 @@ describe('disconnecting', () => {
     );
     assert.equal(response.status, 200);
 
-    const state = await store.usableBinding('user_1', NOW);
+    const state = await store.usableBinding('user_1', 'p1', NOW);
     assert.equal(state.usable, false);
     if (!state.usable) assert.equal(state.reason, 'revoked');
-    assert.ok(await store.binding('user_1'), 'the row was deleted');
+    assert.ok(await store.binding('user_1', 'p1'), 'the row was deleted');
   });
 
   it('answers the same way when there was nothing connected', async () => {
@@ -540,7 +564,7 @@ describe('disconnecting', () => {
     assert.deepEqual(body.movedTo, { owner: 'acme', repo: 'other' });
 
     // And the connection it was not asked about is untouched.
-    const state = await store.usableBinding('user_1', NOW);
+    const state = await store.usableBinding('user_1', 'p1', NOW);
     assert.equal(state.usable, true);
   });
 
@@ -562,7 +586,7 @@ describe('disconnecting', () => {
       NOW,
     );
     assert.equal(response.status, 400);
-    const state = await store.usableBinding('user_1', NOW);
+    const state = await store.usableBinding('user_1', 'p1', NOW);
     assert.equal(state.usable, true);
   });
 
@@ -603,7 +627,7 @@ describe('disconnecting', () => {
     // Rebind to the requested repository the moment the guarded update has
     // run and failed, which is the window the read sits in.
     const raced = afterFirstUpdate(db, async () => {
-      await store.revoke('user_1', NOW);
+      await store.disconnectAccount('user_1', NOW);
       await store.bind(GRANT_ROW);
     });
 
@@ -637,7 +661,7 @@ describe('disconnecting', () => {
       NOW,
     );
     assert.equal(response.status, 200);
-    const state = await store.usableBinding('user_1', NOW);
+    const state = await store.usableBinding('user_1', 'p1', NOW);
     assert.equal(state.usable, false);
   });
 });
@@ -723,6 +747,7 @@ describe('a user with the app on more than one account', () => {
       new Request('https://app.vibld.com/api/github/bind', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: body.ticket,
           owner: 'acme',
           repo: 'work',
@@ -735,6 +760,7 @@ describe('a user with the app on more than one account', () => {
     assert.equal(bound.status, 200);
     const stored = await new GitHubStore(db as unknown as D1Database).binding(
       'user_1',
+      'p1',
     );
     assert.equal(stored?.installationId, 77);
     assert.equal(stored?.repo, 'work');
@@ -760,6 +786,7 @@ describe('a user with the app on more than one account', () => {
       new Request('https://app.vibld.com/api/github/bind', {
         method: 'POST',
         body: JSON.stringify({
+          projectId: 'p1',
           ticket: body.ticket,
           owner: 'chris',
           repo: 'personal',
@@ -772,6 +799,7 @@ describe('a user with the app on more than one account', () => {
     assert.equal(bound.status, 200);
     const stored = await new GitHubStore(db as unknown as D1Database).binding(
       'user_1',
+      'p1',
     );
     assert.equal(stored?.installationId, 42);
     assert.equal(stored?.repo, 'personal');

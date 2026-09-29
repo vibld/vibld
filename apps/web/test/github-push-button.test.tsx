@@ -108,11 +108,13 @@ beforeEach(() => {
 describe('the push button, as it is actually wired', () => {
   it('asks for the status and offers the repository it names', async () => {
     const calls = serving({ '/api/github/status': () => reply(CONNECTED) });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
 
     assert.deepEqual(
       calls.map((call) => call.url),
-      ['/api/github/status'],
+      ['/api/github/status?project=p1'],
     );
     assert.match(view.container.textContent ?? '', /Push to acme\/site/);
     view.unmount();
@@ -126,7 +128,9 @@ describe('the push button, as it is actually wired', () => {
       '/api/github/push': () =>
         reply({ branch: 'vibld/r7', commitSha: 'abc', created: true }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     await view.click('Push to');
 
     const push = calls.find((call) => call.url.includes('/push'));
@@ -140,7 +144,9 @@ describe('the push button, as it is actually wired', () => {
 
   it('says nothing when the deployment has no GitHub', async () => {
     serving({ '/api/github/status': () => reply({ configured: false }) });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     assert.equal(view.container.innerHTML, '');
     view.unmount();
   });
@@ -168,14 +174,18 @@ describe('answers that arrive after the thing they were about moved on', () => {
       '/api/github/push': () =>
         reply({ branch: 'vibld/r7', commitSha: 'abc', created: true }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     await view.click('Push to');
     assert.match(view.container.textContent ?? '', /vibld\/r7/);
 
     // Otherwise the branch from the last push stays on screen beside a
     // project that has moved on, which reads as though the new work is
     // already on GitHub.
-    await view.render(<GitHubPushButton snapshot={snapshot('r8')} />);
+    await view.render(
+      <GitHubPushButton snapshot={snapshot('r8')} projectId="p1" />,
+    );
     assert.doesNotMatch(view.container.textContent ?? '', /vibld\/r7/);
     view.unmount();
   });
@@ -189,9 +199,13 @@ describe('answers that arrive after the thing they were about moved on', () => {
       '/api/github/status': () => reply(CONNECTED),
       '/api/github/push': () => slow.promise,
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     await view.click('Push to');
-    await view.render(<GitHubPushButton snapshot={snapshot('r8')} />);
+    await view.render(
+      <GitHubPushButton snapshot={snapshot('r8')} projectId="p1" />,
+    );
 
     await act(async () => {
       slow.give(reply({ branch: 'vibld/r7', commitSha: 'abc', created: true }));
@@ -211,7 +225,9 @@ describe('answers that arrive after the thing they were about moved on', () => {
       '/api/github/status': () => reply(CONNECTED),
       '/api/github/push': () => slow.promise,
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     await view.click('Push to');
 
     await act(async () => {
@@ -238,7 +254,9 @@ describe('answers that arrive after the thing they were about moved on', () => {
       '/api/github/push': () =>
         reply({ branch: 'vibld/r7', commitSha: 'abc', created: true }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     await view.click('Push to');
     assert.match(view.container.textContent ?? '', /vibld\/r7/);
 
@@ -258,7 +276,9 @@ describe('answers that arrive after the thing they were about moved on', () => {
       '/api/github/status': () =>
         reply(connected ? CONNECTED : { configured: true, connected: false }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     assert.doesNotMatch(view.container.textContent ?? '', /Push to/);
 
     connected = true;
@@ -292,7 +312,9 @@ describe('answers that arrive after the thing they were about moved on', () => {
         );
       },
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r7')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r7')} projectId="p1" />,
+    );
     await view.click('Push to');
 
     assert.equal(
@@ -324,7 +346,9 @@ describe('previewing the push, as it is actually wired', () => {
     // The preview spends the same GitHub quota a push does. Fetching one
     // after every generation spends it for people who never look.
     const calls = serving({ '/api/github/status': () => reply(CONNECTED) });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r1')} projectId="p1" />,
+    );
 
     assert.equal(
       calls.filter((call) => call.url.includes('/api/github/diff')).length,
@@ -338,7 +362,9 @@ describe('previewing the push, as it is actually wired', () => {
       '/api/github/status': () => reply(CONNECTED),
       '/api/github/diff': () => reply(DIFF),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r1')} projectId="p1" />,
+    );
 
     await view.click('What would this change?');
 
@@ -346,10 +372,12 @@ describe('previewing the push, as it is actually wired', () => {
     assert.match(text, /Deleted from the branch/);
     assert.match(text, /LICENSE/);
     assert.match(text, /src\/new\.ts/);
-    // It sends the files, and no revision: a preview is not a push and must
-    // not key one.
+    // It sends the files and the project whose repository the diff is
+    // against (D72), and no revision: a preview is not a push and must not
+    // key one.
     const asked = calls.find((call) => call.url.includes('/api/github/diff'));
-    assert.deepEqual(Object.keys(asked?.body ?? {}), ['files']);
+    assert.deepEqual(Object.keys(asked?.body ?? {}), ['projectId', 'files']);
+    assert.equal(asked?.body?.projectId, 'p1');
     view.unmount();
   });
 
@@ -361,11 +389,15 @@ describe('previewing the push, as it is actually wired', () => {
       '/api/github/status': () => reply(CONNECTED),
       '/api/github/diff': () => reply(DIFF),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r1')} projectId="p1" />,
+    );
     await view.click('What would this change?');
     assert.match(view.container.textContent ?? '', /LICENSE/);
 
-    await view.render(<GitHubPushButton snapshot={snapshot('r2')} />);
+    await view.render(
+      <GitHubPushButton snapshot={snapshot('r2')} projectId="p1" />,
+    );
 
     assert.doesNotMatch(view.container.textContent ?? '', /LICENSE/);
     view.unmount();
@@ -377,7 +409,9 @@ describe('previewing the push, as it is actually wired', () => {
       '/api/github/diff': () =>
         reply({ ...DIFF, added: [], changed: [], removed: [] }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r1')} projectId="p1" />,
+    );
 
     await view.click('What would this change?');
 
@@ -390,7 +424,9 @@ describe('previewing the push, as it is actually wired', () => {
       '/api/github/status': () => reply(CONNECTED),
       '/api/github/diff': () => reply({ ...DIFF, truncated: true }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r1')} projectId="p1" />,
+    );
 
     await view.click('What would this change?');
 
@@ -403,7 +439,9 @@ describe('previewing the push, as it is actually wired', () => {
       '/api/github/status': () => reply(CONNECTED),
       '/api/github/diff': () => reply({ error: 'vibld lost access.' }, 409),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r1')} projectId="p1" />,
+    );
 
     await view.click('What would this change?');
 
@@ -420,7 +458,9 @@ describe('previewing the push, as it is actually wired', () => {
       '/api/github/status': () => reply(CONNECTED),
       '/api/github/diff': () => reply({ error: 'nope' }, 500),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r1')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r1')} projectId="p1" />,
+    );
 
     await view.click('What would this change?');
 
@@ -448,7 +488,9 @@ describe('what became of an earlier pull request', () => {
           },
         }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r8')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r8')} projectId="p1" />,
+    );
 
     assert.match(view.container.textContent ?? '', /Merged:/);
     view.unmount();
@@ -466,7 +508,9 @@ describe('what became of an earlier pull request', () => {
           },
         }),
     });
-    const view = await mount(<GitHubPushButton snapshot={snapshot('r8')} />);
+    const view = await mount(
+      <GitHubPushButton snapshot={snapshot('r8')} projectId="p1" />,
+    );
 
     const text = view.container.textContent ?? '';
     assert.match(text, /Opened earlier:/);
