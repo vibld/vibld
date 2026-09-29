@@ -26,6 +26,7 @@ import { parsePlanArgs } from '../src/cli-args.ts';
 import { isStylePresetId } from '../src/style-presets.ts';
 import { diffProjects, readProject } from '../src/read-project.ts';
 import type { PlanUsage } from '../src/client.ts';
+import type { RunStepTrace } from '@vibld/core';
 
 const { prompt, out, base, style } = parsePlanArgs(process.argv.slice(2));
 
@@ -44,6 +45,28 @@ if (style !== undefined && !isStylePresetId(style)) {
 }
 
 let usage: PlanUsage | undefined;
+let measured: RunStepTrace[] = [];
+
+/** Each call's time and output, so the slow step is named, not guessed. */
+function printSteps(): void {
+  if (measured.length === 0) return;
+  console.log('\nsteps:');
+  for (const step of measured) {
+    console.log(
+      `  ${step.name.padEnd(14)} ${(step.ms / 1000).toFixed(1).padStart(7)}s ` +
+        `${String(step.outputTokens).padStart(7)} out` +
+        (step.reasoningTokens !== undefined
+          ? ` (${step.reasoningTokens} reasoning)`
+          : ''),
+    );
+  }
+}
+
+function reasoningNote(reported: PlanUsage): string {
+  return reported.reasoningTokens !== undefined
+    ? `, ${reported.reasoningTokens} of it reasoning`
+    : '';
+}
 // Which service answers is configuration, not a constant: VIBLD_PROVIDER
 // picks, or the single key that is set does. An unset VIBLD_MODEL falls back
 // to the chosen provider's own model, never the other one's.
@@ -63,6 +86,9 @@ const provider = new BoundedPlanProvider(createPlanClient(process.env, model), {
   ...(style !== undefined && isStylePresetId(style) ? { style } : {}),
   onUsage: (reported) => {
     usage = reported;
+  },
+  onSteps: (steps) => {
+    measured = steps;
   },
   // One line per step, with the time it started, so a slow step can be
   // told from a stuck one in the job log.
@@ -99,11 +125,13 @@ try {
   if (usage) {
     console.log(
       `\ntokens over ${steps} steps: ${usage.inputTokens} in / ${usage.outputTokens} out` +
+        reasoningNote(usage) +
         (usage.cacheReadInputTokens
           ? ` (${usage.cacheReadInputTokens} cached)`
           : ''),
     );
   }
+  printSteps();
 
   if (baseProject) {
     const diff = diffProjects(baseProject, plan);
@@ -143,9 +171,10 @@ try {
     // A failed run was still billed for every step it made.
     if (usage) {
       console.error(
-        `tokens spent over ${steps} steps: ${usage.inputTokens} in / ${usage.outputTokens} out`,
+        `tokens spent over ${steps} steps: ${usage.inputTokens} in / ${usage.outputTokens} out${reasoningNote(usage)}`,
       );
     }
+    printSteps();
     process.exit(1);
   }
   throw error;

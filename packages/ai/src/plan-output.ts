@@ -5,6 +5,7 @@ import {
   BuildOutlineSchema,
   FileGroupSchema,
   GenerationPlanSchema,
+  KeptSpecOutlineSchema,
 } from './plan-schema.ts';
 import { DraftMockupSetSchema, MockupSetSchema } from './mockup-schema.ts';
 import { ChatDecisionSchema } from './chat-schema.ts';
@@ -128,6 +129,8 @@ code fence. It must match this shape exactly:
 
 {
   "summary": "one sentence describing what you will build",
+  "title": "the site's name, a few words",
+  "description": "one sentence for search results",
   "spec": ${SPEC_JSON_EXAMPLE},
   "manifest": [
     {
@@ -137,11 +140,38 @@ code fence. It must match this shape exactly:
       "size": "small, medium or large"
     }
   ],
+  "dependencies": [],
   "delete": []
 }
 
 "spec" comes before "manifest". "manifest" plans files and holds no file
-content.`;
+content. "dependencies" lists { "name", "version" } for each package outside
+the stack a planned file imports, and is usually empty.`;
+
+/**
+ * The first step of a bounded build that keeps its spec (a repair): the
+ * outline without a spec, a title or a description.
+ */
+export const KEPT_SPEC_OUTLINE_JSON_INSTRUCTION = `OUTPUT FORMAT
+Reply with a single json object and nothing else. No prose, no markdown, no
+code fence. It must match this shape exactly:
+
+{
+  "summary": "one sentence describing the change",
+  "manifest": [
+    {
+      "path": "src/pages/Services.tsx",
+      "purpose": "what changes in the file and what stays",
+      "dependsOn": ["src/components/SiteLayout.tsx"],
+      "size": "small, medium or large"
+    }
+  ],
+  "dependencies": [],
+  "delete": []
+}
+
+There is no "spec": the design is fixed. "manifest" plans files and holds no
+file content.`;
 
 /** Each later step of a bounded build: only the files it was asked for. */
 export const FILE_GROUP_JSON_INSTRUCTION = `OUTPUT FORMAT
@@ -218,6 +248,17 @@ export const OUTLINE_OUTPUT: PlanOutput = {
   name: 'build_outline',
   schema: BuildOutlineSchema,
   instruction: OUTLINE_JSON_INSTRUCTION,
+};
+
+/**
+ * The first step of a bounded build that keeps its spec: a repair's
+ * outline, which asks for no spec because the spec it has is kept
+ * (`BoundedBuilderOptions.keepSpec`).
+ */
+export const KEPT_SPEC_OUTLINE_OUTPUT: PlanOutput = {
+  name: 'patch_outline',
+  schema: KeptSpecOutlineSchema,
+  instruction: KEPT_SPEC_OUTLINE_JSON_INSTRUCTION,
 };
 
 /** Each later step of a bounded build: the few files it was asked for. */

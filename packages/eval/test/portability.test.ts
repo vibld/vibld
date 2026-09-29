@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ProjectSnapshot } from '@vibld/core';
+import {
+  BoundedPlanProvider,
+  SCAFFOLD_PATHS,
+  createScriptedBuildClient,
+} from '@vibld/ai';
 import { CASES, stubPlan } from '../src/cases.ts';
 import { checkPortability, rangeHighestMajor } from '../src/portability.ts';
 
@@ -597,6 +602,43 @@ describe('the generated stack', () => {
     assert.deepEqual(checkPortability(snapshot(stub)), []);
   });
 
+  it("accepts a bounded build's project, whose configuration Vibld writes (D71)", async () => {
+    // The model writes only its own files; the outline also lists the
+    // configuration, as one written before D71 would, and is not asked.
+    const own = stub.filter(
+      (file) =>
+        !(SCAFFOLD_PATHS as readonly string[]).includes(file.path) &&
+        file.path !== 'DESIGN.md',
+    );
+    const client = createScriptedBuildClient({
+      summary: 'A site.',
+      title: 'Crumb & Co.',
+      description: 'Bread on Elm Street.',
+      files: [
+        ...stub.filter((file) => file.path !== 'DESIGN.md'),
+        {
+          path: 'src/components/ui/command.tsx',
+          content: "import { Command } from 'cmdk';\nexport { Command };\n",
+        },
+      ],
+    });
+    const plan = await new BoundedPlanProvider(client, {
+      model: 'claude-opus-5-5',
+    }).generate({ prompt: 'A bakery.' });
+    for (const path of SCAFFOLD_PATHS) {
+      assert.ok(
+        plan.files.some((file) => file.path === path),
+        `${path} is missing`,
+      );
+    }
+    assert.ok(own.length > 0);
+    assert.deepEqual(checkPortability(snapshot(plan.files)), []);
+    const pkg = JSON.parse(
+      plan.files.find((file) => file.path === 'package.json')!.content,
+    ) as { dependencies: Record<string, string> };
+    assert.ok(pkg.dependencies.cmdk, 'an imported package is not declared');
+  });
+
   it('refuses @tailwindcss/vite that the vite config never adds', () => {
     const problems = checkPortability(
       replace(
@@ -903,6 +945,7 @@ describe('the generated stack', () => {
     };
     manifest.scripts.build = 'tsc -p config/tsconfig.json && vite build';
     manifest.scripts.typecheck = 'tsc --noEmit -p config/tsconfig.json';
+    manifest.scripts.lint = 'tsc --noEmit -p config/tsconfig.json';
     const lenient = {
       ...withoutTypes,
       compilerOptions: {

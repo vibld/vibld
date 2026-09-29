@@ -38,6 +38,10 @@ import { ReferralStore } from '../worker/referral-store.ts';
 import { CONFIRMATION_PHRASE as BROWSER_PHRASE } from '../src/account/deletion-client.ts';
 import { liveSiteProjects } from '../worker/project-store.ts';
 import { sharePreviewKey } from '../worker/share-link.ts';
+
+/** The trace columns these rows fill, named since 0037 added two more. */
+const TRACE_COLUMNS =
+  'run_id, project_id, stop, model, input_tokens, cached_input_tokens, output_tokens, context_window, cost_micro_usd, elapsed_ms, ended_at';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 import { schemaSql } from './fakes/schema.ts';
@@ -248,7 +252,7 @@ async function seed(w: World, { siteLive = false } = {}) {
     );
     await exec(
       db,
-      `INSERT INTO generation_run_traces VALUES (?1, ?2, 'accepted', 'm', 1, 0, 1, 100, 5, 10, ?3)`,
+      `INSERT INTO generation_run_traces (${TRACE_COLUMNS}) VALUES (?1, ?2, 'accepted', 'm', 1, 0, 1, 100, 5, 10, ?3)`,
       `run_${customer}`,
       user,
       at,
@@ -302,7 +306,7 @@ async function seed(w: World, { siteLive = false } = {}) {
     );
     await exec(
       db,
-      `INSERT INTO generation_run_traces VALUES (?1, ?2, 'accepted', 'm', 1, 0, 1, 100, 5, 10, ?3)`,
+      `INSERT INTO generation_run_traces (${TRACE_COLUMNS}) VALUES (?1, ?2, 'accepted', 'm', 1, 0, 1, 100, 5, 10, ?3)`,
       `run2_${customer}`,
       second,
       at,

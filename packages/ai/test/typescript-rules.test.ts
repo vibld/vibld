@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { PLAN_SYSTEM_PROMPT } from '../src/plan-schema.ts';
+import {
+  GROUP_SYSTEM_PROMPT,
+  OUTLINE_SYSTEM_PROMPT,
+  PLAN_SYSTEM_PROMPT,
+} from '../src/plan-schema.ts';
 
 /**
  * The two TypeScript rules a generated project cannot be written without.
@@ -57,5 +61,18 @@ describe('what the prompt tells the model about TypeScript', () => {
       /import type \{/,
       'the rule is named but never shown, so the model has to infer the syntax',
     );
+  });
+
+  it('states both rules to a bounded build, whose tsconfig is templated (D71)', () => {
+    // The tsconfig is Vibld's now and sets both, so the rules are no
+    // longer about surviving the model's pick; they are the settings the
+    // code is compiled under.
+    for (const prompt of [OUTLINE_SYSTEM_PROMPT, GROUP_SYSTEM_PROMPT]) {
+      assert.match(prompt, /isolatedModules/);
+      assert.match(prompt, /verbatimModuleSyntax/);
+      assert.match(prompt, /export type \{/);
+      assert.match(prompt, /import type \{/);
+      assert.match(prompt, /tsconfig\.json is written for you/);
+    }
   });
 });

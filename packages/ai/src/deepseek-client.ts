@@ -361,6 +361,16 @@ export function createDeepseekPlanClient(
           // Same as OpenAI: caching is automatic, the write is not charged,
           // and `prompt_tokens` above already includes the hit tokens.
           cacheWriteInputTokens: 0,
+          // The part of `completion_tokens` that was thinking, where the
+          // terminal chunk says. Kept in `diagnostics` below as well, which
+          // is where the mockup command line has always read it.
+          ...(typeof usage?.completion_tokens_details?.reasoning_tokens ===
+          'number'
+            ? {
+                reasoningTokens:
+                  usage.completion_tokens_details.reasoning_tokens,
+              }
+            : {}),
         },
         // Reported only where there is something to report, so "this
         // provider does not say" stays distinguishable from "none" (internal PR 190).

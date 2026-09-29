@@ -125,6 +125,21 @@ export interface PlanUsage {
    * report, not a write being hidden.
    */
   cacheWriteInputTokens: number;
+  /**
+   * The part of `outputTokens` the provider reported as reasoning: OpenAI's
+   * `output_tokens_details.reasoning_tokens` (or, on the chat shape,
+   * `completion_tokens_details.reasoning_tokens`), DeepSeek's
+   * `completion_tokens_details.reasoning_tokens`, Anthropic's
+   * `output_tokens_details.thinking_tokens`. A subset, like the cache
+   * figures: every provider already counts it in `outputTokens`, which is
+   * what is billed.
+   *
+   * Absent where the provider does not say, so "not reported" and "none"
+   * stay different answers. Recorded because a reasoning model's thinking
+   * streams nothing the meter counts, and without this the share of a
+   * build's output that went on it could only be estimated.
+   */
+  reasoningTokens?: number;
 }
 
 export interface PlanRefusal {

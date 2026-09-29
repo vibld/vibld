@@ -1,7 +1,6 @@
 import type { GenerationPlan, ProjectFile } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
-import { stackDependencies } from '@vibld/ai/stack';
-import { tokenCss } from '@vibld/ai';
+import { scaffoldFiles, tokenCss } from '@vibld/ai';
 
 /**
  * The versioned prompt set.
@@ -218,11 +217,16 @@ export const CASES: EvalCase[] = [
  * against this measures the machinery, not generation quality. The real
  * baseline needs a provider and an approved spend cap (internal issue 9, internal issue 18).
  *
- * It emits the same file set `PLAN_SYSTEM_PROMPT` requires of a real model,
- * rather than the minimum the older cases happened to assert. A stub that
- * produces less than the contract demands is not a stand-in: it passes cases
- * a real run would fail, and fails cases that ask for a file the contract
- * already requires.
+ * It emits the same file set a real build has, rather than the minimum the
+ * older cases happened to assert: the files a model writes (src/App.tsx,
+ * src/styles.css, and the DESIGN.md a real build renders from its spec),
+ * and Vibld's own files from the same templates a real build uses (D71,
+ * `scaffoldFiles`), so CI's build of this stub installs and compiles exactly
+ * the package.json, tsconfig.json and vite.config.ts a real generation gets.
+ * A stub that produces less than the contract demands is not a stand-in: it
+ * passes cases a real run would fail, and fails cases that ask for a file
+ * the contract already requires. Until internal PR 59 the stub declared no vite at
+ * all, and the project it reported accepted stopped at "vite: not found".
  */
 export function stubPlan(testCase: EvalCase): GenerationPlan {
   // The prompt and the words the case expects, echoed into the page's
@@ -232,66 +236,10 @@ export function stubPlan(testCase: EvalCase): GenerationPlan {
   const subject = [testCase.prompt, ...testCase.expects.content.flat()]
     .join(' ')
     .toLowerCase();
-  const files: ProjectFile[] = [
-    {
-      path: 'package.json',
-      content: JSON.stringify(
-        {
-          name: testCase.id,
-          private: true,
-          type: 'module',
-          scripts: {
-            dev: 'vite',
-            build: 'tsc --noEmit && vite build',
-            typecheck: 'tsc --noEmit',
-          },
-          // The packages and ranges the prompt asks a model for (ADR-0014),
-          // so CI's build of this stub installs and compiles exactly the set
-          // a real generation declares. Until internal PR 59 the stub declared no vite
-          // at all, and the project it reported accepted stopped at
-          // "vite: not found".
-          ...stackDependencies(),
-        },
-        null,
-        2,
-      ),
-    },
-    {
-      path: 'README.md',
-      content: `# ${testCase.id}\n\n${testCase.prompt}\n\n## Run it\n\n\`npm install\`, then \`npm run dev\`. \`npm run build\` produces the bundle.\n`,
-    },
+  const own: ProjectFile[] = [
     {
       path: 'DESIGN.md',
       content: `---\nrounded: 4px\n---\n\n# Design\n\nPlaceholder tokens for: ${testCase.prompt}\n`,
-    },
-    {
-      path: 'tsconfig.json',
-      content: JSON.stringify(
-        {
-          compilerOptions: {
-            target: 'ES2022',
-            lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-            module: 'ESNext',
-            moduleResolution: 'bundler',
-            jsx: 'react-jsx',
-            strict: true,
-            noEmit: true,
-            skipLibCheck: true,
-            allowImportingTsExtensions: true,
-            verbatimModuleSyntax: true,
-            isolatedModules: true,
-            types: ['vite/client', 'node'],
-            paths: { '@/*': ['./src/*'] },
-          },
-          include: ['src'],
-        },
-        null,
-        2,
-      ),
-    },
-    {
-      path: 'vite.config.ts',
-      content: `import { fileURLToPath, URL } from 'node:url';\nimport tailwindcss from '@tailwindcss/vite';\nimport react from '@vitejs/plugin-react';\nimport { defineConfig } from 'vite';\n\nexport default defineConfig({\n  plugins: [react(), tailwindcss()],\n  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },\n});\n`,
     },
     {
       path: 'src/styles.css',
@@ -316,22 +264,13 @@ export function stubPlan(testCase: EvalCase): GenerationPlan {
       )}\n`,
     },
     {
-      path: 'src/lib/utils.ts',
-      content: `import { clsx, type ClassValue } from 'clsx';\nimport { twMerge } from 'tailwind-merge';\n\nexport function cn(...inputs: ClassValue[]) {\n  return twMerge(clsx(inputs));\n}\n`,
-    },
-    {
-      path: 'src/main.tsx',
-      content:
-        "import { createRoot } from 'react-dom/client';\nimport App from './App.tsx';\nimport './styles.css';\n\ncreateRoot(document.getElementById('root')!).render(<App />);\n",
-    },
-    {
       path: 'src/App.tsx',
       content: `import { ArrowRight } from 'lucide-react';\nimport { MotionConfig, motion } from 'motion/react';\nimport { cn } from '@/lib/utils';\n\nexport default function App() {\n  return (\n    <MotionConfig reducedMotion="user">\n      <motion.main\n        className={cn('bg-background text-foreground')}\n        initial={{ opacity: 0, y: 16 }}\n        animate={{ opacity: 1, y: 0 }}\n      >\n        ${testCase.id} <ArrowRight aria-hidden="true" className="size-4" />\n      </motion.main>\n    </MotionConfig>\n  );\n}\n`,
     },
-    {
-      path: 'index.html',
-      content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="description" content="${subject.replaceAll('"', '&quot;')}" />\n    <title>${testCase.id}</title>\n  </head>\n  <body>\n    <div id="root"></div>\n    <script type="module" src="/src/main.tsx"></script>\n  </body>\n</html>\n`,
-    },
+  ];
+  const files: ProjectFile[] = [
+    ...own,
+    ...scaffoldFiles({ title: testCase.id, description: subject }, own),
   ];
   return { summary: `Static site for: ${testCase.prompt}`, files };
 }

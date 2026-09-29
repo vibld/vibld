@@ -47,6 +47,7 @@ export {
   GROUP_MAX_TOKENS,
   MAX_PLANNED_FILES,
   MIN_CALL_TOKENS,
+  MODEL_REQUIRED_FILES,
   OUTLINE_LABEL,
   OUTLINE_MAX_TOKENS,
   SIZE_ESTIMATE_TOKENS,
@@ -62,6 +63,7 @@ export {
   rankOf,
   runBoundedBuild,
   splitGroup,
+  stepOf,
 } from './bounded-build.ts';
 export type {
   BaseSource,
@@ -101,6 +103,7 @@ export {
 export {
   BuildOutlineReadSchema,
   BuildOutlineSchema,
+  DependencySchema,
   FileGroupSchema,
   GROUP_SYSTEM_PROMPT,
   GenerationPlanReadSchema,
@@ -414,5 +417,26 @@ export {
   stackVersionLine,
 } from './stack.ts';
 export type { StackPackage } from './stack.ts';
+export {
+  MAIN_TSX,
+  PROJECT_SCRIPTS,
+  SCAFFOLD_PATHS,
+  SCAFFOLD_SECTION,
+  TSCONFIG,
+  UTILS_TS,
+  VITE_CONFIG,
+  extraDependencies,
+  importedPackages,
+  isScaffoldPath,
+  scaffoldFiles,
+  scaffoldText,
+  withImportedDependencies,
+  withScaffold,
+} from './scaffold.ts';
+export type {
+  ExtraDependency,
+  ScaffoldInput,
+  ScaffoldPath,
+} from './scaffold.ts';
 export { TOKEN_USE, tokenCss } from './theme-css.ts';
 export type { ColorTokens, ShapeTokens } from './theme-css.ts';

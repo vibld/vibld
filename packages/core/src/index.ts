@@ -29,7 +29,12 @@ export {
   stopIsRecordable,
   stopIsRetryable,
 } from './run-outcome.ts';
-export type { RunRefusal, RunStop, RunTrace } from './run-outcome.ts';
+export type {
+  RunRefusal,
+  RunStepTrace,
+  RunStop,
+  RunTrace,
+} from './run-outcome.ts';
 export {
   RUN_OUTCOME_KINDS,
   canDiscardFor,

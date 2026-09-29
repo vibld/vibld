@@ -6,7 +6,11 @@ import test from 'node:test';
 import { testGenerationStoreContract } from '@vibld/core/test-contract';
 import type { ProjectSnapshot, RunTrace } from '@vibld/core';
 
-import { D1GenerationStore } from '../worker/generation-store.ts';
+import {
+  D1GenerationStore,
+  readSteps,
+  writeSteps,
+} from '../worker/generation-store.ts';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
 import { SqliteD1Database } from './fakes/sqlite-d1.ts';
 
@@ -17,13 +21,15 @@ function migration(file: string): string {
   );
 }
 
-// Both migrations, because the store is one object and the trace table is
-// part of what it is now. Reading them from the files that ship means a
-// column added to the schema without being written here fails the tests
-// rather than passing against a hand-copied definition that drifted.
+// The migrations the store reads and writes, because the store is one
+// object and the trace table is part of what it is now. Reading them from
+// the files that ship means a column added to the schema without being
+// written here fails the tests rather than passing against a hand-copied
+// definition that drifted.
 const SCHEMA = [
   migration('0001_generation_store.sql'),
   migration('0014_run_traces.sql'),
+  migration('0037_run_trace_steps.sql'),
 ].join('\n');
 
 function newStore(): D1GenerationStore {
@@ -177,4 +183,78 @@ test('[d1] a stop this build cannot read comes back as a provider error', async 
 
   const [trace] = await store.tracesForProject('project-1');
   assert.equal(trace?.stop, 'provider-error');
+});
+
+test('[d1] reasoning and the steps come back as they were saved', async () => {
+  const store = newStore();
+  const measured = {
+    ...TRACE,
+    outputTokens: 35_354,
+    reasoningTokens: 16_200,
+    steps: [
+      { name: 'prepare', ms: 120, outputTokens: 0 },
+      {
+        name: 'outline',
+        ms: 61_000,
+        outputTokens: 9_800,
+        reasoningTokens: 4_100,
+      },
+      {
+        name: 'write-1',
+        ms: 90_500,
+        outputTokens: 12_000,
+        reasoningTokens: 6_000,
+      },
+      // A provider that did not say: no reasoning, rather than zero.
+      { name: 'write-2', ms: 70_000, outputTokens: 13_554 },
+      { name: 'assemble', ms: 900, outputTokens: 0 },
+      { name: 'verify-and-repair', ms: 44_000, outputTokens: 0 },
+    ],
+  } satisfies RunTrace;
+  await store.saveTrace(measured);
+  assert.deepEqual(await store.tracesForProject('project-1'), [measured]);
+});
+
+test('[d1] a row written before 0037 reads with neither, not with zeros', async () => {
+  const database = new SqliteD1Database(SCHEMA);
+  const store = new D1GenerationStore(database, new InMemoryR2Bucket());
+  // The insert an older deployment makes: it names its eleven columns and
+  // leaves the two new ones NULL.
+  await database
+    .prepare(
+      `INSERT INTO generation_run_traces
+         (run_id, project_id, stop, model, input_tokens, cached_input_tokens,
+          output_tokens, context_window, cost_micro_usd, elapsed_ms, ended_at)
+       VALUES ('run-old', 'project-1', 'applied', 'm', 1, 0, 1, 100, 5, 10,
+               '2026-03-04T00:00:00.000Z')`,
+    )
+    .run();
+  const [trace] = await store.tracesForProject('project-1');
+  assert.equal(trace?.runId, 'run-old');
+  assert.equal('reasoningTokens' in trace!, false);
+  assert.equal('steps' in trace!, false);
+});
+
+test('the steps column is compact JSON, and read back defensively', () => {
+  assert.equal(writeSteps(undefined), null);
+  assert.equal(writeSteps([]), null);
+  assert.equal(
+    writeSteps([
+      { name: 'outline', ms: 1234.4, outputTokens: 10, reasoningTokens: 4 },
+      { name: 'assemble', ms: 5, outputTokens: 0 },
+    ]),
+    '[{"name":"outline","ms":1234,"outputTokens":10,"reasoningTokens":4},{"name":"assemble","ms":5,"outputTokens":0}]',
+  );
+  assert.equal(readSteps(null), undefined);
+  assert.equal(readSteps('not json'), undefined);
+  assert.equal(readSteps('{"name":"x"}'), undefined);
+  assert.deepEqual(
+    readSteps(
+      '[{"name":"ok","ms":1,"outputTokens":2},{"ms":1},{"name":"bad","ms":-1},null,{"name":"r","ms":3,"outputTokens":"x","reasoningTokens":2}]',
+    ),
+    [
+      { name: 'ok', ms: 1, outputTokens: 2 },
+      { name: 'r', ms: 3, outputTokens: 0, reasoningTokens: 2 },
+    ],
+  );
 });

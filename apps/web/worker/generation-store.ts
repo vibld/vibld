@@ -24,6 +24,7 @@ import type {
   GenerationStore,
   ProjectSnapshot,
   PromotionResult,
+  RunStepTrace,
   RunTrace,
 } from '@vibld/core';
 
@@ -96,9 +97,75 @@ interface TraceRow {
   cost_micro_usd: number;
   elapsed_ms: number;
   ended_at: string;
+  /** NULL on a row written before `0037_run_trace_steps.sql`. */
+  reasoning_tokens?: number | null;
+  steps_json?: string | null;
+}
+
+/** A count that is a whole, non-negative number, or nothing. */
+function count(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined;
+}
+
+/**
+ * A row's steps, read back defensively: a column this build did not write
+ * (an older one, or a hand edit) is read as no steps rather than trusted,
+ * and a step without the shape is dropped.
+ */
+export function readSteps(
+  json: string | null | undefined,
+): RunStepTrace[] | undefined {
+  if (!json) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  const steps: RunStepTrace[] = [];
+  for (const item of parsed) {
+    if (typeof item !== 'object' || item === null) continue;
+    const step = item as Record<string, unknown>;
+    const ms = count(step.ms);
+    if (typeof step.name !== 'string' || ms === undefined) continue;
+    const reasoningTokens = count(step.reasoningTokens);
+    steps.push({
+      name: step.name.slice(0, 64),
+      ms,
+      outputTokens: count(step.outputTokens) ?? 0,
+      ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    });
+  }
+  return steps;
+}
+
+/**
+ * The steps as the column stores them: compact JSON, in order, each step's
+ * name, time and output, and its reasoning only where it was reported.
+ * NULL for a run with none.
+ */
+export function writeSteps(
+  steps: readonly RunStepTrace[] | undefined,
+): string | null {
+  if (!steps || steps.length === 0) return null;
+  return JSON.stringify(
+    steps.map((step) => ({
+      name: step.name,
+      ms: Math.max(0, Math.round(step.ms)),
+      outputTokens: step.outputTokens,
+      ...(step.reasoningTokens === undefined
+        ? {}
+        : { reasoningTokens: step.reasoningTokens }),
+    })),
+  );
 }
 
 function toTrace(row: TraceRow): RunTrace {
+  const steps = readSteps(row.steps_json);
+  const reasoningTokens = count(row.reasoning_tokens);
   return {
     runId: row.run_id,
     projectId: row.project_id,
@@ -116,6 +183,8 @@ function toTrace(row: TraceRow): RunTrace {
     costMicroUsd: row.cost_micro_usd,
     elapsedMs: row.elapsed_ms,
     endedAt: row.ended_at,
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(steps && steps.length > 0 ? { steps } : {}),
   };
 }
 
@@ -146,8 +215,9 @@ export class D1GenerationStore implements GenerationStore {
       .prepare(
         `INSERT INTO generation_run_traces
            (run_id, project_id, stop, model, input_tokens, cached_input_tokens,
-            output_tokens, context_window, cost_micro_usd, elapsed_ms, ended_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            output_tokens, context_window, cost_micro_usd, elapsed_ms, ended_at,
+            reasoning_tokens, steps_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(run_id) DO NOTHING`,
       )
       .bind(
@@ -162,6 +232,8 @@ export class D1GenerationStore implements GenerationStore {
         trace.costMicroUsd,
         trace.elapsedMs,
         trace.endedAt,
+        trace.reasoningTokens ?? null,
+        writeSteps(trace.steps),
       )
       .run();
   }
@@ -175,7 +247,8 @@ export class D1GenerationStore implements GenerationStore {
       .prepare(
         `SELECT run_id, project_id, stop, model, input_tokens,
                 cached_input_tokens, output_tokens, context_window,
-                cost_micro_usd, elapsed_ms, ended_at
+                cost_micro_usd, elapsed_ms, ended_at, reasoning_tokens,
+                steps_json
            FROM generation_run_traces
           WHERE project_id = ?1
           ORDER BY ended_at DESC

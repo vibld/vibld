@@ -67,14 +67,22 @@ export function usageOf(usage: {
   output_tokens: number;
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
+  /**
+   * The part of `output_tokens` spent thinking, where the API says. It is
+   * a decomposition for observability; `output_tokens` stays the billed
+   * total.
+   */
+  output_tokens_details?: { thinking_tokens?: number | null } | null;
 }): PlanUsage {
   const read = usage.cache_read_input_tokens ?? 0;
   const written = usage.cache_creation_input_tokens ?? 0;
+  const thinking = usage.output_tokens_details?.thinking_tokens;
   return {
     inputTokens: usage.input_tokens + read + written,
     outputTokens: usage.output_tokens,
     cacheReadInputTokens: read,
     cacheWriteInputTokens: written,
+    ...(typeof thinking === 'number' ? { reasoningTokens: thinking } : {}),
   };
 }
 

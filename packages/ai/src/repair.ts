@@ -64,7 +64,15 @@ export function withRecordOf(
   return [...files.filter((file) => file.path !== DESIGN_MD_PATH), record];
 }
 
-/** `provider`, with every plan it returns carrying `original`'s design record. */
+/**
+ * `provider`, with every plan it returns carrying `original`'s design record.
+ *
+ * The rule that a repair keeps its spec, enforced on what comes back. The
+ * provider a repair runs is also told not to ask for a spec at all
+ * (`BoundedBuilderOptions.keepSpec`), because a spec asked for here was
+ * written, paid for and then replaced by this; this stays as the check
+ * that holds whatever the provider does.
+ */
 export function keepingRecordOf(
   original: readonly ProjectFile[],
   provider: ModelProvider,

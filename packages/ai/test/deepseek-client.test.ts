@@ -294,6 +294,31 @@ describe('createDeepseekPlanClient', () => {
     assert.deepEqual(completion.plan, PLAN);
   });
 
+  it('records the reasoning tokens the terminal chunk reports', async () => {
+    const { impl } = fetchReturning(
+      sse(
+        contentFrames(JSON.stringify(PLAN), 'stop', {
+          prompt_tokens: 900,
+          completion_tokens: 12_000,
+          completion_tokens_details: { reasoning_tokens: 7_500 },
+        }),
+      ),
+    );
+    const completion = await createDeepseekPlanClient({
+      apiKey: 'k',
+      fetchImpl: impl,
+    }).createPlan({
+      system: 's',
+      prompt: 'p',
+      model: 'deepseek-flash',
+      maxTokens: 64_000,
+      effort: 'high',
+    });
+    assert.equal(completion.usage.outputTokens, 12_000);
+    assert.equal(completion.usage.reasoningTokens, 7_500);
+    assert.equal(completion.diagnostics?.reasoningTokens, 7_500);
+  });
+
   it('estimates usage when the stream omits it, erring high', async () => {
     // A budget that under-reports is worse than one that over-reports, which
     // is the same rule the spend ceiling already follows.

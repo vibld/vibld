@@ -254,6 +254,66 @@ describe('a large first build, run as durable steps', () => {
     assert.ok(charged < params().worstCaseMicroUsd);
   });
 
+  it('measures every model step for the trace, the same on a replay, and logs each once', async () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: unknown) => {
+      lines.push(String(line));
+    };
+    const stored = new Map<string, unknown>();
+    let first: Awaited<ReturnType<typeof runLikeTheWorkflow>>;
+    let again: Awaited<ReturnType<typeof runLikeTheWorkflow>>;
+    try {
+      first = await runLikeTheWorkflow(newStore(), companySite(), params(), {
+        steps: durableSteps(stored),
+        client: createScriptedBuildClient(companySite(), {
+          thinking: { high: 40 },
+        }),
+      });
+      again = await runLikeTheWorkflow(newStore(), companySite(), params(), {
+        steps: durableSteps(stored),
+      });
+    } finally {
+      console.log = log;
+    }
+    const built = first.built!;
+    assert.deepEqual(
+      built.steps.map((step) => step.name),
+      first.steps.names,
+    );
+    assert.ok(built.steps.every((step) => step.reasoningTokens === 40));
+    // Read back from the stored steps, not measured again.
+    assert.deepEqual(again.built!.steps, built.steps);
+
+    // One line per call made, none for a replayed one, and nothing in it
+    // but the step's name and numbers (D20).
+    const events = lines
+      .filter((line) => line.includes('"generation.step"'))
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.equal(events.length, first.client.requests.length);
+    for (const event of events) {
+      assert.deepEqual(Object.keys(event).sort(), [
+        'event',
+        'model',
+        'ms',
+        'name',
+        'outputTokens',
+        'reasoningTokens',
+        'runId',
+      ]);
+    }
+
+    // And into the run's trace as they are.
+    const trace = traceOf(params(), first.outcome.result, first.outcome.usage, {
+      costMicroUsd: 1,
+      elapsedMs: 1,
+      endedAt: '2026-09-29T00:00:00.000Z',
+      steps: built.steps,
+    });
+    assert.deepEqual(trace.steps, built.steps);
+    assert.equal(trace.reasoningTokens, 40 * built.steps.length);
+  });
+
   it('keeps its reservation alive from every model step, on both layers', async () => {
     const { client, money } = await runLikeTheWorkflow(
       newStore(),
@@ -276,7 +336,7 @@ describe('a large first build, run as durable steps', () => {
     const steps = [...new Set(reports.map((report) => report.step))];
     assert.equal(steps[0], OUTLINE_LABEL);
     const total = steps.length - 1;
-    assert.equal(steps[1], `Writing 1 of ${total}: project setup`);
+    assert.equal(steps[1], `Writing 1 of ${total}: styles`);
     assert.ok(
       steps.some((step) =>
         new RegExp(`^Writing \\d of ${total}: \\w+ and \\w+ pages$`).test(

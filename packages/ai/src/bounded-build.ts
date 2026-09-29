@@ -5,6 +5,7 @@ import type {
   ModelProvider,
   ProjectFile,
   ProjectSnapshot,
+  RunStepTrace,
   RunStop,
 } from '@vibld/core';
 import type { ZodType } from 'zod';
@@ -15,7 +16,7 @@ import type {
   PlanProgress,
   PlanUsage,
 } from './client.ts';
-import { DESIGN_MD_PATH } from './design-spec.ts';
+import { DESIGN_MD_PATH, readDesignSpec } from './design-spec.ts';
 import type { DesignSpec } from './design-spec.ts';
 import {
   BoundedBuildError,
@@ -30,7 +31,11 @@ import {
   projectChars,
 } from './limits.ts';
 import { findModel } from './model-catalogue.ts';
-import { FILE_GROUP_OUTPUT, OUTLINE_OUTPUT } from './plan-output.ts';
+import {
+  FILE_GROUP_OUTPUT,
+  KEPT_SPEC_OUTLINE_OUTPUT,
+  OUTLINE_OUTPUT,
+} from './plan-output.ts';
 import type { PlanOutput } from './plan-output.ts';
 import {
   DEFAULT_EFFORT,
@@ -47,6 +52,7 @@ import {
   BuildOutlineReadSchema,
   FileGroupSchema,
   GROUP_SYSTEM_PROMPT,
+  KEPT_SPEC_OUTLINE_SYSTEM_PROMPT,
   OUTLINE_SYSTEM_PROMPT,
   REQUIRED_PROJECT_FILES,
 } from './plan-schema.ts';
@@ -55,6 +61,14 @@ import type {
   ManifestEntry,
   ManifestSize,
 } from './plan-schema.ts';
+import {
+  fixedScaffoldFiles,
+  isScaffoldPath,
+  isPackageName,
+  scaffoldText,
+  withScaffold,
+} from './scaffold.ts';
+import type { ExtraDependency, ScaffoldInput } from './scaffold.ts';
 
 /**
  * A build in bounded steps (docs/decisions.md, "Resolved 2026-09-29").
@@ -444,36 +458,48 @@ export function groupLabel(
   return `Writing ${index} of ${total}: ${describeGroup(entries)}`;
 }
 
+/**
+ * The required files the model writes: every one but those Vibld templates
+ * itself (D71, `scaffold.ts`).
+ */
+export const MODEL_REQUIRED_FILES = REQUIRED_PROJECT_FILES.filter(
+  (path) => !isScaffoldPath(path),
+);
+
 /** What a required file is for, where an outline forgot to plan it. */
-const REQUIRED_PURPOSES: Record<
-  (typeof REQUIRED_PROJECT_FILES)[number],
-  string
-> = {
-  'package.json':
-    'The declared packages at the stated ranges and the dev, build, lint and typecheck scripts.',
-  'index.html': 'The page shell that loads src/main.tsx.',
-  'vite.config.ts':
-    'Vite with the React and Tailwind plugins and the @ alias to ./src.',
-  'tsconfig.json':
-    'TypeScript settings as TYPESCRIPT describes, with the @/* path.',
-  'src/main.tsx': 'Mounts App and imports ./styles.css.',
-  'src/App.tsx': 'The app shell: the pages and how they are reached.',
+const REQUIRED_PURPOSES: Record<string, string> = {
+  'src/App.tsx':
+    'The app shell, default-exported as App: the pages and how they are reached.',
   'src/styles.css':
     "Tailwind v4 and the spec's tokens as custom properties, mapped in @theme inline.",
-  'src/lib/utils.ts': 'cn() from clsx and tailwind-merge.',
-  'README.md':
-    'What the project is and how to install, run and build it, using the scripts package.json declares.',
 };
 
 /** What an outline plans, once it has been checked and completed. */
 export interface NormalisedOutline {
   summary: string;
+  /** For index.html and README.md, which are templated (D71). */
+  title: string;
+  description: string;
+  /**
+   * The title and description exactly as the outline gave them, without
+   * the fallbacks above: what a follow-up may rename the site to
+   * (`retitledIndexHtml`). A fallback is never a rename.
+   */
+  given: { title?: string; description?: string };
+  /** Packages beyond the stack the outline says its files import. */
+  dependencies: ExtraDependency[];
   spec?: DesignSpec;
   manifest: ManifestEntry[];
   /** Existing files this change removes. Empty for a new project. */
   deletions: string[];
   /** Existing files this change keeps untouched. Empty for a new project. */
   kept: string[];
+  /**
+   * The project's own spec is kept (a repair, `keepSpec`): `spec` is read
+   * from its DESIGN.md for the steps to build to, and the patch carries no
+   * spec, so DESIGN.md stays exactly as it was.
+   */
+  keepSpec?: true;
 }
 
 /**
@@ -486,21 +512,33 @@ export interface NormalisedOutline {
  * - A path planned twice is planned once, the first time.
  * - Deletions are only of files the project has, never of one this change
  *   also writes, and never of a required file.
- * - A required file the project would otherwise lack is added to the
- *   manifest, with a purpose saying what it is for. A plan missing
- *   `package.json` would otherwise be discovered only by validation, after
- *   every other file had been written and paid for.
+ * - A file Vibld writes itself (D71: package.json, the configuration, the
+ *   entry point, the README) is never planned, whatever the outline says:
+ *   `applyBoundedPatch` writes it from the stack and the plan.
+ * - A required file the model writes that the project would otherwise lack
+ *   (src/App.tsx, src/styles.css) is added to the manifest, with a purpose
+ *   saying what it is for, rather than discovered missing by validation
+ *   after every other file had been written and paid for.
+ * - The title and description fall back to the summary and the spec's
+ *   intent, and a declared dependency that is not a package name is
+ *   dropped: an outline from DeepSeek's JSON mode may lack them.
+ * - With `keepSpec` (a repair), DESIGN.md is never planned, spec or not:
+ *   the project's own is kept.
  */
 export function normaliseOutline(
   outline: BuildOutline,
   basePaths: readonly string[],
+  options: { keepSpec?: boolean } = {},
 ): NormalisedOutline {
   const existing = new Set(basePaths);
   const manifest: ManifestEntry[] = [];
   const planned = new Set<string>();
   for (const entry of outline.manifest) {
     if (planned.has(entry.path)) continue;
-    if (entry.path === DESIGN_MD_PATH && outline.spec) continue;
+    if (entry.path === DESIGN_MD_PATH && (outline.spec || options.keepSpec)) {
+      continue;
+    }
+    if (isScaffoldPath(entry.path)) continue;
     planned.add(entry.path);
     manifest.push({
       ...entry,
@@ -522,26 +560,43 @@ export function normaliseOutline(
     (path) => !planned.has(path) && !removed.has(path),
   );
   const present = new Set([...kept, ...planned]);
-  for (const path of REQUIRED_PROJECT_FILES) {
+  for (const path of MODEL_REQUIRED_FILES) {
     if (present.has(path)) continue;
     manifest.push({
       path,
-      purpose: REQUIRED_PURPOSES[path],
+      purpose: REQUIRED_PURPOSES[path] ?? `The file at ${path}.`,
       dependsOn: [],
-      size:
-        path === 'src/styles.css'
-          ? 'large'
-          : path === 'src/App.tsx'
-            ? 'medium'
-            : 'small',
+      size: path === 'src/styles.css' ? 'large' : 'medium',
     });
   }
+  const text = scaffoldText({
+    title: outline.title,
+    description: outline.description ?? outline.spec?.intent,
+    summary: outline.summary,
+  });
+  const dependencies: ExtraDependency[] = [];
+  for (const dependency of outline.dependencies ?? []) {
+    const name = dependency.name.trim();
+    if (!isPackageName(name)) continue;
+    if (dependencies.some((known) => known.name === name)) continue;
+    dependencies.push({ name, version: dependency.version.trim() });
+  }
+  const given = {
+    ...(outline.title?.trim() ? { title: outline.title.trim() } : {}),
+    ...(outline.description?.trim()
+      ? { description: outline.description.trim() }
+      : {}),
+  };
   return {
     summary: outline.summary,
+    ...text,
+    given,
+    dependencies,
     ...(outline.spec ? { spec: outline.spec } : {}),
     manifest,
     deletions,
     kept,
+    ...(options.keepSpec ? { keepSpec: true as const } : {}),
   };
 }
 
@@ -606,6 +661,11 @@ export interface OutlineValue {
   outline: BuildOutline;
   /** The paths of the project the outline was planned against. */
   basePaths: string[];
+  /**
+   * The outline was asked for no spec, and `outline.spec` is the one the
+   * project's DESIGN.md holds (`keepSpec`). Absent on every other outline.
+   */
+  keepSpec?: true;
 }
 
 export interface GroupInput extends BaseSource {
@@ -624,13 +684,26 @@ const NO_USAGE: PlanUsage = {
   cacheWriteInputTokens: 0,
 };
 
-/** The same instruction the outline's user prompt ends with on a follow-up. */
-const PATCH_INSTRUCTION = `Plan this change as a patch. In the manifest, list only the files to add and
+/** How a follow-up's outline is asked to plan, before what it returns. */
+const PATCH_PLAN = `Plan this change as a patch. In the manifest, list only the files to add and
 the existing files to replace. A replaced file is rewritten in full by a later
 step that is given its current content, so its purpose says what changes in it
 and what stays. In delete, list the existing paths to remove. Every file you
 do not list stays exactly as it is, so list nothing the request does not need
-changed. Return the spec updated for this change.`;
+changed.`;
+
+/** The same instruction the outline's user prompt ends with on a follow-up. */
+const PATCH_INSTRUCTION = `${PATCH_PLAN} Return the spec updated for this change. For title and
+description, repeat the ones index.html has now, exactly, unless the request
+asks to rename or re-describe the site: then give the new ones, and
+index.html is updated for you.`;
+
+/**
+ * The instruction a follow-up that keeps its spec (a repair) ends with:
+ * the same patch, and no spec, because the one in DESIGN.md stands.
+ */
+const KEPT_SPEC_PATCH_INSTRUCTION = `${PATCH_PLAN} The design spec is fixed: it is DESIGN.md above, and this change
+does not alter it, so return no spec.`;
 
 export type BoundedBuilderOptions = Pick<
   ModelProviderOptions,
@@ -645,6 +718,15 @@ export type BoundedBuilderOptions = Pick<
   | 'palette'
   | 'styleDna'
 > & {
+  /**
+   * Keep the spec the project has, and do not ask for one (a repair). The
+   * outline is asked for a patch with no spec (`KEPT_SPEC_OUTLINE_OUTPUT`),
+   * the steps build to the spec read from the project's DESIGN.md, and the
+   * patch carries none, so DESIGN.md is kept as it is. A repair's spec was
+   * thrown away anyway (`keepingRecordOf`), after it had been paid for.
+   * Ignored for a new project, which has no spec to keep.
+   */
+  keepSpec?: boolean;
   /**
    * Told about an error that is not this package's own, before it is
    * replaced by a generic sentence. The Worker logs it; nothing else sees
@@ -707,6 +789,7 @@ export class BoundedBuilder {
       return this.#refused(error, limits);
     }
     const parts = [context];
+    const keepSpec = Boolean(this.#options.keepSpec && base);
     if (base) {
       const total = projectChars(base.files);
       if (total > MAX_BASE_CONTENT_CHARS) {
@@ -720,21 +803,42 @@ current files, as JSON:
 
 ${JSON.stringify(base.files)}
 
-${PATCH_INSTRUCTION}`);
+${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
     }
+    // The spec a repair keeps, for the steps to build to. A project whose
+    // DESIGN.md is missing or unreadable has none, as it had none before.
+    const record = base?.files.find((file) => file.path === DESIGN_MD_PATH);
+    const kept =
+      keepSpec && record ? readDesignSpec(record.content) : undefined;
     return this.#call(
       {
-        system: OUTLINE_SYSTEM_PROMPT,
+        system: keepSpec
+          ? KEPT_SPEC_OUTLINE_SYSTEM_PROMPT
+          : OUTLINE_SYSTEM_PROMPT,
         prompt: parts.join('\n\n'),
-        output: OUTLINE_OUTPUT,
+        output: keepSpec ? KEPT_SPEC_OUTLINE_OUTPUT : OUTLINE_OUTPUT,
         schema: BuildOutlineReadSchema,
         subject: OUTLINE_SUBJECT,
       },
       limits,
-      (outline) => ({
-        outline,
-        basePaths: (base?.files ?? []).map((file) => file.path),
-      }),
+      (outline) => {
+        const basePaths = (base?.files ?? []).map((file) => file.path);
+        if (!keepSpec) return { outline, basePaths };
+        // Whatever spec came back (JSON mode enforces no schema) is not
+        // the one kept, and a repair renames nothing: a title or
+        // description it wrote anyway is dropped too.
+        const {
+          spec: _spec,
+          title: _title,
+          description: _description,
+          ...rest
+        } = outline;
+        return {
+          outline: kept ? { ...rest, spec: kept } : rest,
+          basePaths,
+          keepSpec: true as const,
+        };
+      },
     );
   }
 
@@ -767,14 +871,19 @@ ${PATCH_INSTRUCTION}`);
       (reply) =>
         // Its own files, plus any file the manifest never planned that the
         // model found it needed. A file planned for another group is that
-        // group's to write, and DESIGN.md is never the model's when there is
-        // a spec to render it from.
+        // group's to write, DESIGN.md is never the model's when there is a
+        // spec to render it from, and a templated file is never the
+        // model's at all (D71).
         reply.files.filter(
           (file) =>
-            wanted.has(file.path) ||
-            (!input.plan.manifest.some((entry) => entry.path === file.path) &&
-              !input.written.some((done) => done.path === file.path) &&
-              !(file.path === DESIGN_MD_PATH && input.plan.spec)),
+            !isScaffoldPath(file.path) &&
+            (wanted.has(file.path) ||
+              (!input.plan.manifest.some((entry) => entry.path === file.path) &&
+                !input.written.some((done) => done.path === file.path) &&
+                !(
+                  file.path === DESIGN_MD_PATH &&
+                  (input.plan.spec || input.plan.keepSpec)
+                ))),
         ),
     );
   }
@@ -994,7 +1103,12 @@ spec and its manifest (every file to write, with its purpose, the files it
 depends on and its size), as JSON. Build to it exactly.
 
 --- BEGIN PLAN ---
-${JSON.stringify({ summary: plan.summary, spec: plan.spec, manifest: plan.manifest })}
+${JSON.stringify({
+  summary: plan.summary,
+  spec: plan.spec,
+  manifest: plan.manifest,
+  ...(plan.dependencies.length > 0 ? { dependencies: plan.dependencies } : {}),
+})}
 --- END PLAN ---`,
   ];
   if (base) {
@@ -1019,6 +1133,13 @@ ${JSON.stringify(plan.deletions)}`
     if (!removed.has(file.path)) available.set(file.path, file.content);
   }
   for (const file of input.written) available.set(file.path, file.content);
+  // The templated files a new project will have (D71), so a file that
+  // declares it depends on one is shown it. A follow-up's own are above.
+  for (const file of fixedScaffoldFiles()) {
+    if (!available.has(file.path) && !removed.has(file.path)) {
+      available.set(file.path, file.content);
+    }
+  }
 
   // What this call may be shown, most necessary first: the current content
   // of a file it replaces (it cannot be edited unseen), then what each of
@@ -1143,6 +1264,11 @@ export interface StartedCall {
 export interface BoundedPatch {
   summary: string;
   spec?: DesignSpec;
+  /**
+   * What the templated files take from the plan (D71). Absent only on a
+   * patch made before D71, which is applied as it always was.
+   */
+  scaffold?: ScaffoldInput;
   /** Every file this run wrote, in the order it wrote them. */
   files: ProjectFile[];
   /** Existing files this run removes. */
@@ -1164,14 +1290,46 @@ export interface BoundedBuildResult {
   measured: boolean;
   /** Characters of answer streamed across the run. */
   characters: number;
+  /**
+   * Every call that asked the model, in the order made: its step's name,
+   * how long it took, and what it wrote, reasoning split out where the
+   * provider reported it. Rebuilt from the stored step results on a
+   * replay, so it describes the calls as they were made, not the replay.
+   */
+  steps: RunStepTrace[];
 }
 
-function addUsage(a: PlanUsage, b: PlanUsage): PlanUsage {
+/**
+ * Two calls' usage together. Reasoning is summed over the calls that
+ * reported it, and stays absent when neither did: "not reported" is not
+ * zero.
+ */
+export function addUsage(a: PlanUsage, b: PlanUsage): PlanUsage {
+  const reasoning =
+    a.reasoningTokens === undefined && b.reasoningTokens === undefined
+      ? undefined
+      : (a.reasoningTokens ?? 0) + (b.reasoningTokens ?? 0);
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
     cacheReadInputTokens: a.cacheReadInputTokens + b.cacheReadInputTokens,
     cacheWriteInputTokens: a.cacheWriteInputTokens + b.cacheWriteInputTokens,
+    ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+  };
+}
+
+/** One call's record as a step of the run's trace. */
+export function stepOf(
+  name: string,
+  record: CallRecord<unknown>,
+): RunStepTrace {
+  return {
+    name,
+    ms: Math.max(0, Math.round(record.elapsedMs)),
+    outputTokens: record.usage.outputTokens,
+    ...(record.usage.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: record.usage.reasoningTokens }),
   };
 }
 
@@ -1208,6 +1366,7 @@ export async function runBoundedBuild(
   let calls = 0;
   let measured = true;
   let characters = 0;
+  const steps: RunStepTrace[] = [];
 
   const remaining = () => {
     const report = ledger.report();
@@ -1226,6 +1385,7 @@ export async function runBoundedBuild(
     calls,
     measured,
     characters,
+    steps,
   });
 
   const call = async <T>(
@@ -1261,7 +1421,10 @@ export async function runBoundedBuild(
       return made;
     });
     usage = addUsage(usage, record.usage);
-    if (record.called) calls += 1;
+    if (record.called) {
+      calls += 1;
+      steps.push(stepOf(name, record));
+    }
     if (!record.measured) measured = false;
     characters += record.characters;
     // Clamped to what the call was given, which a provider never exceeds;
@@ -1317,6 +1480,7 @@ export async function runBoundedBuild(
   const plan = normaliseOutline(
     outlined.value.outline,
     outlined.value.basePaths,
+    { keepSpec: outlined.value.keepSpec === true },
   );
   const fileCount = plan.kept.length + plan.manifest.length;
   if (fileCount > MAX_PLANNED_FILES) {
@@ -1422,7 +1586,19 @@ export async function runBoundedBuild(
     ok: true,
     patch: {
       summary: plan.summary,
-      ...(plan.spec ? { spec: plan.spec } : {}),
+      // A kept spec is not the patch's to write: without one, DESIGN.md
+      // carries over from the project as it is.
+      ...(plan.spec && !plan.keepSpec ? { spec: plan.spec } : {}),
+      scaffold: {
+        title: plan.title,
+        description: plan.description,
+        dependencies: plan.dependencies,
+        // A follow-up that renames or re-describes the site edits its own
+        // index.html in place; a repair never does.
+        ...(input.baseRevision && !plan.keepSpec
+          ? { retitle: plan.given }
+          : {}),
+      },
       files: [...planned, ...extra],
       delete: plan.deletions,
       ...(input.baseRevision ? { baseRevision: input.baseRevision } : {}),
@@ -1431,13 +1607,17 @@ export async function runBoundedBuild(
     calls,
     measured,
     characters,
+    steps,
   };
 }
 
 /**
  * A patch applied to the project it was planned against: every existing
  * file it does not replace or delete, then the files it wrote, with
- * DESIGN.md rendered from its spec.
+ * DESIGN.md rendered from its spec and Vibld's own files (D71) written from
+ * the stack and the plan: all of them for a new project, and for a
+ * follow-up only a missing one, and package.json only to declare a package
+ * a file now imports (`withScaffold`).
  *
  * A new project's patch applies to nothing, whatever `base` is: a first
  * build replaces the project, as it always has. A follow-up's patch applies
@@ -1463,13 +1643,16 @@ export function applyBoundedPatch(
   const kept = onto
     .filter((file) => !replaced.has(file.path) && !removed.has(file.path))
     .map((file) => ({ path: file.path, content: file.content }));
+  const files = withDesignRecord(
+    [...kept, ...patch.files.map((file) => ({ ...file }))],
+    patch.spec,
+    patch.baseRevision ? base?.files : undefined,
+  );
   return {
     summary: patch.summary,
-    files: withDesignRecord(
-      [...kept, ...patch.files.map((file) => ({ ...file }))],
-      patch.spec,
-      patch.baseRevision ? base?.files : undefined,
-    ),
+    files: patch.scaffold
+      ? withScaffold(files, patch.scaffold, Boolean(patch.baseRevision))
+      : files,
   };
 }
 
@@ -1481,6 +1664,11 @@ export type BoundedPlanProviderOptions = BoundedBuilderOptions & {
   maxInputChars?: number;
   /** Told once, with the usage of every call summed, failed calls included. */
   onUsage?: (usage: PlanUsage) => void;
+  /**
+   * Told once, beside `onUsage`, with each call the run made: its step's
+   * name, how long it took, its output and its reasoning where reported.
+   */
+  onSteps?: (steps: RunStepTrace[]) => void;
   /** Told as each step starts, with the words the builder shows for it. */
   onStep?: (label: string) => void;
   /** Characters written across the whole run, as they stream. */
@@ -1538,6 +1726,7 @@ export class BoundedPlanProvider implements ModelProvider {
       },
     );
     this.#options.onUsage?.(result.usage);
+    this.#options.onSteps?.(result.steps);
     if (!result.ok || !result.patch) {
       throw new BoundedBuildError(
         result.failure?.stop ?? 'provider-error',

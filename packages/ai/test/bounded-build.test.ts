@@ -5,6 +5,7 @@ import {
   BoundedBuilder,
   BoundedPlanProvider,
   GROUP_CONTEXT_MAX_CHARS,
+  MODEL_REQUIRED_FILES,
   GROUP_ESTIMATE_TOKENS,
   GROUP_MAX_TOKENS,
   MAX_PLANNED_FILES,
@@ -27,11 +28,16 @@ import type {
   BoundedBuildHooks,
   BoundedBuildResult,
 } from '../src/bounded-build.ts';
-import { DESIGN_MD_PATH, readDesignSpec } from '../src/design-spec.ts';
+import {
+  DESIGN_MD_PATH,
+  readDesignSpec,
+  renderDesignMd,
+} from '../src/design-spec.ts';
 import { BoundedBuildError, ProviderTruncationError } from '../src/errors.ts';
 import { MODEL_CATALOGUE } from '../src/model-catalogue.ts';
 import {
   GROUP_SYSTEM_PROMPT,
+  KEPT_SPEC_OUTLINE_SYSTEM_PROMPT,
   MAX_PLANNED_ROUTES,
   OUTLINE_SYSTEM_PROMPT,
   PLAN_SYSTEM_PROMPT,
@@ -49,6 +55,11 @@ import {
   requestedPaths,
 } from '../src/scripted-client.ts';
 import type { ScriptedBuild, ScriptedFile } from '../src/scripted-client.ts';
+import {
+  SCAFFOLD_PATHS,
+  isScaffoldPath,
+  scaffoldFiles,
+} from '../src/scaffold.ts';
 import { SPEC } from './fixtures/design-spec.ts';
 
 const MODEL = 'claude-opus-5-5';
@@ -211,7 +222,7 @@ describe('the prompts a bounded build sends', () => {
     for (const heading of [
       'STACK',
       'TYPESCRIPT',
-      'REQUIRED FILES',
+      'FILES WRITTEN FOR YOU',
       'PATHS',
       'MOTION',
       'CONTENT',
@@ -440,10 +451,54 @@ describe('completing an outline', () => {
     assert.ok(plan.manifest.some((item) => item.path === DESIGN_MD_PATH));
   });
 
-  it('adds every required file a new project would lack', () => {
+  it('adds every required file the model writes that a new project would lack', () => {
     const plan = normaliseOutline(outline, []);
     const paths = new Set(plan.manifest.map((item) => item.path));
-    for (const path of REQUIRED_PROJECT_FILES) assert.ok(paths.has(path), path);
+    assert.deepEqual(MODEL_REQUIRED_FILES, ['src/App.tsx', 'src/styles.css']);
+    for (const path of MODEL_REQUIRED_FILES) assert.ok(paths.has(path), path);
+  });
+
+  it('never plans a file Vibld writes itself (D71), even when the outline lists it', () => {
+    const plan = normaliseOutline(
+      {
+        ...outline,
+        manifest: [
+          ...SCAFFOLD_PATHS.map((path) => entry(path)),
+          entry('src/App.tsx', 'medium', ['src/lib/utils.ts']),
+        ],
+      },
+      [],
+    );
+    const paths = plan.manifest.map((item) => item.path);
+    for (const path of SCAFFOLD_PATHS) assert.ok(!paths.includes(path), path);
+    assert.ok(paths.includes('src/App.tsx'));
+  });
+
+  it('takes the title, description and dependencies from the outline, or falls back', () => {
+    const given = normaliseOutline(
+      {
+        ...outline,
+        title: 'Crumb & Co.',
+        description: 'A bakery on Elm Street.',
+        dependencies: [
+          { name: 'cmdk', version: '^1.1.1' },
+          { name: 'Not A Package', version: '1.0.0' },
+          { name: 'cmdk', version: '^9.0.0' },
+        ],
+      },
+      [],
+    );
+    assert.equal(given.title, 'Crumb & Co.');
+    assert.equal(given.description, 'A bakery on Elm Street.');
+    assert.deepEqual(given.dependencies, [{ name: 'cmdk', version: '^1.1.1' }]);
+
+    const bare = normaliseOutline(
+      { summary: 'A site for a bakery.', manifest: [], delete: [] },
+      [],
+    );
+    assert.equal(bare.title, 'A site for a bakery');
+    assert.equal(bare.description, 'A site for a bakery.');
+    assert.deepEqual(bare.dependencies, []);
   });
 
   it('deletes only existing files, never one it writes or one every project needs', () => {
@@ -494,6 +549,11 @@ describe('a large request, as it failed on 2026-09-29', () => {
       result.patch!.files.map((item) => [item.path, item.content]),
     );
     for (const item of script.files) {
+      // Vibld's own files are templated (D71), never asked of the model.
+      if (isScaffoldPath(item.path)) {
+        assert.equal(written.has(item.path), false, item.path);
+        continue;
+      }
       assert.equal(written.get(item.path), item.content, item.path);
     }
 
@@ -509,19 +569,26 @@ describe('a large request, as it failed on 2026-09-29', () => {
     // What the builder shows while it works.
     assert.equal(hooks.labels[0], OUTLINE_LABEL);
     const total = hooks.labels.length - 1;
-    assert.equal(hooks.labels[1], `Writing 1 of ${total}: project setup`);
+    assert.equal(hooks.labels[1], `Writing 1 of ${total}: styles`);
     assert.ok(
       hooks.labels.includes(
-        `Writing ${total - 2} of ${total}: fractional and readiness pages`,
+        `Writing ${total - 2} of ${total}: services and fractional pages`,
       ),
       hooks.labels.join('\n'),
     );
 
-    // And as a whole project, DESIGN.md rendered from the spec.
+    // And as a whole project, DESIGN.md rendered from the spec and the
+    // templated files in place.
     const plan = applyBoundedPatch(result.patch!, undefined);
     const record = plan.files.find((item) => item.path === DESIGN_MD_PATH);
     assert.deepEqual(readDesignSpec(record!.content), SPEC);
     assert.equal(plan.files.length, script.files.length + 1);
+    for (const path of SCAFFOLD_PATHS) {
+      assert.ok(
+        plan.files.some((item) => item.path === path),
+        `${path} is missing`,
+      );
+    }
   });
 
   it('shares one cached prefix across every file-writing step', async () => {
@@ -626,13 +693,13 @@ describe('a group that comes back short', () => {
     const { result, hooks, client } = await build(
       { summary: 'A site.', files: requiredFiles() },
       inProcess(),
-      { omitOnce: ['README.md'] },
+      { omitOnce: ['src/App.tsx'] },
     );
     assert.equal(result.ok, true, result.failure?.message ?? '');
     const rest = hooks.names.find((name) => name.endsWith('.rest'));
     assert.ok(rest, hooks.names.join(', '));
     assert.deepEqual(requestedPaths(client.requests.at(-1)!.prompt), [
-      'README.md',
+      'src/App.tsx',
     ]);
   });
 
@@ -849,6 +916,97 @@ describe('a durable run replayed from its stored steps', () => {
   });
 });
 
+describe("Vibld's own files (D71)", () => {
+  function withCombobox(): ScriptedBuild {
+    return {
+      summary: 'A site for Crumb & Co.',
+      title: 'Crumb & Co.',
+      description: 'Bread and pastry on Elm Street.',
+      spec: SPEC,
+      dependencies: [{ name: 'cmdk', version: '^1.1.0' }],
+      files: [
+        // What an outline written before D71 still plans: ignored.
+        ...requiredFiles(),
+        {
+          path: 'src/components/ui/command.tsx',
+          content: "import { Command } from 'cmdk';\nexport { Command };\n",
+          size: 'small',
+          dependsOn: ['src/lib/utils.ts'],
+        },
+      ],
+    };
+  }
+
+  it('never asks the model for one, and writes them from the stack and the plan', async () => {
+    const { result, client } = await build(withCombobox());
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    for (const request of client.requests.slice(1)) {
+      for (const path of requestedPaths(request.prompt)) {
+        assert.equal(isScaffoldPath(path), false, path);
+      }
+    }
+    assert.ok(client.requests[0]!.system.includes('\nFILES WRITTEN FOR YOU\n'));
+
+    const plan = applyBoundedPatch(result.patch!, undefined);
+    const byPath = new Map(plan.files.map((item) => [item.path, item.content]));
+    for (const path of SCAFFOLD_PATHS) assert.ok(byPath.has(path), path);
+    const pkg = JSON.parse(byPath.get('package.json')!) as {
+      name: string;
+      dependencies: Record<string, string>;
+    };
+    assert.equal(pkg.name, 'crumb-co');
+    // Declared by the outline, and imported by a file, so it is in.
+    assert.equal(pkg.dependencies.cmdk, '^1.1.0');
+    assert.match(byPath.get('index.html')!, /<title>Crumb &amp; Co\.<\/title>/);
+    assert.match(
+      byPath.get('index.html')!,
+      /content="Bread and pastry on Elm Street\."/,
+    );
+    assert.match(byPath.get('README.md')!, /^# Crumb & Co\.\n/);
+    assert.match(byPath.get('README.md')!, /src\/components\/ui\//);
+  });
+
+  it('shows a step the templated file a file it writes depends on', async () => {
+    const { client } = await build(withCombobox());
+    const step = client.requests.find((request) =>
+      requestedPaths(request.prompt).includes('src/components/ui/command.tsx'),
+    )!;
+    assert.ok(step.prompt.includes('export function cn('));
+  });
+
+  it('keeps the template when a step writes one of them anyway', async () => {
+    const inner = createScriptedBuildClient(withCombobox());
+    const client = {
+      id: inner.id,
+      createPlan: async (request: Parameters<typeof inner.createPlan>[0]) => {
+        const completion = await inner.createPlan(request);
+        const reply = completion.plan as { files?: unknown[] } | null;
+        if (reply?.files) {
+          reply.files.push({ path: 'package.json', content: '{"name":"x"}' });
+          reply.files.push({ path: 'tsconfig.json', content: '{}' });
+        }
+        return completion;
+      },
+    };
+    const result = await runBoundedBuild(
+      new BoundedBuilder(client, { model: MODEL }),
+      { prompt: 'A bakery.', budget: BUDGET },
+      inProcess(),
+    );
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.ok(
+      !result.patch!.files.some((item) => isScaffoldPath(item.path)),
+      'a templated file was taken from the model',
+    );
+    const plan = applyBoundedPatch(result.patch!, undefined);
+    const pkg = plan.files.find((item) => item.path === 'package.json')!;
+    assert.equal(
+      (JSON.parse(pkg.content) as { name: string }).name,
+      'crumb-co',
+    );
+  });
+});
+
 describe('a follow-up, as a patch', () => {
   const base = {
     revision: 'r0000base',
@@ -922,14 +1080,48 @@ describe('a follow-up, as a patch', () => {
     assert.ok(!appStep.prompt.includes('export const Blog'));
   });
 
-  it('keeps the design record it had when the outline has no spec', async () => {
+  it('declares a package the change imports, and otherwise keeps package.json as it was', async () => {
     const client = createScriptedBuildClient({
-      summary: 'A tweak.',
-      files: [{ path: 'README.md', content: '# Site, updated' }],
+      summary: 'Added a search box.',
+      files: [
+        {
+          path: 'src/components/ui/command.tsx',
+          content: "import { Command } from 'cmdk';\nexport { Command };\n",
+          size: 'small',
+        },
+      ],
     });
     const plan = await new BoundedPlanProvider(client, {
       model: MODEL,
-    }).generate({ prompt: 'Update the README', base });
+    }).generate({ prompt: 'Add a search box', base });
+    const pkg = JSON.parse(
+      plan.files.find((item) => item.path === 'package.json')!.content,
+    ) as { name: string; dependencies: Record<string, string> };
+    assert.equal(pkg.name, 'site');
+    assert.ok(pkg.dependencies.cmdk);
+    // Every other templated file stays as the project had it.
+    for (const path of ['index.html', 'tsconfig.json', 'README.md']) {
+      assert.equal(
+        plan.files.find((item) => item.path === path)?.content,
+        base.files.find((item) => item.path === path)!.content,
+        path,
+      );
+    }
+  });
+
+  it('keeps the design record it had when the outline has no spec', async () => {
+    const client = createScriptedBuildClient({
+      summary: 'A tweak.',
+      files: [
+        {
+          path: 'src/pages/Home.tsx',
+          content: 'export const Home = () => <h1>Hi</h1>;',
+        },
+      ],
+    });
+    const plan = await new BoundedPlanProvider(client, {
+      model: MODEL,
+    }).generate({ prompt: 'Update the home page', base });
     assert.equal(
       plan.files.find((item) => item.path === DESIGN_MD_PATH)?.content,
       '# the old record',
@@ -940,13 +1132,18 @@ describe('a follow-up, as a patch', () => {
   it('stops without spending more once the project it edits has moved on', async () => {
     const client = createScriptedBuildClient({
       summary: 'A tweak.',
-      files: [{ path: 'README.md', content: '# Site, updated' }],
+      files: [
+        {
+          path: 'src/pages/Home.tsx',
+          content: 'export const Home = () => <h1>Hi</h1>;',
+        },
+      ],
     });
     let reads = 0;
     const result = await runBoundedBuild(
       new BoundedBuilder(client, { model: MODEL }),
       {
-        prompt: 'Update the README',
+        prompt: 'Update the home page',
         baseRevision: base.revision,
         // The first read is the revision asked for; after that another tab
         // has promoted something else.
@@ -993,6 +1190,270 @@ describe('a follow-up, as a patch', () => {
   });
 });
 
+describe('a follow-up that renames or re-describes the site', () => {
+  const INDEX = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crumb &amp; Co.</title>
+    <meta name="description" content="Bread on Elm Street." />
+    <!-- added by hand -->
+    <link rel="icon" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`;
+  const own = [
+    {
+      path: 'src/App.tsx',
+      content: 'export default function App() { return null; }',
+    },
+    { path: 'src/styles.css', content: ':root { --primary: #000; }' },
+    { path: DESIGN_MD_PATH, content: renderDesignMd(SPEC) },
+  ];
+  // A whole project as D71 writes one, with index.html edited by hand.
+  const base = {
+    revision: 'r0000base',
+    files: [
+      ...own,
+      ...scaffoldFiles(
+        { title: 'Crumb & Co.', description: 'Bread on Elm Street.' },
+        own,
+      ).map((item) =>
+        item.path === 'index.html' ? { ...item, content: INDEX } : item,
+      ),
+    ],
+  };
+  const change = (extra: Partial<ScriptedBuild> = {}): ScriptedBuild => ({
+    summary: 'A change.',
+    spec: SPEC,
+    files: [
+      {
+        path: 'src/App.tsx',
+        content: 'export default function App() { return <main />; }',
+      },
+    ],
+    ...extra,
+  });
+  const indexOf = (plan: { files: { path: string; content: string }[] }) =>
+    plan.files.find((item) => item.path === 'index.html')!.content;
+
+  it('changes the title and description in the index.html the project has, and nothing else', async () => {
+    const client = createScriptedBuildClient(
+      change({
+        title: 'Rye & Salt',
+        description: 'Sourdough on Elm Street, every morning.',
+      }),
+    );
+    const plan = await new BoundedPlanProvider(client, {
+      model: MODEL,
+    }).generate({ prompt: 'Rename the bakery to Rye & Salt', base });
+    assert.equal(
+      indexOf(plan),
+      INDEX.replace(
+        '<title>Crumb &amp; Co.</title>',
+        '<title>Rye &amp; Salt</title>',
+      ).replace(
+        'content="Bread on Elm Street."',
+        'content="Sourdough on Elm Street, every morning."',
+      ),
+    );
+    // Only index.html: the rest of the templated files stay as they were.
+    for (const path of ['package.json', 'README.md']) {
+      assert.equal(
+        plan.files.find((item) => item.path === path)?.content,
+        base.files.find((item) => item.path === path)!.content,
+      );
+    }
+    // And the outline was told when it may.
+    assert.match(
+      client.requests[0]!.prompt,
+      /unless the request\s+asks to rename or re-describe the site/,
+    );
+    assert.match(
+      client.requests[0]!.system,
+      /change them only when the request asks to rename or re-describe the\s+site/,
+    );
+  });
+
+  it('leaves index.html byte for byte on a change that does not rename the site', async () => {
+    for (const script of [
+      // The outline repeats what index.html has, as it is told to.
+      change({ title: 'Crumb & Co.', description: 'Bread on Elm Street.' }),
+      // Or gives none at all, as a JSON-mode outline may: no fallback is
+      // ever taken for a rename.
+      change(),
+    ]) {
+      const plan = await new BoundedPlanProvider(
+        createScriptedBuildClient(script),
+        { model: MODEL },
+      ).generate({ prompt: 'Make the hero darker', base });
+      assert.equal(indexOf(plan), INDEX);
+    }
+  });
+
+  it('never renames the site on a repair, whatever the model returns', async () => {
+    const inner = createScriptedBuildClient(change());
+    const client = {
+      id: inner.id,
+      createPlan: async (request: Parameters<typeof inner.createPlan>[0]) => {
+        const completion = await inner.createPlan(request);
+        const reply = completion.plan as Record<string, unknown> | null;
+        if (reply && Array.isArray(reply.manifest)) {
+          reply.title = 'Something Else';
+          reply.description = 'Another description.';
+        }
+        return completion;
+      },
+    };
+    const plan = await new BoundedPlanProvider(client, {
+      model: MODEL,
+      keepSpec: true,
+    }).generate({ prompt: 'Fix the build.', base });
+    assert.equal(indexOf(plan), INDEX);
+  });
+});
+
+describe('a repair, which keeps its spec', () => {
+  const record = renderDesignMd(SPEC);
+  const base = {
+    revision: 'r0000base',
+    files: [
+      {
+        path: 'src/App.tsx',
+        content: 'export default function App() { return <Hero />; }',
+      },
+      { path: 'src/styles.css', content: ':root { --primary: #000; }' },
+      {
+        path: 'src/components/Hero.tsx',
+        content: 'export const Hero = () => <h1>Broken</h1>',
+      },
+      { path: DESIGN_MD_PATH, content: record },
+    ],
+  };
+  // What a model asked for a spec would write: a different one.
+  const rewritten = {
+    ...SPEC,
+    intent: 'A spec the repair was never asked for.',
+  };
+
+  function repairClient() {
+    return createScriptedBuildClient({
+      summary: 'Fixed the hero.',
+      spec: rewritten,
+      files: [
+        {
+          path: 'src/components/Hero.tsx',
+          content: 'export const Hero = () => <h1>Fixed</h1>;',
+          size: 'small',
+        },
+      ],
+    });
+  }
+
+  it('is not asked for a spec, and says why', async () => {
+    const client = repairClient();
+    await new BoundedPlanProvider(client, {
+      model: MODEL,
+      keepSpec: true,
+    }).generate({ prompt: 'Fix the build.', base });
+    const [outline] = client.requests;
+    assert.equal(outline!.output?.name, 'patch_outline');
+    const shape = outline!.output!.schema as unknown as {
+      shape: Record<string, unknown>;
+    };
+    assert.deepEqual(Object.keys(shape.shape).sort(), [
+      'delete',
+      'dependencies',
+      'manifest',
+      'summary',
+    ]);
+    assert.equal(outline!.system, KEPT_SPEC_OUTLINE_SYSTEM_PROMPT);
+    assert.ok(!outline!.system.includes('Before any file, write the spec'));
+    assert.ok(!outline!.prompt.includes('Return the spec updated'));
+    assert.match(outline!.prompt, /return no spec/);
+    // The instruction a JSON-mode model is given says the same.
+    assert.ok(!outline!.output!.instruction.includes('"spec": {'));
+  });
+
+  it("builds to the project's own spec and keeps its DESIGN.md byte for byte", async () => {
+    const client = repairClient();
+    const plan = await new BoundedPlanProvider(client, {
+      model: MODEL,
+      keepSpec: true,
+    }).generate({ prompt: 'Fix the build.', base });
+    const byPath = new Map(plan.files.map((item) => [item.path, item.content]));
+    assert.equal(byPath.get(DESIGN_MD_PATH), record);
+    assert.equal(
+      byPath.get('src/components/Hero.tsx'),
+      'export const Hero = () => <h1>Fixed</h1>;',
+    );
+    // The step that wrote the fix was given the spec the project has.
+    const step = client.requests.find((request) =>
+      requestedPaths(request.prompt).includes('src/components/Hero.tsx'),
+    )!;
+    assert.ok(step.cachePrefix!.includes(JSON.stringify(SPEC.intent)));
+    assert.ok(!step.cachePrefix!.includes(rewritten.intent));
+  });
+
+  it('ignores a spec a JSON-mode model writes anyway, and never plans DESIGN.md', async () => {
+    const inner = repairClient();
+    const client = {
+      id: inner.id,
+      createPlan: async (request: Parameters<typeof inner.createPlan>[0]) => {
+        const completion = await inner.createPlan(request);
+        const reply = completion.plan as Record<string, unknown> | null;
+        if (reply && Array.isArray(reply.manifest)) {
+          reply.spec = rewritten;
+          reply.manifest.push({
+            path: DESIGN_MD_PATH,
+            purpose: 'A new record.',
+            dependsOn: [],
+            size: 'small',
+          });
+        }
+        return completion;
+      },
+    };
+    const plan = await new BoundedPlanProvider(client, {
+      model: MODEL,
+      keepSpec: true,
+    }).generate({ prompt: 'Fix the build.', base });
+    assert.equal(
+      plan.files.find((item) => item.path === DESIGN_MD_PATH)?.content,
+      record,
+    );
+    for (const request of inner.requests.slice(1)) {
+      assert.ok(!requestedPaths(request.prompt).includes(DESIGN_MD_PATH));
+    }
+  });
+
+  it('is asked for the spec as before without keepSpec, and on a new project', async () => {
+    const followUp = repairClient();
+    await new BoundedPlanProvider(followUp, { model: MODEL }).generate({
+      prompt: 'Change the hero.',
+      base,
+    });
+    assert.equal(followUp.requests[0]!.output?.name, 'build_outline');
+    assert.match(followUp.requests[0]!.prompt, /Return the spec updated/);
+
+    // A new project has no spec to keep. (The script lacks styles.css, so
+    // this build stops short; only what its outline was asked for matters.)
+    const fresh = repairClient();
+    await new BoundedPlanProvider(fresh, {
+      model: MODEL,
+      keepSpec: true,
+    })
+      .generate({ prompt: 'A site.' })
+      .catch(() => undefined);
+    assert.equal(fresh.requests[0]!.output?.name, 'build_outline');
+  });
+});
+
 describe('BoundedPlanProvider', () => {
   it('reports the usage of every call once, summed, failed calls included', async () => {
     const reports: number[] = [];
@@ -1030,5 +1491,84 @@ describe('BoundedPlanProvider', () => {
     }
     assert.equal(steps[0], OUTLINE_LABEL);
     assert.equal(steps.length, seen.length);
+  });
+});
+
+describe('what each step took', () => {
+  it('records every call as a step: its name, its time, its output and its reasoning', async () => {
+    // A reasoning model reports its thinking inside its output; the
+    // scripted one spends `thinking` tokens at every effort named.
+    const { result, hooks } = await build(
+      { summary: 'A site.', spec: SPEC, files: requiredFiles() },
+      inProcess(),
+      { thinking: { high: 700 } },
+    );
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.deepEqual(
+      result.steps.map((step) => step.name),
+      hooks.names,
+    );
+    for (const step of result.steps) {
+      assert.ok(step.ms >= 0);
+      assert.ok(step.outputTokens > 700, step.name);
+      assert.equal(step.reasoningTokens, 700, step.name);
+    }
+    // Summed, and inside the output it is billed in.
+    assert.equal(result.usage.reasoningTokens, 700 * result.steps.length);
+    assert.equal(
+      result.usage.outputTokens,
+      result.steps.reduce((sum, step) => sum + step.outputTokens, 0),
+    );
+  });
+
+  it('leaves reasoning out, not at zero, where no call reported it', async () => {
+    const { result } = await build({
+      summary: 'A site.',
+      spec: SPEC,
+      files: requiredFiles(),
+    });
+    assert.equal('reasoningTokens' in result.usage, false);
+    for (const step of result.steps) {
+      assert.equal('reasoningTokens' in step, false);
+    }
+  });
+
+  it('comes to the same steps when replayed from stored results', async () => {
+    const stored = new Map<string, unknown>();
+    const durable = (): BoundedBuildHooks => ({
+      step: async (name, run) => {
+        if (stored.has(name)) return stored.get(name) as never;
+        const value = await run();
+        stored.set(name, value);
+        return value;
+      },
+    });
+    const script = { summary: 'A site.', spec: SPEC, files: requiredFiles() };
+    const first = await build(
+      script,
+      { ...durable(), names: [], labels: [] },
+      {
+        thinking: { high: 50 },
+      },
+    );
+    const again = await build(script, { ...durable(), names: [], labels: [] });
+    assert.deepEqual(again.result.steps, first.result.steps);
+    assert.equal(again.client.requests.length, 0);
+  });
+
+  it('tells BoundedPlanProvider callers once, beside the usage', async () => {
+    const told: unknown[] = [];
+    const provider = new BoundedPlanProvider(
+      createScriptedBuildClient(
+        { summary: 'A site.', spec: SPEC, files: requiredFiles() },
+        { thinking: { high: 10 } },
+      ),
+      { model: MODEL, onSteps: (steps) => told.push(steps) },
+    );
+    await provider.generate({ prompt: 'A site' });
+    assert.equal(told.length, 1);
+    const [steps] = told as { name: string; reasoningTokens?: number }[][];
+    assert.equal(steps![0]!.name, 'outline');
+    assert.ok(steps!.every((step) => step.reasoningTokens === 10));
   });
 });

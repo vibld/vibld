@@ -36,6 +36,11 @@ export interface ScriptedFile {
 
 export interface ScriptedBuild {
   summary: string;
+  /** The outline's title and description, for the templated files (D71). */
+  title?: string;
+  description?: string;
+  /** Packages beyond the stack the outline declares. */
+  dependencies?: { name: string; version: string }[];
   spec?: DesignSpec;
   files: ScriptedFile[];
   /** Existing paths the outline removes, on a follow-up. */
@@ -49,9 +54,9 @@ export interface ScriptedClientOptions {
    */
   omitOnce?: readonly string[];
   /** Answer a request of this output kind with a refusal. */
-  refuse?: 'build_outline' | 'file_group';
+  refuse?: 'build_outline' | 'patch_outline' | 'file_group';
   /** Answer the first request of this kind with something unreadable. */
-  malformOnce?: 'build_outline' | 'file_group';
+  malformOnce?: 'build_outline' | 'patch_outline' | 'file_group';
   /**
    * Output tokens spent thinking before the answer, by the effort asked
    * for, as a reasoning model spends them: billed as output and counted
@@ -95,16 +100,24 @@ export function createScriptedBuildClient(
       requests.push(request);
       const kind = outputFor(request).name;
       let reply: unknown;
-      if (kind === 'build_outline') {
+      if (kind === 'build_outline' || kind === 'patch_outline') {
+        // A patch outline (a repair's) is asked for no spec, title or
+        // description, and a model constrained to its schema writes none.
+        const full = kind === 'build_outline';
         reply = {
           summary: build.summary,
-          ...(build.spec ? { spec: build.spec } : {}),
+          ...(full && build.title !== undefined ? { title: build.title } : {}),
+          ...(full && build.description !== undefined
+            ? { description: build.description }
+            : {}),
+          ...(full && build.spec ? { spec: build.spec } : {}),
           manifest: build.files.map((file) => ({
             path: file.path,
             purpose: file.purpose ?? `The file at ${file.path}.`,
             dependsOn: file.dependsOn ?? [],
             size: file.size ?? 'small',
           })),
+          dependencies: build.dependencies ?? [],
           delete: build.delete ?? [],
         };
       } else if (kind === 'file_group') {
@@ -165,6 +178,10 @@ export function createScriptedBuildClient(
         outputTokens: Math.min(needed, request.maxTokens),
         cacheReadInputTokens: hit ? prefixTokens : 0,
         cacheWriteInputTokens: !hit && prefix.length > 0 ? prefixTokens : 0,
+        // Reported the way a reasoning model reports it, when there was any.
+        ...(thinking > 0
+          ? { reasoningTokens: Math.min(thinking, request.maxTokens) }
+          : {}),
       };
 
       if (options.refuse === kind) {

@@ -72,8 +72,28 @@ interface OpenaiResponse {
       cached_tokens?: number;
       cache_write_tokens?: number;
     } | null;
+    /** The part of `output_tokens` that was reasoning. */
+    output_tokens_details?: { reasoning_tokens?: number } | null;
+    /**
+     * The same figure under the Chat Completions name, read too so a
+     * response in that shape is not reported as having none.
+     */
+    completion_tokens_details?: { reasoning_tokens?: number } | null;
   } | null;
   error?: { code?: string; message?: string } | null;
+}
+
+/**
+ * The reasoning tokens a response reported, under either name OpenAI uses,
+ * or undefined when it reported none: "not reported" is not zero.
+ */
+export function reasoningTokensOf(
+  usage: OpenaiResponse['usage'],
+): number | undefined {
+  const reported =
+    usage?.output_tokens_details?.reasoning_tokens ??
+    usage?.completion_tokens_details?.reasoning_tokens;
+  return typeof reported === 'number' ? reported : undefined;
 }
 
 /** The assistant text, or null when the response carried none. */
@@ -369,6 +389,7 @@ export function createOpenaiPlanClient(
 
       const refusal = final ? readRefusal(final) : null;
       const promptCharacters = request.system.length + userText.length;
+      const reasoningTokens = reasoningTokensOf(final?.usage);
 
       return {
         plan,
@@ -397,6 +418,9 @@ export function createOpenaiPlanClient(
           // this request sets no cache breakpoint of its own.
           cacheWriteInputTokens:
             final?.usage?.input_tokens_details?.cache_write_tokens ?? 0,
+          // Already inside `output_tokens`, which is what is billed: this
+          // says how much of it was thinking the stream never showed.
+          ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
         },
       };
     },

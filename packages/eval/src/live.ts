@@ -184,11 +184,18 @@ export function createLiveRun(
   model: string,
   projectId: string,
   style?: StylePresetId,
+  /**
+   * For a repair turn: keep the project's spec rather than ask for one, as
+   * the product's repair does (`keepSpec`), so the bakeoff measures the
+   * repair the product makes.
+   */
+  options: { keepSpec?: boolean } = {},
 ): LiveRun {
   const usage = { inputTokens: 0, outputTokens: 0 };
   const provider = new BoundedPlanProvider(createPlanClient(env, model), {
     model,
     ...(style ? { style } : {}),
+    ...(options.keepSpec ? { keepSpec: true } : {}),
     onUsage: (reported) => {
       usage.inputTokens += reported.inputTokens;
       usage.outputTokens += reported.outputTokens;

@@ -485,6 +485,56 @@ describe('traceOf', () => {
     assert.equal(trace.elapsedMs, 8_000);
     assert.equal(trace.endedAt, '2026-03-04T05:06:07.000Z');
   });
+
+  it('records the reasoning inside the output, and each step, where they were measured', () => {
+    const steps = [
+      { name: 'prepare', ms: 40, outputTokens: 0 },
+      {
+        name: 'outline',
+        ms: 50_000,
+        outputTokens: 7_000,
+        reasoningTokens: 3_000,
+      },
+      {
+        name: 'write-1',
+        ms: 80_000,
+        outputTokens: 11_000,
+        reasoningTokens: 5_000,
+      },
+      { name: 'assemble', ms: 700, outputTokens: 0 },
+    ];
+    const trace = traceOf(
+      TRACE_PARAMS,
+      { stop: 'applied' },
+      {
+        inputTokens: 1,
+        outputTokens: 18_000,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        reasoningTokens: 8_000,
+      },
+      { ...TIMING, steps },
+    );
+    assert.equal(trace.outputTokens, 18_000);
+    assert.equal(trace.reasoningTokens, 8_000);
+    assert.deepEqual(trace.steps, steps);
+  });
+
+  it('leaves both out, rather than at zero, where nothing measured them', () => {
+    const trace = traceOf(
+      TRACE_PARAMS,
+      { stop: 'applied' },
+      {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
+      { ...TIMING, steps: [] },
+    );
+    assert.equal('reasoningTokens' in trace, false);
+    assert.equal('steps' in trace, false);
+  });
 });
 
 /**

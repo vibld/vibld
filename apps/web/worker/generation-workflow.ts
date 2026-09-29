@@ -8,6 +8,7 @@ import {
   createPlanClient,
 } from '@vibld/ai';
 import type { PlanUsage } from '@vibld/ai';
+import type { RunStepTrace } from '@vibld/core';
 
 import { D1GenerationStore } from './generation-store.ts';
 import { buildProject } from './publish-client.ts';
@@ -183,12 +184,15 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         async (): Promise<{
           startedAt: number;
           refusal?: GenerationOutcome;
+          /** How long the checks took, for the trace's steps. */
+          ms?: number;
         }> => {
           const startedAt = Date.now();
           const checked = await preflightRun(openStore(), params);
+          const ms = Date.now() - startedAt;
           return checked.refusal
-            ? { startedAt, refusal: checked.refusal }
-            : { startedAt };
+            ? { startedAt, refusal: checked.refusal, ms }
+            : { startedAt, ms };
         },
       );
 
@@ -237,6 +241,9 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         },
         async () => {
           await finished();
+          // Timed from here, for the trace's steps: the finish above is the
+          // model steps' last word, not this step's work.
+          const assembleStartedAt = Date.now();
           await enter('assembling');
           // Kept alive until it is settled: this step can follow a long run
           // of model steps, and the reclaim counts from the last heartbeat.
@@ -250,6 +257,20 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           return {
             // Its usage summed across every call, failed ones included.
             ...outcome,
+            // Where the time went, step by step: the checks, each model
+            // call as it was made (read back from the stored steps, not
+            // timed again), and this step.
+            steps: [
+              ...(prepared.ms === undefined
+                ? []
+                : [{ name: 'prepare', ms: prepared.ms, outputTokens: 0 }]),
+              ...(built?.steps ?? []),
+              {
+                name: 'assemble',
+                ms: Date.now() - assembleStartedAt,
+                outputTokens: 0,
+              },
+            ],
             // The run, from the first check to the promotion: the time the
             // caller waited, not only the time the model spent writing.
             elapsedMs: Date.now() - prepared.startedAt,
@@ -308,11 +329,22 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           } finally {
             await finished();
           }
+          const elapsedMs = Date.now() - startedAt;
           return {
             ...outcome,
             ...(usage ? { usage } : {}),
             calls: outcome.providerRan ? 1 : 0,
-            elapsedMs: Date.now() - startedAt,
+            steps: [
+              {
+                name: 'generate',
+                ms: elapsedMs,
+                outputTokens: usage?.outputTokens ?? 0,
+                ...(usage?.reasoningTokens === undefined
+                  ? {}
+                  : { reasoningTokens: usage.reasoningTokens }),
+              },
+            ],
+            elapsedMs,
             endedAt: new Date().toISOString(),
           };
         },
@@ -373,6 +405,9 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             calls: generation.calls,
             inputTokens: generation.usage?.inputTokens ?? 0,
             outputTokens: generation.usage?.outputTokens ?? 0,
+            ...(generation.usage?.reasoningTokens === undefined
+              ? {}
+              : { reasoningTokens: generation.usage.reasoningTokens }),
             microUsd: actual,
           }),
         );
@@ -437,41 +472,58 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         // its own and is settled inside it.
         timeout: REPAIR_STEP_TIMEOUT_MS,
       },
-      () =>
-        verifyAndRepair(this.env, params, generation.result, {
-          build: buildProject,
-          reserve: reserveBudget,
-          settle: settleBudget,
-          store: openStore(),
-          generate: (provider, request) =>
-            runGeneration(openStore(), provider, request),
-          onPhase: (phase) => enter(phase),
-          // A provider of its own, with its own usage capture: the run's
-          // was settled above. A repair is a follow-up, so it is a patch in
-          // bounded steps like any other, made in this step rather than as
-          // steps of its own, and held to the run's own budgets.
-          // No progress channel, deliberately. The meter's clock stopped
-          // when the model steps finished, and reopening it here would show
-          // a run that had already reported its result still writing.
-          providerFor: (onUsage) =>
-            new SanitizingModelProvider(
-              new BoundedPlanProvider(
-                createPlanClient(this.env, params.model),
-                {
-                  model: params.model,
-                  maxTokens: ceilingForRun(params),
-                  maxInputChars: inputBudgetForRun(params),
-                  onUsage: (usage: PlanUsage) => onUsage(usage),
-                  ...(params.style ? { style: params.style } : {}),
-                  ...(params.knowledge ? { knowledge: params.knowledge } : {}),
-                  ...(params.media ? { media: params.media } : {}),
-                  onUnexpectedError: (error) => {
-                    console.error('repair generation failed', error);
+      async () => {
+        const verifyStartedAt = Date.now();
+        const verified = await verifyAndRepair(
+          this.env,
+          params,
+          generation.result,
+          {
+            build: buildProject,
+            reserve: reserveBudget,
+            settle: settleBudget,
+            store: openStore(),
+            generate: (provider, request) =>
+              runGeneration(openStore(), provider, request),
+            onPhase: (phase) => enter(phase),
+            // A provider of its own, with its own usage capture: the run's
+            // was settled above. A repair is a follow-up, so it is a patch in
+            // bounded steps like any other, made in this step rather than as
+            // steps of its own, and held to the run's own budgets.
+            // No progress channel, deliberately. The meter's clock stopped
+            // when the model steps finished, and reopening it here would show
+            // a run that had already reported its result still writing.
+            providerFor: (onUsage, onSteps) =>
+              new SanitizingModelProvider(
+                new BoundedPlanProvider(
+                  createPlanClient(this.env, params.model),
+                  {
+                    model: params.model,
+                    maxTokens: ceilingForRun(params),
+                    maxInputChars: inputBudgetForRun(params),
+                    // A repair fixes the project against the spec it has, and
+                    // its DESIGN.md is put back whatever it says, so it is not
+                    // asked to write one.
+                    keepSpec: true,
+                    onUsage: (usage: PlanUsage) => onUsage(usage),
+                    onSteps: (steps: RunStepTrace[]) => onSteps?.(steps),
+                    ...(params.style ? { style: params.style } : {}),
+                    ...(params.knowledge
+                      ? { knowledge: params.knowledge }
+                      : {}),
+                    ...(params.media ? { media: params.media } : {}),
+                    onUnexpectedError: (error) => {
+                      console.error('repair generation failed', error);
+                    },
                   },
-                },
+                ),
               ),
-            ),
-        }),
+          },
+        );
+        // Stored with the step's result, so the trace written after it
+        // reads the time the checks and any repair took, not a replay's.
+        return { ...verified, elapsedMs: Date.now() - verifyStartedAt };
+      },
     );
 
     // Field by field, never a spread of `repair` (internal PR 196 review). That object
@@ -502,6 +554,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
           ? {}
           : { repairMicroUsd: repair.repairCostMicroUsd }),
         ...(repair.settled === false ? { settled: false } : {}),
+        ...(repair.elapsedMs === undefined ? {} : { ms: repair.elapsedMs }),
       }),
     );
 
@@ -527,6 +580,22 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             elapsedMs: generation.elapsedMs,
             endedAt: generation.endedAt,
             calls: generation.calls,
+            // The steps up to the promotion, then the verification and
+            // any repair, which run after it and on the person's clock.
+            // Its output is on the repair's own row, with its model steps,
+            // so it is not counted here twice.
+            steps: [
+              ...(generation.steps ?? []),
+              ...(repair.elapsedMs === undefined
+                ? []
+                : [
+                    {
+                      name: 'verify-and-repair',
+                      ms: repair.elapsedMs,
+                      outputTokens: 0,
+                    },
+                  ]),
+            ],
           }),
         );
         // The repair's own row, under its own run id (internal PR 196 review). Without

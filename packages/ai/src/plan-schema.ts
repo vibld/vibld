@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { DesignSpecSchema } from './design-spec.ts';
+import { SCAFFOLD_SECTION } from './scaffold.ts';
 import { stackVersionLine } from './stack.ts';
 
 /**
@@ -159,7 +160,12 @@ room is thrown away, and the person gets nothing at all.
 - Reuse: a few shared components and a small set of shared Motion variants,
   not bespoke animation code for every element.`;
 
-const RULES_BEFORE_SPEC = `STACK
+/**
+ * STACK's opening, for a build whose model writes package.json itself: the
+ * single-response build (`PLAN_SYSTEM_PROMPT`). A bounded build writes it
+ * from `stack.ts` instead (D71), and says so in `BOUNDED_STACK_HEAD`.
+ */
+const PLAN_STACK_HEAD = `STACK
 React 19, TypeScript and Vite, styled with Tailwind CSS v4, with shadcn/ui
 components, lucide-react icons and Motion for animation, unless the request
 names a different stack.
@@ -167,8 +173,23 @@ names a different stack.
   request needs one:
 ${stackVersionLine()}
   dependencies hold the runtime ones; vite, the plugins, tailwindcss,
-  tw-animate-css, typescript and the @types packages are devDependencies.
-- Tailwind v4 is configured in CSS, through the @tailwindcss/vite plugin.
+  tw-animate-css, typescript and the @types packages are devDependencies.`;
+
+/**
+ * STACK's opening for a bounded build, whose package.json, tsconfig.json
+ * and the rest of FILES WRITTEN FOR YOU are templated (D71,
+ * `scaffold.ts`). There is no "unless the request names a different
+ * stack": the templates are this stack's.
+ */
+const BOUNDED_STACK_HEAD = `STACK
+React 19, TypeScript and Vite, styled with Tailwind CSS v4, with shadcn/ui
+components, lucide-react icons and Motion for animation.
+- package.json is written for you (see FILES WRITTEN FOR YOU) and declares
+  exactly these packages, at these ranges:
+${stackVersionLine()}
+  Import only these, and any package the plan's dependencies name.`;
+
+const STACK_RULES = `- Tailwind v4 is configured in CSS, through the @tailwindcss/vite plugin.
   There is no tailwind.config.js and no postcss.config.js. src/styles.css
   opens with any font @import url(...), then @import "tailwindcss"; then
   @import "tw-animate-css";, then @custom-variant dark (&:is(.dark *));.
@@ -193,16 +214,22 @@ ${stackVersionLine()}
   aria-label, or use a generic Lucide icon (Globe, Mail, AtSign, Rss) beside
   the brand's name.
 - Animation is Motion: \`import { motion } from 'motion/react'\` (the package
-  is motion, not framer-motion).
+  is motion, not framer-motion).`;
 
-TYPESCRIPT
+const PLAN_TYPESCRIPT_HEAD = `TYPESCRIPT
 You write this project's tsconfig.json, and the one npm create vite@latest
 produces sets both isolatedModules and verbatimModuleSyntax. Write code that
 compiles under both, whichever tsconfig you end up writing, and the build
 survives either choice. Two rules follow, and breaking either one fails the
-build before anything is bundled.
+build before anything is bundled.`;
 
-Import a type with a type-only import:
+const BOUNDED_TYPESCRIPT_HEAD = `TYPESCRIPT
+This project's tsconfig.json is written for you, and like the one npm create
+vite@latest produces it sets both isolatedModules and verbatimModuleSyntax.
+Two rules follow, and breaking either one fails the build before anything is
+bundled.`;
+
+const TYPESCRIPT_RULES = `Import a type with a type-only import:
 
   import type { ReactNode } from 'react';
   import { useState } from 'react';
@@ -239,9 +266,14 @@ never WebkitBackdropFilter or another vendor-prefixed key, which Variants
 rejects with TS2353. A vendor prefix belongs in CSS, not in a variant.
 A component that spreads its props onto motion.div types them
 HTMLMotionProps<'div'> from 'motion/react', not HTMLAttributes<HTMLDivElement>,
-whose onAnimationStart and onDrag clash with Motion's and fail with TS2322.
+whose onAnimationStart and onDrag clash with Motion's and fail with TS2322.`;
 
-tsconfig.json sets "types": ["vite/client", "node"], or the import of
+/**
+ * The configuration and the required files, for the single-response build,
+ * whose model writes all of them. A bounded build has `SCAFFOLD_SECTION`
+ * in their place.
+ */
+const PLAN_REQUIRED_FILES = `tsconfig.json sets "types": ["vite/client", "node"], or the import of
 src/styles.css fails to compile; "allowImportingTsExtensions": true with
 "noEmit": true, so imports can name ./App.tsx; and maps "@/*" to "./src/*"
 in "paths", with no "baseUrl": TypeScript 7 removed it, tsc stops at the
@@ -267,6 +299,26 @@ project is, how to install it, how to run it, and how to build it, using the
 scripts package.json actually declares. It is the portability promise in
 practice (ADR-0002), so write it for a stranger with a terminal, not as a
 summary of the request.`;
+
+/** STACK, TYPESCRIPT and the files, for the single-response build. */
+const PLAN_RULES_BEFORE_SPEC = [
+  `${PLAN_STACK_HEAD}\n${STACK_RULES}`,
+  PLAN_TYPESCRIPT_HEAD,
+  TYPESCRIPT_RULES,
+  PLAN_REQUIRED_FILES,
+].join('\n\n');
+
+/**
+ * STACK, TYPESCRIPT and the files, for both steps of a bounded build: the
+ * same rules for the code, with the configuration and the required files
+ * replaced by what the templates hold (D71).
+ */
+const BOUNDED_RULES_BEFORE_SPEC = [
+  `${BOUNDED_STACK_HEAD}\n${STACK_RULES}`,
+  BOUNDED_TYPESCRIPT_HEAD,
+  TYPESCRIPT_RULES,
+  SCAFFOLD_SECTION,
+].join('\n\n');
 
 const PLAN_SPEC_SECTION = `SPEC
 Before any file, write the spec: the design this project is built to, as
@@ -495,7 +547,7 @@ export const PLAN_SYSTEM_PROMPT = [
   PROMPT_HEAD,
   PLAN_OUTPUT_SECTION,
   PLAN_SIZE_SECTION,
-  RULES_BEFORE_SPEC,
+  PLAN_RULES_BEFORE_SPEC,
   PLAN_SPEC_SECTION,
   RULES_AFTER_SPEC,
 ].join('\n\n');
@@ -508,6 +560,9 @@ export const PLAN_SYSTEM_PROMPT = [
  * forgot one of these is completed in code rather than found missing after
  * every file has been paid for. `bounded-build.test.ts` holds the prose and
  * this list to each other.
+ *
+ * A bounded build writes most of them itself (D71, `SCAFFOLD_PATHS`); the
+ * model is asked only for the rest, src/App.tsx and src/styles.css.
  */
 export const REQUIRED_PROJECT_FILES = [
   'package.json',
@@ -536,13 +591,19 @@ export const MAX_PLANNED_ROUTES = 6;
 const OUTLINE_OUTPUT_SECTION = `OUTPUT
 This is the first step of several. Here you plan the project; its files are
 written afterwards, a few at a time, by later steps that are given your plan
-and nothing else you decided. Return a one-sentence summary, the design spec
-(see SPEC), the manifest and the paths to delete, in that order, and no file
-content at all.
+and nothing else you decided. Return a one-sentence summary, the title and
+description, the design spec (see SPEC), the manifest, the dependencies and
+the paths to delete, in that order, and no file content at all.
+- title: the site's name as a browser tab shows it, a few words
+  ("Crumb & Co. Bakery"). description: one sentence for search results.
+  Both go into index.html and README.md, which are written for you. For a
+  project that exists, repeat the ones its index.html has, exactly, and
+  change them only when the request asks to rename or re-describe the
+  site.
 - manifest: the files to write, in the order they should be written:
-  configuration and src/styles.css first, then src/lib, then the shadcn/ui
-  components, then shared components and layout, then pages, then
-  src/App.tsx, src/main.tsx and README.md. For each file give its path; its
+  src/styles.css first, then src/lib, then the shadcn/ui components, then
+  shared components and layout, then pages, then src/App.tsx. Never list a
+  file from FILES WRITTEN FOR YOU. For each file give its path; its
   purpose, specific enough that someone writing it without seeing the other
   files produces one that fits (what it exports and what imports it, which
   spec sections and copy it carries, which route it serves); dependsOn, the
@@ -552,6 +613,9 @@ content at all.
 - Say in src/App.tsx's purpose how pages are routed and linked, and in each
   page's purpose which route it serves, so files written separately agree.
 - Never list DESIGN.md: it is written for you from the spec.
+- dependencies: each package outside STACK that a planned file will import,
+  with the version range to declare (cmdk ^1.1.1 for a combobox). Usually
+  empty: the stack covers a site.
 - delete: paths of existing files to remove. Empty for a new project.`;
 
 const OUTLINE_SIZE_SECTION = `SIZE
@@ -575,9 +639,10 @@ the files you are asked to write, each with its complete content -- never
 abbreviate, never write a placeholder comment such as "rest of the code
 here".
 - Follow the manifest: import only from files it lists, files the project
-  already has, or the declared packages, and use the exports each file's
-  purpose names.
-- Write every file you are asked for, and no other. Never write DESIGN.md.`;
+  already has, FILES WRITTEN FOR YOU, the packages in STACK or the plan's
+  dependencies, and use the exports each file's purpose names.
+- Write every file you are asked for, and no other. Never write DESIGN.md
+  or a file from FILES WRITTEN FOR YOU.`;
 
 const GROUP_SPEC_SECTION = `SPEC
 The spec is the design this project is built to, as measured values. Build
@@ -592,17 +657,69 @@ tokens and type steps exactly: the files written in other steps do.`;
  * The system prompt for a bounded build's first step: the spec and a
  * manifest of files, with no file content (`bounded-build.ts`).
  *
- * The same rules as `PLAN_SYSTEM_PROMPT`, section for section, with two
- * replaced. OUTPUT asks for a plan of the files rather than the files, and
+ * The same rules as `PLAN_SYSTEM_PROMPT`, section for section, with three
+ * replaced. OUTPUT asks for a plan of the files rather than the files,
  * SIZE drops the single-response limit (internal PR 289), which existed only because
- * the whole project had to fit in one reply.
+ * the whole project had to fit in one reply, and REQUIRED FILES is FILES
+ * WRITTEN FOR YOU: the configuration, the entry point and the README are
+ * templated (D71), so the model plans none of them.
  */
 export const OUTLINE_SYSTEM_PROMPT = [
   PROMPT_HEAD,
   OUTLINE_OUTPUT_SECTION,
   OUTLINE_SIZE_SECTION,
-  RULES_BEFORE_SPEC,
+  BOUNDED_RULES_BEFORE_SPEC,
   PLAN_SPEC_SECTION,
+  RULES_AFTER_SPEC,
+].join('\n\n');
+
+const KEPT_SPEC_OUTLINE_OUTPUT_SECTION = `OUTPUT
+This is the first step of several, and it plans a change to a project that
+exists. Its files are written afterwards, a few at a time, by later steps
+that are given your plan and nothing else you decided. Return a one-sentence
+summary, the manifest, the dependencies and the paths to delete, in that
+order, and no file content at all. There is no spec to write: the design is
+fixed (see SPEC).
+- manifest: the files to add or replace, in the order they should be
+  written: src/styles.css first, then src/lib, then the shadcn/ui
+  components, then shared components and layout, then pages, then
+  src/App.tsx. Never list a file from FILES WRITTEN FOR YOU. For each file
+  give its path; its purpose, saying what changes in it and what stays;
+  dependsOn, the manifest paths whose contents it needs to see, such as the
+  files it imports; and size: small (up to about 80 lines), medium (up to
+  about 250) or large (longer).
+- Never list DESIGN.md.
+- dependencies: each package outside STACK that a planned file will import,
+  with the version range to declare (cmdk ^1.1.1 for a combobox). Usually
+  empty.
+- delete: paths of existing files to remove.`;
+
+const KEPT_SPEC_SECTION = `SPEC
+The design spec is fixed: it is the project's DESIGN.md, whose frontmatter
+is the spec as JSON, and this change does not alter it. Plan files that
+hold to it exactly: every colour is a custom property on :root with the
+spec's value, mapped in \`@theme inline\` as --color-<name>: var(--<name>);
+every copy string appears verbatim; every breakpoint is a responsive variant
+or @media at that width.`;
+
+/**
+ * The system prompt for the first step of a bounded build that keeps the
+ * spec it has: a repair (`BoundedBuilderOptions.keepSpec`).
+ *
+ * A repair fixes a project against the spec it was built to, and its
+ * DESIGN.md is put back afterwards whatever it says (`keepingRecordOf`).
+ * Asked with `OUTLINE_SYSTEM_PROMPT`, it wrote the whole spec out again
+ * (1,700 to 6,000 tokens of output, and the reasoning behind them) for
+ * that to be thrown away. So this one asks for no spec at all: OUTPUT
+ * without one, and SPEC saying the design is fixed rather than how to
+ * write it.
+ */
+export const KEPT_SPEC_OUTLINE_SYSTEM_PROMPT = [
+  PROMPT_HEAD,
+  KEPT_SPEC_OUTLINE_OUTPUT_SECTION,
+  OUTLINE_SIZE_SECTION,
+  BOUNDED_RULES_BEFORE_SPEC,
+  KEPT_SPEC_SECTION,
   RULES_AFTER_SPEC,
 ].join('\n\n');
 
@@ -617,7 +734,7 @@ export const OUTLINE_SYSTEM_PROMPT = [
 export const GROUP_SYSTEM_PROMPT = [
   PROMPT_HEAD,
   GROUP_OUTPUT_SECTION,
-  RULES_BEFORE_SPEC,
+  BOUNDED_RULES_BEFORE_SPEC,
   GROUP_SPEC_SECTION,
   RULES_AFTER_SPEC,
 ].join('\n\n');
@@ -634,18 +751,45 @@ export const ManifestEntrySchema = z.object({
   size: z.enum(MANIFEST_SIZES),
 });
 
+/** A package beyond the stack that a planned file imports (D71). */
+export const DependencySchema = z.object({
+  name: z.string().min(1),
+  version: z.string().min(1),
+});
+
 /**
  * What the first step of a bounded build is asked to return: the summary,
- * the spec, the manifest of files to write, and the files to remove.
+ * the title and description the templated files carry (D71), the spec, the
+ * manifest of files to write, the packages beyond the stack its files
+ * import, and the files to remove.
  *
  * `spec` before `manifest` for the reason `GenerationPlanSchema` gives:
  * structured output is written in schema order, so the design is decided
- * before the files that carry it are planned.
+ * before the files that carry it are planned. `dependencies` after the
+ * manifest, because which packages are needed follows from which files
+ * there are.
  */
 export const BuildOutlineSchema = z.object({
   summary: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
   spec: DesignSpecSchema,
   manifest: z.array(ManifestEntrySchema),
+  dependencies: z.array(DependencySchema),
+  delete: z.array(z.string()),
+});
+
+/**
+ * What the first step of a build that keeps its spec is asked to return
+ * (`KEPT_SPEC_OUTLINE_SYSTEM_PROMPT`): `BuildOutlineSchema` without the
+ * spec, and without the title and description, which only a new project's
+ * templated files take. Read with `BuildOutlineReadSchema`, where all three
+ * are optional already.
+ */
+export const KeptSpecOutlineSchema = z.object({
+  summary: z.string().min(1),
+  manifest: z.array(ManifestEntrySchema),
+  dependencies: z.array(DependencySchema),
   delete: z.array(z.string()),
 });
 
@@ -658,6 +802,8 @@ export const BuildOutlineSchema = z.object({
  */
 export const BuildOutlineReadSchema = z.object({
   summary: z.string().min(1),
+  title: z.string().optional().catch(undefined),
+  description: z.string().optional().catch(undefined),
   spec: DesignSpecSchema.optional().catch(undefined),
   manifest: z.array(
     z.object({
@@ -667,6 +813,12 @@ export const BuildOutlineReadSchema = z.object({
       size: z.enum(MANIFEST_SIZES).catch('medium'),
     }),
   ),
+  // Optional as well as caught: an outline stored by a run that started
+  // before D71 has none, and is read back on a replay.
+  dependencies: z
+    .array(z.object({ name: z.string(), version: z.string() }))
+    .optional()
+    .catch(undefined),
   delete: z.array(z.string()).catch([]),
 });
 

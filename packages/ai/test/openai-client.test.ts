@@ -363,6 +363,41 @@ describe('createOpenaiPlanClient', () => {
     assert.equal(written.usage.cacheReadInputTokens, 7);
   });
 
+  it('records the reasoning inside the output, under either name OpenAI uses', async () => {
+    // A reasoning model's thinking streams nothing the meter counts, so
+    // this is the only place its share of a step's output is said.
+    const responses = await clientWith(
+      sse(
+        completed({
+          usage: {
+            input_tokens: 40,
+            output_tokens: 900,
+            output_tokens_details: { reasoning_tokens: 640 },
+          },
+        }),
+      ),
+    ).createPlan(REQUEST);
+    assert.equal(responses.usage.outputTokens, 900);
+    assert.equal(responses.usage.reasoningTokens, 640);
+
+    const chat = await clientWith(
+      sse(
+        completed({
+          usage: {
+            input_tokens: 40,
+            output_tokens: 900,
+            completion_tokens_details: { reasoning_tokens: 300 },
+          },
+        }),
+      ),
+    ).createPlan(REQUEST);
+    assert.equal(chat.usage.reasoningTokens, 300);
+
+    // Not reported is not zero.
+    const none = await clientWith(sse(completed())).createPlan(REQUEST);
+    assert.equal('reasoningTokens' in none.usage, false);
+  });
+
   it('returns a null plan and a refusal rather than parsing garbage', async () => {
     const result = await clientWith(
       sse({

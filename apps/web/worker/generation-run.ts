@@ -7,6 +7,7 @@ import {
   type ModelProvider,
   type ProjectFile,
   type ProjectSnapshot,
+  type RunStepTrace,
   type RunTrace,
 } from '@vibld/core';
 import {
@@ -21,6 +22,7 @@ import {
   keepingRecordOf,
   repairPromptFor,
   runBoundedBuild,
+  stepOf,
   withRecordOf,
 } from '@vibld/ai';
 import {
@@ -711,6 +713,11 @@ export interface RepairOutcome {
    */
   settled?: boolean;
   /**
+   * How long this step took, the build and the checks and any repair,
+   * measured by the Workflow around it and stored with its result.
+   */
+  elapsedMs?: number;
+  /**
    * The repair's own row in the run record (internal PR 196 review).
    *
    * Its own row rather than an addition to the run's, because the repair is
@@ -1254,6 +1261,19 @@ export async function buildInSteps(
         }
       },
       afterCall: async (name, record) => {
+        // One line per model call as it finishes, so a slow step can be
+        // found while the run is still going, not only in its trace:
+        // metadata only (D20), the step's name and its numbers.
+        if (record.called) {
+          console.log(
+            JSON.stringify({
+              event: 'generation.step',
+              runId: params.runId,
+              model: params.model,
+              ...stepOf(name, record),
+            }),
+          );
+        }
         const meter = deps.meter;
         if (!meter) return;
         // Priced as the settle step prices the run: an unmeasured call's
@@ -1445,7 +1465,15 @@ export async function verifyAndRepair(
         | 'maxTokens'
       >,
     ) => Promise<GenerationOutcome>;
-    providerFor: (onUsage: (usage: PlanUsage) => void) => ModelProvider;
+    /**
+     * The repair's provider. `onUsage` is told what its calls spent, and
+     * `onSteps`, where the provider says, what each call took, for the
+     * repair's own row in the trace.
+     */
+    providerFor: (
+      onUsage: (usage: PlanUsage) => void,
+      onSteps?: (steps: RunStepTrace[]) => void,
+    ) => ModelProvider;
     /**
      * Where the first attempt is put back if a design-only repair breaks
      * the build (`restored`). Without one, the repair stands as it is.
@@ -1656,6 +1684,7 @@ export async function verifyAndRepair(
 
   const startedAt = now();
   let usage: PlanUsage | undefined;
+  let repairSteps: RunStepTrace[] | undefined;
   let outcome: GenerationOutcome | undefined;
   let settlement: SettlementOutcome | undefined;
   /** Set when the model call was given up on rather than answered. */
@@ -1687,9 +1716,14 @@ export async function verifyAndRepair(
         // later edit and check reads.
         keepingRecordOf(
           result.accepted.files,
-          deps.providerFor((reported) => {
-            usage = reported;
-          }),
+          deps.providerFor(
+            (reported) => {
+              usage = reported;
+            },
+            (steps) => {
+              repairSteps = steps;
+            },
+          ),
         ),
         {
           projectId: params.projectId,
@@ -1793,6 +1827,7 @@ export async function verifyAndRepair(
               costMicroUsd: repairCostMicroUsd ?? 0,
               elapsedMs: now() - startedAt,
               endedAt: new Date(now()).toISOString(),
+              ...(repairSteps ? { steps: repairSteps } : {}),
             },
           ),
         }
@@ -2112,6 +2147,8 @@ export function traceOf(
     costMicroUsd: number;
     elapsedMs: number;
     endedAt: string;
+    /** Where the run's time went, step by step (`RunStepTrace`). */
+    steps?: readonly RunStepTrace[];
     /**
      * How many model calls the tokens above were spent across. A bounded
      * build is one row for the whole run, its tokens and cost summed, so
@@ -2141,10 +2178,17 @@ export function traceOf(
     inputTokens: usage?.inputTokens ?? 0,
     cachedInputTokens: usage?.cacheReadInputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? 0,
+    // Absent, not zero, where no call reported it.
+    ...(usage?.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: usage.reasoningTokens }),
     contextWindow: (findModel(params.model)?.contextWindow ?? 0) * calls,
     costMicroUsd: timing.costMicroUsd,
     elapsedMs: timing.elapsedMs,
     endedAt: timing.endedAt,
+    ...(timing.steps && timing.steps.length > 0
+      ? { steps: timing.steps.map((step) => ({ ...step })) }
+      : {}),
   };
 }
 

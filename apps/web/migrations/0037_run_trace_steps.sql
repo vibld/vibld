@@ -1,0 +1,28 @@
+-- Where a run's output and time went, attached to its trace.
+--
+-- A one-page build on GPT-6 Luna took about 540 seconds, and the trace could
+-- not say where: its output tokens were one total, with the reasoning a
+-- reasoning model spends before it writes folded in, and its elapsed time
+-- ran from the first check to the promotion with nothing about the steps
+-- inside it or the verification after it. So the split had to be inferred.
+--
+-- `reasoning_tokens` is the part of `output_tokens` the provider reported as
+-- reasoning, summed over the calls that reported it. NULL where none did:
+-- a run recorded before this column existed, or a provider that does not
+-- say. NULL is "not reported", which is not zero.
+--
+-- `steps_json` is the run's steps in order, as compact JSON: an array of
+-- `{"name", "ms", "outputTokens", "reasoningTokens"?}`, one per step
+-- (`prepare`, `outline`, `write-1`, ..., `assemble`, `verify-and-repair`).
+-- NULL on a run recorded before it. A column of JSON rather than a table,
+-- because the steps are only ever read with their run and a run has a
+-- dozen or so.
+--
+-- **Metadata only, per D20**, like the rest of the table: a step's name is
+-- one this system gave it, never a file path or anything the model wrote,
+-- and the rest are numbers.
+--
+-- Additive: both columns are nullable, so every existing row, and an older
+-- deployment's insert (which names its columns), keeps working.
+ALTER TABLE generation_run_traces ADD COLUMN reasoning_tokens INTEGER;
+ALTER TABLE generation_run_traces ADD COLUMN steps_json TEXT;

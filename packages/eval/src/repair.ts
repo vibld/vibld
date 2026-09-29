@@ -22,7 +22,9 @@ import { createEvalValidator } from './validator.ts';
  * `repairPromptFor`'s words, with the project's current files as the prior
  * state; the plan provider puts those files into the prompt as the project
  * to edit. The provider is wrapped in `keepingRecordOf`, so the repair
- * cannot rewrite the DESIGN.md the project is checked against.
+ * cannot rewrite the DESIGN.md the project is checked against, and a live
+ * one is made with `keepSpec` (`createLiveRun`), so it is not asked to
+ * write a spec either.
  *
  * This does the same things in the same order. The candidate is made the
  * store's accepted revision first, by running it through the runner as a

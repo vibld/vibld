@@ -139,7 +139,9 @@ async function main(): Promise<number> {
     }
 
     const projectId = `${candidate.model}:${candidate.case}#${candidate.run}`;
-    const run = createLiveRun(env, candidate.model, projectId, testCase.style);
+    const run = createLiveRun(env, candidate.model, projectId, testCase.style, {
+      keepSpec: true,
+    });
     const repaired = await repairCandidate({
       testCase,
       files: files as { path: string; content: string }[],

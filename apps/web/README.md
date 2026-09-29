@@ -454,10 +454,22 @@ of its own:
 | `settle-budget`, `verify-and-repair`, `record-trace` | As before, over the summed usage of every call.                                                                                                                                    |
 | `open-check`, `close-check`                          | Around `verify-and-repair`: the promoted revision is shown to the builder with a badge while it is checked, and what the check found is recorded (D69).                            |
 
-- **Grouping.** The manifest is ordered by declared dependencies (config and
-  styles, then `src/lib`, shadcn/ui components, shared components, pages,
-  then `App.tsx` and the README), then packed into groups estimated at no
-  more than 12,000 output tokens (small 1,000, medium 3,000, large 6,000).
+- **Grouping.** The manifest is ordered by declared dependencies (styles,
+  then `src/lib`, shadcn/ui components, shared components, pages, then
+  `App.tsx`), then packed into groups estimated at no more than 12,000
+  output tokens (small 1,000, medium 3,000, large 6,000).
+- **Vibld's own files (D71).** `package.json`, `index.html`,
+  `vite.config.ts`, `tsconfig.json`, `src/main.tsx`, `src/lib/utils.ts` and
+  `README.md` are never planned or written by the model. `applyBoundedPatch`
+  writes them from `@vibld/ai`'s `scaffold.ts`: the stack's packages at
+  `stack.ts`'s ranges, the outline's title and description, and every
+  package the project's files import (at the range the outline declared,
+  `stack.ts`'s for an optional package, or `latest`). A follow-up keeps the
+  project's own copies and only adds a newly imported package to
+  `package.json`, and, when it renames or re-describes the site, replaces
+  the `<title>` text and meta description in `index.html` in place. The
+  prompts' FILES WRITTEN FOR YOU section says what the
+  files hold, from the same constants.
 - **Running out of room.** A group that truncates is split in two and each
   half asked again (`write-3.1`, `write-3.2`), down to a single file. A
   single file that still does not fit fails the run with its path named. A
@@ -468,7 +480,9 @@ of its own:
   only the files to add or replace, plus the paths to delete; every other
   file carries over untouched. A repair turn is a patch the same way.
   `DESIGN.md` is still rendered from the spec, or carried over when there
-  is none, and a repair keeps the first attempt's.
+  is none, and a repair keeps the first attempt's: its outline is asked for
+  no spec at all (`keepSpec`), and its steps build to the one read from
+  `DESIGN.md`.
 - **Money.** `handlePlan` reserves once for the whole run: the output
   budget summed across calls (`buildOutputBudgetFor`: what the $3.20 reserve
   buys, up to 256,000 tokens) and the input of every call together
@@ -499,7 +513,12 @@ of its own:
   so writing files shows as Write and the checks and a repair as Check,
   where the builder's own status would still say Plan.
 - **One trace per run,** its tokens and cost summed, its context window
-  counted once per call.
+  counted once per call. It also carries the part of its output the
+  provider reported as reasoning (`reasoning_tokens`, NULL where none was
+  reported) and where its time went (`steps_json`: `prepare`, each model
+  step with its output and reasoning, `assemble`, `verify-and-repair`), from
+  `0037_run_trace_steps.sql`. A repair's own row carries its model steps.
+  Each model step is also logged as it finishes (`generation.step`).
 
 ### Setup
 

@@ -165,6 +165,26 @@ describe('reading Anthropic usage', () => {
       cacheWriteInputTokens: 0,
     });
   });
+
+  it('records thinking as reasoning, inside the output it is billed in', async () => {
+    const usage = usageOf({
+      input_tokens: 10,
+      output_tokens: 900,
+      output_tokens_details: { thinking_tokens: 600 },
+    });
+    assert.equal(usage.outputTokens, 900);
+    assert.equal(usage.reasoningTokens, 600);
+    // Not reported is not zero.
+    assert.equal(
+      'reasoningTokens' in
+        usageOf({
+          input_tokens: 1,
+          output_tokens: 1,
+          output_tokens_details: null,
+        }),
+      false,
+    );
+  });
 });
 
 /**

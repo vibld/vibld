@@ -296,6 +296,18 @@ export interface RunTrace {
   cachedInputTokens: number;
   outputTokens: number;
   /**
+   * The part of `outputTokens` the provider reported as reasoning, summed
+   * over the calls that reported it. Absent where no call did, which is
+   * "not reported", not "none": a run written before this was recorded, or
+   * a provider that does not say.
+   */
+  reasoningTokens?: number;
+  /**
+   * Where the run's time went: each step of it in order, the model steps
+   * with their output. Absent on a run recorded before this was.
+   */
+  steps?: RunStepTrace[];
+  /**
    * The window this run was working inside. Stored with the run rather than
    * looked up later: a model's window changes, and a run near the limit of
    * the window it actually had is the thing worth seeing.
@@ -304,6 +316,21 @@ export interface RunTrace {
   costMicroUsd: number;
   elapsedMs: number;
   endedAt: string;
+}
+
+/**
+ * One step of a run as the trace records it: its name (`outline`,
+ * `write-2.1`, `assemble`, ...), how long it took, and for a model step what
+ * it wrote. Metadata only, like the rest of the trace: a name this system
+ * gave the step, and numbers.
+ */
+export interface RunStepTrace {
+  name: string;
+  ms: number;
+  /** Output tokens, reasoning included. Zero for a step with no model call. */
+  outputTokens: number;
+  /** The part of `outputTokens` that was reasoning, where it was reported. */
+  reasoningTokens?: number;
 }
 
 /**

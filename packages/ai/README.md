@@ -51,6 +51,13 @@ file too large for a response of its own can fail a build for size. A
 follow-up is a patch: the outline names the files to add, replace and
 delete, and every other file carries over.
 
+The model writes the page, not the boilerplate (D71). `scaffold.ts` writes
+`package.json`, `index.html`, `vite.config.ts`, `tsconfig.json`,
+`src/main.tsx`, `src/lib/utils.ts` and `README.md` from `stack.ts` and the
+outline's title, description and dependencies, declaring every package the
+files import; `applyBoundedPatch` puts them in place. The prompts' FILES
+WRITTEN FOR YOU section describes them from the same constants.
+
 `BoundedPlanProvider` runs every step in turn behind the `ModelProvider`
 contract (the CLI below, the eval harness, the repair turn), and
 `runBoundedBuild` takes the step runner as a hook, which is how the Worker

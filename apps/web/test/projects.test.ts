@@ -772,6 +772,8 @@ describe('deleting a project', () => {
     await w.db
       .prepare(
         `INSERT INTO generation_run_traces
+           (run_id, project_id, stop, model, input_tokens, cached_input_tokens,
+            output_tokens, context_window, cost_micro_usd, elapsed_ms, ended_at)
            VALUES ('trace-1', ?1, 'applied', 'm', 1, 0, 1, 100, 5, 10, ?2)`,
       )
       .bind(doomed.id, '2026-09-28T12:00:00.000Z')

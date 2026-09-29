@@ -300,6 +300,38 @@ Decided while implementing it, and Chris's to reverse:
 - A project cannot be deleted while its build is being checked, since a
   repair may still promote into it.
 
+**Vibld writes its own boilerplate; the model writes the page.** Chris
+decided on 2026-09-29 (D71, "Template ours only"). A bounded build no longer
+asks the model for `package.json`, `index.html`, `vite.config.ts`,
+`tsconfig.json`, `src/main.tsx`, `src/lib/utils.ts` or `README.md`: about
+16% of a build's visible output, plus the reasoning behind it, went on files
+with one right answer, and the tsconfig was where the prompt spent the most
+words preventing a build error. `applyBoundedPatch` writes them from
+`packages/ai/src/scaffold.ts`: the packages and ranges in `stack.ts`, the
+title and description the outline now returns, and every package the
+project's files import, declared at the range the outline gave in its new
+`dependencies` list, at `stack.ts`'s range for an optional package such as
+cmdk, or at `latest` when nobody named one, so a stray import installs
+rather than buying a repair. The model still writes `src/styles.css`,
+`src/App.tsx` (now a default export, which the templated `main.tsx`
+renders), `src/lib/motion.ts`, pages, components and the shadcn/ui
+primitives; no shadcn/ui source is vendored. The outline and file-group
+prompts replace REQUIRED FILES and the tsconfig paragraph with FILES WRITTEN
+FOR YOU, which states the alias, the scripts and each file's exports from
+the same constants the templates use; an outline that plans one of these
+files anyway has it dropped, and a step that writes one has it discarded. A
+follow-up keeps the project's own copies, so a hand edit is not undone. It
+changes `package.json` only to add a package a file newly imports, and
+`index.html` only when the request renames or re-describes the site: the
+outline then gives a new title or description (it is told to repeat the
+current ones otherwise), and only the `<title>` text and the meta
+description's content are replaced, escaped, leaving the rest of a
+hand-edited file as it was. A repair never renames. The
+single-response prompt, used only by runs enqueued before bounded builds, is
+unchanged. The output still installs and builds with plain npm (ADR-0002):
+the eval's stub now takes its configuration from the same templates, so
+CI's build of it builds them.
+
 ### Resolved 2026-09-29
 
 **Builds are generated in bounded steps, and follow-ups as patches.** Every
