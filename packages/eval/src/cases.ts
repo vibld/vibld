@@ -1,6 +1,6 @@
 import type { GenerationPlan, ProjectFile } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
-import { scaffoldFiles, tokenCss } from '@vibld/ai';
+import { tokenCss, withScaffold } from '@vibld/ai';
 
 /**
  * The versioned prompt set.
@@ -221,7 +221,7 @@ export const CASES: EvalCase[] = [
  * older cases happened to assert: the files a model writes (src/App.tsx,
  * src/styles.css, and the DESIGN.md a real build renders from its spec),
  * and Vibld's own files from the same templates a real build uses (D71,
- * `scaffoldFiles`), so CI's build of this stub installs and compiles exactly
+ * `withScaffold`), so CI's build of this stub installs and compiles exactly
  * the package.json, tsconfig.json and vite.config.ts a real generation gets.
  * A stub that produces less than the contract demands is not a stand-in: it
  * passes cases a real run would fail, and fails cases that ask for a file
@@ -265,12 +265,46 @@ export function stubPlan(testCase: EvalCase): GenerationPlan {
     },
     {
       path: 'src/App.tsx',
-      content: `import { ArrowRight } from 'lucide-react';\nimport { MotionConfig, motion } from 'motion/react';\nimport { cn } from '@/lib/utils';\n\nexport default function App() {\n  return (\n    <MotionConfig reducedMotion="user">\n      <motion.main\n        className={cn('bg-background text-foreground')}\n        initial={{ opacity: 0, y: 16 }}\n        animate={{ opacity: 1, y: 0 }}\n      >\n        ${testCase.id} <ArrowRight aria-hidden="true" className="size-4" />\n      </motion.main>\n    </MotionConfig>\n  );\n}\n`,
+      // Every animated background (D75), so CI compiles each templated one
+      // under the project's own tsconfig, as a build that imports it would.
+      content: `import { ArrowRight } from 'lucide-react';
+import { MotionConfig, motion } from 'motion/react';
+import { AuroraMesh } from '@/components/backdrop/aurora-mesh';
+import { FlowLines } from '@/components/backdrop/flow-lines';
+import { GrainBlobs } from '@/components/backdrop/grain-blobs';
+import { ParticleField } from '@/components/backdrop/particle-field';
+import { cn } from '@/lib/utils';
+
+export default function App() {
+  return (
+    <MotionConfig reducedMotion="user">
+      <motion.main
+        className={cn('relative isolate min-h-screen overflow-hidden bg-background text-foreground')}
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <AuroraMesh className="opacity-80" speed={0.6} />
+        ${testCase.id} <ArrowRight aria-hidden="true" className="size-4" />
+        <div className="relative isolate h-40 overflow-hidden">
+          <ParticleField count={800} colors={['var(--accent)']} />
+        </div>
+        <div className="relative isolate h-40 overflow-hidden">
+          <GrainBlobs grain={0.1} />
+        </div>
+        <div className="relative isolate h-40 overflow-hidden">
+          <FlowLines speed={0} />
+        </div>
+      </motion.main>
+    </MotionConfig>
+  );
+}
+`,
     },
   ];
-  const files: ProjectFile[] = [
-    ...own,
-    ...scaffoldFiles({ title: testCase.id, description: subject }, own),
-  ];
+  const files = withScaffold(
+    own,
+    { title: testCase.id, description: subject },
+    false,
+  );
   return { summary: `Static site for: ${testCase.prompt}`, files };
 }

@@ -29,6 +29,7 @@ import {
 import { styleDirection } from './style-presets.ts';
 import type { StylePresetId } from './style-presets.ts';
 import { patternGuidance } from './patterns.ts';
+import { backdropGuidance } from './backdrops.ts';
 import { motionGuidance } from './motion.ts';
 import { surfaceGuidance } from './surfaces.ts';
 import { diagramGuidance } from './diagrams.ts';
@@ -833,6 +834,12 @@ Preserve anything the request does not ask you to change.`,
   // fields, and this says how to paint one.
   const surfaces = surfaceGuidance(request.prompt);
   if (surfaces) parts.push(surfaces);
+
+  // The animated backgrounds are templated components rather than
+  // technique, offered only when the request asks for a moving background
+  // (D75, D77). Not suppressed by a preset: the request asked for it.
+  const backdrops = backdropGuidance(request.prompt);
+  if (backdrops) parts.push(backdrops);
 
   // A diagram is its own deliverable rather than a treatment of the page, so
   // it is not suppressed by a preset either. The craft rules are what stop

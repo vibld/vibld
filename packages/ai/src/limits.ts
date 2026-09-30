@@ -178,9 +178,11 @@ export const MAX_CHOSEN_MOCKUP_SECTION_CHARS = 28_500;
  * apps/web measures the real text against it, in both directions.
  *
  * Raised from 32,000 when the Motion typing rules (D66 follow-up) took the
- * longest system prompt plus guidance to about 32,200.
+ * longest system prompt plus guidance to about 32,200, and from 34,000 when
+ * the animated backgrounds' guidance (D75, up to about 2,050 characters with
+ * all four offered) took it to about 34,900.
  */
-export const MAX_BUILD_FIXED_PROMPT_CHARS = 34_000;
+export const MAX_BUILD_FIXED_PROMPT_CHARS = 36_000;
 
 /**
  * The longest reference URL a request may carry (internal PR 189 review).

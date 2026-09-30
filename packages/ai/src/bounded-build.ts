@@ -64,6 +64,7 @@ import type {
 import {
   fixedScaffoldFiles,
   isScaffoldPath,
+  isTemplatedPath,
   isPackageName,
   scaffoldText,
   withScaffold,
@@ -563,7 +564,7 @@ export function normaliseOutline(
     if (entry.path === DESIGN_MD_PATH && (outline.spec || options.keepSpec)) {
       continue;
     }
-    if (isScaffoldPath(entry.path)) continue;
+    if (isTemplatedPath(entry.path)) continue;
     planned.add(entry.path);
     manifest.push({
       ...entry,
@@ -918,10 +919,10 @@ ${keepSpec ? KEPT_SPEC_PATCH_INSTRUCTION : PATCH_INSTRUCTION}`);
         // model found it needed. A file planned for another group is that
         // group's to write, DESIGN.md is never the model's when there is a
         // spec to render it from, and a templated file is never the
-        // model's at all (D71).
+        // model's at all (D71), nor is an animated background (D75).
         reply.files.filter(
           (file) =>
-            !isScaffoldPath(file.path) &&
+            !isTemplatedPath(file.path) &&
             (wanted.has(file.path) ||
               (!input.plan.manifest.some((entry) => entry.path === file.path) &&
                 !input.written.some((done) => done.path === file.path) &&

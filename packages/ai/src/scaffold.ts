@@ -1,5 +1,6 @@
 import type { ProjectFile } from '@vibld/core';
 
+import { backdropFiles, isBackdropPath } from './backdrops.ts';
 import {
   OPTIONAL_PACKAGES,
   STACK_PACKAGES,
@@ -47,6 +48,14 @@ const SCAFFOLD_SET = new Set<string>(SCAFFOLD_PATHS);
 
 export function isScaffoldPath(path: string): path is ScaffoldPath {
   return SCAFFOLD_SET.has(path);
+}
+
+/**
+ * Whether Vibld writes the file at `path` rather than the model: a scaffold
+ * file, or an animated background (`backdrops.ts`).
+ */
+export function isTemplatedPath(path: string): boolean {
+  return isScaffoldPath(path) || isBackdropPath(path);
 }
 
 /** A package beyond the stack, as an outline declares it. */
@@ -765,27 +774,29 @@ export function withImportedDependencies(
  * `files` with Vibld's own files in place.
  *
  * A new project gets every templated file, replacing any file at those
- * paths. A follow-up keeps the ones its project already has, so an edit
- * made to them since is not undone. Two things change in place: package.json
+ * paths, and the animated backgrounds its files import (`backdropFiles`).
+ * A follow-up keeps the ones its project already has, so an edit made to
+ * them since is not undone. Two things change in place: package.json
  * declares a package a file now imports, and index.html takes a new title
  * or description when the follow-up gave one (`retitle`,
  * `retitledIndexHtml`). A templated file the project lacks (one generated
- * before D71 may) is written.
+ * before D71 may) is written, and so is a backdrop a file now imports.
  */
 export function withScaffold(
   files: readonly ProjectFile[],
   input: ScaffoldInput,
   followUp: boolean,
 ): ProjectFile[] {
-  const templated = scaffoldFiles(input, files);
   if (!followUp) {
-    return [
-      ...files.filter((file) => !isScaffoldPath(file.path)),
-      ...templated,
-    ];
+    const own = files.filter((file) => !isTemplatedPath(file.path));
+    const withBackdrops = [...own, ...backdropFiles(own)];
+    return [...withBackdrops, ...scaffoldFiles(input, withBackdrops)];
   }
   const present = new Set(files.map((file) => file.path));
-  const added = templated.filter((file) => !present.has(file.path));
+  const added = [
+    ...scaffoldFiles(input, files),
+    ...backdropFiles(files),
+  ].filter((file) => !present.has(file.path));
   // Read over the files it adds as well: a utils.ts written into a project
   // that lacked one imports clsx, which that project may not declare.
   const all = [...files, ...added];

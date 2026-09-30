@@ -136,6 +136,7 @@ export {
 export type { DesignSpec, MotionEntry } from './design-spec.ts';
 export {
   MAX_FINDINGS_IN_PROMPT,
+  canvasFindings,
   checkDesign,
   describeFindings,
   normalizeCssValue,
@@ -239,6 +240,18 @@ export {
   surfaceGuidance,
 } from './surfaces.ts';
 export type { SurfaceTechnique } from './surfaces.ts';
+export {
+  BACKDROPS,
+  BACKDROP_DIR,
+  BACKDROP_IMPORT,
+  backdropFiles,
+  backdropGuidance,
+  backdropPath,
+  importedBackdrops,
+  isBackdropPath,
+  selectBackdrops,
+} from './backdrops.ts';
+export type { BackdropId, BackdropRecipe } from './backdrops.ts';
 export {
   DIAGRAM_CRAFT,
   DIAGRAM_TYPES,
@@ -431,6 +444,7 @@ export {
   extraDependencies,
   importedPackages,
   isScaffoldPath,
+  isTemplatedPath,
   scaffoldFiles,
   scaffoldText,
   withImportedDependencies,

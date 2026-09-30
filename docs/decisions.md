@@ -238,6 +238,21 @@ and a build with no style picked is exactly what it was.
 background layer that take the project's palette, with no video files and no
 generation spend. The upstream library's video loops are not used.
 
+**How the animated background layer works** (D75, D77). Four backgrounds
+live in `packages/ai/src/backdrops.ts`: AuroraMesh (a WebGL gradient field),
+ParticleField (a WebGL point galaxy), GrainBlobs (soft 2D blobs under film
+grain) and FlowLines (drifting 2D ribbons). They are templated files, like
+the scaffold (D71): the model never plans, writes or edits one, and
+`withScaffold` writes `src/components/backdrop/<id>.tsx` into a project
+only when one of its files imports it. A request is told they exist only
+when it asks for a moving background, by name ("aurora", "particles",
+"grain", "flowing lines") or in general ("animated background", "heavy
+animation"). Each paints from the project's colour tokens, caps the pixel
+ratio at 2, pauses off screen and in a hidden tab, draws one still frame
+under reduced motion, and keeps a CSS gradient where WebGL is missing. A
+canvas loop the model writes itself is held to the same four conventions by
+warnings in `checkDesign` (`canvasFindings`), never errors.
+
 ### Resolved 2026-09-29 (later)
 
 **Every call taken on Chris's behalf on 2026-09-29 stands.** Chris accepted

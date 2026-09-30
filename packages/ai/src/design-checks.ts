@@ -1,3 +1,4 @@
+import { isBackdropPath } from './backdrops.ts';
 import { blockTracker, compareLayers, oklchToRgb } from './contrast.ts';
 import { DESIGN_MD_PATH, readDesignSpec } from './design-spec.ts';
 import type { DesignSpec, MotionEntry } from './design-spec.ts';
@@ -4122,6 +4123,85 @@ function scriptedMotionAnswered(
       preferenceGovernsMotion(file.content, 'scripted'),
     ),
   );
+}
+
+/**
+ * The conventions a hand-written canvas animation keeps, read file by file
+ * (D75): the four things the animated backgrounds in `backdrops.ts` are
+ * written to settle, and that a canvas or WebGL loop written from memory
+ * tends to leave out. Those templated files are skipped: Vibld wrote them,
+ * and a repair cannot change them.
+ *
+ * Warnings, never errors. Each is a reading of one file, and a loop can be
+ * paused or capped from another; a page with a heavy background still
+ * builds.
+ */
+export function canvasFindings(
+  files: readonly ProjectFileLike[],
+): DesignFinding[] {
+  const findings: DesignFinding[] = [];
+  for (const file of files) {
+    if (!/\.[cm]?[jt]sx?$/.test(file.path) || isBackdropPath(file.path)) {
+      continue;
+    }
+    const code = file.content;
+    const draws = /\.getContext\s*\(/.test(code);
+    const loops = /\brequestAnimationFrame\s*\(/.test(code);
+    if (/\bdevicePixelRatio\b/.test(code)) {
+      // Math.min(window.devicePixelRatio, 2), either way round, or a cap
+      // named with any number up to 2.
+      const capped =
+        /Math\.min\s*\([^()]*\bdevicePixelRatio\b[^()]*,\s*(?:1(?:\.\d+)?|2(?:\.0+)?)\s*\)/.test(
+          code,
+        ) ||
+        /Math\.min\s*\(\s*(?:1(?:\.\d+)?|2(?:\.0+)?)\s*,[^()]*\bdevicePixelRatio\b/.test(
+          code,
+        );
+      if (!capped) {
+        findings.push({
+          severity: 'warning',
+          check: 'canvas',
+          detail: `${file.path} sizes a canvas by devicePixelRatio without a cap. Use Math.min(window.devicePixelRatio, 2): a 3x phone otherwise draws more than twice the pixels for no visible gain.`,
+        });
+      }
+    }
+    if (draws && loops) {
+      if (
+        !/\bvisibilitychange\b|\bdocument\.hidden\b|\bvisibilityState\b|\bIntersectionObserver\b|\buseInView\b/.test(
+          code,
+        )
+      ) {
+        findings.push({
+          severity: 'warning',
+          check: 'canvas',
+          detail: `${file.path} redraws a canvas every frame and never stops. Pause it when it is off screen (IntersectionObserver) and when the tab is hidden (visibilitychange).`,
+        });
+      }
+      if (!/prefers-reduced-motion|\buseReducedMotion\b/.test(code)) {
+        findings.push({
+          severity: 'warning',
+          check: 'reduced-motion',
+          detail: `${file.path} animates a canvas with no reading of the reduced-motion preference. Draw one still frame, and no loop, when (prefers-reduced-motion: reduce) matches.`,
+        });
+      }
+    }
+    for (const match of code.matchAll(
+      /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*[\w$.?]+\.getContext\s*\(\s*['"](?:webgl2?|experimental-webgl)['"]/g,
+    )) {
+      const name = escapeRegExp(match[1]!);
+      const checked = new RegExp(
+        `!\\s*${name}\\b|\\b${name}\\s*[!=]==?\\s*(?:null|undefined)\\b|\\b(?:null|undefined)\\s*[!=]==?\\s*${name}\\b|\\bif\\s*\\(\\s*${name}\\s*\\)|\\b${name}\\s*\\?\\.|\\b${name}\\s*&&`,
+      ).test(code.slice(match.index! + match[0].length));
+      if (!checked) {
+        findings.push({
+          severity: 'warning',
+          check: 'canvas',
+          detail: `${file.path} uses the WebGL context in ${match[1]} without checking it exists. getContext returns null where WebGL is off; return early then, and leave a CSS background in its place.`,
+        });
+      }
+    }
+  }
+  return findings;
 }
 
 function universalFindings(
@@ -10002,6 +10082,7 @@ export function checkDesign(
   const spec = design ? readDesignSpec(design.content) : undefined;
 
   const findings = universalFindings(clean, css, source, files);
+  findings.push(...canvasFindings(clean));
   if (options.mediaPaths) {
     findings.push(
       ...mediaFindings(options.mediaPaths, files, css + '\n' + source),

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { BACKDROPS, backdropPath, isBackdropPath } from '../src/backdrops.ts';
 import {
   BoundedBuilder,
   BoundedPlanProvider,
@@ -476,6 +477,24 @@ describe('completing an outline', () => {
     );
     const paths = plan.manifest.map((item) => item.path);
     for (const path of SCAFFOLD_PATHS) assert.ok(!paths.includes(path), path);
+    assert.ok(paths.includes('src/App.tsx'));
+  });
+
+  it('never plans an animated background, which Vibld writes when a file imports it (D75)', () => {
+    const plan = normaliseOutline(
+      {
+        ...outline,
+        manifest: [
+          entry('src/components/backdrop/aurora-mesh.tsx', 'large'),
+          entry('src/App.tsx', 'medium', [
+            'src/components/backdrop/aurora-mesh.tsx',
+          ]),
+        ],
+      },
+      [],
+    );
+    const paths = plan.manifest.map((item) => item.path);
+    assert.ok(!paths.includes('src/components/backdrop/aurora-mesh.tsx'));
     assert.ok(paths.includes('src/App.tsx'));
   });
 
@@ -1046,6 +1065,49 @@ describe("Vibld's own files (D71)", () => {
     assert.equal(
       (JSON.parse(pkg.content) as { name: string }).name,
       'crumb-co',
+    );
+  });
+
+  it('takes no animated background from the model, and writes the one a file imports (D75)', async () => {
+    const inner = createScriptedBuildClient(withCombobox());
+    const client = {
+      id: inner.id,
+      createPlan: async (request: Parameters<typeof inner.createPlan>[0]) => {
+        const completion = await inner.createPlan(request);
+        const reply = completion.plan as { files?: unknown[] } | null;
+        if (reply?.files) {
+          reply.files.push({
+            path: 'src/components/backdrop/aurora-mesh.tsx',
+            content: 'export const AuroraMesh = () => null;',
+          });
+          reply.files.push({
+            path: 'src/components/Hero.tsx',
+            content:
+              'import { AuroraMesh } from \'@/components/backdrop/aurora-mesh\';\nexport const Hero = () => <section className="relative isolate"><AuroraMesh /></section>;\n',
+          });
+        }
+        return completion;
+      },
+    };
+    const result = await runBoundedBuild(
+      new BoundedBuilder(client, { model: MODEL }),
+      { prompt: 'A bakery.', budget: BUDGET },
+      inProcess(),
+    );
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.ok(
+      !result.patch!.files.some((item) => isBackdropPath(item.path)),
+      'an animated background was taken from the model',
+    );
+    const plan = applyBoundedPatch(result.patch!, undefined);
+    const aurora = BACKDROPS.find((recipe) => recipe.id === 'aurora-mesh')!;
+    assert.equal(
+      plan.files.find((item) => item.path === backdropPath(aurora))?.content,
+      aurora.source,
+    );
+    assert.equal(
+      plan.files.filter((item) => isBackdropPath(item.path)).length,
+      1,
     );
   });
 });
