@@ -44,7 +44,7 @@ export const USE_CASES: UseCase[] = [
     title: 'A site for a small business',
     description:
       'A cafe, a practice, a studio or a shop: what to ask vibld for, what it hands back, and real sites it built from one sentence.',
-    lead: 'Opening hours, services, a way to find you and a way to get in touch. The site most small businesses actually need is small, and it should be yours to keep.',
+    lead: 'Opening hours, services, a way to find you and a way to get in touch.',
     asks: [
       'A site for a dental practice with opening hours, services and directions.',
       'A cafe site with the menu, opening hours and a map link.',
@@ -53,7 +53,7 @@ export const USE_CASES: UseCase[] = [
     produces: [
       'A one-page or few-page React and TypeScript site on Vite, styled with Tailwind and shadcn/ui components.',
       'Sections for what you named (hours, services, directions), with the copy written for your business rather than lorem ipsum.',
-      'A DESIGN.md recording the colours, type and breakpoints it chose, which the build is checked against.',
+      'A DESIGN.md recording the colors, type and breakpoints it chose, which the build is checked against.',
     ],
     limits: [
       'A contact or booking form has no server behind it until you add one. The builder is told to say so on the page rather than pretend it sends.',
@@ -69,7 +69,7 @@ export const USE_CASES: UseCase[] = [
     title: 'A portfolio',
     description:
       'A portfolio for your work, built by vibld as a plain React project you can host anywhere: what to ask for, what you get, and a real example.',
-    lead: 'Big images, a short bio, and one page for each body of work. A portfolio is mostly layout and restraint, which is what a named style direction is for.',
+    lead: 'Big images, a short bio, and one page for each body of work.',
     asks: [
       'A portfolio for a freelance illustrator with a gallery and a short bio.',
       'A portfolio for my ceramics, big images, one page per series.',
@@ -93,7 +93,7 @@ export const USE_CASES: UseCase[] = [
     title: 'A landing page for a software product',
     description:
       'A landing page for a SaaS product, with pricing, an FAQ and a sign-up form: what to ask vibld for, what it produces, and a real example.',
-    lead: 'A headline, the three things the product does, a pricing table and a form. A landing page is a conventional shape, and a conventional codebase is the right thing to hand a developer afterwards.',
+    lead: 'A headline, the three things the product does, a pricing table and a form.',
     asks: [
       'A landing page for a cybersecurity SaaS with pricing, FAQ and a contact form.',
       'A landing page for an invoicing tool, with a pricing table and a sign-up form.',
@@ -117,7 +117,7 @@ export const USE_CASES: UseCase[] = [
     title: 'A page for an event or a booking',
     description:
       'A page for a conference, a class or a fair, with a schedule and a way to sign up: what to ask vibld for, what it produces, and a real example.',
-    lead: 'A date, a schedule, who is speaking or teaching, and a way to take part. Event pages are short-lived, which is a good reason to want one quickly and a bad reason to be locked into a platform for it.',
+    lead: 'A date, a schedule, who is speaking or teaching, and a way to take part.',
     asks: [
       'A one-page site for a two-day developer conference with a schedule and speakers.',
       'A site for my Saturday wheel-throwing classes. People pick a two-hour slot and see a confirmation.',
@@ -125,7 +125,7 @@ export const USE_CASES: UseCase[] = [
     ],
     produces: [
       'A schedule laid out for the days you describe, with speakers or sessions as separate components.',
-      'A slot picker or signup form as its own React component, with labelled fields, which the design checks look for.',
+      'A slot picker or signup form as its own React component, with labeled fields, which the design checks look for.',
       'A site you can publish at a vibld address for the weeks it matters, then take down, or export and host yourself.',
     ],
     limits: [
@@ -141,7 +141,7 @@ export const USE_CASES: UseCase[] = [
     title: 'A small tool or app',
     description:
       'A small app that runs in the browser, such as a budget tracker or a recipe box: what to ask vibld for, what it produces, and real examples.',
-    lead: 'Add things, change them, see a total, keep it between visits. A lot of useful software is one screen and a list, and it should not need an account somewhere to keep working.',
+    lead: 'Add things, change them, see a total, keep it between visits.',
     asks: [
       'A personal budget tracker: add income and expenses with a category and a date, see the month’s balance, and export the month as CSV.',
       'A recipe box: save recipes with ingredients and steps, search them, and scale the servings.',

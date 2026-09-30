@@ -16,9 +16,8 @@ export default function Configuration() {
         Two kinds of value. A <strong>var</strong> is public: it ships in the
         Worker’s <code>wrangler.jsonc</code> and is meant to be read. A{' '}
         <strong>secret</strong> is set out of band, with{' '}
-        <code>wrangler secret put</code>, and never committed. Putting one in
-        the other’s place is the mistake this page exists to prevent. Everything
-        here is the builder’s unless it says otherwise;{' '}
+        <code>wrangler secret put</code>, and never committed. Everything here
+        is the builder’s unless it says otherwise;{' '}
         <a
           href={`${SITE.repoUrl}/blob/main/apps/web/.env.example`}
           rel="noopener noreferrer"
@@ -37,9 +36,8 @@ export default function Configuration() {
 
       <h2>Secrets</h2>
       <p>
-        Every one of these is optional in the same sense: unset means the
-        feature it unlocks reports itself unavailable. None of them ever opens
-        anything up by being absent.
+        Each is optional: unset means the feature it unlocks reports itself
+        unavailable, never that anything opens up.
       </p>
       <ul>
         <li>
@@ -97,8 +95,7 @@ export default function Configuration() {
         webhook secret, pushing still works but <code>/api/github/webhook</code>{' '}
         answers 503, so a merged pull request goes on being shown as open. The
         private key is a PEM file that downloads once; it belongs in a secret
-        store and nowhere else, not in an email and not pasted into a chat
-        window.
+        store and nowhere else.
       </p>
 
       <h2>Sign-in</h2>
@@ -136,9 +133,8 @@ export default function Configuration() {
         <li>
           <code>VIBLD_PROVIDER</code>: <code>anthropic</code>,{' '}
           <code>deepseek</code> or <code>openai</code>, the provider that
-          answers when no model is named. Explicit beats inferred, so set it
-          rather than relying on which key happens to be present. Any other
-          value is an error.
+          answers when no model is named. Set it rather than relying on which
+          key is present. Any other value is an error.
         </li>
         <li>
           <code>VIBLD_MODEL</code>: the default model, which beats{' '}
@@ -146,8 +142,8 @@ export default function Configuration() {
           <code>wrangler.jsonc</code> sets <code>VIBLD_PROVIDER</code> to{' '}
           <code>openai</code> and this to <code>gpt-6-sol</code>. If your keys
           cannot serve the model named here, the builder does not refuse: it
-          falls back to the first model it can serve in catalogue order, which
-          on an Anthropic-only deployment is Claude Fable 5.1, the dearest
+          falls back to the first model it can serve in catalog order, which on
+          an Anthropic-only deployment is Claude Fable 5.1, the dearest
           Anthropic model. Set it to a model your key serves, or delete it to
           get the provider’s default. On the command line, a set{' '}
           <code>VIBLD_MODEL</code> picks the provider outright.
@@ -175,11 +171,10 @@ export default function Configuration() {
           <code>VIBLD_SIGNUP_CREDIT_USD_CENTS</code> and{' '}
           <code>VIBLD_SIGNUP_CREDIT_FROM</code>: the one-time grant for a new
           account, and the instant from which accounts count as new. The second
-          has no default on purpose. Any default early enough to catch new
-          accounts also catches every account that already exists, and this is
-          money. The grant waits for a card saved through Stripe, so it needs
-          billing configured and the Stripe webhook subscribed to{' '}
-          <code>checkout.session.completed</code> or{' '}
+          has no default: any default early enough to catch new accounts would
+          also catch every existing one. The grant waits for a card saved
+          through Stripe, so it needs billing configured and the Stripe webhook
+          subscribed to <code>checkout.session.completed</code> or{' '}
           <code>setup_intent.succeeded</code>; without Stripe nobody gets it.
         </li>
       </ul>
@@ -234,15 +229,10 @@ export default function Configuration() {
       <p>
         <code>VIBLD_USD_MICRO_PER_INPUT_TOKEN</code> and{' '}
         <code>VIBLD_USD_MICRO_PER_OUTPUT_TOKEN</code> override the running
-        model’s own rate. There is one good reason to set them, which is that
-        the built-in rate for your model is wrong.
-      </p>
-      <p>
-        Setting them for any other reason has a specific failure that has
-        already happened once here: pinning one provider’s prices while running
-        another’s model ceilinged every run at roughly forty times its real
-        cost, which turned a budget that afforded forty generations a day into
-        two.
+        model’s own rate. Set them only if the built-in rate for your model is
+        wrong. Pinning one provider’s prices while running another’s model has
+        already ceilinged every run here at roughly forty times its real cost,
+        turning a budget of forty generations a day into two.
       </p>
       <ul>
         <li>

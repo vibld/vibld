@@ -353,8 +353,8 @@ export default function Template() {
 
           <h3>As vibld’s tokens</h3>
           <p>
-            The palette on the fifteen colour tokens vibld styles a project
-            with, each text colour on the fill it is read on.
+            The palette on the 15+ color tokens vibld styles a project with,
+            each text color on the fill it is read on.
             {derived.size > 0
               ? ' Marked tokens are solved from the palette, because no swatch held that role at 4.5:1.'
               : ''}

@@ -24,7 +24,7 @@ export default function HowItWorks() {
       <PageHead
         eyebrow="How it works"
         title="From a sentence to a project you own"
-        lead="Seven steps. Each one leaves something you can look at before the next one starts, and nothing becomes public until you publish it yourself."
+        lead="Seven steps, each leaving something you can look at before the next starts. Nothing is public until you publish it."
       >
         <p className="lb-honest">
           <PencilIcon />
@@ -211,7 +211,7 @@ function StepArt({ step }: { step: FlowStep }) {
           </div>
           <div>
             <dt>motion</dt>
-            <dd>short ease-out; honours reduced motion</dd>
+            <dd>short ease-out; honors reduced motion</dd>
           </div>
         </dl>
       );

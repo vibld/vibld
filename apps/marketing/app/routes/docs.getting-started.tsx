@@ -15,7 +15,7 @@ export default function GettingStarted() {
       <p>
         vibld turns a description of an application into a real project: a
         conventional codebase in files you can read, running on a stack you
-        already recognise. This page is the first twenty minutes.
+        already recognize.
       </p>
 
       <h2>1. Sign in</h2>
@@ -24,9 +24,8 @@ export default function GettingStarted() {
         <a href={SITE.appUrl} rel="noopener noreferrer">
           app.vibld.com
         </a>
-        . Accounts are email and password or a linked provider, whichever you
-        prefer. Nothing in the builder mounts until you are signed in, including
-        the part that would start spending money on your behalf.
+        . Accounts are email and password or a linked provider. Nothing in the
+        builder mounts until you are signed in.
       </p>
       <p>
         vibld is in public beta, and anyone can sign up at{' '}
@@ -35,10 +34,9 @@ export default function GettingStarted() {
         </a>
         . A new account can get <strong>$1.00 of model spend</strong> by adding
         a card: the <strong>Add a card</strong> button above the composer opens
-        a Stripe page that saves the card and charges nothing. That is a
-        one-time grant, one per account and one per card, and it does not reset.
-        It is enough to build something small and see what the output looks like
-        before deciding whether to pay for anything.
+        a Stripe page that saves the card and charges nothing. It is a one-time
+        grant, one per account and one per card, and it does not reset. It is
+        enough to build something small.
       </p>
 
       <h2>2. Describe what you want</h2>
@@ -56,20 +54,20 @@ export default function GettingStarted() {
       <ul>
         <li>
           <strong>Style</strong> is a visual direction from the{' '}
-          <a href="/styles">style catalogue</a>. A row of moods (luxe, calm,
+          <a href="/styles">style catalog</a>. A row of moods (luxe, calm,
           technical, organic, playful, brutal) narrows the list, and the styles
           whose moods your message names are listed as{' '}
           <strong>Suggested for your request</strong>. Nothing is picked for
           you. A moving background is asked for in the message instead: say
           “animated background”, or name one (aurora, particles, grain, flowing
           lines), and the build can use one of four that vibld draws in code
-          from the project’s colours.
+          from the project’s colors.
         </li>
         <li>
           <strong>Reference</strong> is the address of a page to start from.
-          vibld reads its text, colours, fonts and spacing and adapts them
-          rather than copying. It goes with the message it is sent with, and the
-          field clears once that message is sent.
+          vibld reads its text, colors, fonts and spacing and adapts them rather
+          than copying. It goes with the message it is sent with, and the field
+          clears once that message is sent.
         </li>
         <li>
           <strong>Media</strong> is your images and video (JPEG, PNG, WebP,
@@ -108,18 +106,18 @@ export default function GettingStarted() {
       </p>
       <p>
         There is no step where you accept a build. While a first build runs, the
-        Preview tab shows a draft of the page, labelled as one. The code is
-        shown as soon as it exists, badged <strong>Checking the build</strong>{' '}
-        while vibld installs and builds it, and{' '}
-        <strong>Fixing a problem</strong> while one repair runs. The badge goes
-        when the check passes. <strong>Does not build</strong> means the check
-        failed: that version is still your current one, and you can ask for a
-        fix. <strong>Not checked</strong> means the check could not finish.
+        Preview tab shows a draft of the page, labeled as one. The code is shown
+        as soon as it exists, badged <strong>Checking the build</strong> while
+        vibld installs and builds it, and <strong>Fixing a problem</strong>{' '}
+        while one repair runs. The badge goes when the check passes.{' '}
+        <strong>Does not build</strong> means the check failed: that version is
+        still your current one, and you can ask for a fix.{' '}
+        <strong>Not checked</strong> means the check could not finish.
       </p>
       <p>
         A build keeps going if you close the tab, lock your phone or reload, and
         reopening the project picks up the result. Only <strong>Cancel</strong>{' '}
-        stops it, and a cancelled build is charged for what it used up to that
+        stops it, and a canceled build is charged for what it used up to that
         point.
       </p>
       <p>
@@ -146,12 +144,11 @@ export default function GettingStarted() {
           mostly about what each pane does <em>not</em> show.
         </li>
         <li>
-          <a href="/docs/credits-and-plans">Credits and plans</a>, if you want
-          to know what a run costs before you make several.
+          <a href="/docs/credits-and-plans">Credits and plans</a>, for what a
+          run costs.
         </li>
         <li>
-          <a href="/docs/taking-your-code">Taking your code with you</a>, which
-          is the point of the whole exercise.
+          <a href="/docs/taking-your-code">Taking your code with you</a>.
         </li>
       </ul>
     </DocPage>

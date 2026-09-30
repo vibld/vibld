@@ -121,8 +121,7 @@ function Hero() {
           </p>
           <AskForm />
           <p className="lb-ask__note">
-            A demonstration of the flow, drawn in this page. It does not call a
-            model.{' '}
+            A demonstration drawn in this page. It does not call a model.{' '}
             <a className="lb-link" href={SITE.signUpUrl}>
               Sign up
             </a>{' '}
@@ -144,7 +143,7 @@ function HowItWorks() {
           eyebrow="How it works"
           id="how-title"
           title="Seven steps, and you can see every one"
-          lede="Each step leaves something behind you can look at: a spec, files, a check report, a preview. Nothing becomes public until you publish it yourself."
+          lede="Each step leaves something you can look at: a spec, files, a check report, a preview. Nothing is public until you publish it."
         />
         <FlowStepper />
         <FlowList />
@@ -184,7 +183,7 @@ function Styles() {
           eyebrow="Styles"
           id="styles-title"
           title={`${approxCount(entries.length)} directions the builder actually knows`}
-          lede="Ask for one by name, or ask for three sketches and pick. Each preset carries direction concrete enough to act on, including how it moves. Press a tile to re-skin the site in the builder above."
+          lede="Ask for one by name, or for three sketches and pick. Each preset also says how it moves. Press a tile to re-skin the site in the builder above."
         />
         <ul className="lb-tiles">
           {HOME_TILES.map((id, index) => {
@@ -220,9 +219,9 @@ function Styles() {
           })}
         </ul>
         <p className="lb-note">
-          Directions that are a surface treatment rather than a colour scheme
-          are drawn in one neutral demonstration palette, because the builder
-          leaves their colours to the project.
+          Surface treatments, rather than color schemes, are drawn in one
+          neutral demonstration palette: the builder leaves their colors to the
+          project.
         </p>
         <div className="lb-morestyles">
           <p className="lb-morestyles__label">
@@ -253,7 +252,7 @@ function WhatYouGet() {
           eyebrow="What you get"
           id="features-title"
           title="A project you can read, run and move"
-          lede="No proprietary format that only runs inside vibld, and no required runtime. The core is open source under Apache-2.0."
+          lede="No proprietary format and no required runtime. The core is open source under Apache-2.0."
         />
         <FeatureBento />
         <p className="lb-more-link">
@@ -278,12 +277,11 @@ function UseCases() {
           title="Sites and apps, from one sentence"
           lede={
             <>
-              Some starting points. The{' '}
+              The{' '}
               <Link className="lb-link" to="/examples">
                 examples page
               </Link>{' '}
-              shows real builds exactly as vibld generated them, with the prompt
-              and no hand edits.
+              shows real builds with their prompts and no hand edits.
             </>
           }
         />
@@ -325,7 +323,7 @@ function Pricing() {
           eyebrow="Pricing"
           id="pricing-title"
           title="A price, and the model spend it includes"
-          lede="Model spend is what actually costs money to run, so each plan comes with an amount of it every month. Free comes with some too."
+          lede="Model spend is what costs money to run. Every plan, Free included, comes with some each month."
         />
         <PlanCards />
         <PlanFacts />
@@ -408,9 +406,8 @@ function Join() {
           </p>
           <OpenFacts />
           <p className="lb-closing__small">
-            This page has no customer logos, reviews or user counts. The source
-            is public, so you can read how vibld works before you trust it with
-            anything.{' '}
+            The source is public, so you can read how vibld works before you
+            trust it with anything.{' '}
             <Link className="lb-link" to="/legal/licenses">
               Open-source notices
             </Link>

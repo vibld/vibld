@@ -48,7 +48,7 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | L1   | a              | Clerk replaces Supabase Auth for the Vibld platform. D23 (Supabase for generated apps) is untouched. Amends D30.                                                                                                                                                                                                                                                                                                                             |
 | L2   | a              | Verify the Clerk session JWT against a cached JWKS inside the Worker -- no network call per request.                                                                                                                                                                                                                                                                                                                                         |
 | L3   | a              | The budget ledger and every ownership row key on the Clerk user id. Email is display only.                                                                                                                                                                                                                                                                                                                                                   |
-| L4   | a              | Platform admins come from a `VIBLD_PLATFORM_ADMINS` GitHub Actions secret (comma-separated emails), synced to the Worker on deploy, honoured only for a Clerk-verified primary address.                                                                                                                                                                                                                                                      |
+| L4   | a              | Platform admins come from a `VIBLD_PLATFORM_ADMINS` GitHub Actions secret (comma-separated emails), synced to the Worker on deploy, honored only for a Clerk-verified primary address.                                                                                                                                                                                                                                                       |
 | L5   | a              | Cloudflare Access stays until Clerk sign-in and the L29 abuse controls are both live, then comes off in the same deploy that opens sign-up.                                                                                                                                                                                                                                                                                                  |
 | L6   | a              | Clerk waitlist mode at launch -- anyone can request, only allowlisted emails sign in.                                                                                                                                                                                                                                                                                                                                                        |
 | L7   | a              | Cloudflare Sandbox SDK / Containers for preview execution, as D5 already chose.                                                                                                                                                                                                                                                                                                                                                              |
@@ -74,12 +74,12 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | L25  | a              | R2 for project content, checkpoints and export archives.                                                                                                                                                                                                                                                                                                                                                                                     |
 | L26  | a              | Cloudflare Workflows for durable generation, landing in the same change as sandboxes.                                                                                                                                                                                                                                                                                                                                                        |
 | L27  | --             | Paid infrastructure approved per the list recorded below.                                                                                                                                                                                                                                                                                                                                                                                    |
-| L28  | a              | No row-level security on the control plane; one enforced authorisation choke point plus a test that no query path bypasses it. RLS is mandatory in the generated-app Supabase template, and generation is refused when it is off there.                                                                                                                                                                                                      |
+| L28  | a              | No row-level security on the control plane; one enforced authorization choke point plus a test that no query path bypasses it. RLS is mandatory in the generated-app Supabase template, and generation is refused when it is off there.                                                                                                                                                                                                      |
 | L29  | --             | Turnstile, a per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, and a new account-wide daily ceiling all ship before Access comes off.                                                                                                                                                                                                                                                                        |
 | L30  | a              | Stripe, Clerk (Svix) and the GitHub App webhooks are all signature-verified with a replay window, rejected before the body is parsed.                                                                                                                                                                                                                                                                                                        |
 | L31  | a              | No BYOK storage in the hosted product until a credential vault exists. _(Deployment tokens for L40's auto-publish flow are a separate question, resolved under "Resolved 2026-09-09"; they are not covered by this line.)_                                                                                                                                                                                                                   |
 | L32  | --             | Project content purged 30 days after account deletion; audit log kept 12 months with the user id tombstoned.                                                                                                                                                                                                                                                                                                                                 |
-| L33  | **b**          | Security scanning is run directly, and a trust centre is stood up separately.                                                                                                                                                                                                                                                                                                                                                                |
+| L33  | **b**          | Security scanning is run directly, and a trust center is stood up separately.                                                                                                                                                                                                                                                                                                                                                                |
 | L34  | a              | Hosted model access runs on one shared platform key per provider, gated by our own credit ledger.                                                                                                                                                                                                                                                                                                                                            |
 | L35  | a              | One credit = 1¢ of model spend; the user sees a plain "generations remaining" for the model they chose.                                                                                                                                                                                                                                                                                                                                      |
 | L36  | --             | Free $0/$1 spend, Build $29/$10, Ship $99/$40, top-up $20/$8 expiring 12 months. Recorded in full below.                                                                                                                                                                                                                                                                                                                                     |
@@ -98,8 +98,8 @@ Accepted 2026-09-09 (internal PR 70). L1 and L24 amend D30 -- D23 is untouched b
 | L47  | a              | The self-hosted build ships a local (Docker or child-process) sandbox adapter alongside the Cloudflare one.                                                                                                                                                                                                                                                                                                                                  |
 | L48  | a              | Billing, entitlement and tenancy code ships in the same public repository as the core, inert without secrets.                                                                                                                                                                                                                                                                                                                                |
 | L49  | a              | v0.1.0 is tagged once the hosted alpha is stable and a clean checkout is proven in CI to build, run and generate with only a provider key.                                                                                                                                                                                                                                                                                                   |
-| L50  | a              | The generation pattern/style/SEO catalogue is retrieved on demand -- a handful of relevant patterns injected per request -- extending D13's retrieval work and ADR-0009's bounded-context design, not held permanently in the system prompt.                                                                                                                                                                                                 |
-| L51  | a              | Catalogue v1 is small and real: about 10 marketing page types, 6 SaaS app screens, 5 style presets (glassmorphism, minimalist, brutalist, retro, editorial), built well enough to improve output before it grows.                                                                                                                                                                                                                            |
+| L50  | a              | The generation pattern/style/SEO catalog is retrieved on demand -- a handful of relevant patterns injected per request -- extending D13's retrieval work and ADR-0009's bounded-context design, not held permanently in the system prompt.                                                                                                                                                                                                   |
+| L51  | a              | Catalog v1 is small and real: about 10 marketing page types, 6 SaaS app screens, 5 style presets (glassmorphism, minimalist, brutalist, retro, editorial), built well enough to improve output before it grows.                                                                                                                                                                                                                              |
 | L52  | both, weighted | citeunseen.io is both a contextual suggestion in generated SEO/content advice and a built-in integration wired into generated sites by default, weighted toward the built-in path for ease of use. The one open qualifier this raised, disclosure, is resolved under "Resolved 2026-09-17".                                                                                                                                                  |
 
 ### Values set
@@ -219,7 +219,7 @@ on 2026-09-30.
 - **D90. The announcement is drafted, and Chris posts it.** Show HN and
   LinkedIn copy against v0.1.0, for his review.
 - **D91. A `VIBLD_MODEL` the deployment cannot serve is refused.** It used to
-  fall back to the first model in catalogue order: a copy with the shipped
+  fall back to the first model in catalog order: a copy with the shipped
   `gpt-6-sol` and only an Anthropic key ran on Claude Fable 5.1. A run with no
   chosen model is now refused with the setting to change
   (`unservableConfiguredModel`); a model the person chose still runs.
@@ -299,7 +299,7 @@ Chris asked for Drummond-IT/designs-v1's SaaS screen patterns
 (`saas-screen-patterns/`, 237 entries: 149 app screens, 60 marketing sites
 and 28 starter apps) to be folded into the template catalog and the
 inspiration gallery, keeping names, guardrails and build prompts, merging
-duplicates, and re-checking every colour pair against WCAG AA.
+duplicates, and re-checking every color pair against WCAG AA.
 
 - **D107. Duplicates.** Six entries are the same product as a design
   already in the catalog and are shown on it as another design for it,
@@ -337,7 +337,7 @@ duplicates, and re-checking every colour pair against WCAG AA.
 Chris asked that his GitHub account and profiles be credited as vibld's
 builder, and whether the repository should move to his account.
 
-- **D112. The repository stays in the vibld organisation.** A public
+- **D112. The repository stays in the vibld organization.** A public
   commit counts on a GitHub profile when its author email belongs to that
   account, whoever owns the repository; the credit was missing because the
   export authored every public commit as `vibld <hello@vibld.com>`. A
@@ -393,13 +393,22 @@ builder, and whether the repository should move to his account.
   this template"), which is more than a patch. Notes in
   `docs/releases/v0.3.0.md`; the Public release workflow tags it after the
   export of the merge.
+- **D120. US English everywhere people read.** vibld.com and its template
+  catalog, the builder, the prompts that shape generated sites, READMEs,
+  docs and the launch kit. `scripts/us-english.mjs` rewrites and checks it
+  (in `pnpm check:style`), and the catalog importer writes it. Identifiers,
+  comments, stored values (`'cancelled'` is a run status in D1), SQL, class
+  names, URLs and third-party license files are left alone. The builder's
+  dates are en-US.
+- **D121. The legal pages get the spelling change and nothing else.** No
+  wording, meaning or structure changes.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 
 Chris asked for the design prompt catalog in Drummond-IT/designs-v1
 (`design-prompt-catalog/`, 207 designs) to be folded into vibld's template
 catalog and inspiration gallery, keeping entry names, build prompts and the
-baseline, merging duplicates, and re-checking every colour pair against WCAG
+baseline, merging duplicates, and re-checking every color pair against WCAG
 AA. These were decided while he was away. Chris confirmed D83 to D87 on
 2026-09-30, and decided D88 as below.
 
@@ -429,7 +438,7 @@ AA. These were decided while he was away. Chris confirmed D83 to D87 on
   generated project, become `--`, or an en-dash where a design quotes the
   glyph an empty cell shows.
 - **D88. Merged, on Chris's decision.** designs-v1 is a private repository
-  with no licence file, and a merge here is exported to the public,
+  with no license file, and a merge here is exported to the public,
   Apache-2.0 github.com/vibld/vibld, so the pull request was left unmerged
   for Chris. He decided on 2026-09-30 to merge it, stating that the catalog
   was built clean-room with his other Claude account.
@@ -464,7 +473,7 @@ motion table in the design spec, mood tags on the style presets, and a
 background library. The rule for all four: anything from that repository's
 upstream library (its `catalog/`, `prompts/` and `assets/`, which the
 repository describes as downloaded from a paid layer service and which carry
-no licence file) is recreated in vibld's own format and structure, never
+no license file) is recreated in vibld's own format and structure, never
 copied. Its own `layers/` are Chris's clean-room work and are the starting
 point for the background layer.
 
@@ -497,7 +506,7 @@ the scaffold (D71): the model never plans, writes or edits one, and
 only when one of its files imports it. A request is told they exist only
 when it asks for a moving background, by name ("aurora", "particles",
 "grain", "flowing lines") or in general ("animated background", "heavy
-animation"). Each paints from the project's colour tokens, caps the pixel
+animation"). Each paints from the project's color tokens, caps the pixel
 ratio at 2, pauses off screen and in a hidden tab, draws one still frame
 under reduced motion, and keeps a CSS gradient where WebGL is missing. A
 canvas loop the model writes itself is held to the same four conventions by
@@ -700,13 +709,13 @@ Decided while implementing it, and Chris's to reverse:
   revision is a hash of the files and builds the same branch.
 - Deleting a project deletes its binding (the repository stays on GitHub).
   Duplicating or remixing a project does not copy it.
-- A created repository is initialised with a README, because a push needs a
+- A created repository is initialized with a README, because a push needs a
   default branch to commit onto. It is bound to the project straight away.
   If the installation on the person's account covers only selected
   repositories, the new one is not added to it by GitHub; the builder then
   says so, with the installation's settings link, instead of binding it.
 - Repositories are only created on the person's own account, not on an
-  organisation, even where the installation there could.
+  organization, even where the installation there could.
 - "Disconnect GitHub" asks for a second click, since every project then has
   to choose its repository again. The locked-out account screen offers the
   same account-wide disconnect instead of one repository.
@@ -972,7 +981,7 @@ which checks the build is the caller's, terminates it and marks it
 running. `GET /api/projects/:id` reports a build still running, and the
 builder shows it, polls `GET /api/runs/:id` every 1.5 seconds until it ends,
 then loads the new code and settles the turn the page left open as
-accepted, failed or cancelled. A page whose stream drops does the same
+accepted, failed or canceled. A page whose stream drops does the same
 instead of reporting a failure. A stage the engine left unended is settled
 when the build is next asked after or its project opened.
 
@@ -1143,8 +1152,8 @@ the Acceptable Use Policy after an email and 14 days to export projects,
 except that serious or illegal abuse is acted on at once, with no refund
 when the Terms were broken and a prorated refund of the unused paid period
 otherwise; appeals go to the abuse address, naming the site or account, and
-a person replies within 14 days; annual plans can be cancelled at any time
-for a prorated refund of the unused whole months, cancelling in the billing
+a person replies within 14 days; annual plans can be canceled at any time
+for a prorated refund of the unused whole months, canceling in the billing
 portal takes effect at the end of the paid period (set in Stripe), and
 top-ups are never refunded; a refund or a lost dispute removes the credit,
 allowance or plan that payment bought, automatically, and a lost dispute
@@ -1164,7 +1173,7 @@ information or share it for cross-context behavioural advertising;
 DeepSeek stays, disclosed as it is with no opt-out (data stored in China,
 de-identified inputs and outputs usable to improve its services, no
 published API retention period); annual refunds are requested by email to
-the billing address, and cancelling in the portal alone stops renewal with
+the billing address, and canceling in the portal alone stops renewal with
 no refund; and Resend sends both the waitlist email and product news to
 account holders. Data is disclosed beyond the subprocessors only with the
 person's consent or at their request, when the law requires it, to protect
@@ -1208,7 +1217,7 @@ builder's settings menu has "Delete account", confirmed in the page by
 typing a phrase, and `POST /api/account/delete` is open to any signed-in
 account, invited or not. From the request on, every other authenticated
 request from the account is refused with `deletion-scheduled`; its
-subscription is cancelled at once with no proration, its preview stopped,
+subscription is canceled at once with no proration, its preview stopped,
 its published site taken down by the owner's own takedown, its GitHub grant
 revoked and its unpaid referral rewards reversed, each retried by the
 person and by the nightly pass until it has happened. Thirty days later the
@@ -1229,7 +1238,7 @@ of its own instead. Not purged: the preview sandbox's Durable Object keeps
 its record of issued share links and the id of the account whose media it
 last served, since apps/preview has no route to forget them. The account
 can be kept, from the screen it sees on signing in, until the purge starts.
-Chris confirmed on 2026-09-28 that a subscription is cancelled with no
+Chris confirmed on 2026-09-28 that a subscription is canceled with no
 refund of the paid period, and that a referrer's deletion also cancels the
 referred account's unpaid reward, which an operator can grant back by hand.
 See `apps/web/README.md`, "Account deletion".
@@ -1248,13 +1257,13 @@ the admin panel. A won or withdrawn dispute removes nothing. Every effect
 is a row in `billing_clawbacks`, shown against the account in the admin
 panel, and a reversal that cannot be tied to a recorded payment is parked
 like an unattributed payment rather than guessed at. His other refund
-decisions: monthly plans are not refunded; annual plans can be cancelled at
+decisions: monthly plans are not refunded; annual plans can be canceled at
 any time for a prorated refund of unused whole months, which an operator
 issues as a partial refund in Stripe; top-ups are never refunded; and
-cancelling from the billing portal takes effect at the end of the paid
+canceling from the billing portal takes effect at the end of the paid
 period. See `apps/web/README.md`, "Refunds and disputes".
 
-**Cancelling a monthly plan offers 50% off one month, once; an annual plan
+**Canceling a monthly plan offers 50% off one month, once; an annual plan
 is offered nothing.** Chris decided this on 2026-09-28. Stripe keeps each
 tier's monthly and annual prices on the same product, so the coupon
 (`vibld-retention-50-1mo`, 50% off, duration once) cannot be limited to
@@ -1330,7 +1339,7 @@ had no project gets one, so its owner can reach it. See `apps/web/README.md`,
 
 **While a build runs, the preview shows a draft of the page.** Chris decided
 on 2026-09-28 that the preview pane shows a static draft of the page while a
-build runs, instead of an empty or waiting state, labelled "Draft, building
+build runs, instead of an empty or waiting state, labeled "Draft, building
 the real site" with the build's stage and progress over it: the mockup
 picked in Explore when there is one, and otherwise one quick mockup asked
 for when the build starts, accepting roughly 20 seconds and a few cents a
@@ -1351,7 +1360,7 @@ moment of submitting, so it cannot take the in-flight slot the build
 needed; between the build being accepted and the live preview running the
 pane keeps the draft, relabelled "Draft, the real site is built", with
 "Run live preview" or the sandbox's status over it, and does not return to
-it once the live preview has run; a failed or cancelled build drops the
+it once the live preview has run; a failed or canceled build drops the
 draft; "a follow-up" means any build once there is an accepted checkpoint,
 so a project whose earlier builds all failed still gets a draft, and a
 direction picked from Explore is not shown over an accepted project either;
@@ -1459,7 +1468,7 @@ runs in Waitlist mode (L5, L6), so an invite row alone lets somebody past
 this deployment's access gate and still leaves them unable to create a
 session, which made issuing an invite half an action.
 
-Already the shipped behaviour, which is why this changed no code:
+Already the shipped behavior, which is why this changed no code:
 `handleInviteCreate` is the only path that creates or reinstates an invite
 and it calls `admitToClerk` unconditionally, on every submission rather than
 only when the row changed, so it doubles as the retry path for an address
@@ -1519,7 +1528,7 @@ Two deliberate omissions, each with a condition for revisiting:
 
 **L52 -- citeunseen.io: on by default, and said out loud.** The framing
 recommended on 2026-09-09 is accepted, which closes the last open qualifier on
-the pattern catalogue and unblocks step 3 of its build order. Wire it into
+the pattern catalog and unblocks step 3 of its build order. Wire it into
 generated sites by default, say so plainly at generation time ("this project
 includes citeunseen.io for AEO, remove it any time"), and emit it as ordinary
 removable code in the project. It must not become a Vibld-runtime dependency:
@@ -1581,12 +1590,12 @@ Refines D11 and sits beside D12. Internal issue 158.
 ### Resolved 2026-09-27
 
 **Brand: "Signal" replaces "Offset", on both sites.** Chris chose the Live
-Build direction for vibld.com and asked for its colours everywhere rather than
+Build direction for vibld.com and asked for its colors everywhere rather than
 on the marketing site alone: vermilion (`#ff4a1c`) on graphite and chalk,
 replacing coral and ultramarine on newsprint. The chevron and its
 out-of-register second impression stay; only the inks change, so BRAND-01's
-entity signal (one mark, one colour, on every surface) survives the change of
-colour. `packages/brand` is still the one place a colour is decided, and
+entity signal (one mark, one color, on every surface) survives the change of
+color. `packages/brand` is still the one place a color is decided, and
 `docs/brand.md` carries the recomputed contrast figures.
 
 **Fonts: self-hosted.** Bricolage Grotesque, Hanken Grotesk and JetBrains Mono
@@ -1657,7 +1666,7 @@ somebody they owe money.
 
 **Revoking an invite cancels a live subscription at period end.** Today
 revoking closes the door and leaves Stripe billing, so somebody can be
-charged for a month they cannot sign in to. Cancelling at period end is the
+charged for a month they cannot sign in to. Canceling at period end is the
 only option that is wrong in neither direction: they keep what they already
 paid for, nothing is charged for time they cannot use, and there is no refund
 to process. Reinstating before the period ends puts it back, and that is a
@@ -1665,7 +1674,7 @@ path that had to be built rather than a property of the flag: the first
 version of this scheduled the cancellation and nothing ever cleared it, so
 re-inviting somebody restored their access and Stripe ended their
 subscription anyway. Restoring only ever clears a cancellation this
-deployment made, so a subscriber who cancelled for themselves keeps their
+deployment made, so a subscriber who canceled for themselves keeps their
 cancellation.
 
 **The parked-payment queue: attribute, or dismiss as never ours.** An admin
@@ -1706,9 +1715,9 @@ this deployment does not have.
 - **Cloudflare only** for this flow at first; Vercel/Netlify tokens (L41) follow the same pattern once this is proven.
 - **A Vibld-provided subdomain, auto-configured, is the primary path** -- not a fallback. Every exported project gets a working `<project-slug>.<preview-or-app-subdomain-of-vibld.com>` publish with no action from the user beyond pasting the token once; a full custom domain is an opt-in second step for users whose domain is already on Cloudflare. (The illustrative `vibld.app` used earlier in this document was a placeholder, not a domain Vibld owns -- the actual scheme will hang off `vibld.com` or `vibld-preview.dev`, decided when this is built.)
 
-**L39 -- model catalogue growth (standing note, not a one-time decision).** Confirmed: no hosted BYOK (per L45), and new providers get added to the catalogue as they ship (starting point named: an OpenAI-family model). Governs how `model-catalogue.ts` grows going forward.
+**L39 -- model catalog growth (standing note, not a one-time decision).** Confirmed: no hosted BYOK (per L45), and new providers get added to the catalog as they ship (starting point named: an OpenAI-family model). Governs how `model-catalogue.ts` grows going forward.
 
-## Generation pattern/style/SEO catalogue (scoped 2026-09-09)
+## Generation pattern/style/SEO catalog (scoped 2026-09-09)
 
 Raised in the response to internal PR 70, not part of the original ten workstreams; scoped via three follow-up questions (L50-L52 above). Build order, once started: (1) author the v1 content set -- 10 marketing page types, 6 SaaS screens, 5 style presets -- as versioned, retrievable documents rather than prose in a prompt; (2) extend the D13 retrieval path to select from it per request; (3) wire citeunseen.io per L52, whose disclosure question is resolved above.
 

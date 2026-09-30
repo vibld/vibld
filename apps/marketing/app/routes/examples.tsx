@@ -30,7 +30,7 @@ export default function Examples() {
     <Page
       eyebrow="Examples"
       title="Built with vibld"
-      lead="The sites and apps in the first section are exactly what vibld generated from the prompt shown, with no hand edits. Open the live copy, or download the source and run it yourself. The hand-built starter templates come after them, in a section of their own."
+      lead="The sites and apps in the first section are exactly what vibld generated from the prompt shown, with no hand edits. Open the live copy, or download the source and run it yourself."
     >
       <ul className="mt-12 grid gap-8 md:grid-cols-2">
         {all.map((example) => (
@@ -106,7 +106,7 @@ function TemplateCard({ template }: { template: Template }) {
           {template.subject}. {template.description}
         </p>
         <p className="text-sm text-[var(--color-ink-muted)]">
-          MIT licence, per the template’s LICENSE file.
+          MIT license, per the template’s LICENSE file.
         </p>
         <div className="mt-auto flex flex-wrap items-center gap-x-6 gap-y-2 pt-2">
           <a href={template.source} className="text-link">

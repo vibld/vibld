@@ -241,8 +241,8 @@ export function RoadmapBoard() {
       {loadFailed ? (
         <div className="lb-wrap">
           <p className="lb-rm-status" role="status">
-            The vote counts could not be loaded, so none are shown. Voting may
-            not work until they can be.
+            The vote counts could not be loaded. Voting may not work until they
+            can be.
           </p>
         </div>
       ) : null}

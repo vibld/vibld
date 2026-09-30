@@ -1594,7 +1594,7 @@ describe('when the probe is refused rather than absent', () => {
     // organisation policy is not fixed by signing in again, so telling the
     // client to reconnect contradicts the sentence beside it.
     assert.equal(body.reconnect, undefined);
-    assert.match(body.error, /organisation settings/);
+    assert.match(body.error, /organization settings/);
   });
 
   it('still says to install when GitHub cannot find it at all', async () => {

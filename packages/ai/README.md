@@ -128,10 +128,10 @@ DEEPSEEK_API_KEY=... pnpm generate "add a pricing page" --base ./generated --out
 With exactly one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
 `DEEPSEEK_API_KEY` set, that provider answers with its default model
 (`DEFAULT_MODELS` in `src/select-client.ts`). `VIBLD_MODEL` names another from
-the catalogue, and `VIBLD_PROVIDER` chooses when more than one key is set;
+the catalog, and `VIBLD_PROVIDER` chooses when more than one key is set;
 with more than one and no `VIBLD_PROVIDER`, Anthropic answers.
 
-Anthropic's default is `claude-opus-5-5`, whose catalogue rates
+Anthropic's default is `claude-opus-5-5`, whose catalog rates
 (`src/model-catalogue.ts`) are about 13 times DeepSeek Flash's for input and
 17 times for output, so a run on it costs far more than one on DeepSeek's
 default, `deepseek-flash`. The DeepSeek runs measured on 2026-09-30 cost
@@ -156,8 +156,8 @@ build as a durable Workflow, one step per call. Locally, `pnpm dev` serves no
 ## Design intelligence
 
 `style-presets.ts` (24 named visual directions -- 16 surface treatments and
-8 complete colour systems), `patterns.ts` (10 marketing
-page types, 6 SaaS screens), `palettes.ts` (15 product-type colour, typography
+8 complete color systems), `patterns.ts` (10 marketing
+page types, 6 SaaS screens), `palettes.ts` (15 product-type color, typography
 and feel defaults), `motion.ts` (19 motion recipes), `surfaces.ts` (5
 painting techniques), `diagrams.ts` (5 diagram types plus the connector
 craft) and `primitives.ts` (6 interactive controls) are closed-set,
@@ -219,7 +219,7 @@ MIT-licensed design skills. What was taken, and from where:
 
 One licensing question was decided by the project owner rather than here.
 [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md)
-catalogues about seventy real companies' design languages. The owner directed
+catalogs about seventy real companies' design languages. The owner directed
 that the archetypes drawn from it ship without the companies' names, which is
 what `style-presets.ts` does. A test enforces it on the id, chip name and
 caption.
@@ -297,13 +297,13 @@ nominal: "dark" is really four unrelated systems, and a warm paper ground
 with a terracotta accent is its own thing rather than a tint of minimalism.
 Those clusters are `warmTerminal`, `layeredVoid`, `acidDark`, `nightIndigo`,
 `warmPaper`, `monoPress` and `polarityBands` -- presets that carry a whole
-colour system, font pairing and radius scale rather than only a sentence.
+color system, font pairing and radius scale rather than only a sentence.
 `cinematic` (full-bleed footage, glass and a serif headline) carries the same
 three and was added after them.
 
 They fill a real hole. `buildUserPrompt` suppresses the product-type palette
 whenever a style preset is chosen, so before these existed, picking a preset
-meant getting no colour tokens at all. Their token names are identical to
+meant getting no color tokens at all. Their token names are identical to
 `ProductPalette.colors`, so the `:root` block the prompt receives has one
 shape whichever source produced it.
 

@@ -386,7 +386,7 @@ export function formatDay(iso: string): string {
   const at = new Date(iso);
   return Number.isNaN(at.getTime())
     ? iso
-    : at.toLocaleDateString('en-GB', {
+    : at.toLocaleDateString('en-US', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',

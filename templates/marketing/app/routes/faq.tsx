@@ -8,7 +8,7 @@ export function meta() {
 const QUESTIONS = [
   {
     q: 'How long does a quote take?',
-    a: 'Most quotes go out within one business day. A discontinued part with no obvious source can take three or four, and we tell you that on day one rather than letting the enquiry go quiet.',
+    a: 'Most quotes go out within one business day. A discontinued part with no obvious source can take three or four, and we tell you that on day one rather than letting the inquiry go quiet.',
   },
   {
     q: 'What happens if the part is genuinely unobtainable?',
@@ -16,7 +16,7 @@ const QUESTIONS = [
   },
   {
     q: 'How do you avoid counterfeit components?',
-    a: 'We buy only from distributors we can confirm are authorised for that manufacturer. For critical components we inspect against the manufacturer specification before shipping, and the lot number travels with the paperwork.',
+    a: 'We buy only from distributors we can confirm are authorized for that manufacturer. For critical components we inspect against the manufacturer specification before shipping, and the lot number travels with the paperwork.',
   },
   {
     q: 'Can we return a part we no longer need?',

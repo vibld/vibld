@@ -162,7 +162,7 @@ describe('what the account page says', () => {
     const user = readAdminUser(DETAIL)!;
     assert.equal(
       describePlan(user.plan),
-      'Ship, gifted until 31 Dec 2026; pays for Build',
+      'Ship, gifted until Dec 31, 2026; pays for Build',
     );
     assert.equal(
       describePlan({
@@ -180,7 +180,7 @@ describe('what the account page says', () => {
     const user = readAdminUser(DETAIL)!;
     const line = describeAuditEntry(user.audit[0]!);
     assert.match(line, /Gave a plan/);
-    assert.match(line, /Ship until 31 Dec 2026/);
+    assert.match(line, /Ship until Dec 31, 2026/);
     assert.match(line, /"Partner"/);
     assert.match(line, /by admin@vibld\.com/);
     assert.doesNotMatch(line, /target@example\.com/);
@@ -237,7 +237,7 @@ describe('the billing panel', () => {
           inUse: true,
         },
       }),
-      'Build plan gifted until 31 Dec 2026.',
+      'Build plan gifted until Dec 31, 2026.',
     );
     assert.equal(
       describeGift({

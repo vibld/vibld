@@ -205,7 +205,7 @@ export const DEMO_SITES: Record<DemoSiteId, DemoSite> = {
       'A physiotherapy clinic site where patients request an appointment slot.',
     section: 'Services',
     text: {
-      brand: 'Harbour Physio',
+      brand: 'Harbor Physio',
       links: ['Treatments', 'Team', 'Visit'],
       nav: 'Book',
       eyebrow: 'Physiotherapy clinic',

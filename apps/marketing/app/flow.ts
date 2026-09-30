@@ -30,14 +30,14 @@ export const FLOW: FlowStep[] = [
     id: 'directions',
     short: 'Directions',
     title: 'Pick a direction',
-    body: 'Before the first build, ask for three sketches that differ in look, not just colour, for about a tenth of a build, and choose one. Or skip the sketches and name one of the style presets.',
-    doc: { href: '/styles', label: 'The style catalogue' },
+    body: 'Before the first build, ask for three sketches that differ in look, not just color, for about a tenth of a build, and choose one. Or skip the sketches and name one of the style presets.',
+    doc: { href: '/styles', label: 'The style catalog' },
   },
   {
     id: 'spec',
     short: 'Spec',
     title: 'It writes the spec down',
-    body: 'The direction becomes DESIGN.md: the colours, type, breakpoints and motion the build has to honour, written into the project where you can read it.',
+    body: 'The direction becomes DESIGN.md: the colors, type, breakpoints and motion the build has to honor, written into the project where you can read it.',
     doc: { href: '/features#checks', label: 'Design checks' },
   },
   {
@@ -51,7 +51,7 @@ export const FLOW: FlowStep[] = [
     id: 'checks',
     short: 'Checks',
     title: 'It checks its own design',
-    body: 'The files are read against the spec: the named colours, the display face, the breakpoints, alt text, a reduced-motion rule. Only an error the checker is sure of buys a repair, which is another paid call, and a repair patches only the files at fault.',
+    body: 'The files are read against the spec: the named colors, the display face, the breakpoints, alt text, a reduced-motion rule. Only an error the checker is sure of buys a repair, which is another paid call, and a repair patches only the files at fault.',
     doc: { href: '/features#checks', label: 'Design checks' },
   },
   {

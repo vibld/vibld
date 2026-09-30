@@ -16,8 +16,7 @@ export default function SelfHosting() {
         <a href={SITE.repoUrl} rel="noopener noreferrer">
           github.com/vibld/vibld
         </a>
-        . This page is what you are taking on before you start: the moving
-        parts, the state behind them, and the accounts you will need.
+        .
       </p>
       <p>
         <strong>Checked by the project, not yet by anyone else.</strong> A
@@ -27,10 +26,9 @@ export default function SelfHosting() {
         own yet. Expect to be among the first, and to find gaps.
       </p>
       <p>
-        If what you want is a real build with your own model key, you do not
-        need any of this. <code>pnpm generate</code> in a clone runs the same
-        bounded build with one provider key and no Cloudflare, Clerk or
-        database; the{' '}
+        For a real build with your own model key, you need none of this.{' '}
+        <code>pnpm generate</code> in a clone runs the same bounded build with
+        one provider key and no Cloudflare, Clerk or database; the{' '}
         <a href={`${SITE.repoUrl}#quick-start`} rel="noopener noreferrer">
           repository’s Quick start
         </a>{' '}
@@ -40,14 +38,13 @@ export default function SelfHosting() {
       </p>
       <p>
         The terms that govern using and modifying that source are on the{' '}
-        <a href="/legal/licenses">Open-Source Notices</a> page. Read them there
-        rather than trusting a paraphrase on this one.
+        <a href="/legal/licenses">Open-Source Notices</a> page.
       </p>
 
       <h2>Three Workers, not one</h2>
       <p>
-        vibld is not a single deployable. It is three Cloudflare Workers with
-        deliberately different blast radii:
+        vibld is three Cloudflare Workers with deliberately different blast
+        radii:
       </p>
       <ul>
         <li>
@@ -79,9 +76,8 @@ export default function SelfHosting() {
           <strong>R2</strong> for the file content those rows point at.
         </li>
         <li>
-          <strong>A Durable Object</strong> for the per-user spend ledger. It is
-          what makes a ceiling a ceiling rather than a suggestion, so a
-          deployment without it cannot generate at all.
+          <strong>A Durable Object</strong> for the per-user spend ledger, which
+          enforces the ceilings. A deployment without it cannot generate at all.
         </li>
         <li>
           <strong>A Workflow</strong> for generation, so a run survives the

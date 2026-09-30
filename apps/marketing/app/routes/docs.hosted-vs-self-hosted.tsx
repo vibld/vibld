@@ -12,19 +12,17 @@ export default function HostedVsSelfHosted() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
-        The honest version of this comparison, which is that the difference is
-        mostly operations rather than features. There is no reduced build of the
-        builder: the source that runs{' '}
+        The difference is mostly operations rather than features. There is no
+        reduced build of the builder: the source that runs{' '}
         <a href={SITE.appUrl} rel="noopener noreferrer">
           app.vibld.com
         </a>{' '}
         is the source in the repository.
       </p>
       <p>
-        One caveat first: the project checks that a copy deploys from the docs
-        and refuses a signed-out caller, but nobody outside the project has
-        deployed their own copy yet, and sign-in and generation on a copy are
-        not checked.
+        The project checks that a copy deploys from the docs and refuses a
+        signed-out caller, but nobody outside the project has deployed their own
+        copy yet, and sign-in and generation on a copy are not checked.
       </p>
 
       <h2>The same either way</h2>
@@ -41,7 +39,7 @@ export default function HostedVsSelfHosted() {
         </li>
         <li>
           Saving your work, connecting Git, and exporting. None of these is
-          behind a paid plan, by policy and not by accident.
+          behind a paid plan, by policy.
         </li>
       </ul>
 
@@ -50,7 +48,7 @@ export default function HostedVsSelfHosted() {
         <li>
           <strong>Your own model keys.</strong> The hosted service holds no
           user’s provider key; it sells model spend instead. Bringing your own
-          key is the self-hosted story, and the command line’s.
+          key is for a self-hosted copy or the command line.
         </li>
       </ul>
 
@@ -114,12 +112,6 @@ export default function HostedVsSelfHosted() {
         order, a spend ceiling tuned against real usage rather than a guess, and
         somebody to ask when it breaks.
       </p>
-      <p>
-        If you would rather do that yourself, the source is there and it is
-        meant to be run. If you would rather not, that is what a plan buys.
-        Either way the project you build is a conventional codebase you can pick
-        up and take elsewhere.
-      </p>
 
       <h2>Things only the hosted service has</h2>
       <ul>
@@ -131,9 +123,8 @@ export default function HostedVsSelfHosted() {
           Stripe.
         </li>
         <li>
-          <strong>Publishing to a vibld URL.</strong> Self-hosted, this becomes
-          publishing to your own domain, which is a different thing wearing the
-          same button.
+          <strong>Publishing to a vibld URL.</strong> Self-hosted, the same
+          button publishes to your own domain.
         </li>
         <li>
           <strong>Referral credit.</strong> It pays out of the hosted service’s
@@ -143,10 +134,10 @@ export default function HostedVsSelfHosted() {
 
       <h2>What the terms say</h2>
       <p>
-        The licence covering the core, the templates and what you generate is
+        The license covering the core, the templates and what you generate is
         set out on the <a href="/legal/licenses">Open-Source Notices</a> page.
-        This page is a description of how the two deployments differ in
-        practice, not a statement of what you are permitted to do.
+        This page describes how the two deployments differ, not what you are
+        permitted to do.
       </p>
     </DocPage>
   );

@@ -223,7 +223,7 @@ export function PageHead({
 }: {
   eyebrow?: string;
   title: string;
-  lead: string;
+  lead?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -231,7 +231,7 @@ export function PageHead({
       <div className="lb-wrap">
         {eyebrow ? <p className="lb-eyebrow">{eyebrow}</p> : null}
         <h1>{title}</h1>
-        <p className="lb-lede">{lead}</p>
+        {lead ? <p className="lb-lede">{lead}</p> : null}
         {children}
       </div>
     </header>
@@ -246,7 +246,7 @@ export function Page({
 }: {
   eyebrow?: string;
   title: string;
-  lead: string;
+  lead?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -255,9 +255,11 @@ export function Page({
       <h1 className="mt-3 font-display text-4xl font-bold tracking-tight text-balance sm:text-5xl">
         {title}
       </h1>
-      <p className="mt-4 max-w-2xl text-lg text-[var(--color-ink-muted)] text-pretty">
-        {lead}
-      </p>
+      {lead ? (
+        <p className="mt-4 max-w-2xl text-lg text-[var(--color-ink-muted)] text-pretty">
+          {lead}
+        </p>
+      ) : null}
       {children}
     </article>
   );

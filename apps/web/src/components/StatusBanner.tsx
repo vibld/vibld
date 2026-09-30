@@ -7,7 +7,7 @@ const MESSAGES: Record<BuilderStatus, string> = {
   validating: 'Checking the project…',
   accepted: 'Done.',
   failed: 'This run failed. Your last accepted checkpoint is unchanged.',
-  cancelled: 'Run cancelled. Your last accepted checkpoint is unchanged.',
+  cancelled: 'Run canceled. Your last accepted checkpoint is unchanged.',
 };
 
 export function StatusBanner({ state }: { state: BuilderState }) {

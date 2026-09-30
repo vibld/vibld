@@ -45,7 +45,7 @@ export const MARKETING_PAGE_PATTERNS: readonly PagePattern[] = [
     name: 'Pricing page',
     triggers: ['pricing page', 'pricing', 'plans page', 'plans and pricing'],
     guidance:
-      'A small number of tiers (two or three) as parallel cards, the recommended one visually distinguished but not the only one that looks viable. A monthly/annual toggle if both exist, with the annual saving stated in plain terms. One primary action per tier. Answer the two questions a pricing page always raises -- what happens at the limit, and can this be cancelled -- either inline or in an FAQ immediately below. Verify the CTA label text against its own button fill at 4.5:1, not against the page background -- a button that reads clearly on the card can still fail once its own fill colour is the actual backdrop.',
+      'A small number of tiers (two or three) as parallel cards, the recommended one visually distinguished but not the only one that looks viable. A monthly/annual toggle if both exist, with the annual saving stated in plain terms. One primary action per tier. Answer the two questions a pricing page always raises -- what happens at the limit, and can this be canceled -- either inline or in an FAQ immediately below. Verify the CTA label text against its own button fill at 4.5:1, not against the page background -- a button that reads clearly on the card can still fail once its own fill color is the actual backdrop.',
   },
   {
     id: 'about',
@@ -90,7 +90,7 @@ export const MARKETING_PAGE_PATTERNS: readonly PagePattern[] = [
       'success stories',
     ],
     guidance:
-      'A specific result attributed to a specific person or company beats a generic quote attributed to "a happy customer." Where the request supplies no real testimonials, use clearly labelled placeholder quotes (e.g. "[Customer name], [Company]") rather than inventing a real-sounding person -- a fabricated testimonial is a fabricated claim, not a design placeholder.',
+      'A specific result attributed to a specific person or company beats a generic quote attributed to "a happy customer." Where the request supplies no real testimonials, use clearly labeled placeholder quotes (e.g. "[Customer name], [Company]") rather than inventing a real-sounding person -- a fabricated testimonial is a fabricated claim, not a design placeholder.',
   },
   {
     id: 'blog-index',
@@ -122,7 +122,7 @@ export const SAAS_SCREEN_PATTERNS: readonly PagePattern[] = [
     name: 'Dashboard / overview',
     triggers: ['dashboard', 'overview screen', 'home screen', 'app home'],
     guidance:
-      'Lead with the small number of things a returning user actually checks (status, recent activity, one or two key numbers), not every metric the system can produce. One clear next action, not a wall of equally-weighted widgets. Any chart gets a visible legend and a data-table or numeric fallback -- never encode the only meaningful distinction in colour alone.',
+      'Lead with the small number of things a returning user actually checks (status, recent activity, one or two key numbers), not every metric the system can produce. One clear next action, not a wall of equally-weighted widgets. Any chart gets a visible legend and a data-table or numeric fallback -- never encode the only meaningful distinction in color alone.',
   },
   {
     id: 'settings',
@@ -171,7 +171,7 @@ export const SAAS_SCREEN_PATTERNS: readonly PagePattern[] = [
       'manage subscription',
     ],
     guidance:
-      'Show the current plan and what it costs before anything else on the screen. Make upgrading, downgrading and cancelling equally easy to find -- burying cancellation is the kind of dark pattern this should not reproduce even as a demonstration.',
+      'Show the current plan and what it costs before anything else on the screen. Make upgrading, downgrading and canceling equally easy to find -- burying cancellation is the kind of dark pattern this should not reproduce even as a demonstration.',
   },
   {
     id: 'empty-state',

@@ -12,11 +12,7 @@ export function meta() {
 export default function CreditsAndPlans() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
-      <p>
-        vibld bills for model spend, which is the thing that actually costs
-        money to run. This page is what a plan includes, how a run is priced,
-        and the order the layers are spent in.
-      </p>
+      <p>vibld bills for model spend, which is what costs money to run.</p>
 
       <h2>The plans</h2>
       <p>
@@ -50,9 +46,8 @@ export default function CreditsAndPlans() {
       <p>
         An account with no active subscription is Free. The monthly allowance
         resets on the UTC calendar month, for everyone, rather than on each
-        subscription’s own anniversary. That is a deliberate simplification: it
-        is easier to reason about, at the cost of a first month that is shorter
-        than thirty days.
+        subscription’s own anniversary, so a first month can be shorter than
+        thirty days.
       </p>
       <p>
         A new account can also get <strong>$1.00 once</strong>, by adding a
@@ -60,11 +55,10 @@ export default function CreditsAndPlans() {
         above the composer, offer it with an <strong>Add a card</strong> button,
         which opens a Stripe page that saves the card and charges nothing. The
         credit arrives once Stripe confirms the card, usually within a minute.
-        It is granted once per account and once per card, so a card that has
-        already claimed it on another account does not claim it again. It does
-        not reset, is separate from the monthly allowance, and expires twelve
-        months after it is granted. Accounts that received it on creation,
-        before a card was required, keep it.
+        It is granted once per account and once per card. It does not reset, is
+        separate from the monthly allowance, and expires twelve months after it
+        is granted. Accounts that received it on creation, before a card was
+        required, keep it.
       </p>
 
       <h2>Top-up credit</h2>
@@ -79,17 +73,15 @@ export default function CreditsAndPlans() {
 
       <h2>How a run is priced</h2>
       <p>
-        A run <strong>reserves its worst case up front</strong> and is
-        reconciled to what it actually cost once it finishes. That is why a long
-        generation can briefly look more expensive than it turns out to be: the
-        reservation is what stops a run starting that could not have been paid
-        for, and the reconciliation is what you are actually charged.
+        A run <strong>reserves its worst case up front</strong>, so no run
+        starts that could not be paid for, and once it finishes you are charged
+        what it actually cost. A long generation can briefly look more expensive
+        than it turns out to be.
       </p>
       <p>
         Prices follow the model that runs. A cheaper model reserves less and
-        costs less, which is the practical reason the model selector exists.
-        Chat replies and the three sketches are priced the same way; the
-        sketches cost about a tenth of a build.
+        costs less. Chat replies and the three sketches are priced the same way;
+        the sketches cost about a tenth of a build.
       </p>
       <p>
         When you cannot fund a build’s full reservation, it is not refused
@@ -100,8 +92,7 @@ export default function CreditsAndPlans() {
       <p>
         A build you cancel is charged for the steps it finished, plus the step
         that was running at the most it could have cost, and never more than it
-        reserved. A build keeps running if you close the page, so closing the
-        page is not a way to stop one.
+        reserved. A build keeps running if you close the page.
       </p>
 
       <h2>The order things are spent in</h2>
@@ -109,8 +100,8 @@ export default function CreditsAndPlans() {
       <ol>
         <li>
           A <strong>deployment-wide daily ceiling</strong>, across all accounts.
-          It exists so that one compromised account cannot spend the month, and
-          it is invisible in normal use.
+          It stops one compromised account spending the month, and is invisible
+          in normal use.
         </li>
         <li>
           Your <strong>monthly tier allowance</strong>.
@@ -124,11 +115,10 @@ export default function CreditsAndPlans() {
         When a run is refused for spend, the reason names which ceiling it hit.
         For your own, it says how much is left and how much the run needs set
         aside. The readout under <strong>Plan and usage</strong> in the settings
-        menu is a read-only mirror of the same figures the gate uses, so what it
-        shows and what it enforces cannot disagree.
+        menu is a read-only mirror of the same figures the gate uses.
       </p>
 
-      <h2>Changing or cancelling</h2>
+      <h2>Changing or canceling</h2>
       <p>
         Upgrading starts a Stripe Checkout session. Once you have a Stripe
         customer record, <strong>Manage billing</strong> appears under{' '}
@@ -137,7 +127,7 @@ export default function CreditsAndPlans() {
       </p>
       <p>
         <strong>Cancel plan</strong>, in the same place, opens Stripe’s page for
-        cancelling. A monthly plan is offered 50% off one month, once, before it
+        canceling. A monthly plan is offered 50% off one month, once, before it
         cancels; a yearly plan is offered nothing.
       </p>
 

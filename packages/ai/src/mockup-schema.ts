@@ -138,7 +138,7 @@ export const MOCKUP_SYSTEM_PROMPT = `You produce three short visual directions f
 Return JSON: { "mockups": [ { "label", "rationale", "html" } ] } with exactly three entries.
 
 THE POINT IS THE DIFFERENCE
-The three must be genuinely different answers to the request, not three finishes on one answer. Vary the things a person would actually choose between: the layout's structure, the typographic register, the colour temperature and contrast, the density, and how much the page relies on imagery versus type. If two of them could be described by the same sentence, one of them is wasted.
+The three must be genuinely different answers to the request, not three finishes on one answer. Vary the things a person would actually choose between: the layout's structure, the typographic register, the color temperature and contrast, the density, and how much the page relies on imagery versus type. If two of them could be described by the same sentence, one of them is wasted.
 
 EACH MOCKUP
 - label: two or three words naming the direction, in the reader's language, not a style-system term.

@@ -68,7 +68,7 @@ export function describeGift(status: BillingStatus): string | null {
   const gift = status.gift;
   if (!gift) return null;
   const until = gift.endsAt
-    ? `until ${new Date(gift.endsAt).toLocaleDateString('en-GB', {
+    ? `until ${new Date(gift.endsAt).toLocaleDateString('en-US', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',

@@ -59,7 +59,7 @@ clears the large-text bar (3.0) by five hundredths and fails the normal-text
 bar (4.5), which is the worst kind of number: it looks fine in a mockup and
 fails the first time a heading wraps, a monitor runs bright or the heading
 lands on the raised surface instead, where it measures 2.86 and fails both.
-It is the most recognisable colour in the system and the one nobody may set a
+It is the most recognizable color in the system and the one nobody may set a
 heading, a link or a label in, at any size.
 
 The refusals that follow from it, all enforced by tests rather than by
@@ -92,9 +92,9 @@ quietly halved the contrast of every keyboard focus ring in the product.
 
 `apps/marketing/test/palette-use.test.ts` reads the source and fails the build
 if any of these appears. It was written because all three were already
-shipped: the consent banner's "Allow" button set its text colour to
+shipped: the consent banner's "Allow" button set its text color to
 `--color-accent-contrast`, a token that never existed, so the one control
-every visitor sees had no text colour at all.
+every visitor sees had no text color at all.
 
 ## The mark
 
@@ -102,8 +102,8 @@ One chevron, printed twice, the second impression two units down and right in
 a 32-unit box, the pair blended with `mix-blend-mode: multiply` on light and
 `screen` on dark.
 
-**Vermilion is always the ghost.** That is what makes it the colour people
-recognise: it is the one that does not change. The other impression is the
+**Vermilion is always the ghost.** That is what makes it the color people
+recognize: it is the one that does not change. The other impression is the
 stroke the shape's legibility actually rests on, and it changes with the
 ground:
 
@@ -143,7 +143,7 @@ cannot drift from the real mark.
 ## The wordmark
 
 `vibld`, lowercase, everywhere: page titles, the header, the middle of a
-sentence, legal copy. The capitalised form survives in exactly one place,
+sentence, legal copy. The capitalized form survives in exactly one place,
 `SITE.legalName`, which feeds schema.org's `alternateName` so a search engine
 can match the way people actually type it.
 
@@ -176,20 +176,20 @@ the committed files differ, so they cannot drift from the palette.
 **Never write `oklch()` into a file rendered outside a browser.** The first
 social card the previous palette produced came out entirely black: librsvg,
 which rasterises the PNGs, does not parse `oklch()` and falls back to black
-rather than failing. Static assets use the `hex` field on each colour, which
+rather than failing. Static assets use the `hex` field on each color, which
 the palette test verifies against `oklchToHex`.
 
 ## Why one package
 
 Before `@vibld/brand` existed, vibld.com shipped a warm orange chevron in
 oklch and app.vibld.com shipped a purple-to-blue tilde in hsl. Two halves of
-one product, two logos, two colour systems, which is exactly what BRAND-01
+one product, two logos, two color systems, which is exactly what BRAND-01
 (`docs/decisions.md`) forbids: searching "vibld" returns Bible-study sites, so
 the only lever available is publishing one unambiguous entity everywhere.
 
 Both apps now alias their existing token names onto `brand.css` rather than
-declaring colours. That indirection is deliberate. It meant neither app had to
-be rewritten to adopt the brand, it means there is exactly one place a colour
+declaring colors. That indirection is deliberate. It meant neither app had to
+be rewritten to adopt the brand, it means there is exactly one place a color
 is decided, and it is why moving from Offset to Signal changed no alias in
 either app. Every theme token (`--vibld-paper`, `--vibld-accent`,
 `--vibld-accent-ink` and the rest) kept its name and only its value moved;

@@ -71,7 +71,7 @@
 - [Running it yourself](#running-it-yourself)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
-- [Licence](#licence)
+- [License](#license)
 
 ## Three ways to use it
 
@@ -94,9 +94,9 @@
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **1. Say what you want**          | Plain words. It may answer, or ask one or two questions first; when you say go, your answers become a full brief. Style, a reference page, your own images and video, and standing instructions sit in one row under the message box. |
 | **2. Pick a direction**           | Choose one of 24 [style presets](https://vibld.com/styles), with suggestions for the mood your request names, or ask for three directions to compare before anything is built.                                                        |
-| **3. It writes the spec down**    | The direction becomes `DESIGN.md`: colours, type, breakpoints and motion the build has to honour, kept in the project.                                                                                                                |
+| **3. It writes the spec down**    | The direction becomes `DESIGN.md`: colors, type, breakpoints and motion the build has to honor, kept in the project.                                                                                                                  |
 | **4. It builds in bounded steps** | A plan, then files in small groups, each with a ceiling on tokens and time. A draft of the page shows while the first build runs, and a build keeps going if you close the tab.                                                       |
-| **5. It checks its own work**     | Design checks read the files against the spec (colours, type, breakpoints, alt text, contrast, motion, copy). Then a real production build: if it fails, one repair patch, then the build again.                                      |
+| **5. It checks its own work**     | Design checks read the files against the spec (colors, type, breakpoints, alt text, contrast, motion, copy). Then a real production build: if it fails, one repair patch, then the build again.                                       |
 | **6. Look at it live**            | Run a live preview: the real dev server in a private sandbox, which picks up each new revision in place. Share it by link until you revoke it.                                                                                        |
 | **7. Ship it, or take the code**  | Download a `.zip`, create or push to a GitHub repository for this project, or publish it at `<name>.vibld-preview.dev`. Unpublishing is one step too.                                                                                 |
 
@@ -163,11 +163,11 @@ Real builds from the evaluation suite, published exactly as the model wrote them
   </tr>
 </table>
 
-Two hand-built starter templates ship alongside, each under its own MIT licence: [`templates/marketing`](templates/marketing), a plain prerendered marketing site, and [`templates/luminous`](templates/luminous), a product site with a cursor-reactive glow, dressed for an invented SaaS called Emberline.
+Two hand-built starter templates ship alongside, each under its own MIT license: [`templates/marketing`](templates/marketing), a plain prerendered marketing site, and [`templates/luminous`](templates/luminous), a product site with a cursor-reactive glow, dressed for an invented SaaS called Emberline.
 
 ## Designed, not templated
 
-Every build starts from a written design, not a theme. There are 24 style presets, 16 surface treatments from Editorial and Brutalism to Liquid glass, and 8 complete colour systems. Each carries mood tags (luxe, calm, technical, organic, playful, brutal), so the picker can suggest the ones your request describes.
+Every build starts from a written design, not a theme. There are 24 style presets, 16 surface treatments from Editorial and Brutalism to Liquid glass, and 8 complete color systems. Each carries mood tags (luxe, calm, technical, organic, playful, brutal), so the picker can suggest the ones your request describes.
 
 <p align="center">
   <img alt="A scroll down vibld.com/styles: each surface treatment drawn as a small site in the same demonstration palette, from Glassmorphism and Neumorphism down." src="docs/images/media-styles.webp" width="80%">
@@ -175,7 +175,7 @@ Every build starts from a written design, not a theme. There are 24 style preset
   <sub>The style presets on <a href="https://vibld.com/styles">vibld.com/styles</a>.</sub>
 </p>
 
-Ask for an aurora, a starfield, a smoky gradient or any "animated background", and the build imports one of four backgrounds written once and tested, rather than improvising a canvas loop. Each takes the project's own colour tokens, caps its pixel ratio, pauses off screen and holds still for anyone who asks for reduced motion.
+Ask for an aurora, a starfield, a smoky gradient or any "animated background", and the build imports one of four backgrounds written once and tested, rather than improvising a canvas loop. Each takes the project's own color tokens, caps its pixel ratio, pauses off screen and holds still for anyone who asks for reduced motion.
 
 <p align="center">
   <img alt="Four animated backgrounds side by side: AuroraMesh, a WebGL field of colour like light through smoke; ParticleField, a spiral of drifting points; GrainBlobs, soft blurred shapes under film grain; FlowLines, two glowing lines flowing like a waveform." src="docs/images/media-backdrops.webp" width="100%">
@@ -190,7 +190,7 @@ Ask for an aurora, a starfield, a smoky gradient or any "animated background", a
 - A conversation, not a form: the agent answers questions, asks its own when a request is thin, and builds when you say so. Follow-ups ("make the hero navy") change the project rather than starting over.
 - Model providers behind one contract in [`packages/ai`](packages/ai): Anthropic, OpenAI and DeepSeek adapters, chosen per run.
 - Bounded, multi-step builds: a plan, then files in groups, each with its own ceiling on tokens and time, that keep running when you close the tab.
-- Three directions to compare before the first build, 24 style presets with mood suggestions, a reference page whose text, colours, fonts and spacing the spec measures, and your own uploaded images and video.
+- Three directions to compare before the first build, 24 style presets with mood suggestions, a reference page whose text, colors, fonts and spacing the spec measures, and your own uploaded images and video.
 - Four tested animated backgrounds a build imports when a request asks for motion.
 
 **Checking**
@@ -257,7 +257,7 @@ npm run dev                   # the generated project, with no vibld dependency
 | `--build`          | Installs and builds the result with npm and, when it does not build, asks for one repair with the compiler's output. The build gets no credential from your environment.                |
 | `--style <id>`     | One of the style presets, by id: `editorial`, `brutalism`, `liquidGlass`, `bentoGrid`, `warmPaper`, `cinematic` and the rest in [`style-presets.ts`](packages/ai/src/style-presets.ts). |
 | `--base <dir>`     | Makes the prompt a follow-up to a project already on disk.                                                                                                                              |
-| `VIBLD_MODEL=<id>` | Another model from [the catalogue](packages/ai/src/model-catalogue.ts). With one key set, that provider's default answers: `deepseek-flash`, `gpt-5.6-terra` or `claude-opus-5-5`.      |
+| `VIBLD_MODEL=<id>` | Another model from [the catalog](packages/ai/src/model-catalogue.ts). With one key set, that provider's default answers: `deepseek-flash`, `gpt-5.6-terra` or `claude-opus-5-5`.        |
 
 The calls are billed to your key. The weekly proof run, a one-page bakery site on DeepSeek's default model, has taken 7 to 17 minutes and cost $0.15 to $0.31, most of it the model's reasoning. A larger request or a costlier model costs more: Claude Opus 5.5, Anthropic's default here, costs many times what DeepSeek Flash does. [`packages/ai/README.md`](packages/ai/README.md) has the details.
 
@@ -317,7 +317,7 @@ flowchart LR
 Self-hosting is possible, and still needs validation outside the project: a workflow deploys a separately named copy from the docs and checks it comes up signed out, but nobody else has deployed their own copy yet. A deployment needs:
 
 - **Cloudflare**, for three Workers (the builder, the sandbox and the publish service) plus D1, R2, a Durable Object and a Workflow behind the builder. Live previews and publishing run generated code in [Containers](https://developers.cloudflare.com/containers/), which need the Workers Paid plan, and building the sandbox image needs Docker.
-- **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves, or a copy with only another provider's key falls back to whichever of that provider's models the catalogue lists first.
+- **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves, or a copy with only another provider's key falls back to whichever of that provider's models the catalog lists first.
 - **Clerk**, for sign-in. There is no hosted mode without authentication, because the endpoints spend money.
 - **An open door.** A deployment is invite-only until `VIBLD_ACCESS_MODE` is `open`: before that, only the verified emails in `VIBLD_PLATFORM_ADMINS` and the people they invite get in, so list your own. Clerk's session token has to carry `email` and `email_verified` for that match to work.
 - **Your own names.** The Worker names, database, bucket, Workflow, routes and Clerk domain in the `wrangler.jsonc` files are vibld's. `node scripts/self-host.mjs <settings.json>` writes a `wrangler.self-host.jsonc` beside each with all of them derived from a prefix of yours, and refuses to write one that still names vibld's ([Deploying](https://vibld.com/docs/deploying)).
@@ -341,8 +341,8 @@ Issues, discussions and pull requests are welcome. Start with [CONTRIBUTING.md](
 
 Found a vulnerability? Report it privately through [SECURITY.md](SECURITY.md), never in a public issue.
 
-## Licence
+## License
 
 Built by [Chris Brock (@cbrock84)](https://github.com/cbrock84), the lead maintainer ([GOVERNANCE.md](GOVERNANCE.md)); [CITATION.cff](CITATION.cff) says how to cite it.
 
-The core is licensed under [Apache-2.0](LICENSE); see also [NOTICE](NOTICE). The starter templates in `templates/marketing` and `templates/luminous` each carry their own MIT `LICENSE` at their own boundary, which does not relicense the core ([ADR-0008](docs/adr/0008-portable-marketing-site-template.md)). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists the projects whose material is adapted here, with the licence text each one publishes.
+The core is licensed under [Apache-2.0](LICENSE); see also [NOTICE](NOTICE). The starter templates in `templates/marketing` and `templates/luminous` each carry their own MIT `LICENSE` at their own boundary, which does not relicense the core ([ADR-0008](docs/adr/0008-portable-marketing-site-template.md)). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists the projects whose material is adapted here, with the license text each one publishes.

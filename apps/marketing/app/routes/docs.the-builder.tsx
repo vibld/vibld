@@ -12,16 +12,10 @@ export function meta() {
 export default function TheBuilder() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
-      <p>
-        Five tabs, and the useful half of this page is what each one does not
-        show. A tab that looks like it reports everything, and reports some of
-        it, is worse than one that says where it stops.
-      </p>
-
       <h2>Preview</h2>
       <p>
         While a first build runs, this is a <strong>draft</strong>: a static
-        sketch of the page, labelled “Draft, building the real site”, with the
+        sketch of the page, labeled “Draft, building the real site”, with the
         build’s progress over it. It is drawn in a restricted frame, is never
         saved in the project, and is a picture of the intent, not a run of it. A
         follow-up keeps what the tab already shows instead.
@@ -31,8 +25,7 @@ export default function TheBuilder() {
         the draft) and offers <strong>Run live preview</strong>, which installs
         the project and starts it in a private sandbox. Once it is up, the frame
         is the running app and the draft is gone: the two are never shown side
-        by side, because a stale sketch next to a live copy invites the wrong
-        conclusion about which one you are looking at.
+        by side.
       </p>
       <p>
         A running preview takes each new version in place, and says{' '}
@@ -53,8 +46,7 @@ export default function TheBuilder() {
         Export, Publish and Push to GitHub are not here. They are under{' '}
         <strong>Ship</strong>, in the top bar, and they act on the{' '}
         <strong>last finished checkpoint</strong>. The tab says so when the list
-        shows something else, because a button that acts on something other than
-        the list in front of you is a trap.
+        shows something else.
       </p>
 
       <h2>Console</h2>
@@ -76,8 +68,7 @@ export default function TheBuilder() {
       <p>
         <strong>It is not the sandbox’s errors.</strong> Install failures, build
         failures and type errors from a sandbox run are not reported here yet. A
-        sandbox that fails to start says so in the Preview tab, which is
-        currently the only place that knows.
+        sandbox that fails to start says so only in the Preview tab.
       </p>
 
       <h2>Runs</h2>
@@ -99,8 +90,7 @@ export default function TheBuilder() {
       <p>
         With the same project open in two tabs, the one left behind is told
         “This project changed in another tab” and stops saving until you press{' '}
-        <strong>Reload</strong>, so nothing is overwritten without it being
-        said.
+        <strong>Reload</strong>.
       </p>
 
       <h2>Sharing a project</h2>
@@ -130,10 +120,9 @@ export default function TheBuilder() {
         already live, and the second is the act.
       </p>
       <p>
-        A preview is not a publish. Running a sandbox, or finishing a build,
-        never makes anything public. Nothing automated can publish either: no
-        scheduled run, no webhook, and no text in a pull request or a commit
-        message. Only a person asking, in the moment, puts a site on the web.
+        Running a sandbox, or finishing a build, never makes anything public.
+        Nothing automated can publish either: no scheduled run, no webhook, and
+        no text in a pull request or a commit message.
       </p>
       <p>
         <strong>Take it down</strong> is the other half, on the same terms. The
@@ -168,7 +157,7 @@ export default function TheBuilder() {
       </p>
       <p>
         <strong>Delete account</strong> asks you to type a phrase to confirm.
-        From then on the account cannot be used: any subscription is cancelled,
+        From then on the account cannot be used: any subscription is canceled,
         the preview stopped, published sites taken down and the GitHub
         connection removed. Thirty days later its projects, media and usage
         records are deleted. Until then, signing in offers{' '}
@@ -176,17 +165,14 @@ export default function TheBuilder() {
       </p>
       <p>
         The footer carries the limits above in one line, for anybody who never
-        opens those tabs. It is built from the same source the tabs are, so it
-        cannot drift away from them. The run count and token figures sit beside
-        it, folded away until you ask for them: reference, not news.
+        opens those tabs. The run count and token figures sit beside it, folded
+        away until you ask for them.
       </p>
 
       <h2>Where this is going</h2>
       <p>
-        Both gaps are about wiring an existing thing into a tab, not about
-        building the thing. The sandbox already produces the output and the
-        errors. Until they arrive here, this page and the tabs themselves will
-        keep saying so.
+        The sandbox already produces the output and the errors; both gaps are
+        about wiring them into these tabs. Until then, the tabs say so.
       </p>
     </DocPage>
   );

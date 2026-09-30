@@ -137,7 +137,7 @@ describe('the delete account control', () => {
     const text = view.text();
     // What stops immediately.
     assert.match(text, /What stops now/);
-    assert.match(text, /subscription is cancelled straight away/);
+    assert.match(text, /subscription is canceled straight away/);
     assert.match(text, /published site goes offline/);
     // What goes after 30 days.
     assert.match(text, /deleted after 30 days/);
@@ -178,7 +178,7 @@ describe('the delete account control', () => {
       reply({
         ...SCHEDULED,
         steps: { ...SCHEDULED.steps, subscription: false },
-        errors: ['Your subscription could not be cancelled yet.'],
+        errors: ['Your subscription could not be canceled yet.'],
       }),
     );
     let done = 0;
@@ -189,7 +189,7 @@ describe('the delete account control', () => {
 
     assert.match(view.text(), /scheduled for deletion on/);
     assert.match(view.text(), /2026/);
-    assert.match(view.text(), /subscription could not be cancelled yet/);
+    assert.match(view.text(), /subscription could not be canceled yet/);
     await view.press(/^Continue$/);
     assert.equal(done, 1);
     view.unmount();

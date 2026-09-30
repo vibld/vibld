@@ -48,7 +48,7 @@ Three-tier tokens: `--raw-*` primitives → semantic roles → components. No he
 
 A single spring integrator (k, c, dt-stepped) inside one rAF loop drives all of these:
 
-| Element | Trigger | Behaviour | Spring |
+| Element | Trigger | Behavior | Spring |
 |---|---|---|---|
 | h1 words | load | Split into masked words; each rises from 110%, 70ms stagger | k=120 c=20 |
 | `[data-reveal]` | IntersectionObserver, −12% bottom margin | Fade + rise 40px; 80ms stagger per batch | k=140 c=22 |

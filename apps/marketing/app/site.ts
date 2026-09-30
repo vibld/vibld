@@ -210,7 +210,7 @@ export const LEGAL_DOCS: LegalDoc[] = [
     label: 'Refund Policy',
     title: `Refund Policy | ${SITE.name}`,
     description:
-      'Cancelling a plan, refunds for plans and top-ups, and what happens after a refund or a dispute.',
+      'Canceling a plan, refunds for plans and top-ups, and what happens after a refund or a dispute.',
   },
   {
     slug: 'licenses',
@@ -388,7 +388,7 @@ export const ROUTES: SiteRoute[] = [
     path: '/styles',
     title: `Styles | ${SITE.name}`,
     description:
-      'Every visual direction vibld can build in, from the builder\u2019s own list: full colour systems where a direction has one, surface treatments where it does not.',
+      'Every visual direction vibld can build in, from the builder\u2019s own list: full color systems where a direction has one, surface treatments where it does not.',
   },
   {
     path: '/templates',
@@ -413,7 +413,7 @@ export const ROUTES: SiteRoute[] = [
     path: '/inspiration',
     title: `Inspiration | ${SITE.name}`,
     description:
-      'Palettes and type pairings from every design in the template catalog, each colour pair checked against WCAG AA, to borrow for your own project.',
+      'Palettes and type pairings from every design in the template catalog, each color pair checked against WCAG AA, to borrow for your own project.',
   },
   {
     path: '/examples',

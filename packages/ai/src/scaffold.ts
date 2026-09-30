@@ -431,7 +431,7 @@ export function readme(
   }
   if (has((path) => path === 'src/styles.css')) {
     layout.push(
-      "- `src/styles.css`: Tailwind CSS and the design's colours, fonts and spacing.",
+      "- `src/styles.css`: Tailwind CSS and the design's colors, fonts and spacing.",
     );
   }
   if (has((path) => path === 'DESIGN.md')) {

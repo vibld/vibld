@@ -243,7 +243,7 @@ function motionTable(motion: readonly MotionEntry[]): string {
   return `
 ## Motion
 
-| Element | Trigger | Behaviour | Timing |
+| Element | Trigger | Behavior | Timing |
 | --- | --- | --- | --- |
 ${rows.join('\n')}
 `;
@@ -260,7 +260,7 @@ ${JSON.stringify(spec, null, indent)}
 
 ${spec.intent}
 ${motionTable(spec.motion)}
-The frontmatter above is this project's design spec: every colour, font, type step, space, radius and effect it uses, each section's copy verbatim, and what changes at each breakpoint. Change the spec and the code together.
+The frontmatter above is this project's design spec: every color, font, type step, space, radius and effect it uses, each section's copy verbatim, and what changes at each breakpoint. Change the spec and the code together.
 
 ## Do
 

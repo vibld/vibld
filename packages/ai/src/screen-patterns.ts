@@ -47,7 +47,7 @@ export function findScreen(id: string): ScreenPattern | undefined {
 
 const HEADING = [
   '## Screens to add',
-  "Build each screen below inside this project, in its design system above: its colours, typefaces, spacing, radius and components. A screen names its own product and sample data; use this project's instead. Keep the app shell the same on every screen.",
+  "Build each screen below inside this project, in its design system above: its colors, typefaces, spacing, radius and components. A screen names its own product and sample data; use this project's instead. Keep the app shell the same on every screen.",
 ];
 
 /**

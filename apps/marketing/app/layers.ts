@@ -59,7 +59,7 @@ export const LAYERS: readonly Layer[] = [
     name: 'Stacked cards',
     kind: 'section',
     summary:
-      'A four-step process section in which each colour card pins as you scroll and the next slides over it, like sheets of paper.',
+      'A four-step process section in which each color card pins as you scroll and the next slides over it, like sheets of paper.',
     stack: 'One HTML file: CSS sticky positioning and springs',
   }),
 ];

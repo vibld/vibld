@@ -895,7 +895,7 @@ export function paletteFromPage(
     source,
     'reference',
     'From the reference site',
-    `Derived from ${source}, the dominant colour of the page you pointed at.`,
+    `Derived from ${source}, the dominant color of the page you pointed at.`,
     scheme,
   );
   if (!seed) return null;

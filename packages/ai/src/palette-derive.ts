@@ -449,12 +449,12 @@ export function paletteCss(palette: DerivedPalette): string {
  * answering.
  */
 export function referencePaletteGuidance(palette: DerivedPalette): string {
-  return `Colour palette for this build, derived from the reference site the
+  return `Color palette for this build, derived from the reference site the
 user pointed at. ${palette.note}
 
 Use these exact values. ${TOKEN_USE} Every
 foreground and background pair here has already been checked against WCAG AA,
-so use the values as given rather than adjusting them; a colour the user
+so use the values as given rather than adjusting them; a color the user
 actually typed in the request above still wins over any of them. This is a
 ${palette.mode} palette, so build the page for a ${palette.mode} ground.
 

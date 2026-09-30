@@ -2,14 +2,14 @@
 
 Vibld's own source is licensed under the Apache License, Version 2.0 (see
 [LICENSE](LICENSE) and [NOTICE](NOTICE)). Parts of this repository credit the
-projects below as the source of material they adapt. Each project's licence
+projects below as the source of material they adapt. Each project's license
 text is reproduced exactly as it appeared in that project's `LICENSE` file on
 its default branch when it was retrieved.
 
 ## nextlevelbuilder/ui-ux-pro-max-skill
 
 - Project: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
-- Licence file: https://raw.githubusercontent.com/nextlevelbuilder/ui-ux-pro-max-skill/main/LICENSE
+- License file: https://raw.githubusercontent.com/nextlevelbuilder/ui-ux-pro-max-skill/main/LICENSE
 - Retrieved: 2026-09-27 (default branch `main`)
 
 Files in this repository that credit it:
@@ -44,7 +44,7 @@ SOFTWARE.
 ## emilkowalski/skills
 
 - Project: https://github.com/emilkowalski/skills
-- Licence file: https://raw.githubusercontent.com/emilkowalski/skills/main/LICENSE
+- License file: https://raw.githubusercontent.com/emilkowalski/skills/main/LICENSE
 - Retrieved: 2026-09-27 (default branch `main`)
 
 Files in this repository that credit it:
@@ -81,7 +81,7 @@ SOFTWARE.
 ## LottieFiles/motion-design-skill
 
 - Project: https://github.com/LottieFiles/motion-design-skill
-- Licence file: https://raw.githubusercontent.com/LottieFiles/motion-design-skill/main/LICENSE
+- License file: https://raw.githubusercontent.com/LottieFiles/motion-design-skill/main/LICENSE
 - Retrieved: 2026-09-27 (default branch `main`)
 
 Files in this repository that credit it:
@@ -119,7 +119,7 @@ SOFTWARE.
 ## blader/humanizer
 
 - Project: https://github.com/blader/humanizer
-- Licence file: https://raw.githubusercontent.com/blader/humanizer/main/LICENSE
+- License file: https://raw.githubusercontent.com/blader/humanizer/main/LICENSE
 - Retrieved: 2026-09-27 (default branch `main`)
 
 Files in this repository that credit it:
@@ -154,7 +154,7 @@ SOFTWARE.
 ## AThevon/genjutsu
 
 - Project: https://github.com/AThevon/genjutsu
-- Licence file: https://raw.githubusercontent.com/AThevon/genjutsu/main/LICENSE
+- License file: https://raw.githubusercontent.com/AThevon/genjutsu/main/LICENSE
 - Retrieved: 2026-09-27 (default branch `main`)
 
 Its `LICENSE` file ends with a "Third-party components" section. That section is part of the file and is reproduced below with the rest of it.
@@ -203,13 +203,13 @@ sub-skill's own `SKILL.md`, which is genjutsu-authored.
 ## VoltAgent/awesome-design-md
 
 - Project: https://github.com/VoltAgent/awesome-design-md
-- Licence file: https://raw.githubusercontent.com/VoltAgent/awesome-design-md/main/LICENSE
+- License file: https://raw.githubusercontent.com/VoltAgent/awesome-design-md/main/LICENSE
 - Retrieved: 2026-09-27 (default branch `main`)
 
 Files in this repository that credit it:
 
 - `packages/ai/src/style-presets.ts` (file header: the last seven presets,
-  and which of their colour values appear in the corpus)
+  and which of their color values appear in the corpus)
 - `packages/ai/README.md` (the "Design intelligence" section)
 
 ```text
@@ -239,7 +239,7 @@ SOFTWARE.
 ## cathrynlavery/diagram-design
 
 - Project: https://github.com/cathrynlavery/diagram-design
-- Licence file: https://raw.githubusercontent.com/cathrynlavery/diagram-design/main/LICENSE
+- License file: https://raw.githubusercontent.com/cathrynlavery/diagram-design/main/LICENSE
 - Retrieved: 2026-09-27 (default branch `main`)
 
 Files in this repository that credit it:

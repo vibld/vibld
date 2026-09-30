@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * A slowly turning spiral of soft points in the page's colours, drawn with
+ * A slowly turning spiral of soft points in the page's colors, drawn with
  * WebGL, that tilts toward the pointer. Written by Vibld: it fills its
  * nearest positioned ancestor, behind that ancestor's content.
  */
 export interface ParticleFieldProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** Two CSS colours, core then rim; defaults to the project's tokens. */
+  /** Two CSS colors, core then rim; defaults to the project's tokens. */
   colors?: readonly string[];
   /** 1 is a slow turn, 0 holds still. */
   speed?: number;
@@ -20,7 +20,7 @@ type Rgb = [number, number, number];
 
 const DEFAULT_COLORS = ['var(--accent)', 'var(--primary)'];
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 1. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 1. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';

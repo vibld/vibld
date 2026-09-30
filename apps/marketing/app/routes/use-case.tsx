@@ -65,9 +65,8 @@ export default function UseCase() {
             </ul>
 
             <p className="lb-uc__next">
-              Then the same flow as everything else: a staged checkpoint to
-              read, a private preview, and export, a pull request or a publish
-              when you are ready.{' '}
+              Then the same flow: a staged checkpoint to read, a private
+              preview, and export, a pull request or a publish.{' '}
               <Link className="lb-link" to="/how-it-works">
                 How it works
               </Link>

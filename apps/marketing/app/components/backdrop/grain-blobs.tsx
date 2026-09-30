@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * Soft blobs of the page's colours drifting under a fine film grain, drawn
+ * Soft blobs of the page's colors drifting under a fine film grain, drawn
  * on a 2D canvas. Written by Vibld: it fills its nearest positioned
  * ancestor, behind that ancestor's content.
  */
 export interface GrainBlobsProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** Up to five CSS colours; defaults to the project's colour tokens. */
+  /** Up to five CSS colors; defaults to the project's color tokens. */
   colors?: readonly string[];
   /** 1 is a slow drift, 0 holds still. */
   speed?: number;
@@ -24,7 +24,7 @@ const DEFAULT_COLORS = ['var(--primary)', 'var(--accent)', 'var(--secondary)'];
 const GRAIN =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 255. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 255. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';

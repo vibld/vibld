@@ -36,7 +36,7 @@ export default function AcceptableUse() {
         </li>
         <li>
           Build or publish malware, phishing pages, pages that collect passwords
-          or payment details under false pretences, or tools designed to gain
+          or payment details under false pretenses, or tools designed to gain
           unauthorized access to systems or data.
         </li>
         <li>
@@ -54,7 +54,7 @@ export default function AcceptableUse() {
             </li>
             <li>
               phishing, or impersonation of another person or brand, including
-              collecting credentials under false pretences;
+              collecting credentials under false pretenses;
             </li>
             <li>
               malware, fraud or scams, including crypto and get-rich-quick

@@ -58,7 +58,7 @@ export default function Terms() {
       <h2>2. Who may use the Service</h2>
       <p>
         You must be at least 18 years old, or the age of majority where you live
-        if that is higher. If you use the Service for an organisation, you
+        if that is higher. If you use the Service for an organization, you
         confirm you may bind it to these Terms.
       </p>
       <p>The Service is open to people anywhere in the world.</p>
@@ -123,7 +123,7 @@ export default function Terms() {
         us. Subscriptions renew automatically at the end of each month or year
         until you cancel them in the billing portal, reached from{' '}
         <strong>Manage billing</strong> in the builder. While a subscription is
-        not active (cancelled, past due or unpaid) the account has the Free
+        not active (canceled, past due or unpaid) the account has the Free
         allowance. Cancellations and refunds are covered by the{' '}
         <a href="/legal/refunds">Refund Policy</a>.
       </p>
@@ -161,10 +161,10 @@ export default function Terms() {
       </p>
       <p>
         You keep ownership of your content. You grant {SITE.legalEntity} a
-        worldwide, non-exclusive, royalty-free licence to host, store, process,
+        worldwide, non-exclusive, royalty-free license to host, store, process,
         build, preview and publish your content, and to send it to the provider
         of the model you choose (or of the default model), only for the purpose
-        of running the Service for you. The licence ends when your content is
+        of running the Service for you. The license ends when your content is
         deleted, subject to backups and to the retention described in the{' '}
         <a href="/legal/privacy">Privacy Policy</a>.
       </p>
@@ -178,7 +178,7 @@ export default function Terms() {
       </p>
       <p>
         AI output can be wrong, insecure, similar to other people&apos;s output,
-        or include third-party open-source components under their own licences.
+        or include third-party open-source components under their own licenses.
         vibld checks what it builds, but those checks do not make the code fit
         for any purpose. Review and test it before you rely on it or put it in
         front of anyone else.
@@ -205,7 +205,7 @@ export default function Terms() {
 
       <h2>8. GitHub</h2>
       <p>
-        If you connect a GitHub repository, you authorise vibld&apos;s GitHub
+        If you connect a GitHub repository, you authorize vibld&apos;s GitHub
         App to create a branch, a commit and a pull request in that one
         repository when you push. The connection lasts 90 days or until you
         disconnect it. Your use of GitHub is governed by GitHub&apos;s own
@@ -233,7 +233,7 @@ export default function Terms() {
         section 4 says.
       </p>
       <p>
-        You may stop using the Service at any time. Cancelling a subscription is
+        You may stop using the Service at any time. Canceling a subscription is
         described in the <a href="/legal/refunds">Refund Policy</a>. You can
         also delete your account from the builder&apos;s settings, as the{' '}
         <a href="/legal/privacy">Privacy Policy</a> describes; deleting it

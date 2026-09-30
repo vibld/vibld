@@ -123,7 +123,7 @@ export default function Licenses() {
           THIRD_PARTY_NOTICES.md
         </a>{' '}
         lists projects whose material is adapted, the files that credit each
-        one, and each listed project&apos;s licence text as that project
+        one, and each listed project&apos;s license text as that project
         publishes it.
       </p>
 
@@ -131,7 +131,7 @@ export default function Licenses() {
       <p>
         This website serves three typefaces from its own origin. The files were
         copied from the Fontsource packages named below, and each package’s
-        licence file is served unchanged beside the fonts.
+        license file is served unchanged beside the fonts.
       </p>
       {/*
         A list rather than a table: the copyright lines are long, and four
@@ -141,7 +141,7 @@ export default function Licenses() {
         {FONTS.map((font) => (
           <li key={font.family}>
             <strong>{font.family}</strong> (<code>{font.package}</code>).{' '}
-            {font.copyright}. SIL Open Font License 1.1. Licence text:{' '}
+            {font.copyright}. SIL Open Font License 1.1. License text:{' '}
             <a href={font.licence} className="break-all">
               {font.licence}
             </a>
@@ -154,8 +154,8 @@ export default function Licenses() {
         The template gallery draws each design in its own typefaces:{' '}
         {approxCount(templateFonts.length)} families, served from this
         website&apos;s own origin. Each was copied from the Fontsource package
-        named below, and that package&apos;s licence file is served unchanged
-        beside the font. Each entry gives the licence its file names and the
+        named below, and that package&apos;s license file is served unchanged
+        beside the font. Each entry gives the license its file names and the
         file&apos;s copyright line exactly as written; where a file has no
         copyright line, the entry says so.
       </p>
@@ -163,8 +163,8 @@ export default function Licenses() {
         {templateFonts.map((font) => (
           <li key={font.family}>
             <strong>{font.family}</strong> (<code>{font.package}</code>).{' '}
-            {font.copyright ?? 'Its licence file has no copyright line'}.{' '}
-            {font.name ?? 'Licence as its file states'}. Licence text:{' '}
+            {font.copyright ?? 'Its license file has no copyright line'}.{' '}
+            {font.name ?? 'License as its file states'}. License text:{' '}
             <a href={font.licence} className="break-all">
               {font.licence}
             </a>

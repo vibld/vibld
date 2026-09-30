@@ -12,7 +12,7 @@ Build **one self-contained HTML file** that renders the layer described below.
 
 ## Intent
 
-A four-step "how we work" process in which each step is a large colour card.
+A four-step "how we work" process in which each step is a large color card.
 As you scroll, each card pins to the viewport, and the next card slides up over
 it. The covered card sinks back: it scales down, lifts slightly and dims, so the
 stack reads like physical paper. The section drops into any page.
@@ -20,7 +20,7 @@ stack reads like physical paper. The section drops into any page.
 ## Composition
 
 - Intro header (70svh) → the stack → footer (70svh), so the section is seen in context.
-- Each card sits in a `position: sticky; top: 0; height: 100svh` wrapper; the card is centred at `min(1100px, 100%)` × `min(72svh, 640px)`.
+- Each card sits in a `position: sticky; top: 0; height: 100svh` wrapper; the card is centered at `min(1100px, 100%)` × `min(72svh, 640px)`.
 - Card grid: a step number top-left, a large title spanning the bottom, and body copy in the right column.
 - Below 768px: single column.
 
@@ -37,7 +37,7 @@ stack reads like physical paper. The section drops into any page.
 
 ## Motion
 
-| Element | Trigger | Behaviour | Physics |
+| Element | Trigger | Behavior | Physics |
 |---|---|---|---|
 | Card *n* | scroll | Progress = how far card *n+1* has covered it (0→1). Scale down by up to 10%, translateY −3svh, black overlay → 35% (never fade the card itself, or the card beneath shows through) | spring k=180 c=26 per card |
 

@@ -79,7 +79,7 @@ export default function Contact() {
             type="submit"
             className="rounded-md bg-[var(--color-accent)] px-5 py-3 font-medium text-white hover:opacity-90"
           >
-            Send enquiry
+            Send inquiry
           </button>
 
           {/*

@@ -98,7 +98,7 @@ Three sub-rules that are easy to lose:
   the note does not rescue it, however much it sounds like assent.
 - **Whatever drives a run shows the real request and submits only the answer
   given.** This is the second-order requirement, and it binds Vibld's own
-  builder as much as any future client: a surface that summarises the request
+  builder as much as any future client: a surface that summarizes the request
   into something friendlier, pre-selects the likely answer, or answers on the
   user's behalf while they are away has defeated every rule above without
   touching the enforcement code. The request shown is the request made.

@@ -1076,7 +1076,7 @@ async function clawBackPurchase(
       stripe = await deps.cancelSubscription(subscriptionId);
     } catch (error) {
       console.error(
-        'clawback: the subscription could not be cancelled',
+        'clawback: the subscription could not be canceled',
         subscriptionId,
         error,
       );

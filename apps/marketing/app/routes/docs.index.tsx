@@ -8,11 +8,7 @@ export function meta() {
 
 export default function DocsIndex() {
   return (
-    <Page
-      eyebrow="Docs"
-      title="Guides"
-      lead="Two tracks, because they answer different questions. One is about using the hosted builder. The other is about running your own copy of it."
-    >
+    <Page eyebrow="Docs" title="Guides">
       <div className="mt-12 space-y-14">
         {DOC_TRACKS.map((track) => (
           <section key={track.id} id={track.id} className="scroll-mt-8">

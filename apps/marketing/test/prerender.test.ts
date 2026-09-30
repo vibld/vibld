@@ -989,7 +989,7 @@ describe('the templates on /examples', () => {
         after.indexOf(`aria-labelledby="template-${template.slug}"`),
       );
       assert.ok(card.includes('Template, hand-built'), template.slug);
-      assert.ok(card.includes('MIT licence'), template.slug);
+      assert.ok(card.includes('MIT license'), template.slug);
       assert.ok(card.includes(`href="${template.source}"`), template.slug);
       assert.ok(card.includes(`src="${template.screenshot}"`), template.slug);
       assert.ok(

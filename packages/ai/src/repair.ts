@@ -45,7 +45,7 @@ ${findings}`);
   }
   parts.push(`Fix ${parts.length > 1 ? 'all of it' : 'it'}, and change nothing else. Keep every file that is not implicated, keep
 the design, the copy and the structure exactly as they are, and do not rename
-or reorganise anything. Change only the files the fix needs: every other file
+or reorganize anything. Change only the files the fix needs: every other file
 stays exactly as it is.`);
   return parts.join('\n\n');
 }

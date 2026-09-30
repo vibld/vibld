@@ -138,7 +138,7 @@ describe('the account page', () => {
   it('shows the plan as gifted and until when, and the projects with their sites', async () => {
     serving(() => DETAIL());
     const view = await mount();
-    assert.match(view.text(), /Build, gifted until 31 Dec 2026/);
+    assert.match(view.text(), /Build, gifted until Dec 31, 2026/);
     assert.match(view.text(), /Bakery/);
     assert.match(view.text(), /bakery \(live\)/);
     view.unmount();

@@ -264,7 +264,7 @@ Underneath:
   invite does nothing and says so; reinstating a revoked one is reported as
   its own outcome rather than looking like a fresh invite.
 - `POST /api/admin/invite/revoke` `{ email }` -- withdraw one. The row stays,
-  so the record of what was authorised stays readable.
+  so the record of what was authorized stays readable.
 
 All four are behind the platform-admin check, not the invite gate. That
 check needs an admin list and a D1 binding, and deliberately not
@@ -276,7 +276,7 @@ tool was missing when asked why.
 the two credit routes refuse without it, and `POST /api/admin/invite` records
 the invite either way and reports that Clerk was not asked. Setting it is
 worth it, though, on an invite-only deployment, where sign-in is waitlisted
-in Clerk (L6) and without the key an invite here is half the action: the row authorises somebody who still
+in Clerk (L6) and without the key an invite here is half the action: the row authorizes somebody who still
 cannot create a session, and an operator has to approve them by hand at
 https://dashboard.clerk.com/~/users/waitlist. With the key set, inviting asks
 Clerk to approve the address too and the panel says what Clerk answered.
@@ -391,7 +391,7 @@ Frontend API domain, not this Worker's origin. The client sends the token as
 `Authorization: Bearer <token>` instead (`src/auth/clerk-token.ts`,
 `src/generation/remote-provider.ts`), and ADR-0006 requires the Worker to
 verify it itself regardless. Verification pins RS256 (rejecting the
-`alg: none` downgrade), matches the Clerk instance's issuer, and honours
+`alg: none` downgrade), matches the Clerk instance's issuer, and honors
 expiry with a small skew allowance.
 
 **Cloudflare Access is off** (docs/decisions.md L5): Clerk is the only gate.
@@ -429,7 +429,7 @@ What this costs, accepted rather than solved here:
   instance's result, D62). A stage the engine left unended (an instance terminated
   or errored between steps) is settled when either route, or the open,
   finds the instance has stopped.
-- **Cancelling stops the _next_ step, not the current one.** Termination
+- **Canceling stops the _next_ step, not the current one.** Termination
   lands at a step boundary; a Stop that arrives mid-model-call cannot stop
   that one call from finishing (or being billed for). With bounded steps (below)
   the next boundary is at most one group of files away. The stopped run's
@@ -639,7 +639,7 @@ Both gracefully no-op if `VITE_CLERK_PUBLISHABLE_KEY` is ever unset
 (`ClerkRoot` renders its children unwrapped; `AuthStatus` renders nothing;
 `getClerkToken()` returns `null`) -- but since Access is off, an unset key on
 a live deployment now means generation is unreachable, not merely
-unauthenticated, which is the fail-closed behaviour `isConfigured` in
+unauthenticated, which is the fail-closed behavior `isConfigured` in
 `worker/index.ts` requires.
 
 **Manual setup steps (one-time, dashboard-only):**
@@ -781,7 +781,7 @@ a share only ever makes sense against a preview that is actually running.
 ### The draft preview (resolved 2026-09-28)
 
 While a project's first build runs, the Preview tab shows a static draft of
-the page instead of "Nothing to preview yet", labelled "Draft, building the
+the page instead of "Nothing to preview yet", labeled "Draft, building the
 real site", with the build's stage (`LifecycleBar`) and progress
 (`ProgressMeter`) laid over its foot. `BuilderSession` holds it as
 `state.draft`; `PreviewPanel` renders it through `DraftPreview.tsx` and
@@ -801,12 +801,12 @@ content policy Explore's tiles use, so the draft cannot touch the builder.
   own reservation is held, so the draft can never take the in-flight slot
   the build needed. A draft that fails is dropped silently; one still being
   drawn when the build ends is aborted, which stops what it spends.
-- **After the build.** The draft stays, labelled "Draft, the real site is
+- **After the build.** The draft stays, labeled "Draft, the real site is
   built", with "Run live preview" (or the sandbox's start-up status) over
   it, until the live preview is running; then the pane shows the live
   preview as it always has. `Workspace` remembers that the live preview has
   run, so stopping it afterwards does not bring the sketch back. A failed
-  or cancelled build drops the draft, and a sandbox that fails to start
+  or canceled build drops the draft, and a sandbox that fails to start
   shows its failure as before.
 - **Follow-ups** (a project with an accepted checkpoint) show no draft and
   ask for none: the current preview or code stays on screen.
@@ -957,7 +957,7 @@ Dashboard needs no code change, only the amount to change.
   their own subscription.
 - `POST /api/billing/cancel` -- authenticated, no body, open to the same
   callers as the portal. Returns `{ url }` for a Billing Portal session
-  that opens straight on cancelling the caller's subscription
+  that opens straight on canceling the caller's subscription
   (`billing-checkout.ts`'s `createCancelSession`), and answers an account
   with no subscription the way the portal answers one with no customer
   (502). **A monthly plan is offered 50% off one month, once, before it
@@ -970,7 +970,7 @@ Dashboard needs no code change, only the amount to change.
   product, so neither the portal's retention setting nor the coupon can
   tell them apart; that setting stays empty. If Stripe refuses the coupon
   (it has not been created yet, say), the flow opens without the offer
-  and the refusal is logged, so nobody is kept from cancelling. A
+  and the refusal is logged, so nobody is kept from canceling. A
   subscription already set to end is sent to the plain portal instead.
 - `POST /api/billing/card` -- authenticated, gated, no body. Returns `{ url }`
   for a Stripe Checkout Session in `setup` mode, which saves a card and
@@ -1009,7 +1009,7 @@ Dashboard needs no code change, only the amount to change.
   the payment bought; see "Refunds and disputes" below.
 
   **A refund takes a reward back only when it is demonstrably the payment
-  that earned it.** The ids a payment can be recognised by are recorded on
+  that earned it.** The ids a payment can be recognized by are recorded on
   the attribution when the payout settles (`funded_by`), and the refunded
   charge has to name one of them. A refund that names none of them, which
   includes every reward paid before this was recorded, leaves the reward
@@ -1069,7 +1069,7 @@ Dashboard needs no code change, only the amount to change.
 
   The nightly reconcile offers the payout on that recorded answer rather
   than on a subscription's status, for every subscription rather than only
-  the active ones: a subscriber who paid once and then cancelled reads
+  the active ones: a subscriber who paid once and then canceled reads
   `canceled` for ever, and reading status was how the sweep came to skip
   them.
 
@@ -1143,7 +1143,7 @@ intent paid (`invoicePayments.list`) and matches that invoice instead.
 | What happened                            | What is removed                                                                                                                                                                   |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Top-up refunded, in full or in part      | The refunded share of its $8 credit, floored at what the account has not spent. The rest is recorded as a shortfall and never collected.                                          |
-| Subscription payment refunded, in full   | The subscription: its allowance stops at once in D1, and it is cancelled in Stripe with no final invoice and no proration.                                                        |
+| Subscription payment refunded, in full   | The subscription: its allowance stops at once in D1, and it is canceled in Stripe with no final invoice and no proration.                                                         |
 | Subscription payment refunded, in part   | The same. A partial refund is how an operator processes an annual plan's prorated cancellation, so it is treated as that cancellation.                                            |
 | Dispute lost, on either                  | The same as a full refund of that payment, and the account is suspended: `/api/plan`, `/api/mockups` and `/api/chat` refuse it as `account-suspended` until an operator lifts it. |
 | Dispute won, withdrawn, or merely opened | Nothing.                                                                                                                                                                          |
@@ -1167,7 +1167,7 @@ for a refund and `dispute:<dispute>` for a dispute, so a redelivery, the
 nightly replay and the parked retry all land on the same row. Credit owed
 is computed from Stripe's running refunded total inside the one statement
 that writes the row, so two partial refunds add up to exactly the share
-they refunded and an older refund replayed late owes nothing. Cancelling in
+they refunded and an older refund replayed late owes nothing. Canceling in
 Stripe is asked on every application and answers `already-ended` for a
 subscription that is over.
 
@@ -1710,7 +1710,7 @@ with 403 and `reason: "deletion-scheduled"`, except the deletion routes
 themselves. Then, each on its own and each recorded when it is done:
 
 1. **Subscription.** Every subscription Stripe has for the customer that can
-   still take money is cancelled immediately, with `prorate: false` and
+   still take money is canceled immediately, with `prorate: false` and
    `invoice_now: false`: nothing is refunded or prorated, as the refund
    policy says.
 2. **Preview.** Stopped through the preview service's stop path.
@@ -1734,7 +1734,7 @@ save their place: the subscription is checked once more, then every project
 the account owns is deleted one at a time (everything under
 `projects/<id>/`, its snapshots and its saved conversation, and then its
 rows, so each pass takes a project out of the next pass's list), then the
-media (`media/<user>/`), then any project, run, trace and media rows left, the published site's catalogue (its
+media (`media/<user>/`), then any project, run, trace and media rows left, the published site's catalog (its
 bytes are collected by apps/publish's orphan sweep; the slug is kept, never
 released, under the tombstone), the GitHub grant and push history, the
 referral code and the redeemed invite, both spend-ledger Durable Objects,

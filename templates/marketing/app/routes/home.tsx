@@ -19,7 +19,7 @@ const STEPS = [
   },
   {
     title: 'We verify the source',
-    body: 'Every supplier is checked for authorised distribution before we quote, so a cheap listing does not become a counterfeit bearing.',
+    body: 'Every supplier is checked for authorized distribution before we quote, so a cheap listing does not become a counterfeit bearing.',
   },
   {
     title: 'You approve, we ship',

@@ -13,11 +13,7 @@ export function meta() {
 export default function UseCases() {
   return (
     <>
-      <PageHead
-        eyebrow="Use cases"
-        title="Sites and apps, from one sentence"
-        lead="The kinds of project vibld is built for: what to ask for, what comes back, what to know first, and a real example of each where one exists."
-      />
+      <PageHead eyebrow="Use cases" title="Sites and apps, from one sentence" />
       <section className="lb-section lb-section--tight" aria-label="Use cases">
         <div className="lb-wrap">
           <ul className="lb-uses">

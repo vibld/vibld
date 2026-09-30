@@ -407,7 +407,7 @@ export function PlanFacts() {
 
 /** What anyone can verify today without an account. */
 export const OPEN_FACTS = [
-  { term: 'Licence', detail: 'Apache-2.0, for the core' },
+  { term: 'License', detail: 'Apache-2.0, for the core' },
   { term: 'Source', detail: 'Public on GitHub' },
   { term: 'Output', detail: 'Plain files in a standard Vite layout' },
   { term: 'Runtime', detail: 'None required from vibld' },

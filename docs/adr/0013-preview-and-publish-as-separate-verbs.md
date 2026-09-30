@@ -5,7 +5,7 @@
 - Accepted: 2026-09-17
 - Decision owners: maintainers
 - Refines: ADR-0006, ADR-0010
-- Approval: the authorisation rules D22's publishing milestone is built against
+- Approval: the authorization rules D22's publishing milestone is built against
 
 ## Context
 
@@ -45,7 +45,7 @@ merging, so it is not in this repository.
 
 ## Decision
 
-**Preview and publish are distinct operations with distinct authorisation.**
+**Preview and publish are distinct operations with distinct authorization.**
 
 Producing a preview never makes anything public. Publishing is its own verb,
 its own permission, and its own audit record. A grant to preview is not a

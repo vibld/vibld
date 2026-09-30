@@ -41,11 +41,11 @@ const COMPOSER: Feature[] = [
   },
   {
     title: 'Style',
-    body: 'A visual direction from the catalogue, narrowed by mood. Styles whose moods your message names are marked as suggestions; nothing is picked for you.',
+    body: 'A visual direction from the catalog, narrowed by mood. Styles whose moods your message names are marked as suggestions; nothing is picked for you.',
   },
   {
     title: 'Reference',
-    body: 'A page to start from. vibld reads its text, colours, fonts and spacing and adapts them rather than copying. It goes with one message.',
+    body: 'A page to start from. vibld reads its text, colors, fonts and spacing and adapts them rather than copying. It goes with one message.',
   },
   {
     title: 'Media',
@@ -72,14 +72,14 @@ const DIRECTIONS: Feature[] = [
   },
   {
     title: 'Moving backgrounds',
-    body: 'Ask for an animated background, or name one (aurora, particles, grain, flowing lines), and the build can use one of four that vibld writes itself: drawn in code from the project’s colours, paused off screen, and a still frame under reduced motion.',
+    body: 'Ask for an animated background, or name one (aurora, particles, grain, flowing lines), and the build can use one of four that vibld writes itself: drawn in code from the project’s colors, paused off screen, and a still frame under reduced motion.',
   },
 ];
 
 const PANES: Feature[] = [
   {
     title: 'Preview',
-    body: 'While a first build runs, a draft of the page, labelled as one. Then Run live preview, and the frame is the running app.',
+    body: 'While a first build runs, a draft of the page, labeled as one. Then Run live preview, and the frame is the running app.',
   },
   {
     title: 'Code',
@@ -162,7 +162,7 @@ export default function Features() {
       <PageHead
         eyebrow="Features"
         title="What the builder does today"
-        lead="A request goes in, a conventional project comes out, and every step between is something you can read. This is the whole of it, including where each part stops."
+        lead="A request goes in, a conventional project comes out, and every step between is something you can read."
       />
 
       <section
@@ -197,7 +197,6 @@ export default function Features() {
             eyebrow="Directions"
             id="directions-title"
             title={`${approxCount(STYLE_PRESETS.length)} named styles, or three sketches`}
-            lede="Name a style preset and the build starts from its direction. Or ask for three sketches that differ in look, and pick one."
           />
           <FeatureGrid features={DIRECTIONS} />
           <p className="lb-more-link">
@@ -274,7 +273,6 @@ export default function Features() {
             eyebrow="Projects"
             id="projects-title"
             title="Each project keeps everything"
-            lede="Every project remembers its code, its conversation and its settings, and publishes to a site of its own."
           />
           <FeatureGrid features={PROJECTS} />
         </div>
@@ -291,14 +289,14 @@ export default function Features() {
             eyebrow="Design checks"
             id="checks-title"
             title="It checks the build against its own spec"
-            lede="The chosen direction is written into the project as DESIGN.md: its colours, type, breakpoints and motion. When the build finishes, static checks read the files against it, and against the few rules every page must keep: a page language, alt text on images, a reduced-motion rule. Checks read files; they do not render them, so they cannot see computed contrast or an overflowing layout."
+            lede="The chosen direction is written into the project as DESIGN.md: its colors, type, breakpoints and motion. When the build finishes, static checks read the files against it, and against the few rules every page must keep: a page language, alt text on images, a reduced-motion rule. Checks read files; they do not render them, so they cannot see computed contrast or an overflowing layout."
           />
           <div className="lb-grid2">
             <article className="lb-card">
               <h3>Errors and warnings</h3>
               <p>
                 An error is something the checker is confident about, such as a
-                colour the spec named that appears nowhere. Only errors buy a
+                color the spec named that appears nowhere. Only errors buy a
                 repair, because a repair is another paid call. A repair is a
                 patch to the files at fault, not a rewrite, and a warning rides
                 along with one that is happening anyway.
@@ -338,7 +336,7 @@ export default function Features() {
             eyebrow="Taking your code"
             id="out-title"
             title="Three ways out, and they do different things"
-            lede="All three are under Ship, in the top bar. The output is a conventional project. There is no proprietary runtime to keep it working and nothing that stops building the day you stop paying."
+            lede="All three are under Ship, in the top bar. The output is a conventional project with no proprietary runtime, and it keeps building the day you stop paying."
           />
           <FeatureGrid features={OUT} />
           <p className="lb-more-link">
@@ -358,9 +356,8 @@ export default function Features() {
             title="A project you can read, run and move"
             lede={
               <>
-                Plan and usage in the settings menu mirrors the same spend
-                figures the builder enforces, so what it shows and what it
-                allows cannot disagree.{' '}
+                Plan and usage in the settings menu reads the same spend figures
+                the builder enforces.{' '}
                 <Link className="lb-link" to="/pricing">
                   Pricing
                 </Link>{' '}

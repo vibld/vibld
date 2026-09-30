@@ -128,7 +128,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             params.referencePaletteSource,
             'reference',
             'From the reference site',
-            `Derived from ${params.referencePaletteSource}, the dominant colour of the page you pointed at.`,
+            `Derived from ${params.referencePaletteSource}, the dominant color of the page you pointed at.`,
           );
           if (!seed) return null;
           const mode = params.referencePaletteMode;

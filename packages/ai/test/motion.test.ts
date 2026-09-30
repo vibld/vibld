@@ -231,7 +231,7 @@ describe('the spec, and the DESIGN.md written from it', () => {
   it('holds the files to the spec', () => {
     assert.match(
       PLAN_SYSTEM_PROMPT,
-      /every colour is a\s+custom property on :root with the spec's value[\s\S]*?every copy string\s+appears verbatim; every breakpoint is a responsive variant or @media at that\s+width/,
+      /every color is a\s+custom property on :root with the spec's value[\s\S]*?every copy string\s+appears verbatim; every breakpoint is a responsive variant or @media at that\s+width/,
     );
   });
 

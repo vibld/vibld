@@ -27,7 +27,7 @@ export default function Pricing() {
       <PageHead
         eyebrow="Pricing"
         title="A price, and the model spend it includes"
-        lead="Model spend is what actually costs money to run, so each plan comes with an amount of it every month. An account with no active subscription is Free."
+        lead="Model spend is what costs money to run, so each plan includes some every month."
       />
       <section className="lb-section lb-section--tight" aria-label="The plans">
         <div className="lb-wrap">
@@ -38,7 +38,7 @@ export default function Pricing() {
             automatically past the allowance. A build you cannot fully fund is
             started smaller rather than refused, and once too little is left for
             even that, runs are refused until the month resets or you buy a
-            top-up. vibld is in public beta, and anyone can sign up.
+            top-up.
           </p>
           <PlanFacts />
         </div>
@@ -55,10 +55,9 @@ export default function Pricing() {
             <article className="lb-card">
               <h3>The reservation</h3>
               <p>
-                A run reserves its worst case before it starts, which is what
-                stops a run starting that could not have been paid for. That is
-                why a long generation can briefly look more expensive than it
-                turns out to be.
+                A run reserves its worst case before it starts, so no run starts
+                that could not be paid for. A long generation can briefly look
+                more expensive than it turns out to be.
               </p>
             </article>
             <article className="lb-card">
@@ -66,8 +65,7 @@ export default function Pricing() {
               <p>
                 When the run finishes it is reconciled to what it actually cost,
                 and that is what you are charged. Prices follow the model that
-                runs: a cheaper model reserves less and costs less, which is the
-                practical reason the model selector exists.
+                runs: a cheaper model reserves less and costs less.
               </p>
             </article>
           </div>
@@ -114,7 +112,7 @@ export default function Pricing() {
       <section className="lb-section" aria-labelledby="change-title">
         <div className="lb-wrap">
           <SectionHead
-            eyebrow="Changing or cancelling"
+            eyebrow="Changing or canceling"
             id="change-title"
             title="Stripe handles the money"
           />

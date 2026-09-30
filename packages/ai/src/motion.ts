@@ -61,7 +61,7 @@ export const MOTION_RECIPES: readonly MotionRecipe[] = [
     name: 'Modal or dialog',
     triggers: ['modal', 'dialog', 'lightbox', 'confirmation popup'],
     guidance:
-      'A modal is the one overlay that stays centred, because it is not anchored to a trigger. On the shadcn Dialog, fade the Overlay (`data-[state=open]:fade-in-0`) and zoom the Content from 95% over the same 200-250ms so the two read as one surface arriving, with `motion-reduce:animate-none` on both. For content that changes size inside an open dialog, give the inner wrapper Motion `layout` so it resizes smoothly instead of jumping.',
+      'A modal is the one overlay that stays centered, because it is not anchored to a trigger. On the shadcn Dialog, fade the Overlay (`data-[state=open]:fade-in-0`) and zoom the Content from 95% over the same 200-250ms so the two read as one surface arriving, with `motion-reduce:animate-none` on both. For content that changes size inside an open dialog, give the inner wrapper Motion `layout` so it resizes smoothly instead of jumping.',
   },
   {
     id: 'drawer',
@@ -130,7 +130,7 @@ export const MOTION_RECIPES: readonly MotionRecipe[] = [
       'glow effect',
     ],
     guidance:
-      "Drive it with motion values, never React state, so it moves at frame rate without re-rendering: `const x = useMotionValue(0)` set in onPointerMove from `e.clientX - rect.left`, smoothed with `useSpring(x, { stiffness: 150, damping: 20, mass: 0.4 })`. Spotlight: `background: useMotionTemplate\\`radial-gradient(420px at ${x}px ${y}px, color-mix(in oklch, var(--primary) 22%, transparent), transparent 70%)\\`` on the section. Magnetic button: translate it 20-30% of the pointer's offset from its centre and spring back on leave. Tilt card: `rotateX`/`rotateY` within 6-8deg from `useTransform`, with `perspective` on the parent. Run it only where `matchMedia('(pointer: fine)').matches` and `useReducedMotion()` is false; touch has no hover to follow.",
+      "Drive it with motion values, never React state, so it moves at frame rate without re-rendering: `const x = useMotionValue(0)` set in onPointerMove from `e.clientX - rect.left`, smoothed with `useSpring(x, { stiffness: 150, damping: 20, mass: 0.4 })`. Spotlight: `background: useMotionTemplate\\`radial-gradient(420px at ${x}px ${y}px, color-mix(in oklch, var(--primary) 22%, transparent), transparent 70%)\\`` on the section. Magnetic button: translate it 20-30% of the pointer's offset from its center and spring back on leave. Tilt card: `rotateX`/`rotateY` within 6-8deg from `useTransform`, with `perspective` on the parent. Run it only where `matchMedia('(pointer: fine)').matches` and `useReducedMotion()` is false; touch has no hover to follow.",
   },
   {
     id: 'parallax',
@@ -161,7 +161,7 @@ export const MOTION_RECIPES: readonly MotionRecipe[] = [
       'logo strip',
     ],
     guidance:
-      'Ambient motion must be imperceptible at a glance and never compete with content. Aurora or mesh: two to four large blurred blobs (`blur-3xl`, `mix-blend-mode` where it suits the ground) drifting 5-15% with Motion `animate={{ x: [...], y: [...] }}` on 12-24s loops of different lengths so they never synchronise. Floating: translateY within 5-15px over 3-5s. Marquee: duplicate the row and animate `x` from `0%` to `-50%` linearly over 25-40s with `repeat: Infinity`, pause on hover, and mask the edges with `mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent)`. Under reduced motion these stop outright: they carry no information.',
+      'Ambient motion must be imperceptible at a glance and never compete with content. Aurora or mesh: two to four large blurred blobs (`blur-3xl`, `mix-blend-mode` where it suits the ground) drifting 5-15% with Motion `animate={{ x: [...], y: [...] }}` on 12-24s loops of different lengths so they never synchronize. Floating: translateY within 5-15px over 3-5s. Marquee: duplicate the row and animate `x` from `0%` to `-50%` linearly over 25-40s with `repeat: Infinity`, pause on hover, and mask the edges with `mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent)`. Under reduced motion these stop outright: they carry no information.',
   },
   {
     id: 'text',
@@ -204,7 +204,7 @@ export const MOTION_RECIPES: readonly MotionRecipe[] = [
     name: 'Tab indicator',
     triggers: ['tabs', 'tab bar', 'segmented control', 'tab indicator'],
     guidance:
-      'Render the active indicator as one Motion element with `layoutId="tab-indicator"` inside the active trigger. Motion moves it between tabs as a shared element, so the pill slides from one tab to the next instead of two colours interpolating out of step. A spring (stiffness 500, damping 35) keeps it quick. Put the label above it with `relative z-10`.',
+      'Render the active indicator as one Motion element with `layoutId="tab-indicator"` inside the active trigger. Motion moves it between tabs as a shared element, so the pill slides from one tab to the next instead of two colors interpolating out of step. A spring (stiffness 500, damping 35) keeps it quick. Put the label above it with `relative z-10`.',
   },
   {
     id: 'hold-to-confirm',

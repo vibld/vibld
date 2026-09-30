@@ -130,7 +130,7 @@ function copyFamily(family: string, work: string): TemplateFont {
     files.push({ file: `/fonts/templates/${slug}/${from}`, weight });
   }
   const licenceName = readdirSync(pkg!).find((f) => /^licen[cs]e/i.test(f));
-  if (!licenceName) throw new Error(`${family}: package has no licence file`);
+  if (!licenceName) throw new Error(`${family}: package has no license file`);
   writeFileSync(
     join(target, 'LICENSE.txt'),
     readFileSync(join(pkg!, licenceName)),

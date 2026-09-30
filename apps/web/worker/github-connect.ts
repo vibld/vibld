@@ -499,7 +499,7 @@ async function readAsUser(
     return {
       ok: false,
       error:
-        'GitHub refused access to that installation. Check your organisation settings, then try again.',
+        'GitHub refused access to that installation. Check your organization settings, then try again.',
       reason: 'forbidden',
     };
   }

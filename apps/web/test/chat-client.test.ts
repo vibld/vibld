@@ -238,7 +238,7 @@ describe('asking for a chat turn', () => {
     assert.equal(seen, controller.signal);
     assert.deepEqual(result, {
       ok: false,
-      error: { kind: 'aborted', message: 'Cancelled.' },
+      error: { kind: 'aborted', message: 'Canceled.' },
     });
   });
 

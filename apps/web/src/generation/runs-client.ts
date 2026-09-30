@@ -35,7 +35,7 @@ import type { CheckVerdict } from './build-check.ts';
 export const STOP_LABELS: Record<RunStop, string> = {
   applied: 'Applied',
   'no-changes': 'No changes needed',
-  cancelled: 'Cancelled',
+  cancelled: 'Canceled',
   'validation-failed': 'Did not pass validation',
   'model-refused': 'The model declined this request',
   'model-truncated': 'Cut off at the output limit',

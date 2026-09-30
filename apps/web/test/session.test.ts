@@ -214,7 +214,7 @@ describe('BuilderSession cancellation', () => {
     assert.equal(state.running, false);
     assert.deepEqual(state.problems, [], 'a cancellation is not a failure');
     assert.ok(
-      state.timeline.some((entry) => entry.message.includes('cancelled')),
+      state.timeline.some((entry) => entry.message.includes('canceled')),
     );
   });
 

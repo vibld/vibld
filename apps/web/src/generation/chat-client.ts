@@ -120,7 +120,7 @@ export async function requestChatTurn(
   const getToken = options.getToken ?? getClerkToken;
   const aborted: ChatResult = {
     ok: false,
-    error: { kind: 'aborted', message: 'Cancelled.' },
+    error: { kind: 'aborted', message: 'Canceled.' },
   };
 
   let response: Response;

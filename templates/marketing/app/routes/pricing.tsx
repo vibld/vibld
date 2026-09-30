@@ -85,9 +85,9 @@ export default function Pricing() {
 
       <Section heading="What is not charged for">
         <p className="max-w-2xl text-[var(--color-ink-muted)]">
-          Quotes, sourcing research and a request we cannot fulfil are all free.
-          We would rather tell you a part is unobtainable than bill you for
-          finding out.
+          Quotes, sourcing research and a request we cannot fulfill are all
+          free. We would rather tell you a part is unobtainable than bill you
+          for finding out.
         </p>
         <p className="mt-6">
           <Link

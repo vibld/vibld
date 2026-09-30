@@ -224,7 +224,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       Manrope: 'Mona Sans',
       'JetBrains Mono': 'Fragment Mono',
     },
-    why: 'Mona Sans has the tight, heavy presence of a launch keynote at display sizes and a clean text cut; Fragment Mono is a grotesk-flavoured mono that keeps code sleek and monochrome.',
+    why: 'Mona Sans has the tight, heavy presence of a launch keynote at display sizes and a clean text cut; Fragment Mono is a grotesk-flavored mono that keeps code sleek and monochrome.',
   },
   snagline: {
     faces: [
@@ -645,13 +645,13 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Albert Sans',
         role: 'body',
-        use: 'body 17px, light grey on black',
+        use: 'body 17px, light gray on black',
       },
     ],
     replaces: {
       Manrope: 'Albert Sans',
     },
-    why: 'Sora keeps the geometric display voice; Albert Sans is a clean, slightly humanist body that stays readable in light grey on black.',
+    why: 'Sora keeps the geometric display voice; Albert Sans is a clean, slightly humanist body that stays readable in light gray on black.',
   },
   slotwise: {
     faces: [
@@ -718,7 +718,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Mulish',
         role: 'body',
-        use: 'UI copy 16px, slate-grey secondary text',
+        use: 'UI copy 16px, slate-gray secondary text',
       },
     ],
     replaces: {
@@ -737,7 +737,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Rethink Sans',
         role: 'body',
-        use: 'body 16px, grey secondary',
+        use: 'body 16px, gray secondary',
       },
     ],
     replaces: {
@@ -858,7 +858,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Outfit',
         role: 'body',
-        use: 'body 16px, warm grey',
+        use: 'body 16px, warm gray',
       },
     ],
     replaces: {
@@ -1009,7 +1009,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       },
     ],
     replaces: {},
-    why: "The design relies on Manrope's variable weight for its richer body colour, so it keeps Manrope while most other templates move off it.",
+    why: "The design relies on Manrope's variable weight for its richer body color, so it keeps Manrope while most other templates move off it.",
   },
   jotworks: {
     faces: [
@@ -1146,7 +1146,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Hanken Grotesk',
         role: 'body',
-        use: 'body 16px, grey secondary',
+        use: 'body 16px, gray secondary',
       },
     ],
     replaces: {
@@ -1188,7 +1188,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Space Grotesk',
         role: 'body',
-        use: 'body 16-18px, grey secondary',
+        use: 'body 16-18px, gray secondary',
       },
     ],
     replaces: {},
@@ -1258,7 +1258,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Inter',
         role: 'body',
-        use: 'body 16px, meta 12px grey',
+        use: 'body 16px, meta 12px gray',
       },
     ],
     replaces: {
@@ -1292,7 +1292,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Sofia Sans Semi Condensed',
         role: 'body',
-        use: 'body 16-18px, slate grey',
+        use: 'body 16-18px, slate gray',
       },
     ],
     replaces: {
@@ -1496,7 +1496,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Epilogue',
         role: 'body',
-        use: 'body 16px light grey, 12px meta',
+        use: 'body 16px light gray, 12px meta',
       },
     ],
     replaces: {
@@ -1567,7 +1567,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Source Sans 3',
         role: 'body',
-        use: 'body 16-18px grey',
+        use: 'body 16-18px gray',
       },
     ],
     replaces: {
@@ -1603,7 +1603,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Nunito Sans',
         role: 'body',
-        use: 'body 18px, warm grey',
+        use: 'body 18px, warm gray',
       },
     ],
     replaces: {
@@ -1857,14 +1857,14 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Roboto',
         role: 'body',
-        use: 'body 16px, muted grey',
+        use: 'body 16px, muted gray',
       },
     ],
     replaces: {
       Inter: 'Roboto',
       Geist: 'Roboto',
     },
-    why: 'Roboto is a true system UI face, so the monochrome black stage stays neutral and lets the course thumbnails bring the colour.',
+    why: 'Roboto is a true system UI face, so the monochrome black stage stays neutral and lets the course thumbnails bring the color.',
   },
   'plain-matter': {
     faces: [
@@ -1935,13 +1935,13 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Public Sans',
         role: 'body',
-        use: 'body 16px, muted grey excerpts',
+        use: 'body 16px, muted gray excerpts',
       },
     ],
     replaces: {
       Inter: 'Public Sans',
     },
-    why: 'Outfit keeps the neighbourly rounded headlines, and Public Sans, drawn for civic websites, makes long local reads comfortable.',
+    why: 'Outfit keeps the neighborly rounded headlines, and Public Sans, drawn for civic websites, makes long local reads comfortable.',
   },
   'tessellate-lab': {
     faces: [
@@ -2091,7 +2091,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Inter: 'Signika',
     },
-    why: 'Nunito keeps the rounded, neighbourly headline, and Signika is a soft, low-contrast humanist body that feels like a café noticeboard.',
+    why: 'Nunito keeps the rounded, neighborly headline, and Signika is a soft, low-contrast humanist body that feels like a café noticeboard.',
   },
   fernhollow: {
     faces: [
@@ -2214,7 +2214,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       'Playfair Display': 'Fraunces',
       Nunito: 'Quicksand',
     },
-    why: 'Fraunces has the soft, 1970s-flavoured serif of vintage stationery, and Quicksand is a rounded sans that keeps the sweet, sunlit tone.',
+    why: 'Fraunces has the soft, 1970s-flavored serif of vintage stationery, and Quicksand is a rounded sans that keeps the sweet, sunlit tone.',
   },
   vernissage: {
     faces: [
@@ -2344,7 +2344,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Red Hat Display',
         role: 'body',
-        use: 'body 16px grey, 13px uppercase countdown labels',
+        use: 'body 16px gray, 13px uppercase countdown labels',
       },
     ],
     replaces: {
@@ -2362,7 +2362,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Inter Tight',
         role: 'body',
-        use: 'body 16px, grey secondary',
+        use: 'body 16px, gray secondary',
       },
     ],
     replaces: {},
@@ -2396,7 +2396,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Anek Latin',
         role: 'body',
-        use: 'body 16px at 1.6, grey metadata',
+        use: 'body 16px at 1.6, gray metadata',
       },
     ],
     replaces: {
@@ -2473,7 +2473,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       'Space Grotesk': 'Bai Jamjuree',
     },
-    why: 'Anton keeps the condensed album-cover impact, and Bai Jamjuree is a quirky, techno-flavoured grotesk for the utility text.',
+    why: 'Anton keeps the condensed album-cover impact, and Bai Jamjuree is a quirky, techno-flavored grotesk for the utility text.',
   },
   'tidewell-sessions': {
     faces: [
@@ -3104,7 +3104,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       Inter: 'Pathway Extreme',
       Playfair: 'Playfair Display',
     },
-    why: 'Playfair Display stays for this art-book catalogue, one of the few templates keeping it, and Pathway Extreme is a quiet regular-weight grotesk with optical sizes for small labels.',
+    why: 'Playfair Display stays for this art-book catalog, one of the few templates keeping it, and Pathway Extreme is a quiet regular-weight grotesk with optical sizes for small labels.',
   },
   'paloma-arce': {
     faces: [
@@ -3221,12 +3221,12 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Chakra Petch',
         role: 'display',
-        use: 'hero 128px 600 at -3.2px, grey on black',
+        use: 'hero 128px 600 at -3.2px, gray on black',
       },
       {
         family: 'Chakra Petch',
         role: 'body',
-        use: 'body 16px grey',
+        use: 'body 16px gray',
       },
       {
         family: 'Azeret Mono',
@@ -3587,7 +3587,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Heebo',
         role: 'body',
-        use: 'descriptions 16-18px grey',
+        use: 'descriptions 16-18px gray',
       },
     ],
     replaces: {
@@ -3738,7 +3738,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Quicksand',
         role: 'body',
-        use: 'body 16-18px at 500, grey-blue secondary',
+        use: 'body 16-18px at 500, gray-blue secondary',
       },
     ],
     replaces: {
@@ -3868,7 +3868,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'Mukta',
         role: 'body',
-        use: 'body 16-18px, warm grey',
+        use: 'body 16-18px, warm gray',
       },
     ],
     replaces: {
@@ -3927,7 +3927,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       {
         family: 'M PLUS 2',
         role: 'body',
-        use: 'body 16px grey on black, tracked uppercase nav and eyebrows',
+        use: 'body 16px gray on black, tracked uppercase nav and eyebrows',
       },
     ],
     replaces: {
@@ -3971,7 +3971,7 @@ export const TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       Playfair: 'Brygada 1918',
       Inter: 'Hind',
     },
-    why: 'Brygada 1918 is a classic book serif with real italics and a semibold for card titles, signalling premium care, and Hind keeps nav and forms neutral.',
+    why: 'Brygada 1918 is a classic book serif with real italics and a semibold for card titles, signaling premium care, and Hind keeps nav and forms neutral.',
   },
   'groundwork-collective': {
     faces: [

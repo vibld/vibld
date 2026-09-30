@@ -249,7 +249,7 @@ function DeletionScheduledNotice({
             <p className="banner__detail">
               Changed your mind? You can keep the account until then. Your
               projects and files come back as they were. Anything already
-              stopped stays stopped: a cancelled subscription, a published site
+              stopped stays stopped: a canceled subscription, a published site
               taken down, the GitHub connection and referral rewards.
             </p>
             <p className="banner__detail">

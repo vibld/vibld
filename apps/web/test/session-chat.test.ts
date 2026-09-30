@@ -162,7 +162,7 @@ describe('talking to the agent', () => {
           options.signal?.addEventListener('abort', () =>
             resolve({
               ok: false,
-              error: { kind: 'aborted', message: 'Cancelled.' },
+              error: { kind: 'aborted', message: 'Canceled.' },
             }),
           );
         }),

@@ -49,7 +49,7 @@ Goal: a signed-in user turns a prompt into a portable marketing site with a priv
 
 Exit criterion: the versioned evaluation suite meets its documented target, accepted exports build outside Vibld, and recovery, tenant-isolation, preview-access and budget tests pass. M1 is a hosted technical alpha. A working preview alone does not close this milestone.
 
-Status: running at app.vibld.com as a public beta. Not built: revision-scoped repository indexing and semantic search (internal issue 12), and scoped autonomy permissions (internal issue 15). Not settled: the measured model selection, since the bakeoff has run but its evidence does not yet favour one model.
+Status: running at app.vibld.com as a public beta. Not built: revision-scoped repository indexing and semantic search (internal issue 12), and scoped autonomy permissions (internal issue 15). Not settled: the measured model selection, since the bakeoff has run but its evidence does not yet favor one model.
 
 Track: M1 milestone and Hello Vibld tracker.
 

@@ -238,7 +238,7 @@ export function unservableConfiguredModel(env: ModelAccessEnv): string | null {
   if (!named) return null;
   const model = findModel(canonicalModelId(named));
   if (!model) {
-    return `VIBLD_MODEL is ${named}, which is not a model vibld knows. Set it to one from the model catalogue, or leave it unset for the default of the provider whose key is set.`;
+    return `VIBLD_MODEL is ${named}, which is not a model vibld knows. Set it to one from the model catalog, or leave it unset for the default of the provider whose key is set.`;
   }
   if (configuredProviders(env)[model.provider]) return null;
   return `VIBLD_MODEL is ${model.label}, and this deployment has no ${KEY_NAME[model.provider]}. Set VIBLD_MODEL to a model your keys serve, or leave it unset for the default of the provider whose key is set.`;

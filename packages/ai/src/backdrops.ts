@@ -79,7 +79,7 @@ export const BACKDROPS: readonly BackdropRecipe[] = [
     id: 'aurora-mesh',
     component: 'AuroraMesh',
     looks:
-      "A slow, full-bleed field of the page's colours, like light through smoke, that bends toward the pointer. WebGL shader.",
+      "A slow, full-bleed field of the page's colors, like light through smoke, that bends toward the pointer. WebGL shader.",
     triggers: [
       'aurora',
       'northern lights',
@@ -92,14 +92,14 @@ export const BACKDROPS: readonly BackdropRecipe[] = [
     source: String.raw`import { useEffect, useRef } from 'react';
 
 /**
- * A slow, cursor-aware field of the page's own colours, drawn by a WebGL
+ * A slow, cursor-aware field of the page's own colors, drawn by a WebGL
  * fragment shader. Written by Vibld: it fills its nearest positioned
  * ancestor, behind that ancestor's content.
  */
 export interface AuroraMeshProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** Up to four CSS colours; defaults to the project's colour tokens. */
+  /** Up to four CSS colors; defaults to the project's color tokens. */
   colors?: readonly string[];
   /** 1 is a slow drift, 0 holds still. */
   speed?: number;
@@ -114,7 +114,7 @@ const DEFAULT_COLORS = [
   'var(--secondary)',
 ];
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 1. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 1. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';
@@ -341,14 +341,14 @@ export function AuroraMesh({
     source: String.raw`import { useEffect, useRef } from 'react';
 
 /**
- * A slowly turning spiral of soft points in the page's colours, drawn with
+ * A slowly turning spiral of soft points in the page's colors, drawn with
  * WebGL, that tilts toward the pointer. Written by Vibld: it fills its
  * nearest positioned ancestor, behind that ancestor's content.
  */
 export interface ParticleFieldProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** Two CSS colours, core then rim; defaults to the project's tokens. */
+  /** Two CSS colors, core then rim; defaults to the project's tokens. */
   colors?: readonly string[];
   /** 1 is a slow turn, 0 holds still. */
   speed?: number;
@@ -360,7 +360,7 @@ type Rgb = [number, number, number];
 
 const DEFAULT_COLORS = ['var(--accent)', 'var(--primary)'];
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 1. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 1. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';
@@ -592,7 +592,7 @@ export function ParticleField({
     id: 'grain-blobs',
     component: 'GrainBlobs',
     looks:
-      "Large soft blobs of the page's colours drifting under a fine film grain. 2D canvas; calm and warm.",
+      "Large soft blobs of the page's colors drifting under a fine film grain. 2D canvas; calm and warm.",
     extraProps: 'grain (0 to 1, default 0.5)',
     triggers: [
       'blob',
@@ -607,14 +607,14 @@ export function ParticleField({
     source: String.raw`import { useEffect, useRef } from 'react';
 
 /**
- * Soft blobs of the page's colours drifting under a fine film grain, drawn
+ * Soft blobs of the page's colors drifting under a fine film grain, drawn
  * on a 2D canvas. Written by Vibld: it fills its nearest positioned
  * ancestor, behind that ancestor's content.
  */
 export interface GrainBlobsProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** Up to five CSS colours; defaults to the project's colour tokens. */
+  /** Up to five CSS colors; defaults to the project's color tokens. */
   colors?: readonly string[];
   /** 1 is a slow drift, 0 holds still. */
   speed?: number;
@@ -630,7 +630,7 @@ const DEFAULT_COLORS = ['var(--primary)', 'var(--accent)', 'var(--secondary)'];
 const GRAIN =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 255. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 255. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';
@@ -806,7 +806,7 @@ export function GrainBlobs({
 export interface FlowLinesProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** One CSS colour per line; defaults to the project's colour tokens. */
+  /** One CSS color per line; defaults to the project's color tokens. */
   colors?: readonly string[];
   /** 1 is a slow drift, 0 holds still. */
   speed?: number;
@@ -816,7 +816,7 @@ type Rgb = [number, number, number];
 
 const DEFAULT_COLORS = ['var(--primary)', 'var(--accent)', 'var(--secondary)'];
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 255. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 255. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';
@@ -1031,10 +1031,10 @@ export function backdropGuidance(promptText: string): string | null {
     '- Render it as the first child of the section it fills, and give that',
     '  section "relative isolate overflow-hidden" and a height. It fills the',
     "  section behind the section's content.",
-    '- It paints with the colour tokens (--background, --primary, --accent,',
-    "  --secondary); pass colors (CSS colours, such as 'var(--primary)') to",
+    '- It paints with the color tokens (--background, --primary, --accent,',
+    "  --secondary); pass colors (CSS colors, such as 'var(--primary)') to",
     '  choose others, and speed (0 holds it still) to change the pace. Keep',
-    '  text readable over its lightest and darkest colour, with a scrim if',
+    '  text readable over its lightest and darkest color, with a scrim if',
     '  needed.',
     '- It already caps pixel density, pauses off screen and in background',
     '  tabs, draws one still frame under reduced motion, and falls back to a',

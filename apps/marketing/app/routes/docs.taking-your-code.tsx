@@ -26,9 +26,8 @@ export default function TakingYourCode() {
         Nothing is rewritten on the way out and nothing phones home.
       </p>
       <p>
-        This is the option that owes nothing to any account, including yours. It
-        works the same whether you are on the hosted service or running your own
-        copy.
+        It needs no account, including yours, and works the same on the hosted
+        service and on your own copy.
       </p>
 
       <h2>Push to GitHub</h2>
@@ -50,9 +49,7 @@ export default function TakingYourCode() {
       <p>
         A push writes the checkpoint as a branch named{' '}
         <code>vibld/&lt;revision&gt;</code>, one commit carrying the generated
-        files, and a pull request against the repository’s default branch. It
-        opens a pull request rather than committing to your default branch,
-        because a generated change is a change to review.
+        files, and a pull request against the repository’s default branch.
       </p>
       <p>
         <strong>Disconnect</strong> on a project stops that project pushing
@@ -61,7 +58,7 @@ export default function TakingYourCode() {
         project’s connection and the sign-in. Duplicating or remixing a project
         does not copy its repository.
       </p>
-      <p>Two things about the access it uses:</p>
+      <p>The access it uses:</p>
       <ul>
         <li>
           It is scoped to the{' '}
@@ -71,31 +68,26 @@ export default function TakingYourCode() {
         </li>
         <li>
           The grant <strong>expires after 90 days</strong>. A revoked or expired
-          grant blocks new pushes and keeps its record rather than vanishing, so
-          the history of what was authorised stays readable.
+          grant blocks new pushes, and its record is kept.
         </li>
       </ul>
       <p>
-        A push is safe to retry. The parent commit and the commit timestamps are
-        recorded before the first call that could succeed without reporting
-        back, so retrying a checkpoint produces the identical commit rather than
-        a second one.
+        A push is safe to retry: retrying a checkpoint produces the identical
+        commit rather than a second one.
       </p>
 
       <h2>Publish</h2>
       <p>
         Builds the checkpoint and serves it at the project’s own address,{' '}
-        <code>&lt;slug&gt;.vibld-preview.dev</code>. Unlike a sandbox, it is not
-        a dev server on a timer: it is the built output, which is what you want
-        when somebody needs to look at it tomorrow. Each project has its own
+        <code>&lt;slug&gt;.vibld-preview.dev</code>. Unlike a sandbox, it is the
+        built output, not a dev server on a timer. Each project has its own
         site, and deleting the project takes its site down. Images and fonts the
         build itself emits are not published yet; files from your media library
         are.
       </p>
       <p>
-        Publishing is still vibld hosting your project. If you want it on your
-        own domain and your own account, export it or push it and deploy from
-        there.
+        Publishing is still vibld hosting your project. For your own domain and
+        account, export it or push it and deploy from there.
       </p>
 
       <h2>What you own</h2>

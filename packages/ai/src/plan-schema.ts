@@ -327,7 +327,7 @@ spec; "rgba(10,22,31,.37) fill, 1px rgba(255,255,255,.22) border, 50px
 pill, blur(18px)" is. Every value in it is one the files actually use.
 - intent: one sentence naming the subject, who it is for, and the page's
   single job.
-- tokens.colors: every colour the page uses, including overlays and scrims,
+- tokens.colors: every color the page uses, including overlays and scrims,
   written exactly as the CSS writes it (#07121c, rgba(2,10,18,.57),
   oklch(...)). name is its custom property without the dashes (primary for
   --primary); use says what it is for.
@@ -347,7 +347,7 @@ pill, blur(18px)" is. Every value in it is one the files actually use.
   1440px as well as the widths between.
 - motion: one row for everything that moves, in the order a visitor meets
   it: element (what moves), trigger (load, in view, hover, press, scroll,
-  always), behaviour in values (rise 40px and fade in, 80ms stagger), and
+  always), behavior in values (rise 40px and fade in, 80ms stagger), and
   timing as numbers (spring stiffness 120 damping 20, or 200ms ease-out).
   Every row's reduced-motion form is its finished state. Empty only for a
   page with no motion at all. Build each row with exactly its numbers.
@@ -359,7 +359,7 @@ pill, blur(18px)" is. Every value in it is one the files actually use.
   one observable fact ("the headline stays on one line at 1440px", "the
   form says it does not send yet").
 Write the rules from what this project does, never from a named company's
-design language. Then build the files to the spec exactly: every colour is a
+design language. Then build the files to the spec exactly: every color is a
 custom property on :root with the spec's value (dark values in a .dark
 block), mapped in \`@theme inline\` as --color-<name>: var(--<name>) so the
 utilities use it (bg-primary, text-muted-foreground); every copy string
@@ -373,9 +373,9 @@ no "." or ".." segment and no leading slash. Keep the project under 40 files,
 counting the shadcn/ui components in src/components/ui/.
 
 DESIGN INTENT
-Honour every design instruction in the request -- colour palettes, motion and
-animation, tone, layout and named sections. If the request names colours, use
-those exact colours. If it asks for animation, implement it in real code, not
+Honor every design instruction in the request -- color palettes, motion and
+animation, tone, layout and named sections. If the request names colors, use
+those exact colors. If it asks for animation, implement it in real code, not
 as a comment describing it. Ignoring a stated design instruction is a failed
 generation.
 
@@ -385,7 +385,7 @@ template. Where the request does not decide it:
 - Choose the layout from the content. A split hero with the product in use,
   a bento grid of unequal cells, an editorial column with pull quotes, a
   full-bleed image or video with type over it, a sticky scroll story, a
-  horizontally scrolling rail. Never default to a centred hero, three
+  horizontally scrolling rail. Never default to a centered hero, three
   identical feature cards, a testimonial row and a call-to-action band.
 - Vary rhythm: section widths, alignment and density change down the page.
   Let one element break the grid (an oversized numeral, an image bleeding
@@ -395,7 +395,7 @@ template. Where the request does not decide it:
   Not Inter, Roboto, Arial, Space Grotesk or a bare system stack as the
   display face. Display type is large and tight: clamp() up to 5-8rem on a
   hero, letter-spacing around -0.03em.
-- Use current CSS where it earns its place: oklch() colour and color-mix(),
+- Use current CSS where it earns its place: oklch() color and color-mix(),
   layered gradients and grain, backdrop-filter glass over imagery,
   mask-image fades, text-wrap: balance on headings, container queries
   (@container) for components that live in different widths, :has() for
@@ -404,7 +404,7 @@ template. Where the request does not decide it:
 UX BASELINE
 Hold these regardless of style or product type, unless the request explicitly
 overrides one:
-- Text on its background meets a 4.5:1 contrast ratio; do not use colour alone
+- Text on its background meets a 4.5:1 contrast ratio; do not use color alone
   to convey state (error, success, selected) -- pair it with an icon or text.
 - Every interactive element keeps a visible focus state and is reachable by
   keyboard alone; icon-only buttons get an aria-label.
@@ -413,7 +413,7 @@ overrides one:
   state distinct from their resting state.
 - Layout is mobile-first and never scrolls horizontally; body text is at
   least 16px with 1.5+ line-height.
-- Colour lives in CSS custom properties on :root with shadcn/ui's names
+- Color lives in CSS custom properties on :root with shadcn/ui's names
   (--background, --foreground, --primary, --primary-foreground, --muted,
   --muted-foreground, --accent, --border, --ring and so on), used through
   utilities (bg-primary, text-muted-foreground, bg-primary/80). Never a raw
@@ -468,7 +468,7 @@ Rules that hold everywhere:
 - The more often something is triggered, the less it animates. Anything the
   user fires many times a day -- typing, a keyboard shortcut, a command
   palette, a nav toggle -- gets no more than a 150ms fade.
-- Reduced motion keeps opacity and colour changes and drops movement: fewer
+- Reduced motion keeps opacity and color changes and drops movement: fewer
   and gentler, not none. MotionConfig covers declarative animation, but
   values linked to scroll or the pointer keep moving, so read
   useReducedMotion() and pass them their static value when it is true. CSS
@@ -652,7 +652,7 @@ here".
 
 const GROUP_SPEC_SECTION = `SPEC
 The spec is the design this project is built to, as measured values. Build
-the files to it exactly: every colour is a custom property on :root with the
+the files to it exactly: every color is a custom property on :root with the
 spec's value (dark values in a .dark block), mapped in \`@theme inline\` as
 --color-<name>: var(--<name>) so the utilities use it (bg-primary,
 text-muted-foreground); every copy string appears verbatim; every breakpoint
@@ -703,7 +703,7 @@ fixed (see SPEC).
 const KEPT_SPEC_SECTION = `SPEC
 The design spec is fixed: it is the project's DESIGN.md, whose frontmatter
 is the spec as JSON, and this change does not alter it. Plan files that
-hold to it exactly: every colour is a custom property on :root with the
+hold to it exactly: every color is a custom property on :root with the
 spec's value, mapped in \`@theme inline\` as --color-<name>: var(--<name>);
 every copy string appears verbatim; every breakpoint is a responsive variant
 or @media at that width.`;

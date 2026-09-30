@@ -89,8 +89,8 @@ the whole budget. Raising the ceiling is an edit to `MAX_RUNS` in
 `src/live.ts`.
 
 Spend is measured from the usage each provider reports, priced from the
-catalogue, and printed in cents. Cents rather than dollars because the
-cheapest model in the catalogue finishes a case for well under a cent, and a
+catalog, and printed in cents. Cents rather than dollars because the
+cheapest model in the catalog finishes a case for well under a cent, and a
 dollar figure rounded to two places prints that as `$0.00`.
 
 ### File-writing effort (D70)
@@ -106,7 +106,7 @@ bakeoff takes it as its `write_effort` input.
 **`VIBLD_EVAL_LIVE` is the only thing that starts spending.** A key in the
 environment is never enough on its own, because this same command runs in CI.
 A live run is refused before it costs anything if it names no model, names a
-model the catalogue does not have, or names one whose provider key is not set.
+model the catalog does not have, or names one whose provider key is not set.
 
 ## The bakeoff: two figures per model
 

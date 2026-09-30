@@ -156,7 +156,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Glassmorphism',
     description: 'Blurred see-through panels',
     direction:
-      'Frosted glass surfaces: translucent panels over a saturated background, backdrop-filter blur, hairline light borders and soft shadows. Keep text on a solid-enough backing to stay readable. Motion: materialize rather than fade -- animate backdrop-filter blur radius and scale together on enter so the surface reads as real material arriving, 250ms --ease-out. Never stack one light translucent surface on another; legibility collapses. Put colour on a solid layer behind the glass, not on the translucent foreground.',
+      'Frosted glass surfaces: translucent panels over a saturated background, backdrop-filter blur, hairline light borders and soft shadows. Keep text on a solid-enough backing to stay readable. Motion: materialize rather than fade -- animate backdrop-filter blur radius and scale together on enter so the surface reads as real material arriving, 250ms --ease-out. Never stack one light translucent surface on another; legibility collapses. Put color on a solid layer behind the glass, not on the translucent foreground.',
   },
   {
     id: 'neumorphism',
@@ -170,7 +170,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Brutalism',
     description: 'Heavy rules, hard edges',
     direction:
-      'Raw and deliberate: heavy black rules, flat blocks of one or two loud colours, oversized type, visible grid, hard shadows and no rounded corners. Motion: near-zero. Transitions at 0-80ms with no easing softness, or none at all -- a hard cut is the honest choice here, and a gentle curve contradicts the whole direction.',
+      'Raw and deliberate: heavy black rules, flat blocks of one or two loud colors, oversized type, visible grid, hard shadows and no rounded corners. Motion: near-zero. Transitions at 0-80ms with no easing softness, or none at all -- a hard cut is the honest choice here, and a gentle curve contradicts the whole direction.',
   },
   {
     id: 'minimalist',
@@ -191,7 +191,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Gradient rich',
     description: 'Vivid gradients',
     direction:
-      'Vivid multi-stop gradients across large surfaces, gradient text on headings, glowing accents, and colour that shifts between sections. Motion: the gradient itself drifts -- shift background-position by 10-20% over 8000-20000ms, linear, imperceptible at a glance. Foreground elements stay on the standard 150-250ms budget.',
+      'Vivid multi-stop gradients across large surfaces, gradient text on headings, glowing accents, and color that shifts between sections. Motion: the gradient itself drifts -- shift background-position by 10-20% over 8000-20000ms, linear, imperceptible at a glance. Foreground elements stay on the standard 150-250ms budget.',
   },
   {
     id: 'depth',
@@ -212,21 +212,21 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Claymorphism',
     description: 'Soft and playful',
     direction:
-      'Puffy, rounded surfaces that look moulded from clay: soft matte colours, an inflated 3D look from a light inner highlight plus a soft outer shadow (never a hard shadow), generous corner radii, and a friendly, approachable tone throughout. Motion: playful -- 150-300ms with a 10-20% overshoot on entrances (an ease-out-back curve), and a visible squash on press. The material looks soft, so it should settle like something soft.',
+      'Puffy, rounded surfaces that look molded from clay: soft matte colors, an inflated 3D look from a light inner highlight plus a soft outer shadow (never a hard shadow), generous corner radii, and a friendly, approachable tone throughout. Motion: playful -- 150-300ms with a 10-20% overshoot on entrances (an ease-out-back curve), and a visible squash on press. The material looks soft, so it should settle like something soft.',
   },
   {
     id: 'aurora',
     name: 'Aurora UI',
     description: 'Flowing gradient light',
     direction:
-      'Soft, flowing multi-colour gradient fields (like aurora light) behind glass-like foreground panels, gentle blur, and light that feels like it is slowly moving rather than a static backdrop. Keep foreground text on a surface solid enough to stay readable over the gradient. Motion: the drifting light is the point, not decoration. Move the gradient field over 8000-20000ms, linear or sine, with foreground panels entering at the normal 200-250ms. If the background is static, this is not aurora.',
+      'Soft, flowing multi-color gradient fields (like aurora light) behind glass-like foreground panels, gentle blur, and light that feels like it is slowly moving rather than a static backdrop. Keep foreground text on a surface solid enough to stay readable over the gradient. Motion: the drifting light is the point, not decoration. Move the gradient field over 8000-20000ms, linear or sine, with foreground panels entering at the normal 200-250ms. If the background is static, this is not aurora.',
   },
   {
     id: 'bentoGrid',
     name: 'Bento grid',
     description: 'Asymmetric tiles',
     direction:
-      'A grid of asymmetric rounded tiles of varying sizes, each one a self-contained card holding one idea (a stat, a feature, an image), like a bento box. Consistent gutter and corner radius across every tile size, restrained colour so the grid structure itself carries the visual interest. Motion: tiles enter staggered by 30-60ms in a center-out or top-left order, total under 500ms, each fading up 8px. Hover lifts a single tile; the grid itself never reflows.',
+      'A grid of asymmetric rounded tiles of varying sizes, each one a self-contained card holding one idea (a stat, a feature, an image), like a bento box. Consistent gutter and corner radius across every tile size, restrained color so the grid structure itself carries the visual interest. Motion: tiles enter staggered by 30-60ms in a center-out or top-left order, total under 500ms, each fading up 8px. Hover lifts a single tile; the grid itself never reflows.',
   },
   {
     id: 'editorial',
@@ -252,23 +252,23 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
   {
     id: 'vibrantBlocks',
     name: 'Vibrant blocks',
-    description: 'Bold flat colour',
+    description: 'Bold flat color',
     direction:
-      'Bold, saturated flat colour blocks with hard edges (no gradients, no shadows), high-contrast complementary colour pairs, oversized rounded sans-serif type, and a confident, energetic tone aimed at a younger or more casual audience. Motion: energetic -- 100-250ms with 15-30% overshoot, large decisive moves, colour blocks snapping into place from an edge. Fast enough to feel eager, never bouncy enough to feel unstable.',
+      'Bold, saturated flat color blocks with hard edges (no gradients, no shadows), high-contrast complementary color pairs, oversized rounded sans-serif type, and a confident, energetic tone aimed at a younger or more casual audience. Motion: energetic -- 100-250ms with 15-30% overshoot, large decisive moves, color blocks snapping into place from an edge. Fast enough to feel eager, never bouncy enough to feel unstable.',
   },
   {
     id: 'liquidGlass',
     name: 'Liquid glass',
     description: 'Fluid translucent surfaces',
     direction:
-      'Fluid, translucent surfaces that refract and bend the content behind them like real glass or liquid, with soft specular highlights along edges and smooth, physical-feeling transitions between states. More dimensional and fluid than flat glassmorphism -- the surface should feel like it is reacting to what is behind and around it, not just blurred. Motion: the surface should react, not just blur -- animate blur radius, scale and the specular highlight together on enter and on hover, 250-350ms --ease-out. Never stack one translucent surface on another, and keep colour on the solid layer behind.',
+      'Fluid, translucent surfaces that refract and bend the content behind them like real glass or liquid, with soft specular highlights along edges and smooth, physical-feeling transitions between states. More dimensional and fluid than flat glassmorphism -- the surface should feel like it is reacting to what is behind and around it, not just blurred. Motion: the surface should react, not just blur -- animate blur radius, scale and the specular highlight together on enter and on hover, 250-350ms --ease-out. Never stack one translucent surface on another, and keep color on the solid layer behind.',
   },
   {
     id: 'warmTerminal',
     name: 'Warm terminal',
-    description: 'Warm near-black, no colour',
+    description: 'Warm near-black, no color',
     direction:
-      'A warm near-black ground -- brown-tinted rather than blue-tinted or neutral -- with an off-white as the only strong value and no chromatic accent at all in the interface itself. Monospace for headings and labels so the page reads as a tool rather than a brochure; hairlines and surfaces separate by a step of warmth, not by a border colour. The restraint is the style: a single amber is available for a genuine warning and nothing else earns colour. Motion: fast and mechanical -- 100-150ms, no overshoot, no easing flourish. A tool should feel instant.',
+      'A warm near-black ground -- brown-tinted rather than blue-tinted or neutral -- with an off-white as the only strong value and no chromatic accent at all in the interface itself. Monospace for headings and labels so the page reads as a tool rather than a brochure; hairlines and surfaces separate by a step of warmth, not by a border color. The restraint is the style: a single amber is available for a genuine warning and nothing else earns color. Motion: fast and mechanical -- 100-150ms, no overshoot, no easing flourish. A tool should feel instant.',
     tokens: {
       colors: {
         primary: '#F7F5F0',
@@ -301,7 +301,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Layered void',
     description: 'Pure black, graded surfaces',
     direction:
-      'A true black page with depth built from graded surfaces rather than from shadow: the canvas is #000, cards sit a step above it, elevated elements a step above those, and a hairline marks each boundary. White is the primary action colour and black the text on it, inverting the usual relationship. Exactly one warm accent exists for the single most important action per screen. Motion: surfaces fade and lift between elevation steps at 200ms; nothing slides. Depth changes, position does not.',
+      'A true black page with depth built from graded surfaces rather than from shadow: the canvas is #000, cards sit a step above it, elevated elements a step above those, and a hairline marks each boundary. White is the primary action color and black the text on it, inverting the usual relationship. Exactly one warm accent exists for the single most important action per screen. Motion: surfaces fade and lift between elevation steps at 200ms; nothing slides. Depth changes, position does not.',
     tokens: {
       colors: {
         primary: '#FFFFFF',
@@ -334,7 +334,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Acid dark',
     description: 'One high-voltage accent',
     direction:
-      'A near-black ground carrying exactly one very high-chroma colour -- an acid yellow-green -- used as the primary action and nowhere else. The discipline is what makes it work: everything else is greyscale, so the accent reads as a signal rather than as decoration, and a second saturated colour anywhere on the page destroys the effect. Type is a geometric sans, tight and technical. Motion: 100-180ms, sharp and immediate. The accent may pulse briefly on a state change; nothing else moves.',
+      'A near-black ground carrying exactly one very high-chroma color -- an acid yellow-green -- used as the primary action and nowhere else. The discipline is what makes it work: everything else is grayscale, so the accent reads as a signal rather than as decoration, and a second saturated color anywhere on the page destroys the effect. Type is a geometric sans, tight and technical. Motion: 100-180ms, sharp and immediate. The accent may pulse briefly on a state change; nothing else moves.',
     tokens: {
       colors: {
         primary: '#E8FF52',
@@ -367,7 +367,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Night indigo',
     description: 'Dark with one deep hue',
     direction:
-      'A near-black canvas with a cool blue cast, carrying a single saturated indigo as the product colour across buttons, links and selected states. Surfaces step up in three graded levels above the canvas, each a few points lighter, so hierarchy comes from elevation rather than from borders. Text runs at three deliberate emphasis levels -- full, muted, subtle -- rather than one grey for everything. Motion: 150-250ms, ease-out, precise. Selection and focus states change instantly; only overlays animate.',
+      'A near-black canvas with a cool blue cast, carrying a single saturated indigo as the product color across buttons, links and selected states. Surfaces step up in three graded levels above the canvas, each a few points lighter, so hierarchy comes from elevation rather than from borders. Text runs at three deliberate emphasis levels -- full, muted, subtle -- rather than one gray for everything. Motion: 150-250ms, ease-out, precise. Selection and focus states change instantly; only overlays animate.',
     tokens: {
       colors: {
         primary: '#7C87F5',
@@ -400,7 +400,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Warm paper',
     description: 'Cream ground, terracotta',
     direction:
-      'An off-white ground that is warm rather than grey -- cream or bone, never #fff as the page colour -- with near-black warm text and a muted terracotta as the accent. White is reserved for cards so they lift off the page by being *lighter* than it. The overall register is considered and literary rather than corporate: generous margins, a serif for headings, and colour used sparingly enough that the terracotta always means something. Motion: unhurried, 250-350ms, opacity-led. Nothing bounces; the material is paper, not rubber.',
+      'An off-white ground that is warm rather than gray -- cream or bone, never #fff as the page color -- with near-black warm text and a muted terracotta as the accent. White is reserved for cards so they lift off the page by being *lighter* than it. The overall register is considered and literary rather than corporate: generous margins, a serif for headings, and color used sparingly enough that the terracotta always means something. Motion: unhurried, 250-350ms, opacity-led. Nothing bounces; the material is paper, not rubber.',
     tokens: {
       colors: {
         primary: '#B5533A',
@@ -499,7 +499,7 @@ export const STYLE_PRESETS: readonly StylePreset[] = [
     name: 'Cinematic',
     description: 'Full-bleed footage, glass, serif',
     direction:
-      'One full-screen hero (min-height 100svh), media edge to edge behind it, one centred action. Footage: <video autoPlay muted loop playsInline> (the React prop names) with a poster, object-fit: cover, object-position set again for phones; with no footage, a layered CSS glow, never an <img> or <video> of a file the project lacks. Scrim, not blur: linear-gradient(180deg, rgba(2,10,18,.57) 0%, rgba(2,10,18,.28) 40%, rgba(2,10,18,.02) 72%, rgba(2,10,18,.13) 100%). Nav: a floating glass pill 20px down, max-width 850px, 50px tall, 1px solid rgba(255,255,255,.22), rgba(10,22,31,.37), backdrop-filter: blur(18px). Headline: serif, clamp(4.3rem, 8.8vw, 8.3rem), line-height .99, letter-spacing -.065em, last word italic, one line where it fits. Input: a 51px glass pill, max-width 490px, 38px round submit inside it. Under 650px: trim the nav, content at 12vh, form full width. No cards or decoration over the media. Motion: the footage is the motion; UI changes are 150-200ms opacity; prefers-reduced-motion shows the poster instead.',
+      'One full-screen hero (min-height 100svh), media edge to edge behind it, one centered action. Footage: <video autoPlay muted loop playsInline> (the React prop names) with a poster, object-fit: cover, object-position set again for phones; with no footage, a layered CSS glow, never an <img> or <video> of a file the project lacks. Scrim, not blur: linear-gradient(180deg, rgba(2,10,18,.57) 0%, rgba(2,10,18,.28) 40%, rgba(2,10,18,.02) 72%, rgba(2,10,18,.13) 100%). Nav: a floating glass pill 20px down, max-width 850px, 50px tall, 1px solid rgba(255,255,255,.22), rgba(10,22,31,.37), backdrop-filter: blur(18px). Headline: serif, clamp(4.3rem, 8.8vw, 8.3rem), line-height .99, letter-spacing -.065em, last word italic, one line where it fits. Input: a 51px glass pill, max-width 490px, 38px round submit inside it. Under 650px: trim the nav, content at 12vh, form full width. No cards or decoration over the media. Motion: the footage is the motion; UI changes are 150-200ms opacity; prefers-reduced-motion shows the poster instead.',
     tokens: {
       colors: {
         primary: '#FFFFFF',

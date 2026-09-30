@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * A slow, cursor-aware field of the page's own colours, drawn by a WebGL
+ * A slow, cursor-aware field of the page's own colors, drawn by a WebGL
  * fragment shader. Written by Vibld: it fills its nearest positioned
  * ancestor, behind that ancestor's content.
  */
 export interface AuroraMeshProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** Up to four CSS colours; defaults to the project's colour tokens. */
+  /** Up to four CSS colors; defaults to the project's color tokens. */
   colors?: readonly string[];
   /** 1 is a slow drift, 0 holds still. */
   speed?: number;
@@ -23,7 +23,7 @@ const DEFAULT_COLORS = [
   'var(--secondary)',
 ];
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 1. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 1. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';

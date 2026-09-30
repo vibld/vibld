@@ -37,7 +37,7 @@ describe('counts on vibld.com', { skip: !built && 'no build' }, () => {
    */
   const EXACT = new RegExp(
     String.raw`(?<![\d,.$+])\b(?:[1-9]\d{1,2}|[1-9],\d{3})\b(?![+\d,.:%])\s+` +
-      String.raw`(?:app and website )?(?:templates|designs|palettes|styles|named styles|directions|presets|style presets|surface treatments|moving backgrounds|backgrounds|checks|design checks|examples|pairs|type pairings|fonts|layers|use cases|with a colour system|more:)`,
+      String.raw`(?:app and website )?(?:templates|designs|palettes|styles|named styles|directions|presets|style presets|surface treatments|moving backgrounds|backgrounds|checks|design checks|examples|pairs|type pairings|fonts|layers|use cases|with a color system|more:)`,
     'g',
   );
 

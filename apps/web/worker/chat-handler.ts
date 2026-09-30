@@ -275,7 +275,7 @@ export async function handleChat(
 
       // Nothing has been asked for yet, so a caller who left before this
       // line costs nothing: `providerRan` stays false and settles at zero.
-      if (cancelled) return json({ error: 'Cancelled.' }, 499);
+      if (cancelled) return json({ error: 'Canceled.' }, 499);
 
       providerRan = true;
       const turn = await provider.respond({
@@ -285,7 +285,7 @@ export async function handleChat(
       action = turn.action;
       return json({ turn, model: effectiveModel });
     } catch (error) {
-      if (cancelled) return json({ error: 'Cancelled.' }, 499);
+      if (cancelled) return json({ error: 'Canceled.' }, 499);
       const visible = sanitizedProviderFailure(
         error,
         'chat turn failed',

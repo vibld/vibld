@@ -302,7 +302,7 @@ export function PromptPanel({
       label: 'Style',
       value: chosenStyle?.name ?? null,
       about:
-        'Sets the overall look. A treatment is a surface finish; a complete system also brings its own colours and fonts.',
+        'Sets the overall look. A treatment is a surface finish; a complete system also brings its own colors and fonts.',
       body: (
         <StylePicker
           value={style}
@@ -317,7 +317,7 @@ export function PromptPanel({
       label: 'Reference',
       value: referenceHost,
       about:
-        "vibld reads this page's text, colours, fonts and spacing and uses them as a starting point. It adapts rather than copies. This project remembers it: every build reads it until you clear the field.",
+        "vibld reads this page's text, colors, fonts and spacing and uses them as a starting point. It adapts rather than copies. This project remembers it: every build reads it until you clear the field.",
       body: (
         <>
           <label className="option-panel__label" htmlFor={referenceId}>

@@ -26,7 +26,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Manrope: 'League Spartan',
     },
-    why: 'League Spartan is a sturdy geometric grotesk whose 700 keeps its shape at 72px on the near-black canvas and stays plain at 16px, so the generated images keep all the colour.',
+    why: 'League Spartan is a sturdy geometric grotesk whose 700 keeps its shape at 72px on the near-black canvas and stays plain at 16px, so the generated images keep all the color.',
   },
   everquill: {
     faces: [
@@ -560,7 +560,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Figtree: 'Inclusive Sans',
     },
-    why: 'Inclusive Sans is a friendly, highly legible sans with a sturdy bold, so heavy headlines on saturated colour blocks stay clear and playful.',
+    why: 'Inclusive Sans is a friendly, highly legible sans with a sturdy bold, so heavy headlines on saturated color blocks stay clear and playful.',
   },
   kavindo: {
     faces: [
@@ -871,7 +871,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Manrope: 'Wix Madefor Display',
     },
-    why: 'Wix Madefor Display has a round, confident 800 that makes the candy-coloured numbers feel approachable, and its 500 is comfortable for body copy.',
+    why: 'Wix Madefor Display has a round, confident 800 that makes the candy-colored numbers feel approachable, and its 500 is comfortable for body copy.',
   },
   loopreel: {
     faces: [
@@ -889,7 +889,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Inter: 'Commissioner',
     },
-    why: 'Commissioner is a clean, low-contrast grotesk that tightens gracefully at 80px, keeping the white gallery glossy and minimal around the colourful posters.',
+    why: 'Commissioner is a clean, low-contrast grotesk that tightens gracefully at 80px, keeping the white gallery glossy and minimal around the colorful posters.',
   },
   lostlane: {
     faces: [
@@ -925,7 +925,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       'Plus Jakarta Sans': 'TASA Orbiter',
     },
-    why: 'TASA Orbiter is an airy geometric grotesk that keeps HR data organised and bright rather than corporate, clean at both 60px and dense table sizes.',
+    why: 'TASA Orbiter is an airy geometric grotesk that keeps HR data organized and bright rather than corporate, clean at both 60px and dense table sizes.',
   },
   hireloom: {
     faces: [
@@ -960,7 +960,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       'Bricolage Grotesque': 'Belanosima',
       Inter: 'Cabin',
     },
-    why: 'Belanosima is a chunky, slightly quirky grotesk that brings neighbourhood-cafe cheer to the dark-green headings, and Cabin is a down-to-earth humanist body.',
+    why: 'Belanosima is a chunky, slightly quirky grotesk that brings neighborhood-cafe cheer to the dark-green headings, and Cabin is a down-to-earth humanist body.',
   },
   heathmere: {
     faces: [
@@ -1259,7 +1259,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       'Inter (closest Google Font to the observed system stack)':
         'Open Sans (standing in for the observed system stack)',
     },
-    why: 'Open Sans has the plain, system-font feel of an engineering checklist and a true 800 for the hero, so the page reads as organised rather than salesy.',
+    why: 'Open Sans has the plain, system-font feel of an engineering checklist and a true 800 for the hero, so the page reads as organized rather than salesy.',
   },
   copperkey: {
     faces: [
@@ -1370,7 +1370,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Inter: 'Ancizar Sans',
     },
-    why: 'Ancizar Sans is a plain, neutral sans with a wide weight range, so the almost monochrome editor lets the coloured cursors and avatars carry the liveness.',
+    why: 'Ancizar Sans is a plain, neutral sans with a wide weight range, so the almost monochrome editor lets the colored cursors and avatars carry the liveness.',
   },
   bluequill: {
     faces: [
@@ -1632,7 +1632,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Inter: 'Pontano Sans',
     },
-    why: 'Pontano Sans is a quiet, neutral sans with a component-library plainness, so the tenant emoji stays the only colour.',
+    why: 'Pontano Sans is a quiet, neutral sans with a component-library plainness, so the tenant emoji stays the only color.',
   },
   dockhold: {
     faces: [
@@ -1650,7 +1650,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
     replaces: {
       Inter: 'Overpass',
     },
-    why: 'Overpass descends from highway signage, so its clarity reads as serious and trustworthy in a monochrome identity product with no accent colour.',
+    why: 'Overpass descends from highway signage, so its clarity reads as serious and trustworthy in a monochrome identity product with no accent color.',
   },
   amberkey: {
     faces: [
@@ -1722,7 +1722,7 @@ export const SAAS_TYPE_SETS: Readonly<Record<string, TypeSet>> = {
       Inter: 'SUSE',
       'JetBrains Mono': 'Fragment Mono',
     },
-    why: "SUSE is a clean geometric sans that keeps a security topic friendly, and Fragment Mono's grotesk-flavoured mono makes the ciphertext chips look tidy rather than intimidating.",
+    why: "SUSE is a clean geometric sans that keeps a security topic friendly, and Fragment Mono's grotesk-flavored mono makes the ciphertext chips look tidy rather than intimidating.",
   },
   cuetide: {
     faces: [

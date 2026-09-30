@@ -230,7 +230,7 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       },
     },
     rationale:
-      'Near-monochrome so the work is the colour; one accent for links and CTAs.',
+      'Near-monochrome so the work is the color; one accent for links and CTAs.',
   },
   {
     id: 'healthcare',
@@ -690,7 +690,7 @@ export const PRODUCT_PALETTES: readonly ProductPalette[] = [
       },
     },
     rationale:
-      'Cinema-dark background so poster art and thumbnails carry the colour, not the chrome.',
+      'Cinema-dark background so poster art and thumbnails carry the color, not the chrome.',
   },
   {
     id: 'legal',
@@ -846,7 +846,7 @@ export function paletteGuidance(promptText: string): string | null {
   const palette = selectPalette(promptText);
   if (!palette) return null;
   const { colors, typography, feel } = palette;
-  return `This looks like a ${palette.name} product. In the absence of a stated palette, default to these tokens (${palette.rationale}) -- an explicit colour or font in the request above still wins. ${TOKEN_USE}
+  return `This looks like a ${palette.name} product. In the absence of a stated palette, default to these tokens (${palette.rationale}) -- an explicit color or font in the request above still wins. ${TOKEN_USE}
 
 ${tokenCss(colors, feel)}
 

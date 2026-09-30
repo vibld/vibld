@@ -18,12 +18,12 @@ decision has to work inside.
 What lands in somebody else's coding agent today carries no instructions at
 all. The obvious fix is to write an `AGENTS.md` into every generated project,
 and it is the fix that ages worst. Vibld's conventions are expected to change
-(the pattern catalogue was authored three weeks ago and has already been
+(the pattern catalog was authored three weeks ago and has already been
 revised); a project generated today would keep teaching the conventions of
 the week it was made, with nothing in the file to say which week that was.
 The agent reading it cannot tell a deliberately pinned older set from a stale
 copy nobody updated, so it either follows stale guidance or silently
-"upgrades" a project whose owner chose the older behaviour. Both are worse
+"upgrades" a project whose owner chose the older behavior. Both are worse
 than no file.
 
 One more fact worth stating plainly, because it constrains the stamp: this
@@ -74,7 +74,7 @@ to their code's future, not a documentation refresh.
 Instructions refer to other documents as identifiers resolved through the
 same path (`vibld:patterns/saas-dashboard`), never as a repository path or a
 URL into a file tree. Documents move; a project generated in March should not
-break because a file was reorganised in June. The identifier is the contract;
+break because a file was reorganized in June. The identifier is the contract;
 where it resolves is ours to change.
 
 **One canonical file; per-tool variants generated from it.**
@@ -90,7 +90,7 @@ overwriting their work to deliver a document they did not ask for.
 Instructions that describe how to check a site must not let a preview
 measurement be reported as published-site performance. They are different
 machines, different networks and different caches, and a number taken from
-one and labelled as the other is a false claim about somebody's site. Vibld's
+one and labeled as the other is a false claim about somebody's site. Vibld's
 own validation suite has the same obligation, and it is worth writing into
 the instruction set so the agent editing the project afterwards inherits it.
 
@@ -110,11 +110,11 @@ that silently changes what it serves is worse than the vendored file this
 decision replaces.
 
 **The pointer is advisory and will be deleted by some users.** That is
-correct and intended: it is provenance, not a licence check. A project
+correct and intended: it is provenance, not a license check. A project
 without it simply gets no instructions, the current state of the world.
 
 **It says nothing about what the instructions contain.** The content, and
-whether it duplicates the pattern catalogue (`packages/ai/src/patterns.ts`)
+whether it duplicates the pattern catalog (`packages/ai/src/patterns.ts`)
 or is served from it, is a separate decision. This one settles where
 instructions live and how they are addressed.
 

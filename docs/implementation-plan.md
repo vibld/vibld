@@ -50,7 +50,7 @@ token activity, for as long as the run is active. Requirements:
   connection. A keepalive reduces spurious drops; it does not replace durable
   run state (ADR-0007).
 
-Cover an idle-model run, a client disconnect and a cancelled run in the stream
+Cover an idle-model run, a client disconnect and a canceled run in the stream
 tests.
 
 ## Release evidence

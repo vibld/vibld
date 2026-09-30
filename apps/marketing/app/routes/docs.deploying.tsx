@@ -12,14 +12,12 @@ export default function Deploying() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
-        From a clone to a running builder. The repository’s own READMEs carry
-        the exact commands and stay with the code, so they are the version to
-        follow; this page is the shape of the job and the parts that bite. The
-        project’s own Self-host check follows it on every run: it deploys a
-        separately named copy, confirms the copy comes up and refuses a
-        signed-out caller, then removes it. Sign-in and generation on a copy are
-        not part of that check, and nobody outside the project has followed the
-        page end to end yet.
+        The repository’s own READMEs carry the exact commands and are the
+        version to follow. The project’s own Self-host check follows this page
+        on every run: it deploys a separately named copy, confirms the copy
+        comes up and refuses a signed-out caller, then removes it. Sign-in and
+        generation on a copy are not part of that check, and nobody outside the
+        project has followed the page end to end yet.
       </p>
       <p>
         The deploy workflows in the repository run only in the maintainers’ own
@@ -87,12 +85,10 @@ export default function Deploying() {
         </li>
         <li>
           <strong>Apply the migrations before deploying the Worker</strong>, not
-          after. This one is not a style preference: shipping a Worker whose
-          code expects a table that does not exist yet takes the whole thing
-          down, and it has happened here. Two migrations once sat unapplied for
-          two days and every generation failed with an accounting error until
-          somebody applied them by hand. The builder’s <code>deploy</code>{' '}
-          script applies them first for you.
+          after. A Worker whose code expects a table that does not exist yet
+          takes the whole thing down: two migrations once sat unapplied here for
+          two days, and every generation failed. The builder’s{' '}
+          <code>deploy</code> script applies them first for you.
         </li>
         <li>
           <strong>Deploy the publish Worker, then the sandbox</strong>, which
@@ -112,12 +108,10 @@ export default function Deploying() {
         </li>
       </ol>
       <p>
-        Migrations are idempotent, so applying them when there is nothing new is
-        a no-op. Make it a step in your deploy rather than something you
-        remember.
+        Migrations are idempotent. Make applying them a step in your deploy.
       </p>
 
-      <h2>The domain problem, which will catch you</h2>
+      <h2>The domain problem</h2>
       <p>
         A <strong>live</strong> Clerk instance is bound to a domain, and Clerk’s
         Frontend API refuses any request whose origin is not that domain or a
@@ -135,8 +129,7 @@ export default function Deploying() {
           Or put the Worker on a custom domain from the start. A custom domain
           route provisions its own DNS record on deploy, but only if the
           deploying token can manage DNS on that zone. A token scoped to Workers
-          alone is not enough, and the failure at deploy time does not say so
-          very clearly.
+          alone is not enough, and the deploy error does not say so clearly.
         </li>
       </ul>
       <p>
@@ -171,11 +164,7 @@ export default function Deploying() {
           the two sides, or the sandbox has no <code>PREVIEW_HOSTNAME</code>.
         </li>
       </ul>
-      <p>
-        Each of those refuses rather than half-working, which is the point: you
-        will get an unavailable feature and a reason, not a deployment that
-        looks fine until it spends money incorrectly.
-      </p>
+      <p>Each of those refuses with a reason rather than half-working.</p>
 
       <h2>Where the exact commands live</h2>
       <p>
@@ -200,8 +189,7 @@ export default function Deploying() {
         >
           apps/publish/README.md
         </a>{' '}
-        for publishing. Keeping them there rather than duplicating them here is
-        deliberate. A command on a marketing page ages badly and nobody notices.
+        for publishing.
       </p>
     </DocPage>
   );

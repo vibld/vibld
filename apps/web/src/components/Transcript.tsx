@@ -61,7 +61,7 @@ function Reply({ turn }: { turn: TranscriptTurn }) {
     return (
       <>
         {said}
-        <p className="bubble__text">Cancelled. Nothing was changed.</p>
+        <p className="bubble__text">Canceled. Nothing was changed.</p>
       </>
     );
   }

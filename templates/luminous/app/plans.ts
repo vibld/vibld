@@ -61,5 +61,5 @@ export const PLAN_NOTES = [
   'Prices are per workspace, never per message. A busy week costs the same as a quiet one.',
   'Every paid plan starts with a fourteen-day trial and no card on file.',
   'Paying yearly takes two months off the price.',
-  'Cancelling keeps your data readable and exportable for ninety days.',
+  'Canceling keeps your data readable and exportable for ninety days.',
 ];

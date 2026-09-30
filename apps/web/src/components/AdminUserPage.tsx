@@ -662,7 +662,7 @@ function DeleteControls({
     <Panel title="Delete">
       <p className="pane-note">
         The same deletion the account&rsquo;s owner can ask for: it is refused
-        at once, its subscription is cancelled, previews stop, its sites are
+        at once, its subscription is canceled, previews stop, its sites are
         held, and everything is purged after 30 days. Until then the owner can
         sign in and keep the account, unless it is also banned.
       </p>

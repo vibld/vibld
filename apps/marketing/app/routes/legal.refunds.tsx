@@ -29,10 +29,10 @@ export default function Refunds() {
         you save a card) charges nothing, so there is nothing to refund.
       </p>
 
-      <h2>Cancelling a subscription</h2>
+      <h2>Canceling a subscription</h2>
       <p>
         Cancel at any time from <strong>Manage billing</strong> in the builder,
-        which opens Stripe&apos;s billing portal. Cancelling there takes effect
+        which opens Stripe&apos;s billing portal. Canceling there takes effect
         at the end of the period you have already paid for, and your plan stays
         active until then. Once a subscription is no longer active, your account
         has the Free allowance. Unspent top-up credit stays usable until it
@@ -56,7 +56,7 @@ export default function Refunds() {
         You can cancel an annual plan at any time and get a prorated refund for
         the whole months of it left unused. To ask for one, email{' '}
         <a href={`mailto:${SITE.emails.billing}`}>{SITE.emails.billing}</a>.
-        Cancelling in the billing portal on its own stops the plan renewing at
+        Canceling in the billing portal on its own stops the plan renewing at
         the end of the year, without a refund.
       </p>
 

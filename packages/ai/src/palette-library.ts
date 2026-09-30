@@ -151,7 +151,7 @@ const SEEDS: readonly LibrarySeed[] = [
     saturation: 90,
     mode: 'dark',
     scheme: 'analogous',
-    note: 'The same acid green as a signal colour on black.',
+    note: 'The same acid green as a signal color on black.',
   },
   {
     id: 'moss',
@@ -238,7 +238,7 @@ const SEEDS: readonly LibrarySeed[] = [
   // --- blues --------------------------------------------------------------
   {
     id: 'harbour',
-    name: 'Harbour',
+    name: 'Harbor',
     hue: 212,
     saturation: 62,
     mode: 'light',
@@ -253,7 +253,7 @@ const SEEDS: readonly LibrarySeed[] = [
     saturation: 28,
     mode: 'light',
     scheme: 'triadic',
-    note: 'Desaturated blue-grey. Recedes, so the content carries the page.',
+    note: 'Desaturated blue-gray. Recedes, so the content carries the page.',
     triggers: ['documentation', 'docs', 'knowledge base', 'wiki'],
   },
   {
@@ -375,7 +375,7 @@ const SEEDS: readonly LibrarySeed[] = [
     saturation: 10,
     mode: 'dark',
     scheme: 'analogous',
-    note: 'Almost no colour at all. Lets photography or code be the only colour on the page.',
+    note: 'Almost no color at all. Lets photography or code be the only color on the page.',
     triggers: ['photography', 'gallery', 'archive'],
   },
   {
@@ -385,7 +385,7 @@ const SEEDS: readonly LibrarySeed[] = [
     saturation: 16,
     mode: 'light',
     scheme: 'complementary',
-    note: 'Warm off-white, minimal colour. Reading first, everything else second.',
+    note: 'Warm off-white, minimal color. Reading first, everything else second.',
     triggers: ['blog', 'writing', 'book', 'journal'],
   },
   {
@@ -395,7 +395,7 @@ const SEEDS: readonly LibrarySeed[] = [
     saturation: 8,
     mode: 'light',
     scheme: 'triadic',
-    note: 'Cool grey with three restrained accents. Architectural, precise.',
+    note: 'Cool gray with three restrained accents. Architectural, precise.',
     triggers: ['architect', 'construction', 'engineering'],
   },
 ];

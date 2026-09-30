@@ -2177,7 +2177,7 @@ const data: unknown = [
   {
     "id": "millpond",
     "name": "Millpond",
-    "summary": "Customisable traffic overview dashboard with KPI sparklines",
+    "summary": "Customizable traffic overview dashboard with KPI sparklines",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -2207,7 +2207,7 @@ const data: unknown = [
   {
     "id": "mallowset",
     "name": "Mallowset",
-    "summary": "Brand settings with logo, colour and live checkout preview",
+    "summary": "Brand settings with logo, color and live checkout preview",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -2237,7 +2237,7 @@ const data: unknown = [
   {
     "id": "mothwing",
     "name": "Mothwing",
-    "summary": "Dark colour-token customiser for an interactive quiz builder",
+    "summary": "Dark color-token customizer for an interactive quiz builder",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -2267,7 +2267,7 @@ const data: unknown = [
   {
     "id": "murkbell",
     "name": "Murkbell",
-    "summary": "Dark week-view calendar with calendar list and colour-coded events",
+    "summary": "Dark week-view calendar with calendar list and color-coded events",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -2467,7 +2467,7 @@ const data: unknown = [
   {
     "id": "nessary",
     "name": "Nessary",
-    "summary": "Delete-account dialog with acknowledgement checkbox in a task app",
+    "summary": "Delete-account dialog with acknowledgment checkbox in a task app",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -2547,7 +2547,7 @@ const data: unknown = [
   {
     "id": "pembrow",
     "name": "Pembrow",
-    "summary": "Personalised welcome question with icon choice cards",
+    "summary": "Personalized welcome question with icon choice cards",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -3297,7 +3297,7 @@ const data: unknown = [
   {
     "id": "tokenmoor",
     "name": "Tokenmoor",
-    "summary": "Organisation API keys table",
+    "summary": "Organization API keys table",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -3547,7 +3547,7 @@ const data: unknown = [
   {
     "id": "woolberry",
     "name": "Woolberry",
-    "summary": "Minimal welcome screen launching a personalised onboarding quiz",
+    "summary": "Minimal welcome screen launching a personalized onboarding quiz",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -3557,7 +3557,7 @@ const data: unknown = [
   {
     "id": "yarrowmint",
     "name": "Yarrowmint",
-    "summary": "Welcome modal that creates the first organisation",
+    "summary": "Welcome modal that creates the first organization",
     "kind": "app",
     "useCase": "tools",
     "format": "screen",
@@ -3857,7 +3857,7 @@ const data: unknown = [
   {
     "id": "juvelle",
     "name": "Juvelle",
-    "summary": "Customer-engagement CRM landing site with colour-blocked split feature panels",
+    "summary": "Customer-engagement CRM landing site with color-blocked split feature panels",
     "kind": "site",
     "useCase": "saas-landing",
     "format": "design",
@@ -4433,7 +4433,7 @@ const data: unknown = [
   {
     "id": "ashlight",
     "name": "Ashlight",
-    "summary": "Typo-tolerant full-text search app over a film catalogue",
+    "summary": "Typo-tolerant full-text search app over a film catalog",
     "kind": "app",
     "useCase": "tools",
     "format": "design",

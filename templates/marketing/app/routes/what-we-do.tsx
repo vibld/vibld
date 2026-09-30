@@ -8,11 +8,11 @@ export function meta() {
 const SERVICES = [
   {
     title: 'Obsolete and discontinued parts',
-    body: 'When a manufacturer has stopped supplying a component, we trace remaining authorised stock, and tell you plainly when there is none left rather than substituting quietly.',
+    body: 'When a manufacturer has stopped supplying a component, we trace remaining authorized stock, and tell you plainly when there is none left rather than substituting quietly.',
   },
   {
     title: 'Verification before purchase',
-    body: 'Supplier authorisation, lot traceability and, for critical components, physical inspection against the manufacturer specification.',
+    body: 'Supplier authorization, lot traceability and, for critical components, physical inspection against the manufacturer specification.',
   },
   {
     title: 'Consolidated logistics',
@@ -44,8 +44,8 @@ export default function WhatWeDo() {
       <Section heading="What we do not do">
         <p className="max-w-2xl text-[var(--color-ink-muted)]">
           We do not machine bespoke parts, and we do not broker stock we cannot
-          trace to an authorised distributor. If a request falls outside that,
-          we say so on the same day rather than holding the enquiry open.
+          trace to an authorized distributor. If a request falls outside that,
+          we say so on the same day rather than holding the inquiry open.
         </p>
       </Section>
     </Page>

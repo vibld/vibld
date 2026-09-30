@@ -295,7 +295,7 @@ export default function Templates() {
       <PageHead
         eyebrow="Templates"
         title="Designs to start from"
-        lead={`${approxCount(designCount)} app and website designs and ${approxCount(screenCount)} app screens to add to them, each with a palette whose every text pair passes WCAG AA and a build prompt a coding agent can follow. Every design has its own typefaces. Open one to read all of it, or start building from it.`}
+        lead={`${approxCount(designCount)} app and website designs and ${approxCount(screenCount)} app screens to add to them, each with a palette whose every text pair passes WCAG AA and a build prompt a coding agent can follow. Every design has its own typefaces.`}
       />
       <section
         className="lb-section lb-section--tight"
@@ -448,8 +448,7 @@ export default function Templates() {
           </h2>
           <p className="lb-lede">
             A page and a section, each the output of one prompt that asks for
-            one self-contained HTML file. Open one for the live page and the
-            prompt that made it.
+            one self-contained HTML file.
           </p>
           <ul className="lb-tpls lb-tpls--layers">
             {LAYERS.map((layer) => (

@@ -44,11 +44,11 @@ export type DeletionResult =
  */
 export const WHAT_STOPS_NOW = [
   'You can no longer use the builder: every request from this account is refused.',
-  'Any subscription is cancelled straight away. The rest of a period already paid for is not refunded or prorated.',
+  'Any subscription is canceled straight away. The rest of a period already paid for is not refunded or prorated.',
   'A running preview is stopped, and share links to it stop working.',
   'Your published site goes offline, and its address is not given to anyone else.',
   'The GitHub connection is removed. The vibld app stays installed on your GitHub account until you remove it there.',
-  'Referral rewards not yet paid are cancelled, and your referral code stops working.',
+  'Referral rewards not yet paid are canceled, and your referral code stops working.',
 ] as const;
 
 export const WHAT_IS_DELETED_LATER = [

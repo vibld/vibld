@@ -88,7 +88,7 @@ export default function Styles() {
       <PageHead
         eyebrow="Styles"
         title="Directions vibld builds in"
-        lead="Ask for one by name, or ask for three sketches and pick. Every direction here is one the builder actually knows; this page is generated from the same list it reads."
+        lead="Ask for one by name, or for three sketches and pick. This page is generated from the builder’s own list."
       />
       <section className="lb-section lb-section--tight" aria-label="Moods">
         <div className="lb-wrap">
@@ -114,7 +114,7 @@ export default function Styles() {
             A moving background is asked for in words rather than picked: say
             “animated background”, or name one, and the build can use one of
             these four. Each runs here from the same file a build writes into a
-            project. In a project it takes the project’s own colours; the ones
+            project. In a project it takes the project’s own colors; the ones
             here are ours, for the drawing. They pause off screen and hold still
             if you have asked your system for less motion.
           </p>
@@ -153,11 +153,10 @@ export default function Styles() {
             {approxCount(treatments.length)} surface treatments
           </h2>
           <p className="lb-lede">
-            How a page feels rather than what colour it is: glass, extrusion,
+            How a page feels rather than what color it is: glass, extrusion,
             hard rules, drifting light. They wear whatever palette the project
-            needs, so each is drawn here in the same neutral demonstration
-            palette. Those colours are ours, for the drawing, and not a choice
-            the builder makes.
+            needs, so each is drawn here in one neutral demonstration palette of
+            ours, not a choice the builder makes.
           </p>
           <StyleGrid entries={treatments} offset={0} />
         </div>
@@ -165,12 +164,12 @@ export default function Styles() {
       <section className="lb-section" aria-labelledby="palettes-title">
         <div className="lb-wrap">
           <h2 className="lb-h2" id="palettes-title">
-            {approxCount(coloured.length)} with a colour system of their own
+            {approxCount(coloured.length)} with a color system of their own
           </h2>
           <p className="lb-lede">
             These carry real tokens the builder sends with the request: a
-            palette, fonts and radii. Each is drawn only in its own colours, and
-            every text colour is shown on the fill the preset pairs it with.
+            palette, fonts and radii. Each is drawn only in its own colors, and
+            every text color is shown on the fill the preset pairs it with.
           </p>
           <StyleGrid entries={coloured} offset={treatments.length} />
           <p className="lb-note">
@@ -246,7 +245,7 @@ function StyleGrid({
                 </ul>
               ) : (
                 <p className="lb-style__demo">
-                  Any palette. Drawn in the demonstration colours.
+                  Any palette. Drawn in the demonstration colors.
                 </p>
               )}
             </div>

@@ -119,6 +119,6 @@ describe('what the model is asked to fix', () => {
     // the line width rather than the instruction.
     const prompt = repairPromptFor('boom').replace(/\s+/g, ' ');
     assert.match(prompt, /change nothing else/i);
-    assert.match(prompt, /do not rename or reorganise/i);
+    assert.match(prompt, /do not rename or reorganize/i);
   });
 });

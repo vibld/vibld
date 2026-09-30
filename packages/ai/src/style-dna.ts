@@ -119,8 +119,8 @@ export const STYLE_DIMENSIONS: readonly StyleDimension[] = [
     id: 'balance',
     label: 'Balance',
     options: [
-      { value: 'symmetric', direction: 'centred, mirrored composition' },
-      { value: 'asymmetric', direction: 'off-centre, weighted composition' },
+      { value: 'symmetric', direction: 'centered, mirrored composition' },
+      { value: 'asymmetric', direction: 'off-center, weighted composition' },
       { value: 'mosaic', direction: 'a grid of unequal tiles' },
     ],
   },

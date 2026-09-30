@@ -74,7 +74,7 @@ export function specLines(site: DemoSite): string[] {
     '',
     '## motion',
     'enter 200ms ease-out',
-    'prefers-reduced-motion: honoured',
+    'prefers-reduced-motion: honored',
   ];
 }
 

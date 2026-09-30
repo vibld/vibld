@@ -36,6 +36,19 @@ anywhere. Use a comma, a colon, parentheses, or two sentences.
 The double hyphen this repository uses in prose is a different character and
 is fine. Do not read it as evidence that em-dashes are wanted.
 
+## US English: "color", not "colour"
+
+Chris is in the US (docs/decisions.md, D120). Everything people read is
+written in US English: vibld.com, the template catalog, the builder, the
+prompts that shape generated sites, READMEs and docs. "color", "center",
+"organize", "canceled", "catalog", "license" (noun and verb), "gray".
+
+`scripts/us-english.mjs` fails `pnpm check:style` on a UK spelling where a
+person reads it, and `--fix` rewrites it. It leaves alone what code reads:
+identifiers, comments, object keys, single-word values (`'cancelled'` is a
+run status stored in D1), SQL, class names and URLs, and proper nouns their
+owners spell the UK way (the "Ubuntu Font Licence").
+
 ## Counts in copy are rounded down: "200+ templates", not "207 templates"
 
 Chris's rule (docs/decisions.md, D105). Wherever vibld.com or the builder
@@ -54,9 +67,9 @@ an exact count in a built page.
 ## Licensing is the maintainer's decision
 
 Never decide on the maintainer's behalf whether something can be used,
-adopted, copied or shipped. State the facts -- what licence file exists or
+adopted, copied or shipped. State the facts -- what license file exists or
 does not, what it grants, what it does not cover -- and then stop. Do not
-exclude something from consideration because of its licence, and do not
+exclude something from consideration because of its license, and do not
 present a licensing conclusion as if the analysis were finished.
 
 ## Everything else

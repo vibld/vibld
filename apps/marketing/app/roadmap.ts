@@ -25,8 +25,8 @@ export interface RoadmapGroup {
   /** The eyebrow, and what the group is called anywhere else. */
   label: string;
   title: string;
-  /** One sentence under the heading. */
-  lead: string;
+  /** A sentence under the heading, only where it says something the heading does not. */
+  lead?: string;
 }
 
 /** In the order the page draws them. */
@@ -35,25 +35,22 @@ export const ROADMAP_GROUPS: readonly RoadmapGroup[] = [
     status: 'in-progress',
     label: 'In progress',
     title: 'Being built now',
-    lead: 'Work that is under way today.',
   },
   {
     status: 'upcoming',
     label: 'Upcoming',
     title: 'Planned next',
-    lead: 'Committed to and not scheduled: no dates, and no promised order.',
+    lead: 'Committed to, in no promised order.',
   },
   {
     status: 'considering',
     label: 'Considering',
     title: 'Being considered',
-    lead: 'On the roadmap and not yet planned. Vote for the ones you want sooner.',
   },
   {
     status: 'shipped',
     label: 'Shipped',
     title: 'In the builder today',
-    lead: 'Finished, so there is nothing left to vote on.',
   },
 ];
 
@@ -192,14 +189,14 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
     // test/roadmap.test.ts holds this number to the builder's own list.
     title: '20+ style presets',
     description:
-      'Choose a visual direction from the builder’s presets, each a full colour system or a surface treatment.',
+      'Choose a visual direction from the builder’s presets, each a full color system or a surface treatment.',
   },
   {
     id: 'reference-url',
     status: 'shipped',
     title: 'Build from a reference URL',
     description:
-      'Give it a page to start from, and vibld reads its text, colours, fonts and spacing and adapts them rather than copying.',
+      'Give it a page to start from, and vibld reads its text, colors, fonts and spacing and adapts them rather than copying.',
   },
   {
     id: 'projects',
@@ -248,7 +245,7 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
     status: 'shipped',
     title: 'Animated backgrounds',
     description:
-      'Four moving backgrounds drawn in code from the project’s colours, used when a request asks for one.',
+      'Four moving backgrounds drawn in code from the project’s colors, used when a request asks for one.',
   },
   {
     // Shipped as a gallery on vibld.com (internal PR 323, D100); picking a design inside

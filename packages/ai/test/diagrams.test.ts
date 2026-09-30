@@ -110,7 +110,7 @@ describe('diagramGuidance', () => {
     const guidance = diagramGuidance('Add an architecture diagram');
     assert.ok(guidance);
     assert.match(guidance, /viewBox/);
-    assert.match(guidance, /labelled zones/);
+    assert.match(guidance, /labeled zones/);
     assert.match(guidance, /follow the request/i);
   });
 });

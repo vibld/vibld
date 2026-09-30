@@ -13,16 +13,14 @@ export default function RunningYourProject() {
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
         A sandbox is a real, installed, running copy of your project: a
-        dependency install and a dev server, not a rendering of the plan. It is
-        how you find out whether the thing actually works.
+        dependency install and a dev server, not a rendering of the plan.
       </p>
 
       <h2>Starting one</h2>
       <p>
         <strong>Run live preview</strong> sits in the Preview tab once something
         is built, and runs the project’s current code, including a build that is
-        still being checked. It moves through a few states and each one is
-        reported rather than hidden behind a spinner:
+        still being checked. It reports each state it moves through:
       </p>
       <ul>
         <li>
@@ -41,16 +39,15 @@ export default function RunningYourProject() {
           and the expiry time is shown below it.
         </li>
         <li>
-          <strong>Failed</strong>, with the reason, which is not the same as
-          nothing having happened.
+          <strong>Failed</strong>, with the reason.
         </li>
       </ul>
       <p>
         Sandboxes expire: after ten minutes without use, and thirty minutes
         after starting whatever happens. You have one at a time, so opening
-        another project stops it. That is deliberate: a sandbox is for looking
-        at your project, not for hosting it. If you want something that stays
-        up, that is publishing or your own deployment, covered in{' '}
+        another project stops it. A sandbox is for looking at your project, not
+        hosting it. For something that stays up, publish it or deploy it
+        yourself: see{' '}
         <a href="/docs/taking-your-code">Taking your code with you</a>.
       </p>
 
@@ -66,7 +63,7 @@ export default function RunningYourProject() {
       </p>
       <p>
         <strong>Stop</strong> shuts a running sandbox down. It does not touch
-        share links, which are covered next.
+        share links.
       </p>
 
       <h2>Sharing what is running</h2>
@@ -76,20 +73,15 @@ export default function RunningYourProject() {
           Anyone with that link can view the running app and everything it
           shows, until it is revoked or expires.
         </strong>{' '}
-        That warning is in the interface next to the button, not buried in a
-        tooltip, because it is the entire risk of the feature.
+        The builder shows that warning next to the button.
       </p>
-      <p>Two things worth knowing about how shares behave:</p>
+      <p>How shares behave:</p>
       <ul>
         <li>
           Several can be active at once, each with its own expiry, each revoked
-          independently. Revoking one does not disturb the others.
+          independently.
         </li>
-        <li>
-          They are not affected by restarting or stopping the sandbox. A share
-          is a grant of access, tracked separately from the thing it grants
-          access to.
-        </li>
+        <li>They are not affected by restarting or stopping the sandbox.</li>
         <li>
           Each lasts 24 hours at most, and never longer than the preview it
           points at.
@@ -109,10 +101,9 @@ export default function RunningYourProject() {
 
       <h2>When a sandbox fails</h2>
       <p>
-        The failure reason appears in the Preview tab. It is currently the only
-        place it appears: install, build and type errors from a sandbox run are
-        not reported under Problems yet, and the sandbox’s process output is not
-        piped into the Console. See{' '}
+        The failure reason appears only in the Preview tab: install, build and
+        type errors from a sandbox run are not reported under Problems yet, and
+        the sandbox’s process output is not piped into the Console. See{' '}
         <a href="/docs/the-builder">The builder, pane by pane</a>.
       </p>
     </DocPage>

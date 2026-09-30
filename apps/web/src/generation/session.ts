@@ -1065,7 +1065,7 @@ export class BuilderSession {
         failed ? 'error' : 'info',
         failed
           ? `${UNSEEN_FAILURE} The accepted checkpoint is unchanged.`
-          : 'Run cancelled; the accepted checkpoint is unchanged',
+          : 'Run canceled; the accepted checkpoint is unchanged',
       ),
     }));
   }
@@ -1418,7 +1418,7 @@ export class BuilderSession {
           `That did not work${turn.problem ? `: ${turn.problem}` : '.'} Nothing was changed.`,
         );
       } else if (turn.status === 'cancelled') {
-        said.push('Cancelled. Nothing was changed.');
+        said.push('Canceled. Nothing was changed.');
       }
       messages.push({ role: 'user', text: clip(turn.prompt) });
       if (said.length > 0) {
@@ -2031,7 +2031,7 @@ export class BuilderSession {
       timeline: this.#append(
         this.#state.timeline,
         'info',
-        `Run ${this.#state.runId ?? ''} cancelled; the accepted checkpoint is unchanged`.trim(),
+        `Run ${this.#state.runId ?? ''} canceled; the accepted checkpoint is unchanged`.trim(),
       ),
     };
     this.#emit();

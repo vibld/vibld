@@ -52,7 +52,7 @@ that does not exist and never with a charting library. Give the <svg> a
 viewBox, width="100%", height="auto" and a max-width, so it scales instead
 of overflowing. It needs role="img" and an aria-label saying what it shows,
 plus a <title> as the first child; a diagram no screen reader can describe is
-decoration. Use the project's own CSS custom properties for every colour
+decoration. Use the project's own CSS custom properties for every color
 (fill="var(--card)", stroke="var(--border)", text fill="var(--foreground)"),
 never hardcoded hex, or the diagram breaks the moment the palette changes.
 
@@ -67,7 +67,7 @@ Connectors are where diagrams fail, so these are not optional:
   A mainly-vertical arrow entering a side edge looks like it punctures the
   box rather than arriving at it.
 - A label never sits on its line. Put an opaque mask rect behind the text in
-  the surface colour, and leave a visible 6-10px gap between that rect and
+  the surface color, and leave a visible 6-10px gap between that rect and
   the stroke. Place it on a segment crossing open canvas, clear of every box.
 - Two connectors never share an attach point. For N connectors on one edge of
   length L, attach point k sits at L*k/(N+1) from the leading corner, at
@@ -95,7 +95,7 @@ export const DIAGRAM_TYPES: readonly DiagramType[] = [
       'system architecture',
     ],
     guidance:
-      'Group boxes into labelled zones (client, service, data) drawn first as a soft-filled container behind them, so containment is read before connection. Flow runs one way, left-to-right or top-to-bottom, and every arrow agrees with that direction: a single backward arrow is what makes a diagram feel like a maze. Label each box with what it is, not what it is called internally. Put the technology on a second line at a smaller size if it matters, and leave it off if it does not.',
+      'Group boxes into labeled zones (client, service, data) drawn first as a soft-filled container behind them, so containment is read before connection. Flow runs one way, left-to-right or top-to-bottom, and every arrow agrees with that direction: a single backward arrow is what makes a diagram feel like a maze. Label each box with what it is, not what it is called internally. Put the technology on a second line at a smaller size if it matters, and leave it off if it does not.',
   },
   {
     id: 'flow',
@@ -109,7 +109,7 @@ export const DIAGRAM_TYPES: readonly DiagramType[] = [
       'onboarding flow',
     ],
     guidance:
-      'One start and one end, both visually distinct from the steps between them (a pill rather than a rectangle). A decision is a diamond with exactly two labelled exits, and the labels go on the connectors, not inside the diamond. Keep the happy path running straight down the centre so it can be read without tracing, and push exception branches to one side. If a branch rejoins, it rejoins on the main spine rather than into the middle of another step.',
+      'One start and one end, both visually distinct from the steps between them (a pill rather than a rectangle). A decision is a diamond with exactly two labeled exits, and the labels go on the connectors, not inside the diamond. Keep the happy path running straight down the center so it can be read without tracing, and push exception branches to one side. If a branch rejoins, it rejoins on the main spine rather than into the middle of another step.',
   },
   {
     id: 'sequence',
@@ -142,7 +142,7 @@ export const DIAGRAM_TYPES: readonly DiagramType[] = [
       'feature matrix',
     ],
     guidance:
-      'Both axes need named poles at each end, not just an axis title: a reader must be able to tell what "high" means without a caption. Place items by their actual position on both axes, and never crowd them into corners to make a point. Label each item beside its marker with a 6-10px gap, and where two items sit close, offset the labels rather than shrinking them. If one quadrant is meant to be the desirable one, say so in a caption rather than by colouring it and hoping.',
+      'Both axes need named poles at each end, not just an axis title: a reader must be able to tell what "high" means without a caption. Place items by their actual position on both axes, and never crowd them into corners to make a point. Label each item beside its marker with a 6-10px gap, and where two items sit close, offset the labels rather than shrinking them. If one quadrant is meant to be the desirable one, say so in a caption rather than by coloring it and hoping.',
   },
 ];
 

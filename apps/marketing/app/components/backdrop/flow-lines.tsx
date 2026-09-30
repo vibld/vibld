@@ -8,7 +8,7 @@ import { useEffect, useRef } from 'react';
 export interface FlowLinesProps {
   /** Extra classes for the box; it already fills its positioned parent. */
   className?: string;
-  /** One CSS colour per line; defaults to the project's colour tokens. */
+  /** One CSS color per line; defaults to the project's color tokens. */
   colors?: readonly string[];
   /** 1 is a slow drift, 0 holds still. */
   speed?: number;
@@ -18,7 +18,7 @@ type Rgb = [number, number, number];
 
 const DEFAULT_COLORS = ['var(--primary)', 'var(--accent)', 'var(--secondary)'];
 
-/** Any CSS colour, including var(--token) and oklch(), as sRGB from 0 to 255. */
+/** Any CSS color, including var(--token) and oklch(), as sRGB from 0 to 255. */
 function resolveColor(value: string, fallback: Rgb): Rgb {
   const probe = document.createElement('span');
   probe.style.display = 'none';

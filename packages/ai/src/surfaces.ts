@@ -43,12 +43,12 @@ export const SURFACE_TECHNIQUES: readonly SurfaceTechnique[] = [
       'mesh gradient',
       'gradient background',
       'gradient blob',
-      'colourful background',
+      'colorful background',
       'colorful background',
       'aurora background',
     ],
     guidance:
-      'A mesh gradient is several overlapping radial gradients on one element, not an image and not a library: stack three or four `radial-gradient(at 20% 30%, <colour> 0%, transparent 50%)` layers at different positions and hues over a solid base colour, comma-separated in a single `background` declaration. The base colour underneath is what stops the blend going muddy where the transparent edges meet. Keep the colours within one or two neighbouring hue families or it reads as a smear rather than a field. To animate it, move `background-position` slowly (8000-20000ms, linear) rather than re-rendering the gradients.',
+      'A mesh gradient is several overlapping radial gradients on one element, not an image and not a library: stack three or four `radial-gradient(at 20% 30%, <color> 0%, transparent 50%)` layers at different positions and hues over a solid base color, comma-separated in a single `background` declaration. The base color underneath is what stops the blend going muddy where the transparent edges meet. Keep the colors within one or two neighboring hue families or it reads as a smear rather than a field. To animate it, move `background-position` slowly (8000-20000ms, linear) rather than re-rendering the gradients.',
   },
   {
     id: 'conic-ring',
@@ -62,7 +62,7 @@ export const SURFACE_TECHNIQUES: readonly SurfaceTechnique[] = [
       'spinner',
     ],
     guidance:
-      'Draw a ring with `conic-gradient` plus a mask rather than with SVG stroke-dasharray arithmetic: `background: conic-gradient(var(--primary) calc(var(--value) * 1%), var(--muted) 0)` on a square element with `border-radius: 50%`, then punch the centre out with `mask: radial-gradient(farthest-side, transparent calc(100% - 8px), black calc(100% - 8px))`. The percentage is a single custom property, so animating or updating progress means changing one number. Give it `role="progressbar"` with `aria-valuenow`, and put the value in text inside the ring: a ring alone conveys the state by shape and colour only.',
+      'Draw a ring with `conic-gradient` plus a mask rather than with SVG stroke-dasharray arithmetic: `background: conic-gradient(var(--primary) calc(var(--value) * 1%), var(--muted) 0)` on a square element with `border-radius: 50%`, then punch the center out with `mask: radial-gradient(farthest-side, transparent calc(100% - 8px), black calc(100% - 8px))`. The percentage is a single custom property, so animating or updating progress means changing one number. Give it `role="progressbar"` with `aria-valuenow`, and put the value in text inside the ring: a ring alone conveys the state by shape and color only.',
   },
   {
     id: 'blend-overlay',
@@ -75,7 +75,7 @@ export const SURFACE_TECHNIQUES: readonly SurfaceTechnique[] = [
       'image treatment',
     ],
     guidance:
-      'For text that must stay legible over an unknown image, `mix-blend-mode: difference` with `color: white` inverts against whatever is behind it. It is genuinely adaptive but it is also unpredictable, so use it for a display headline, never for body copy or anything interactive. For a duotone image treatment, put the image in a container with the shadow colour as its background, set the image to `mix-blend-mode: luminosity` or `screen`, and overlay the highlight colour. The safer general answer for text over a photograph is a gradient scrim (`linear-gradient(transparent, rgba(0,0,0,0.7))`) sized to the text block, which guarantees the contrast ratio rather than hoping for it.',
+      'For text that must stay legible over an unknown image, `mix-blend-mode: difference` with `color: white` inverts against whatever is behind it. It is genuinely adaptive but it is also unpredictable, so use it for a display headline, never for body copy or anything interactive. For a duotone image treatment, put the image in a container with the shadow color as its background, set the image to `mix-blend-mode: luminosity` or `screen`, and overlay the highlight color. The safer general answer for text over a photograph is a gradient scrim (`linear-gradient(transparent, rgba(0,0,0,0.7))`) sized to the text block, which guarantees the contrast ratio rather than hoping for it.',
   },
   {
     id: 'clip-shape',

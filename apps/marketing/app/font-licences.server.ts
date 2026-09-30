@@ -16,7 +16,7 @@ export function templateFontLicences() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([family, font]) => {
       const text = FILES[`../public${font.licence}`];
-      if (text === undefined) throw new Error(`No licence file for ${family}`);
+      if (text === undefined) throw new Error(`No license file for ${family}`);
       return {
         family,
         package: font.source,

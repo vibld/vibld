@@ -525,7 +525,7 @@ function ConsentBanner() {
           ) : (
             <>
               We count page views without cookies. May we also use Google
-              Analytics, which sets cookies and recognises your browser across
+              Analytics, which sets cookies and recognizes your browser across
               visits?{' '}
               <Link
                 to="/legal/cookies"

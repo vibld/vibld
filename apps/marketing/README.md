@@ -25,7 +25,7 @@ pnpm --filter @vibld/marketing test
 
 ## What's here today
 
-The "Live Build" design (approved 2026-09-27), in the brand's colours:
+The "Live Build" design (approved 2026-09-27), in the brand's colors:
 
 - **Home** (`app/routes/home.tsx`): a hero whose builder window assembles a
   small invented site in front of the reader (`components/LiveBuild.tsx`),
@@ -38,7 +38,7 @@ The "Live Build" design (approved 2026-09-27), in the brand's colours:
   one page per kind of project), each held to the guides under `/docs`.
   Pricing reads every figure from `apps/web/worker` (`app/plans.ts`): each
   plan's price from `PRICE_USD_CENTS` beside the Stripe lookup keys, and the
-  model spend it includes from what the spend gate enforces, labelled apart so
+  model spend it includes from what the spend gate enforces, labeled apart so
   one cannot read as the other. `test/plans.test.ts` pins the prices to
   `docs/decisions.md` (L36, L38), and `turbo.json` in this directory makes a
   change to those files rebuild the site.
@@ -67,7 +67,7 @@ The "Live Build" design (approved 2026-09-27), in the brand's colours:
   `llms-full.txt`, plus a `.zip` of each generated example for the
   examples page to link to.
 
-Colours are the brand's aliases plus a few marketing-local tokens (six pale
+Colors are the brand's aliases plus a few marketing-local tokens (six pale
 tints, the code block, one green), declared in `app.css` and measured against
 the brand's ink in `test/tokens.test.ts`.
 
@@ -99,7 +99,7 @@ just never assembled into an actual system:
   in `app.css` -- no new colors introduced.
 - **Type**: Bricolage Grotesque (display), Hanken Grotesk (body) and
   JetBrains Mono, chosen with the Live Build design and self-hosted from
-  `public/fonts/`, each beside its family's licence file, so the site still
+  `public/fonts/`, each beside its family's license file, so the site still
   contacts no font service and the Cookie Notice stays true. Listed on
   `/legal/licenses`; cached for a year by the Worker because each filename
   carries its package version.

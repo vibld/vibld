@@ -64,12 +64,12 @@ export default function Cookies() {
         way the measurement above does, and we would rather say so plainly than
         bury it: Google Analytics sets cookies in your browser (names beginning{' '}
         <code>_ga</code>), assigns your browser a client identifier, and uses
-        that identifier to recognise the same browser across pages and across
+        that identifier to recognize the same browser across pages and across
         visits. It also receives your IP address in order to derive an
         approximate location, though we have not enabled Google Signals,
         advertising features, or any linking of this data to Google Ads, and our
         code tells Google Analytics that advertising storage, the use of your
-        data for advertising, and ad personalisation are all refused. We use it
+        data for advertising, and ad personalization are all refused. We use it
         to understand which pages people reach and what brought them here. How
         Google processes this data is covered by{' '}
         <a

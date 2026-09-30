@@ -1242,14 +1242,14 @@ function specFindings(
       findings.push({
         severity: 'warning',
         check: 'color',
-        detail: `The spec's colour "${color.name}" (${color.value}, ${color.use}) is not written anywhere in the CSS or markup, unless it is one of the Tailwind palette colours the page uses (${utilities.palette.slice(0, 6).join(', ')}). ${define}`,
+        detail: `The spec's color "${color.name}" (${color.value}, ${color.use}) is not written anywhere in the CSS or markup, unless it is one of the Tailwind palette colors the page uses (${utilities.palette.slice(0, 6).join(', ')}). ${define}`,
       });
       continue;
     }
     findings.push({
       severity: 'error',
       check: 'color',
-      detail: `The spec's colour "${color.name}" (${color.value}, ${color.use}) is not used anywhere in the CSS or markup. ${define}`,
+      detail: `The spec's color "${color.name}" (${color.value}, ${color.use}) is not used anywhere in the CSS or markup. ${define}`,
     });
   }
 
@@ -4346,7 +4346,7 @@ function universalFindings(
       severity: 'warning',
       check: 'reduced-motion',
       detail:
-        'The page animates but has no @media (prefers-reduced-motion: reduce) rule that stops it. Keep opacity and colour changes there and drop the movement.',
+        'The page animates but has no @media (prefers-reduced-motion: reduce) rule that stops it. Keep opacity and color changes there and drop the movement.',
     });
   }
   // Motion (motion/react, formerly framer-motion) moves elements from
@@ -4376,7 +4376,7 @@ function universalFindings(
       severity: 'warning',
       check: 'reduced-motion',
       detail:
-        'The page animates with Motion but ignores the reduced-motion preference. Wrap the app in <MotionConfig reducedMotion="user">, which keeps opacity and colour changes and drops the movement.',
+        'The page animates with Motion but ignores the reduced-motion preference. Wrap the app in <MotionConfig reducedMotion="user">, which keeps opacity and color changes and drops the movement.',
     });
   }
   // Checked on its own, not as an else: MotionConfig, which the warning

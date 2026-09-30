@@ -194,11 +194,11 @@ export function deletionDepsFor(env: DeletionEnv): DeletionDeps {
  * not for a log: it is shown in the builder and in the operator's panel.
  */
 const STEP_FAILED: Record<ImmediateStep, string> = {
-  subscription: 'Your subscription could not be cancelled yet.',
+  subscription: 'Your subscription could not be canceled yet.',
   preview: 'Your preview could not be stopped yet.',
   sites: 'Your published site is still online.',
   github: 'Your GitHub connection could not be removed yet.',
-  referrals: 'Pending referral rewards could not be cancelled yet.',
+  referrals: 'Pending referral rewards could not be canceled yet.',
 };
 
 /**
@@ -235,7 +235,7 @@ async function cancelSubscriptions(
   // Never reached Checkout: there is nothing in Stripe to stop.
   if (!customerId) return true;
   if (!deps.stripe) {
-    return 'Your subscription could not be cancelled: billing is not configured here.';
+    return 'Your subscription could not be canceled: billing is not configured here.';
   }
   const page = await deps.stripe.subscriptions.list({
     customer: customerId,

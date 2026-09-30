@@ -249,7 +249,7 @@ function parseProjectFiles(
     if (totalPathChars > limits.maxTotalPathChars) {
       return fail(
         413,
-        'The project has too many path characters to summarise.',
+        'The project has too many path characters to summarize.',
       );
     }
     totalContentChars += path.length + content.length;

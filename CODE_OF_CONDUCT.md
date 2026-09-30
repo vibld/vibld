@@ -23,7 +23,7 @@ Vibld is built in the open by people who disagree about code, often and usefully
 
 Email **hello@vibld.com**. Say what happened, where (links help), and whether you want to stay anonymous to the other person. A maintainer will read it, reply to acknowledge it, and keep who reported it private.
 
-If the problem is a security vulnerability rather than behaviour, use the private route in [SECURITY.md](SECURITY.md) instead.
+If the problem is a security vulnerability rather than behavior, use the private route in [SECURITY.md](SECURITY.md) instead.
 
 ## What happens next
 

@@ -221,7 +221,7 @@ export async function handleAccountDeleteCancel(
     return json(
       {
         error:
-          'The deletion has already started and can no longer be cancelled.',
+          'The deletion has already started and can no longer be canceled.',
       },
       409,
     );

@@ -41,7 +41,7 @@ Motion is expressive by default. The system prompt's MOTION section asks for:
 
 The frequency gate and the reduced-motion posture stay: `<MotionConfig reducedMotion="user">`, a read of `useReducedMotion()` for scroll- and pointer-linked values, and `motion-reduce:animate-none` on CSS animation.
 
-The prompt also gains a LAYOUT AND TYPE section. It rules out the default of a centred hero, three identical cards and a system or Inter display face, and asks for current CSS where it earns its place.
+The prompt also gains a LAYOUT AND TYPE section. It rules out the default of a centered hero, three identical cards and a system or Inter display face, and asks for current CSS where it earns its place.
 
 Versions are named in the prompt. A model choosing its own picks ranges that disagree, and an install that fails buys a paid repair. `stack.ts` is the one list: the prompt, the fake scaffold and the eval's stub plan all read it. CI builds the stub, so a set that stops installing or compiling together fails there first.
 
@@ -49,7 +49,7 @@ The per-run output reserve is $3.20.
 
 The design checks read the stack before the prompt asks for it:
 
-- colours drawn by utilities and opacity modifiers;
+- colors drawn by utilities and opacity modifiers;
 - Motion's animation, for the reduced-motion check;
 - `oklch()` and `.dark` tokens, for contrast;
 - shadcn's own `<input {...props}>`, for the label check.
@@ -84,15 +84,15 @@ The local mock preview (`apps/web/src/generation/preview.ts`) inlines `src/style
 
 Mockups stay HTML and inline CSS, so they cannot show pointer or scroll motion. Their tokens are carried into the spec and then into `@theme`.
 
-Tailwind's default palette values are not held by the design checks. A spec colour the page may be drawing from a palette utility (`bg-slate-900`) is reported as a warning rather than an error.
+Tailwind's default palette values are not held by the design checks. A spec color the page may be drawing from a palette utility (`bg-slate-900`) is reported as a warning rather than an error.
 
 D15 ("begin with curated dependencies") has no allowlist in code. This ADR names the set the prompt asks for; nothing enforces it at install time.
 
-## Licence facts
+## License facts
 
-These are what each package's own licence file says. Whether to adopt them is the maintainer's decision.
+These are what each package's own license file says. Whether to adopt them is the maintainer's decision.
 
-| Package                                             | Licence                                                                                                                             |
+| Package                                             | License                                                                                                                             |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `tailwindcss`, `@tailwindcss/vite`                  | MIT                                                                                                                                 |
 | `motion` (and `framer-motion`, which it depends on) | MIT; copyright Motion B.V.                                                                                                          |
@@ -103,7 +103,7 @@ These are what each package's own licence file says. Whether to adopt them is th
 | `cmdk` (only for a combobox)                        | MIT, per its registry metadata                                                                                                      |
 | `shadcn` (the CLI package, not used at build time)  | MIT, per its registry metadata                                                                                                      |
 
-The shadcn/ui component source the model writes comes from the shadcn/ui registry. Its licence was not read for this record.
+The shadcn/ui component source the model writes comes from the shadcn/ui registry. Its license was not read for this record.
 
 ## Alternatives considered
 

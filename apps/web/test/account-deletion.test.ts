@@ -574,10 +574,7 @@ describe('asking to be deleted', () => {
     assert.deepEqual(result.done.sort(), ['github', 'referrals']);
     assert.equal(result.errors.length, 3);
     const stored = await w.store.find(USER);
-    assert.match(
-      stored!.lastError ?? '',
-      /subscription could not be cancelled/,
-    );
+    assert.match(stored!.lastError ?? '', /subscription could not be canceled/);
   });
 });
 

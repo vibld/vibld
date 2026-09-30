@@ -40,7 +40,7 @@ export default function Privacy() {
           pick, any direction you chose from a quick mockup, and, if you give
           one, the address of a reference page. vibld fetches that page from its
           own servers, and only its visible text and some values measured from
-          its styles, such as its main colour, go into the run.
+          its styles, such as its main color, go into the run.
         </li>
         <li>
           <strong>Standing instructions and style preferences</strong>, which
@@ -176,14 +176,14 @@ export default function Privacy() {
             Page views, measured by Google Analytics 4, but only if you agree.
           </strong>{' '}
           It sets cookies in your browser, assigns your browser a client
-          identifier that recognises it across pages and visits, and sends your
+          identifier that recognizes it across pages and visits, and sends your
           IP address to Google to derive an approximate location. So we ask
           first, with a banner on your first visit, and unless and until you say
           yes we do not load it at all: nothing is requested from Google and
           nothing about your visit reaches them. We have not enabled Google
           Signals, advertising features, or any link to Google Ads, our code
           tells Google Analytics that advertising storage, the use of your data
-          for advertising, and ad personalisation are all refused, and we run no
+          for advertising, and ad personalization are all refused, and we run no
           advertising scripts. The <strong>Cookie preferences</strong> link at
           the bottom of every page changes your answer at any time. Google
           Analytics runs only on vibld.com, never in the builder.
@@ -289,10 +289,10 @@ export default function Privacy() {
         <li>
           <strong>Account deletion</strong>: you can delete your account
           yourself, from the builder&apos;s settings. From that moment the
-          account cannot be used: any subscription is cancelled at once, with no
+          account cannot be used: any subscription is canceled at once, with no
           refund of the period already paid for; previews stop; published sites
           go offline; the GitHub connection is removed; unpaid referral rewards,
-          on both sides of a referral, are cancelled; and unused credit and
+          on both sides of a referral, are canceled; and unused credit and
           allowance are forfeited, with no refund. 30 days later everything else
           is deleted: your projects and their history, uploaded media, your
           sites&apos; files, your GitHub connection history, your invitation,
