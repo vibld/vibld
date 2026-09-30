@@ -1207,6 +1207,31 @@ body {
   border-radius: 999px;
 }
 
+/* D76: the moods that narrow the rows, smaller than the styles they filter. */
+.styles__moods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
+.chip--mood {
+  border-radius: 999px;
+  font-size: var(--text-xs);
+}
+
+/* A suggestion is a mark, not a choice: a dashed brand edge, no fill. */
+.chip--suggested:not(.chip--on) {
+  border-style: dashed;
+  border-color: var(--brand);
+}
+
+.styles__suggested {
+  margin: 0.5rem 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
 .chip--on {
   border-color: var(--brand);
   background: var(--brand-16);

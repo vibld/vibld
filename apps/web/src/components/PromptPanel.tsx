@@ -268,7 +268,12 @@ export function PromptPanel({
       about:
         'Sets the overall look. A treatment is a surface finish; a complete system also brings its own colours and fonts.',
       body: (
-        <StylePicker value={style} onChange={setStyle} disabled={disabled} />
+        <StylePicker
+          value={style}
+          onChange={setStyle}
+          disabled={disabled}
+          prompt={prompt}
+        />
       ),
     },
     {

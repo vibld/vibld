@@ -566,3 +566,190 @@ ${tokenCss(colors, { radius: { ...radius } })}
 
 Heading font: ${typography.headingFont}. Body font: ${typography.bodyFont}. ${fontImport(typography.googleFontsUrl)}`;
 }
+
+/**
+ * The mood a style carries, for suggesting one from a request (D76).
+ *
+ * Six moods, the axis designs-v1's catalogue sorts its layers by (D75), in
+ * our own words and our own assignment: luxe, calm, technical, organic,
+ * playful, brutal. A mood is a suggestion, never a choice: the picker
+ * highlights the styles whose moods the request names, and a build with no
+ * style picked stays exactly as it was.
+ */
+export type StyleMood =
+  'luxe' | 'calm' | 'technical' | 'organic' | 'playful' | 'brutal';
+
+export const STYLE_MOODS: readonly { id: StyleMood; name: string }[] = [
+  { id: 'luxe', name: 'Luxe' },
+  { id: 'calm', name: 'Calm' },
+  { id: 'technical', name: 'Technical' },
+  { id: 'organic', name: 'Organic' },
+  { id: 'playful', name: 'Playful' },
+  { id: 'brutal', name: 'Brutal' },
+];
+
+/**
+ * Each preset's moods, one to three, read from its direction. A `Record`
+ * over the id union, so a preset added without moods does not compile.
+ */
+export const PRESET_MOODS: Readonly<
+  Record<StylePresetId, readonly StyleMood[]>
+> = {
+  glassmorphism: ['luxe', 'calm'],
+  neumorphism: ['calm'],
+  brutalism: ['brutal'],
+  minimalist: ['calm'],
+  dark: ['technical'],
+  gradient: ['playful'],
+  depth: ['luxe', 'technical'],
+  retrowave: ['playful'],
+  claymorphism: ['playful'],
+  aurora: ['calm', 'luxe'],
+  bentoGrid: ['technical'],
+  editorial: ['luxe'],
+  organic: ['organic', 'calm'],
+  aiNative: ['technical'],
+  vibrantBlocks: ['playful', 'brutal'],
+  liquidGlass: ['luxe'],
+  warmTerminal: ['technical'],
+  layeredVoid: ['luxe', 'technical'],
+  acidDark: ['technical', 'brutal'],
+  nightIndigo: ['technical'],
+  warmPaper: ['organic', 'calm'],
+  monoPress: ['brutal'],
+  polarityBands: ['luxe'],
+  cinematic: ['luxe'],
+};
+
+/**
+ * The words in a request that name each mood. Whole words, case folded, a
+ * trailing "s" allowed. Words a request uses for something other than its
+ * mood are left out: "bold" (bold type), "clean" (clean code), "modern"
+ * (every request).
+ */
+const MOOD_WORDS: Readonly<Record<StyleMood, readonly string[]>> = {
+  luxe: [
+    'luxe',
+    'luxury',
+    'luxurious',
+    'premium',
+    'elegant',
+    'upscale',
+    'high-end',
+    'sophisticated',
+    'refined',
+    'exclusive',
+    'boutique',
+    'opulent',
+  ],
+  calm: [
+    'calm',
+    'calming',
+    'serene',
+    'minimal',
+    'minimalist',
+    'quiet',
+    'peaceful',
+    'gentle',
+    'relaxing',
+    'tranquil',
+    'wellness',
+    'spa',
+    'airy',
+  ],
+  technical: [
+    'technical',
+    'techy',
+    'developer',
+    'engineering',
+    'data',
+    'dashboard',
+    'analytics',
+    'saas',
+    'cybersecurity',
+    'infrastructure',
+    'api',
+    'precise',
+    'futuristic',
+  ],
+  organic: [
+    'organic',
+    'natural',
+    'nature',
+    'earthy',
+    'eco',
+    'sustainable',
+    'botanical',
+    'handmade',
+    'farm',
+    'garden',
+    'rustic',
+  ],
+  playful: [
+    'playful',
+    'fun',
+    'vibrant',
+    'colorful',
+    'colourful',
+    'quirky',
+    'whimsical',
+    'cheerful',
+    'energetic',
+    'kids',
+    'cartoon',
+  ],
+  brutal: [
+    'brutal',
+    'brutalist',
+    'raw',
+    'stark',
+    'edgy',
+    'gritty',
+    'punk',
+    'loud',
+    'unpolished',
+  ],
+};
+
+const MOOD_PATTERNS: readonly [StyleMood, RegExp][] = STYLE_MOODS.map(
+  ({ id }) => [
+    id,
+    new RegExp(
+      `(?:^|[^a-z0-9-])(?:${MOOD_WORDS[id]
+        .map((word) => word.replace(/[-]/g, '\\-'))
+        .join('|')})s?(?![a-z0-9-])`,
+      'i',
+    ),
+  ],
+);
+
+/** The moods a request names, in `STYLE_MOODS` order. */
+export function moodsInText(text: string): StyleMood[] {
+  return MOOD_PATTERNS.filter(([, pattern]) => pattern.test(text)).map(
+    ([mood]) => mood,
+  );
+}
+
+/** At most this many styles are suggested, so a suggestion stays one. */
+export const MAX_SUGGESTED_STYLES = 4;
+
+/**
+ * The styles to suggest for a request: those sharing the most of its
+ * moods, best first and in `STYLE_PRESETS` order within a tie, at most
+ * `MAX_SUGGESTED_STYLES`. Empty when the request names no mood.
+ */
+export function suggestStyles(text: string): StylePresetId[] {
+  const moods = new Set(moodsInText(text));
+  if (moods.size === 0) return [];
+  const scored = STYLE_PRESETS.map((preset, order) => ({
+    id: preset.id,
+    order,
+    score: PRESET_MOODS[preset.id].filter((mood) => moods.has(mood)).length,
+  })).filter((entry) => entry.score > 0);
+  const best = Math.max(...scored.map((entry) => entry.score));
+  return scored
+    .filter((entry) => entry.score === best)
+    .sort((a, b) => a.order - b.order)
+    .slice(0, MAX_SUGGESTED_STYLES)
+    .map((entry) => entry.id);
+}

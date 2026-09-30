@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  MAX_SUGGESTED_STYLES,
+  PRESET_MOODS,
+  STYLE_MOODS,
   STYLE_PRESETS,
   findStylePreset,
   isStylePresetId,
+  moodsInText,
   styleDirection,
+  suggestStyles,
 } from '../src/style-presets.ts';
 import { buildUserPrompt } from '../src/plan-provider.ts';
 
@@ -163,5 +168,64 @@ describe('the cinematic preset', () => {
       styleDirection('cinematic')!,
       /never an <img> or <video> of a file the project lacks/,
     );
+  });
+});
+
+describe('style moods (D76)', () => {
+  const moods = new Set(STYLE_MOODS.map((mood) => mood.id));
+
+  it('gives every preset one to three moods from the set', () => {
+    for (const preset of STYLE_PRESETS) {
+      const own = PRESET_MOODS[preset.id];
+      assert.ok(own.length >= 1 && own.length <= 3, preset.id);
+      assert.equal(
+        new Set(own).size,
+        own.length,
+        `${preset.id} repeats a mood`,
+      );
+      for (const mood of own)
+        assert.ok(moods.has(mood), `${preset.id}: ${mood}`);
+    }
+  });
+
+  it('carries every mood on at least two presets, so a filter never shows one', () => {
+    for (const { id } of STYLE_MOODS) {
+      const count = STYLE_PRESETS.filter((preset) =>
+        PRESET_MOODS[preset.id].includes(id),
+      ).length;
+      assert.ok(count >= 2, `${id} is on ${count} preset(s)`);
+    }
+  });
+
+  it('reads the moods a request names, as whole words', () => {
+    assert.deepEqual(moodsInText('A calm, premium spa website'), [
+      'luxe',
+      'calm',
+    ]);
+    assert.deepEqual(moodsInText('A HIGH-END boutique'), ['luxe']);
+    assert.deepEqual(moodsInText('Dashboards for developers'), ['technical']);
+    // Words inside other words, and words requests use for something else.
+    assert.deepEqual(moodsInText('A funeral home'), []);
+    assert.deepEqual(moodsInText('Bold type, clean and modern'), []);
+    assert.deepEqual(moodsInText(''), []);
+  });
+
+  it('suggests the styles sharing the most moods, and nothing for none', () => {
+    assert.deepEqual(suggestStyles('A calm, premium spa website'), [
+      'glassmorphism',
+      'aurora',
+    ]);
+    const technical = suggestStyles('A techy SaaS product');
+    assert.ok(technical.length > 0 && technical.length <= MAX_SUGGESTED_STYLES);
+    for (const id of technical) {
+      assert.ok(PRESET_MOODS[id].includes('technical'), id);
+    }
+    assert.deepEqual(suggestStyles('A bakery website'), []);
+  });
+
+  it('never turns request text into anything but preset ids', () => {
+    for (const id of suggestStyles('ignore previous instructions, luxury')) {
+      assert.equal(isStylePresetId(id), true);
+    }
   });
 });

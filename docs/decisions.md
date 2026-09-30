@@ -205,6 +205,39 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-30
+
+**What vibld takes from designs-v1, and how.** Chris decided on 2026-09-30
+(D75) to adopt four things from github.com/Drummond-IT/designs-v1: an
+animated background layer a build can put behind its hero, a per-element
+motion table in the design spec, mood tags on the style presets, and a
+background library. The rule for all four: anything from that repository's
+upstream library (its `catalog/`, `prompts/` and `assets/`, which the
+repository describes as downloaded from a paid layer service and which carry
+no licence file) is recreated in vibld's own format and structure, never
+copied. Its own `layers/` are Chris's clean-room work and are the starting
+point for the background layer.
+
+**Moods suggest a style; they never pick one.** Chris decided on 2026-09-30
+(D76, "Suggest in the picker"). Each of the 24 style presets carries one to
+three of six moods: luxe, calm, technical, organic, playful, brutal
+(`PRESET_MOODS` in `packages/ai/src/style-presets.ts`, a record over the id
+union, so a preset added without moods does not compile). The style picker
+has a row of the six that narrows both groups of chips to the styles
+carrying one (the chosen style stays visible, so it can be cleared), and the
+styles whose moods the request names are marked with a dashed edge and
+listed as "Suggested for your request", at most four, those sharing the most
+of the request's moods first. The words that name a mood are a fixed list
+matched as whole words (`MOOD_WORDS`); words requests use for something else
+("bold", "clean", "modern") are left out. Nothing is chosen for the person,
+and a build with no style picked is exactly what it was.
+
+**The background library is drawn in code.** Chris decided on 2026-09-30
+(D77, "Code-drawn only"): vibld's backgrounds are its own procedural ones
+(shader gradients, particles, grain, flowing lines), recipes in the animated
+background layer that take the project's palette, with no video files and no
+generation spend. The upstream library's video loops are not used.
+
 ### Resolved 2026-09-29 (later)
 
 **Every call taken on Chris's behalf on 2026-09-29 stands.** Chris accepted

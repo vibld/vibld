@@ -1,5 +1,16 @@
-import { STYLE_PRESETS } from '@vibld/ai/style-presets';
-import type { StylePreset, StylePresetId } from '@vibld/ai/style-presets';
+import { useMemo, useState } from 'react';
+
+import {
+  PRESET_MOODS,
+  STYLE_MOODS,
+  STYLE_PRESETS,
+  suggestStyles,
+} from '@vibld/ai/style-presets';
+import type {
+  StyleMood,
+  StylePreset,
+  StylePresetId,
+} from '@vibld/ai/style-presets';
 
 /**
  * A visual direction to start from.
@@ -20,6 +31,11 @@ import type { StylePreset, StylePresetId } from '@vibld/ai/style-presets';
  * legend carries a link to vibld.com/styles, which is generated from this
  * same `STYLE_PRESETS` list and therefore cannot drift from what these
  * chips send.
+ *
+ * Moods (D76): a row of six narrows both groups to the styles that carry
+ * one, and the styles whose moods the request names ("calm", "premium")
+ * are marked as suggestions. A suggestion is only a mark: nothing is picked
+ * for the person, and a build with no style chosen is unchanged.
  */
 const TREATMENTS = STYLE_PRESETS.filter((preset) => !preset.tokens);
 const SYSTEMS = STYLE_PRESETS.filter((preset) => preset.tokens);
@@ -28,38 +44,59 @@ export function StylePicker({
   value,
   onChange,
   disabled,
+  prompt = '',
 }: {
   value: StylePresetId | null;
   onChange: (value: StylePresetId | null) => void;
   disabled: boolean;
+  /** The request as typed, which the suggestions are read from. */
+  prompt?: string;
 }) {
+  const [mood, setMood] = useState<StyleMood | null>(null);
+  const suggested = useMemo(() => new Set(suggestStyles(prompt)), [prompt]);
   const chosen = STYLE_PRESETS.find((preset) => preset.id === value) ?? null;
-  const row = (label: string, presets: readonly StylePreset[]) => (
-    <>
-      <span className="styles__group" aria-hidden="true">
-        {label}
-      </span>
-      <div className="styles__row" role="group" aria-label={label}>
-        {presets.map((preset) => {
-          const selected = preset.id === value;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              // Selecting the chosen chip again clears it: a starting point
-              // you cannot put back is a trap, and there is no "none" chip.
-              onClick={() => onChange(selected ? null : preset.id)}
-              className={`chip chip--style${selected ? ' chip--on' : ''}`}
-              aria-pressed={selected}
-              title={preset.description}
-            >
-              {preset.name}
-            </button>
-          );
-        })}
-      </div>
-    </>
-  );
+  // The chosen style stays visible under any mood, so it can be cleared.
+  const shown = (preset: StylePreset) =>
+    mood === null ||
+    preset.id === value ||
+    PRESET_MOODS[preset.id].includes(mood);
+  const row = (label: string, presets: readonly StylePreset[]) => {
+    const visible = presets.filter(shown);
+    if (visible.length === 0) return null;
+    return (
+      <>
+        <span className="styles__group" aria-hidden="true">
+          {label}
+        </span>
+        <div className="styles__row" role="group" aria-label={label}>
+          {visible.map((preset) => {
+            const selected = preset.id === value;
+            const isSuggested = suggested.has(preset.id);
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                // Selecting the chosen chip again clears it: a starting point
+                // you cannot put back is a trap, and there is no "none" chip.
+                onClick={() => onChange(selected ? null : preset.id)}
+                className={`chip chip--style${selected ? ' chip--on' : ''}${
+                  isSuggested ? ' chip--suggested' : ''
+                }`}
+                aria-pressed={selected}
+                title={preset.description}
+                data-suggested={isSuggested ? 'true' : undefined}
+              >
+                {preset.name}
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  };
+  const suggestedNames = STYLE_PRESETS.filter((preset) =>
+    suggested.has(preset.id),
+  ).map((preset) => preset.name);
 
   return (
     <fieldset className="styles" disabled={disabled}>
@@ -81,8 +118,29 @@ export function StylePicker({
           See them all
         </a>
       </legend>
+      <div className="styles__moods" role="group" aria-label="Mood">
+        {STYLE_MOODS.map((entry) => {
+          const on = entry.id === mood;
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => setMood(on ? null : entry.id)}
+              className={`chip chip--mood${on ? ' chip--on' : ''}`}
+              aria-pressed={on}
+            >
+              {entry.name}
+            </button>
+          );
+        })}
+      </div>
       {row('Treatment', TREATMENTS)}
       {row('Complete system', SYSTEMS)}
+      {!chosen && suggestedNames.length > 0 ? (
+        <p className="styles__suggested" aria-live="polite">
+          Suggested for your request: {suggestedNames.join(', ')}
+        </p>
+      ) : null}
       {/*
         What the chosen one will do, in the preset's own words. The chip
         names alone ("Claymorphism") told somebody who had not seen one
