@@ -1,5 +1,7 @@
 import { type RouteConfig, index, route } from '@react-router/dev/routes';
 
+import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
+
 import { USE_CASES } from './use-cases';
 
 export default [
@@ -30,6 +32,15 @@ export default [
     }),
   ),
   route('styles', 'routes/styles.tsx'),
+  route('templates', 'routes/templates.tsx'),
+  // One module for every design, declared once per path for the same reason
+  // as the use cases above.
+  ...DESIGN_TEMPLATE_INDEX.map((template) =>
+    route(`templates/${template.id}`, 'routes/template.tsx', {
+      id: `template-${template.id}`,
+    }),
+  ),
+  route('inspiration', 'routes/inspiration.tsx'),
   route('examples', 'routes/examples.tsx'),
   route('roadmap', 'routes/roadmap.tsx'),
   route('docs', 'routes/docs.index.tsx'),

@@ -751,9 +751,19 @@ describe('the way in, now the beta is open', () => {
     }
   });
 
+  // The template catalog quotes designs whose subject is a waitlist or an
+  // invitation ("Pre-launch waitlist page"), so those pages are held to the
+  // rule on vibld's own words: the route modules that write every sentence
+  // around the quoted designs. The header and footer they share with every
+  // other page are checked on those pages.
+  const quotesTheCatalog = (path: string) =>
+    path === '/templates' ||
+    path.startsWith('/templates/') ||
+    path === '/inspiration';
+
   it('no longer says the product is invite-only, outside the legal pages', () => {
     for (const route of ROUTES) {
-      if (isLegal(route.path)) continue;
+      if (isLegal(route.path) || quotesTheCatalog(route.path)) continue;
       const text = read(route.path)
         .replace(/<[^>]+>/g, ' ')
         .replace(/\s+/g, ' ');
@@ -761,6 +771,20 @@ describe('the way in, now the beta is open', () => {
         text,
         /invite-only|join the waitlist|invitations go out|waitlist/i,
         `${route.path} still describes a closed product`,
+      );
+    }
+  });
+
+  it('says nothing closed in its own words on the pages that quote the catalog', () => {
+    for (const module of ['templates.tsx', 'template.tsx', 'inspiration.tsx']) {
+      const source = readFileSync(
+        new URL(`../app/routes/${module}`, import.meta.url),
+        'utf8',
+      );
+      assert.doesNotMatch(
+        source,
+        /invite-only|join the waitlist|invitations go out|waitlist/i,
+        module,
       );
     }
   });

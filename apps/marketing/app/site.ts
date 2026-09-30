@@ -7,6 +7,8 @@
  * place in the legal index.
  */
 
+import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
+
 import { USE_CASES } from './use-cases.ts';
 
 export interface SiteRoute {
@@ -375,6 +377,22 @@ export const ROUTES: SiteRoute[] = [
       'Every visual direction vibld can build in, from the builder\u2019s own list: full colour systems where a direction has one, surface treatments where it does not.',
   },
   {
+    path: '/templates',
+    title: `Templates | ${SITE.name}`,
+    description: `${DESIGN_TEMPLATE_INDEX.length} app and website designs to start from, each with a layout, a checked palette, a type pairing and a build prompt, grouped by what you are building.`,
+  },
+  ...DESIGN_TEMPLATE_INDEX.map((template) => ({
+    path: `/templates/${template.id}`,
+    title: `${template.name}, ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)} | ${SITE.name} templates`,
+    description: `${template.name}: a ${template.kind === 'app' ? 'app' : 'website'} design for vibld, a ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)}, with its layout, palette, type and full build prompt.`,
+  })),
+  {
+    path: '/inspiration',
+    title: `Inspiration | ${SITE.name}`,
+    description:
+      'Palettes and type pairings from every design in the template catalog, each colour pair checked against WCAG AA, to borrow for your own project.',
+  },
+  {
     path: '/examples',
     title: `Examples | ${SITE.name}`,
     description:
@@ -419,6 +437,7 @@ export const PRODUCT_PAGES: { path: string; label: string }[] = [
   { path: '/how-it-works', label: 'How it works' },
   { path: '/features', label: 'Features' },
   { path: '/styles', label: 'Styles' },
+  { path: '/templates', label: 'Templates' },
   { path: '/use-cases', label: 'Use cases' },
   { path: '/examples', label: 'Examples' },
   { path: '/pricing', label: 'Pricing' },
@@ -453,6 +472,11 @@ export function breadcrumbsFor(path: string): { name: string; path: string }[] {
     ...USE_CASES.map(
       (useCase) =>
         [`/use-cases/${useCase.slug}`, useCase.label] as [string, string],
+    ),
+    ['/inspiration', 'Inspiration'],
+    ...DESIGN_TEMPLATE_INDEX.map(
+      (template) =>
+        [`/templates/${template.id}`, template.name] as [string, string],
     ),
   ]);
   const segments = path.split('/').filter(Boolean);

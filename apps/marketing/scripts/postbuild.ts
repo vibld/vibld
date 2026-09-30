@@ -71,9 +71,11 @@ function sourcesFor(path: string): string[] {
       ? 'routes/home.tsx'
       : path.startsWith('/use-cases/')
         ? 'routes/use-case.tsx'
-        : ['/legal', '/docs', '/use-cases'].includes(path)
-          ? `routes/${path.slice(1)}.index.tsx`
-          : `routes/${path.slice(1).replace(/\//g, '.')}.tsx`;
+        : path.startsWith('/templates/')
+          ? 'routes/template.tsx'
+          : ['/legal', '/docs', '/use-cases'].includes(path)
+            ? `routes/${path.slice(1)}.index.tsx`
+            : `routes/${path.slice(1).replace(/\//g, '.')}.tsx`;
   const data: Record<string, string[]> = {
     '/': ['answers.ts'],
     '/pricing': [
@@ -85,9 +87,13 @@ function sourcesFor(path: string): string[] {
     '/examples': ['examples.ts', '../../../examples/catalogue.json'],
     '/roadmap': ['roadmap.ts'],
   };
+  // Every template page and the two galleries read the generated catalog.
+  const catalog = '../../../packages/ai/data/design-templates.ts';
   const extra = path.startsWith('/use-cases/')
     ? ['use-cases.ts']
-    : (data[path] ?? []);
+    : path.startsWith('/templates') || path === '/inspiration'
+      ? [catalog]
+      : (data[path] ?? []);
   const files = [module, ...extra].map((file) => join(APP, file));
   for (const file of files) {
     if (!existsSync(file)) {
