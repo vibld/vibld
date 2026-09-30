@@ -17,6 +17,8 @@ export interface SiteRoute {
   path: string;
   title: string;
   description: string;
+  /** Its own share image, 1200 by 630, when it has one (D106). */
+  image?: { path: string; alt: string };
 }
 
 /** The builder's origin. Named once so the sign-in and sign-up links cannot drift apart. */
@@ -384,6 +386,10 @@ export const ROUTES: SiteRoute[] = [
     description: `${approxCount(DESIGN_TEMPLATE_INDEX.length)} app and website designs to start from, each with a layout, a checked palette, a type pairing and a build prompt, grouped by what you are building.`,
   },
   ...DESIGN_TEMPLATE_INDEX.map((template) => ({
+    image: {
+      path: `/og/templates/${template.id}.jpg`,
+      alt: `${template.name}: a mock-up of its homepage, and its typefaces.`,
+    },
     path: `/templates/${template.id}`,
     title: `${template.name}, ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)} | ${SITE.name} templates`,
     description: `${template.name}: a ${template.kind === 'app' ? 'app' : 'website'} design for vibld, a ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)}, with its layout, palette, type and full build prompt.`,
@@ -520,7 +526,8 @@ export function breadcrumbSchema(path: string) {
 export function metaFor(path: string) {
   const route = routeFor(path);
   const url = new URL(path, SITE.url).toString();
-  const image = new URL(SITE.ogImage, SITE.url).toString();
+  const image = new URL(route.image?.path ?? SITE.ogImage, SITE.url).toString();
+  const imageAlt = route.image?.alt ?? SITE.ogImageAlt;
   return [
     { title: route.title },
     { name: 'description', content: route.description },
@@ -535,13 +542,13 @@ export function metaFor(path: string) {
     { property: 'og:image', content: image },
     { property: 'og:image:width', content: '1200' },
     { property: 'og:image:height', content: '630' },
-    { property: 'og:image:alt', content: SITE.ogImageAlt },
+    { property: 'og:image:alt', content: imageAlt },
     { property: 'og:locale', content: 'en_US' },
     { name: 'twitter:card', content: 'summary_large_image' },
     { name: 'twitter:title', content: route.title },
     { name: 'twitter:description', content: route.description },
     { name: 'twitter:image', content: image },
-    { name: 'twitter:image:alt', content: SITE.ogImageAlt },
+    { name: 'twitter:image:alt', content: imageAlt },
     ...(path === '/' ? [] : [breadcrumbSchema(path)]),
   ];
 }

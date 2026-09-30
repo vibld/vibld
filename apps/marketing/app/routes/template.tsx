@@ -3,6 +3,7 @@ import { Link, data, useLoaderData } from 'react-router';
 
 import type { Route } from './+types/template';
 import { PageHead } from '../components/SiteChrome';
+import { TemplatePreview } from '../components/TemplatePreview';
 import { SITE, metaFor } from '../site';
 import { USE_CASES } from '../use-cases';
 
@@ -25,6 +26,10 @@ export function meta({ location }: Route.MetaArgs) {
   return metaFor(`/templates/${idOf(location.pathname)}`);
 }
 
+export function links() {
+  return [{ rel: 'stylesheet', href: '/fonts/templates/faces.css' }];
+}
+
 /** One design, read at build time so the catalog stays out of the bundle. */
 export async function loader({ request }: Route.LoaderArgs) {
   const { findDesignTemplate, DESIGN_BASELINE } =
@@ -32,7 +37,23 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { contrastRatio } = await import('@vibld/ai/contrast');
   const template = findDesignTemplate(idOf(new URL(request.url).pathname));
   if (!template) throw data('Not found', { status: 404 });
+  const { TEMPLATE_FONTS } = await import('../template-fonts.gen');
+  const { previewSpec, fontStack } = await import('../template-preview');
+  const GENERIC: Record<string, string> = {
+    serif: 'Georgia, serif',
+    monospace: 'ui-monospace, monospace',
+    handwriting: 'cursive',
+  };
+  const genericOf = (family: string) =>
+    GENERIC[TEMPLATE_FONTS[family]?.category ?? ''] ?? 'system-ui, sans-serif';
   return {
+    preview: previewSpec(template, genericOf),
+    faceCss: Object.fromEntries(
+      template.style.typeSet.map((f) => [
+        f.family,
+        fontStack(f.family, genericOf(f.family)),
+      ]),
+    ),
     template,
     baseline: DESIGN_BASELINE,
     // Measured here, with vibld's own contrast code, rather than trusted.
@@ -73,11 +94,20 @@ const TOKEN_LABELS: [string, string][] = [
  * with the baseline every prompt assumes.
  */
 export default function Template() {
-  const { template: t, baseline, pairs } = useLoaderData<typeof loader>();
+  const {
+    template: t,
+    baseline,
+    pairs,
+    preview,
+    faceCss,
+  } = useLoaderData<typeof loader>();
   const useCase = USE_CASES.find((u) => u.slug === t.useCase);
   const colors = t.style.tokens.colors as Record<string, string>;
   const derived = new Set<string>(t.style.derived);
   const brief = `${baseline.trim()}\n\n## ${t.name}\n\n${t.buildPrompt.trim()}\n`;
+  // "Start from this template" (D106): the builder fills its composer from
+  // the fragment, which never reaches a server (apps/web/src/templates).
+  const startUrl = `${SITE.appUrl}/#${new URLSearchParams({ template: t.id, brief }).toString()}`;
 
   return (
     <>
@@ -93,6 +123,51 @@ export default function Template() {
 
       <section className="lb-section lb-section--tight" aria-label="The design">
         <div className="lb-wrap lb-tpl-detail">
+          <div className="lb-tpl-hero">
+            <TemplatePreview spec={preview} />
+          </div>
+          <p className="lb-note">
+            A mock-up of the homepage, drawn from this design’s layout, palette
+            and typefaces. A build follows the full prompt below.
+          </p>
+          <p className="lb-after__cta">
+            <a className="button" href={startUrl}>
+              Start from this template
+            </a>
+            <a className="lb-link" href="#build-prompt">
+              Read the build prompt
+            </a>
+          </p>
+
+          <h2>Typefaces</h2>
+          <p>{t.style.typeWhy}</p>
+          <ul className="lb-tpl-typeset">
+            {t.style.typeSet.map((face) => (
+              <li key={`${face.family}-${face.role}`}>
+                <span
+                  className="lb-tpl-typeset__sample"
+                  style={{ fontFamily: faceCss[face.family] }}
+                >
+                  {face.family}
+                </span>
+                <span>
+                  {face.role === 'display'
+                    ? 'Headings'
+                    : face.role === 'body'
+                      ? 'Body'
+                      : face.role === 'mono'
+                        ? 'Figures and code'
+                        : face.role === 'script'
+                          ? 'Handwriting'
+                          : face.role === 'ui'
+                            ? 'Interface'
+                            : 'Accent'}
+                  : {face.use}
+                </span>
+              </li>
+            ))}
+          </ul>
+
           {t.mergedInto ? (
             <p className="lb-note">
               vibld has built this product: see{' '}
@@ -197,7 +272,7 @@ export default function Template() {
             ))}
           </ul>
 
-          <h2>Type</h2>
+          <h2>Type scale</h2>
           <dl className="lb-tpl-type">
             <dt>Display</dt>
             <dd>

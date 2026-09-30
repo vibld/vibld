@@ -7,6 +7,10 @@ import {
   captureReferral,
   referralStorage,
 } from './referral/referral-client.ts';
+import {
+  briefStorage,
+  captureTemplateBrief,
+} from './templates/template-brief.ts';
 import './styles.css';
 
 const container = document.getElementById('root');
@@ -22,6 +26,8 @@ installRateLimitRetry(globalThis);
 // path, so the `?ref=` a shared link arrived with is only certain to be in
 // the URL on this first load.
 captureReferral(window.location, referralStorage());
+// The same, for a brief vibld.com sent with "Start from this template".
+captureTemplateBrief(window.location, window.history, briefStorage());
 
 createRoot(container).render(
   <StrictMode>

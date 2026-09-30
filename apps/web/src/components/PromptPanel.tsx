@@ -11,6 +11,10 @@ import { MediaLibrary } from './MediaLibrary.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { StyleDnaPanel } from './StyleDnaPanel.tsx';
 import { StylePicker } from './StylePicker.tsx';
+import {
+  briefStorage,
+  takeTemplateBrief,
+} from '../templates/template-brief.ts';
 
 /** A short label on the chip, and the whole request it puts in the box. */
 const EXAMPLES = [
@@ -123,7 +127,11 @@ export function PromptPanel({
   onReferenceUrlChange,
   resetLabel = 'Start over',
 }: PromptPanelProps) {
-  const [prompt, setPrompt] = useState('');
+  // A template's brief, when vibld.com sent one (D106): filled once, to be
+  // read, edited or sent like anything typed.
+  const [prompt, setPrompt] = useState(
+    () => takeTemplateBrief(briefStorage())?.brief ?? '',
+  );
   const [failNext, setFailNext] = useState(false);
   const [ownStyle, setOwnStyle] = useState<StylePresetId | null>(null);
   const [ownReferenceUrl, setOwnReferenceUrl] = useState('');

@@ -1,4 +1,7 @@
+import { useLoaderData } from 'react-router';
+
 import { LegalPage } from '../components/SiteChrome';
+import { approxCount } from '../counts';
 import { LEGAL_DOCS, SITE, metaFor } from '../site';
 
 const DOC = LEGAL_DOCS.find((d) => d.slug === 'licenses')!;
@@ -38,7 +41,14 @@ export function meta() {
   return metaFor('/legal/licenses');
 }
 
+/** The template gallery's typefaces, read from their files at build time. */
+export async function loader() {
+  const { templateFontLicences } = await import('../font-licences.server');
+  return { templateFonts: templateFontLicences() };
+}
+
 export default function Licenses() {
+  const { templateFonts } = useLoaderData<typeof loader>();
   return (
     <LegalPage title={DOC.label} updated={UPDATED}>
       <p>
@@ -132,6 +142,29 @@ export default function Licenses() {
           <li key={font.family}>
             <strong>{font.family}</strong> (<code>{font.package}</code>).{' '}
             {font.copyright}. SIL Open Font License 1.1. Licence text:{' '}
+            <a href={font.licence} className="break-all">
+              {font.licence}
+            </a>
+          </li>
+        ))}
+      </ul>
+
+      <h2>Typefaces in the template gallery</h2>
+      <p>
+        The template gallery draws each design in its own typefaces:{' '}
+        {approxCount(templateFonts.length)} families, served from this
+        website&apos;s own origin. Each was copied from the Fontsource package
+        named below, and that package&apos;s licence file is served unchanged
+        beside the font. Each entry gives the licence its file names and the
+        file&apos;s copyright line exactly as written; where a file has no
+        copyright line, the entry says so.
+      </p>
+      <ul>
+        {templateFonts.map((font) => (
+          <li key={font.family}>
+            <strong>{font.family}</strong> (<code>{font.package}</code>).{' '}
+            {font.copyright ?? 'Its licence file has no copyright line'}.{' '}
+            {font.name ?? 'Licence as its file states'}. Licence text:{' '}
             <a href={font.licence} className="break-all">
               {font.licence}
             </a>

@@ -2,7 +2,15 @@
 @import '@vibld/brand/brand.css';
 @import './styles/live.css';
 @import './styles/miniature.css';
+@import './styles/template-preview.css';
 @import './styles/roadmap.css';
+
+/* The `hidden` attribute hides an element even when a class gives it a
+   display of its own (the template gallery's cards past the first page).
+   Without this, a class like .lb-tpl beats the browser's default. */
+[hidden] {
+  display: none !important;
+}
 
 /*
  * Three typefaces, self-hosted from this site's own origin (public/fonts/,

@@ -16,7 +16,10 @@
  * asks for it.
  */
 import catalog from '../data/design-templates.ts';
+import type { TypeFace } from '../data/design-template-type.ts';
 import type { StyleTokens } from './style-presets.ts';
+
+export type { TypeFace, TypeRole } from '../data/design-template-type.ts';
 
 /** vibld.com's use cases (`apps/marketing/app/use-cases.ts`). */
 export type DesignUseCase =
@@ -29,6 +32,24 @@ export const DESIGN_USE_CASES: readonly DesignUseCase[] = [
   'events',
   'tools',
 ];
+
+export type DesignFormat = 'design' | 'page' | 'screen' | 'section';
+
+/**
+ * Where each batch of templates came from (D106), so a gallery can sort by
+ * what is new and say where a design came from.
+ */
+export const DESIGN_BATCHES = {
+  'design-catalog': {
+    name: 'Design catalog',
+    repository: 'Drummond-IT/designs-v1',
+    path: 'design-prompt-catalog',
+    addedOn: '2026-09-30',
+  },
+} as const satisfies Record<
+  string,
+  { name: string; repository: string; path: string; addedOn: string }
+>;
 
 export interface DesignFont {
   /** The face as the design names it. */
@@ -56,6 +77,13 @@ export interface InspirationStyle {
   palette: readonly { role: string; hex: string }[];
   typography: { display: string; body: string; notes?: string };
   fonts: { display: DesignFont; body: DesignFont };
+  /**
+   * The design's own typefaces (D103): one family or several, each with
+   * the role it plays. No two designs share a set.
+   */
+  typeSet: readonly TypeFace[];
+  /** Why this set suits this design. */
+  typeWhy: string;
   /** Every pair the catalog measured, as it recorded them. */
   contrastChecks: readonly DesignContrastCheck[];
   /** The palette and type on vibld's tokens, ready for `tokenCss`. */
@@ -74,6 +102,15 @@ export interface DesignTemplate {
   /** The catalog's own category, kept beside the use case. */
   category: string;
   complexity: string;
+  /**
+   * What it is (D106): a whole product's design, or a single page, screen
+   * or section. Every design in this catalog is `design`.
+   */
+  format: DesignFormat;
+  /** The batch it arrived in (`DESIGN_BATCHES`). */
+  batch: string;
+  /** ISO date it was added to vibld. */
+  addedOn: string;
   /** Set when this design is one of vibld's own examples. */
   mergedInto?: { collection: 'examples'; slug: string; reason: string };
   purpose: string;

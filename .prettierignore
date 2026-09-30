@@ -18,3 +18,6 @@ packages/ai/data/design-template-index.ts
 apps/marketing/app/components/backdrop
 # Chris's clean-room layers, kept as designs-v1 has them (app/layers.ts).
 apps/marketing/public/layers
+# Written by apps/marketing/scripts/template-fonts.ts (D104).
+apps/marketing/app/template-fonts.gen.ts
+apps/marketing/public/fonts/templates

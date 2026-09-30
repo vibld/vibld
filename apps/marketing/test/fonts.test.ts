@@ -21,7 +21,9 @@ const NOTICES = readFileSync(
   'utf8',
 );
 
-const FILES = readdirSync(FONTS);
+// `templates/` holds each template's typefaces (D104), checked by
+// test/template-fonts.test.ts; this file is about the site's own three.
+const FILES = readdirSync(FONTS).filter((name) => name !== 'templates');
 const WOFF2 = FILES.filter((name) => name.endsWith('.woff2'));
 
 /** Each family's font file, its licence file and its CSS family name. */

@@ -274,7 +274,11 @@ look alike, no filtering, and an exact count where his rule rounds.
   the same combination; a family may recur, and a set may be one family, a
   pair, or three or more, chosen for the design's mood. The catalog used
   Inter for 52 of its 207 headings and one family for everything in 108.
-  The build prompts' font lines change to match.
+  The build prompts' font lines change to match. The sets are in
+  `packages/ai/data/design-template-type.ts`: 207 sets over 183 families,
+  Inter now in one design, and every face named in its prompt. An audit of
+  every prompt for font names found alternatives the catalog offered ("Inter
+  or DM Sans"), which are renamed with the rest.
 - **D104. Template fonts are self-hosted subsets.** A script copies a small
   Latin subset of each family into vibld.com, as the site's own fonts are,
   so a visitor's browser asks Google for nothing and the legal pages are

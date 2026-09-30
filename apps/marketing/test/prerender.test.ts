@@ -98,12 +98,14 @@ describe('every declared route is prerendered', () => {
     // fonts test below checks the second holds nothing else. `layers` holds
     // the layers' reference pages (app/layers.ts), copied from public/
     // rather than prerendered; the links test checks each one is there.
+    // `og` holds the templates' share images (template-preview.test.ts).
     const emitted = readdirSync(CLIENT).filter(
       (entry) =>
         statSync(join(CLIENT, entry)).isDirectory() &&
         entry !== 'assets' &&
         entry !== 'fonts' &&
         entry !== 'layers' &&
+        entry !== 'og' &&
         !entry.startsWith('.'),
     );
     for (const dir of emitted) {

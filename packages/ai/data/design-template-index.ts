@@ -7,91 +7,130 @@ const data: unknown = [
     "name": "Tallyroot",
     "summary": "Personal net-worth tracker",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "warmlist",
     "name": "Warmlist",
     "summary": "Kanban sales lead tracker",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "loanlight",
     "name": "Loanlight",
     "summary": "Guided home-loan payment estimator",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "eventgrain",
     "name": "Eventgrain",
     "summary": "Event-based usage insights dashboard",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "scanwell",
     "name": "Scanwell",
     "summary": "Branded QR code studio",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "quillmark",
     "name": "Quillmark",
     "summary": "Private in-browser document e-signing",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "cutline",
     "name": "Cutline",
     "summary": "Browser video trimmer",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "specwright",
     "name": "Specwright",
     "summary": "API documentation site",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "lanternbase",
     "name": "Lanternbase",
     "summary": "Dark docs and knowledge hub",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "snagline",
     "name": "Snagline",
     "summary": "Bug report and triage tracker",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "chalkmark",
     "name": "Chalkmark",
     "summary": "Rubric grading workspace",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "recallr",
     "name": "Recallr",
     "summary": "Spaced-repetition study cards",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "liftoff-lab",
     "name": "Liftoff Lab",
     "summary": "Workshop sales landing page",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "paysprout",
@@ -99,6 +138,9 @@ const data: unknown = [
     "summary": "Pay-period budget tracker",
     "kind": "app",
     "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30",
     "mergedInto": "budget-tracker-gpt-6-sol"
   },
   {
@@ -106,658 +148,940 @@ const data: unknown = [
     "name": "Clearpath",
     "summary": "Debt snowball and avalanche plan",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "receiptly",
     "name": "Receiptly",
     "summary": "Phone-first receipt and reimbursement app",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "cashtide",
     "name": "Cashtide",
     "summary": "Small-business money overview",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "kitlog",
     "name": "Kitlog",
     "summary": "Company equipment tracker",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "varianceboard",
     "name": "Varianceboard",
     "summary": "Budget vs actual dashboard",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "boardroom-lens",
     "name": "Boardroom Lens",
     "summary": "Board finance reporting dashboard",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "payoutly",
     "name": "Payoutly",
     "summary": "Rep payout and quota modeler",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "conversia",
     "name": "Conversia",
     "summary": "Revenue funnel analytics dashboard",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "churnwatch",
     "name": "Churnwatch",
     "summary": "Account churn-risk monitor",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "closerail",
     "name": "Closerail",
     "summary": "Drag-and-drop deal board",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "seatplot",
     "name": "Seatplot",
     "summary": "Hybrid workplace seat reservations",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "spendgate",
     "name": "Spendgate",
     "summary": "Expense claim approval tool",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hubshift",
     "name": "Hubshift",
     "summary": "Hybrid workplace platform",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "shortlister",
     "name": "Shortlister",
     "summary": "Applicant tracking system",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "billsmith",
     "name": "Billsmith",
     "summary": "Drag-to-design billing documents",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "plainask",
     "name": "Plainask",
     "summary": "Governed self-serve analytics",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "brieflane",
     "name": "Brieflane",
     "summary": "Marketing campaign operations hub",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "slotwise",
     "name": "Slotwise",
     "summary": "Self-hosted meeting scheduler",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "branchwise",
     "name": "Branchwise",
     "summary": "Org chart and people directory",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "renewcast",
     "name": "Renewcast",
     "summary": "Churn-risk and renewals dashboard",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "bidwell",
     "name": "Bidwell",
     "summary": "Proposal and quote builder",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "shortlist",
     "name": "Shortlist",
     "summary": "Small-team applicant tracker",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "sparring-room",
     "name": "Sparring Room",
     "summary": "AI sales role-play trainer",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "signoff",
     "name": "Signoff",
     "summary": "Internal request approval system",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "breakeven",
     "name": "Breakeven",
     "summary": "Sales ROI business-case builder",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "creditline",
     "name": "Creditline",
     "summary": "Marketing attribution explainer dashboard",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "snippetly",
     "name": "Snippetly",
     "summary": "Meta tag and SERP preview tool",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "relay-desk",
     "name": "Relay Desk",
     "summary": "Internal request routing workspace",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "shelfwise",
     "name": "Shelfwise",
     "summary": "Multi-location inventory manager",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tidewatch",
     "name": "Tidewatch",
     "summary": "Freight network disruption simulator",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "rollcall",
     "name": "Rollcall",
     "summary": "Friendly staff directory",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "stillpage",
     "name": "Stillpage",
     "summary": "Private daily writing journal",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "stagecraft",
     "name": "Stagecraft",
     "summary": "Code-driven interactive slide deck",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "trailmap",
     "name": "Trailmap",
     "summary": "Quarter-based roadmap planner",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "ballotbox",
     "name": "Ballotbox",
     "summary": "Feature request voting board",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "jotworks",
     "name": "Jotworks",
     "summary": "Real-time collaborative notes",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "cellwright",
     "name": "Cellwright",
     "summary": "Browser spreadsheet editor",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tomatick",
     "name": "Tomatick",
     "summary": "Focus and break interval timer",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "plainwrite",
     "name": "Plainwrite",
     "summary": "Lightweight collaborative docs editor",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "shipyard",
     "name": "Shipyard",
     "summary": "Agile sprint delivery workspace",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "swimlane",
     "name": "Swimlane",
     "summary": "Drag-and-drop task board",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "lookback",
     "name": "Lookback",
     "summary": "Async sprint retrospective board",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hueprint",
     "name": "Hueprint",
     "summary": "Brand identity extraction tool",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "cutbench",
     "name": "Cutbench",
     "summary": "In-browser video trimming SaaS",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "driftbox",
     "name": "Driftbox",
     "summary": "Team cloud storage workspace",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "cadenza",
     "name": "Cadenza",
     "summary": "Social content planning calendar",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "steadyline",
     "name": "Steadyline",
     "summary": "Minimalist habit tracker app",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "glyphshelf",
     "name": "Glyphshelf",
     "summary": "Font discovery directory with CMS",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "pinwall",
     "name": "Pinwall",
     "summary": "Infinite-canvas moodboard app",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "billwise",
     "name": "Billwise",
     "summary": "Freelancer invoicing app",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "murmur",
     "name": "Murmur",
     "summary": "Voice-note content scheduler",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "northstar",
     "name": "Northstar",
     "summary": "Team objectives and key results",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "glimpse",
     "name": "Glimpse",
     "summary": "Social card mockup checker",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "keyhollow",
     "name": "Keyhollow",
     "summary": "Holiday home booking marketplace",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "roundup",
     "name": "RoundUp",
     "summary": "Startup funding directory and newsroom",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "signet",
     "name": "Signet",
     "summary": "Email sign-off and QR maker",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "wayfarer",
     "name": "Wayfarer",
     "summary": "AI trip planner",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "snip",
     "name": "Snip",
     "summary": "Link shortener with click analytics",
     "kind": "app",
-    "useCase": "tools"
+    "useCase": "tools",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "marginalia",
     "name": "Marginalia",
     "summary": "Single-author essay newsletter site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "afterglow",
     "name": "Afterglow",
     "summary": "Moody cinema criticism journal",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "long-take",
     "name": "Long Take",
     "summary": "Monochrome film criticism magazine",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "saltcellar",
     "name": "Saltcellar",
     "summary": "Food culture magazine blog",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "plinth",
     "name": "Plinth",
     "summary": "Architecture and design journal",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "dogear-weekly",
     "name": "Dogear Weekly",
     "summary": "Creator newsletter landing page",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "slabwork",
     "name": "Slabwork",
     "summary": "Brutalist-leaning personal magazine blog",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "stillwater",
     "name": "Stillwater",
     "summary": "Calm wellness and living journal",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hemline",
     "name": "Hemline",
     "summary": "Color-blocked fashion blog",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "driftwood-press",
     "name": "Driftwood Press",
     "summary": "Photo-led dark travel journal",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "switchback-atlas",
     "name": "Switchback Atlas",
     "summary": "Editorial travel guide publication",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "crumb-and-co",
     "name": "Crumb & Co.",
     "summary": "Bakery pickup ordering site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "givebid",
     "name": "GiveBid",
     "summary": "Charity auction platform",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "daybreak-roasters",
     "name": "Daybreak Roasters",
     "summary": "Coffee shop ordering site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "aurelle",
     "name": "Aurelle",
     "summary": "Minimalist jewelry storefront",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "fernwool",
     "name": "Fernwool",
     "summary": "Handmade knitwear storefront",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hearthwick",
     "name": "Hearthwick",
     "summary": "Editorial homeware store",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "quietroom",
     "name": "Quietroom",
     "summary": "Monochrome fashion pre-launch site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "kilnlight",
     "name": "Kilnlight",
     "summary": "Cinematic product showcase",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hardline-depot",
     "name": "Hardline Depot",
     "summary": "Brutalist catalog storefront",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "rushcut",
     "name": "Rushcut",
     "summary": "Video creator course shop",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "plain-matter",
     "name": "Plain Matter",
     "summary": "Monospace streetwear shop",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "inkstand-courier",
     "name": "Inkstand Courier",
     "summary": "Traditional newspaper website",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "brightwire",
     "name": "Brightwire",
     "summary": "Members-only newsroom",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "blockwise",
     "name": "Blockwise",
     "summary": "Hyperlocal community news site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tessellate-lab",
     "name": "Tessellate Lab",
     "summary": "Academic research group website",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "northpoint-dispatch",
     "name": "Northpoint Dispatch",
     "summary": "B2B content marketing hub",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "clearing-house-weekly",
     "name": "Clearing House Weekly",
     "summary": "Markets and trade newsletter site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "loam-quarterly",
     "name": "Loam Quarterly",
     "summary": "Literary quarterly site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "ashgrove-herald",
     "name": "Ashgrove Herald",
     "summary": "Classic multi-topic newspaper",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "gatherbox",
     "name": "Gatherbox",
     "summary": "Poster-style event discovery platform",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "rsvpkit",
     "name": "RSVPkit",
     "summary": "Event registration platform",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "rootline-commons",
     "name": "Rootline Commons",
     "summary": "Community garden website",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "fernhollow",
     "name": "Fernhollow",
     "summary": "Editorial wedding website",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "pressed-petal",
     "name": "Pressed Petal",
     "summary": "Scrapbook wedding invitation site",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "mesa-lantern",
     "name": "Mesa Lantern",
     "summary": "Destination wedding website",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "makers-forum-26",
@@ -765,6 +1089,9 @@ const data: unknown = [
     "summary": "Indie tech conference site",
     "kind": "site",
     "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30",
     "mergedInto": "conference-gpt-6-sol"
   },
   {
@@ -772,259 +1099,370 @@ const data: unknown = [
     "name": "DevHarbor Live",
     "summary": "Conference video hub",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "sunfade",
     "name": "Sunfade",
     "summary": "Retro 1970s wedding site",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "vernissage",
     "name": "Vernissage",
     "summary": "Art-exhibition wedding site",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hollerday",
     "name": "Hollerday",
     "summary": "Poster-style wedding site",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "glossbound",
     "name": "Glossbound",
     "summary": "Magazine-style wedding site",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "quillmoor",
     "name": "Quillmoor",
     "summary": "Single-scroll literary wedding page",
     "kind": "site",
-    "useCase": "events"
+    "useCase": "events",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "groundplan",
     "name": "Groundplan",
     "summary": "Construction cost estimator landing page",
     "kind": "site",
-    "useCase": "saas-landing"
+    "useCase": "saas-landing",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "syntaxfire",
     "name": "Syntaxfire",
     "summary": "Live cohort class sign-up page",
     "kind": "site",
-    "useCase": "saas-landing"
+    "useCase": "saas-landing",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "queueline",
     "name": "Queueline",
     "summary": "Pre-launch waitlist page",
     "kind": "site",
-    "useCase": "saas-landing"
+    "useCase": "saas-landing",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "nightvault",
     "name": "Nightvault",
     "summary": "Dark fintech marketing site",
     "kind": "site",
-    "useCase": "saas-landing"
+    "useCase": "saas-landing",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tandem",
     "name": "Tandem",
     "summary": "Coming-soon launch page",
     "kind": "site",
-    "useCase": "saas-landing"
+    "useCase": "saas-landing",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "plinth-and-lathe",
     "name": "Plinth & Lathe",
     "summary": "Interior studio lead-gen site",
     "kind": "site",
-    "useCase": "saas-landing"
+    "useCase": "saas-landing",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tallyway",
     "name": "Tallyway",
     "summary": "Payments startup marketing site",
     "kind": "site",
-    "useCase": "saas-landing"
+    "useCase": "saas-landing",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "low-tide-signal",
     "name": "Low Tide Signal",
     "summary": "Electronic artist one-pager",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "brasa",
     "name": "Brasa",
     "summary": "Latin urban artist site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "delphine-rourke",
     "name": "Delphine Rourke",
     "summary": "Solo artist portfolio site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tidewell-sessions",
     "name": "Tidewell Sessions",
     "summary": "DJ event series site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "marlow-kane",
     "name": "Marlow Kane",
     "summary": "Photo-led artist portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "dust-bowl-radio",
     "name": "Dust Bowl Radio",
     "summary": "Desert-rock band website",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hollis-fern",
     "name": "Hollis Fern",
     "summary": "Folk songwriter website",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "grain-theory",
     "name": "Grain Theory",
     "summary": "Mosaic electronic artist site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "ottilie-barr",
     "name": "Ottilie Barr",
     "summary": "Single-release musician site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "isolde-marsh",
     "name": "Isolde Marsh",
     "summary": "Cinematic neo-soul artist site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "static-chapel",
     "name": "Static Chapel",
     "summary": "Post-punk band website",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "oriel-sands",
     "name": "Oriel Sands",
     "summary": "Pre-release campaign landing",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "ines-calloway",
     "name": "Ines Calloway",
     "summary": "Multi-theme artist portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "common-groove",
     "name": "Common Groove",
     "summary": "Shared listening room app",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "ashen-veil",
     "name": "Ashen Veil",
     "summary": "Dark rock band portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "lintel-works",
     "name": "Lintel Works",
     "summary": "Architecture practice website",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "cantilever-house",
     "name": "Cantilever House",
     "summary": "Architecture and interiors portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "noor-halvorsen",
     "name": "Noor Halvorsen",
     "summary": "Case-study design portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "ilse-marrow",
     "name": "Ilse Marrow",
     "summary": "Solo consultant studio site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "corin-ashdown",
     "name": "Corin Ashdown",
     "summary": "Content strategist portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "saga-lindqvist",
     "name": "Saga Lindqvist",
     "summary": "Fashion photographer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "celeste-varga",
     "name": "Celeste Varga",
     "summary": "Stylist lookbook portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "dani-okafor",
     "name": "Dani Okafor",
     "summary": "Portrait photographer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tessa-quill",
     "name": "Tessa Quill",
     "summary": "Typographic poster resume",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "kasimir-lund",
@@ -1032,6 +1470,9 @@ const data: unknown = [
     "summary": "Masonry illustrator portfolio",
     "kind": "site",
     "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30",
     "mergedInto": "freelance-portfolio-opus-5-5"
   },
   {
@@ -1039,420 +1480,600 @@ const data: unknown = [
     "name": "Odette Crane",
     "summary": "Brand designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "nadia-kolbe",
     "name": "Nadia Kolbe",
     "summary": "Single-color designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "harbor-and-pine",
     "name": "Harbor & Pine",
     "summary": "Monospace designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hollis-ward",
     "name": "Hollis Ward",
     "summary": "Editorial art director portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "krv-works",
     "name": "KRV Works",
     "summary": "Brutalist split-screen design portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "mara-ellis",
     "name": "Mara Ellis",
     "summary": "Dark green brand designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "solenne-marsh",
     "name": "Solenne Marsh",
     "summary": "Editorial photographer website",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tidewell-photo",
     "name": "Tidewell Photo",
     "summary": "Split-screen photography portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "ardent-words",
     "name": "Ardent Words",
     "summary": "Dark sales copywriter showcase",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "elio-park",
     "name": "Elio Park",
     "summary": "Corner-nav product designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "linden-ash",
     "name": "Linden & Ash",
     "summary": "Editorial artist-designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "paloma-arce",
     "name": "Paloma Arce",
     "summary": "Masonry architecture photography portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "kestrel-bureau",
     "name": "Kestrel Bureau",
     "summary": "Cinematic brand designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "idris-vale",
     "name": "Idris Vale",
     "summary": "Swiss split-screen fine-art photo site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "aster-quinn",
     "name": "Aster Quinn",
     "summary": "Slate-blue design director portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "transom",
     "name": "Transom",
     "summary": "Horizontal-scroll monospace photo portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "orin-blackwood",
     "name": "Orin Blackwood",
     "summary": "Dark 3D artist portfolio with CMS",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "cass-moreno",
     "name": "Cass Moreno",
     "summary": "Cinematic documentary photographer one-pager",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "seren-maddox",
     "name": "Seren Maddox",
     "summary": "Parallax painter portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "bram-oduya",
     "name": "Bram Oduya",
     "summary": "Carousel-led freelance designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "odile-varenne",
     "name": "Odile Varenne",
     "summary": "Linen-toned painter portfolio with sidebar",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "theo-lindqvist",
     "name": "Theo Lindqvist",
     "summary": "Dark design lead portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "nadia-holt",
     "name": "Nadia Holt",
     "summary": "Product designer and speaker site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "linnea-farrow",
     "name": "Linnea Farrow",
     "summary": "Typographic nature photographer site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "neon-harbor",
     "name": "Neon Harbor",
     "summary": "Dark parallax illustration studio portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "marisol-duarte",
     "name": "Marisol Duarte",
     "summary": "Editorial food photographer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "jonah-reyes",
     "name": "Jonah Reyes",
     "summary": "Broadsheet three-column designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "wren-adeyemi",
     "name": "Wren Adeyemi",
     "summary": "Masthead-style product designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "adaeze-bello",
     "name": "Adaeze Bello",
     "summary": "Horizontal-scroll wedding photography site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "juno-ferreira",
     "name": "Juno Ferreira",
     "summary": "Warm-gradient creative director portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "kai-okafor",
     "name": "Kai Okafor",
     "summary": "Terminal-style developer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "iris-hale",
     "name": "Iris Hale",
     "summary": "Literary writer showcase with essays",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "fernwood",
     "name": "Fernwood",
     "summary": "Case-study-first identity studio portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hollowlight-stories",
     "name": "Hollowlight Stories",
     "summary": "Cinematic wedding photography portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "brightcut-motion",
     "name": "Brightcut Motion",
     "summary": "AI-assisted film studio landing page",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tabline",
     "name": "Tabline",
     "summary": "Accordion designer portfolio",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "marlowe-page",
     "name": "Marlowe Page",
     "summary": "Editorial one-page resume",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "tidepool-cv",
     "name": "Tidepool CV",
     "summary": "Timeline resume site",
     "kind": "site",
-    "useCase": "portfolio"
+    "useCase": "portfolio",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "second-leash",
     "name": "Second Leash",
     "summary": "Dog rescue nonprofit website",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "harborline-law",
     "name": "Harborline Law",
     "summary": "Personal injury law firm website",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "wrenchwell-plumbing",
     "name": "Wrenchwell Plumbing",
     "summary": "Plumbing company site with leads dashboard",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "casa-lumen",
     "name": "Casa Lumen",
     "summary": "Italian restaurant website",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "snooze-sniff",
     "name": "Snooze & Sniff",
     "summary": "Pet boarding hotel booking site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "fernbrook-lodge",
     "name": "Fernbrook Lodge",
     "summary": "Small-group pet boarding and daycare site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "kindling-trust",
     "name": "Kindling Trust",
     "summary": "Editorial charitable foundation site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "sudsbury",
     "name": "Sudsbury",
     "summary": "Dog grooming and boarding site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "turnwell",
     "name": "Turnwell",
     "summary": "Coaching practice site with booking and CMS",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "polyglot-commons",
     "name": "Polyglot Commons",
     "summary": "Language school enrollment site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "nocturne-works",
     "name": "Nocturne Works",
     "summary": "Monochrome branding studio portfolio",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "barkley-grand",
     "name": "Barkley Grand",
     "summary": "Luxury pet resort landing page",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "romp-club",
     "name": "Romp Club",
     "summary": "Dog daycare landing page",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "hearthside-pet-care",
     "name": "Hearthside Pet Care",
     "summary": "In-home pet sitter booking site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "aperture-hall",
     "name": "Aperture Hall",
     "summary": "Dark photography school site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "sunnyside-kennels",
     "name": "Sunnyside Kennels",
     "summary": "Kennel website with owner dashboard",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "pawpoint-network",
     "name": "PawPoint Network",
     "summary": "Multi-location pet care franchise hub",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "groundwork-collective",
     "name": "Groundwork Collective",
     "summary": "Multi-location wellness studio site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "blade-fade-co",
     "name": "Blade & Fade Co.",
     "summary": "Barbershop booking one-pager",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "glowbench",
     "name": "Glowbench",
     "summary": "Salon and spa booking storefront",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "rosewell",
     "name": "Rosewell",
     "summary": "Editorial yoga and wellness platform",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   },
   {
     "id": "quiet-pines-retreats",
     "name": "Quiet Pines Retreats",
     "summary": "Off-grid glamping booking site",
     "kind": "site",
-    "useCase": "small-business"
+    "useCase": "small-business",
+    "format": "design",
+    "batch": "design-catalog",
+    "addedOn": "2026-09-30"
   }
 ];
 

@@ -14,7 +14,9 @@ import {
   findDesignTemplate,
   isDesignTemplateId,
   listedDesignTemplates,
+  DESIGN_BATCHES,
 } from '../src/design-templates.ts';
+import { TYPE_SETS } from '../data/design-template-type.ts';
 import { DESIGN_TEMPLATE_INDEX } from '../src/design-template-index.ts';
 import { DIAGRAM_TYPES } from '../src/diagrams.ts';
 import { MOTION_RECIPES } from '../src/motion.ts';
@@ -116,9 +118,21 @@ describe('the design template catalog', () => {
         summary: t.summary,
         kind: t.kind,
         useCase: t.useCase,
+        format: t.format,
+        batch: t.batch,
+        addedOn: t.addedOn,
         ...(t.mergedInto ? { mergedInto: t.mergedInto.slug } : {}),
       })),
     );
+  });
+
+  it('says which batch each design arrived in, and when (D106)', () => {
+    for (const t of DESIGN_TEMPLATES) {
+      const batch = DESIGN_BATCHES[t.batch as keyof typeof DESIGN_BATCHES];
+      assert.ok(batch, `${t.id}: unknown batch ${t.batch}`);
+      assert.equal(t.addedOn, batch.addedOn, t.id);
+      assert.equal(t.format, 'design', t.id);
+    }
   });
 
   it('contains no em-dash, the one change made to its words', () => {
@@ -190,26 +204,36 @@ describe('the inspiration styles', () => {
     }
   });
 
-  it('load both typefaces from Google Fonts, naming a substitute when needed', () => {
+  it("load their typefaces from Google Fonts, the set's display and body first", () => {
     for (const template of DESIGN_TEMPLATES) {
       const { display, body } = template.style.fonts;
       const { headingFont, bodyFont, googleFontsUrl } =
         template.style.tokens.typography;
-      for (const [font, loaded] of [
-        [display, headingFont],
-        [body, bodyFont],
-      ] as const) {
-        assert.equal(
-          loaded,
-          font.onGoogleFonts ? font.family : font.substitute,
-          `${template.id}: ${font.asWritten}`,
+      const faces = template.style.typeSet;
+      const families = new Set(faces.map((f) => f.family));
+      assert.equal(
+        headingFont,
+        faces.find((f) => f.role === 'display')?.family,
+        template.id,
+      );
+      assert.equal(
+        bodyFont,
+        faces.find((f) => f.role === 'body')?.family,
+        template.id,
+      );
+      // What the catalog named, as vibld loads it, is one of the set.
+      for (const font of [display, body]) {
+        const loaded = font.onGoogleFonts ? font.family : font.substitute;
+        assert.ok(
+          loaded && families.has(loaded),
+          `${template.id}: ${font.asWritten} loads ${loaded}`,
         );
       }
       assert.match(
         googleFontsUrl,
         /^https:\/\/fonts\.googleapis\.com\/css2\?family=/,
       );
-      for (const family of [headingFont, bodyFont]) {
+      for (const family of families) {
         assert.ok(
           googleFontsUrl.includes(`family=${family.replace(/ /g, '+')}`),
           `${template.id}: ${family} in ${googleFontsUrl}`,
@@ -277,6 +301,86 @@ describe('merging with what vibld already has', () => {
           undefined,
           `${template.id}: "${name}" is already vibld's`,
         );
+      }
+    }
+  });
+});
+
+describe("each design's own typefaces (D103)", () => {
+  const key = (t: (typeof DESIGN_TEMPLATES)[number]) =>
+    [...new Set(t.style.typeSet.map((f) => f.family))].sort().join(' + ');
+
+  it('gives no two designs the same set', () => {
+    const seen = new Map<string, string>();
+    for (const t of DESIGN_TEMPLATES) {
+      const other = seen.get(key(t));
+      assert.equal(other, undefined, `${t.id} and ${other}: ${key(t)}`);
+      seen.set(key(t), t.id);
+    }
+  });
+
+  it('uses no family in more than four designs', () => {
+    const uses = new Map<string, number>();
+    for (const t of DESIGN_TEMPLATES) {
+      for (const family of new Set(t.style.typeSet.map((f) => f.family))) {
+        uses.set(family, (uses.get(family) ?? 0) + 1);
+      }
+    }
+    const over = [...uses].filter(([, n]) => n > 4);
+    assert.deepEqual(over, []);
+  });
+
+  it('gives every set a display face, a body face and a reason', () => {
+    for (const t of DESIGN_TEMPLATES) {
+      const roles = new Set(t.style.typeSet.map((f) => f.role));
+      assert.ok(roles.has('display') && roles.has('body'), t.id);
+      assert.ok(t.style.typeWhy.length >= 20, t.id);
+    }
+  });
+
+  it('names every face of the set in the build prompt', () => {
+    for (const t of DESIGN_TEMPLATES) {
+      for (const face of t.style.typeSet) {
+        assert.ok(
+          t.buildPrompt.includes(face.family),
+          `${t.id}: ${face.family}`,
+        );
+      }
+    }
+  });
+
+  it('leaves no family it replaced in the words it renamed', () => {
+    const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const t of DESIGN_TEMPLATES) {
+      const set = TYPE_SETS[t.id]!;
+      const text = [
+        t.buildPrompt,
+        t.style.typography.display,
+        t.style.typography.body,
+        t.style.typography.notes ?? '',
+      ].join('\n');
+      // A longer family the design still names, such as "Inter Tight" when
+      // "Inter" was replaced, is not a leftover.
+      const longer = [
+        ...set.faces.map((f) => f.family),
+        ...Object.keys(set.replaces),
+        ...Object.values(set.replaces),
+      ];
+      for (const from of Object.keys(set.replaces)) {
+        const pattern = new RegExp(
+          `(?<![A-Za-z-])${escape(from)}(?![A-Za-z]|-[A-Za-z])`,
+          'g',
+        );
+        for (const match of text.matchAll(pattern)) {
+          const rest = text.slice(match.index);
+          const partOfLonger = longer.some(
+            (name) => name.length > from.length && rest.startsWith(name),
+          );
+          assert.ok(
+            partOfLonger,
+            `${t.id}: "${from}" is still in its words: ...${text.slice(Math.max(0, match.index - 40), match.index + 40)}...`,
+          );
+        }
       }
     }
   });

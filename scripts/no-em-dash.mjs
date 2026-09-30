@@ -30,8 +30,12 @@ for (const file of files) {
   try {
     text = readFileSync(file, 'utf8');
   } catch {
-    continue; // unreadable or binary; nothing to check
+    continue; // unreadable; nothing to check
   }
+  // Reading as UTF-8 never throws, so a binary file (a font, an image) is
+  // told apart by its NUL bytes, which no text file here has. Its bytes can
+  // happen to spell U+2014 and are nobody's copy.
+  if (text.includes('\0')) continue;
   if (!text.includes(EM_DASH)) continue;
   text.split('\n').forEach((line, index) => {
     if (line.includes(EM_DASH))

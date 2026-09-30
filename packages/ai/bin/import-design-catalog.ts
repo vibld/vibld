@@ -27,6 +27,12 @@
  *   tokens, the type pairing as Google Fonts families, and a radius scale,
  *   in the same shape as a style preset's `tokens`.
  *
+ * - its own set of typefaces (D103, `data/design-template-type.ts`): each
+ *   family the design named is swapped, word for word, for one of the same
+ *   construction, so no two designs share a set; a face the prompt does not
+ *   yet name is added to its design system section;
+ * - the batch it arrived in and when (D106).
+ *
  * It refuses to write anything if a check fails: a missing field or build
  * prompt heading, a repeated id or name, a recorded contrast pair below its
  * WCAG target, a mapped text pair below 4.5:1, or a typeface that is neither
@@ -38,6 +44,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { contrastRatio } from '../src/contrast.ts';
 import { hexToHsl, shadeAgainst } from '../src/color-space.ts';
+import { TYPE_SETS } from '../data/design-template-type.ts';
+import type { TypeSet } from '../data/design-template-type.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, '../data/design-templates.ts');
@@ -698,6 +706,85 @@ function checkSource(entries: SourceEntry[], count: number) {
   return checked;
 }
 
+/** The batch this importer brings in (D106): one per source, dated. */
+const BATCH = { id: 'design-catalog', addedOn: '2026-09-30' } as const;
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Every Google Fonts family name, read once by `main`. */
+let familyNames: readonly string[] = [];
+
+/**
+ * Swaps each family a type set replaces, as a whole name: never inside a
+ * longer word or a hyphenated one, and never where it begins a longer
+ * family ("Inter" is left alone in "Inter Tight" unless the set replaces
+ * "Inter Tight" itself). Longest name first.
+ */
+function renamer(set: TypeSet): (text: string) => string {
+  const pairs = Object.entries(set.replaces).sort(
+    ([a], [b]) => b.length - a.length,
+  );
+  const patterns = pairs.map(([from, to]) => {
+    const longer = familyNames
+      .filter((name) => name.startsWith(`${from} `))
+      .map((name) => `(?!${escapeRegExp(name.slice(from.length))}(?![A-Za-z]))`)
+      .join('');
+    return [
+      new RegExp(
+        `(?<![A-Za-z-])${escapeRegExp(from)}(?![A-Za-z]|-[A-Za-z])${longer}`,
+        'g',
+      ),
+      to,
+    ] as const;
+  });
+  // Two names the catalog gave as alternatives ("JetBrains Mono (or Geist
+  // Mono)") can both become one family; the second is then dropped rather
+  // than left reading "Martian Mono (or Martian Mono)".
+  const collapses = [...new Set(pairs.map(([, to]) => to))].map(
+    (to) =>
+      [
+        new RegExp(
+          `(["']?)${escapeRegExp(to)}\\1(?:\\s*\\((?:or |and )?["']?${escapeRegExp(to)}["']?\\)|\\s*(?:/|,| or | and )\\s*["']?${escapeRegExp(to)}["']?)(?![A-Za-z])`,
+          'g',
+        ),
+        `$1${to}$1`,
+      ] as const,
+  );
+  const phrases = Object.entries(set.phrases ?? {});
+  return (text) =>
+    [...patterns, ...collapses].reduce(
+      (out, [pattern, to]) => out.replace(pattern, to),
+      phrases.reduce((out, [from, to]) => out.split(from).join(to), text),
+    );
+}
+
+/**
+ * The build prompt with its type set in it: every family named once
+ * renamed, and a face the prompt does not mention added as a line at the end
+ * of its design system section, with the use the set gives it.
+ */
+function withTypeSet(id: string, prompt: string, set: TypeSet): string {
+  const renamed = renamer(set)(prompt);
+  const missing = set.faces.filter(
+    (face, i) =>
+      set.faces.findIndex((f) => f.family === face.family) === i &&
+      !new RegExp(`(?<![A-Za-z])${escapeRegExp(face.family)}(?![A-Za-z])`).test(
+        renamed,
+      ),
+  );
+  if (missing.length === 0) return renamed;
+  const marker = '\n### Components & interactions';
+  const at = renamed.indexOf(marker);
+  if (at < 0) {
+    problems.push(`${id}: no design system section to add a typeface to`);
+    return renamed;
+  }
+  const lines = missing
+    .map((face) => `- Typeface: ${face.family} (Google Fonts) for ${face.use}.`)
+    .join('\n');
+  return `${renamed.slice(0, at).trimEnd()}\n${lines}\n${renamed.slice(at)}`;
+}
+
 /** A generated module whose one export is `value`, typed by its reader. */
 function dataModule(value: unknown): string {
   return (
@@ -730,21 +817,70 @@ function main([dir, commit, fontsPath]: string[]) {
     }
   }
 
-  const fonts = makeFontResolver(googleFamilies(fontsPath));
+  const families = googleFamilies(fontsPath);
+  familyNames = families.map((f) => f.family);
+  const fonts = makeFontResolver(families);
+  for (const id of Object.keys(TYPE_SETS)) {
+    if (!source.entries.some((e) => e.id === id)) {
+      problems.push(`TYPE_SETS names ${id}, which the catalog does not have`);
+    }
+  }
   const templates = source.entries.map((e) => {
-    const display = fonts.resolveFamily(
-      e.id,
-      e.visual_style.typography.display,
+    const set = TYPE_SETS[e.id];
+    if (!set) {
+      problems.push(`${e.id}: no type set in data/design-template-type.ts`);
+    }
+    const typeSet: TypeSet = set ?? { faces: [], replaces: {}, why: '' };
+    const rename = renamer(typeSet);
+    const displayFace = typeSet.faces.find((f) => f.role === 'display');
+    const bodyFace = typeSet.faces.find((f) => f.role === 'body');
+    // The catalog's words, then the family each named is now (D103). A face
+    // that was never on Google Fonts keeps its name, with the set's face as
+    // what a project loads.
+    const restyle = (
+      font: ReturnType<typeof fonts.resolveFamily>,
+      face: TypeSet['faces'][number] | undefined,
+    ) => {
+      if (!font.onGoogleFonts) {
+        return { ...font, substitute: face?.family ?? font.substitute };
+      }
+      const renamed = typeSet.replaces[font.family];
+      if (renamed !== undefined) {
+        return {
+          asWritten: rename(font.asWritten),
+          family: renamed,
+          onGoogleFonts: true,
+        };
+      }
+      // Kept as it was, when the set keeps it; otherwise the set's own face
+      // for the role (the resolver reads "Archivo Black" as Archivo in its
+      // black weight, and the set names Archivo Black).
+      return typeSet.faces.some((f) => f.family === font.family) || !face
+        ? font
+        : { ...font, family: face.family };
+    };
+    const display = restyle(
+      fonts.resolveFamily(e.id, e.visual_style.typography.display),
+      displayFace,
     );
-    const body = fonts.resolveFamily(
-      e.id,
-      e.visual_style.typography.body,
-      display,
+    const body = restyle(
+      fonts.resolveFamily(
+        e.id,
+        e.visual_style.typography.body,
+        fonts.resolveFamily(e.id, e.visual_style.typography.display),
+      ),
+      bodyFace,
     );
-    const heading = display.onGoogleFonts
-      ? display.family
-      : display.substitute!;
-    const bodyFont = body.onGoogleFonts ? body.family : body.substitute!;
+    const heading = displayFace?.family ?? display.family;
+    const bodyFont = bodyFace?.family ?? body.family;
+    const typography = {
+      ...e.visual_style.typography,
+      display: rename(e.visual_style.typography.display),
+      body: rename(e.visual_style.typography.body),
+      ...(e.visual_style.typography.notes
+        ? { notes: rename(e.visual_style.typography.notes) }
+        : {}),
+    };
     const { colors, derived } = mapColors(e.id, e.visual_style.palette);
     return {
       id: e.id,
@@ -754,6 +890,9 @@ function main([dir, commit, fontsPath]: string[]) {
       useCase: USE_CASE[e.category],
       category: e.category,
       complexity: e.complexity,
+      format: 'design',
+      batch: BATCH.id,
+      addedOn: BATCH.addedOn,
       ...(MERGED_INTO[e.id] ? { mergedInto: MERGED_INTO[e.id] } : {}),
       purpose: e.purpose,
       audience: e.audience,
@@ -767,23 +906,36 @@ function main([dir, commit, fontsPath]: string[]) {
         imagery: e.visual_style.imagery,
         spacing: e.visual_style.spacing,
         palette: e.visual_style.palette,
-        typography: e.visual_style.typography,
+        typography,
         fonts: { display, body },
+        typeSet: typeSet.faces,
+        typeWhy: typeSet.why,
         contrastChecks: e.contrast_checks,
         tokens: {
           colors,
           typography: {
             headingFont: heading,
             bodyFont,
-            googleFontsUrl: fonts.cssUrl([heading, bodyFont]),
+            googleFontsUrl: fonts.cssUrl(typeSet.faces.map((f) => f.family)),
           },
           radius: radiusOf(e.visual_style.spacing),
         },
         derived,
       },
-      buildPrompt: e.build_prompt,
+      buildPrompt: withTypeSet(e.id, e.build_prompt, typeSet),
     };
   });
+  // No two designs share a set of families (D103).
+  const sets = new Map<string, string>();
+  for (const t of templates) {
+    const key = [...new Set(t.style.typeSet.map((f) => f.family))]
+      .sort()
+      .join(' + ');
+    const other = sets.get(key);
+    if (other)
+      problems.push(`${t.id} has the same typefaces as ${other}: ${key}`);
+    sets.set(key, t.id);
+  }
 
   if (problems.length > 0) {
     console.error(`${problems.length} problems; nothing written:`);
@@ -808,6 +960,9 @@ function main([dir, commit, fontsPath]: string[]) {
     summary: t.summary,
     kind: t.kind,
     useCase: t.useCase,
+    format: t.format,
+    batch: t.batch,
+    addedOn: t.addedOn,
     ...(t.mergedInto ? { mergedInto: t.mergedInto.slug } : {}),
   }));
   writeFileSync(INDEX_OUT, dataModule(index));
