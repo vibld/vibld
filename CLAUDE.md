@@ -36,6 +36,21 @@ anywhere. Use a comma, a colon, parentheses, or two sentences.
 The double hyphen this repository uses in prose is a different character and
 is fine. Do not read it as evidence that em-dashes are wanted.
 
+## Counts in copy are rounded down: "200+ templates", not "207 templates"
+
+Chris's rule (docs/decisions.md, D105). Wherever vibld.com or the builder
+tells a reader how many of something the product has, the number is rounded
+down to a friendly "N+":
+
+- under 10: exact ("4 moving backgrounds");
+- 10 to 99: down to the ten ("24 style presets" is "20+ style presets");
+- 100 and over: down to the hundred ("207" is "200+", "1,656" is "1,600+").
+
+Prices, measured costs, durations and plan limits are facts, not counts, and
+stay exact. On vibld.com the rule is `approxCount` in
+`apps/marketing/app/counts.ts`; `apps/marketing/test/counts.test.ts` fails on
+an exact count in a built page.
+
 ## Licensing is the maintainer's decision
 
 Never decide on the maintainer's behalf whether something can be used,

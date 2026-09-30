@@ -4,6 +4,7 @@ import { PageHead } from '../components/SiteChrome';
 import { LAYERS } from '../layers';
 import { SITE, metaFor } from '../site';
 import { USE_CASES } from '../use-cases';
+import { approxCount } from '../counts';
 
 export function meta() {
   return metaFor('/templates');
@@ -82,16 +83,16 @@ export default function Templates() {
       <PageHead
         eyebrow="Templates"
         title="Designs to start from"
-        lead={`${total} app and website designs, each with a layout, a palette whose every text pair passes WCAG AA, a type pairing, and a build prompt a coding agent can follow. Open one to read all of it.`}
+        lead={`${approxCount(total)} app and website designs, each with a layout, a palette whose every text pair passes WCAG AA, a type pairing, and a build prompt a coding agent can follow. Open one to read all of it.`}
       >
         <nav className="lb-tpl-jump" aria-label="Jump to a use case">
           {groups.map((group) => (
             <a key={group.slug} href={`#${group.slug}`}>
-              {group.label} <span>{group.cards.length}</span>
+              {group.label} <span>{approxCount(group.cards.length)}</span>
             </a>
           ))}
           <a href="#layers">
-            Built from one prompt <span>{LAYERS.length}</span>
+            Built from one prompt <span>{approxCount(LAYERS.length)}</span>
           </a>
           <Link to="/inspiration">Palettes and type only</Link>
         </nav>
@@ -151,7 +152,7 @@ export default function Templates() {
               {group.label}
             </h2>
             <p className="lb-lede">
-              {group.cards.length} designs.{' '}
+              {approxCount(group.cards.length)} designs.{' '}
               <Link className="lb-link" to={`/use-cases/${group.slug}`}>
                 What to ask vibld for
               </Link>

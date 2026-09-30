@@ -14,6 +14,7 @@ import { lookById } from '../looks';
 import { PRESET_MOODS, STYLE_MOODS } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import { SITE, metaFor } from '../site';
+import { approxCount } from '../counts';
 
 export function meta() {
   return metaFor('/styles');
@@ -107,7 +108,7 @@ export default function Styles() {
       >
         <div className="lb-wrap">
           <h2 className="lb-h2" id="backdrops-title">
-            {backdrops.length} moving backgrounds
+            {approxCount(backdrops.length)} moving backgrounds
           </h2>
           <p className="lb-lede">
             A moving background is asked for in words rather than picked: say
@@ -149,7 +150,7 @@ export default function Styles() {
       >
         <div className="lb-wrap">
           <h2 className="lb-h2" id="treatments-title">
-            {treatments.length} surface treatments
+            {approxCount(treatments.length)} surface treatments
           </h2>
           <p className="lb-lede">
             How a page feels rather than what colour it is: glass, extrusion,
@@ -164,7 +165,7 @@ export default function Styles() {
       <section className="lb-section" aria-labelledby="palettes-title">
         <div className="lb-wrap">
           <h2 className="lb-h2" id="palettes-title">
-            {coloured.length} with a colour system of their own
+            {approxCount(coloured.length)} with a colour system of their own
           </h2>
           <p className="lb-lede">
             These carry real tokens the builder sends with the request: a

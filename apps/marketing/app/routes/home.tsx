@@ -28,6 +28,7 @@ import { PLANS } from '../plan-sources';
 import { faqSchema, softwareApplicationSchema } from '../schema';
 import { SITE, metaFor, organizationSchema } from '../site';
 import { USE_CASES } from '../use-cases';
+import { approxCount } from '../counts';
 
 /**
  * The home page, in the "Live Build" direction Chris approved (2026-09-27):
@@ -182,7 +183,7 @@ function Styles() {
           number="02"
           eyebrow="Styles"
           id="styles-title"
-          title={`${entries.length} directions the builder actually knows`}
+          title={`${approxCount(entries.length)} directions the builder actually knows`}
           lede="Ask for one by name, or ask for three sketches and pick. Each preset carries direction concrete enough to act on, including how it moves. Press a tile to re-skin the site in the builder above."
         />
         <ul className="lb-tiles">
@@ -224,7 +225,9 @@ function Styles() {
           leaves their colours to the project.
         </p>
         <div className="lb-morestyles">
-          <p className="lb-morestyles__label">and {rest.length} more:</p>
+          <p className="lb-morestyles__label">
+            and {approxCount(rest.length)} more:
+          </p>
           <ul>
             {rest.map((entry) => (
               <li key={entry.id}>

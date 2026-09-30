@@ -1,8 +1,28 @@
 name: Deploy marketing site
 
-# Manual only, like "Deploy web preview" -- an automatic deploy on every push
-# to main would redeploy vibld.com on every unrelated merge.
+# On every push to main that changes what vibld.com is built from, and by
+# hand (Chris, D106). It was manual only, to avoid redeploying on unrelated
+# merges; the paths below do that instead, and a manual-only deploy left
+# vibld.com a day and a half behind main on 2026-09-30.
 on:
+  push:
+    branches: [main]
+    paths:
+      - apps/marketing/**
+      # The site reads the style presets, the model catalogue, the template
+      # catalog and the backgrounds from packages/ai, plans and prices from
+      # these Worker modules (apps/marketing/turbo.json), and the examples.
+      - packages/ai/**
+      - packages/brand/**
+      - packages/security-headers/**
+      - apps/web/worker/entitlement.ts
+      - apps/web/worker/signup-credit.ts
+      - apps/web/worker/stripe-client.ts
+      - apps/web/worker/referral.ts
+      - apps/web/worker/model-access.ts
+      - examples/**
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-marketing.yml
   workflow_dispatch:
 
 permissions:

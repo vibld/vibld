@@ -11,6 +11,7 @@ import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 
 import { LAYERS } from './layers.ts';
 import { USE_CASES } from './use-cases.ts';
+import { approxCount } from './counts.ts';
 
 export interface SiteRoute {
   path: string;
@@ -380,7 +381,7 @@ export const ROUTES: SiteRoute[] = [
   {
     path: '/templates',
     title: `Templates | ${SITE.name}`,
-    description: `${DESIGN_TEMPLATE_INDEX.length} app and website designs to start from, each with a layout, a checked palette, a type pairing and a build prompt, grouped by what you are building.`,
+    description: `${approxCount(DESIGN_TEMPLATE_INDEX.length)} app and website designs to start from, each with a layout, a checked palette, a type pairing and a build prompt, grouped by what you are building.`,
   },
   ...DESIGN_TEMPLATE_INDEX.map((template) => ({
     path: `/templates/${template.id}`,

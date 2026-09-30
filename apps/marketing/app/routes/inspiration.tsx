@@ -2,6 +2,7 @@ import { Link, useLoaderData } from 'react-router';
 
 import { PageHead } from '../components/SiteChrome';
 import { SITE, metaFor } from '../site';
+import { approxCount } from '../counts';
 
 export function meta() {
   return metaFor('/inspiration');
@@ -50,7 +51,7 @@ export default function Inspiration() {
       <PageHead
         eyebrow="Inspiration"
         title="Palettes and type to borrow"
-        lead={`${styles.length} palettes and type pairings from the template catalog. Every text pair in them passes WCAG AA; the sample on each card is drawn only in the palette's own pairs.`}
+        lead={`${approxCount(styles.length)} palettes and type pairings from the template catalog. Every text pair in them passes WCAG AA; the sample on each card is drawn only in the palette's own pairs.`}
       >
         <p className="lb-tpl-facts">
           <Link to="/templates">The designs they come from</Link> ·{' '}

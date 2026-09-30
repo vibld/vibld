@@ -190,7 +190,7 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
     id: 'style-presets',
     status: 'shipped',
     // test/roadmap.test.ts holds this number to the builder's own list.
-    title: '24 style presets',
+    title: '20+ style presets',
     description:
       'Choose a visual direction from the builder’s presets, each a full colour system or a surface treatment.',
   },

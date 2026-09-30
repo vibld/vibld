@@ -265,6 +265,30 @@ on 2026-09-30.
   that his ports are designs-v1's `layers/` and `design-prompt-catalog/`,
   and nothing else.
 
+### Resolved 2026-09-30 (evening)
+
+Chris reviewed /templates and found the cards thin: a palette, fonts that all
+look alike, no filtering, and an exact count where his rule rounds.
+
+- **D103. Every template has its own set of fonts.** No two templates share
+  the same combination; a family may recur, and a set may be one family, a
+  pair, or three or more, chosen for the design's mood. The catalog used
+  Inter for 52 of its 207 headings and one family for everything in 108.
+  The build prompts' font lines change to match.
+- **D104. Template fonts are self-hosted subsets.** A script copies a small
+  Latin subset of each family into vibld.com, as the site's own fonts are,
+  so a visitor's browser asks Google for nothing and the legal pages are
+  unchanged.
+- **D105. Counts in copy are rounded down.** 207 is "200+", 24 is "20+", 14
+  is "10+"; under ten stays exact. Prices, measured costs, durations and plan
+  limits are not counts. The rule is written into CLAUDE.md, where it had
+  not been, which is how /templates came to say "207".
+- **D106. Four more changes to the templates.** A "Start from this template"
+  button that opens the builder with the prompt filled in; vibld.com deployed
+  on every push to main that changes it; a source batch, an added date and a
+  type (homepage, screen, section) on every entry, ready for the next batch;
+  and a share image of each template's mocked homepage.
+
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 
 Chris asked for the design prompt catalog in Drummond-IT/designs-v1

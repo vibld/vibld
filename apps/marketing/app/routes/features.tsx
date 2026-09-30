@@ -6,6 +6,7 @@ import { PageHead } from '../components/SiteChrome';
 import { faqSchema } from '../schema';
 import { SITE, metaFor } from '../site';
 import { FREE_PLAN } from '../plan-sources';
+import { approxCount } from '../counts';
 
 export function meta() {
   return [...metaFor('/features'), faqSchema(QUESTIONS)];
@@ -195,7 +196,7 @@ export default function Features() {
             number="02"
             eyebrow="Directions"
             id="directions-title"
-            title={`${STYLE_PRESETS.length} named styles, or three sketches`}
+            title={`${approxCount(STYLE_PRESETS.length)} named styles, or three sketches`}
             lede="Name a style preset and the build starts from its direction. Or ask for three sketches that differ in look, and pick one."
           />
           <FeatureGrid features={DIRECTIONS} />

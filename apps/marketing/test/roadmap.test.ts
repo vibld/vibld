@@ -34,6 +34,7 @@ import {
   isTurnstileVerified,
   WAITLIST_TURNSTILE_ACTION,
 } from '../worker/waitlist.ts';
+import { approxCount } from '../app/counts.ts';
 
 /**
  * The roadmap's data file and the page's side of voting, with no Worker and
@@ -111,7 +112,7 @@ describe('the roadmap data', () => {
       'Sandbox previews with share links',
       'One-step publishing',
       'GitHub pull requests',
-      '24 style presets',
+      '20+ style presets',
       'Build from a reference URL',
       'Projects',
       'Project links and remix',
@@ -136,7 +137,10 @@ describe('the roadmap data', () => {
     // The one number in the list. A preset added to the builder without this
     // changing would make a shipped claim false by understating it.
     const item = ROADMAP_ITEMS.find((each) => each.id === 'style-presets');
-    assert.equal(item?.title, `${STYLE_PRESETS.length} style presets`);
+    assert.equal(
+      item?.title,
+      `${approxCount(STYLE_PRESETS.length)} style presets`,
+    );
   });
 });
 
