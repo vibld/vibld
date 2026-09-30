@@ -128,6 +128,13 @@ pnpm --filter @vibld/web build
 pnpm --filter @vibld/web deploy:preview
 ```
 
+Those deploy vibld's own Workers, database and domains. A copy of your own
+deploys from the `wrangler.self-host.jsonc` that `scripts/self-host.mjs`
+writes, with `-c wrangler.self-host.jsonc` on every `wrangler` command
+([Deploying](https://vibld.com/docs/deploying)). The **Self-host check**
+workflow (`.github/workflows/self-host-check.yml`) does the whole sequence
+for a prefixed copy and checks it comes up.
+
 The deployed Worker serves at `app.vibld.com` (a custom domain route --
 `docs/decisions.md` L20; adding it disables the `workers.dev` URL for this
 Worker entirely, so that address 404s once a custom domain exists). The

@@ -27,6 +27,13 @@ export default function Configuration() {
         </a>{' '}
         lists the builder’s secrets with the shape of each.
       </p>
+      <p>
+        For a copy of your own, <code>scripts/self-host.mjs</code> writes the
+        names, <code>CLERK_FRONTEND_API_URL</code>, <code>VIBLD_PROVIDER</code>{' '}
+        and <code>VIBLD_MODEL</code> from a settings file, and drops{' '}
+        <code>VIBLD_MODEL</code> unless you give one, so the provider’s default
+        answers. See <a href="/docs/deploying">Deploying</a>.
+      </p>
 
       <h2>Secrets</h2>
       <p>

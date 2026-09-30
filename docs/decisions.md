@@ -354,6 +354,27 @@ builder, and whether the repository should move to his account.
   change are listed in `docs/social-launch.md`.
 - **D114. Profiles linked: GitHub only, for now.** Others are added to
   `SITE.founder.sameAs` when Chris gives their URLs.
+- **D115. The self-host check runs in the Chris Brock LLC account, under
+  prefixed names.** The copy is deployed beside vibld's own, so every name
+  must differ from vibld's: `selfhost-web`, `selfhost-preview`,
+  `selfhost-publish`, `selfhost-generation` and `selfhost-control-plane`
+  (database and bucket), rate-limit namespaces from 5001. Walking the docs
+  found that the shipped configuration names vibld's Workers, bucket,
+  Workflow, service targets and rate-limit namespaces as well as the values
+  the docs listed, and that the docs told a self-hoster to keep the
+  database name `vibld-control-plane`: in an account that also ran vibld,
+  following them would have replaced vibld's Workers. `scripts/self-host.mjs`
+  now writes each Worker's configuration from a settings file and refuses
+  one that still names vibld's deployment; the **Self-host check** workflow
+  deploys a copy from it in the documented order and checks it signed out.
+  Sign-in and a generation need a Clerk instance of the copy's own.
+- **D116. The self-host check stops signed out.** It proves the copy
+  deploys under its own names and refuses a signed-out caller; sign-in and
+  a generation on a copy stay untested outside the project, and the docs
+  keep saying so.
+- **D117. The `selfhost-*` resources are torn down after the check.** A
+  rerun recreates the Workers; the database and bucket are created again
+  beforehand, as the workflow's header says.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

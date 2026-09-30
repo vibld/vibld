@@ -24,40 +24,50 @@ export default function Deploying() {
         machine with <code>wrangler</code>, or write your own workflow.
       </p>
 
-      <h2>Change these for your copy</h2>
+      <h2>Your copy’s configuration</h2>
       <p>
-        The configuration in the repository deploys vibld’s own service. These
-        values name it, and have to become yours:
+        The configuration in the repository deploys vibld’s own service: its
+        Worker names, its D1 database and R2 bucket, its Workflow, its
+        rate-limit namespaces, its domains and its Clerk. Deployed unchanged
+        into another account it fails. Deployed into an account that also runs
+        vibld, it would replace vibld’s Workers and write into its database.
       </p>
-      <ul>
-        <li>
-          <code>apps/web/wrangler.jsonc</code>: the <code>app.vibld.com</code>{' '}
-          route, <code>CLERK_FRONTEND_API_URL</code> (vibld’s Clerk), the D1{' '}
-          <code>database_id</code>, and <code>VIBLD_PROVIDER</code> and{' '}
-          <code>VIBLD_MODEL</code>, which ship as OpenAI and{' '}
-          <code>gpt-6-sol</code>.
-        </li>
-        <li>
-          <code>apps/preview/wrangler.jsonc</code>: the{' '}
-          <code>*.vibld-preview.dev/*</code> route and its{' '}
-          <code>zone_name</code>, <code>PREVIEW_HOSTNAME</code>, and the D1{' '}
-          <code>database_id</code>.
-        </li>
-        <li>
-          <code>apps/publish/wrangler.jsonc</code>:{' '}
-          <code>PUBLISH_HOSTNAME</code> and the D1 <code>database_id</code>. Set{' '}
-          <code>PUBLISH_HOSTNAME</code> on the builder too, where it is unset
-          and defaults to <code>vibld-preview.dev</code>.
-        </li>
-        <li>
-          The alert addresses and the referral origin, if you use them, which
-          default to vibld’s. See{' '}
-          <a href="/docs/configuration">Settings and secrets</a>.
-        </li>
-      </ul>
+      <p>Write your own instead, from a settings file:</p>
+      <pre>
+        <code>{`{
+  "prefix": "acme",
+  "d1DatabaseId": "<the id wrangler d1 create printed>",
+  "clerkFrontendApiUrl": "https://<your instance>.clerk.accounts.dev",
+  "provider": "deepseek"
+}`}</code>
+      </pre>
       <p>
-        Keep the database name <code>vibld-control-plane</code>, or change it in
-        the builder’s <code>migrate</code> script as well, which names it.
+        <code>node scripts/self-host.mjs settings.json</code> writes{' '}
+        <code>wrangler.self-host.jsonc</code> beside each Worker’s configuration
+        (git ignores it) with every one of those names derived from your prefix:
+        Workers <code>acme-web</code>, <code>acme-preview</code> and{' '}
+        <code>acme-publish</code>, database and bucket{' '}
+        <code>acme-control-plane</code>, Workflow <code>acme-generation</code>,
+        the service bindings between them, and the rate-limit namespaces. It
+        refuses to write a file that still names anything of vibld’s. Without a{' '}
+        <code>builderDomain</code> and a <code>previewDomain</code> the Workers
+        are served at <code>workers.dev</code>; the optional settings are listed
+        at the top of the script.
+      </p>
+      <p>
+        Pass <code>-c wrangler.self-host.jsonc</code> to every{' '}
+        <code>wrangler</code> command, and apply the migrations with{' '}
+        <code>
+          wrangler d1 migrations apply acme-control-plane --remote -c
+          wrangler.self-host.jsonc
+        </code>{' '}
+        from <code>apps/web</code>: the builder’s own <code>deploy</code> and{' '}
+        <code>migrate</code> scripts name vibld’s database.
+      </p>
+      <p>
+        Still yours to set: the alert addresses and the referral origin, if you
+        use them, which default to vibld’s. See{' '}
+        <a href="/docs/configuration">Settings and secrets</a>.
       </p>
 
       <h2>The order that works</h2>
@@ -86,9 +96,10 @@ export default function Deploying() {
           alone. Three different values.
         </li>
         <li>
-          <strong>Deploy the builder</strong> with its service bindings pointing
-          at those two, built with <code>VITE_CLERK_PUBLISHABLE_KEY</code> set,
-          and with a provider key and <code>VIBLD_PLATFORM_ADMINS</code> set as
+          <strong>Deploy the builder</strong> last: its service bindings name
+          the other two Workers, and Cloudflare refuses the deploy until both
+          exist. Build it with <code>VITE_CLERK_PUBLISHABLE_KEY</code> set, and
+          give it a provider key and <code>VIBLD_PLATFORM_ADMINS</code> as
           secrets.
         </li>
       </ol>

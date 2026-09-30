@@ -1,0 +1,163 @@
+name: Self-host check
+
+# Deploys a second, separately named copy of vibld from this commit, the way
+# https://vibld.com/docs/deploying tells a self-hoster to, and checks that
+# it comes up and refuses what it has not been given (D80, D115). Every
+# Worker, database, bucket and Workflow name is derived from `prefix` by
+# scripts/self-host.mjs, which refuses to write a configuration that still
+# names vibld's own deployment, so this can run in the same account as
+# vibld without touching it.
+#
+# Before the first run, in the account the "preview" environment's
+# credentials reach:
+#   wrangler d1 create <prefix>-control-plane    (its id is `d1_database_id`)
+#   wrangler r2 bucket create <prefix>-control-plane
+on:
+  workflow_dispatch:
+    inputs:
+      prefix:
+        description: Names start with this (lowercase; never "vibld")
+        required: true
+        default: selfhost
+      d1_database_id:
+        description: The id `wrangler d1 create <prefix>-control-plane` printed
+        required: true
+      clerk_frontend_api_url:
+        description: A Clerk instance's Frontend API URL (https://..., no path)
+        required: true
+      provider:
+        description: The model provider the builder selects
+        type: choice
+        options: [deepseek, anthropic, openai]
+        default: deepseek
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-host-check
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy a prefixed copy and check it
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: preview
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER: pnpm dlx wrangler@4.137.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Inputs reach the script through the environment, never pasted into
+      # the shell, so a value cannot run as a command.
+      - name: Write this copy's Wrangler configuration
+        env:
+          PREFIX: ${{ inputs.prefix }}
+          D1_ID: ${{ inputs.d1_database_id }}
+          CLERK_URL: ${{ inputs.clerk_frontend_api_url }}
+          PROVIDER: ${{ inputs.provider }}
+        run: |
+          node -e '
+            const { writeFileSync } = require("node:fs");
+            writeFileSync(process.argv[1], JSON.stringify({
+              prefix: process.env.PREFIX,
+              d1DatabaseId: process.env.D1_ID,
+              clerkFrontendApiUrl: process.env.CLERK_URL,
+              provider: process.env.PROVIDER,
+              rateLimitNamespaceBase: 5001,
+            }));
+          ' "$RUNNER_TEMP/self-host.json"
+          node scripts/self-host.mjs "$RUNNER_TEMP/self-host.json"
+
+      - name: Apply the migrations to this copy's database
+        working-directory: apps/web
+        env:
+          PREFIX: ${{ inputs.prefix }}
+        run: $WRANGLER d1 migrations apply "$PREFIX-control-plane" --remote -c wrangler.self-host.jsonc
+
+      # The order https://vibld.com/docs/deploying gives: the builder's
+      # service bindings name the other two, and Cloudflare refuses a
+      # binding to a Worker that does not exist yet (code 10143).
+      - name: Deploy the publish Worker
+        working-directory: apps/publish
+        run: $WRANGLER deploy -c wrangler.self-host.jsonc
+
+      - name: Deploy the sandbox Worker
+        working-directory: apps/preview
+        run: $WRANGLER deploy -c wrangler.self-host.jsonc
+
+      # No Clerk publishable key: this copy is checked signed out.
+      - name: Build the builder
+        run: pnpm --filter @vibld/web build
+
+      - name: Deploy the builder
+        id: web
+        working-directory: apps/web
+        run: |
+          set -o pipefail
+          $WRANGLER deploy -c wrangler.self-host.jsonc | tee "$RUNNER_TEMP/web-deploy.log"
+          url="$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/web-deploy.log" | head -1)"
+          [ -n "$url" ] || { echo "::error::The deploy printed no workers.dev URL"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Fresh values for this copy alone, never vibld's, given on stdin so
+      # they reach no log. Each side of a service binding gets the same one.
+      - name: Set the shared secrets
+        run: |
+          set -euo pipefail
+          put() { (cd "apps/$1" && printf '%s' "$3" | $WRANGLER secret put "$2" -c wrangler.self-host.jsonc >/dev/null); }
+          preview="$(openssl rand -hex 32)"
+          publish="$(openssl rand -hex 32)"
+          share="$(openssl rand -hex 32)"
+          put web PREVIEW_INTERNAL_SECRET "$preview"
+          put preview PREVIEW_INTERNAL_SECRET "$preview"
+          put web PUBLISH_INTERNAL_SECRET "$publish"
+          put publish PUBLISH_INTERNAL_SECRET "$publish"
+          put preview PREVIEW_SHARE_SECRET "$share"
+
+      # What can be checked signed out: the interface is served, and the
+      # API refuses an anonymous caller rather than answering or failing.
+      # Signing in and generating need a real Clerk instance and a model key
+      # (docs/deploying, "What to check once it is up").
+      - name: Check the deployed copy
+        env:
+          URL: ${{ steps.web.outputs.url }}
+        run: |
+          set -euo pipefail
+          sleep 10
+          page="$(curl -sS -o "$RUNNER_TEMP/index.html" -w '%{http_code}' "$URL/")"
+          api="$(curl -sS -o "$RUNNER_TEMP/config.json" -w '%{http_code}' "$URL/api/config")"
+          {
+            echo "## Self-host check"
+            echo
+            echo "Builder: $URL"
+            echo
+            echo "| Check | Status |"
+            echo "| --- | --- |"
+            echo "| \`/\` serves the interface | $page |"
+            echo "| \`/api/config\` refuses a signed-out caller | $api |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$page" = 200 ] && grep -qi '<html' "$RUNNER_TEMP/index.html" \
+            || { echo "::error::/ answered $page"; exit 1; }
+          case "$api" in
+            401|403) ;;
+            *) echo "::error::/api/config answered $api to a signed-out caller"; cat "$RUNNER_TEMP/config.json"; exit 1 ;;
+          esac
