@@ -3,8 +3,10 @@
  * the builder with a design's brief in the address's fragment,
  *
  *   https://app.vibld.com/#template=<id>&brief=<the brief, encoded>
+ *     [&screens=<screen id>,<screen id>]
  *
- * and the composer opens with that brief in it, ready to send or edit.
+ * and the composer opens with that brief in it, ready to send or edit, and
+ * with the text of each chosen screen pattern after it (D110).
  *
  * The fragment, because it is never sent to a server: the brief is several
  * kilobytes, and none of it is the Worker's business until somebody sends
@@ -27,6 +29,27 @@ export const MAX_BRIEF_CHARS = MAX_PROMPT_CHARS;
 export interface TemplateBrief {
   template: string;
   brief: string;
+  /** Screen pattern ids to add to the brief (D110), in the order chosen. */
+  screens: string[];
+}
+
+const ID = /^[a-z0-9-]{1,80}$/;
+
+/** The most screen ids a link may carry: `MAX_COMPOSED_SCREENS`. */
+const MAX_LINK_SCREENS = 6;
+
+function screensOf(value: unknown): string[] {
+  const list =
+    typeof value === 'string'
+      ? value.split(',')
+      : Array.isArray(value)
+        ? value
+        : [];
+  return [
+    ...new Set(
+      list.filter((id): id is string => typeof id === 'string' && ID.test(id)),
+    ),
+  ].slice(0, MAX_LINK_SCREENS);
 }
 
 export type BriefStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -44,9 +67,9 @@ export function readTemplateBrief(hash: string): TemplateBrief | null {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const template = params.get('template') ?? '';
   const brief = (params.get('brief') ?? '').trim();
-  if (!/^[a-z0-9-]{1,80}$/.test(template)) return null;
+  if (!ID.test(template)) return null;
   if (brief.length === 0 || brief.length > MAX_BRIEF_CHARS) return null;
-  return { template, brief };
+  return { template, brief, screens: screensOf(params.get('screens') ?? '') };
 }
 
 /**
@@ -82,7 +105,11 @@ export function takeTemplateBrief(
     return typeof parsed.template === 'string' &&
       typeof parsed.brief === 'string' &&
       parsed.brief.length <= MAX_BRIEF_CHARS
-      ? { template: parsed.template, brief: parsed.brief }
+      ? {
+          template: parsed.template,
+          brief: parsed.brief,
+          screens: screensOf(parsed.screens),
+        }
       : null;
   } catch {
     return null;

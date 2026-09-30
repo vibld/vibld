@@ -3862,3 +3862,31 @@
   font-size: clamp(1.5rem, 4vw, 2.25rem);
   line-height: 1.15;
 }
+
+/* The screens a template page can add (D110). */
+.lb-tpl-screens {
+  margin-block: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-edge);
+  border-radius: 12px;
+}
+.lb-tpl-screens summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.lb-tpl-screens fieldset {
+  border: 0;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.lb-tpl-screens legend {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.lb-tpl-screens label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}

@@ -173,20 +173,19 @@ function ExampleCard({ example }: { example: Example }) {
             {note}
           </p>
         ))}
-        {DESIGN_TEMPLATE_INDEX.filter((t) => t.mergedInto === example.slug).map(
-          (design) => (
-            <p
-              key={design.id}
-              className="text-sm text-[var(--color-ink-muted)]"
-            >
-              The same product is in the template catalog as{' '}
-              <Link to={`/templates/${design.id}`} className="text-link">
-                {design.name}
-              </Link>
-              , with its palette, type and a full build prompt.
-            </p>
-          ),
-        )}
+        {DESIGN_TEMPLATE_INDEX.filter(
+          (t) =>
+            t.mergedInto?.collection === 'examples' &&
+            t.mergedInto.slug === example.slug,
+        ).map((design) => (
+          <p key={design.id} className="text-sm text-[var(--color-ink-muted)]">
+            The same product is in the template catalog as{' '}
+            <Link to={`/templates/${design.id}`} className="text-link">
+              {design.name}
+            </Link>
+            , with its palette, type and a full build prompt.
+          </p>
+        ))}
         <details className="text-sm">
           <summary className="cursor-pointer font-medium">The prompt</summary>
           <p className="mt-2 text-[var(--color-ink-muted)] text-pretty">

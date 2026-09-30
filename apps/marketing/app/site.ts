@@ -383,16 +383,16 @@ export const ROUTES: SiteRoute[] = [
   {
     path: '/templates',
     title: `Templates | ${SITE.name}`,
-    description: `${approxCount(DESIGN_TEMPLATE_INDEX.length)} app and website designs to start from, each with a layout, a checked palette, a type pairing and a build prompt, grouped by what you are building.`,
+    description: `${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format !== 'screen').length)} app and website designs and ${approxCount(DESIGN_TEMPLATE_INDEX.filter((t) => t.format === 'screen').length)} app screens to start from, each with a layout, a checked palette, typefaces and a build prompt.`,
   },
   ...DESIGN_TEMPLATE_INDEX.map((template) => ({
     image: {
       path: `/og/templates/${template.id}.jpg`,
-      alt: `${template.name}: a mock-up of its homepage, and its typefaces.`,
+      alt: `${template.name}: a mock-up of its ${template.format === 'screen' ? 'screen' : 'homepage'}, and its typefaces.`,
     },
     path: `/templates/${template.id}`,
     title: `${template.name}, ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)} | ${SITE.name} templates`,
-    description: `${template.name}: a ${template.kind === 'app' ? 'app' : 'website'} design for vibld, a ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)}, with its layout, palette, type and full build prompt.`,
+    description: `${template.name}: ${template.format === 'screen' ? 'an app screen' : template.kind === 'app' ? 'an app design' : 'a website design'} for vibld, a ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)}, with its layout, palette, type and full build prompt.`,
   })),
   ...LAYERS.map((layer) => ({
     path: `/templates/${layer.slug}`,

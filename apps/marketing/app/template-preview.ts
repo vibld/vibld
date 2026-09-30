@@ -16,6 +16,8 @@
 export type PreviewBlock =
   | { kind: 'nav'; links: string[] }
   | { kind: 'hero'; layout: 'centered' | 'split' | 'media' }
+  /** A screen's own title bar, where a homepage would have a hero (D110). */
+  | { kind: 'heading' }
   | { kind: 'grid'; columns: 2 | 3 | 4; label: string }
   | { kind: 'bento'; label: string }
   | { kind: 'stats'; label: string }
@@ -58,6 +60,8 @@ interface TemplateLike {
   name: string;
   summary: string;
   kind: 'site' | 'app';
+  /** 'screen' draws one app screen rather than a homepage (D110). */
+  format?: string;
   category: string;
   layout: readonly string[];
   buildPrompt: string;
@@ -272,7 +276,19 @@ export function previewSpec(
       b.kind !== 'hero' &&
       blocks.findIndex((other) => other.kind === b.kind) === i,
   );
-  blocks.splice(0, blocks.length, nav, hero, ...rest);
+  // A screen opens with its title, not a hero, and shows what the screen
+  // holds, however little its layout names.
+  const screen = t.format === 'screen';
+  if (screen && rest.length === 0) {
+    rest.push({ kind: 'list', label: '' }, { kind: 'form', label: '' });
+  }
+  blocks.splice(
+    0,
+    blocks.length,
+    nav,
+    screen ? { kind: 'heading' } : hero,
+    ...rest,
+  );
   const flavour = flavourOf(t.category, t.kind);
   for (const block of blocks) {
     if ('label' in block)
@@ -311,7 +327,7 @@ export function previewSpec(
     shell:
       t.kind === 'app' &&
       lines
-        .slice(0, 3)
+        .slice(0, screen ? 4 : 3)
         .some((l) =>
           has(l, 'sidebar', 'side rail', 'left rail', 'left nav', 'rail'),
         )

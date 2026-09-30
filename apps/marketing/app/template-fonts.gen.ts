@@ -2,6 +2,18 @@
 import type { TemplateFont } from '../scripts/template-fonts.ts';
 
 export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
+  "AR One Sans": {
+    "slug": "ar-one-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/ar-one-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/ar-one-sans/ar-one-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/ar-one-sans/LICENSE.txt"
+  },
   "Afacad": {
     "slug": "afacad",
     "category": "sans-serif",
@@ -13,6 +25,30 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/afacad/LICENSE.txt"
+  },
+  "Afacad Flux": {
+    "slug": "afacad-flux",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/afacad-flux 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/afacad-flux/afacad-flux-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/afacad-flux/LICENSE.txt"
+  },
+  "Alan Sans": {
+    "slug": "alan-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/alan-sans 5.3.1",
+    "files": [
+      {
+        "file": "/fonts/templates/alan-sans/alan-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/alan-sans/LICENSE.txt"
   },
   "Albert Sans": {
     "slug": "albert-sans",
@@ -54,6 +90,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/alegreya-sans/LICENSE.txt"
   },
+  "Ancizar Sans": {
+    "slug": "ancizar-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/ancizar-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/ancizar-sans/ancizar-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/ancizar-sans/LICENSE.txt"
+  },
   "Anek Latin": {
     "slug": "anek-latin",
     "category": "sans-serif",
@@ -65,6 +113,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/anek-latin/LICENSE.txt"
+  },
+  "Anonymous Pro": {
+    "slug": "anonymous-pro",
+    "category": "monospace",
+    "source": "@fontsource/anonymous-pro 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/anonymous-pro/anonymous-pro-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/anonymous-pro/anonymous-pro-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/anonymous-pro/LICENSE.txt"
   },
   "Anton": {
     "slug": "anton",
@@ -137,6 +201,34 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/asap/LICENSE.txt"
+  },
+  "Assistant": {
+    "slug": "assistant",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/assistant 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/assistant/assistant-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/assistant/LICENSE.txt"
+  },
+  "Atkinson Hyperlegible": {
+    "slug": "atkinson-hyperlegible",
+    "category": "sans-serif",
+    "source": "@fontsource/atkinson-hyperlegible 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/atkinson-hyperlegible/atkinson-hyperlegible-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/atkinson-hyperlegible/atkinson-hyperlegible-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/atkinson-hyperlegible/LICENSE.txt"
   },
   "Atkinson Hyperlegible Next": {
     "slug": "atkinson-hyperlegible-next",
@@ -218,6 +310,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/baloo-2/LICENSE.txt"
   },
+  "Baloo Da 2": {
+    "slug": "baloo-da-2",
+    "category": "display",
+    "source": "@fontsource-variable/baloo-da-2 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/baloo-da-2/baloo-da-2-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/baloo-da-2/LICENSE.txt"
+  },
   "Barlow": {
     "slug": "barlow",
     "category": "sans-serif",
@@ -266,6 +370,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/barlow-semi-condensed/LICENSE.txt"
   },
+  "Baskervville": {
+    "slug": "baskervville",
+    "category": "serif",
+    "source": "@fontsource-variable/baskervville 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/baskervville/baskervville-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/baskervville/LICENSE.txt"
+  },
   "Be Vietnam Pro": {
     "slug": "be-vietnam-pro",
     "category": "sans-serif",
@@ -293,6 +409,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/bebas-neue/LICENSE.txt"
+  },
+  "Belanosima": {
+    "slug": "belanosima",
+    "category": "sans-serif",
+    "source": "@fontsource/belanosima 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/belanosima/belanosima-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/belanosima/belanosima-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/belanosima/LICENSE.txt"
   },
   "Bodoni Moda": {
     "slug": "bodoni-moda",
@@ -430,6 +562,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/chivo-mono/LICENSE.txt"
   },
+  "Comme": {
+    "slug": "comme",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/comme 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/comme/comme-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/comme/LICENSE.txt"
+  },
   "Commissioner": {
     "slug": "commissioner",
     "category": "sans-serif",
@@ -481,6 +625,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/courier-prime/LICENSE.txt"
+  },
+  "Cousine": {
+    "slug": "cousine",
+    "category": "monospace",
+    "source": "@fontsource/cousine 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/cousine/cousine-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/cousine/cousine-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/cousine/LICENSE.txt"
   },
   "Crimson Pro": {
     "slug": "crimson-pro",
@@ -622,6 +782,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/epilogue/LICENSE.txt"
   },
+  "Exo 2": {
+    "slug": "exo-2",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/exo-2 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/exo-2/exo-2-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/exo-2/LICENSE.txt"
+  },
   "Familjen Grotesk": {
     "slug": "familjen-grotesk",
     "category": "sans-serif",
@@ -633,6 +805,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/familjen-grotesk/LICENSE.txt"
+  },
+  "Faustina": {
+    "slug": "faustina",
+    "category": "serif",
+    "source": "@fontsource-variable/faustina 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/faustina/faustina-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/faustina/LICENSE.txt"
   },
   "Figtree": {
     "slug": "figtree",
@@ -766,6 +950,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/funnel-sans/LICENSE.txt"
   },
+  "Gabarito": {
+    "slug": "gabarito",
+    "category": "display",
+    "source": "@fontsource-variable/gabarito 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/gabarito/gabarito-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/gabarito/LICENSE.txt"
+  },
   "Gantari": {
     "slug": "gantari",
     "category": "sans-serif",
@@ -826,6 +1022,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/geologica/LICENSE.txt"
   },
+  "Georama": {
+    "slug": "georama",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/georama 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/georama/georama-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/georama/LICENSE.txt"
+  },
   "Gilda Display": {
     "slug": "gilda-display",
     "category": "serif",
@@ -850,6 +1058,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/gloock/LICENSE.txt"
   },
+  "Glory": {
+    "slug": "glory",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/glory 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/glory/glory-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/glory/LICENSE.txt"
+  },
   "Golos Text": {
     "slug": "golos-text",
     "category": "sans-serif",
@@ -873,6 +1093,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/google-sans/LICENSE.txt"
+  },
+  "Google Sans Code": {
+    "slug": "google-sans-code",
+    "category": "monospace",
+    "source": "@fontsource-variable/google-sans-code 5.3.1",
+    "files": [
+      {
+        "file": "/fonts/templates/google-sans-code/google-sans-code-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/google-sans-code/LICENSE.txt"
   },
   "Google Sans Flex": {
     "slug": "google-sans-flex",
@@ -925,6 +1157,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/hanken-grotesk/LICENSE.txt"
+  },
+  "Hedvig Letters Serif": {
+    "slug": "hedvig-letters-serif",
+    "category": "serif",
+    "source": "@fontsource/hedvig-letters-serif 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/hedvig-letters-serif/hedvig-letters-serif-latin-400-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/hedvig-letters-serif/LICENSE.txt"
   },
   "Heebo": {
     "slug": "heebo",
@@ -1018,6 +1262,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/ibm-plex-sans/LICENSE.txt"
   },
+  "Imbue": {
+    "slug": "imbue",
+    "category": "serif",
+    "source": "@fontsource-variable/imbue 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/imbue/imbue-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/imbue/LICENSE.txt"
+  },
   "Inclusive Sans": {
     "slug": "inclusive-sans",
     "category": "sans-serif",
@@ -1065,6 +1321,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/instrument-serif/LICENSE.txt"
+  },
+  "Intel One Mono": {
+    "slug": "intel-one-mono",
+    "category": "monospace",
+    "source": "@fontsource-variable/intel-one-mono 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/intel-one-mono/intel-one-mono-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/intel-one-mono/LICENSE.txt"
   },
   "Inter": {
     "slug": "inter",
@@ -1125,6 +1393,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/jost/LICENSE.txt"
+  },
+  "Kalam": {
+    "slug": "kalam",
+    "category": "handwriting",
+    "source": "@fontsource/kalam 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/kalam/kalam-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/kalam/kalam-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/kalam/LICENSE.txt"
   },
   "Kanit": {
     "slug": "kanit",
@@ -1205,6 +1489,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/league-gothic/LICENSE.txt"
+  },
+  "League Spartan": {
+    "slug": "league-spartan",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/league-spartan 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/league-spartan/league-spartan-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/league-spartan/LICENSE.txt"
   },
   "Lexend": {
     "slug": "lexend",
@@ -1450,6 +1746,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/merriweather/LICENSE.txt"
   },
+  "Merriweather Sans": {
+    "slug": "merriweather-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/merriweather-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/merriweather-sans/merriweather-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/merriweather-sans/LICENSE.txt"
+  },
   "Miranda Sans": {
     "slug": "miranda-sans",
     "category": "sans-serif",
@@ -1486,6 +1794,46 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/montserrat/LICENSE.txt"
   },
+  "Montserrat Alternates": {
+    "slug": "montserrat-alternates",
+    "category": "sans-serif",
+    "source": "@fontsource/montserrat-alternates 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/montserrat-alternates/montserrat-alternates-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/montserrat-alternates/montserrat-alternates-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/montserrat-alternates/LICENSE.txt"
+  },
+  "Mozilla Headline": {
+    "slug": "mozilla-headline",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/mozilla-headline 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/mozilla-headline/mozilla-headline-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/mozilla-headline/LICENSE.txt"
+  },
+  "Mozilla Text": {
+    "slug": "mozilla-text",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/mozilla-text 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/mozilla-text/mozilla-text-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/mozilla-text/LICENSE.txt"
+  },
   "Mukta": {
     "slug": "mukta",
     "category": "sans-serif",
@@ -1513,6 +1861,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/mulish/LICENSE.txt"
+  },
+  "National Park": {
+    "slug": "national-park",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/national-park 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/national-park/national-park-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/national-park/LICENSE.txt"
   },
   "Newsreader": {
     "slug": "newsreader",
@@ -1710,6 +2070,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/pathway-extreme/LICENSE.txt"
   },
+  "Petrona": {
+    "slug": "petrona",
+    "category": "serif",
+    "source": "@fontsource-variable/petrona 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/petrona/petrona-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/petrona/LICENSE.txt"
+  },
   "Philosopher": {
     "slug": "philosopher",
     "category": "sans-serif",
@@ -1725,6 +2097,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/philosopher/LICENSE.txt"
+  },
+  "Pixelify Sans": {
+    "slug": "pixelify-sans",
+    "category": "display",
+    "source": "@fontsource-variable/pixelify-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/pixelify-sans/pixelify-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/pixelify-sans/LICENSE.txt"
   },
   "Playfair": {
     "slug": "playfair",
@@ -1761,6 +2145,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/plus-jakarta-sans/LICENSE.txt"
+  },
+  "Pontano Sans": {
+    "slug": "pontano-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/pontano-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/pontano-sans/pontano-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/pontano-sans/LICENSE.txt"
   },
   "Poppins": {
     "slug": "poppins",
@@ -1834,6 +2230,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/quicksand/LICENSE.txt"
   },
+  "Radio Canada": {
+    "slug": "radio-canada",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/radio-canada 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/radio-canada/radio-canada-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/radio-canada/LICENSE.txt"
+  },
   "Radio Canada Big": {
     "slug": "radio-canada-big",
     "category": "sans-serif",
@@ -1905,6 +2313,30 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/red-hat-text/LICENSE.txt"
+  },
+  "Reddit Mono": {
+    "slug": "reddit-mono",
+    "category": "monospace",
+    "source": "@fontsource-variable/reddit-mono 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/reddit-mono/reddit-mono-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/reddit-mono/LICENSE.txt"
+  },
+  "Reddit Sans": {
+    "slug": "reddit-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/reddit-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/reddit-sans/reddit-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/reddit-sans/LICENSE.txt"
   },
   "Rethink Sans": {
     "slug": "rethink-sans",
@@ -1989,6 +2421,30 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/rubik/LICENSE.txt"
+  },
+  "SUSE": {
+    "slug": "suse",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/suse 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/suse/suse-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/suse/LICENSE.txt"
+  },
+  "Saira": {
+    "slug": "saira",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/saira 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/saira/saira-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/saira/LICENSE.txt"
   },
   "Satisfy": {
     "slug": "satisfy",
@@ -2174,6 +2630,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/space-mono/LICENSE.txt"
   },
+  "Special Gothic": {
+    "slug": "special-gothic",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/special-gothic 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/special-gothic/special-gothic-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/special-gothic/LICENSE.txt"
+  },
   "Spectral": {
     "slug": "spectral",
     "category": "serif",
@@ -2226,6 +2694,42 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/syne/LICENSE.txt"
   },
+  "TASA Orbiter": {
+    "slug": "tasa-orbiter",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/tasa-orbiter 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/tasa-orbiter/tasa-orbiter-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/tasa-orbiter/LICENSE.txt"
+  },
+  "Teachers": {
+    "slug": "teachers",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/teachers 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/teachers/teachers-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/teachers/LICENSE.txt"
+  },
+  "TikTok Sans": {
+    "slug": "tiktok-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/tiktok-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/tiktok-sans/tiktok-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/tiktok-sans/LICENSE.txt"
+  },
   "Tomorrow": {
     "slug": "tomorrow",
     "category": "sans-serif",
@@ -2242,6 +2746,22 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/tomorrow/LICENSE.txt"
   },
+  "Ubuntu Mono": {
+    "slug": "ubuntu-mono",
+    "category": "monospace",
+    "source": "@fontsource/ubuntu-mono 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/ubuntu-mono/ubuntu-mono-latin-400-normal.woff2",
+        "weight": "400"
+      },
+      {
+        "file": "/fonts/templates/ubuntu-mono/ubuntu-mono-latin-700-normal.woff2",
+        "weight": "700"
+      }
+    ],
+    "licence": "/fonts/templates/ubuntu-mono/LICENSE.txt"
+  },
   "Ubuntu Sans": {
     "slug": "ubuntu-sans",
     "category": "sans-serif",
@@ -2253,6 +2773,18 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/ubuntu-sans/LICENSE.txt"
+  },
+  "Ubuntu Sans Mono": {
+    "slug": "ubuntu-sans-mono",
+    "category": "monospace",
+    "source": "@fontsource-variable/ubuntu-sans-mono 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/ubuntu-sans-mono/ubuntu-sans-mono-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/ubuntu-sans-mono/LICENSE.txt"
   },
   "Unbounded": {
     "slug": "unbounded",
@@ -2290,6 +2822,42 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
     ],
     "licence": "/fonts/templates/urbanist/LICENSE.txt"
   },
+  "Winky Sans": {
+    "slug": "winky-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/winky-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/winky-sans/winky-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/winky-sans/LICENSE.txt"
+  },
+  "Wix Madefor Display": {
+    "slug": "wix-madefor-display",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/wix-madefor-display 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/wix-madefor-display/wix-madefor-display-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/wix-madefor-display/LICENSE.txt"
+  },
+  "Wix Madefor Text": {
+    "slug": "wix-madefor-text",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/wix-madefor-text 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/wix-madefor-text/wix-madefor-text-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/wix-madefor-text/LICENSE.txt"
+  },
   "Work Sans": {
     "slug": "work-sans",
     "category": "sans-serif",
@@ -2313,6 +2881,30 @@ export const TEMPLATE_FONTS: Record<string, TemplateFont> = {
       }
     ],
     "licence": "/fonts/templates/ysabeau-office/LICENSE.txt"
+  },
+  "Zalando Sans": {
+    "slug": "zalando-sans",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/zalando-sans 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/zalando-sans/zalando-sans-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/zalando-sans/LICENSE.txt"
+  },
+  "Zalando Sans Expanded": {
+    "slug": "zalando-sans-expanded",
+    "category": "sans-serif",
+    "source": "@fontsource-variable/zalando-sans-expanded 5.3.0",
+    "files": [
+      {
+        "file": "/fonts/templates/zalando-sans-expanded/zalando-sans-expanded-latin-wght-normal.woff2",
+        "weight": "400"
+      }
+    ],
+    "licence": "/fonts/templates/zalando-sans-expanded/LICENSE.txt"
   },
   "Zen Kaku Gothic New": {
     "slug": "zen-kaku-gothic-new",

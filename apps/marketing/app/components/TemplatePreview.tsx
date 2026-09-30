@@ -97,6 +97,13 @@ function Block({ block, spec }: { block: PreviewBlock; spec: PreviewSpec }) {
         </div>
       );
     }
+    case 'heading':
+      return (
+        <div className="tp__heading">
+          <b className="tp__title">{spec.headline}</b>
+          <span className="tp__button tp__button--sm">{spec.cta}</span>
+        </div>
+      );
     case 'grid':
       return (
         <div className="tp__section">

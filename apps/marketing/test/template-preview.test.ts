@@ -53,11 +53,14 @@ describe('a template card’s mocked homepage (D106)', () => {
     assert.equal(ctaFor('internal-tools', 'app'), 'Start free');
   });
 
-  it('draws every design with a nav and a hero, in its own colours and faces', () => {
+  it('draws every design with a nav and a hero, and a screen with its title bar, in its own colours and faces', () => {
     for (const t of DESIGN_TEMPLATES) {
       const spec = previewSpec(t, () => 'sans-serif');
       const kinds = spec.blocks.map((b) => b.kind);
-      assert.ok(kinds.includes('nav') && kinds.includes('hero'), t.id);
+      assert.equal(kinds[0], 'nav', t.id);
+      // A screen (D110) is one app screen, not a homepage.
+      assert.equal(kinds[1], t.format === 'screen' ? 'heading' : 'hero', t.id);
+      assert.ok(spec.blocks.length >= 3, t.id);
       assert.ok(spec.blocks.length <= 6, t.id);
       assert.equal(
         spec.colors.background,

@@ -29,8 +29,38 @@ describe('a template brief from vibld.com (D106)', () => {
       {
         template: 'loanlight',
         brief: '## Loanlight\nBuild it.',
+        screens: [],
       },
     );
+  });
+
+  it('reads the screens chosen with it (D110), each once, and only ids', () => {
+    const hash = `#${new URLSearchParams({
+      template: 'loanlight',
+      brief: 'Build it.',
+      screens: 'mendwick,Bad Id!,relayon,mendwick,a,b,c,d,e',
+    }).toString()}`;
+    assert.deepEqual(readTemplateBrief(hash)?.screens, [
+      'mendwick',
+      'relayon',
+      'a',
+      'b',
+      'c',
+      'd',
+    ]);
+  });
+
+  it('keeps the screens through sign-in', () => {
+    const storage = memory();
+    storage.setItem(
+      TEMPLATE_BRIEF_KEY,
+      JSON.stringify({
+        template: 'loanlight',
+        brief: 'Build it.',
+        screens: ['mendwick', 7, '../x'],
+      }),
+    );
+    assert.deepEqual(takeTemplateBrief(storage)?.screens, ['mendwick']);
   });
 
   it('ignores a fragment without a usable brief', () => {

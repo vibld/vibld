@@ -7,16 +7,30 @@ import { contrastRatio } from '../src/contrast.ts';
 import {
   BUILD_PROMPT_SECTIONS,
   DESIGN_BASELINE,
+  DESIGN_SOURCES,
   DESIGN_TEMPLATES,
   DESIGN_USE_CASES,
+  SCREEN_PATTERNS,
+  SCREEN_TYPES,
+  baselineFor,
+  composeBrief,
   designBrief,
   designsForExample,
+  designsMergedInto,
   findDesignTemplate,
   isDesignTemplateId,
   listedDesignTemplates,
   DESIGN_BATCHES,
 } from '../src/design-templates.ts';
+import {
+  MAX_COMPOSED_SCREENS,
+  SCREENS,
+  SCREEN_BASELINE,
+  composedScreens,
+  screenSections,
+} from '../src/screen-patterns.ts';
 import { TYPE_SETS } from '../data/design-template-type.ts';
+import { SAAS_TYPE_SETS } from '../data/saas-template-type.ts';
 import { DESIGN_TEMPLATE_INDEX } from '../src/design-template-index.ts';
 import { DIAGRAM_TYPES } from '../src/diagrams.ts';
 import { MOTION_RECIPES } from '../src/motion.ts';
@@ -48,10 +62,26 @@ const TEXT_PAIRS = [
 ] as const;
 
 describe('the design template catalog', () => {
-  it('has every design the catalog does: 72 apps and 135 websites', () => {
-    assert.equal(DESIGN_TEMPLATES.length, 207);
-    assert.equal(DESIGN_TEMPLATES.filter((t) => t.kind === 'app').length, 72);
-    assert.equal(DESIGN_TEMPLATES.filter((t) => t.kind === 'site').length, 135);
+  it('has every entry of both batches', () => {
+    const of = (batch: string) =>
+      DESIGN_TEMPLATES.filter((t) => t.batch === batch);
+    // The design prompt catalog: 72 apps and 135 websites.
+    const designs = of('design-catalog');
+    assert.equal(designs.length, 207);
+    assert.equal(designs.filter((t) => t.kind === 'app').length, 72);
+    assert.equal(designs.filter((t) => t.kind === 'site').length, 135);
+    // The SaaS screen patterns: 149 app screens, 60 marketing sites (one
+    // of them a single 404 page) and 28 starters.
+    const saas = of('saas-screen-patterns');
+    assert.equal(saas.length, 237);
+    assert.equal(saas.filter((t) => t.format === 'screen').length, 149);
+    assert.equal(SCREEN_PATTERNS.length, 149);
+    assert.deepEqual(
+      saas.filter((t) => t.format === 'page').map((t) => t.id),
+      ['lostlane'],
+    );
+    // The catalog's 38 screen types, one per screen.
+    assert.equal(SCREEN_TYPES.length, 38);
   });
 
   it('keeps ids and names unique', () => {
@@ -71,7 +101,9 @@ describe('the design template catalog', () => {
         DESIGN_USE_CASES.includes(template.useCase),
         `${template.id}: ${template.useCase}`,
       );
-      if (template.kind === 'app') assert.equal(template.useCase, 'tools');
+      // Every app is a tool, except a SaaS starter that is a waitlist.
+      if (template.kind === 'app' && template.category !== 'waitlist')
+        assert.equal(template.useCase, 'tools', template.id);
     }
     // Every use case has designs to show.
     for (const useCase of DESIGN_USE_CASES) {
@@ -105,6 +137,13 @@ describe('the design template catalog', () => {
       brief.includes(findDesignTemplate('tallyroot')!.buildPrompt.trim()),
     );
     assert.equal(designBrief('no-such-design'), undefined);
+    // A SaaS screen pattern's brief starts with its own batch's baseline.
+    const saas = DESIGN_SOURCES.find(
+      (b) => b.batch === 'saas-screen-patterns',
+    )!;
+    assert.match(saas.baseline, /### SaaS screen baseline/);
+    assert.equal(baselineFor(findDesignTemplate('mendwick')!), saas.baseline);
+    assert.ok(designBrief('mendwick')!.startsWith(saas.baseline.trim()));
     assert.equal(isDesignTemplateId('tallyroot'), true);
     assert.equal(isDesignTemplateId('glassmorphism'), false);
   });
@@ -121,7 +160,14 @@ describe('the design template catalog', () => {
         format: t.format,
         batch: t.batch,
         addedOn: t.addedOn,
-        ...(t.mergedInto ? { mergedInto: t.mergedInto.slug } : {}),
+        ...(t.mergedInto
+          ? {
+              mergedInto: {
+                collection: t.mergedInto.collection,
+                slug: t.mergedInto.slug,
+              },
+            }
+          : {}),
       })),
     );
   });
@@ -131,7 +177,35 @@ describe('the design template catalog', () => {
       const batch = DESIGN_BATCHES[t.batch as keyof typeof DESIGN_BATCHES];
       assert.ok(batch, `${t.id}: unknown batch ${t.batch}`);
       assert.equal(t.addedOn, batch.addedOn, t.id);
-      assert.equal(t.format, 'design', t.id);
+      if (t.batch === 'design-catalog') assert.equal(t.format, 'design', t.id);
+    }
+    // Each batch records where it came from, once, in the order it arrived.
+    assert.deepEqual(
+      DESIGN_SOURCES.map((s) => s.batch),
+      Object.keys(DESIGN_BATCHES),
+    );
+    for (const source of DESIGN_SOURCES) {
+      assert.match(source.commit, /^[0-9a-f]{40}$/, source.batch);
+      assert.match(source.baseline, /### Engineering baseline/, source.batch);
+    }
+  });
+
+  it("keeps a screen pattern's screen types, patterns, states and guardrails", () => {
+    for (const t of DESIGN_TEMPLATES.filter(
+      (t) => t.batch === 'saas-screen-patterns',
+    )) {
+      assert.ok(t.patterns && t.patterns.length > 0, t.id);
+      assert.ok(t.states && t.states.length > 0, t.id);
+      for (const kind of ['ux', 'accessibility', 'security'] as const) {
+        assert.ok(
+          t.guardrails && t.guardrails[kind].length > 0,
+          `${t.id} ${kind}`,
+        );
+      }
+      if (t.format === 'screen') {
+        assert.ok(t.screenTypes && t.screenTypes.length > 0, t.id);
+        assert.ok(SCREEN_TYPES.includes(t.category), t.id);
+      }
     }
   });
 
@@ -164,7 +238,9 @@ describe('the WCAG AA check, rerun', () => {
         measured += 1;
       }
     }
-    assert.equal(measured, 2001);
+    // 2,001 from the design catalog and 1,872 from the SaaS screen
+    // patterns, the figure their own validate.py reports.
+    assert.equal(measured, 2001 + 1872);
   });
 
   it("passes every text pair of each design's inspiration style", () => {
@@ -261,7 +337,9 @@ describe('merging with what vibld already has', () => {
   const slugs = new Set(catalogue.examples.map((entry) => entry.slug));
 
   it('merges a design into an example only when that example exists', () => {
-    const merged = DESIGN_TEMPLATES.filter((t) => t.mergedInto);
+    const merged = DESIGN_TEMPLATES.filter(
+      (t) => t.mergedInto?.collection === 'examples',
+    );
     assert.deepEqual(merged.map((t) => t.id).sort(), [
       'kasimir-lund',
       'makers-forum-26',
@@ -273,7 +351,37 @@ describe('merging with what vibld already has', () => {
         template,
       ]);
     }
-    assert.equal(listedDesignTemplates().length, 207 - merged.length);
+  });
+
+  it('merges a SaaS entry into the design that is the same product (D107)', () => {
+    const merged = DESIGN_TEMPLATES.filter(
+      (t) => t.mergedInto?.collection === 'templates',
+    );
+    assert.deepEqual(
+      Object.fromEntries(merged.map((t) => [t.id, t.mergedInto!.slug])),
+      {
+        chorusdesk: 'plainwrite',
+        coquill: 'plainwrite',
+        cuetide: 'queueline',
+        dawnlist: 'queueline',
+        gildway: 'tallyway',
+        hexledger: 'nightvault',
+      },
+    );
+    for (const template of merged) {
+      const into = findDesignTemplate(template.mergedInto!.slug)!;
+      assert.equal(into.batch, 'design-catalog', template.id);
+      assert.equal(into.mergedInto, undefined, template.id);
+      assert.ok(designsMergedInto(into.id).includes(template), template.id);
+    }
+    assert.deepEqual(
+      designsMergedInto('queueline').map((t) => t.id),
+      ['cuetide', 'dawnlist'],
+    );
+    assert.equal(
+      listedDesignTemplates().length,
+      DESIGN_TEMPLATES.length - 3 - merged.length,
+    );
   });
 
   it("clashes with no name or id in vibld's own catalogues", () => {
@@ -306,13 +414,18 @@ describe('merging with what vibld already has', () => {
   });
 });
 
-describe("each design's own typefaces (D103)", () => {
+describe("each design's own typefaces (D103, D108)", () => {
   const key = (t: (typeof DESIGN_TEMPLATES)[number]) =>
     [...new Set(t.style.typeSet.map((f) => f.family))].sort().join(' + ');
+  // A screen pattern keeps the catalog's faces (D108): composed into a
+  // design, it is drawn in the design's.
+  const designs = DESIGN_TEMPLATES.filter((t) => t.format !== 'screen');
+  const SETS = { ...TYPE_SETS, ...SAAS_TYPE_SETS };
 
-  it('gives no two designs the same set', () => {
+  it('gives no two designs the same set, across both batches', () => {
+    assert.equal(designs.length, 207 + 88);
     const seen = new Map<string, string>();
-    for (const t of DESIGN_TEMPLATES) {
+    for (const t of designs) {
       const other = seen.get(key(t));
       assert.equal(other, undefined, `${t.id} and ${other}: ${key(t)}`);
       seen.set(key(t), t.id);
@@ -321,7 +434,7 @@ describe("each design's own typefaces (D103)", () => {
 
   it('uses no family in more than four designs', () => {
     const uses = new Map<string, number>();
-    for (const t of DESIGN_TEMPLATES) {
+    for (const t of designs) {
       for (const family of new Set(t.style.typeSet.map((f) => f.family))) {
         uses.set(family, (uses.get(family) ?? 0) + 1);
       }
@@ -349,10 +462,28 @@ describe("each design's own typefaces (D103)", () => {
     }
   });
 
+  it("keeps a screen pattern's own faces, as the catalog named them", () => {
+    for (const t of SCREEN_PATTERNS) {
+      assert.equal(SETS[t.id], undefined, t.id);
+      const { display, body } = t.style.fonts;
+      for (const [font, role] of [
+        [display, 'display'],
+        [body, 'body'],
+      ] as const) {
+        const loaded = font.onGoogleFonts ? font.family : font.substitute;
+        assert.equal(
+          t.style.typeSet.find((f) => f.role === role)?.family,
+          loaded,
+          t.id,
+        );
+      }
+    }
+  });
+
   it('leaves no family it replaced in the words it renamed', () => {
     const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    for (const t of DESIGN_TEMPLATES) {
-      const set = TYPE_SETS[t.id]!;
+    for (const t of designs) {
+      const set = SETS[t.id]!;
       const text = [
         t.buildPrompt,
         t.style.typography.display,
@@ -383,5 +514,64 @@ describe("each design's own typefaces (D103)", () => {
         }
       }
     }
+  });
+});
+
+describe('screen patterns composed into a design (D110)', () => {
+  it('has a section for every screen pattern, and no more', () => {
+    assert.deepEqual(
+      SCREENS.map((s) => s.id),
+      SCREEN_PATTERNS.map((t) => t.id),
+    );
+    for (const screen of SCREENS) {
+      const t = findDesignTemplate(screen.id)!;
+      assert.equal(screen.name, t.name);
+      assert.deepEqual(screen.screenTypes, t.screenTypes);
+      assert.equal(screen.category, t.category);
+      assert.ok(screen.section.startsWith(`### ${t.name}: ${t.summary}`));
+      for (const heading of [
+        'Patterns',
+        'Pages & layout',
+        'Components & interactions',
+        'Data & state',
+        'States to design',
+        'Guardrails',
+      ]) {
+        assert.ok(
+          screen.section.includes(`#### ${heading}\n`),
+          `${t.id}: ${heading}`,
+        );
+      }
+      // Its own stack and design system are the design's to decide.
+      assert.ok(!screen.section.includes('### Stack'), t.id);
+      assert.ok(!screen.section.includes('### Design system'), t.id);
+      for (const line of t.guardrails!.security) {
+        assert.ok(screen.section.includes(line), `${t.id}: ${line}`);
+      }
+    }
+    assert.match(SCREEN_BASELINE, /^### SaaS screen baseline\n/);
+  });
+
+  it("adds chosen screens after a design's brief, in its design system", () => {
+    const brief = composeBrief('tallyroot', ['mendwick', 'nope', 'mendwick'])!;
+    assert.ok(brief.startsWith(designBrief('tallyroot')!));
+    assert.ok(brief.includes('## Screens to add'));
+    assert.ok(brief.includes('in its design system above'));
+    assert.ok(brief.includes(SCREEN_BASELINE));
+    assert.equal(brief.split('### Mendwick:').length, 2);
+    assert.equal(composeBrief('tallyroot', []), designBrief('tallyroot'));
+    assert.equal(composeBrief('nope', ['mendwick']), undefined);
+  });
+
+  it('keeps no more screens than fit, and never more than the most', () => {
+    const ids = SCREENS.map((s) => s.id);
+    assert.equal(composedScreens(ids).length, MAX_COMPOSED_SCREENS);
+    for (const budget of [0, 3_000, 9_000, 20_000, 40_000]) {
+      assert.ok(screenSections(ids, budget).length <= budget, String(budget));
+    }
+    assert.equal(screenSections(ids, 10), '');
+    const whole = composeBrief('tallyroot', ids, 40_000)!;
+    assert.ok(whole.length <= 40_000);
+    assert.ok(whole.includes('## Screens to add'));
   });
 });

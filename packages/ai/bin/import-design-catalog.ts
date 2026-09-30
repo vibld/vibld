@@ -1,13 +1,16 @@
 /**
- * Imports the design prompt catalog (Drummond-IT/designs-v1,
- * `design-prompt-catalog/`) into vibld's own shape, as
+ * Imports Drummond-IT/designs-v1's two catalogs, the design prompt catalog
+ * (`design-prompt-catalog/`) and the SaaS screen patterns
+ * (`saas-screen-patterns/`, D107 to D110), into vibld's own shape, as
  * `packages/ai/data/design-templates.ts`, a data module rather than JSON so
  * every reader (Node, Vite, the Worker, TypeScript under any module
  * setting) can import it without import attributes. It is generated: change
  * this script, or the catalog, and run it again, never the output.
  *
  *   node --experimental-strip-types bin/import-design-catalog.ts \
- *     <path to design-prompt-catalog> <commit sha> [google fonts metadata json]
+ *     <designs-v1 checkout> [google fonts metadata json]
+ *
+ * Each batch records the last commit in the checkout that changed it.
  *
  * The Google Fonts metadata (https://fonts.google.com/metadata/fonts) is
  * fetched when no file is given. It is read only here, to decide which of a
@@ -31,7 +34,12 @@
  *   family the design named is swapped, word for word, for one of the same
  *   construction, so no two designs share a set; a face the prompt does not
  *   yet name is added to its design system section;
- * - the batch it arrived in and when (D106).
+ * - the batch it arrived in and when (D106), and its baseline;
+ * - for a SaaS screen pattern (format `screen`), its screen types, patterns,
+ *   states and guardrails, and the section a brief composes it as
+ *   (`data/screen-patterns.ts`, D110). A screen keeps the catalog's faces
+ *   (D108); an entry that is the same product as a design already here is
+ *   merged into it (D107).
  *
  * It refuses to write anything if a check fails: a missing field or build
  * prompt heading, a repeated id or name, a recorded contrast pair below its
@@ -45,6 +53,7 @@ import { fileURLToPath } from 'node:url';
 import { contrastRatio } from '../src/contrast.ts';
 import { hexToHsl, shadeAgainst } from '../src/color-space.ts';
 import { TYPE_SETS } from '../data/design-template-type.ts';
+import { SAAS_TYPE_SETS } from '../data/saas-template-type.ts';
 import type { TypeSet } from '../data/design-template-type.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -55,6 +64,11 @@ const OUT = resolve(HERE, '../data/design-templates.ts');
  * whole catalog.
  */
 const INDEX_OUT = resolve(HERE, '../data/design-template-index.ts');
+/**
+ * The screen patterns as a brief composes them (D110), small enough for the
+ * builder to load when its screen picker opens.
+ */
+const SCREENS_OUT = resolve(HERE, '../data/screen-patterns.ts');
 
 const HEADINGS = [
   'Goal',
@@ -82,7 +96,6 @@ const REQUIRED = [
   'key_components',
   'interactions',
   'data_model',
-  'stack_observed',
   'complexity',
   'contrast_checks',
   'build_prompt',
@@ -124,8 +137,45 @@ const USE_CASE: Record<string, string> = {
  */
 const MERGED_INTO: Record<
   string,
-  { collection: 'examples'; slug: string; reason: string }
+  { collection: 'examples' | 'templates'; slug: string; reason: string }
 > = {
+  // The SaaS screen patterns (D107): the same product as a design already
+  // in the catalog, shown on that design as another way to draw it.
+  cuetide: {
+    collection: 'templates',
+    slug: 'queueline',
+    reason:
+      'A pre-launch waitlist page: a countdown, a signup count and an email form.',
+  },
+  dawnlist: {
+    collection: 'templates',
+    slug: 'queueline',
+    reason:
+      'A dark pre-launch waitlist page that collects names and emails for a launch.',
+  },
+  coquill: {
+    collection: 'templates',
+    slug: 'plainwrite',
+    reason:
+      'A collaborative documents editor with live cursors and inline comments.',
+  },
+  chorusdesk: {
+    collection: 'templates',
+    slug: 'plainwrite',
+    reason:
+      'A collaborative documents app with presence, live cursors and sharing.',
+  },
+  hexledger: {
+    collection: 'templates',
+    slug: 'nightvault',
+    reason:
+      'A dark marketing site for a payments and business-finance startup.',
+  },
+  gildway: {
+    collection: 'templates',
+    slug: 'tallyway',
+    reason: 'A marketing site for a payments and cards startup.',
+  },
   'kasimir-lund': {
     collection: 'examples',
     slug: 'freelance-portfolio-opus-5-5',
@@ -142,6 +192,72 @@ const MERGED_INTO: Record<
     reason: 'A tech conference site with a schedule and speakers.',
   },
 };
+
+/**
+ * Each batch this imports (D106), in the order they arrived: where it is in
+ * Drummond-IT/designs-v1, its data file, and when vibld added it.
+ */
+export const SOURCES = [
+  {
+    batch: 'design-catalog',
+    path: 'design-prompt-catalog',
+    file: 'design-catalog.json',
+    addedOn: '2026-09-30',
+  },
+  {
+    batch: 'saas-screen-patterns',
+    path: 'saas-screen-patterns',
+    file: 'saas-screen-patterns.json',
+    addedOn: '2026-09-30',
+  },
+] as const;
+
+type Format = 'design' | 'page' | 'screen' | 'section';
+
+/**
+ * The SaaS screen patterns' entries that are one page rather than a site
+ * (D106): its marketing-sites group holds one 404 page.
+ */
+const FORMAT_OVERRIDES: Record<string, Format> = { lostlane: 'page' };
+
+/**
+ * What an entry is, in vibld's terms (D84, D110). The design catalog's apps
+ * are tools and its websites go where their subject does. Of the SaaS screen
+ * patterns: an app screen is a screen pattern a template composes; a
+ * marketing site is a SaaS landing site; a starter is a site when it is a
+ * static site and an app otherwise, and a SaaS landing site when it is a
+ * marketing site or a waitlist.
+ */
+function classify(e: SourceEntry): {
+  kind: 'site' | 'app';
+  useCase: string | undefined;
+  format: Format;
+} {
+  const format = FORMAT_OVERRIDES[e.id] ?? 'design';
+  switch (e.group) {
+    case 'apps':
+    case 'websites':
+      return {
+        kind: e.group === 'apps' ? 'app' : 'site',
+        useCase: USE_CASE[e.category],
+        format,
+      };
+    case 'app-screens':
+      return { kind: 'app', useCase: 'tools', format: 'screen' };
+    case 'marketing-sites':
+      return { kind: 'site', useCase: 'saas-landing', format };
+    case 'saas-starters':
+      return {
+        kind: e.complexity === 'static site' ? 'site' : 'app',
+        useCase: /^(marketing-site|waitlist)$/.test(e.category)
+          ? 'saas-landing'
+          : 'tools',
+        format,
+      };
+    default:
+      return { kind: 'app', useCase: undefined, format };
+  }
+}
 
 /**
  * Typefaces the catalog names that Google Fonts does not serve, and the
@@ -198,7 +314,8 @@ interface SourceEntry {
   id: string;
   name: string;
   kind: string;
-  group: 'apps' | 'websites';
+  group:
+    'apps' | 'websites' | 'app-screens' | 'marketing-sites' | 'saas-starters';
   category: string;
   purpose: string;
   audience: string[];
@@ -206,15 +323,24 @@ interface SourceEntry {
   visual_style: {
     palette: { role: string; hex: string }[];
     typography: { display: string; body: string; notes?: string };
-    spacing: string;
+    /** 37 SaaS screen patterns give it as named parts. */
+    spacing: string | Record<string, string>;
     mood: string;
     imagery: string;
   };
   key_components: string[];
   interactions: string[];
   data_model: string[];
-  stack_observed: string[];
+  /** The design catalog's word for it. */
+  stack_observed?: string[];
+  /** The SaaS screen patterns' word for it. */
+  stack_suggested?: string[];
   complexity: string;
+  /** SaaS screen patterns only. */
+  screen_types?: string[];
+  patterns?: string[];
+  states?: string[];
+  guardrails?: { ux: string[]; accessibility: string[]; security: string[] };
   contrast_checks: {
     use: string;
     fg?: string;
@@ -680,8 +806,10 @@ function checkSource(entries: SourceEntry[], count: number) {
         problems.push(`${e.id}: build prompt lacks "### ${h}"`);
       }
     }
-    if (!USE_CASE[e.category])
+    if (!classify(e).useCase)
       problems.push(`${e.id}: unknown category ${e.category}`);
+    if (!e.stack_observed && !e.stack_suggested)
+      problems.push(`${e.id}: missing stack_observed or stack_suggested`);
     for (const c of e.contrast_checks) {
       // Decorative pairs are exempt, as the catalog records them. Every
       // other pair with a target is measured here, including the ones the
@@ -705,9 +833,6 @@ function checkSource(entries: SourceEntry[], count: number) {
   }
   return checked;
 }
-
-/** The batch this importer brings in (D106): one per source, dated. */
-const BATCH = { id: 'design-catalog', addedOn: '2026-09-30' } as const;
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -789,44 +914,188 @@ function withTypeSet(id: string, prompt: string, set: TypeSet): string {
 function dataModule(value: unknown): string {
   return (
     '// Generated by packages/ai/bin/import-design-catalog.ts from\n' +
-    '// Drummond-IT/designs-v1, design-prompt-catalog/. Do not edit: change the\n' +
-    '// catalog or the importer and run it again.\n' +
+    '// Drummond-IT/designs-v1 (design-prompt-catalog/, saas-screen-patterns/).\n' +
+    '// Do not edit: change a catalog or the importer and run it again.\n' +
     `const data: unknown = ${JSON.stringify(value, null, 2)};\n\nexport default data;\n`
   );
 }
 
-function main([dir, commit, fontsPath]: string[]) {
-  if (!dir || !commit) {
+/** The body of a markdown section, from its heading to the next of its level. */
+function sectionOf(text: string, heading: string, level = '### '): string {
+  const start = text.indexOf(`${level}${heading}\n`);
+  if (start < 0) return '';
+  const body = text.slice(start + level.length + heading.length + 1);
+  const next = body.indexOf(`\n${level}`);
+  return (next < 0 ? body : body.slice(0, next)).trim();
+}
+
+/**
+ * What a screen pattern adds to a brief it is composed into (D110): what it
+ * is for, its patterns, layout, components, data and states, and its
+ * guardrails. Its stack, design system and performance notes are left out:
+ * the template's own apply.
+ */
+function screenSection(t: {
+  name: string;
+  summary: string;
+  purpose: string;
+  screenTypes?: readonly string[];
+  patterns?: readonly string[];
+  states?: readonly string[];
+  guardrails?: {
+    ux: readonly string[];
+    accessibility: readonly string[];
+    security: readonly string[];
+  };
+  buildPrompt: string;
+}): string {
+  const list = (items: readonly string[] | undefined) =>
+    (items ?? []).map((item) => `- ${item}`).join('\n');
+  const parts = [
+    `### ${t.name}: ${t.summary}`,
+    `Screen types: ${(t.screenTypes ?? []).join(', ')}.`,
+    t.purpose,
+    `#### Patterns\n${list(t.patterns)}`,
+    ...(
+      ['Pages & layout', 'Components & interactions', 'Data & state'] as const
+    ).map((h) => `#### ${h}\n${sectionOf(t.buildPrompt, h)}`),
+    `#### States to design\n${list(t.states)}`,
+    `#### Guardrails\nUX:\n${list(t.guardrails?.ux)}\nAccessibility:\n${list(t.guardrails?.accessibility)}\nSecurity:\n${list(t.guardrails?.security)}`,
+  ];
+  return parts.join('\n\n');
+}
+
+/**
+ * Spacing as one string: 37 SaaS screen patterns give it as named parts
+ * ({ density, grid, radius, ... }), which become "Density: ... Grid: ...",
+ * in the catalog's own order and words.
+ */
+function spacingText(spacing: string | Record<string, string>): string {
+  if (typeof spacing === 'string') return spacing;
+  return Object.entries(spacing)
+    .map(([k, v]) => `${k.charAt(0).toUpperCase()}${k.slice(1)}: ${v}`)
+    .join(' ');
+}
+
+/** The last commit in `checkout` that changed `path`. */
+function commitOf(checkout: string, path: string): string {
+  return execFileSync(
+    'git',
+    ['-C', checkout, 'log', '-1', '--format=%H', '--', path],
+    {
+      encoding: 'utf8',
+    },
+  ).trim();
+}
+
+/**
+ * A screen pattern keeps the faces the catalog drew it in (D108): composed
+ * into a template, it is drawn in that template's type, so its own set is
+ * not one of the unique sets D103 gives a template.
+ */
+const SCREEN_TYPE_WHY =
+  "The catalog's own faces. A screen composed into a template is drawn in that template's typefaces.";
+
+function main([checkout, fontsPath]: string[]) {
+  if (!checkout) {
     console.error(
-      'usage: import-design-catalog.ts <design-prompt-catalog dir> <commit sha> [fonts metadata json]',
+      'usage: import-design-catalog.ts <Drummond-IT/designs-v1 checkout> [fonts metadata json]',
     );
     process.exit(2);
   }
-  const source = JSON.parse(
-    readFileSync(join(dir, 'design-catalog.json'), 'utf8'),
-  ) as {
-    updated: string;
-    count: number;
-    entries: SourceEntry[];
-  };
-  const baseline = readFileSync(join(dir, 'baseline.md'), 'utf8');
-  const checkedPairs = checkSource(source.entries, source.count);
-  for (const id of Object.keys(MERGED_INTO)) {
-    if (!source.entries.some((e) => e.id === id)) {
-      problems.push(`MERGED_INTO names ${id}, which the catalog does not have`);
+  const loaded = SOURCES.map((src) => {
+    const dir = join(checkout, src.path);
+    const json = JSON.parse(readFileSync(join(dir, src.file), 'utf8')) as {
+      updated: string;
+      count: number;
+      entries: SourceEntry[];
+    };
+    return {
+      ...src,
+      dir,
+      commit: commitOf(checkout, src.path),
+      updated: json.updated,
+      count: json.count,
+      entries: json.entries,
+      baseline: readFileSync(join(dir, 'baseline.md'), 'utf8'),
+    };
+  });
+  const entries = loaded.flatMap((src) =>
+    src.entries.map((e) => ({ e, batch: src.batch, addedOn: src.addedOn })),
+  );
+  let checkedPairs = 0;
+  for (const src of loaded) checkedPairs += checkSource(src.entries, src.count);
+  // An id or a name is unique across every batch, not only within one.
+  for (const key of ['id', 'name'] as const) {
+    const seen = new Map<string, string>();
+    for (const { e, batch } of entries) {
+      const v = e[key].toLowerCase();
+      const other = seen.get(v);
+      if (other && other !== batch)
+        problems.push(`${key} ${e[key]} is in both ${other} and ${batch}`);
+      seen.set(v, batch);
     }
   }
+  const byId = new Map(entries.map(({ e }) => [e.id, e]));
+  for (const [id, merge] of Object.entries(MERGED_INTO)) {
+    if (!byId.has(id)) {
+      problems.push(`MERGED_INTO names ${id}, which the catalog does not have`);
+    }
+    if (merge.collection === 'templates') {
+      if (!byId.has(merge.slug)) {
+        problems.push(`${id} merges into ${merge.slug}, which is not a design`);
+      } else if (MERGED_INTO[merge.slug]) {
+        problems.push(
+          `${id} merges into ${merge.slug}, which is itself merged`,
+        );
+      }
+    }
+  }
+  const typeSets: Record<string, TypeSet> = { ...TYPE_SETS, ...SAAS_TYPE_SETS };
 
   const families = googleFamilies(fontsPath);
   familyNames = families.map((f) => f.family);
   const fonts = makeFontResolver(families);
-  for (const id of Object.keys(TYPE_SETS)) {
-    if (!source.entries.some((e) => e.id === id)) {
-      problems.push(`TYPE_SETS names ${id}, which the catalog does not have`);
+  for (const id of Object.keys(typeSets)) {
+    const e = byId.get(id);
+    if (!e) {
+      problems.push(`a type set names ${id}, which the catalog does not have`);
+    } else if (classify(e).format === 'screen') {
+      problems.push(`${id} is a screen, which keeps its own faces (D108)`);
     }
   }
-  const templates = source.entries.map((e) => {
-    const set = TYPE_SETS[e.id];
+  const templates = entries.map(({ e, batch, addedOn }) => {
+    const { kind, useCase, format } = classify(e);
+    const screenSet = (): TypeSet => {
+      const display = fonts.resolveFamily(
+        e.id,
+        e.visual_style.typography.display,
+      );
+      const body = fonts.resolveFamily(
+        e.id,
+        e.visual_style.typography.body,
+        display,
+      );
+      const family = (f: typeof display) =>
+        f.onGoogleFonts ? f.family : (f.substitute ?? SYSTEM_SUBSTITUTE);
+      return {
+        faces: [
+          {
+            family: family(display),
+            role: 'display',
+            use: e.visual_style.typography.display,
+          },
+          {
+            family: family(body),
+            role: 'body',
+            use: e.visual_style.typography.body,
+          },
+        ],
+        replaces: {},
+        why: SCREEN_TYPE_WHY,
+      };
+    };
+    const set = format === 'screen' ? screenSet() : typeSets[e.id];
     if (!set) {
       problems.push(`${e.id}: no type set in data/design-template-type.ts`);
     }
@@ -886,13 +1155,13 @@ function main([dir, commit, fontsPath]: string[]) {
       id: e.id,
       name: e.name,
       summary: e.kind,
-      kind: e.group === 'apps' ? 'app' : 'site',
-      useCase: USE_CASE[e.category],
+      kind,
+      useCase,
       category: e.category,
       complexity: e.complexity,
-      format: 'design',
-      batch: BATCH.id,
-      addedOn: BATCH.addedOn,
+      format,
+      batch,
+      addedOn,
       ...(MERGED_INTO[e.id] ? { mergedInto: MERGED_INTO[e.id] } : {}),
       purpose: e.purpose,
       audience: e.audience,
@@ -900,11 +1169,15 @@ function main([dir, commit, fontsPath]: string[]) {
       components: e.key_components,
       interactions: e.interactions,
       dataModel: e.data_model,
-      stack: e.stack_observed,
+      stack: e.stack_observed ?? e.stack_suggested ?? [],
+      ...(e.screen_types ? { screenTypes: e.screen_types } : {}),
+      ...(e.patterns ? { patterns: e.patterns } : {}),
+      ...(e.states ? { states: e.states } : {}),
+      ...(e.guardrails ? { guardrails: e.guardrails } : {}),
       style: {
         mood: e.visual_style.mood,
         imagery: e.visual_style.imagery,
-        spacing: e.visual_style.spacing,
+        spacing: spacingText(e.visual_style.spacing),
         palette: e.visual_style.palette,
         typography,
         fonts: { display, body },
@@ -918,16 +1191,18 @@ function main([dir, commit, fontsPath]: string[]) {
             bodyFont,
             googleFontsUrl: fonts.cssUrl(typeSet.faces.map((f) => f.family)),
           },
-          radius: radiusOf(e.visual_style.spacing),
+          radius: radiusOf(spacingText(e.visual_style.spacing)),
         },
         derived,
       },
       buildPrompt: withTypeSet(e.id, e.build_prompt, typeSet),
     };
   });
-  // No two designs share a set of families (D103).
+  // No two designs share a set of families (D103); a screen keeps the
+  // catalog's own (D108).
   const sets = new Map<string, string>();
   for (const t of templates) {
+    if (t.format === 'screen') continue;
     const key = [...new Set(t.style.typeSet.map((f) => f.family))]
       .sort()
       .join(' + ');
@@ -943,17 +1218,41 @@ function main([dir, commit, fontsPath]: string[]) {
     process.exit(1);
   }
   const output = {
-    source: {
+    sources: loaded.map((src) => ({
+      batch: src.batch,
       repository: 'Drummond-IT/designs-v1',
-      path: 'design-prompt-catalog',
-      commit,
-      updated: source.updated,
-    },
-    baseline: housed(baseline),
+      path: src.path,
+      commit: src.commit,
+      updated: src.updated,
+      baseline: housed(src.baseline),
+    })),
     templates: housed(templates),
   };
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, dataModule(output));
+  const screenBaseline = output.sources
+    .map((src) => sectionOf(src.baseline, 'SaaS screen baseline', '### '))
+    .find(Boolean);
+  if (!screenBaseline) {
+    console.error('No "### SaaS screen baseline" in any baseline.md');
+    process.exit(1);
+  }
+  writeFileSync(
+    SCREENS_OUT,
+    dataModule({
+      baseline: `### SaaS screen baseline\n${screenBaseline}`,
+      screens: output.templates
+        .filter((t) => t.format === 'screen')
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          summary: t.summary,
+          category: t.category,
+          screenTypes: t.screenTypes ?? [],
+          section: screenSection(t),
+        })),
+    }),
+  );
   const index = output.templates.map((t) => ({
     id: t.id,
     name: t.name,
@@ -963,7 +1262,14 @@ function main([dir, commit, fontsPath]: string[]) {
     format: t.format,
     batch: t.batch,
     addedOn: t.addedOn,
-    ...(t.mergedInto ? { mergedInto: t.mergedInto.slug } : {}),
+    ...(t.mergedInto
+      ? {
+          mergedInto: {
+            collection: t.mergedInto.collection,
+            slug: t.mergedInto.slug,
+          },
+        }
+      : {}),
   }));
   writeFileSync(INDEX_OUT, dataModule(index));
   const substituted = templates.filter(
@@ -975,7 +1281,7 @@ function main([dir, commit, fontsPath]: string[]) {
     `${templates.length} templates, ${checkedPairs} recorded contrast pairs measured, ` +
       `${templates.length * TEXT_PAIRS.length} mapped text pairs at 4.5:1, ` +
       `${substituted} with a substituted typeface, ${solved} with a solved token, ` +
-      `${Object.keys(MERGED_INTO).length} merged into examples, ` +
+      `${Object.keys(MERGED_INTO).length} merged into another entry, ` +
       `${dashesRewritten} em-dashes rewritten -> ${OUT}`,
   );
 }

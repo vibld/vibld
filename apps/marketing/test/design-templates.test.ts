@@ -68,7 +68,17 @@ describe('the template catalog on vibld.com', () => {
   it('merges a design only into an example this site shows', () => {
     const shown = new Set(examples().map((e) => e.slug));
     for (const design of DESIGN_TEMPLATE_INDEX) {
-      if (design.mergedInto) assert.ok(shown.has(design.mergedInto), design.id);
+      if (design.mergedInto?.collection === 'examples')
+        assert.ok(shown.has(design.mergedInto.slug), design.id);
+    }
+  });
+
+  it('merges a design into another only when that one is listed (D107)', () => {
+    const byId = new Map(DESIGN_TEMPLATE_INDEX.map((t) => [t.id, t]));
+    for (const design of DESIGN_TEMPLATE_INDEX) {
+      if (design.mergedInto?.collection !== 'templates') continue;
+      const into = byId.get(design.mergedInto.slug);
+      assert.ok(into && !into.mergedInto, design.id);
     }
   });
 });

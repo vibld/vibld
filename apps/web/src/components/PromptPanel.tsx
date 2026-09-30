@@ -10,8 +10,10 @@ import { KnowledgePanel } from './KnowledgePanel.tsx';
 import { MediaLibrary } from './MediaLibrary.tsx';
 import { ModelPicker } from './ModelPicker.tsx';
 import { StyleDnaPanel } from './StyleDnaPanel.tsx';
+import { ScreenPicker } from './ScreenPicker.tsx';
 import { StylePicker } from './StylePicker.tsx';
 import {
+  MAX_BRIEF_CHARS,
   briefStorage,
   takeTemplateBrief,
 } from '../templates/template-brief.ts';
@@ -35,7 +37,7 @@ const EXAMPLES = [
   },
 ];
 
-type OptionId = 'style' | 'reference' | 'media' | 'preferences';
+type OptionId = 'style' | 'reference' | 'screens' | 'media' | 'preferences';
 
 export interface PromptPanelProps {
   state: BuilderState;
@@ -129,9 +131,33 @@ export function PromptPanel({
 }: PromptPanelProps) {
   // A template's brief, when vibld.com sent one (D106): filled once, to be
   // read, edited or sent like anything typed.
-  const [prompt, setPrompt] = useState(
-    () => takeTemplateBrief(briefStorage())?.brief ?? '',
-  );
+  const [sentBrief] = useState(() => takeTemplateBrief(briefStorage()));
+  const [prompt, setPrompt] = useState(sentBrief?.brief ?? '');
+  // The screens chosen with it (D110), added once their text has loaded,
+  // unless the message was changed first.
+  useEffect(() => {
+    if (!sentBrief || sentBrief.screens.length === 0) return;
+    let live = true;
+    import('@vibld/ai/screen-patterns').then(
+      ({ screenSections }) => {
+        const room = MAX_BRIEF_CHARS - sentBrief.brief.trimEnd().length - 2;
+        const text = screenSections(sentBrief.screens, room);
+        if (!live || !text) return;
+        setPrompt((current) =>
+          current === sentBrief.brief
+            ? `${current.trimEnd()}\n\n${text}`
+            : current,
+        );
+      },
+      () => {
+        // The brief is still there; the screens can be added from the
+        // Screens option.
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [sentBrief]);
   const [failNext, setFailNext] = useState(false);
   const [ownStyle, setOwnStyle] = useState<StylePresetId | null>(null);
   const [ownReferenceUrl, setOwnReferenceUrl] = useState('');
@@ -317,6 +343,27 @@ export function PromptPanel({
             disabled={disabled}
           />
         </>
+      ),
+    },
+    {
+      id: 'screens',
+      label: 'Screens',
+      value: null,
+      about:
+        'App screens such as a dashboard, settings or an empty state, each with its states and guardrails. They are added to your message, built in your design.',
+      body: (
+        <ScreenPicker
+          active={open === 'screens'}
+          disabled={disabled}
+          room={MAX_BRIEF_CHARS - prompt.trimEnd().length}
+          onAdd={(text) =>
+            setPrompt((current) =>
+              current.trim().length > 0
+                ? `${current.trimEnd()}\n\n${text}`
+                : text,
+            )
+          }
+        />
       ),
     },
   ];

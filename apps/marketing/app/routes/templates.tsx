@@ -31,6 +31,11 @@ export interface TemplateCard {
   useCase: string;
   category: string;
   complexity: string;
+  /** A whole design, a single page, or a screen pattern (D106, D110). */
+  format: string;
+  batch: string;
+  /** A screen pattern's screen types (D110); empty for a design. */
+  screenTypes: string[];
   addedOn: string;
   /** Catalog order, for "Recommended". */
   order: number;
@@ -70,13 +75,17 @@ function luminance(hex: string): number {
 }
 
 /**
- * Read at build time. The catalog is 2.6 MB, so it is imported here, in the
- * loader, which React Router keeps out of the browser bundle; the page gets
- * only what its cards draw.
+ * Read at build time. The catalog is megabytes, so it is imported here, in
+ * the loader, which React Router keeps out of the browser bundle; the page
+ * gets only what its cards draw.
  */
 export async function loader() {
-  const { listedDesignTemplates, DESIGN_TEMPLATES } =
-    await import('@vibld/ai/design-templates');
+  const {
+    listedDesignTemplates,
+    DESIGN_TEMPLATES,
+    DESIGN_BATCHES,
+    SCREEN_TYPES,
+  } = await import('@vibld/ai/design-templates');
   const { TEMPLATE_FONTS } = await import('../template-fonts.gen');
   const { previewSpec, fontStack } = await import('../template-preview');
   const styleOf = (family: string): TypeStyle =>
@@ -98,6 +107,9 @@ export async function loader() {
       useCase: t.useCase,
       category: t.category,
       complexity: t.complexity,
+      format: t.format,
+      batch: t.batch,
+      screenTypes: [...(t.screenTypes ?? [])],
       addedOn: t.addedOn,
       order,
       tone:
@@ -111,14 +123,32 @@ export async function loader() {
       preview: previewSpec(t, genericOf),
     };
   });
+  const nameOf = new Map(DESIGN_TEMPLATES.map((t) => [t.id, t.name]));
+  const mergedOf = (collection: 'examples' | 'templates') =>
+    DESIGN_TEMPLATES.filter((t) => t.mergedInto?.collection === collection).map(
+      (t) => ({
+        id: t.id,
+        name: t.name,
+        into: t.mergedInto!.slug,
+        intoName: nameOf.get(t.mergedInto!.slug) ?? t.mergedInto!.slug,
+      }),
+    );
   return {
     cards,
-    merged: DESIGN_TEMPLATES.filter((t) => t.mergedInto).map((t) => ({
-      id: t.id,
-      name: t.name,
-      example: t.mergedInto!.slug,
-    })),
+    merged: mergedOf('examples'),
+    alternates: mergedOf('templates'),
+    batches: Object.entries(DESIGN_BATCHES).map(([id, b]) => [id, b.name]) as [
+      string,
+      string,
+    ][],
+    screenTypes: [...SCREEN_TYPES].sort(),
   };
+}
+
+/** "empty-state" as a reader says it: "Empty state". */
+export function screenTypeLabel(type: string): string {
+  const words = type.replace(/-/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 const PAGE = 24;
@@ -127,6 +157,11 @@ type Sort = 'recommended' | 'name' | 'newest';
 
 interface Filters {
   q: string;
+  /** 'design' (sites and apps, and single pages) or 'screen' (D110). */
+  format: string;
+  /** A screen type, which shows screens only. */
+  screen: string;
+  batch: string;
   use: string;
   kind: string;
   tone: string;
@@ -137,6 +172,9 @@ interface Filters {
 
 const EMPTY: Filters = {
   q: '',
+  format: '',
+  screen: '',
+  batch: '',
   use: '',
   kind: '',
   tone: '',
@@ -150,6 +188,9 @@ function readFilters(params: URLSearchParams): Filters {
   const sort = get('sort');
   return {
     q: get('q'),
+    format: get('format'),
+    screen: get('screen'),
+    batch: get('batch'),
     use: get('use'),
     kind: get('kind'),
     tone: get('tone'),
@@ -160,6 +201,15 @@ function readFilters(params: URLSearchParams): Filters {
 }
 
 export function matches(card: TemplateCard, f: Filters): boolean {
+  if (f.format === 'screen' && card.format !== 'screen') return false;
+  if (f.format === 'design' && card.format === 'screen') return false;
+  if (
+    f.screen &&
+    (card.format !== 'screen' ||
+      (card.category !== f.screen && !card.screenTypes.includes(f.screen)))
+  )
+    return false;
+  if (f.batch && card.batch !== f.batch) return false;
   if (f.use && card.useCase !== f.use) return false;
   if (f.kind && card.kind !== f.kind) return false;
   if (f.tone && card.tone !== f.tone) return false;
@@ -175,6 +225,7 @@ export function matches(card: TemplateCard, f: Filters): boolean {
       card.name,
       card.summary,
       card.category,
+      ...card.screenTypes,
       ...card.faces.map((face) => face.family),
     ]
       .join(' ')
@@ -189,9 +240,10 @@ export function matches(card: TemplateCard, f: Filters): boolean {
 export function sorted(cards: TemplateCard[], sort: Sort): TemplateCard[] {
   const copy = [...cards];
   if (sort === 'name') copy.sort((a, b) => a.name.localeCompare(b.name));
+  // The latest batch first: within a day, what was imported later.
   else if (sort === 'newest')
     copy.sort(
-      (a, b) => b.addedOn.localeCompare(a.addedOn) || a.order - b.order,
+      (a, b) => b.addedOn.localeCompare(a.addedOn) || b.order - a.order,
     );
   else copy.sort((a, b) => a.order - b.order);
   return copy;
@@ -206,9 +258,17 @@ export function sorted(cards: TemplateCard[], sort: Sort): TemplateCard[] {
  * for, which also keeps their typefaces from loading.
  */
 export default function Templates() {
-  const { cards, merged } = useLoaderData<typeof loader>();
+  const { cards, merged, alternates, batches, screenTypes } =
+    useLoaderData<typeof loader>();
+  const designCount = cards.filter((c) => c.format !== 'screen').length;
+  const screenCount = cards.length - designCount;
   const [params, setParams] = useSearchParams();
-  const filters = readFilters(params);
+  // The page is prerendered without a query, so the first render matches it
+  // and the address's filters apply once the page is hydrated; applied
+  // earlier, a shared filtered link failed hydration.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  const filters = hydrated ? readFilters(params) : EMPTY;
   const [shown, setShown] = useState(PAGE);
   useEffect(() => setShown(PAGE), [params]);
 
@@ -218,7 +278,7 @@ export default function Templates() {
         cards.filter((card) => matches(card, filters)),
         filters.sort,
       ),
-    [cards, params],
+    [cards, params, hydrated],
   );
   const set = (key: keyof Filters, value: string) => {
     const next = new URLSearchParams(params);
@@ -235,7 +295,7 @@ export default function Templates() {
       <PageHead
         eyebrow="Templates"
         title="Designs to start from"
-        lead={`${approxCount(cards.length)} app and website designs, each with its own typefaces, a palette whose every text pair passes WCAG AA, and a build prompt a coding agent can follow. Open one to read all of it, or start building from it.`}
+        lead={`${approxCount(designCount)} app and website designs and ${approxCount(screenCount)} app screens to add to them, each with a palette whose every text pair passes WCAG AA and a build prompt a coding agent can follow. Every design has its own typefaces. Open one to read all of it, or start building from it.`}
       />
       <section
         className="lb-section lb-section--tight"
@@ -261,6 +321,22 @@ export default function Templates() {
                 onChange={(event) => set('q', event.target.value)}
               />
             </label>
+            <Select
+              label="Show"
+              value={filters.format}
+              onChange={(v) => set('format', v)}
+              anyLabel="Designs and screens"
+              options={[
+                ['design', 'Designs'],
+                ['screen', 'App screens'],
+              ]}
+            />
+            <Select
+              label="Screen type"
+              value={filters.screen}
+              onChange={(v) => set('screen', v)}
+              options={screenTypes.map((type) => [type, screenTypeLabel(type)])}
+            />
             <Select
               label="Use case"
               value={filters.use}
@@ -308,6 +384,12 @@ export default function Templates() {
               ]}
             />
             <Select
+              label="Source"
+              value={filters.batch}
+              onChange={(v) => set('batch', v)}
+              options={batches}
+            />
+            <Select
               label="Sort"
               value={filters.sort}
               onChange={(v) => set('sort', v)}
@@ -323,8 +405,8 @@ export default function Templates() {
             {results.length === 0
               ? 'No design matches all of these.'
               : filtered
-                ? `${approxCount(results.length)} ${results.length === 1 ? 'design matches' : 'designs match'}.`
-                : `${approxCount(results.length)} designs.`}{' '}
+                ? `${approxCount(results.length)} ${results.length === 1 ? 'entry matches' : 'entries match'}.`
+                : `${approxCount(results.length)} designs and screens.`}{' '}
             {filtered ? (
               <button
                 type="button"
@@ -349,7 +431,7 @@ export default function Templates() {
                 className="button"
                 onClick={() => setShown((n) => n + PAGE)}
               >
-                Show more designs
+                Show more
               </button>
             </p>
           ) : null}
@@ -411,7 +493,20 @@ export default function Templates() {
             {merged.map((m) => (
               <li key={m.id}>
                 <Link to={`/templates/${m.id}`}>{m.name}</Link>, on{' '}
-                <Link to={`/examples#example-${m.example}`}>its example</Link>
+                <Link to={`/examples#example-${m.into}`}>its example</Link>
+              </li>
+            ))}
+          </ul>
+          <h3>Another design for the same product</h3>
+          <p>
+            These are the same product as a design above, so they are shown on
+            it as another way to draw it:
+          </p>
+          <ul className="lb-ticks">
+            {alternates.map((m) => (
+              <li key={m.id}>
+                <Link to={`/templates/${m.id}`}>{m.name}</Link>, on{' '}
+                <Link to={`/templates/${m.into}`}>{m.intoName}</Link>
               </li>
             ))}
           </ul>
@@ -496,8 +591,9 @@ export function TemplateCardView({
             ))}
           </ul>
           <p className="lb-tpl__facts">
-            {card.kind === 'app' ? 'App' : 'Website'} ·{' '}
-            {card.category.replace(/-/g, ' ')}
+            {card.format === 'screen'
+              ? `App screen · ${screenTypeLabel(card.category)}`
+              : `${card.format === 'page' ? 'Single page' : card.kind === 'app' ? 'App' : 'Website'} · ${card.category.replace(/-/g, ' ')}`}
           </p>
         </div>
       </Link>

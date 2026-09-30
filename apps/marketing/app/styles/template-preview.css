@@ -350,3 +350,24 @@
 .tp__main .tp__headline {
   font-size: 4.2cqw;
 }
+
+/* A screen pattern's title bar (D110): where a homepage has its hero. */
+.tp__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2cqw;
+  padding: 2.4cqw 3cqw 1.2cqw;
+  border-bottom: 1px solid var(--tp-border);
+}
+.tp__title {
+  font-family: var(--tp-display);
+  font-weight: 700;
+  font-size: 3.2cqw;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
