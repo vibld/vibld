@@ -159,9 +159,20 @@ async function route(request: Request, env: Env): Promise<Response> {
         fontHeaders(url.pathname, await env.ASSETS.fetch(request)),
       ),
     );
-    return env.VIBLD_NOINDEX === '1' ? noindex(response) : response;
+    return env.VIBLD_NOINDEX === '1' || isLayerDemo(url.pathname)
+      ? noindex(response)
+      : response;
   }
   return new Response('Not found', { status: 404 });
+}
+
+/**
+ * A layer's reference page (app/layers.ts, D101): a demonstration of a
+ * made-up product, served as it is, so it says nothing about vibld and is
+ * kept out of search results. Its page on /templates is indexed as usual.
+ */
+export function isLayerDemo(pathname: string): boolean {
+  return pathname === '/layers' || pathname.startsWith('/layers/');
 }
 
 /**

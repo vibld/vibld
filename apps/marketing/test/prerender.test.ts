@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { before, describe, it } from 'node:test';
 
+import { LAYERS } from '../app/layers.ts';
 import {
   DOC_GUIDES,
   DOC_TRACKS,
@@ -94,12 +95,15 @@ describe('every declared route is prerendered', () => {
     declared.add('legal');
     // `assets` is Vite's output and `fonts` is the self-hosted type
     // (public/fonts). Both are directories of files, never pages, and the
-    // fonts test below checks the second holds nothing else.
+    // fonts test below checks the second holds nothing else. `layers` holds
+    // the layers' reference pages (app/layers.ts), copied from public/
+    // rather than prerendered; the links test checks each one is there.
     const emitted = readdirSync(CLIENT).filter(
       (entry) =>
         statSync(join(CLIENT, entry)).isDirectory() &&
         entry !== 'assets' &&
         entry !== 'fonts' &&
+        entry !== 'layers' &&
         !entry.startsWith('.'),
     );
     for (const dir of emitted) {
@@ -563,6 +567,13 @@ describe('internal links', () => {
    */
   it('never points at a page that was not built', () => {
     const declared = new Set(ROUTE_PATHS);
+    // A layer's reference page is a file from public/, not a route: it
+    // counts when the file it is served from was copied into the build.
+    for (const layer of LAYERS) {
+      if (existsSync(join(CLIENT, layer.livePath.slice(1), 'index.html'))) {
+        declared.add(layer.livePath);
+      }
+    }
     const broken: string[] = [];
 
     for (const route of ROUTES) {

@@ -13,3 +13,8 @@ examples/generated
 # and never edited by hand. Its words are the catalog's own.
 packages/ai/data/design-templates.ts
 packages/ai/data/design-template-index.ts
+# The animated backgrounds, written by apps/marketing/scripts/backdrops.ts
+# exactly as packages/ai gives them to a project; a test holds them to it.
+apps/marketing/app/components/backdrop
+# Chris's clean-room layers, kept as designs-v1 has them (app/layers.ts).
+apps/marketing/public/layers

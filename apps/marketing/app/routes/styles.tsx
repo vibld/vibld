@@ -1,7 +1,12 @@
-import { Link } from 'react-router';
+import { Link, useLoaderData } from 'react-router';
+import type { ComponentType } from 'react';
 
 import { catalogue, withPalettes } from '../catalogue';
 import type { CatalogueEntry } from '../catalogue';
+import { AuroraMesh } from '../components/backdrop/aurora-mesh';
+import { FlowLines } from '../components/backdrop/flow-lines';
+import { GrainBlobs } from '../components/backdrop/grain-blobs';
+import { ParticleField } from '../components/backdrop/particle-field';
 import { PageHead } from '../components/SiteChrome';
 import { SiteMiniature } from '../components/SiteMiniature';
 import { DEMO_SITES, DEMO_SITE_IDS } from '../demo-sites';
@@ -13,6 +18,49 @@ import { SITE, metaFor } from '../site';
 export function meta() {
   return metaFor('/styles');
 }
+
+/**
+ * What each moving background is and what asks for it, from the recipes the
+ * builder reads (packages/ai/src/backdrops.ts). Read in the loader, so the
+ * recipes' source strings stay out of this page's bundle: the page runs the
+ * components generated from them instead (scripts/backdrops.ts).
+ */
+export async function loader() {
+  const { BACKDROPS } = await import('@vibld/ai/backdrops');
+  return {
+    backdrops: BACKDROPS.map((recipe) => ({
+      id: recipe.id,
+      component: recipe.component,
+      looks: recipe.looks,
+      triggers: recipe.triggers.slice(0, 4),
+    })),
+  };
+}
+
+/** The components /styles runs, by the name each recipe exports. */
+const BACKDROP_COMPONENTS: Record<
+  string,
+  ComponentType<{ colors?: readonly string[] }>
+> = { AuroraMesh, ParticleField, GrainBlobs, FlowLines };
+
+/**
+ * One demonstration palette apiece: this page's choice, for the drawing. In
+ * a project a background takes the project's own colour tokens.
+ */
+const BACKDROP_COLORS: Record<string, readonly string[]> = {
+  AuroraMesh: ['#0b1026', '#ff4a1c', '#7c5cff', '#16c2d5'],
+  ParticleField: ['#ffb199', '#ff4a1c'],
+  GrainBlobs: ['#ff7a59', '#f9c74f', '#8e7dff'],
+  FlowLines: ['#5eead4', '#38bdf8', '#eeeee9'],
+};
+
+/** The ground under each one, which the components draw over. */
+const BACKDROP_GROUND: Record<string, string> = {
+  AuroraMesh: '#0b1026',
+  ParticleField: '#0e0f11',
+  GrainBlobs: '#1a1030',
+  FlowLines: '#07131a',
+};
 
 /**
  * The catalogue of visual directions (internal issue 186), each one drawn.
@@ -32,6 +80,7 @@ export default function Styles() {
   const entries = catalogue();
   const coloured = withPalettes(entries);
   const treatments = entries.filter((entry) => entry.pairs === null);
+  const { backdrops } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -49,12 +98,49 @@ export default function Styles() {
             whose moods your request names are listed as “Suggested for your
             request”. A suggestion is only a mark: nothing is picked for you.
           </p>
+        </div>
+      </section>
+      <section
+        className="lb-section lb-section--tight"
+        aria-labelledby="backdrops-title"
+        id="backgrounds"
+      >
+        <div className="lb-wrap">
+          <h2 className="lb-h2" id="backdrops-title">
+            {backdrops.length} moving backgrounds
+          </h2>
           <p className="lb-lede">
             A moving background is asked for in words rather than picked: say
-            “animated background”, or name one (aurora, particles, grain,
-            flowing lines), and the build can use one of four that vibld draws
-            in code from the project’s own colours.
+            “animated background”, or name one, and the build can use one of
+            these four. Each runs here from the same file a build writes into a
+            project. In a project it takes the project’s own colours; the ones
+            here are ours, for the drawing. They pause off screen and hold still
+            if you have asked your system for less motion.
           </p>
+          <ul className="lb-backdrops">
+            {backdrops.map((backdrop) => {
+              const Backdrop = BACKDROP_COMPONENTS[backdrop.component];
+              return (
+                <li key={backdrop.id} id={`backdrop-${backdrop.id}`}>
+                  <div
+                    className="lb-backdrop__stage"
+                    style={{ background: BACKDROP_GROUND[backdrop.component] }}
+                  >
+                    {Backdrop ? (
+                      <Backdrop colors={BACKDROP_COLORS[backdrop.component]} />
+                    ) : null}
+                  </div>
+                  <h3>
+                    <code>{`<${backdrop.component} />`}</code>
+                  </h3>
+                  <p>{backdrop.looks}</p>
+                  <p className="lb-style__demo">
+                    Asked for with: {backdrop.triggers.join(', ')}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       </section>
       <section

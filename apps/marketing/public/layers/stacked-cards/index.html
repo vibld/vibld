@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stacked Cards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap">
+<style>
+  :root {
+    --bg: #eeece7;
+    --fg: #16150f;
+    --fg-muted: #6b675c;
+    --card-1: #1f3d2b;
+    --card-2: #c8553d;
+    --card-3: #2d4059;
+    --card-4: #e0b04a;
+    --on-card: #fbf8f1;
+    --radius: 28px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: Manrope, system-ui, sans-serif; }
+  header, footer { min-height: 70svh; display: grid; place-content: center; text-align: center; padding: 2rem; gap: 1rem; }
+  header h1 { font-size: clamp(2.5rem, 7vw, 5.5rem); font-weight: 800; letter-spacing: -0.04em; line-height: .95; }
+  header p, footer p { color: var(--fg-muted); max-width: 40ch; margin-inline: auto; }
+  .stack { position: relative; padding-inline: clamp(1rem, 4vw, 3rem); }
+  .card-wrap { position: sticky; top: 0; height: 100svh; display: grid; place-items: center; }
+  .card {
+    width: min(1100px, 100%); height: min(72svh, 640px); border-radius: var(--radius);
+    color: var(--on-card); padding: clamp(1.5rem, 4vw, 3.5rem);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-content: space-between;
+    transform-origin: 50% 0%; will-change: transform;
+    box-shadow: 0 30px 60px -30px rgb(0 0 0 / .45);
+    position: relative; overflow: hidden;
+  }
+  /* Dimming overlay: fading the card itself would let the card underneath show through. */
+  .card::after { content: ""; position: absolute; inset: 0; background: #000; opacity: var(--dim, 0); pointer-events: none; }
+  .card .num { font-size: .9rem; letter-spacing: .2em; opacity: .7; }
+  .card h2 { font-size: clamp(2rem, 5vw, 4rem); letter-spacing: -0.03em; line-height: 1; grid-column: 1 / -1; align-self: end; }
+  .card p { grid-column: 2; max-width: 36ch; opacity: .85; font-size: 1.05rem; }
+  .card-wrap:nth-child(1) .card { background: var(--card-1); }
+  .card-wrap:nth-child(2) .card { background: var(--card-2); }
+  .card-wrap:nth-child(3) .card { background: var(--card-3); }
+  .card-wrap:nth-child(4) .card { background: var(--card-4); color: var(--fg); }
+  @media (max-width: 767px) {
+    .card { grid-template-columns: 1fr; }
+    .card p { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>How we work</h1>
+  <p>Scroll. Each step pins, then settles back into the stack as the next one arrives.</p>
+</header>
+
+<section class="stack" aria-label="Process">
+  <div class="card-wrap"><article class="card"><span class="num">01 / 04</span><h2>Listen</h2><p>Two weeks of interviews, audits and quiet reading before anything is drawn.</p></article></div>
+  <div class="card-wrap"><article class="card"><span class="num">02 / 04</span><h2>Frame</h2><p>We name the one idea the product is about and cut everything that competes with it.</p></article></div>
+  <div class="card-wrap"><article class="card"><span class="num">03 / 04</span><h2>Build</h2><p>Design and engineering in the same room, shipping to a live URL from day one.</p></article></div>
+  <div class="card-wrap"><article class="card"><span class="num">04 / 04</span><h2>Tune</h2><p>Real traffic, real numbers. We keep adjusting until the metrics stop moving.</p></article></div>
+</section>
+
+<footer><p>End of section. Drop this block anywhere in a page.</p></footer>
+
+<script>
+(() => {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const wraps = [...document.querySelectorAll(".card-wrap")];
+  const cards = wraps.map((w) => w.querySelector(".card"));
+  // One spring per card; its target is how far the NEXT card has covered it (0 → 1).
+  const state = cards.map(() => ({ x: 0, v: 0, target: 0 }));
+
+  const measure = () => {
+    wraps.forEach((wrap, i) => {
+      const next = wraps[i + 1];
+      if (!next) { state[i].target = 0; return; }
+      const top = next.getBoundingClientRect().top;
+      state[i].target = Math.min(Math.max(1 - top / innerHeight, 0), 1);
+    });
+  };
+
+  let last = performance.now();
+  const loop = (now) => {
+    const dt = Math.min((now - last) / 1000, .05); last = now;
+    measure();
+    state.forEach((s, i) => {
+      const k = 180, c = 26; // stiff, just under critical damping: follows scroll with a slight settle
+      s.v += (k * (s.target - s.x) - c * s.v) * dt;
+      s.x += s.v * dt;
+      const depth = cards.length - i;
+      const scale = 1 - s.x * .06 * Math.min(depth, 3) / 3 - s.x * .04;
+      cards[i].style.transform = `translate3d(0, ${s.x * -3}svh, 0) scale(${scale})`;
+      cards[i].style.setProperty("--dim", (s.x * .35).toFixed(3));
+    });
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

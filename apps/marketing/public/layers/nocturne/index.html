@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nocturne: Observability for AI agents</title>
+<meta name="description" content="Nocturne traces every step your AI agents take, so you can see why they did it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+  :root {
+    /* Tier 1: raw */
+    --raw-ink-950: #06070b; --raw-ink-900: #0c0e15; --raw-ink-800: #151823; --raw-ink-700: #232839;
+    --raw-mist-100: #eef1f8; --raw-mist-400: #9aa2b8; --raw-mist-500: #6d7590;
+    --raw-lime: #c6ff4d; --raw-cyan: #4de1ff; --raw-indigo: #3a2fd6;
+    /* Tier 2: semantic */
+    --bg: var(--raw-ink-950); --surface: var(--raw-ink-900); --surface-2: var(--raw-ink-800); --border: var(--raw-ink-700);
+    --fg: var(--raw-mist-100); --fg-muted: var(--raw-mist-400); --fg-subtle: var(--raw-mist-500);
+    --accent: var(--raw-lime); --accent-2: var(--raw-cyan); --accent-3: var(--raw-indigo);
+    --radius: 18px; --gutter: clamp(1.25rem, 4vw, 3rem); --maxw: 1200px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--fg); font-family: Geist, system-ui, sans-serif; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  .wrap { width: min(var(--maxw), 100% - 2 * var(--gutter)); margin-inline: auto; }
+  .serif { font-family: "Instrument Serif", Georgia, serif; font-weight: 400; font-style: italic; }
+
+  /* Nav */
+  .nav { position: fixed; inset: 0 0 auto; z-index: 10; padding-block: 1rem; }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    background: rgb(12 14 21 / .6); backdrop-filter: blur(14px); border: 1px solid var(--border); border-radius: 999px; padding: .5rem .5rem .5rem 1.25rem; }
+  .brand { font-weight: 600; letter-spacing: -.02em; display: flex; gap: .5rem; align-items: center; }
+  .brand i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 16px var(--accent); }
+  .nav ul { display: flex; gap: 1.75rem; list-style: none; padding: 0; color: var(--fg-muted); font-size: .92rem; }
+  .nav ul a:hover { color: var(--fg); }
+  .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .7rem 1.2rem; border-radius: 999px; font-weight: 500; font-size: .92rem; border: 1px solid var(--border); transition: background-color .2s, color .2s; }
+  .btn-primary { background: var(--accent); color: var(--raw-ink-950); border-color: transparent; }
+  .btn-primary:hover { background: var(--fg); }
+  .btn-ghost:hover { background: var(--surface-2); }
+  @media (max-width: 800px) { .nav ul { display: none; } }
+
+  /* Hero */
+  .hero { position: relative; min-height: 100svh; display: grid; align-items: end; padding-block: 8rem 5rem; overflow: hidden; isolation: isolate; }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1;
+    background: radial-gradient(80% 60% at 70% 30%, var(--accent-3), transparent 70%), var(--bg); }
+  .hero::after { content: ""; position: absolute; inset: auto 0 0; height: 40%; z-index: -1; background: linear-gradient(transparent, var(--bg)); }
+  .pill { display: inline-flex; gap: .5rem; align-items: center; font-size: .82rem; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 999px; padding: .35rem .8rem; background: rgb(12 14 21 / .5); }
+  .pill b { color: var(--accent); font-weight: 500; }
+  .hero h1 { font-size: clamp(3rem, 9.5vw, 8.5rem); line-height: .92; letter-spacing: -.045em; font-weight: 500; margin-block: 1.5rem; max-width: 12ch; }
+  .hero h1 .serif { letter-spacing: -.02em; }
+  .hero-foot { display: flex; flex-wrap: wrap; gap: 2rem; align-items: end; justify-content: space-between; }
+  .hero-foot p { color: var(--fg-muted); max-width: 42ch; font-size: 1.1rem; }
+  .hero-foot .ctas { display: flex; gap: .75rem; flex-wrap: wrap; }
+  .word { display: inline-block; overflow: hidden; vertical-align: bottom; padding-bottom: .06em; }
+  .word > span { display: inline-block; will-change: transform; }
+
+  /* Logos */
+  .logos { border-block: 1px solid var(--border); padding-block: 2rem; }
+  .logos ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1.5rem 2.5rem; color: var(--fg-subtle); font-weight: 600; letter-spacing: -.02em; font-size: 1.15rem; }
+
+  /* Sections */
+  section.block { padding-block: clamp(5rem, 12vw, 9rem); }
+  .kicker { color: var(--accent); font-size: .82rem; letter-spacing: .18em; text-transform: uppercase; }
+  h2 { font-size: clamp(2.25rem, 5.5vw, 4.25rem); line-height: 1; letter-spacing: -.035em; font-weight: 500; margin-block: 1rem 1.25rem; max-width: 16ch; }
+  .lede { color: var(--fg-muted); max-width: 52ch; font-size: 1.1rem; }
+
+  .features { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1rem; margin-top: 3.5rem; }
+  .feature { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.75rem; display: grid; gap: .75rem; align-content: start; min-height: 260px; position: relative; overflow: hidden; }
+  .feature h3 { font-size: 1.25rem; font-weight: 500; letter-spacing: -.02em; }
+  .feature p { color: var(--fg-muted); }
+  .feature:nth-child(1) { grid-column: span 4; } .feature:nth-child(2) { grid-column: span 2; }
+  .feature:nth-child(3), .feature:nth-child(4), .feature:nth-child(5) { grid-column: span 2; }
+  .feature .glow { position: absolute; width: 320px; height: 320px; right: -120px; bottom: -160px; border-radius: 50%; background: radial-gradient(var(--accent-3), transparent 70%); opacity: .7; pointer-events: none; }
+  .trace { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; color: var(--fg-muted); display: grid; gap: .4rem; margin-top: .5rem; }
+  .trace span { display: flex; gap: .75rem; align-items: center; }
+  .trace i { height: 6px; border-radius: 3px; background: var(--accent-2); display: inline-block; }
+  .trace span:nth-child(2) i { background: var(--accent); } .trace span:nth-child(4) i { background: var(--accent-3); }
+  @media (max-width: 900px) { .features { grid-template-columns: 1fr 1fr; } .feature:nth-child(n) { grid-column: span 2; } }
+
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 3rem; }
+  .metric { border-top: 1px solid var(--border); padding-top: 1.25rem; }
+  .metric strong { display: block; font-size: clamp(2.5rem, 6vw, 4.5rem); font-weight: 500; letter-spacing: -.04em; line-height: 1; }
+  .metric span { color: var(--fg-muted); }
+  @media (max-width: 700px) { .metrics { grid-template-columns: 1fr; } }
+
+  .pricing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 3rem; }
+  .plan { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; display: grid; gap: 1.25rem; align-content: start; }
+  .plan.featured { background: linear-gradient(160deg, var(--surface-2), var(--surface)); border-color: var(--accent); }
+  .plan h3 { font-weight: 500; font-size: 1.1rem; }
+  .price { font-size: 3rem; letter-spacing: -.04em; line-height: 1; } .price small { font-size: 1rem; color: var(--fg-muted); letter-spacing: 0; }
+  .plan ul { list-style: none; padding: 0; display: grid; gap: .6rem; color: var(--fg-muted); }
+  .plan li::before { content: "→ "; color: var(--accent); }
+  @media (max-width: 900px) { .pricing { grid-template-columns: 1fr; } }
+
+  .cta { text-align: center; border: 1px solid var(--border); border-radius: calc(var(--radius) * 2); padding: clamp(3rem, 8vw, 6rem) var(--gutter);
+    background: radial-gradient(60% 80% at 50% 120%, var(--accent-3), transparent 70%), var(--surface); }
+  .cta h2 { margin-inline: auto; }
+  .cta .ctas { display: flex; gap: .75rem; justify-content: center; margin-top: 2rem; flex-wrap: wrap; }
+
+  footer { padding-block: 3rem; color: var(--fg-subtle); font-size: .9rem; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+
+  /* Reveal initial state is applied by JS only, so content is visible without it. */
+  .js [data-reveal] { opacity: 0; transform: translate3d(0, 40px, 0); }
+</style>
+</head>
+<body>
+<script>document.documentElement.classList.add("js");</script>
+
+<nav class="nav" aria-label="Primary">
+  <div class="wrap">
+    <a class="brand" href="#top"><i aria-hidden="true"></i>Nocturne</a>
+    <ul>
+      <li><a href="#product">Product</a></li>
+      <li><a href="#numbers">Customers</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+      <li><a href="#">Docs</a></li>
+    </ul>
+    <a class="btn btn-primary" href="#pricing">Start free</a>
+  </div>
+</nav>
+
+<main id="top">
+  <header class="hero">
+    <canvas id="hero-gl" aria-hidden="true"></canvas>
+    <div class="wrap">
+      <span class="pill"><b>New</b> Replay any agent run, step by step</span>
+      <h1 data-split>See what your agents <span class="serif">actually</span> did.</h1>
+      <div class="hero-foot">
+        <p data-reveal>Nocturne traces every tool call, prompt and decision your AI agents make, so debugging takes minutes instead of days.</p>
+        <div class="ctas" data-reveal>
+          <a class="btn btn-primary" href="#pricing">Start tracing free</a>
+          <a class="btn btn-ghost" href="#product">See how it works</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="logos" aria-label="Trusted by">
+    <ul class="wrap">
+      <li>Halcyon</li><li>Northwind</li><li>Parabola</li><li>Quanta</li><li>Meridian</li><li>Oakline</li>
+    </ul>
+  </div>
+
+  <section class="block" id="product" aria-labelledby="product-h">
+    <div class="wrap">
+      <span class="kicker" data-reveal>Product</span>
+      <h2 id="product-h" data-reveal>Every step, <span class="serif">explained.</span></h2>
+      <p class="lede" data-reveal>Drop in one SDK call. Nocturne captures the full tree of reasoning, tools and tokens, and turns it into something a person can read.</p>
+      <div class="features">
+        <article class="feature" data-reveal>
+          <h3>Trace timeline</h3>
+          <p>Nested spans for every model call and tool, with latency and cost on each.</p>
+          <div class="trace" aria-hidden="true">
+            <span><i style="width:60%"></i> plan · 1.2s</span>
+            <span><i style="width:25%"></i> search_docs · 410ms</span>
+            <span><i style="width:40%"></i> write_patch · 880ms</span>
+            <span><i style="width:15%"></i> run_tests · 290ms</span>
+          </div>
+          <div class="glow" aria-hidden="true"></div>
+        </article>
+        <article class="feature" data-reveal><h3>Replay</h3><p>Re-run any trace against a new prompt or model and diff the outcome.</p></article>
+        <article class="feature" data-reveal><h3>Evals</h3><p>Score runs automatically and catch regressions before they ship.</p></article>
+        <article class="feature" data-reveal><h3>Cost guardrails</h3><p>Budgets per agent, per user, per day, with alerts before you blow through them.</p></article>
+        <article class="feature" data-reveal><h3>Private by default</h3><p>Self-host in your VPC. PII is redacted at the edge.</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="numbers" aria-labelledby="numbers-h">
+    <div class="wrap">
+      <span class="kicker" data-reveal>Results</span>
+      <h2 id="numbers-h" data-reveal>Teams ship agents <span class="serif">with confidence.</span></h2>
+      <div class="metrics">
+        <div class="metric" data-reveal><strong data-count="84">0</strong><span>% faster incident resolution</span></div>
+        <div class="metric" data-reveal><strong data-count="3.1" data-decimals="1">0</strong><span>B spans traced every month</span></div>
+        <div class="metric" data-reveal><strong data-count="41">0</strong><span>% lower token spend after 30 days</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="pricing" aria-labelledby="pricing-h">
+    <div class="wrap">
+      <span class="kicker" data-reveal>Pricing</span>
+      <h2 id="pricing-h" data-reveal>Start free. <span class="serif">Scale quietly.</span></h2>
+      <div class="pricing">
+        <article class="plan" data-reveal>
+          <h3>Hobby</h3><div class="price">$0 <small>/ month</small></div>
+          <ul><li>50k spans / month</li><li>7-day retention</li><li>Community support</li></ul>
+          <a class="btn btn-ghost" href="#">Start free</a>
+        </article>
+        <article class="plan featured" data-reveal>
+          <h3>Team</h3><div class="price">$49 <small>/ seat / month</small></div>
+          <ul><li>5M spans / month</li><li>90-day retention</li><li>Replay and evals</li><li>SSO</li></ul>
+          <a class="btn btn-primary" href="#">Start 14-day trial</a>
+        </article>
+        <article class="plan" data-reveal>
+          <h3>Enterprise</h3><div class="price">Custom</div>
+          <ul><li>Unlimited spans</li><li>Self-hosted or VPC</li><li>SLA and dedicated support</li></ul>
+          <a class="btn btn-ghost" href="#">Talk to sales</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="cta-h">
+    <div class="wrap">
+      <div class="cta" data-reveal>
+        <h2 id="cta-h">Turn the lights on <span class="serif">in the dark.</span></h2>
+        <p class="lede" style="margin-inline:auto">Five minutes to your first trace. No credit card.</p>
+        <div class="ctas"><a class="btn btn-primary" href="#">Start tracing free</a><a class="btn btn-ghost" href="#">Book a demo</a></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap"><span>© 2026 Nocturne Labs (fictional)</span><span>Template layer: landing zone</span></div>
+</footer>
+
+<script>
+(() => {
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- spring engine: one rAF loop drives everything ---------- */
+  const springs = new Set();
+  const spring = (from, { k = 170, c = 26, onUpdate }) => {
+    const s = { x: from, v: 0, target: from, k, c, onUpdate, set(t) { this.target = t; springs.add(this); } };
+    return s;
+  };
+  let last = performance.now();
+  const loop = (now) => {
+    const dt = Math.min((now - last) / 1000, .05); last = now;
+    for (const s of springs) {
+      s.v += (s.k * (s.target - s.x) - s.c * s.v) * dt; s.x += s.v * dt;
+      if (Math.abs(s.target - s.x) < 1e-4 && Math.abs(s.v) < 1e-4) { s.x = s.target; springs.delete(s); }
+      s.onUpdate(s.x);
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+
+  /* ---------- headline split + staggered rise ---------- */
+  const h1 = document.querySelector("[data-split]");
+  const splitWords = (node) => {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === 3) {
+        const frag = document.createDocumentFragment();
+        child.textContent.split(/(\s+)/).forEach((part) => {
+          if (!part.trim()) { frag.append(part); return; }
+          const outer = document.createElement("span"); outer.className = "word";
+          const inner = document.createElement("span"); inner.textContent = part;
+          outer.append(inner); frag.append(outer);
+        });
+        child.replaceWith(frag);
+      } else if (child.nodeType === 1) {
+        const outer = document.createElement("span"); outer.className = "word";
+        const inner = child.cloneNode(true); outer.append(inner); child.replaceWith(outer);
+      }
+    });
+  };
+  if (!still) {
+    h1.setAttribute("aria-label", h1.textContent.replace(/\s+/g, " ").trim());
+    splitWords(h1);
+    [...h1.querySelectorAll(".word > span")].forEach((el, i) => {
+      el.setAttribute("aria-hidden", "true");
+      el.style.transform = "translate3d(0,110%,0)";
+      const s = spring(110, { k: 120, c: 20, onUpdate: (x) => { el.style.transform = `translate3d(0,${x}%,0)`; } });
+      setTimeout(() => s.set(0), 150 + i * 70);
+    });
+  }
+
+  /* ---------- in-view reveals ---------- */
+  const reveals = [...document.querySelectorAll("[data-reveal]")];
+  const show = (el, delay) => {
+    if (still) { el.style.opacity = 1; el.style.transform = "none"; return; }
+    const s = spring(0, { k: 140, c: 22, onUpdate: (p) => {
+      el.style.opacity = Math.min(p, 1); el.style.transform = `translate3d(0,${(1 - p) * 40}px,0)`;
+    } });
+    setTimeout(() => s.set(1), delay);
+  };
+  const io = new IntersectionObserver((entries) => {
+    let stagger = 0;
+    entries.forEach((e) => {
+      if (!e.isIntersecting) return;
+      io.unobserve(e.target);
+      show(e.target, stagger); stagger += 80;
+      e.target.querySelectorAll("[data-count]").forEach(count);
+      if (e.target.matches("[data-count]")) count(e.target);
+    });
+  }, { rootMargin: "0px 0px -12% 0px" });
+  // Anything already on screen at load reveals now; the observer's shrunken root would miss items near the fold.
+  let firstPaint = 300;
+  reveals.forEach((el) => {
+    if (el.getBoundingClientRect().top < innerHeight) { show(el, firstPaint); firstPaint += 80; }
+    else io.observe(el);
+  });
+
+  function count(el) {
+    const to = parseFloat(el.dataset.count), dec = +(el.dataset.decimals || 0);
+    if (still) { el.textContent = to.toFixed(dec); return; }
+    const s = spring(0, { k: 30, c: 11, onUpdate: (x) => { el.textContent = x.toFixed(dec); } });
+    s.set(to);
+  }
+
+  /* ---------- hero WebGL: slow ribbon of light ---------- */
+  const canvas = document.getElementById("hero-gl");
+  const gl = canvas.getContext("webgl");
+  if (!gl) return;
+  const css = getComputedStyle(document.documentElement);
+  const rgb = (n) => { const h = css.getPropertyValue(n).trim().slice(1); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); };
+  const sh = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}"));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, `
+    precision highp float; uniform vec2 R; uniform float T; uniform vec2 M; uniform vec3 A, B, C, BG;
+    void main(){
+      vec2 uv = gl_FragCoord.xy / R; vec2 p = (gl_FragCoord.xy - .5*R) / R.y;
+      p.x += (M.x - .5) * .15; p.y += (M.y - .5) * .1;
+      float col = 0.; vec3 acc = vec3(0.);
+      for (int i = 0; i < 3; i++) {
+        float fi = float(i);
+        float y = .18*sin(p.x*1.6 + T*.35 + fi*1.9) + .08*sin(p.x*3.7 - T*.22 + fi) + .1 - fi*.06;
+        float d = abs(p.y - y);
+        float band = .0035 / (d + .002) + .35 * exp(-d*14.);
+        vec3 c = i == 0 ? A : (i == 1 ? B : C);
+        acc += c * band * (.55 + .45*sin(p.x*2. + T*.5 + fi));
+      }
+      acc *= smoothstep(1.1, .1, length(p - vec2(.3, .15)));
+      vec3 outc = BG + acc * .6;
+      outc += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453) - .5) / 255.;
+      gl_FragColor = vec4(outc, 1.);
+    }`));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const U = (n) => gl.getUniformLocation(prog, n);
+  gl.uniform3fv(U("A"), rgb("--raw-indigo")); gl.uniform3fv(U("B"), rgb("--raw-cyan"));
+  gl.uniform3fv(U("C"), rgb("--raw-lime")); gl.uniform3fv(U("BG"), rgb("--raw-ink-950"));
+  const resize = () => {
+    const d = Math.min(devicePixelRatio, 2) * .75;
+    canvas.width = canvas.clientWidth * d; canvas.height = canvas.clientHeight * d;
+    gl.viewport(0, 0, canvas.width, canvas.height); gl.uniform2f(U("R"), canvas.width, canvas.height);
+  };
+  addEventListener("resize", resize); resize();
+  const m = { x: .5, y: .5, tx: .5, ty: .5 };
+  addEventListener("pointermove", (e) => { m.tx = e.clientX / innerWidth; m.ty = 1 - e.clientY / innerHeight; });
+  let t = 3, lt = performance.now(), visible = true;
+  new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(canvas);
+  const draw = (now) => {
+    const dt = Math.min((now - lt) / 1000, .05); lt = now;
+    if (visible) {
+      t += dt; const k = 1 - Math.exp(-dt * 3);
+      m.x += (m.tx - m.x) * k; m.y += (m.ty - m.y) * k;
+      gl.uniform1f(U("T"), t); gl.uniform2f(U("M"), m.x, m.y);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    if (!still) requestAnimationFrame(draw);
+  };
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

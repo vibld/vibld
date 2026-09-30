@@ -3714,3 +3714,49 @@
   margin: 4px 0 0;
   font-size: 0.875rem;
 }
+
+/* Chris's clean-room layers (D101): a screenshot of the reference page, on
+   its card on /templates and at the top of its own page. */
+.lb-layer__shot {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--color-edge);
+  border-radius: 12px;
+}
+.lb-layer__shot img,
+.lb-tpl__shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1440 / 900;
+  object-fit: cover;
+}
+.lb-tpls--layers {
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+}
+
+/* The four moving backgrounds on /styles (D101), each running live in a
+   box of its own. `isolation` keeps a component's -z-10 inside its box. */
+.lb-backdrops {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  gap: 24px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.lb-backdrops h3 {
+  margin: 12px 0 4px;
+  font-size: 1rem;
+}
+.lb-backdrops p {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+}
+.lb-backdrop__stage {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  border-radius: 12px;
+}

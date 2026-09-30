@@ -253,6 +253,17 @@ on 2026-09-30.
 - **D100. The template gallery is shipped.** It is the catalog at
   vibld.com/templates (D83, internal PR 323), and the roadmap says so. Picking a design
   inside the builder is not built, and the roadmap does not claim it.
+- **D101. vibld.com shows Chris's clean-room layers.** The four moving
+  backgrounds run live on /styles, from files generated from the source a
+  build writes into a project (`apps/marketing/scripts/backdrops.ts`, held to
+  it by a test). Nocturne (a landing page) and stacked-cards (a page section)
+  are listed on /templates with the prompt that made each; their reference
+  pages are copied from Drummond-IT/designs-v1 `layers/` and served as they
+  are at `/layers/<slug>`, kept out of search indexes. The one change is an
+  em-dash in Nocturne's title, which became a colon (as D87).
+- **D102. Two batches of clean-room ports.** Chris confirmed on 2026-09-30
+  that his ports are designs-v1's `layers/` and `design-prompt-catalog/`,
+  and nothing else.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

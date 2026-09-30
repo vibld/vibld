@@ -2,6 +2,7 @@ import { type RouteConfig, index, route } from '@react-router/dev/routes';
 
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 
+import { LAYERS } from './layers';
 import { USE_CASES } from './use-cases';
 
 export default [
@@ -38,6 +39,11 @@ export default [
   ...DESIGN_TEMPLATE_INDEX.map((template) =>
     route(`templates/${template.id}`, 'routes/template.tsx', {
       id: `template-${template.id}`,
+    }),
+  ),
+  ...LAYERS.map((layer) =>
+    route(`templates/${layer.slug}`, 'routes/layer.tsx', {
+      id: `layer-${layer.slug}`,
     }),
   ),
   route('inspiration', 'routes/inspiration.tsx'),

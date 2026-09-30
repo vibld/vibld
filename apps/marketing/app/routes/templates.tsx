@@ -1,6 +1,7 @@
 import { Link, useLoaderData } from 'react-router';
 
 import { PageHead } from '../components/SiteChrome';
+import { LAYERS } from '../layers';
 import { SITE, metaFor } from '../site';
 import { USE_CASES } from '../use-cases';
 
@@ -89,9 +90,55 @@ export default function Templates() {
               {group.label} <span>{group.cards.length}</span>
             </a>
           ))}
+          <a href="#layers">
+            Built from one prompt <span>{LAYERS.length}</span>
+          </a>
           <Link to="/inspiration">Palettes and type only</Link>
         </nav>
       </PageHead>
+      <section
+        className="lb-section lb-section--tight"
+        aria-labelledby="layers-title"
+        id="layers"
+      >
+        <div className="lb-wrap">
+          <h2 className="lb-h2" id="layers-title">
+            Built from one prompt
+          </h2>
+          <p className="lb-lede">
+            A page and a section, each the output of one prompt that asks for
+            one self-contained HTML file. Open one for the live page and the
+            prompt that made it.
+          </p>
+          <ul className="lb-tpls lb-tpls--layers">
+            {LAYERS.map((layer) => (
+              <li
+                className="lb-tpl"
+                key={layer.slug}
+                id={`layer-${layer.slug}`}
+              >
+                <Link to={`/templates/${layer.slug}`} className="lb-tpl__link">
+                  <img
+                    className="lb-tpl__shot"
+                    src={layer.screenshot}
+                    width={1440}
+                    height={900}
+                    alt=""
+                    loading="lazy"
+                  />
+                  <div className="lb-tpl__meta">
+                    <h3>{layer.name}</h3>
+                    <p>{layer.summary}</p>
+                    <p className="lb-tpl__facts">
+                      {layer.kind === 'page' ? 'Landing page' : 'Page section'}
+                    </p>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
       {groups.map((group) => (
         <section
           key={group.slug}

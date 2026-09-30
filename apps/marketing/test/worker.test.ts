@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it, mock } from 'node:test';
 
-import worker, { canonicalHost } from '../worker/index.ts';
+import worker, { canonicalHost, isLayerDemo } from '../worker/index.ts';
 
 const ENV = {
   RESEND_API_KEY: 're_test_key',
@@ -357,6 +357,26 @@ describe('preview deployments', () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('x-robots-tag'), null);
     assert.match(await response.text(), /Vibe\. Build\. Ship\./);
+  });
+
+  it('keeps a layer demo page out of search results in production', async () => {
+    // /layers/<slug> is a made-up product's page (app/layers.ts, D101); its
+    // page on /templates is the one that belongs in an index.
+    const response = await worker.fetch(
+      new Request('https://vibld.com/layers/nocturne'),
+      { ...ENV, ASSETS: assets() },
+    );
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('x-robots-tag') ?? '', /noindex/);
+  });
+
+  it('leaves the layer pages on /templates indexable', async () => {
+    const response = await worker.fetch(
+      new Request('https://vibld.com/templates/nocturne'),
+      { ...ENV, ASSETS: assets() },
+    );
+    assert.equal(response.headers.get('x-robots-tag'), null);
+    assert.equal(isLayerDemo('/layersmith'), false);
   });
 
   it('still routes the waitlist on a preview rather than serving it as a page', async () => {

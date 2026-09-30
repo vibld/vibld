@@ -9,6 +9,7 @@
 
 import { DESIGN_TEMPLATE_INDEX } from '@vibld/ai/design-template-index';
 
+import { LAYERS } from './layers.ts';
 import { USE_CASES } from './use-cases.ts';
 
 export interface SiteRoute {
@@ -386,6 +387,11 @@ export const ROUTES: SiteRoute[] = [
     title: `${template.name}, ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)} | ${SITE.name} templates`,
     description: `${template.name}: a ${template.kind === 'app' ? 'app' : 'website'} design for vibld, a ${template.summary.charAt(0).toLowerCase()}${template.summary.slice(1)}, with its layout, palette, type and full build prompt.`,
   })),
+  ...LAYERS.map((layer) => ({
+    path: `/templates/${layer.slug}`,
+    title: `${layer.name}, a ${layer.kind === 'page' ? 'landing page' : 'page section'} from one prompt | ${SITE.name} templates`,
+    description: `${layer.name}: ${layer.summary.charAt(0).toLowerCase()}${layer.summary.slice(1)} The live page and the prompt that made it.`,
+  })),
   {
     path: '/inspiration',
     title: `Inspiration | ${SITE.name}`,
@@ -477,6 +483,9 @@ export function breadcrumbsFor(path: string): { name: string; path: string }[] {
     ...DESIGN_TEMPLATE_INDEX.map(
       (template) =>
         [`/templates/${template.id}`, template.name] as [string, string],
+    ),
+    ...LAYERS.map(
+      (layer) => [`/templates/${layer.slug}`, layer.name] as [string, string],
     ),
   ]);
   const segments = path.split('/').filter(Boolean);

@@ -20,7 +20,8 @@
     "./select-client": "./src/select-client.ts",
     "./stack": "./src/stack.ts",
     "./design-templates": "./src/design-templates.ts",
-    "./design-template-index": "./src/design-template-index.ts"
+    "./design-template-index": "./src/design-template-index.ts",
+    "./backdrops": "./src/backdrops.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
