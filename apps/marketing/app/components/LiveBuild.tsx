@@ -150,7 +150,7 @@ function finished(site: DemoSiteId, look: LookId = 'spec'): DemoState {
             freshFrom: Number.POSITIVE_INFINITY,
           }
         : {
-            tab: 'src/index.css',
+            tab: 'src/styles.css',
             status: 'restyled',
             lines: lookCss(look),
             partial: null,
@@ -379,7 +379,7 @@ export function LiveBuild({ children }: { children: ReactNode }) {
           patch({ look: next });
           await stream(
             id,
-            'src/index.css',
+            'src/styles.css',
             next === 'spec' ? specCss(s) : lookCss(next),
             'restyled',
             7,
@@ -445,7 +445,7 @@ export function LiveBuild({ children }: { children: ReactNode }) {
         prompt: s.prompt,
         look: id,
         code: {
-          tab: 'src/index.css',
+          tab: 'src/styles.css',
           status: 'restyled',
           lines: id === 'spec' ? specCss(DEMO_SITES[s.site]) : lookCss(id),
           partial: null,

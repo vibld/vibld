@@ -1,10 +1,20 @@
 # Applications
 
-- [`web`](web/README.md) -- the React/TypeScript/Vite builder shell. It runs a
-  deterministic prompt-to-checkpoint lifecycle in the browser against
-  `@vibld/core`, with a clearly labelled local mock preview. No sandbox
-  execution, model provider, persistence, Git export or deployment yet.
+Four Cloudflare Workers (ADR-0005). Each README says what it does and how it
+is deployed.
 
-The Hono API on Cloudflare Workers, with Workflows for generation jobs, arrives
-with the hosted slices. No deployable product exists here yet. See
-[ADR-0005](../docs/adr/0005-cloudflare-hosted-platform.md).
+- [`web`](web/README.md) -- the builder at `app.vibld.com`: a
+  React/TypeScript/Vite SPA and the Worker behind its `/api` routes. Sign-in
+  (Clerk), the control plane in D1 and R2, model generation as a durable
+  Workflow, projects, billing, publishing and GitHub pushes. Locally,
+  `pnpm dev` serves no `/api`, so it runs the deterministic fake provider.
+- [`preview`](preview/README.md) -- the private sandbox previews: installs
+  and runs a generated project in a time-boxed, network-restricted container
+  on `vibld-preview.dev`, with revocable share links. It also runs the
+  one-shot build that publishing uses.
+- [`publish`](publish/README.md) -- serves published sites at
+  `<slug>.vibld-preview.dev` from R2. It has no route of its own:
+  `apps/preview` owns the zone's wildcard route and forwards to it.
+- [`marketing`](marketing/README.md) -- `vibld.com`: a prerendered React
+  Router site with the product pages, docs, roadmap, legal pages and
+  `llms.txt`.

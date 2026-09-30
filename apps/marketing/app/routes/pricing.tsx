@@ -35,9 +35,10 @@ export default function Pricing() {
           <p className="lb-note">
             Prices are in US dollars and are charged through Stripe Checkout,
             which shows the total before anything is charged. Nothing is charged
-            automatically past the allowance: once it and any top-up credit are
-            spent, runs are refused until the month resets or you buy a top-up.
-            vibld is in public beta, and anyone can sign up.
+            automatically past the allowance. A build you cannot fully fund is
+            started smaller rather than refused, and once too little is left for
+            even that, runs are refused until the month resets or you buy a
+            top-up. vibld is in public beta, and anyone can sign up.
           </p>
           <PlanFacts />
         </div>
@@ -79,7 +80,7 @@ export default function Pricing() {
             eyebrow="The order things are spent in"
             id="order-title"
             title="Three ceilings, in this order"
-            lede="When a run is refused for spend, the reason names which ceiling it hit."
+            lede="When a run is refused for spend, the reason names which ceiling it hit and, for your own, how much is left against how much the run needs."
           />
           <ol className="lb-ceilings">
             <li>
@@ -100,8 +101,9 @@ export default function Pricing() {
             <li>
               <h3>Your top-up credit</h3>
               <p>
-                Tried only once the allowance is genuinely exhausted, not merely
-                low. Top-ups are one-time purchases on any plan, Free included,
+                Tried whenever what is left of the allowance cannot hold a run’s
+                reservation, and a run is drawn from one or the other, never
+                both. Top-ups are one-time purchases on any plan, Free included,
                 and expire twelve months after purchase.
               </p>
             </li>
@@ -128,8 +130,10 @@ export default function Pricing() {
               <h3>Billing and cancellation</h3>
               <p>
                 Once you have a Stripe customer record, Manage billing opens
-                Stripe’s own billing portal, where cards, invoices and
-                cancellation live. Refunds are covered by the{' '}
+                Stripe’s own billing portal, where cards and invoices live.
+                Cancel plan, beside it, offers a monthly plan 50% off one month,
+                once, before it cancels; a yearly plan is offered nothing.
+                Refunds are covered by the{' '}
                 <Link className="lb-link" to="/legal/refunds">
                   Refund Policy
                 </Link>

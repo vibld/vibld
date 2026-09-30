@@ -1,6 +1,15 @@
 # Roadmap
 
-The roadmap describes outcomes, not delivery dates. It follows the [accepted decisions D1-D30](docs/decisions.md). The [implementation plan](docs/implementation-plan.md) orders the work and records release gates. GitHub milestones and issues hold execution status.
+The roadmap describes outcomes, not delivery dates. It follows the [accepted decisions](docs/decisions.md), the D and L series. The [implementation plan](docs/implementation-plan.md) orders the work and records release gates. GitHub milestones and issues hold execution status.
+
+## Open-source launch (D79-D81)
+
+Decided 2026-09-30: new product work pauses until the open-source version is live. Live means all four of these, shipped in this order as each is proven:
+
+- A clean clone generates a real project with only a provider key, proven in CI. **Done:** `pnpm generate`, proven weekly on a fresh clone of the public repository by `.github/workflows/clean-clone.yml` (D82).
+- A validated self-hosting path on Cloudflare. Not yet: the pieces are documented, and nobody outside the project has deployed a copy.
+- A tagged v0.1.0 release. Not yet.
+- An announcement. Not yet.
 
 ## M0: Foundation
 
@@ -22,16 +31,16 @@ Track: M0 milestone and foundation tracker.
 
 ## M1: Hello Vibld
 
-Goal: an invited user turns a prompt into a portable marketing site with a private working preview, a saved checkpoint and export.
+Goal: a signed-in user turns a prompt into a portable marketing site with a private working preview, a saved checkpoint and export.
 
-- Hosted builder UI and API with invitation-only identity and tenant authorization
+- Hosted builder UI and API with sign-in and tenant authorization (Clerk; open sign-up since the public beta, with an invite-only mode kept for a deployment that closes)
 - Structured plan and generation contracts
-- AI SDK adapter and measured initial model selection
-- Versioned React Router/TypeScript marketing template with static prerendering
+- Vibld-owned model clients (Anthropic, OpenAI, DeepSeek) and measured initial model selection
+- Versioned React Router/TypeScript marketing template with static prerendering (`templates/marketing`, a starter a user can export; generated projects do not follow it: they are a Vite single-page app with no router and no prerendering, per `packages/ai/src/stack.ts` and `scaffold.ts`)
 - Cloudflare Sandbox execution with curated dependencies and network/resource policy
 - Preview lifecycle and streamed status
 - Durable workflow, staged changes and bounded initial repair
-- PostgreSQL metadata and durable R2 project objects with restore/export checks
+- D1 metadata and durable R2 project objects with restore/export checks
 - Scoped autonomy permissions and broker-first credentials
 - GitHub connection, branches and PRs for Vibld-generated projects
 - Revision-scoped repository indexing and semantic search
@@ -40,15 +49,21 @@ Goal: an invited user turns a prompt into a portable marketing site with a priva
 
 Exit criterion: the versioned evaluation suite meets its documented target, accepted exports build outside Vibld, and recovery, tenant-isolation, preview-access and budget tests pass. M1 is a hosted technical alpha. A working preview alone does not close this milestone.
 
+Status: running at app.vibld.com as a public beta. Not built: revision-scoped repository indexing and semantic search (internal issue 12), and scoped autonomy permissions (internal issue 15). Not settled: the measured model selection, since the bakeoff has run but its evidence does not yet favour one model.
+
 Track: M1 milestone and Hello Vibld tracker.
 
 ## M2: Reliable iteration
 
 Conversation-driven changes to saved projects, persistent conversation history, targeted patches, regression checks, visible repair/recovery, change summaries and rollback, with a history view that lists every accepted checkpoint and restores one in a single step. Reuse the M1 writer, indexing and checkpoint boundaries. M1 plus M2 proves the first usable build/edit loop. Validate a non-Cloudflare execution path and self-hosting instructions before claiming a complete independent OSS builder.
 
+Status: shipped: projects that keep their whole conversation and settings, follow-ups built as targeted patches, and a build check with one visible repair (D69). Not built: the checkpoint history view and rollback, the non-Cloudflare execution path (L47), and a validated self-hosting path.
+
 ## M3: Publish
 
 Ship to an approved Cloudflare target, with deployment status, logs, rollback and environment/secret handling behind an adapter. Published sites can use the owner's own domain as well as a `vibld-preview.dev` name. Verify an independent static-hosting path. GitHub branch and PR support is already part of M1; broader existing-repository workflows follow as scoped developer use cases.
+
+Status: shipped: one-step publishing of a project to its own `<slug>.vibld-preview.dev` site, and taking it down (`apps/publish`). Not built: the owner's own domain, rolling back to an earlier published version, and an independent static-hosting path.
 
 ## M4: One full-stack integration
 
@@ -76,7 +91,7 @@ More ways to begin than a sentence. Each produces the same conventional project 
 
 ## M7: Working your way
 
-- Bring your own model API key, for cost control and for self-hosted deployments
+- Bring your own model API key in the hosted product, for cost control. A self-hosted copy already runs on its own provider keys (L45); the hosted product holds no user model keys until a credential vault exists (L31)
 - Comments on shared previews, the first step toward working as a team
 - A command-line tool that pulls a project into a local editor and pushes changes back as a checkpoint
 

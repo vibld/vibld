@@ -71,23 +71,23 @@ export default function HowItWorks() {
               <h3>Iterate in the same conversation</h3>
               <p>
                 A follow-up sees the project it is editing, so “make the header
-                sticky” means the header it already wrote. Every change is
-                another staged checkpoint to read and accept.
+                sticky” means the header it already wrote. It changes only the
+                files it needs, and is checked the way the first build was.
               </p>
             </div>
             <div>
-              <h3>Restart the sandbox to see it</h3>
+              <h3>The preview keeps up</h3>
               <p>
-                A running sandbox keeps serving the checkpoint it started from,
-                and says so when a newer one is accepted, rather than quietly
-                becoming something else.
+                A running preview takes each new version in place, and restarts
+                only when it has to, saying why.
               </p>
             </div>
             <div>
               <h3>Take it with you whenever</h3>
               <p>
-                Export and push act on the last accepted checkpoint. The project
-                owes nothing to your account once it is out.
+                Export, push and publish are under Ship, and act on the last
+                finished checkpoint. The project owes nothing to your account
+                once it is out.
               </p>
             </div>
           </div>
@@ -135,10 +135,8 @@ function StepArt({ step }: { step: FlowStep }) {
             two-hour slot and see a confirmation.
           </p>
           <figcaption className="lb-promptbox__foot">
-            <span className="lb-urlfield">Reference URL (optional)</span>
-            <span className="lb-urlfield">
-              Style DNA: calm, let the pots speak
-            </span>
+            <span className="lb-urlfield">Reference (optional)</span>
+            <span className="lb-urlfield">Style: Organic</span>
           </figcaption>
         </figure>
       );
@@ -241,7 +239,7 @@ function StepArt({ step }: { step: FlowStep }) {
             <span className="lb-t-tag">clay-saturdays/</span>
             {'\n  package.json\n  index.html\n  DESIGN.md\n  '}
             <span className="lb-t-tag">src/</span>
-            {'\n    main.tsx  App.tsx  index.css\n    '}
+            {'\n    main.tsx  App.tsx  styles.css\n    '}
             <span className="lb-t-tag">components/</span>
             {'\n      SlotPicker.tsx  Confirmation.tsx'}
           </pre>
@@ -257,7 +255,7 @@ function StepArt({ step }: { step: FlowStep }) {
           <span className="lb-t-comment">design checks against DESIGN.md</span>
           {'\n'}
           <span className="lb-t-ok">pass</span>
-          {'  color           #1F6F6B found in src/index.css\n'}
+          {'  color           #1F6F6B found in src/styles.css\n'}
           <span className="lb-t-ok">pass</span>
           {'  font            display face is loaded\n'}
           <span className="lb-t-ok">pass</span>
@@ -265,9 +263,9 @@ function StepArt({ step }: { step: FlowStep }) {
           <span className="lb-t-bad">error</span>
           {' reduced-motion  no prefers-reduced-motion rule\n'}
           <span className="lb-t-note">repair</span>
-          {' one pass, whole project\n'}
+          {' one pass, a patch\n'}
           <span className="lb-t-ok">pass</span>
-          {'  reduced-motion  rule added in src/index.css\n'}
+          {'  reduced-motion  rule added in src/styles.css\n'}
           <span className="lb-t-ok">clean</span>
           {' 0 errors'}
         </pre>
@@ -301,12 +299,12 @@ function StepArt({ step }: { step: FlowStep }) {
           </div>
           <div>
             <h3>Push to GitHub</h3>
-            <p>A pull request in the one repository you approved.</p>
+            <p>A pull request in the project’s own repository.</p>
             <code>vibld/&lt;revision&gt;: pull request opened</code>
           </div>
           <div>
             <h3>Export</h3>
-            <p>The accepted checkpoint as an archive, nothing rewritten.</p>
+            <p>The checkpoint as an archive, nothing rewritten.</p>
             <code>clay-saturdays.zip</code>
           </div>
         </div>

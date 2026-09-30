@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'credits-and-plans')!;
-const CHECKED = '2026-09-27';
+const CHECKED = '2026-09-30';
 
 export function meta() {
   return metaFor('/docs/credits-and-plans');
@@ -41,6 +41,11 @@ export default function CreditsAndPlans() {
         every month as the monthly one.
       </p>
       <p>
+        A Free account builds, chats and sketches with GPT-6 Luna only; the paid
+        plans unlock the other models. It can have three active projects at once
+        (archived ones do not count), and Build and Ship have no limit.
+      </p>
+      <p>
         An account with no active subscription is Free. The monthly allowance
         resets on the UTC calendar month, for everyone, rather than on each
         subscription’s own anniversary. That is a deliberate simplification: it
@@ -63,11 +68,11 @@ export default function CreditsAndPlans() {
       <h2>Top-up credit</h2>
       <p>
         A top-up costs $20 and adds $8.00 of model spend. Top-ups are one-time
-        purchases and are not tied to a month. They are tried only when the
-        monthly allowance is genuinely exhausted, not when it is merely low, so
-        a top-up is a reserve rather than a substitute for the plan you are on.
-        Top-up credit is available on any tier, Free included, and expires
-        twelve months after purchase.
+        purchases and are not tied to a month. They are tried whenever what is
+        left of the monthly allowance cannot hold a run’s reservation. A run is
+        drawn from one or the other, never from both at once. Top-up credit is
+        available on any tier, Free included, and expires twelve months after
+        purchase.
       </p>
 
       <h2>How a run is priced</h2>
@@ -81,6 +86,20 @@ export default function CreditsAndPlans() {
       <p>
         Prices follow the model that runs. A cheaper model reserves less and
         costs less, which is the practical reason the model selector exists.
+        Chat replies and the three sketches are priced the same way; the
+        sketches cost about a tenth of a build.
+      </p>
+      <p>
+        When you cannot fund a build’s full reservation, it is not refused
+        outright: it is reserved what you have left and runs with a smaller
+        budget, and if it runs out it stops and names the file it reached. Only
+        below the least a build can run on is it refused.
+      </p>
+      <p>
+        A build you cancel is charged for the steps it finished, plus the step
+        that was running at the most it could have cost, and never more than it
+        reserved. A build keeps running if you close the page, so closing the
+        page is not a way to stop one.
       </p>
 
       <h2>The order things are spent in</h2>
@@ -95,13 +114,15 @@ export default function CreditsAndPlans() {
           Your <strong>monthly tier allowance</strong>.
         </li>
         <li>
-          Your <strong>top-up credit</strong>, once the allowance is gone.
+          Your <strong>top-up credit</strong>, when the allowance cannot hold
+          the run.
         </li>
       </ol>
       <p>
         When a run is refused for spend, the reason names which ceiling it hit.
-        The readout under <strong>Plan and usage</strong> in the settings menu
-        is a read-only mirror of the same figures the gate uses, so what it
+        For your own, it says how much is left and how much the run needs set
+        aside. The readout under <strong>Plan and usage</strong> in the settings
+        menu is a read-only mirror of the same figures the gate uses, so what it
         shows and what it enforces cannot disagree.
       </p>
 
@@ -110,7 +131,20 @@ export default function CreditsAndPlans() {
         Upgrading starts a Stripe Checkout session. Once you have a Stripe
         customer record, <strong>Manage billing</strong> appears under{' '}
         <strong>Plan and usage</strong> in the settings menu and opens Stripe’s
-        own billing portal, where cards, invoices and cancellation live.
+        own billing portal, where cards and invoices live.
+      </p>
+      <p>
+        <strong>Cancel plan</strong>, in the same place, opens Stripe’s page for
+        cancelling. A monthly plan is offered 50% off one month, once, before it
+        cancels; a yearly plan is offered nothing.
+      </p>
+
+      <h2>Referrals</h2>
+      <p>
+        Your link is under <strong>Refer a friend</strong> in the settings menu,
+        in the form <code>vibld.com/?ref=&lt;code&gt;</code>. When a friend
+        signs up with it and makes their first payment, you each get $5.00 of
+        build credit, for up to 25 friends.
       </p>
       <p>
         Refunds are covered by the <a href="/legal/refunds">Refund Policy</a>.

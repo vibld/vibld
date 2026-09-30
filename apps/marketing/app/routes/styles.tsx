@@ -6,6 +6,7 @@ import { PageHead } from '../components/SiteChrome';
 import { SiteMiniature } from '../components/SiteMiniature';
 import { DEMO_SITES, DEMO_SITE_IDS } from '../demo-sites';
 import { lookById } from '../looks';
+import { PRESET_MOODS, STYLE_MOODS } from '@vibld/ai/style-presets';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import { SITE, metaFor } from '../site';
 
@@ -39,6 +40,23 @@ export default function Styles() {
         title="Directions vibld builds in"
         lead="Ask for one by name, or ask for three sketches and pick. Every direction here is one the builder actually knows; this page is generated from the same list it reads."
       />
+      <section className="lb-section lb-section--tight" aria-label="Moods">
+        <div className="lb-wrap">
+          <p className="lb-lede">
+            Each style carries one to three moods:{' '}
+            {STYLE_MOODS.map((mood) => mood.name.toLowerCase()).join(', ')}. In
+            the builder’s style picker a mood narrows the list, and the styles
+            whose moods your request names are listed as “Suggested for your
+            request”. A suggestion is only a mark: nothing is picked for you.
+          </p>
+          <p className="lb-lede">
+            A moving background is asked for in words rather than picked: say
+            “animated background”, or name one (aurora, particles, grain,
+            flowing lines), and the build can use one of four that vibld draws
+            in code from the project’s own colours.
+          </p>
+        </div>
+      </section>
       <section
         className="lb-section lb-section--tight"
         aria-labelledby="treatments-title"
@@ -115,6 +133,15 @@ function StyleGrid({
             <div className="lb-style__meta">
               <h3>{entry.name}</h3>
               <p>{entry.description}</p>
+              <p className="lb-style__demo">
+                Moods:{' '}
+                {PRESET_MOODS[entry.id as StylePresetId]
+                  .map(
+                    (id) =>
+                      STYLE_MOODS.find((mood) => mood.id === id)?.name ?? id,
+                  )
+                  .join(', ')}
+              </p>
               {entry.pairs ? (
                 <ul
                   className="lb-swatches"

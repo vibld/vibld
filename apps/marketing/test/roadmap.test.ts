@@ -115,6 +115,13 @@ describe('the roadmap data', () => {
       'GitHub pull requests',
       '24 style presets',
       'Build from a reference URL',
+      'Projects',
+      'Project links and remix',
+      'Chat before building',
+      'Draft preview',
+      'Media uploads',
+      'Style moods and suggestions',
+      'Animated backgrounds',
     ]);
   });
 

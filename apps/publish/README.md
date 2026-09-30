@@ -238,10 +238,12 @@ distinct from `PREVIEW_INTERNAL_SECRET` -- a leak of one must not
 compromise the other) to the **`preview`** environment under **Settings →
 Environments**, the same one `apps/web` and `apps/preview` already use.
 
-The Cloudflare API token needs **Workers Scripts: Edit** (already covers
-this account) plus **DNS: Edit** on the `vibld-preview.dev` zone, for the
-wildcard route -- the same permissions apps/preview's own token already
-has, since it is the same zone.
+The workflow uses the `preview` environment's `CLOUDFLARE_API_TOKEN`, the
+one apps/web deploys with (**Workers Scripts: Edit**, **D1: Edit** and
+**Workers R2 Storage: Edit**), which covers this Worker's deploy, its D1 and
+R2 bindings and the migration step. It needs no DNS permission: this Worker
+has no route of its own (`wrangler.jsonc`). The `vibld-preview.dev`
+wildcard route is apps/preview's, and so is the **DNS: Edit** it needs.
 
 Run the **Deploy publish service** workflow from the Actions tab
 (`workflow_dispatch` only) before apps/web calls `/api/publish` for the

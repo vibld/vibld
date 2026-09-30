@@ -81,12 +81,12 @@ export function specLines(site: DemoSite): string[] {
 export function checkLines(site: DemoSite): string[] {
   return [
     '$ design checks against DESIGN.md',
-    `pass  color           ${site.colors.primary.fill} in src/index.css`,
+    `pass  color           ${site.colors.primary.fill} in src/styles.css`,
     'pass  font            display face loaded',
     'pass  lang            <html lang="en">',
     'pass  alt             every image has alt text',
     'error reduced-motion  no prefers-reduced-motion rule',
-    'repair  one pass, whole project',
+    'repair  one pass, a patch',
     'pass  reduced-motion  rule added',
     'clean 0 errors, preview ready',
   ];

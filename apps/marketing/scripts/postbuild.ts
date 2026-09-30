@@ -250,22 +250,37 @@ function llms(): string {
 
 > ${SITE.summary}
 
-Vibld (pronounced "vibe-build") is a product of ${SITE.legalEntity}. It is not
+vibld (pronounced "vibe-build") is a product of ${SITE.legalEntity}. It is not
 related to Bible study software; the name is a contraction of "vibe" and
 "build".
 
 ## Status
 
-Vibld is in public beta. Anyone can sign up at ${SITE.signUpUrl}, and the
+vibld is in public beta. Anyone can sign up at ${SITE.signUpUrl}, and the
 builder itself is at ${SITE.appUrl}. Plans and prices are at
 ${absolute('/pricing')}.
 
 ## What makes it different
 
 Generated applications are conventional, portable software projects that keep
-working without Vibld. Users can read and export the complete project. Git is
-the canonical project history, and generated code is meant to be readable
-enough to review, not merely exportable.
+working without vibld. Users can read and export the complete project, or push
+it to GitHub as a branch and a pull request. The builder keeps each project's
+history as revisions in its own storage; Git comes in when a project is
+pushed. Generated code is meant to be readable enough to review, not merely
+exportable.
+
+## Running it yourself
+
+- With your own model key and no deployment: in a clone of ${SITE.repoUrl},
+  \`pnpm generate "<prompt>" --out ./site --build\` with one Anthropic,
+  DeepSeek or OpenAI key runs the same bounded build as the hosted builder,
+  writes the project, and builds it with npm, asking the model for one repair
+  if the build fails. A weekly workflow proves this from a clean clone.
+- \`pnpm --filter @vibld/web dev\` runs the builder's interface locally with a
+  deterministic fake provider. No model is called.
+- Self-hosting the whole service on Cloudflare is documented but not yet
+  validated: nobody outside the project has deployed their own copy. See
+  ${absolute('/docs/self-hosting')}.
 
 ## Questions
 
@@ -374,7 +389,7 @@ function llmsFull(): string {
     ].join('\n'),
   );
   return [
-    `# Vibld: the full text`,
+    `# vibld: the full text`,
     '',
     `> ${SITE.summary}`,
     '',

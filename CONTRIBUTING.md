@@ -1,6 +1,6 @@
 # Contributing to Vibld
 
-Thank you for helping build Vibld. The project is in an early architectural stage, so small, reviewable contributions are especially valuable.
+Thank you for helping build Vibld. The builder runs as a public beta and is still early, so small, reviewable contributions are especially valuable.
 
 ## Where changes land
 
@@ -21,12 +21,16 @@ Install Node.js 24 (the LTS release CI runs on; 22.15 or newer also works) and p
 ```bash
 pnpm install --frozen-lockfile
 pnpm format:check
+pnpm check:style
 pnpm typecheck
 pnpm test
-pnpm build
+pnpm test:scripts
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_placeholder pnpm build
 ```
 
-Root `typecheck`/`test`/`build` run Turborepo across every workspace package. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) enforces a frozen install, `format:check`, `typecheck` and `test` on every PR, plus an independent build of each starter template (`templates/marketing` and `templates/luminous`) outside the workspace (each has to prove it builds the way an exported project actually would). Use the pnpm version pinned in `package.json`.
+Those are the steps of CI's quality job ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), in its order, on every pull request and push to `main`. Root `typecheck`/`test`/`build` run Turborepo across every workspace package. `check:style` runs `scripts/no-em-dash.mjs`, and `test:scripts` runs the tests of `scripts/`, which is not a workspace package. The build gets a placeholder Clerk key because it only embeds one.
+
+CI also writes one eval stub case out and builds it in a container, and builds each starter template (`templates/marketing` and `templates/luminous`) outside the workspace with `npm ci`, `npm run typecheck`, `npm test` and `npm run build` (each has to prove it builds the way an exported project actually would). Use the pnpm version pinned in `package.json`.
 
 ## Working agreements
 

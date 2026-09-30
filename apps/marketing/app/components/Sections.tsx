@@ -181,7 +181,8 @@ export function FeatureBento() {
         <h3>It checks the build against its own spec</h3>
         <p>
           Static checks read the files. Only an error the checker is sure of
-          buys a repair, because a repair rewrites the whole project.
+          buys a repair, because a repair is another paid call. It patches the
+          files at fault rather than rewriting the project.
         </p>
         <ul className="lb-chk" aria-label="An example check report">
           {CHECKS.map(([name, result]) => (
@@ -208,8 +209,9 @@ export function FeatureBento() {
         </div>
         <h3>Push opens a pull request</h3>
         <p>
-          In the one repository you approved, on a vibld/ branch, against your
-          default branch. Review it like any other change.
+          In the project’s own repository, created or picked on its first push,
+          on a vibld/ branch, against your default branch. Review it like any
+          other change.
         </p>
         <div className="lb-pr">
           <p className="lb-pr__t">
@@ -323,8 +325,8 @@ export function PlanCards({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
           </p>
           <p className="lb-plan__d">
             {plan.price
-              ? 'Upgrading starts a Stripe Checkout session. Cards, invoices and cancellation live in Stripe’s billing portal.'
-              : 'An account with no active subscription is Free.'}
+              ? 'Upgrading starts a Stripe Checkout session. Cancel plan is in the builder’s settings menu; cards and invoices are in Stripe’s billing portal.'
+              : 'An account with no active subscription is Free. It builds with GPT-6 Luna and keeps up to three active projects.'}
           </p>
         </li>
       ))}

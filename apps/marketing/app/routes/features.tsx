@@ -34,31 +34,54 @@ const COMPOSER: Feature[] = [
     body: 'Write what the thing is, who uses it and what it has to do. Specifics help more than adjectives.',
   },
   {
-    title: 'Knowledge',
-    body: 'Standing instructions that persist: the company name, a stack you insist on, how dates are formatted.',
+    title: 'It answers or it builds',
+    body: 'For each message the agent either replies in words and changes nothing, or builds. Before the first build it may ask a question or two, and a “yes” becomes the full brief you agreed.',
   },
   {
-    title: 'Style DNA',
-    body: 'The visual direction, kept apart from the brief, so changing how it looks does not mean restating what it does.',
+    title: 'Style',
+    body: 'A visual direction from the catalogue, narrowed by mood. Styles whose moods your message names are marked as suggestions; nothing is picked for you.',
   },
   {
-    title: 'Reference URL',
-    body: 'A page to copy from or emulate. vibld fetches it and reads its structure.',
+    title: 'Reference',
+    body: 'A page to start from. vibld reads its text, colours, fonts and spacing and adapts them rather than copying. It goes with one message.',
+  },
+  {
+    title: 'Media',
+    body: 'Your images and video, placed where the request calls for them. One library per account, shared by every project.',
+  },
+  {
+    title: 'Preferences',
+    body: 'Project instructions and a few visual preferences, applied to every message, so you only say them once.',
   },
   {
     title: 'A choice of model',
-    body: 'Which models are offered depends on the deployment and your account. The settings menu reports which one actually served the last run.',
+    body: 'Which models are offered depends on the deployment and your plan; Free builds with GPT-6 Luna. The settings menu reports which one actually served the last run.',
+  },
+];
+
+const DIRECTIONS: Feature[] = [
+  {
+    title: 'Named styles',
+    body: 'Pick a style and the build starts from its direction, including how it moves.',
+  },
+  {
+    title: 'Three sketches',
+    body: 'Show me three directions: three quick sketches that differ in look, for about a tenth of a build. Offered before the first build only.',
+  },
+  {
+    title: 'Moving backgrounds',
+    body: 'Ask for an animated background, or name one (aurora, particles, grain, flowing lines), and the build can use one of four that vibld writes itself: drawn in code from the project’s colours, paused off screen, and a still frame under reduced motion.',
   },
 ];
 
 const PANES: Feature[] = [
   {
     title: 'Preview',
-    body: 'Until a sandbox runs, a local mock of the plan in a fully restricted frame: nothing installed, no generated code executed. Once a sandbox runs, the frame is the sandbox.',
+    body: 'While a first build runs, a draft of the page, labelled as one. Then Run live preview, and the frame is the running app.',
   },
   {
     title: 'Code',
-    body: 'The generated files, as files. The pane to read before accepting anything.',
+    body: 'The generated files, as files, badged while a build is being checked. Export, Publish and Push are under Ship, in the top bar.',
   },
   {
     title: 'Console',
@@ -67,24 +90,43 @@ const PANES: Feature[] = [
   },
   {
     title: 'Problems',
-    body: 'What vibld’s own checks found in the staged files before you accepted them.',
+    body: 'What vibld’s own checks found, including a build that did not pass its check.',
     limit:
       'Not the sandbox’s install, build or type errors, which are not reported here yet.',
+  },
+  {
+    title: 'Runs',
+    body: 'Every run on the project: the model, the tokens, the cost and why it ended.',
+  },
+];
+
+const PROJECTS: Feature[] = [
+  {
+    title: 'Saved as you go',
+    body: 'The code, the whole conversation and the settings. Open, rename, duplicate, archive or delete from the Projects list. Free keeps three active projects; Build and Ship have no limit.',
+  },
+  {
+    title: 'Builds that outlast the page',
+    body: 'Close the tab or lock the phone and the build carries on; reopening the project picks up the result. Only Cancel stops one, and it is charged for what it used.',
+  },
+  {
+    title: 'Share and remix',
+    body: 'Turn on a link and anyone with it sees the project’s code and live preview. Somebody signed in can remix it into a project of their own. Your conversation, name and email stay yours.',
   },
 ];
 
 const OUT: Feature[] = [
   {
     title: 'Export',
-    body: 'Downloads the accepted checkpoint as a .zip: the files as they are, ready to open in an editor and run with the package manager the project declares. Nothing rewritten, nothing that phones home.',
+    body: 'Downloads the checkpoint as a .zip: the files as they are, ready to open in an editor and run with the package manager the project declares. Nothing rewritten, nothing that phones home.',
   },
   {
     title: 'Push to GitHub',
-    body: 'A branch named vibld/<revision>, one commit and a pull request against the default branch, in the single repository you approved. The grant expires after 90 days, and a push is safe to retry.',
+    body: 'A branch named vibld/<revision>, one commit and a pull request against the default branch, in the project’s own repository: a new one vibld creates, or one you pick. The grant expires after 90 days, and a push is safe to retry.',
   },
   {
     title: 'Publish',
-    body: 'Builds the accepted checkpoint and serves it at a vibld address, in two presses. Take it down the same way: the address stops working immediately and the name stays yours.',
+    body: 'Builds the checkpoint and serves it at the project’s own vibld-preview.dev address, in two presses. Take it down the same way: the address stops working immediately and the name stays yours.',
     limit: 'Rolling back to a previous published checkpoint is not built yet.',
   },
 ];
@@ -133,8 +175,8 @@ export default function Features() {
             title="Say it once, keep it"
             lede={
               <>
-                Three optional inputs sit above the request, and all three
-                persist.{' '}
+                Under the message box is a row of options, each opening its
+                panel in place.{' '}
                 <Link className="lb-link" to="/docs/getting-started">
                   Getting started
                 </Link>{' '}
@@ -153,8 +195,9 @@ export default function Features() {
             eyebrow="Directions"
             id="directions-title"
             title={`${STYLE_PRESETS.length} named styles, or three sketches`}
-            lede="Name a style preset and the build starts from its direction, including how it moves. Or ask for three sketches that differ in look, and pick one."
+            lede="Name a style preset and the build starts from its direction. Or ask for three sketches that differ in look, and pick one."
           />
+          <FeatureGrid features={DIRECTIONS} />
           <p className="lb-more-link">
             <Link className="lb-link" to="/styles">
               Every style, drawn
@@ -169,8 +212,8 @@ export default function Features() {
             number="03"
             eyebrow="Checkpoints"
             id="checkpoints-title"
-            title="Nothing acts on files you have not accepted"
-            lede="A run produces a staged checkpoint: a plan and a set of files, not yet the project. The preview, a push and a publish all act on the last one you accepted. Iterating is another turn in the same conversation, and the follow-up sees the project it is editing."
+            title="Shown early, checked, then the project"
+            lede="There is no accept step. A build’s code is shown as soon as it exists, badged “Checking the build” while vibld installs and builds it, and “Fixing a problem” while a repair runs. Until the check ends, export, push and publish act on the last finished checkpoint. Iterating is another turn in the same conversation, and a follow-up changes only the files it needs."
           />
           <FeatureGrid features={PANES} />
           <p className="lb-more-link">
@@ -188,7 +231,7 @@ export default function Features() {
             eyebrow="Sandbox and sharing"
             id="sandbox-title"
             title="A real, installed, running copy"
-            lede="Run live preview installs the dependencies and starts a dev server. It reports each state (queued, installing, starting, ready, failed) instead of a spinner, and it expires, because it is for looking at a project rather than hosting one."
+            lede="Run live preview installs the dependencies and starts a dev server. It reports each state (queued, installing, starting, ready, failed) instead of a spinner, and it expires (ten idle minutes, thirty at most, one at a time), because it is for looking at a project rather than hosting one."
           />
           <div className="lb-grid2">
             <article className="lb-card">
@@ -205,11 +248,12 @@ export default function Features() {
               </p>
             </article>
             <article className="lb-card">
-              <h3>It says when it is out of date</h3>
+              <h3>It keeps up with the project</h3>
               <p>
-                A sandbox serves the checkpoint it started from. Accept a newer
-                one and the pane says so and offers Restart, rather than letting
-                the frame quietly misrepresent the project.
+                A running preview takes each new version in place and says
+                “Updating preview…” while it does. A change to the dependencies
+                is installed first; one it cannot take in place restarts the
+                preview, and the tab says why.
               </p>
               <p>
                 <Link className="lb-link" to="/docs/running-your-project">
@@ -221,6 +265,19 @@ export default function Features() {
         </div>
       </section>
 
+      <section className="lb-section" aria-labelledby="projects-title">
+        <div className="lb-wrap">
+          <SectionHead
+            number="05"
+            eyebrow="Projects"
+            id="projects-title"
+            title="Each project keeps everything"
+            lede="Every project remembers its code, its conversation and its settings, and publishes to a site of its own."
+          />
+          <FeatureGrid features={PROJECTS} />
+        </div>
+      </section>
+
       <section
         className="lb-section"
         id="checks"
@@ -228,7 +285,7 @@ export default function Features() {
       >
         <div className="lb-wrap">
           <SectionHead
-            number="05"
+            number="06"
             eyebrow="Design checks"
             id="checks-title"
             title="It checks the build against its own spec"
@@ -240,9 +297,9 @@ export default function Features() {
               <p>
                 An error is something the checker is confident about, such as a
                 colour the spec named that appears nowhere. Only errors buy a
-                repair, because a repair is a paid call that rewrites the whole
-                project. A warning rides along with a repair that is happening
-                anyway.
+                repair, because a repair is another paid call. A repair is a
+                patch to the files at fault, not a rewrite, and a warning rides
+                along with one that is happening anyway.
               </p>
             </article>
             <article className="lb-card">
@@ -251,12 +308,18 @@ export default function Features() {
                 {[
                   'color',
                   'font',
+                  'type',
                   'breakpoint',
+                  'motion',
+                  'reduced-motion',
+                  'canvas',
                   'lang',
+                  'viewport',
                   'alt',
                   'label',
-                  'reduced-motion',
-                  'viewport',
+                  'media',
+                  'copy',
+                  'em-dash',
                 ].map((name) => (
                   <li key={name}>{name}</li>
                 ))}
@@ -269,11 +332,11 @@ export default function Features() {
       <section className="lb-section" aria-labelledby="out-title">
         <div className="lb-wrap">
           <SectionHead
-            number="06"
+            number="07"
             eyebrow="Taking your code"
             id="out-title"
             title="Three ways out, and they do different things"
-            lede="The output is a conventional project. There is no proprietary runtime to keep it working and nothing that stops building the day you stop paying."
+            lede="All three are under Ship, in the top bar. The output is a conventional project. There is no proprietary runtime to keep it working and nothing that stops building the day you stop paying."
           />
           <FeatureGrid features={OUT} />
           <p className="lb-more-link">
@@ -287,7 +350,7 @@ export default function Features() {
       <section className="lb-section" aria-labelledby="stack-title">
         <div className="lb-wrap">
           <SectionHead
-            number="07"
+            number="08"
             eyebrow="What you get"
             id="stack-title"
             title="A project you can read, run and move"
@@ -310,7 +373,7 @@ export default function Features() {
       <section className="lb-section" aria-labelledby="questions-title">
         <div className="lb-wrap">
           <SectionHead
-            number="08"
+            number="09"
             eyebrow="Before you join"
             id="questions-title"
             title="Questions worth asking first"

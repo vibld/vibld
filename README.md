@@ -21,82 +21,114 @@
   <a href="https://vibld.com/docs">Docs</a> ·
   <a href="https://vibld.com/examples">Examples</a> ·
   <a href="https://vibld.com/styles">Styles</a> ·
+  <a href="https://vibld.com/roadmap">Roadmap</a> ·
   <a href="https://github.com/vibld/vibld/discussions">Discussions</a> ·
   <a href="https://app.vibld.com">Sign in</a>
 </p>
 
 ---
 
-**vibld** turns a description of a website or an app into a conventional React and TypeScript project. It plans the build, writes a design spec, stages the files, checks its own work against that spec, and hands you code you can read line by line, run anywhere and take with you.
-
-- **You own the code.** The output is a plain Vite project with no vibld runtime, no proprietary format and no `.vibld/` directory. Download it, push it to your own GitHub repository or publish it, and it keeps working without us.
-- **It shows its work.** Every step leaves something you can inspect: a plan, a `DESIGN.md`, staged files, a check report, a private preview.
-- **Nothing is public until you say so.** Previews are private and share links are revocable. Publishing is a separate, deliberate step, and it is reversible.
-- **It is open source.** The builder, the sandbox and the publish service in this repository are the ones running at [app.vibld.com](https://app.vibld.com), under Apache-2.0.
-
-> [!NOTE]
-> vibld is **early**. The hosted service is in public beta: anyone can [sign up](https://app.vibld.com/sign-up), and the [status](#status) section below spells out what works and what does not yet.
+<h3 align="center">Describe a website or an app. Watch it being built. Keep the code.</h3>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/builder-code-dark.webp">
-    <img alt="The vibld builder: a coffee roaster prompt on the left, the accepted project's file list and src/App.tsx on the right." src="docs/images/builder-code-light.webp" width="100%">
-  </picture>
+  <img alt="vibld's live builder on vibld.com: a prompt, three directions to choose from, a DESIGN.md written, the build, the design checks, and a private preview of the finished page." src="docs/images/media-live-build.webp" width="100%">
   <br>
-  <sub>The builder, run locally. A local checkout uses a deterministic fake provider instead of a model (tagged <code>vibld · fake</code>), so the files shown are fixture output.</sub>
+  <sub>The builder on <a href="https://vibld.com">vibld.com</a>'s home page, recorded from the site's own production build.</sub>
 </p>
+
+**vibld** turns plain words into a conventional React and TypeScript project. It picks a direction with you, writes the design down, builds in bounded steps, checks its own work against what it wrote, proves the result compiles, and hands you code you can read line by line, run anywhere and take with you.
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <h4>🧾 You own the code</h4>
+      A plain Vite project: React 19, TypeScript, Tailwind v4. No vibld runtime, no proprietary format, no lock-in. Download it, push it to your GitHub or publish it, and it keeps working without us.
+    </td>
+    <td width="33%" valign="top">
+      <h4>🔍 It shows its work</h4>
+      A plan, a <code>DESIGN.md</code>, every file as it lands, a check report, a verification build and a per-run record of model, tokens and cost. Nothing happens off screen.
+    </td>
+    <td width="33%" valign="top">
+      <h4>🔓 It is open source</h4>
+      The builder, the sandbox and the publish service here are the ones running at <a href="https://app.vibld.com">app.vibld.com</a>, under Apache-2.0. Bring one API key and build from your own terminal.
+    </td>
+  </tr>
+</table>
+
+> [!NOTE]
+> vibld is **early**. The hosted service is a public beta that anyone can [sign up](https://app.vibld.com/sign-up) for, and the [status](#status) section says plainly what works and what does not yet.
 
 ## Contents
 
+- [Three ways to use it](#three-ways-to-use-it)
 - [How it works](#how-it-works)
 - [What it has built](#what-it-has-built)
+- [Designed, not templated](#designed-not-templated)
 - [Features](#features)
 - [Status](#status)
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
 - [Running it yourself](#running-it-yourself)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 - [Licence](#licence)
 
+## Three ways to use it
+
+|                    | ☁️ **Hosted**                                                                          | ⌨️ **Your key, your terminal**                                                         | 🛠️ **Self-hosted**                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **What you get**   | The whole builder: chat, previews, projects, sharing, GitHub and publishing.           | The same bounded build, from the command line, writing a project to disk.              | Your own copy of the hosted service on your Cloudflare account.                                            |
+| **What you need**  | A browser. [Sign up](https://app.vibld.com/sign-up).                                   | Node 24, pnpm and one Anthropic, OpenAI or DeepSeek key.                               | Cloudflare (Workers Paid for previews), Clerk, a model key; Stripe and a GitHub App only if you want them. |
+| **What it costs**  | Free plan, or a paid plan with more model spend. [Pricing](https://vibld.com/pricing). | What your provider bills. The weekly proof run costs about $0.15 to $0.31 on DeepSeek. | Your Cloudflare and provider bills.                                                                        |
+| **Where to start** | [Getting started](https://vibld.com/docs/getting-started)                              | [Quick start](#generate-a-real-project-with-your-own-key)                              | [Self-hosting](https://vibld.com/docs/self-hosting) (documented, not yet validated outside the project)    |
+
+<p align="center">
+  <img alt="A terminal: pnpm generate for a one-page bakery site plans the project, writes five groups of files, lists them with their line counts and token usage, then builds the result with npm." src="docs/images/media-terminal.webp" width="100%">
+  <br>
+  <sub><code>pnpm generate --build</code> from a clean clone with one DeepSeek key, replayed from the weekly proof run's own log (13 minutes, shown faster).</sub>
+</p>
+
 ## How it works
 
-| Step                                | What happens                                                                                                                                                                      |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. Say what you want**            | Plain words, with specifics. Project instructions hold standing rules, visual preferences hold a direction, and a reference URL points at a page to start from.                   |
-| **2. Pick a direction**             | Ask for three sketches that differ in look, or name one of 24 [style presets](https://vibld.com/styles).                                                                          |
-| **3. It writes the spec down**      | The direction becomes `DESIGN.md`: the colours, type, breakpoints and motion the build has to honour, written into the project.                                                   |
-| **4. It stages a checkpoint**       | A plan and a set of files in React and TypeScript on Vite. Nothing acts on staged files until you accept them.                                                                    |
-| **5. It checks its own design**     | The files are read against the spec: named colours, the display face, breakpoints, alt text, contrast, a reduced-motion rule. Only an error the checker is sure of buys a repair. |
-| **6. Look at it privately**         | Run the project in a sandbox for a real dev server, and share a link until you revoke it.                                                                                         |
-| **7. Publish it, or take the code** | Download an archive, open a pull request in a repository you connect, or publish it at a name you choose.                                                                         |
+| Step                              | What happens                                                                                                                                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. Say what you want**          | Plain words. It may answer, or ask one or two questions first; when you say go, your answers become a full brief. Style, a reference page, your own images and video, and standing instructions sit in one row under the message box. |
+| **2. Pick a direction**           | Choose one of 24 [style presets](https://vibld.com/styles), with suggestions for the mood your request names, or ask for three directions to compare before anything is built.                                                        |
+| **3. It writes the spec down**    | The direction becomes `DESIGN.md`: colours, type, breakpoints and motion the build has to honour, kept in the project.                                                                                                                |
+| **4. It builds in bounded steps** | A plan, then files in small groups, each with a ceiling on tokens and time. A draft of the page shows while the first build runs, and a build keeps going if you close the tab.                                                       |
+| **5. It checks its own work**     | Design checks read the files against the spec (colours, type, breakpoints, alt text, contrast, motion, copy). Then a real production build: if it fails, one repair patch, then the build again.                                      |
+| **6. Look at it live**            | Run a live preview: the real dev server in a private sandbox, which picks up each new revision in place. Share it by link until you revoke it.                                                                                        |
+| **7. Ship it, or take the code**  | Download a `.zip`, create or push to a GitHub repository for this project, or publish it at `<name>.vibld-preview.dev`. Unpublishing is one step too.                                                                                 |
 
 <details>
-<summary><b>More of the builder</b>: the prompt, a run in progress, and the accepted result</summary>
+<summary><b>The builder, screen by screen</b></summary>
 <br>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/builder-prompt-dark.webp">
   <img alt="The builder at rest, with a prompt for a coffee roaster typed in." src="docs/images/builder-prompt-light.webp" width="100%">
 </picture>
-<p align="center"><sub><b>Describe it.</b> A prompt, with project instructions, visual preferences, a reference URL and the style presets beside it.</sub></p>
+<p align="center"><sub><b>Describe it.</b> The message box, with Style, Reference, Media and Preferences beside it.</sub></p>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/builder-generating-dark.webp">
   <img alt="The builder mid-run: plan and stage done, validation running, generation events in the console." src="docs/images/builder-generating-light.webp" width="100%">
 </picture>
-<p align="center"><sub><b>Watch it build.</b> Plan, stage, validate, accept, with every event in the console.</sub></p>
+<p align="center"><sub><b>Watch it build.</b> Each step as it happens, with every event in the console.</sub></p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/builder-result-dark.webp">
-  <img alt="The accepted checkpoint, with the local preview and a Run in sandbox button." src="docs/images/builder-result-light.webp" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/builder-code-dark.webp">
+  <img alt="The finished project's file list and src/App.tsx." src="docs/images/builder-code-light.webp" width="100%">
 </picture>
-<p align="center"><sub><b>Check it.</b> A local preview of the accepted plan, then <i>Run in sandbox</i> for a real install and dev server.</sub></p>
+<p align="center"><sub><b>Read it.</b> Every file, as written.</sub></p>
+
+<sub>These screenshots are from a local checkout, which uses a deterministic fake provider instead of a model (tagged <code>vibld · fake</code>), so the files shown are fixture output.</sub>
 
 </details>
 
 ## What it has built
 
-Real builds from the evaluation suite, published exactly as the model wrote them, with no hand edits. Each one links to its live copy; the prompt, the run and anything worth knowing are on [vibld.com/examples](https://vibld.com/examples), and the source is in [`examples/generated`](examples/generated).
+Real builds from the evaluation suite, published exactly as the model wrote them, with no hand edits. Each links to its live copy; the prompt, the run and anything worth knowing are on [vibld.com/examples](https://vibld.com/examples), and the source is in [`examples/generated`](examples/generated).
 
 <table>
   <tr>
@@ -131,46 +163,64 @@ Real builds from the evaluation suite, published exactly as the model wrote them
   </tr>
 </table>
 
-Two hand-built starter templates ship alongside, each under its own MIT licence: [`templates/marketing`](templates/marketing), the plain prerendered site generated projects follow, and [`templates/luminous`](templates/luminous), a product site with a cursor-reactive glow, dressed for an invented SaaS called Emberline.
+Two hand-built starter templates ship alongside, each under its own MIT licence: [`templates/marketing`](templates/marketing), a plain prerendered marketing site, and [`templates/luminous`](templates/luminous), a product site with a cursor-reactive glow, dressed for an invented SaaS called Emberline.
+
+## Designed, not templated
+
+Every build starts from a written design, not a theme. There are 24 style presets, 16 surface treatments from Editorial and Brutalism to Liquid glass, and 8 complete colour systems. Each carries mood tags (luxe, calm, technical, organic, playful, brutal), so the picker can suggest the ones your request describes.
+
+<p align="center">
+  <img alt="A scroll down vibld.com/styles: each surface treatment drawn as a small site in the same demonstration palette, from Glassmorphism and Neumorphism down." src="docs/images/media-styles.webp" width="80%">
+  <br>
+  <sub>The style presets on <a href="https://vibld.com/styles">vibld.com/styles</a>.</sub>
+</p>
+
+Ask for an aurora, a starfield, a smoky gradient or any "animated background", and the build imports one of four backgrounds written once and tested, rather than improvising a canvas loop. Each takes the project's own colour tokens, caps its pixel ratio, pauses off screen and holds still for anyone who asks for reduced motion.
+
+<p align="center">
+  <img alt="Four animated backgrounds side by side: AuroraMesh, a WebGL field of colour like light through smoke; ParticleField, a spiral of drifting points; GrainBlobs, soft blurred shapes under film grain; FlowLines, two glowing lines flowing like a waveform." src="docs/images/media-backdrops.webp" width="100%">
+  <br>
+  <sub>The four backgrounds in <a href="packages/ai/src/backdrops.ts"><code>packages/ai/src/backdrops.ts</code></a>, bundled from the exact source a project is given and run in Chromium.</sub>
+</p>
 
 ## Features
 
-**Generation**
+**Building**
 
-- Prompt to plan to staged files to accepted checkpoint, with streaming progress and a durable run that survives a closed tab.
-- Model providers behind one `ModelProvider` contract in [`packages/ai`](packages/ai): Anthropic, OpenAI and DeepSeek adapters, chosen per run. A local checkout uses a deterministic fake provider and calls no model.
-- 24 [style presets](https://vibld.com/styles), from Editorial and Brutalism to Liquid glass, each with concrete direction for colour, type and motion. Or ask for three sketches and pick one.
-- A reference URL: point at a page and the spec takes its measurements.
-- Conversational follow-ups ("make the hero navy") that change the accepted project instead of starting over.
+- A conversation, not a form: the agent answers questions, asks its own when a request is thin, and builds when you say so. Follow-ups ("make the hero navy") change the project rather than starting over.
+- Model providers behind one contract in [`packages/ai`](packages/ai): Anthropic, OpenAI and DeepSeek adapters, chosen per run.
+- Bounded, multi-step builds: a plan, then files in groups, each with its own ceiling on tokens and time, that keep running when you close the tab.
+- Three directions to compare before the first build, 24 style presets with mood suggestions, a reference page whose text, colours, fonts and spacing the spec measures, and your own uploaded images and video.
+- Four tested animated backgrounds a build imports when a request asks for motion.
 
-**Checks**
+**Checking**
 
-- Design checks against the project's own `DESIGN.md`: palette, display face, breakpoints, alt text, reduced motion.
-- Contrast verification of the generated colour pairs.
-- A production build of the generated project, with one bounded repair when it fails.
-- A spend ceiling enforced before each run starts, not after it finishes.
+- Design checks against the project's own `DESIGN.md`: palette, type, breakpoints, alt text, labels, contrast, reduced motion, media, copy and canvas performance.
+- A verification build of every result, with one repair patch when it fails, and a badge that says which: checking, fixing, does not build or not checked.
+- A spend ceiling reserved before each run starts, not counted after it finishes.
 
-**Preview, publish and export**
+**Previewing, sharing and shipping**
 
-- A private preview in a sandboxed container running the real dev server, with revocable share links ([`apps/preview`](apps/preview)).
-- One-step publishing to `<name>.vibld-preview.dev` on Cloudflare, and one-step unpublishing ([`apps/publish`](apps/publish)).
-- Download the accepted checkpoint as a `.zip`, or push it to a GitHub repository you connect as a branch and pull request.
+- A live preview in a private sandboxed container running the real dev server, updated in place as the project changes, with revocable share links ([`apps/preview`](apps/preview)).
+- Projects: save, rename, archive, duplicate and delete, a read-only share link, and Remix for anyone you send it to.
+- One Ship menu: download a `.zip`, create or push to a GitHub repository for each project, or publish to `<name>.vibld-preview.dev` with safe default security headers ([`apps/publish`](apps/publish)).
+- A Runs tab: every run's model, tokens, cost and why it stopped.
 
 **Accounts and operations**
 
-- Sign-in with Clerk, projects and audit records in Cloudflare D1, R2 and a per-user Durable Object.
-- Plans and model-spend credit with Stripe, an access gate that is invite-only unless a deployment opens it, referrals and operator takedown for abuse reports.
-- An evaluation suite ([`packages/eval`](packages/eval)) and a model bakeoff workflow, so model choices are measured, not guessed.
+- Sign-in with Clerk; projects in Cloudflare D1, R2 and a per-user Durable Object; builds as Cloudflare Workflows.
+- Plans and model-spend credit with Stripe, referrals, an access gate that is invite-only unless a deployment opens it, an admin panel with credit grants, bans and an audit log, and operator takedown for abuse reports.
+- An evaluation suite ([`packages/eval`](packages/eval)) and a model bakeoff, so model choices are measured, not guessed.
 
 ## Status
 
-**What runs today.** Everything in the list above, deployed at [app.vibld.com](https://app.vibld.com) as a public beta. Paid plans are live, and a new account gets $1.00 of build credit once it adds a card, which is saved and not charged. From a checkout, `pnpm generate` builds a real project with your own provider key (see [Quick start](#quick-start)).
+**What runs today.** Everything above, deployed at [app.vibld.com](https://app.vibld.com) as a public beta. Paid plans are live; the Free plan builds with GPT-6 Luna, and a new account gets $1.00 of build credit once it adds a card, which is saved and not charged. From a checkout, `pnpm generate --build` builds a real project with your own provider key, and [a weekly workflow](.github/workflows/clean-clone.yml) proves that from a clean clone.
 
 **What does not exist yet.**
 
 - Repository search over an existing codebase (internal issue 12).
 - A bakeoff result strong enough to recommend one model over another. The harness exists and has run; the evidence does not settle it yet.
-- Sandbox output in the builder's own panes. The console shows generation events, and install, build and type errors from a sandbox run are not reported under Problems.
+- Sandbox output in the builder's own panes. The console shows generation events, and Problems shows the design checks and the verification build, not the install, build and type errors from a live preview.
 - A validated self-hosting path. The pieces are documented (see below), but nobody outside the project has deployed their own copy yet.
 - The builder's interface against a real model on your own machine. Locally it runs the fake provider; its model path needs sign-in, D1, R2 and a Workflow, which only a Cloudflare deployment has. `pnpm generate` is the local way to a real build today.
 
@@ -186,11 +236,7 @@ You need Node.js 24 (the LTS release CI uses; 22.15 or newer also works) and pnp
 git clone https://github.com/vibld/vibld.git
 cd vibld
 pnpm install --frozen-lockfile
-
-pnpm --filter @vibld/web dev   # the builder, at http://localhost:5173
 ```
-
-Locally, the builder runs with no sign-in and the deterministic fake provider, so you can go through the whole flow at no cost and no model is called. [`apps/web/README.md`](apps/web/README.md) covers deploying it with a real model provider, sign-in, the sandbox and the rest.
 
 ### Generate a real project with your own key
 
@@ -205,11 +251,25 @@ cd my-site
 npm run dev                   # the generated project, with no vibld dependency
 ```
 
-`--build` installs and builds what it wrote with npm and, when it does not build, asks the model for one repair with the compiler's output, as the hosted builder does. With one key set, that provider answers with its default model; `VIBLD_MODEL` names another from [the catalogue](packages/ai/src/model-catalogue.ts). `--style <preset>` picks one of the style presets, and `--base <dir>` makes the prompt a follow-up to a project already on disk. The calls are billed to your key. On the proof run below, a one-page bakery site on DeepSeek's default model took 17 minutes and cost about $0.31 (250,000 output tokens, most of them the model's reasoning); a larger request or a costlier model costs more. [`packages/ai/README.md`](packages/ai/README.md) has the details.
+| Option             | What it does                                                                                                                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--out <dir>`      | Where the project is written, relative to where you ran the command.                                                                                                                    |
+| `--build`          | Installs and builds the result with npm and, when it does not build, asks for one repair with the compiler's output. The build gets no credential from your environment.                |
+| `--style <id>`     | One of the style presets, by id: `editorial`, `brutalism`, `liquidGlass`, `bentoGrid`, `warmPaper`, `cinematic` and the rest in [`style-presets.ts`](packages/ai/src/style-presets.ts). |
+| `--base <dir>`     | Makes the prompt a follow-up to a project already on disk.                                                                                                                              |
+| `VIBLD_MODEL=<id>` | Another model from [the catalogue](packages/ai/src/model-catalogue.ts). With one key set, that provider's default answers: `deepseek-flash`, `gpt-5.6-terra` or `claude-opus-5-5`.      |
 
-[A workflow](.github/workflows/clean-clone.yml) proves this path every week: it clones this repository, gives it one key, runs exactly the command above, and builds the result again with plain npm.
+The calls are billed to your key. The weekly proof run, a one-page bakery site on DeepSeek's default model, has taken 7 to 17 minutes and cost $0.15 to $0.31, most of it the model's reasoning. A larger request or a costlier model costs more: Claude Opus 5.5, Anthropic's default here, costs many times what DeepSeek Flash does. [`packages/ai/README.md`](packages/ai/README.md) has the details.
 
-Before you open a pull request:
+### Run the builder locally
+
+```bash
+pnpm --filter @vibld/web dev   # the builder, at http://localhost:5173
+```
+
+Locally, the builder runs with no sign-in and a deterministic fake provider, so you can go through the whole flow at no cost and no model is called. [`apps/web/README.md`](apps/web/README.md) covers deploying it with a real model provider, sign-in, the sandbox and the rest.
+
+### Before you open a pull request
 
 ```bash
 pnpm format:check   # Prettier
@@ -254,14 +314,26 @@ flowchart LR
 
 ## Running it yourself
 
-Self-hosting is possible and still needs validation. A deployment needs:
+Self-hosting is possible, and still needs validation: nobody outside the project has deployed their own copy yet. A deployment needs:
 
-- **Cloudflare**, for three Workers (the builder, the sandbox and the publish service) plus D1, R2, a Durable Object and a Workflow behind the builder. The sandbox runs generated code in a container; [`apps/preview/README.md`](apps/preview/README.md) covers what that needs.
-- **A model provider API key.** Without one, generation refuses rather than degrading.
+- **Cloudflare**, for three Workers (the builder, the sandbox and the publish service) plus D1, R2, a Durable Object and a Workflow behind the builder. Live previews and publishing run generated code in [Containers](https://developers.cloudflare.com/containers/), which need the Workers Paid plan, and building the sandbox image needs Docker.
+- **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves, or a copy with only another provider's key falls back to whichever of that provider's models the catalogue lists first.
 - **Clerk**, for sign-in. There is no hosted mode without authentication, because the endpoints spend money.
-- **Stripe** only if you intend to charge anybody, and **a GitHub App** only if you want push-to-repository. Each optional piece left unset reports itself unavailable rather than running without its check.
+- **An open door.** A deployment is invite-only until `VIBLD_ACCESS_MODE` is `open`: before that, only the verified emails in `VIBLD_PLATFORM_ADMINS` and the people they invite get in, so list your own. Clerk's session token has to carry `email` and `email_verified` for that match to work.
+- **Your own names.** The routes, the D1 database id and the Clerk domain in the `wrangler.jsonc` files are vibld's; replace them with yours.
+- **Stripe** only if you intend to charge anybody, **a GitHub App** only if you want push-to-repository, and **Resend** only for email. Each optional piece left unset reports itself unavailable rather than running without its check.
 
-Read next: [what self-hosting involves](https://vibld.com/docs/self-hosting), [every setting and secret](https://vibld.com/docs/configuration), and [deploying your own copy](https://vibld.com/docs/deploying). The exact commands are in [`apps/web/README.md`](apps/web/README.md), beside the code they deploy. The workflows that deploy vibld's own hosted service run only in the maintainers' working repository, since a copy has none of their secrets.
+Read next: [what self-hosting involves](https://vibld.com/docs/self-hosting), [every setting and secret](https://vibld.com/docs/configuration), [deploying your own copy](https://vibld.com/docs/deploying) and [hosted or self-hosted](https://vibld.com/docs/hosted-vs-self-hosted). The exact commands are in [`apps/web/README.md`](apps/web/README.md), [`apps/preview/README.md`](apps/preview/README.md) and [`apps/publish/README.md`](apps/publish/README.md), beside the code they deploy. The workflows that deploy vibld's own hosted service run only in the maintainers' working repository, since a copy has none of their secrets.
+
+## Documentation
+
+| If you want to                             | Read                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Use the hosted builder                     | [Getting started](https://vibld.com/docs/getting-started) · [The builder](https://vibld.com/docs/the-builder) · [Running your project](https://vibld.com/docs/running-your-project) · [Taking your code](https://vibld.com/docs/taking-your-code) · [Credits and plans](https://vibld.com/docs/credits-and-plans) |
+| Build from your terminal with your own key | [Quick start](#generate-a-real-project-with-your-own-key) · [`packages/ai/README.md`](packages/ai/README.md)                                                                                                                                                                                                      |
+| Run your own copy                          | [Self-hosting](https://vibld.com/docs/self-hosting) · [Configuration](https://vibld.com/docs/configuration) · [Deploying](https://vibld.com/docs/deploying) · [`apps/web/README.md`](apps/web/README.md)                                                                                                          |
+| Understand why it is built this way        | [VIBLD.md](VIBLD.md) · [Decisions](docs/decisions.md) · [ADRs](docs/adr/README.md) · [Roadmap](ROADMAP.md)                                                                                                                                                                                                        |
+| Change it                                  | [CONTRIBUTING.md](CONTRIBUTING.md) · [Architecture](#architecture) · [the brand guide](docs/brand.md)                                                                                                                                                                                                             |
 
 ## Contributing
 

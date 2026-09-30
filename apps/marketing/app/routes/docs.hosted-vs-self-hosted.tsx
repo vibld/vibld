@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'hosted-vs-self-hosted')!;
-const CHECKED = '2026-09-27';
+const CHECKED = '2026-09-30';
 
 export function meta() {
   return metaFor('/docs/hosted-vs-self-hosted');
@@ -20,6 +20,10 @@ export default function HostedVsSelfHosted() {
         </a>{' '}
         is the source in the repository.
       </p>
+      <p>
+        One caveat first: self-hosting is documented, and nobody outside the
+        project has deployed their own copy yet.
+      </p>
 
       <h2>The same either way</h2>
       <ul>
@@ -34,11 +38,40 @@ export default function HostedVsSelfHosted() {
           a pull request.
         </li>
         <li>
-          Saving your work, connecting Git, bringing your own model keys, and
-          exporting. None of these is behind a paid plan, by policy and not by
-          accident.
+          Saving your work, connecting Git, and exporting. None of these is
+          behind a paid plan, by policy and not by accident.
         </li>
       </ul>
+
+      <h2>Things only your own copy has</h2>
+      <ul>
+        <li>
+          <strong>Your own model keys.</strong> The hosted service holds no
+          user’s provider key; it sells model spend instead. Bringing your own
+          key is the self-hosted story, and the command line’s.
+        </li>
+      </ul>
+
+      <h2>Running it on your own machine</h2>
+      <p>
+        <code>pnpm --filter @vibld/web dev</code> runs the builder’s interface
+        locally with no sign-in and a deterministic fake provider, so you can go
+        through the whole flow at no cost, but no model is called. Its real
+        model path needs sign-in, D1, R2 and a Workflow, which only a Cloudflare
+        deployment has.
+      </p>
+      <p>
+        The local way to a real build is the command line:{' '}
+        <code>{'pnpm generate "your prompt" --out ./site --build'}</code> with
+        one provider key set. It runs the same bounded build as the hosted
+        builder, writes the project, and with <code>--build</code> installs and
+        builds it with npm, asking the model for one repair if that fails. A
+        weekly workflow proves it from a clean clone. The{' '}
+        <a href={`${SITE.repoUrl}#quick-start`} rel="noopener noreferrer">
+          repository’s Quick start
+        </a>{' '}
+        has the details.
+      </p>
 
       <h2>What you take on by running your own</h2>
       <ul>
@@ -60,7 +93,11 @@ export default function HostedVsSelfHosted() {
         </li>
         <li>
           <strong>Secret rotation</strong>, for the provider key, the Clerk
-          keys, and the two internal shared secrets.
+          keys, the two internal shared secrets and the share-link secret.
+        </li>
+        <li>
+          <strong>Who gets in.</strong> A copy starts closed to everyone but the
+          admins you list, until you invite people or open it.
         </li>
         <li>
           <strong>Sandbox capacity.</strong> Queueing, expiry and cleanup are

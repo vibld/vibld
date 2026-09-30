@@ -42,13 +42,14 @@ export const PANE_GAPS = {
 export type PaneWithGap = keyof typeof PANE_GAPS;
 
 /**
- * The preview gap is a different shape: its pane says at length what the mock
- * is and is not, with markup, so it is not assembled here. The footer still
- * leads with it, because a mock read as the project is the misreading the
- * rest of this exists to prevent.
+ * The preview gap is a different shape: its pane says at length what the
+ * draft (or, against the fake provider, the quick mock) is and is not, with
+ * markup, so it is not assembled here. The footer still leads with it,
+ * because a picture read as the project is the misreading the rest of this
+ * exists to prevent.
  */
 export const PREVIEW_SENTENCE =
-  'Preview shows a local mock until you run the project in the sandbox.';
+  'Preview shows a draft or a mock, not your running app, until you start the live preview.';
 
 /** The note that pane renders above its own contents. */
 export function noteFor(pane: PaneWithGap): string {

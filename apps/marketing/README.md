@@ -1,10 +1,12 @@
 # @vibld/marketing
 
-Vibld's own public site at [vibld.com](https://vibld.com) -- built from the
-same stack ADR-0008 chose for generated marketing sites (React Router
-framework mode, static prerendering, Vite, TypeScript, Tailwind), the way
+Vibld's own public site at [vibld.com](https://vibld.com) -- built on the
+stack of the ADR-0008 marketing template (React Router framework mode,
+static prerendering, Vite, TypeScript, Tailwind), the way
 `docs/decisions.md`'s L21 requires: "The marketing site is its own Worker,
-built from the ADR-0008 template."
+built from the ADR-0008 template." Generated projects do not use that stack:
+they are a Vite single-page app with no router and no prerendering
+(`packages/ai/src/stack.ts`, `scaffold.ts`).
 
 It is a separate app from `templates/marketing` on purpose.
 `templates/marketing` is the generic, MIT-licensed starter Vibld hands to
@@ -48,6 +50,22 @@ The "Live Build" design (approved 2026-09-27), in the brand's colours:
   `styles/miniature.css`). Presets with a palette are drawn only in their own
   pairs; surface treatments in one neutral demonstration palette, which the
   page says. `test/looks.test.ts` measures every pair.
+
+- **Docs** (`/docs`, `app/routes/docs.*.tsx`): an index and one guide per
+  page, in two tracks declared in `app/site.ts` (`DOC_TRACKS`,
+  `DOC_GUIDES`): using the hosted builder, and running vibld yourself.
+- **Roadmap** (`/roadmap`): the items in `app/roadmap.ts`, grouped by
+  status, with a vote on everything not yet shipped. Votes go through
+  `/api/roadmap/votes` and `/api/roadmap/vote` (`worker/roadmap-api.ts`),
+  one per browser, with a per-address limit and Turnstile for a browser the
+  Worker has not seen before.
+- **Use cases** (`/use-cases` and `/use-cases/<slug>`): one route per entry
+  in `app/use-cases.ts`, declared once per path so the prerender emits no
+  SPA fallback.
+- **Crawler files**, written after the build by `scripts/postbuild.ts` from
+  `app/site.ts`: `robots.txt`, `sitemap.xml`, `llms.txt` and
+  `llms-full.txt`, plus a `.zip` of each generated example for the
+  examples page to link to.
 
 Colours are the brand's aliases plus a few marketing-local tokens (six pale
 tints, the code block, one green), declared in `app.css` and measured against

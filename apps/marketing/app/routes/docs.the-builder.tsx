@@ -2,7 +2,7 @@ import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'the-builder')!;
-const CHECKED = '2026-09-17';
+const CHECKED = '2026-09-30';
 
 export function meta() {
   return metaFor('/docs/the-builder');
@@ -12,42 +12,48 @@ export default function TheBuilder() {
   return (
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
-        Four panes, and the useful half of this page is what each one does not
-        show. A pane that looks like it reports everything, and reports some of
+        Five tabs, and the useful half of this page is what each one does not
+        show. A tab that looks like it reports everything, and reports some of
         it, is worse than one that says where it stops.
       </p>
 
       <h2>Preview</h2>
       <p>
-        Until you start a sandbox, this is a <strong>local mock</strong>: static
-        HTML assembled from the accepted plan and stylesheet, rendered in a
-        fully restricted frame. No dependencies are installed and no generated
-        code is executed. It is a picture of the intent, not a run of the
-        project.
+        While a first build runs, this is a <strong>draft</strong>: a static
+        sketch of the page, labelled “Draft, building the real site”, with the
+        build’s progress over it. It is drawn in a restricted frame, is never
+        saved in the project, and is a picture of the intent, not a run of it. A
+        follow-up keeps what the tab already shows instead.
       </p>
       <p>
-        Once a sandbox is running, the frame is the sandbox and the mock is
-        gone. The two are never shown side by side, because a stale mock next to
-        a live copy of the same project invites exactly the wrong conclusion
-        about which one you are looking at.
+        Once there is code, the tab says <strong>Ready to run</strong> (or keeps
+        the draft) and offers <strong>Run live preview</strong>, which installs
+        the project and starts it in a private sandbox. Once it is up, the frame
+        is the running app and the draft is gone: the two are never shown side
+        by side, because a stale sketch next to a live copy invites the wrong
+        conclusion about which one you are looking at.
       </p>
       <p>
-        A sandbox serves the checkpoint it was <em>started from</em>. Accept a
-        later one and the frame says so and asks you to restart it. It does not
-        silently become the new project.
+        A running preview takes each new version in place, and says{' '}
+        <strong>Updating preview…</strong> while it does. When it cannot, it is
+        restarted and the tab says why. See{' '}
+        <a href="/docs/running-your-project">
+          Running and sharing your project
+        </a>
+        .
       </p>
 
       <h2>Code</h2>
       <p>
-        The generated files, as files. This is the pane to read before accepting
-        anything.
+        The generated files, as files. While a build is being checked, the list
+        is that build’s code, badged like the preview.
       </p>
       <p>
-        While a newer checkpoint is staged, the list shows the staged files, but
-        the Export, Push and Publish buttons beneath it act on the{' '}
-        <strong>last accepted checkpoint</strong>. The pane says so when the two
-        differ, because a button that acts on something other than the list
-        above it is a trap.
+        Export, Publish and Push to GitHub are not here. They are under{' '}
+        <strong>Ship</strong>, in the top bar, and they act on the{' '}
+        <strong>last finished checkpoint</strong>. The tab says so when the list
+        shows something else, because a button that acts on something other than
+        the list in front of you is a trap.
       </p>
 
       <h2>Console</h2>
@@ -57,71 +63,128 @@ export default function TheBuilder() {
       </p>
       <p>
         <strong>It is not the sandbox’s output.</strong> Sandbox execution is
-        real, but its process output is not piped into this pane yet. If your
+        real, but its process output is not piped into this tab yet. If your
         project logs something at runtime, that log is in the sandbox, not here.
       </p>
 
       <h2>Problems</h2>
       <p>
-        Validation findings for the staged project: what vibld’s own checks
-        found in the files before you accepted them.
+        What vibld’s own checks found, including a build that failed its check
+        or a run that failed.
       </p>
       <p>
         <strong>It is not the sandbox’s errors.</strong> Install failures, build
         failures and type errors from a sandbox run are not reported here yet. A
-        sandbox that fails to start says so in the Preview pane, which is
+        sandbox that fails to start says so in the Preview tab, which is
         currently the only place that knows.
       </p>
 
-      <h2>Publishing, and taking it back down</h2>
+      <h2>Runs</h2>
       <p>
-        <strong>Publish</strong> puts the last accepted checkpoint on the web at
-        a name you choose, and anybody with the address can read it. It takes
-        two presses: the first names the site, the checkpoint and whether this
-        replaces something already live, and the second is the act. It is the
-        only control in the builder whose result a stranger can see, which is
-        what earns the second press.
+        Every run on this project: the model, the tokens, the cost and why it
+        ended. It is read back from storage, so it survives a reload and
+        includes runs this tab never watched.
+      </p>
+
+      <h2>Projects</h2>
+      <p>
+        Everything is saved as you go: the code, the whole conversation, the
+        style, the model, your instructions and preferences. The{' '}
+        <strong>Projects</strong> list opens, renames, duplicates, archives and
+        deletes projects. Deleting is permanent and asks first. A Free account
+        can have three active projects, and archived ones do not count; Build
+        and Ship have no limit.
       </p>
       <p>
-        A preview is not a publish. Running a sandbox, or accepting a
-        checkpoint, never makes anything public. Nothing automated can publish
-        either: no scheduled run, no webhook, and no text in a pull request or a
-        commit message. Only a person asking, in the moment, puts a site on the
-        web.
+        With the same project open in two tabs, the one left behind is told
+        “This project changed in another tab” and stops saving until you press{' '}
+        <strong>Reload</strong>, so nothing is overwritten without it being
+        said.
+      </p>
+
+      <h2>Sharing a project</h2>
+      <p>
+        <strong>Share</strong>, in the top bar, turns on a link of the form{' '}
+        <code>app.vibld.com/s/&lt;token&gt;</code>. Anyone with it sees the
+        project’s name, its code and its live preview, read-only; starting the
+        live preview needs them to be signed in. Somebody signed in can{' '}
+        <strong>Remix</strong> it: a copy of the code and settings in a new
+        project of their own, called “Remix of” the original, with the media its
+        code uses copied into their library. Your conversation, your name and
+        your email are not shared. Turning the link off stops it working for
+        good, and turning it on again makes a new one.
+      </p>
+      <p>
+        This is not the same as a sandbox share link, which points at one
+        running preview and never outlasts it.
+      </p>
+
+      <h2>Ship: publishing, and taking it back down</h2>
+      <p>
+        <strong>Publish</strong> puts the project’s last finished checkpoint on
+        the web at its own address, <code>&lt;slug&gt;.vibld-preview.dev</code>,
+        and anybody with the address can read it. Each project has its own site,
+        and publishing one never replaces another’s. It takes two presses: the
+        first names the site, the checkpoint and whether this replaces something
+        already live, and the second is the act.
+      </p>
+      <p>
+        A preview is not a publish. Running a sandbox, or finishing a build,
+        never makes anything public. Nothing automated can publish either: no
+        scheduled run, no webhook, and no text in a pull request or a commit
+        message. Only a person asking, in the moment, puts a site on the web.
       </p>
       <p>
         <strong>Take it down</strong> is the other half, on the same terms. The
         address stops working immediately and the files are deleted. The name
         stays yours: nobody else can claim it, and publishing again under it is
-        what puts the site back. Rolling back to a <em>previous</em> published
-        checkpoint is not built yet.
+        what puts the site back. Deleting the project takes its site down too.
+        Rolling back to a <em>previous</em> published checkpoint is not built
+        yet.
+      </p>
+      <p>
+        Published sites are sent a few safe default headers (HTTPS only, no
+        content-type sniffing, a strict referrer policy, and no camera,
+        microphone, location or payment features), and nothing that restricts
+        what a page loads, so embeds and third-party scripts keep working.
+        Images and fonts that the build itself emits are not published yet;
+        files from your media library are.
       </p>
 
       <h2>The header and the footer</h2>
       <p>
-        The header carries what you look at while building, and nothing else:
-        the brand, the light and dark toggle, the settings menu and your
-        account.
+        The header carries what you look at while building: the brand, then{' '}
+        <strong>Projects</strong>, the project’s name (click it to rename), the
+        save status, <strong>Share</strong> and <strong>Ship</strong>, then the
+        light and dark toggle, the settings menu and your account.
       </p>
       <p>
-        Everything that is configuration lives behind the gear: your tier and
-        this period’s spend against your allowance, the GitHub connection, and
-        which provider and model served the last run. Read once, changed rarely,
-        and it used to compete with the work for the same row. None of it claims
-        anything before there has been a run.
+        Everything that is configuration lives behind the gear: your plan and
+        this period’s spend against your allowance, your referral link, the
+        GitHub connection, deleting your account, and which provider and model
+        served the last run. None of it claims anything before there has been a
+        run.
       </p>
       <p>
-        The footer carries the two limitations above in one line, for anybody
-        who never opens those tabs. It is built from the same source the panes
-        are, so it cannot drift away from them. The run count and token figures
-        sit beside it, folded away until you ask for them: reference, not news.
+        <strong>Delete account</strong> asks you to type a phrase to confirm.
+        From then on the account cannot be used: any subscription is cancelled,
+        the preview stopped, published sites taken down and the GitHub
+        connection removed. Thirty days later its projects, media and usage
+        records are deleted. Until then, signing in offers{' '}
+        <strong>Keep my account</strong>.
+      </p>
+      <p>
+        The footer carries the limits above in one line, for anybody who never
+        opens those tabs. It is built from the same source the tabs are, so it
+        cannot drift away from them. The run count and token figures sit beside
+        it, folded away until you ask for them: reference, not news.
       </p>
 
       <h2>Where this is going</h2>
       <p>
-        Both gaps are about wiring an existing thing into a pane, not about
+        Both gaps are about wiring an existing thing into a tab, not about
         building the thing. The sandbox already produces the output and the
-        errors. Until they arrive here, this page and the panes themselves will
+        errors. Until they arrive here, this page and the tabs themselves will
         keep saying so.
       </p>
     </DocPage>

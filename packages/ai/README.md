@@ -1,29 +1,38 @@
 # @vibld/ai
 
-The first real model adapter. It implements `ModelProvider` from
+The model adapters. `BoundedPlanProvider` implements `ModelProvider` from
 [`@vibld/core`](../core), so it is a drop-in peer of `FakeModelProvider` -- the
 state machine, durable runner and builder shell are unchanged by it.
+`MockupProvider` (Explore's looks and the draft preview) and `ChatProvider`
+(one chat turn) use the same client seam; neither returns a project, so
+neither is a `ModelProvider`.
 
 ## Boundary
 
 ```
 @vibld/core          ModelProvider, GenerationPlan      Vibld-owned contracts
   ^
-@vibld/ai            AnthropicModelProvider             policy: prompt, schema, errors
+@vibld/ai            BoundedPlanProvider                policy: prompt, schema, errors
                      PlanClient                         the seam (no vendor types)
-                     createAnthropicPlanClient          the only file importing an SDK
+                     createPlanClient                   picks one of the three below
+                     createAnthropicPlanClient          anthropic-client.ts
+                     createOpenaiPlanClient             openai-client.ts
+                     createDeepseekPlanClient           deepseek-client.ts
 ```
 
 `anthropic-client.ts` is the **only** file in the repository that imports a
-model vendor's SDK (ADR-0003). Everything above it speaks `PlanRequest` /
-`PlanCompletion`, which is also what makes the provider testable with no
-network and no key -- the tests supply their own `PlanClient`.
+model vendor's SDK (ADR-0003). `openai-client.ts` and `deepseek-client.ts`
+call their REST APIs with plain `fetch`. Everything above the clients speaks
+`PlanRequest` / `PlanCompletion`, which is also what makes the providers
+testable with no network and no key -- the tests supply their own
+`PlanClient`.
 
 ## What it guarantees
 
-Structured outputs (`output_config.format`) make the response schema-valid by
-construction rather than by asking for JSON in the prompt. On top of that the
-provider turns three silent failures into explicit, typed errors:
+Anthropic's structured outputs and OpenAI's strict JSON Schema make the
+response schema-valid by construction. DeepSeek has JSON mode only, so its
+shape is asked for in the prompt and checked afterwards. Whichever client
+answers, the provider turns three silent failures into explicit, typed errors:
 
 | Error                     | Cause                                                        |
 | ------------------------- | ------------------------------------------------------------ |
@@ -62,7 +71,9 @@ WRITTEN FOR YOU section describes them from the same constants.
 contract (the CLI below, the eval harness, the repair turn), and
 `runBoundedBuild` takes the step runner as a hook, which is how the Worker
 makes each call a durable Workflow step. `PlanProvider`, the single-response
-provider, is still here and still tested, and nothing in production calls it.
+provider, is still here and still tested. The Worker calls it only to finish
+a run enqueued before bounded builds existed (`legacy` in
+`apps/web/worker/generation-workflow.ts`); new runs never take it.
 
 `createScriptedBuildClient` is a `PlanClient` that answers a bounded build
 from a script, truncating any reply longer than the call's ceiling, so the
@@ -72,8 +83,14 @@ whole orchestration can be exercised with no network and no key.
 
 `pnpm generate` at the repository root runs one real build with a key you
 supply and nothing else: no account, database or Cloudflare. It is
-`pnpm --filter @vibld/ai plan`, and relative paths are read from the
-repository root.
+`pnpm --filter @vibld/ai plan` (`bin/plan.ts`), and relative paths are read
+from the repository root.
+
+```
+pnpm generate "<prompt>" [--out <dir>] [--build] [--base <dir>] [--style <preset id>]
+```
+
+The prompt is everything before the first flag (`src/cli-args.ts`).
 
 ```bash
 DEEPSEEK_API_KEY=... pnpm generate "a landing page for a cybersecurity SaaS with pricing, an FAQ, heavy motion graphics, and a navy / dark purple / neon yellow palette"
@@ -87,24 +104,46 @@ cd generated && npm install && npm run build
 DEEPSEEK_API_KEY=... pnpm generate "..." --out ./generated --build
 
 # with a style preset, as the builder sends one
-DEEPSEEK_API_KEY=... pnpm generate "..." --style glassmorphism
+DEEPSEEK_API_KEY=... pnpm generate "..." --style bentoGrid
 
 # a follow-up to a project already on disk
 DEEPSEEK_API_KEY=... pnpm generate "add a pricing page" --base ./generated --out ./generated-2
 ```
 
+- `--out` writes the project to that directory. Without it the run prints
+  what the model produced and writes nothing.
+- `--build` needs `--out`. It runs `npm install` and `npm run build` in that
+  directory, with the CLI's environment less every variable whose name ends
+  in `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `CREDENTIAL(S)`
+  (`buildEnvironment` in `src/cli-args.ts`), so the provider key never
+  reaches code a model wrote. If the build fails it asks for one repair with
+  the compiler's output, rewrites the project and builds once more.
+- `--base` sends the project in that directory as the base, so the run is a
+  follow-up patch. It prints what the patch kept, changed, added and
+  removed.
+- `--style` takes a preset id exactly as `STYLE_PRESETS` in
+  `src/style-presets.ts` spells it: camelCase, so `bentoGrid`, `liquidGlass`
+  and `warmTerminal`. An unknown id is refused before anything is spent.
+
 With exactly one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
 `DEEPSEEK_API_KEY` set, that provider answers with its default model
 (`DEFAULT_MODELS` in `src/select-client.ts`). `VIBLD_MODEL` names another from
-the catalogue, and `VIBLD_PROVIDER` chooses when more than one key is set.
+the catalogue, and `VIBLD_PROVIDER` chooses when more than one key is set;
+with more than one and no `VIBLD_PROVIDER`, Anthropic answers.
+
+Anthropic's default is `claude-opus-5-5`, whose catalogue rates
+(`src/model-catalogue.ts`) are about 13 times DeepSeek Flash's for input and
+17 times for output, so a run on it costs far more than one on DeepSeek's
+default, `deepseek-flash`. The DeepSeek runs measured on 2026-09-30 cost
+$0.15 to $0.31 and took 7 to 17 minutes each.
 
 Each step of the bounded build is printed as it starts, with the second it
 started at, and the run ends with its token use per step.
 
 The `--out` form is the portability check from ADR-0002: the output must build
 with ordinary npm commands and no Vibld anything.
-`.github/workflows/clean-clone.yml` runs it weekly on a fresh clone of the
-public repository with one key.
+`.github/workflows/clean-clone.yml` runs it with `--build` weekly on a fresh
+clone of the public repository with one key.
 
 ## In the builder
 
@@ -116,12 +155,12 @@ build as a durable Workflow, one step per call. Locally, `pnpm dev` serves no
 
 ## Design intelligence
 
-`style-presets.ts` (23 named visual directions -- 16 surface treatments and
-7 complete colour systems), `patterns.ts` (10 marketing
+`style-presets.ts` (24 named visual directions -- 16 surface treatments and
+8 complete colour systems), `patterns.ts` (10 marketing
 page types, 6 SaaS screens), `palettes.ts` (15 product-type colour, typography
-and feel defaults), `motion.ts` (16 motion recipes), `surfaces.ts` (5
+and feel defaults), `motion.ts` (19 motion recipes), `surfaces.ts` (5
 painting techniques), `diagrams.ts` (5 diagram types plus the connector
-craft) and `primitives.ts` (5 interactive controls) are closed-set,
+craft) and `primitives.ts` (6 interactive controls) are closed-set,
 keyword-matched retrieval -- the same shape, for the same reason: a request's
 own text selects a handful of relevant, concrete guidance to append to the
 prompt, never an arbitrary string a caller supplies directly
@@ -251,7 +290,7 @@ Hairlines are not checked. WCAG's 3:1 is for interactive control boundaries,
 not for a decorative rule between two surfaces, and holding a `--border` token
 to it produces heavy-lined output no design system ships.
 
-### The seven tokened archetypes
+### The eight tokened archetypes
 
 Clustering that corpus showed that its useful content is structural, not
 nominal: "dark" is really four unrelated systems, and a warm paper ground
@@ -259,6 +298,8 @@ with a terracotta accent is its own thing rather than a tint of minimalism.
 Those clusters are `warmTerminal`, `layeredVoid`, `acidDark`, `nightIndigo`,
 `warmPaper`, `monoPress` and `polarityBands` -- presets that carry a whole
 colour system, font pairing and radius scale rather than only a sentence.
+`cinematic` (full-bleed footage, glass and a serif headline) carries the same
+three and was added after them.
 
 They fill a real hole. `buildUserPrompt` suppresses the product-type palette
 whenever a style preset is chosen, so before these existed, picking a preset
@@ -276,7 +317,9 @@ to.
 
 ## Model selection
 
-`DEFAULT_MODEL` exists so the adapter runs, and is **not** a selection. D10
-reserves that for a measured bakeoff with an approved spending cap; the model,
-effort and token ceiling are all constructor options so a bakeoff can sweep
-them without touching this code.
+`DEFAULT_MODEL` (`claude-opus-5-5`, in `plan-provider.ts`) and
+`DEFAULT_MODELS` (one per provider, in `select-client.ts`) exist so the
+providers run, and are **not** a selection. D10 reserves that for a measured
+bakeoff with an approved spending cap; the model, effort and token ceiling
+are all constructor options so a bakeoff can sweep them without touching
+this code.

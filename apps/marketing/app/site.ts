@@ -250,8 +250,7 @@ export const DOC_GUIDES: DocGuide[] = [
     track: 'hosted',
     label: 'Getting started',
     title: `Getting started | ${SITE.name} docs`,
-    description:
-      'Sign in, describe what you want, and accept your first checkpoint.',
+    description: 'Sign in, describe what you want, and watch your first build.',
   },
   {
     slug: 'the-builder',
@@ -259,7 +258,7 @@ export const DOC_GUIDES: DocGuide[] = [
     label: 'The builder, pane by pane',
     title: `The builder, pane by pane | ${SITE.name} docs`,
     description:
-      'What Preview, Code, Console and Problems each show, and what they do not.',
+      'What Preview, Code, Console, Problems and Runs each show, and what they do not.',
   },
   {
     slug: 'running-your-project',

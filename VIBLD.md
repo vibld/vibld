@@ -10,7 +10,7 @@ Start with technical founders and small agencies creating marketing sites and la
 
 ## Product promise
 
-Users control and can export their projects. A generated project must remain a normal application that can be cloned, edited, built, and deployed without Vibld. Optional `.vibld/` metadata can improve the experience, but deleting it must not break the application. Third-party licenses still apply; Vibld does not guarantee exclusive ownership of arbitrary generated content.
+Users control and can export their projects. A generated project must remain a normal application that can be cloned, edited, built, and deployed without Vibld. Generated projects carry no `.vibld/` directory, and the evaluation's portability check refuses one (`packages/eval/src/portability.ts`). Third-party licenses still apply; Vibld does not guarantee exclusive ownership of arbitrary generated content.
 
 ## MVP
 
@@ -25,9 +25,11 @@ The MVP proves this loop well:
 7. Vibld applies a targeted patch and repairs failures.
 8. The resulting changes appear as meaningful Git diffs and commits.
 
-M1 delivers the initial build, private preview, bounded repair, durable checkpoint and export as an invitation-only hosted alpha. GitHub branches/PRs and repository indexing are included early. M2 completes the conversational editing loop.
+M1 delivers the initial build, private preview, bounded repair, durable checkpoint and export. The hosted service runs as a public beta with open sign-up, which replaced the invitation-only alpha of D4 (docs/decisions.md, 2026-09-27). GitHub branches/PRs and repository indexing are included early. M2 completes the conversational editing loop.
 
 The first generated-application standard is React Router framework mode with static prerendering, React, TypeScript, Vite and Tailwind CSS. Add selected shadcn/ui, Radix primitives or Lucide icons where useful. Generated projects support familiar install, development, build, lint, typecheck and test commands. Validate crawlable route HTML, page metadata, responsive behavior and accessibility alongside the build. The separate builder UI uses React/TypeScript/Vite as a SPA.
+
+Today's generator does not yet meet the routing half of that standard. A generated project is a Vite single-page app with React, TypeScript, Tailwind CSS v4, shadcn/ui on Radix, Lucide and Motion, with no React Router and no prerendering (ADR-0014; `packages/ai/src/stack.ts` and `scaffold.ts`). `templates/marketing` follows the React Router standard; generated projects do not.
 
 ## Architecture boundaries
 
@@ -44,9 +46,9 @@ Vibld separates policy from providers:
 
 Boundaries are conceptual until code proves they deserve packages. Provider-specific SDK types must not leak into domain contracts.
 
-The hosted platform uses Hono on Cloudflare Workers, Workflows for persisted generation stages, Cloudflare Sandbox SDK for untrusted execution, Supabase PostgreSQL/Auth, Hyperdrive SQL connections and R2 project objects/assets. Use Durable Objects for coordination where needed. AI SDK sits behind Vibld-owned model contracts; evaluation determines the initial provider. Sandboxes are disposable and never the only copy of accepted project history.
+The hosted platform runs on Cloudflare Workers, with Workflows for persisted generation stages, Cloudflare Sandbox SDK for untrusted execution, Clerk for sign-in (L1), D1 for the control plane (L24) and R2 for project objects/assets. Durable Objects coordinate where needed. Vibld-owned model contracts sit in front of Vibld's own clients for Anthropic, OpenAI and DeepSeek (`packages/ai`); evaluation determines the initial provider. Sandboxes are disposable and never the only copy of accepted project history.
 
-Stage edits against a known base revision, validate, then promote under a single project writer and revision check. Git is accepted code history; PostgreSQL records ownership/run state and references durable project objects. Remote GitHub is an optional sync destination, not a prerequisite for saving a project. Indexes must match the authorized project revision.
+Stage edits against a known base revision, validate, then promote under a single project writer and revision check. Git is accepted code history; D1 records ownership/run state and references durable project objects. Remote GitHub is an optional sync destination, not a prerequisite for saving a project. Indexes must match the authorized project revision.
 
 ## Safety and trust
 
@@ -60,7 +62,7 @@ AI actions should be inspectable. Plans, relevant files, patches, validation fai
 
 The open-source project should contain the complete single-user building experience, project saving, provider adapters, project format, Git, BYOK, export and basic deployment capabilities. Vibld Cloud may charge for managed operations, hosted compute/AI, collaboration and teams. Basic persistence is not an artificial paid gate. Cloud features must not impose a Vibld runtime on exported applications.
 
-Initial execution is Cloudflare-first. Self-hosting and an alternate execution path still require implementation and verification; the repository does not yet contain a runnable builder. Operational telemetry will be on by default with opt-out, documented fields/retention and no source code or prompts in the default analytics stream. Required security/accounting records need a separate disclosed policy.
+Initial execution is Cloudflare-first. The repository holds the builder that runs at app.vibld.com. Locally it runs against a deterministic fake provider, and `pnpm generate` runs a real build with only a provider key. Self-hosting on Cloudflare is documented but not yet validated, and an alternate execution path (L47) is not built. Operational telemetry will be on by default with opt-out, documented fields/retention and no source code or prompts in the default analytics stream. Required security/accounting records need a separate disclosed policy.
 
 The core stays Apache-2.0. Reusable starter-template source will carry MIT at its own boundary, with upstream notices preserved and users choosing their application license. See [ADR-0008](docs/adr/0008-portable-marketing-site-template.md).
 

@@ -198,7 +198,7 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
     status: 'shipped',
     title: 'GitHub pull requests',
     description:
-      'Push a checkpoint and it opens a pull request on a vibld/ branch in the one repository you approved.',
+      'Push a checkpoint and it opens a pull request on a vibld/ branch in the project’s own repository, one vibld creates or one you pick.',
   },
   {
     id: 'style-presets',
@@ -213,7 +213,56 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
     status: 'shipped',
     title: 'Build from a reference URL',
     description:
-      'Give it a page to copy from or emulate, and vibld fetches the page and reads its structure.',
+      'Give it a page to start from, and vibld reads its text, colours, fonts and spacing and adapts them rather than copying.',
+  },
+  {
+    id: 'projects',
+    status: 'shipped',
+    title: 'Projects',
+    description:
+      'Every project keeps its code, its conversation and its settings, and can be renamed, duplicated, archived or deleted.',
+  },
+  {
+    id: 'share-and-remix',
+    status: 'shipped',
+    title: 'Project links and remix',
+    description:
+      'Share a project by link, read-only, and let somebody signed in remix it into a project of their own.',
+  },
+  {
+    id: 'chat',
+    status: 'shipped',
+    title: 'Chat before building',
+    description:
+      'The agent answers a question in words or builds, and may ask one or two questions before the first build.',
+  },
+  {
+    id: 'draft-preview',
+    status: 'shipped',
+    title: 'Draft preview',
+    description:
+      'A draft of the page fills the preview while the first build runs, and the code shows, badged, while it is checked.',
+  },
+  {
+    id: 'media-library',
+    status: 'shipped',
+    title: 'Media uploads',
+    description:
+      'Upload images and video once and a build places them where the request calls for them.',
+  },
+  {
+    id: 'style-moods',
+    status: 'shipped',
+    title: 'Style moods and suggestions',
+    description:
+      'Narrow the styles by mood, and see the ones your request’s own words suggest.',
+  },
+  {
+    id: 'animated-backgrounds',
+    status: 'shipped',
+    title: 'Animated backgrounds',
+    description:
+      'Four moving backgrounds drawn in code from the project’s colours, used when a request asks for one.',
   },
 ];
 

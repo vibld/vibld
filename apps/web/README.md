@@ -33,24 +33,30 @@ into newer state.
 
 ## What this slice does not do
 
-- **The default preview pane content is still a local mock.** It is static
-  HTML assembled from the accepted plan and the generated stylesheet,
-  rendered in a fully restricted iframe (`sandbox=""`); nothing installs
-  dependencies and no generated code runs there. The Preview tab's "Run in
-  sandbox" button (see "Sandbox previews" below) starts the real thing --
-  the mock is what shows before that button is pressed, and for a
-  model-generated project, which has no mock to build in the first place.
+- **The Preview tab shows the real app only once it is run.** "Run live
+  preview" (see "Sandbox previews" below) installs and starts the project
+  in a sandbox. Before that, what the pane shows depends on the provider.
+  With the deterministic fake it is a quick local mock: static HTML
+  assembled from the accepted plan and the generated stylesheet, in a fully
+  restricted iframe (`sandbox=""`), where nothing installs and no generated
+  code runs. `BuilderSession` keeps the brief the mock is drawn from only
+  for the fake provider (`acceptedBrief` in `src/generation/session.ts`). A
+  model-built project has no mock: its first build shows a draft while it
+  builds and after (see "The draft preview" below), and otherwise the pane
+  says "Ready to run".
 - **Locally there is no model provider.** `pnpm dev` runs plain Vite with
   nothing serving `/api`, so plans come from a deterministic local function
   and CI needs no credentials (ADR-0007). A deployed Worker with a provider
   key, sign-in and storage uses a real model (see "Model generation" below),
   and `pnpm generate` at the repository root runs a real build from a
   checkout with only a key.
-- **Console and Problems are placeholders** beyond the lifecycle log and
-  validation findings. `@vibld/preview` reports install/start success or
-  failure as a whole (see "Sandbox previews" below), but nothing pipes a
-  running preview's live process output or build diagnostics into these
-  panels yet.
+- **Console and Problems show only what the builder itself knows**: the
+  lifecycle log, validation findings, and, under Problems, a build check
+  that failed (D69: the revision is shown at once and then built and held
+  to its spec; `checkProblem` in `src/generation/build-check.ts`).
+  `@vibld/preview` reports install/start success or failure as a whole (see
+  "Sandbox previews" below), but nothing pipes a running preview's live
+  process output or build diagnostics into these panels yet.
 - **No version history.** An account has projects now (see "Projects"
   below), each kept server-side with its conversation and settings, and every
   accepted revision is still stored in R2, but nothing in the builder browses
@@ -58,13 +64,15 @@ into newer state.
 
 ## Hosted preview (optional)
 
-The shell can be deployed to Cloudflare Workers static assets (ADR-0005) for a
-shareable URL. It is a client-side SPA with no backend, no credentials and no
-stored data, so nothing deployed here belongs to the trusted control plane.
+The builder deploys to Cloudflare Workers (ADR-0005): the SPA as static
+assets, and the Worker (`worker/`) that serves `/api`. The Worker is the
+trusted control plane: it verifies Clerk sessions, holds the provider keys
+and other secrets, keeps accounts, projects and billing in D1 and project
+content in R2, and runs builds as a durable Workflow.
 
-This deploys the **builder UI**. It is _not_ the private, origin-isolated
-preview ADR-0006 requires for running untrusted generated applications; that
-arrives with sandbox execution (internal issue 6).
+It does not run generated code. That is the private, origin-isolated preview
+ADR-0006 requires, which `@vibld/preview` provides on its own domain (see
+"Sandbox previews" below).
 
 ### One-time setup
 
@@ -222,8 +230,9 @@ the two acts that change it. That panel is the way in: without it, letting
 somebody in would mean constructing an authenticated POST by hand.
 
 **Two systems have to agree**, and the panel says so rather than implying
-otherwise. Clerk is in Waitlist mode (above), so it decides whether somebody
-can sign in at all; this list decides whether signing in gets them anywhere.
+otherwise. On an invite-only deployment Clerk is in Waitlist mode (see
+"Clerk authentication" below), so it decides whether somebody can sign in
+at all; this list decides whether signing in gets them anywhere.
 A row here for an address Clerk has not approved is somebody who cannot
 create a session and so never reaches the gate, which is why the panel's
 confirmation names the Clerk step and links to
@@ -259,8 +268,8 @@ tool was missing when asked why.
 `CLERK_SECRET_KEY` is optional and each route that wants it asks for itself:
 the two credit routes refuse without it, and `POST /api/admin/invite` records
 the invite either way and reports that Clerk was not asked. Setting it is
-worth it, though, because sign-in is waitlisted in Clerk (L6) and without the
-key an invite here is half the action: the row authorises somebody who still
+worth it, though, on an invite-only deployment, where sign-in is waitlisted
+in Clerk (L6) and without the key an invite here is half the action: the row authorises somebody who still
 cannot create a session, and an operator has to approve them by hand at
 https://dashboard.clerk.com/~/users/waitlist. With the key set, inviting asks
 Clerk to approve the address too and the panel says what Clerk answered.
@@ -556,6 +565,25 @@ It builds in bounded steps, as the product does, and prints each step with
 the second it started. **Replay** `north-star` runs the request that ran out
 of room on 2026-09-29, word for word, with its glassmorphism style.
 
+## Chat and looks (`/api/chat`, `/api/mockups`)
+
+Two more routes spend model budget. Both sit behind the invite gate, the
+model policy, the `PLAN_BURST`/`PLAN_SUSTAINED` limiters and the same
+reservation and settlement as `/api/plan` (`runCeilingFor`,
+`reserveBudget`, `settleBudget`), and neither builds anything.
+
+- `POST /api/chat` -- body `{ "messages": [{ "role", "text" }, ...],
+"project"? }`, plus the model. One turn of the builder's conversation
+  (`worker/chat-handler.ts`, `ChatProvider` in `@vibld/ai`): the agent
+  either replies in words, or returns a brief the builder then submits to
+  `/api/plan` as if it had been typed. One call, a JSON answer, no retry.
+- `POST /api/mockups` -- body `{ "prompt", "draft"? }`, plus the style
+  preset and model. Three sketched directions for Explore to choose from
+  before a build, or with `"draft": true` the single draft the Preview tab
+  shows while a first build runs (see "The draft preview" below).
+  `handleMockups` in `worker/index.ts`, `MockupProvider` in `@vibld/ai`;
+  streamed, in the request rather than a Workflow.
+
 ## Clerk authentication (the cutover -- docs/decisions.md L5)
 
 Clerk is the only thing that gates `/api/plan` and `/api/config` now.
@@ -564,8 +592,10 @@ Cloudflare Access is off. The Clerk instance is live: Frontend API at
 **DNS only**, not proxied, or Cloudflare intercepts it with its own "DNS
 points to prohibited IP" error before Clerk ever sees the request), with
 `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` set on the `preview`
-environment, the custom session claim configured, and **Waitlist** sign-up
-mode enabled (L6) so sign-in stays restricted to approved accounts.
+environment, and the custom session claim configured. Clerk's sign-up mode
+is set to match the Worker's access mode (`VIBLD_ACCESS_MODE`, see
+"Invite-only access" above): **Public** when the deployment is `open`,
+**Waitlist** when it is invite-only (L6).
 
 Two pieces, wired together:
 
@@ -614,8 +644,9 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
   intercepts every request before Clerk is ever reached, regardless of what
   the Worker's own code does -- Access was always a second, independent gate
   at the edge, not something this repository's deploy can remove on its own.
-- **Waitlist mode**: `https://dashboard.clerk.com/~/user-authentication/access-mode`
-  → **Waitlist** → **Save** (done). Approve or deny requests at
+- **Sign-up mode**: `https://dashboard.clerk.com/~/user-authentication/access-mode`
+  → **Public** for an open deployment, **Waitlist** for an invite-only one
+  → **Save**. On Waitlist, approve or deny requests at
   `https://dashboard.clerk.com/~/users/waitlist`.
 - `VIBLD_PLATFORM_ADMINS` (comma-separated verified emails) is set on the
   deployment -- see "Admin: manual credit grants" below for its first
@@ -639,8 +670,9 @@ unauthenticated, which is the fail-closed behaviour `isConfigured` in
 
 ### Abuse controls required before Access came off (docs/decisions.md L29)
 
-Access is off; sign-up is open to anyone (subject to Waitlist approval).
-L29 named five controls that had to ship first -- audited directly, not
+Access is off. Who may use the builder is `VIBLD_ACCESS_MODE`'s decision
+(`open` or invite-only, see "Invite-only access" above), with Clerk's
+sign-up mode set to match. L29 named five controls that had to ship first -- audited directly, not
 assumed, once that was true:
 
 1. **Turnstile on sign-up** -- Clerk's own, not something this repo builds:
@@ -679,6 +711,16 @@ could have supplied itself.
   reports queued/in-progress if the caller already has one running.
 - `GET /api/preview` -- polls the current preview's status. Never starts or
   enqueues anything; safe to call as often as needed.
+- `PATCH /api/preview` -- body `{ "files", "revision" }`. Puts a new
+  revision into the preview that is already running (D74), passed to
+  `@vibld/preview`'s `/internal/preview/update`
+  (`apps/preview/worker/live-update.ts`): only new and changed files are
+  written, removed ones are deleted, and Vite reloads the page; a changed
+  dependency set runs `npm install` first and restarts only the dev
+  server. The answer is `{outcome: "applied", status}`, `"installing"`,
+  `"busy"` or `{outcome: "restart", reason}`; the builder sends it when a
+  revision is accepted or shown early (D69), and restarts the preview, saying
+  why, when the outcome is `restart` or the call fails.
 - `DELETE /api/preview` -- stops the caller's preview early. Idempotent.
 
 Every response is one of: `{status: "queued", position}`,
@@ -706,8 +748,9 @@ The Preview tab's "Run live preview" button calls `/api/preview` with the
 accepted checkpoint's files
 (`src/generation/preview-client.ts`, the browser-side mirror of
 `worker/preview-client.ts`'s `PreviewStatus` union and its defensive
-parsing) and polls until the sandbox settles, then swaps the local mock for
-a real `<iframe src>` pointed at the returned URL. "Stop" ends it early;
+parsing) and polls until the sandbox settles, then swaps what the pane
+showed (the mock, the draft or "Ready to run") for a real `<iframe src>`
+pointed at the returned URL. "Stop" ends it early;
 the tab shows a `live` badge while a sandbox is running, since it keeps
 running even while another tab is in view.
 
@@ -1399,6 +1442,31 @@ clears it. See "Refunds and disputes" above.
    preview" → "Deploying" above) picks up any pending migration
    automatically on the next deploy.
 
+## Admin: accounts (D73)
+
+Each account has an admin page in the builder, `/admin/users/<Clerk user
+id>` (`src/components/AdminUserPage.tsx`), opened by email from the admin
+page: identity, plan and whether it is gifted, projects and their sites,
+spend and credit, recent runs, ban state and every admin action taken on
+it. The routes are all behind the same admin check as the credit grants
+(`worker/admin-users.ts`, `worker/admin-store.ts`; state in
+`migrations/0038_admin_controls.sql`):
+
+| Route                                  | Does                                                                                                                                                                   |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/admin/user/detail`               | The account page's contents                                                                                                                                            |
+| `/api/admin/user/gift`, `/gift/revoke` | Give a Build or Ship tier with an optional last day and no Stripe charge, or take it back                                                                              |
+| `/api/admin/user/overrides`            | Set the account's own active-project limit and monthly spend cap, in place of its tier's                                                                               |
+| `/api/admin/user/ban`, `/unban`        | Refuse every request from the account and ban it in Clerk, stopping its builds, previews and share links and holding its sites; or lift the ban (held sites stay held) |
+| `/api/admin/user/delete`               | The account deletion below (L32), asked for by an admin who types the account's email                                                                                  |
+| `/api/admin/audit`                     | The audit log, most recent first                                                                                                                                       |
+
+Every admin action (these, the credit grant, the suspension lift and the
+site and share-link holds) writes one append-only row to
+`admin_audit_log`; triggers in D1 refuse a delete, and any update but the account purge's re-keying of `target_user_id`. The
+details, and what was decided while building it, are D73 in
+`docs/decisions.md`.
+
 ## Projects (resolved 2026-09-28)
 
 An account has projects, and each one remembers everything about itself:
@@ -1471,8 +1539,10 @@ caller's most recently opened active project, or a new one if there is none.
 **Publishing is per project**: each project publishes to its own
 `<slug>.vibld-preview.dev` site, deleting a project takes its site down, and
 the sites published when there was one per account kept their addresses
-(see "Cloudflare auto-publish" above). Everything else stays per account,
-deliberately:
+(see "Cloudflare auto-publish" above). **So is the GitHub repository**
+(D72): each project pushes to the repository it is connected to, and only
+the GitHub sign-in belongs to the account (see "Pushing to GitHub" below).
+Everything else stays per account, deliberately:
 
 - **The media library.** Shared by every project the account has (decided
   2026-09-28). A remix into another account copies what its code uses into
@@ -1480,8 +1550,6 @@ deliberately:
   nothing.
 - **The preview sandbox.** One per account; opening another project stops
   it.
-- **GitHub.** One connected repository per account; pushing from any
-  project pushes there.
 - **Spend, rate limits, `/api/chat` and `/api/mockups`.** Neither route
   reads a project, and the allowance is the account's.
 
@@ -1595,6 +1663,29 @@ the new project, and a preview starts.
 workflow like every other migration. The two rate limits are declared in
 `wrangler.jsonc` and need nothing provisioned. Nothing else: the routes use
 the D1, R2 and service bindings the Worker already has.
+
+## Media library
+
+`/api/media` (`worker/media-handlers.ts`, `worker/media-store.ts`) is the
+account's own library of uploaded images and videos, shared by all its
+projects. A row per file in D1 (`project_media`, `0027`) and the bytes in
+R2.
+
+- `POST /api/media` -- the file as the raw request body (an `image/*`,
+  `video/*` or `application/octet-stream` content type, never JSON or a
+  form); what it is comes from its bytes. Behind the invite gate, since
+  storing is spending, and its own `MEDIA_BURST` limit.
+- `GET /api/media` -- the library and what it may still hold.
+- `DELETE /api/media?id=<id>` -- removes one file. Not gated, so an account
+  whose access was revoked can still remove what it stored.
+
+The limits are in `packages/core/src/media.ts`: 8 MB an image, 40 MB a
+video, 30 files and 200 MB an account. A build is told what the library
+holds (`mediaSection` in `@vibld/ai`) and references a file as
+`/media/<name>`, which a preview serves from the library
+(`apps/preview/worker/media-route.ts`). A push to GitHub carries the files
+the checkpoint references as `public/media/<name>` (`worker/media-export.ts`).
+The builder's side is `src/components/MediaLibrary.tsx`.
 
 ## Account deletion (docs/decisions.md L32)
 
@@ -1740,8 +1831,12 @@ repository.
 1. Create the App at https://github.com/settings/apps/new. Repository
    permissions: **Contents: Read and write** and **Pull requests: Read and
    write**, and, only if "Create a new repository" should work,
-   **Administration: Read and write** (D72); nothing else. Webhook: unchecked. "Where can this GitHub App be
-   installed": **Any account**.
+   **Administration: Read and write** (D72); nothing else. Webhook:
+   **Active**, **Webhook URL** `https://app.vibld.com/api/github/webhook`,
+   **Webhook secret** a long random value, which also goes into a new
+   secret `VIBLD_GITHUB_WEBHOOK_SECRET` on the `preview` environment (step
+   2). Under **Subscribe to events**, tick **Pull request**. "Where can this
+   GitHub App be installed": **Any account**.
 2. On the App's page, **Generate a private key**. The `.pem` downloads once.
    Paste its whole contents (including the `BEGIN`/`END` lines) into a new
    secret `VIBLD_GITHUB_PRIVATE_KEY` on the `preview` environment at
@@ -1755,12 +1850,14 @@ repository.
    client secret** for `VIBLD_GITHUB_CLIENT_SECRET`, both on the same
    environment. Without these a deployment can push on a binding it already
    has but cannot make new ones.
-4. The **Deploy web preview** workflow syncs all four to this Worker on the
+4. The **Deploy web preview** workflow syncs all five to this Worker on the
    next deploy, the same way it already syncs `STRIPE_SECRET_KEY` above, and
    `migrations/0005_github.sql` is applied by that workflow's
-   migration-apply step. All four are optional in the same fail-closed sense
+   migration-apply step. All five are optional in the same fail-closed sense
    as every other secret here: unset means `/api/github/*` answers "not
-   configured", not open.
+   configured", not open. Without `VIBLD_GITHUB_WEBHOOK_SECRET`,
+   `/api/github/webhook` refuses every delivery, so a pull request's state
+   (merged, closed) is never reported back to the builder.
 
 ### Connecting a repository (internal issue 121)
 

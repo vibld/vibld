@@ -1,8 +1,8 @@
 import { DocPage } from '../components/SiteChrome';
-import { DOC_GUIDES, metaFor } from '../site';
+import { DOC_GUIDES, SITE, metaFor } from '../site';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'configuration')!;
-const CHECKED = '2026-09-27';
+const CHECKED = '2026-09-30';
 
 export function meta() {
   return metaFor('/docs/configuration');
@@ -13,9 +13,18 @@ export default function Configuration() {
     <DocPage guide={GUIDE} updated={CHECKED}>
       <p>
         Two kinds of value. A <strong>var</strong> is public: it ships in the
-        Worker’s configuration file and is meant to be read. A{' '}
-        <strong>secret</strong> is set out of band and never committed. Putting
-        one in the other’s place is the mistake this page exists to prevent.
+        Worker’s <code>wrangler.jsonc</code> and is meant to be read. A{' '}
+        <strong>secret</strong> is set out of band, with{' '}
+        <code>wrangler secret put</code>, and never committed. Putting one in
+        the other’s place is the mistake this page exists to prevent. Everything
+        here is the builder’s unless it says otherwise;{' '}
+        <a
+          href={`${SITE.repoUrl}/blob/main/apps/web/.env.example`}
+          rel="noopener noreferrer"
+        >
+          apps/web/.env.example
+        </a>{' '}
+        lists the builder’s secrets with the shape of each.
       </p>
 
       <h2>Secrets</h2>
@@ -27,15 +36,25 @@ export default function Configuration() {
       <ul>
         <li>
           <code>ANTHROPIC_API_KEY</code>, <code>DEEPSEEK_API_KEY</code> or{' '}
-          <code>OPENAI_API_KEY</code>, to match whichever provider you selected.
-          Without the matching key, generation refuses. Setting more than one
-          makes each of those providers’ models available to choose from, within
-          whatever <code>VIBLD_MODEL_POLICY</code> below allows.
+          <code>OPENAI_API_KEY</code>. Any one makes generation available;
+          without any, generation refuses. Setting more than one makes each of
+          those providers’ models available to choose from, within whatever{' '}
+          <code>VIBLD_MODEL_POLICY</code> below allows.
         </li>
         <li>
-          <code>CLERK_SECRET_KEY</code>, and <code>CLERK_PUBLISHABLE_KEY</code>{' '}
-          at build time for the interface. Without them nobody can sign in, and
-          every protected endpoint refuses.
+          <code>VIBLD_PLATFORM_ADMINS</code>, comma-separated email addresses.
+          Each is matched against the verified email in the caller’s Clerk
+          session. An admin is always past the invite gate and gets the admin
+          panel. Unset means no admins, and on a deployment that is not open,
+          nobody at all can generate.
+        </li>
+        <li>
+          <code>CLERK_SECRET_KEY</code>. Not needed for sign-in, which verifies
+          sessions against public keys. It powers the admin tools that talk to
+          Clerk: approving an invited address in Clerk, looking an account up by
+          email for credit grants, banning, and deleting the sign-in account
+          when an account is purged. Each of those says so when the key is
+          missing.
         </li>
         <li>
           <code>PREVIEW_INTERNAL_SECRET</code>, shared with the sandbox Worker.
@@ -44,7 +63,8 @@ export default function Configuration() {
         <li>
           <code>PUBLISH_INTERNAL_SECRET</code>, shared with the publish Worker.
           Deliberately a different value from the one above: a leak of one must
-          not compromise the other.
+          not compromise the other. Publishing needs both, because the sandbox
+          builds what the publish Worker serves.
         </li>
         <li>
           <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code>,
@@ -55,30 +75,73 @@ export default function Configuration() {
           identity may use. A secret rather than a var because it names people.
           Absent means no policy: everyone may use whatever the deployment can
           serve. Where billing is configured, a Free account is held to GPT-6
-          Luna whatever the policy grants.
+          Luna whatever the policy grants, so a deployment that charges needs an
+          OpenAI key for its Free accounts to build at all.
         </li>
       </ul>
       <p>
-        The GitHub App’s four values (<code>VIBLD_GITHUB_APP_ID</code>,{' '}
+        The GitHub App’s five values (<code>VIBLD_GITHUB_APP_ID</code>,{' '}
         <code>VIBLD_GITHUB_PRIVATE_KEY</code>,{' '}
         <code>VIBLD_GITHUB_CLIENT_ID</code>,{' '}
-        <code>VIBLD_GITHUB_CLIENT_SECRET</code>) are secrets too. The private
-        key is a PEM file that downloads once; it belongs in a secret store and
-        nowhere else, not in an email and not pasted into a chat window.
+        <code>VIBLD_GITHUB_CLIENT_SECRET</code>,{' '}
+        <code>VIBLD_GITHUB_WEBHOOK_SECRET</code>) are secrets too. Without the
+        webhook secret, pushing still works but <code>/api/github/webhook</code>{' '}
+        answers 503, so a merged pull request goes on being shown as open. The
+        private key is a PEM file that downloads once; it belongs in a secret
+        store and nowhere else, not in an email and not pasted into a chat
+        window.
+      </p>
+
+      <h2>Sign-in</h2>
+      <ul>
+        <li>
+          <code>CLERK_FRONTEND_API_URL</code>, a var: your Clerk instance’s
+          Frontend API URL. A public identifier, not a secret. It is both the
+          issuer the Worker matches tokens against and the base it fetches the
+          signing keys from. The shipped value is vibld’s own.
+        </li>
+        <li>
+          <code>VITE_CLERK_PUBLISHABLE_KEY</code>, a build variable rather than
+          a Worker secret: Vite inlines it into the interface when you build.
+          Locally it goes in <code>apps/web/.env.local</code>, not in{' '}
+          <code>.dev.vars</code>. (vibld’s own deploy stores it as a secret
+          called <code>CLERK_PUBLISHABLE_KEY</code> and passes it to the build
+          under this name.) Without it the interface has no sign-in, and every
+          request it makes is refused.
+        </li>
+      </ul>
+
+      <h2>The invite gate</h2>
+      <p>
+        <code>VIBLD_ACCESS_MODE</code> decides who may use the deployment once
+        signed in. Only the exact string <code>open</code> lets every signed-in
+        account in. Anything else, including unset, <code>OPEN</code> and{' '}
+        <code>open</code> with a trailing space, keeps the gate shut to all but
+        platform admins and the addresses they invite. It is not in the shipped{' '}
+        <code>wrangler.jsonc</code>, so a fresh deployment is closed. vibld’s
+        own deploy sets it as a secret; a var works the same.
       </p>
 
       <h2>Vars you have to set</h2>
       <ul>
         <li>
           <code>VIBLD_PROVIDER</code>: <code>anthropic</code>,{' '}
-          <code>deepseek</code> or <code>openai</code>. Explicit beats inferred,
-          so set it rather than relying on which key happens to be present.
+          <code>deepseek</code> or <code>openai</code>, the provider that
+          answers when no model is named. Explicit beats inferred, so set it
+          rather than relying on which key happens to be present. Any other
+          value is an error.
         </li>
         <li>
-          <code>CLERK_FRONTEND_API_URL</code>: your Clerk instance’s Frontend
-          API URL. A public identifier, not a secret. It is both the issuer the
-          Worker matches tokens against and the base it fetches the signing keys
-          from.
+          <code>VIBLD_MODEL</code>: the default model, which beats{' '}
+          <code>VIBLD_PROVIDER</code> when set. The shipped{' '}
+          <code>wrangler.jsonc</code> sets <code>VIBLD_PROVIDER</code> to{' '}
+          <code>openai</code> and this to <code>gpt-6-sol</code>. If your keys
+          cannot serve the model named here, the builder does not refuse: it
+          falls back to the first model it can serve in catalogue order, which
+          on an Anthropic-only deployment is Claude Fable 5.1, the dearest
+          Anthropic model. Set it to a model your key serves, or delete it to
+          get the provider’s default. On the command line, a set{' '}
+          <code>VIBLD_MODEL</code> picks the provider outright.
         </li>
       </ul>
 
@@ -112,6 +175,52 @@ export default function Configuration() {
         </li>
       </ul>
 
+      <h2>Your own domains</h2>
+      <ul>
+        <li>
+          <code>PREVIEW_HOSTNAME</code>, on the sandbox Worker: the domain
+          previews and share links are minted under. It has to match that
+          Worker’s wildcard route. Unset, previews report themselves not
+          configured.
+        </li>
+        <li>
+          <code>PUBLISH_HOSTNAME</code>, on the publish Worker and on the
+          builder: the domain published sites are served under, and the address
+          a project shows for its site. Both default to{' '}
+          <code>vibld-preview.dev</code>, so set both. Published sites share the
+          preview domain: the sandbox Worker hands the publish Worker every host
+          that is not a preview or a share.
+        </li>
+        <li>
+          <code>VIBLD_REFERRAL_ORIGIN</code>: where a referral link points.
+          Defaults to <code>https://vibld.com</code>.
+        </li>
+      </ul>
+
+      <h2>The other two Workers’ secrets</h2>
+      <ul>
+        <li>
+          The sandbox Worker carries <code>PREVIEW_INTERNAL_SECRET</code> (the
+          builder’s value) and <code>PREVIEW_SHARE_SECRET</code>, which signs
+          share links. A third, separate value that only the sandbox holds:
+          without it, sharing reports itself not configured.
+        </li>
+        <li>
+          The publish Worker carries <code>PUBLISH_INTERNAL_SECRET</code> (the
+          builder’s value).
+        </li>
+      </ul>
+
+      <h2>Email</h2>
+      <p>
+        <code>RESEND_API_KEY</code> turns on one email: a nightly warning when
+        the DeepSeek balance is below{' '}
+        <code>VIBLD_DEEPSEEK_BALANCE_ALERT_USD</code> (default 10). It goes to{' '}
+        <code>VIBLD_ALERT_EMAIL</code> from <code>VIBLD_ALERT_FROM</code>, whose
+        defaults are vibld’s own addresses, so set both. The From address has to
+        be on a domain your Resend account can send from.
+      </p>
+
       <h2>Vars you should probably leave alone</h2>
       <p>
         <code>VIBLD_USD_MICRO_PER_INPUT_TOKEN</code> and{' '}
@@ -126,6 +235,20 @@ export default function Configuration() {
         cost, which turned a budget that afforded forty generations a day into
         two.
       </p>
+      <ul>
+        <li>
+          <code>VIBLD_REPLAY_QUERY_BUDGET</code>: the D1 queries the nightly
+          billing pass may spend in one invocation. Unset means 40, which fits
+          the Workers free plan’s limit of 50. The shipped{' '}
+          <code>wrangler.jsonc</code> sets 500, sized for Workers Paid. Above
+          your plan’s limit, the pass fails at the same point every night.
+        </li>
+        <li>
+          <code>VIBLD_STREAM_KEEPALIVE_MS</code>: milliseconds between
+          keepalives on the generation stream. Default 10000; a value outside
+          1000 to 60000 is ignored.
+        </li>
+      </ul>
     </DocPage>
   );
 }

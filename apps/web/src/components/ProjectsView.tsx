@@ -293,7 +293,7 @@ function ProjectRow({
           <p className="projectlist__question">
             Delete &ldquo;{project.name}&rdquo; for good? Its code and its
             conversation are removed and cannot be recovered. A site you
-            published from it stays up until you take it down.
+            published from it is taken down first.
           </p>
           <button
             type="button"

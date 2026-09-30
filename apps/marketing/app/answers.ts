@@ -63,7 +63,12 @@ export function answers(plans: Plans): Answer[] {
     {
       question: `Can I run ${SITE.name} myself?`,
       answer:
-        'Yes. The source is public, and self-hosted, vibld is three Cloudflare Workers on your own Cloudflare account with your own model keys. The self-hosting guide lists what that involves and what differs from the hosted service.',
+        'Yes. The source is public, and self-hosted, vibld is three Cloudflare Workers on your own Cloudflare account with your own model keys; live previews and publishing need the Workers Paid plan. That path is documented but not yet validated: nobody outside the project has deployed their own copy. The self-hosting guide lists what it involves and what differs from the hosted service.',
+    },
+    {
+      question: `Can I use ${SITE.name} with my own model key, without deploying anything?`,
+      answer:
+        'Yes, from the command line. In a clone of the repository, pnpm generate with one Anthropic, DeepSeek or OpenAI key runs the same bounded build as the hosted builder and writes the project to disk, and with --build it installs and builds the result with npm and asks the model for one repair if the build fails. A weekly workflow proves that from a clean clone. Running the builder interface locally, with pnpm --filter @vibld/web dev, uses a deterministic fake provider instead, so no model is called.',
     },
     {
       question: `Who makes ${SITE.name}?`,
