@@ -372,9 +372,27 @@ builder, and whether the repository should move to his account.
   deploys under its own names and refuses a signed-out caller; sign-in and
   a generation on a copy stay untested outside the project, and the docs
   keep saying so.
-- **D117. The `selfhost-*` resources are torn down after the check.** A
-  rerun recreates the Workers; the database and bucket are created again
-  beforehand, as the workflow's header says.
+- **D117. The `selfhost-*` resources are torn down after the check.** The
+  first run (36755192186) passed: the copy served its interface and
+  answered `/api/config` signed out with 401. It was torn down by hand; the
+  workflow now creates the database and bucket itself and removes
+  everything it made at the end, pass or fail
+  (`scripts/self-host-resources.mjs`).
+
+### Resolved 2026-09-30 (evening)
+
+- **Codex review of internal PR 333, all three taken.** The rate-limit namespace base
+  is now required and may not overlap vibld's own ids, which are
+  account-wide; without a preview domain of its own the builder is not
+  bound to the publish Worker, so publishing reports itself unavailable
+  instead of publishing under `vibld-preview.dev`; and the check tears
+  itself down.
+- **D118. Cut a release once the docs say what the check proved.**
+- **D119. It is v0.3.0, not v0.2.1.** Since v0.2.0 the template catalog
+  became something to build from (400+ designs and screens, "Start from
+  this template"), which is more than a patch. Notes in
+  `docs/releases/v0.3.0.md`; the Public release workflow tags it after the
+  export of the merge.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

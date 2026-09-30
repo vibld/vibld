@@ -27,6 +27,7 @@ const SETTINGS = {
   d1DatabaseId: '00000000-1111-2222-3333-444444444444',
   clerkFrontendApiUrl: 'https://acme.clerk.accounts.dev',
   provider: 'deepseek',
+  rateLimitNamespaceBase: 5001,
 };
 
 describe("a self-hosted copy's configuration (D115)", () => {
@@ -62,9 +63,9 @@ describe("a self-hosted copy's configuration (D115)", () => {
         [names.bucket],
       );
     }
+    // No preview domain: not bound to the publish Worker (see below).
     assert.deepEqual(web.services.map((s) => s.service).sort(), [
       'acme-preview',
-      'acme-publish',
     ]);
     assert.deepEqual(
       preview.services.map((s) => s.service),
@@ -108,14 +109,37 @@ describe("a self-hosted copy's configuration (D115)", () => {
     );
   });
 
-  it('moves the rate limits to namespaces of their own when asked', () => {
-    const web = selfHostConfig('web', base.web, {
-      ...SETTINGS,
-      rateLimitNamespaceBase: 5000,
-    });
+  it("moves the rate limits to namespaces of their own, never vibld's", () => {
+    // Codex review of internal PR 333: ids are account-wide, and defaulting to 1001
+    // shared vibld's limits with a copy beside it.
+    const web = selfHostConfig('web', base.web, SETTINGS);
     assert.deepEqual(
       web.ratelimits.map((r) => r.namespace_id),
-      base.web.ratelimits.map((_, i) => String(5000 + i)),
+      base.web.ratelimits.map((_, i) => String(5001 + i)),
+    );
+    const { rateLimitNamespaceBase: _, ...unset } = SETTINGS;
+    assert.throws(() => selfHostConfig('web', base.web, unset), /not usable/);
+    assert.throws(
+      () =>
+        selfHostConfig('web', base.web, {
+          ...SETTINGS,
+          rateLimitNamespaceBase: 1005,
+        }),
+      /one of vibld's own/,
+    );
+  });
+
+  it('leaves publishing unavailable without a domain of its own', () => {
+    // Codex review of internal PR 333: bound, it would publish under vibld-preview.dev.
+    const bare = selfHostConfig('web', base.web, SETTINGS);
+    assert.ok(!bare.services.some((b) => b.binding === 'PUBLISH'));
+    const withDomain = selfHostConfig('web', base.web, {
+      ...SETTINGS,
+      previewDomain: 'example-preview.dev',
+    });
+    assert.deepEqual(
+      withDomain.services.find((b) => b.binding === 'PUBLISH'),
+      { binding: 'PUBLISH', service: 'acme-publish' },
     );
   });
 

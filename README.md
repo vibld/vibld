@@ -75,12 +75,12 @@
 
 ## Three ways to use it
 
-|                    | ☁️ **Hosted**                                                                          | ⌨️ **Your key, your terminal**                                                         | 🛠️ **Self-hosted**                                                                                         |
-| ------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **What you get**   | The whole builder: chat, previews, projects, sharing, GitHub and publishing.           | The same bounded build, from the command line, writing a project to disk.              | Your own copy of the hosted service on your Cloudflare account.                                            |
-| **What you need**  | A browser. [Sign up](https://app.vibld.com/sign-up).                                   | Node 24, pnpm and one Anthropic, OpenAI or DeepSeek key.                               | Cloudflare (Workers Paid for previews), Clerk, a model key; Stripe and a GitHub App only if you want them. |
-| **What it costs**  | Free plan, or a paid plan with more model spend. [Pricing](https://vibld.com/pricing). | What your provider bills. The weekly proof run costs about $0.15 to $0.31 on DeepSeek. | Your Cloudflare and provider bills.                                                                        |
-| **Where to start** | [Getting started](https://vibld.com/docs/getting-started)                              | [Quick start](#generate-a-real-project-with-your-own-key)                              | [Self-hosting](https://vibld.com/docs/self-hosting) (documented, not yet validated outside the project)    |
+|                    | ☁️ **Hosted**                                                                          | ⌨️ **Your key, your terminal**                                                         | 🛠️ **Self-hosted**                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **What you get**   | The whole builder: chat, previews, projects, sharing, GitHub and publishing.           | The same bounded build, from the command line, writing a project to disk.              | Your own copy of the hosted service on your Cloudflare account.                                                     |
+| **What you need**  | A browser. [Sign up](https://app.vibld.com/sign-up).                                   | Node 24, pnpm and one Anthropic, OpenAI or DeepSeek key.                               | Cloudflare (Workers Paid for previews), Clerk, a model key; Stripe and a GitHub App only if you want them.          |
+| **What it costs**  | Free plan, or a paid plan with more model spend. [Pricing](https://vibld.com/pricing). | What your provider bills. The weekly proof run costs about $0.15 to $0.31 on DeepSeek. | Your Cloudflare and provider bills.                                                                                 |
+| **Where to start** | [Getting started](https://vibld.com/docs/getting-started)                              | [Quick start](#generate-a-real-project-with-your-own-key)                              | [Self-hosting](https://vibld.com/docs/self-hosting) (documented and checked by the project, not yet by anyone else) |
 
 <p align="center">
   <img alt="A terminal: pnpm generate for a one-page bakery site plans the project, writes five groups of files, lists them with their line counts and token usage, then builds the result with npm." src="docs/images/media-terminal.webp" width="100%">
@@ -221,7 +221,7 @@ Ask for an aurora, a starfield, a smoky gradient or any "animated background", a
 - Repository search over an existing codebase (internal issue 12).
 - A bakeoff result strong enough to recommend one model over another. The harness exists and has run; the evidence does not settle it yet.
 - Sandbox output in the builder's own panes. The console shows generation events, and Problems shows the design checks and the verification build, not the install, build and type errors from a live preview.
-- A validated self-hosting path. The pieces are documented (see below), but nobody outside the project has deployed their own copy yet.
+- A self-hosting path validated outside the project. A workflow deploys a separately named copy from the docs and checks it comes up and refuses a signed-out caller, but nobody outside the project has deployed their own copy yet, and sign-in and generation on a copy are not checked.
 - The builder's interface against a real model on your own machine. Locally it runs the fake provider; its model path needs sign-in, D1, R2 and a Workflow, which only a Cloudflare deployment has. `pnpm generate` is the local way to a real build today.
 
 **What to be careful of.** It is a beta, not a place for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
@@ -314,7 +314,7 @@ flowchart LR
 
 ## Running it yourself
 
-Self-hosting is possible, and still needs validation: nobody outside the project has deployed their own copy yet. A deployment needs:
+Self-hosting is possible, and still needs validation outside the project: a workflow deploys a separately named copy from the docs and checks it comes up signed out, but nobody else has deployed their own copy yet. A deployment needs:
 
 - **Cloudflare**, for three Workers (the builder, the sandbox and the publish service) plus D1, R2, a Durable Object and a Workflow behind the builder. Live previews and publishing run generated code in [Containers](https://developers.cloudflare.com/containers/), which need the Workers Paid plan, and building the sandbox image needs Docker.
 - **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves, or a copy with only another provider's key falls back to whichever of that provider's models the catalogue lists first.

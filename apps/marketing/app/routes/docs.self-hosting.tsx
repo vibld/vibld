@@ -20,9 +20,11 @@ export default function SelfHosting() {
         parts, the state behind them, and the accounts you will need.
       </p>
       <p>
-        <strong>Not yet validated.</strong> Every piece here is documented, but
-        nobody outside the project has deployed their own copy yet. Expect to be
-        among the first, and to find gaps.
+        <strong>Checked by the project, not yet by anyone else.</strong> A
+        workflow deploys a separately named copy from these docs and confirms it
+        comes up and refuses a signed-out caller. Sign-in and generation on a
+        copy are not checked, and nobody outside the project has deployed their
+        own yet. Expect to be among the first, and to find gaps.
       </p>
       <p>
         If what you want is a real build with your own model key, you do not

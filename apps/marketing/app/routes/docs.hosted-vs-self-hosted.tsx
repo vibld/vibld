@@ -21,8 +21,10 @@ export default function HostedVsSelfHosted() {
         is the source in the repository.
       </p>
       <p>
-        One caveat first: self-hosting is documented, and nobody outside the
-        project has deployed their own copy yet.
+        One caveat first: the project checks that a copy deploys from the docs
+        and refuses a signed-out caller, but nobody outside the project has
+        deployed their own copy yet, and sign-in and generation on a copy are
+        not checked.
       </p>
 
       <h2>The same either way</h2>

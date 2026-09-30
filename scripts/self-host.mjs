@@ -28,8 +28,14 @@
  *                                              // workers.dev otherwise
  *     "previewDomain": "example-preview.dev",  // optional: a zone for the
  *                                              // previews' wildcard route
- *     "rateLimitNamespaceBase": 5000           // optional: 1001 onwards otherwise
+ *     "rateLimitNamespaceBase": 5001           // required: rate-limit namespace
+ *                                              // ids are account-wide, so a
+ *                                              // copy beside vibld needs its own
  *   }
+ *
+ * Without a `previewDomain` the builder is not bound to the publish Worker,
+ * so publishing reports itself unavailable: the publish Worker would
+ * otherwise name its sites under vibld's `vibld-preview.dev`.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -109,6 +115,12 @@ export function checkSettings(settings) {
   if (!PROVIDERS.includes(settings.provider)) {
     problems.push(`"provider" is one of ${PROVIDERS.join(', ')}`);
   }
+  const base = settings.rateLimitNamespaceBase;
+  if (!Number.isInteger(base) || base < 1 || base > 1_000_000) {
+    problems.push(
+      '"rateLimitNamespaceBase" is a whole number, such as 5001: rate-limit namespace ids are shared across a Cloudflare account, so pick a range nothing else in it uses',
+    );
+  }
   for (const key of ['builderDomain', 'previewDomain']) {
     const value = settings[key];
     if (value !== undefined && !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(value)) {
@@ -159,12 +171,22 @@ export function selfHostConfig(app, base, settings) {
     if (!target) throw new Error(`${app}: unknown service ${service.service}`);
     service.service = names[target];
   }
+  if (app === 'web' && !s.previewDomain) {
+    // Unbound, publishing answers "not configured" (autoPublishConfigured)
+    // instead of publishing under vibld's hostname.
+    config.services = config.services.filter((b) => b.binding !== 'PUBLISH');
+  }
   for (const workflow of config.workflows ?? []) {
     workflow.name = names.workflow;
   }
-  const base1001 = s.rateLimitNamespaceBase ?? 1001;
+  const ownIds = new Set((base.ratelimits ?? []).map((l) => l.namespace_id));
   (config.ratelimits ?? []).forEach((limit, index) => {
-    limit.namespace_id = String(base1001 + index);
+    limit.namespace_id = String(s.rateLimitNamespaceBase + index);
+    if (ownIds.has(limit.namespace_id)) {
+      throw new Error(
+        `${app}: rate-limit namespace ${limit.namespace_id} is one of vibld's own; choose a "rateLimitNamespaceBase" past them`,
+      );
+    }
   });
 
   const vars = { ...(config.vars ?? {}) };

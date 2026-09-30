@@ -8,10 +8,9 @@ name: Self-host check
 # names vibld's own deployment, so this can run in the same account as
 # vibld without touching it.
 #
-# Before the first run, in the account the "preview" environment's
-# credentials reach:
-#   wrangler d1 create <prefix>-control-plane    (its id is `d1_database_id`)
-#   wrangler r2 bucket create <prefix>-control-plane
+# It creates the copy's D1 database and R2 bucket itself and, unless `keep`
+# is ticked, removes everything it made at the end, pass or fail (D117), with
+# scripts/self-host-resources.mjs.
 on:
   workflow_dispatch:
     inputs:
@@ -19,9 +18,6 @@ on:
         description: Names start with this (lowercase; never "vibld")
         required: true
         default: selfhost
-      d1_database_id:
-        description: The id `wrangler d1 create <prefix>-control-plane` printed
-        required: true
       clerk_frontend_api_url:
         description: A Clerk instance's Frontend API URL (https://..., no path)
         required: true
@@ -30,6 +26,10 @@ on:
         type: choice
         options: [deepseek, anthropic, openai]
         default: deepseek
+      keep:
+        description: Leave the copy deployed afterwards (otherwise torn down)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,12 +66,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Create this copy's database and bucket
+        id: state
+        env:
+          PREFIX: ${{ inputs.prefix }}
+        run: node scripts/self-host-resources.mjs create "$PREFIX"
+
       # Inputs reach the script through the environment, never pasted into
       # the shell, so a value cannot run as a command.
       - name: Write this copy's Wrangler configuration
         env:
           PREFIX: ${{ inputs.prefix }}
-          D1_ID: ${{ inputs.d1_database_id }}
+          D1_ID: ${{ steps.state.outputs.d1_database_id }}
           CLERK_URL: ${{ inputs.clerk_frontend_api_url }}
           PROVIDER: ${{ inputs.provider }}
         run: |
@@ -161,3 +167,11 @@ jobs:
             401|403) ;;
             *) echo "::error::/api/config answered $api to a signed-out caller"; cat "$RUNNER_TEMP/config.json"; exit 1 ;;
           esac
+
+      # D117. Runs whether the check passed or failed, so a failed run does
+      # not leave a half-deployed copy behind.
+      - name: Tear the copy down
+        if: ${{ always() && !inputs.keep }}
+        env:
+          PREFIX: ${{ inputs.prefix }}
+        run: node scripts/self-host-resources.mjs teardown "$PREFIX"

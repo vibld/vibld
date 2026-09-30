@@ -14,9 +14,12 @@ export default function Deploying() {
       <p>
         From a clone to a running builder. The repository’s own READMEs carry
         the exact commands and stay with the code, so they are the version to
-        follow; this page is the shape of the job and the parts that bite.
-        Nobody outside the project has followed it end to end yet, so treat it
-        as a map that has not been walked.
+        follow; this page is the shape of the job and the parts that bite. The
+        project’s own Self-host check follows it on every run: it deploys a
+        separately named copy, confirms the copy comes up and refuses a
+        signed-out caller, then removes it. Sign-in and generation on a copy are
+        not part of that check, and nobody outside the project has followed the
+        page end to end yet.
       </p>
       <p>
         The deploy workflows in the repository run only in the maintainers’ own
@@ -38,7 +41,8 @@ export default function Deploying() {
   "prefix": "acme",
   "d1DatabaseId": "<the id wrangler d1 create printed>",
   "clerkFrontendApiUrl": "https://<your instance>.clerk.accounts.dev",
-  "provider": "deepseek"
+  "provider": "deepseek",
+  "rateLimitNamespaceBase": 5001
 }`}</code>
       </pre>
       <p>
@@ -51,8 +55,12 @@ export default function Deploying() {
         the service bindings between them, and the rate-limit namespaces. It
         refuses to write a file that still names anything of vibld’s. Without a{' '}
         <code>builderDomain</code> and a <code>previewDomain</code> the Workers
-        are served at <code>workers.dev</code>; the optional settings are listed
-        at the top of the script.
+        are served at <code>workers.dev</code>, and publishing stays off: the
+        builder is left unbound from the publish Worker, which would otherwise
+        name sites under vibld’s own domain. Rate-limit namespace ids are shared
+        across a Cloudflare account, so <code>rateLimitNamespaceBase</code> is
+        required, and the script refuses vibld’s own. The optional settings are
+        listed at the top of the script.
       </p>
       <p>
         Pass <code>-c wrangler.self-host.jsonc</code> to every{' '}

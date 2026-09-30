@@ -7,7 +7,7 @@ The roadmap describes outcomes, not delivery dates. It follows the [accepted dec
 Decided 2026-09-30: new product work pauses until the open-source version is live. Live means all four of these, shipped in this order as each is proven:
 
 - A clean clone generates a real project with only a provider key, proven in CI. **Done:** `pnpm generate`, proven weekly on a fresh clone of the public repository by `.github/workflows/clean-clone.yml` (D82).
-- A validated self-hosting path on Cloudflare. Not yet: the pieces are documented, and nobody outside the project has deployed a copy.
+- A validated self-hosting path on Cloudflare. Partly: the pieces are documented, and a workflow deploys a separately named copy from the docs and checks it comes up signed out; nobody outside the project has deployed a copy, and sign-in and generation on a copy are not checked.
 - A tagged release. **Done:** v0.1.0 was tagged by hand on 2026-09-27; releases now go through `.github/workflows/public-release.yml`, starting with v0.2.0 (D89, D99).
 - An announcement. Not yet.
 
