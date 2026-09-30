@@ -306,6 +306,7 @@ export {
   mapFinishReason,
   readCompletionStream,
   readJsonPlan,
+  unreadableReason,
 } from './deepseek-client.ts';
 export type { DeepseekPlanClientOptions } from './deepseek-client.ts';
 export {

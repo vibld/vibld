@@ -26,7 +26,7 @@ import {
   rankOf,
   runBoundedBuild,
   splitGroup,
-  thinkingFilled,
+  thinkingTookRoom,
   uiApiLine,
 } from '../src/bounded-build.ts';
 import type {
@@ -803,7 +803,24 @@ describe('the outline', () => {
     assert.equal(client.requests[1]!.effort, 'low');
   });
 
-  it('counts a reply as filled by thinking only when reasoning is at least half of it', () => {
+  it('gives the retry room when thinking took a real share of a reply that came back in the wrong shape', async () => {
+    // Clean-clone run 36744936999: DeepSeek Flash's first outline came back
+    // unusable at 14,667 tokens, 6,500 of them thinking, and its low-effort
+    // retry thought for 7,126 and was cut off at 16,000 with its plan
+    // unfinished. The retry needs room for both.
+    const script = { summary: 'A site.', spec: SPEC, files: requiredFiles() };
+    const { result, hooks, client } = await build(script, inProcess(), {
+      malformOnce: 'build_outline',
+      thinking: { high: 2_000, low: OUTLINE_MAX_TOKENS - 1_000 },
+    });
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.deepEqual(hooks.names.slice(0, 2), ['outline', 'outline.again']);
+    assert.equal(client.requests[0]!.maxTokens, OUTLINE_MAX_TOKENS);
+    assert.equal(client.requests[1]!.maxTokens, OUTLINE_RETRY_MAX_TOKENS);
+    assert.equal(client.requests[1]!.effort, 'low');
+  });
+
+  it('counts thinking as taking room when it is a quarter of a reply or more', () => {
     const usage = (outputTokens: number, reasoningTokens?: number) => ({
       inputTokens: 1,
       outputTokens,
@@ -811,11 +828,12 @@ describe('the outline', () => {
       cacheWriteInputTokens: 0,
       ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
     });
-    assert.equal(thinkingFilled(usage(16_000, 16_000)), true);
-    assert.equal(thinkingFilled(usage(16_000, 8_000)), true);
-    assert.equal(thinkingFilled(usage(16_000, 7_999)), false);
-    assert.equal(thinkingFilled(usage(16_000)), false);
-    assert.equal(thinkingFilled(usage(0, 0)), false);
+    assert.equal(thinkingTookRoom(usage(16_000, 16_000)), true);
+    assert.equal(thinkingTookRoom(usage(14_667, 6_500)), true);
+    assert.equal(thinkingTookRoom(usage(16_000, 4_000)), true);
+    assert.equal(thinkingTookRoom(usage(16_000, 3_999)), false);
+    assert.equal(thinkingTookRoom(usage(16_000)), false);
+    assert.equal(thinkingTookRoom(usage(0, 0)), false);
   });
 
   it('refuses a plan with more files than a project may hold, before writing any', async () => {

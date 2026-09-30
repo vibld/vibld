@@ -113,6 +113,12 @@ jobs:
           ")"
           # Co-authors and sign-offs carry over, so a contribution ported
           # from a public pull request stays credited to its author there.
+          # The author is the lead maintainer, who merged it here, under his
+          # GitHub no-reply address so it counts on his profile and no
+          # private address is published (docs/decisions.md, D113). The
+          # committer stays vibld, the export that wrote it.
+          export GIT_AUTHOR_NAME="Chris Brock"
+          export GIT_AUTHOR_EMAIL="15268570+cbrock84@users.noreply.github.com"
           trailers="$(git -C "$GITHUB_WORKSPACE" log -1 --format='%(trailers:key=Co-authored-by,key=Signed-off-by)' "$GITHUB_SHA")"
           if [ -n "$trailers" ]; then
             git -c user.name=vibld -c user.email=hello@vibld.com commit -q -m "$subject" -m "$trailers"

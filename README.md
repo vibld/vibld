@@ -343,4 +343,6 @@ Found a vulnerability? Report it privately through [SECURITY.md](SECURITY.md), n
 
 ## Licence
 
+Built by [Chris Brock (@cbrock84)](https://github.com/cbrock84), the lead maintainer ([GOVERNANCE.md](GOVERNANCE.md)); [CITATION.cff](CITATION.cff) says how to cite it.
+
 The core is licensed under [Apache-2.0](LICENSE); see also [NOTICE](NOTICE). The starter templates in `templates/marketing` and `templates/luminous` each carry their own MIT `LICENSE` at their own boundary, which does not relicense the core ([ADR-0008](docs/adr/0008-portable-marketing-site-template.md)). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists the projects whose material is adapted here, with the licence text each one publishes.

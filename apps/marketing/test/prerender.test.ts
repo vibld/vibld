@@ -1143,6 +1143,26 @@ describe('structured data a search engine or an assistant reads', () => {
     );
     assert.deepEqual(org.sameAs, [...SITE.sameAs]);
   });
+
+  it('names who built vibld, in the schema and in every footer (D113)', () => {
+    const org = (schemas('/')[0]!['@graph'] as Record<string, any>[]).find(
+      (node) => node['@type'] === 'Organization',
+    )!;
+    assert.equal(org.founder['@type'], 'Person');
+    assert.equal(org.founder.name, SITE.founder.name);
+    assert.deepEqual(org.founder.sameAs, [...SITE.founder.sameAs]);
+    for (const path of [
+      'index.html',
+      'pricing/index.html',
+      'templates/index.html',
+    ]) {
+      const html = readFileSync(join(CLIENT, path), 'utf8');
+      assert.ok(
+        html.includes(`href="${SITE.founder.url}" rel="author"`),
+        `${path} has no founder credit`,
+      );
+    }
+  });
 });
 
 describe('what AI crawlers are told', () => {

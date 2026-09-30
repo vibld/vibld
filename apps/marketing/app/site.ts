@@ -99,6 +99,16 @@ export const SITE = {
   /** Decisions L16 -- the exact values that must appear on every legal page. */
   legalEntity: 'Chris Brock LLC',
   /**
+   * Who built vibld (docs/decisions.md, D113): named in the footer and as
+   * the Organization's founder in the home page's schema. `sameAs` lists
+   * only profiles Chris has given (D114); add more there as he does.
+   */
+  founder: {
+    name: 'Chris Brock',
+    url: 'https://github.com/cbrock84',
+    sameAs: ['https://github.com/cbrock84'],
+  },
+  /**
    * The date every legal page shows as "Last updated", and the date the
    * Terms, the policies and the notices take effect. One value for all of
    * them: they were rewritten together for the open paid beta and take
@@ -583,6 +593,13 @@ export function organizationSchema() {
           description: SITE.summary,
           email: SITE.emails.hello,
           sameAs: [...SITE.sameAs],
+          founder: {
+            '@type': 'Person',
+            '@id': `${SITE.url}/#founder`,
+            name: SITE.founder.name,
+            url: SITE.founder.url,
+            sameAs: [...SITE.founder.sameAs],
+          },
           address: {
             '@type': 'PostalAddress',
             streetAddress: '285 W Wieuca Rd NE STE 62715',

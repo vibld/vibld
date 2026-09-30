@@ -332,6 +332,29 @@ duplicates, and re-checking every colour pair against WCAG AA.
   about 14%; the smallest build a Free account can start on the default
   model now needs $0.86 set aside, from $0.81.
 
+### Resolved 2026-09-30 (night, later)
+
+Chris asked that his GitHub account and profiles be credited as vibld's
+builder, and whether the repository should move to his account.
+
+- **D112. The repository stays in the vibld organisation.** A public
+  commit counts on a GitHub profile when its author email belongs to that
+  account, whoever owns the repository; the credit was missing because the
+  export authored every public commit as `vibld <hello@vibld.com>`. A
+  transfer would have broken the export and release workflows, the GitHub
+  App, and the URL the site, README, release notes and posts all use.
+- **D113. Chris is named as the builder.** The public export authors each
+  commit, and the release workflow tags each release, as Chris Brock under
+  his GitHub no-reply address (15268570+cbrock84@users.noreply.github.com),
+  so it counts on his profile without publishing a private address; the
+  committer stays `vibld`. Past public commits keep their author: rewriting
+  them would force-push main and move the v0.2.0 tag. The README, a
+  `CITATION.cff`, the root `package.json`, vibld.com's footer and the home
+  page's Organization schema (`founder`) name him. The settings only he can
+  change are listed in `docs/social-launch.md`.
+- **D114. Profiles linked: GitHub only, for now.** Others are added to
+  `SITE.founder.sameAs` when Chris gives their URLs.
+
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 
 Chris asked for the design prompt catalog in Drummond-IT/designs-v1

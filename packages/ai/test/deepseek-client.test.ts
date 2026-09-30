@@ -7,6 +7,7 @@ import {
   mapFinishReason,
   readCompletionStream,
   readJsonPlan,
+  unreadableReason,
 } from '../src/deepseek-client.ts';
 import { ProviderShapeError, ProviderTruncationError } from '../src/errors.ts';
 import type { PlanEffort, PlanUsage } from '../src/client.ts';
@@ -101,6 +102,31 @@ describe('readJsonPlan', () => {
   it('returns null for the documented empty reply', () => {
     assert.equal(readJsonPlan(''), null);
     assert.equal(readJsonPlan('   \n '), null);
+  });
+
+  it('reads an object wrapped in a code fence or a sentence', () => {
+    assert.deepEqual(readJsonPlan('```json\n{"a":{"b":1}}\n```'), {
+      a: { b: 1 },
+    });
+    assert.deepEqual(readJsonPlan('Here is the plan: {"a":1}'), { a: 1 });
+  });
+
+  it('never reads a cut-off object as a plan, fenced or not', () => {
+    assert.equal(readJsonPlan('```json\n{"a":{"b":1},"c":"tru'), null);
+    assert.equal(readJsonPlan('{"a":{"b":1},"c":{"d":2}'), null);
+  });
+});
+
+describe('unreadableReason', () => {
+  it('says how much came back, how it ended and how it began', () => {
+    assert.equal(
+      unreadableReason(
+        '  I cannot plan that. ',
+        'insufficient_system_resource',
+      ),
+      'the reply was not a JSON object (19 characters, finish reason insufficient_system_resource, starting "I cannot plan that.")',
+    );
+    assert.match(unreadableReason('x', null), /finish reason none/);
   });
 });
 
@@ -730,6 +756,35 @@ describe('saying whether anything came back at all', () => {
 
     assert.equal(completion.plan, null, 'that parsed, so it proves nothing');
     assert.equal(completion.emptyBody, undefined);
+  });
+
+  it('says what came back when a finished reply is not a plan', async () => {
+    // Clean-clone run 36751004728: an outline retry finished well inside
+    // its ceiling with about 10,000 tokens of answer that did not parse,
+    // and the run said only "expected object, received null".
+    const ask = (finish: string) =>
+      createDeepseekPlanClient({
+        apiKey: 'k',
+        fetchImpl: fetchReturning(sse(contentFrames('{"mockups": [', finish)))
+          .impl,
+      }).createPlan({
+        system: 's',
+        prompt: 'p',
+        model: 'deepseek-flash',
+        maxTokens: 64_000,
+        effort: 'high',
+      });
+
+    const stopped = await ask('insufficient_system_resource');
+    assert.deepEqual(stopped.failure, {
+      finished: true,
+      reason:
+        'the reply was not a JSON object (13 characters, finish reason insufficient_system_resource, starting "{\\"mockups\\": [")',
+    });
+
+    // A cut-off reply is named from its stop reason, a layer up.
+    const cut = await ask('length');
+    assert.equal(cut.failure, undefined);
   });
 
   it('does not call whitespace a body', async () => {

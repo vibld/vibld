@@ -1,0 +1,26 @@
+# How to cite vibld. GitHub reads this file for the repository's
+# "Cite this repository" panel (docs/decisions.md, D113).
+cff-version: 1.2.0
+message: If you use or refer to vibld, please cite it as below.
+title: vibld
+type: software
+abstract: >-
+  The open-source AI application builder that turns a description into a
+  conventional React and TypeScript project you can read, run and take with
+  you.
+authors:
+  - given-names: Chris
+    family-names: Brock
+    alias: cbrock84
+    website: https://github.com/cbrock84
+    affiliation: Chris Brock LLC
+repository-code: https://github.com/vibld/vibld
+url: https://vibld.com/
+license: Apache-2.0
+version: 0.2.0
+date-released: 2026-09-30
+keywords:
+  - ai app builder
+  - code generation
+  - react
+  - open source

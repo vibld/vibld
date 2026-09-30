@@ -224,10 +224,40 @@ export function readJsonPlan(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    // An object wrapped in a code fence or a sentence is still the object.
+    // Truncated JSON never closes its first brace, so this cannot turn a
+    // cut-off reply into a plan.
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end > start && (start > 0 || end < text.length - 1)) {
+      try {
+        return JSON.parse(text.slice(start, end + 1));
+      } catch {
+        // Fall through.
+      }
+    }
     // Truncated JSON is not a parse bug. The caller knows the stop reason and
     // names it; a null plan is all this needs to return.
     return null;
   }
+}
+
+/**
+ * Why a reply with text in it has no plan, for the error a layer up. Without
+ * it, clean-clone run 36751004728's outline retry (17,814 tokens, about
+ * 10,000 of them answer) failed as "expected object, received null", which
+ * says nothing about what came back.
+ */
+export function unreadableReason(
+  text: string,
+  finishReason: string | null,
+): string {
+  const trimmed = text.trim();
+  return (
+    `the reply was not a JSON object (${trimmed.length} characters, ` +
+    `finish reason ${finishReason ?? 'none'}, ` +
+    `starting ${JSON.stringify(trimmed.slice(0, 40))})`
+  );
 }
 
 export interface DeepseekPlanClientOptions {
@@ -328,12 +358,26 @@ export function createDeepseekPlanClient(
       // of me and not the one beside it. Both now read one variable.
       const promptCharacters = systemSent.length + userText.length;
 
+      const plan = readJsonPlan(text);
       return {
-        plan: readJsonPlan(text),
+        plan,
         // Said here because here is the only place that knows. Above this,
         // an empty body and unparseable JSON are both a null plan (internal PR 191
         // review).
         ...(text.trim().length === 0 ? { emptyBody: true } : {}),
+        // A cut-off reply is named a layer up from the stop reason and the
+        // tokens spent; anything else with text and no plan says what came
+        // back. Still a shape error, so the outline is still asked again.
+        ...(plan === null &&
+        text.trim().length > 0 &&
+        mapFinishReason(finishReason) !== 'max_tokens'
+          ? {
+              failure: {
+                finished: true,
+                reason: unreadableReason(text, finishReason),
+              },
+            }
+          : {}),
         stopReason: mapFinishReason(finishReason),
         ...(mapFinishReason(finishReason) === 'refusal'
           ? { refusal: { category: 'content_filter', explanation: null } }

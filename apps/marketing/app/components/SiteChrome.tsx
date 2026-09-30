@@ -136,6 +136,12 @@ export function SiteFooter() {
             <p>
               <a href={SITE.repoUrl}>The source on GitHub</a>
             </p>
+            <p>
+              Built by{' '}
+              <a href={SITE.founder.url} rel="author">
+                {SITE.founder.name}
+              </a>
+            </p>
           </div>
           <nav aria-label="Product">
             <h2>Product</h2>

@@ -4,6 +4,7 @@
   "private": true,
   "description": "The open-source AI builder for portable, Git-native web applications.",
   "license": "Apache-2.0",
+  "author": "Chris Brock (https://github.com/cbrock84)",
   "packageManager": "pnpm@12.6.0",
   "scripts": {
     "build": "turbo run build",

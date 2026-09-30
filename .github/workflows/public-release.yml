@@ -112,7 +112,9 @@ jobs:
             echo "::error::$VERSION is already tagged in vibld/vibld."
             exit 1
           fi
-          git -c user.name=vibld -c user.email=hello@vibld.com tag -a "$VERSION" -m "vibld $VERSION"
+          # Tagged by the lead maintainer, as the export authors each commit
+          # (docs/decisions.md, D113).
+          git -c user.name="Chris Brock" -c user.email=15268570+cbrock84@users.noreply.github.com tag -a "$VERSION" -m "vibld $VERSION"
           git -c "http.https://github.com/.extraheader=$PUBLIC_AUTH" push origin "refs/tags/$VERSION"
           gh release create "$VERSION" --repo vibld/vibld --verify-tag \
             --title "vibld $VERSION" \

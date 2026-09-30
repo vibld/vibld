@@ -119,27 +119,36 @@ import type { ExtraDependency, ScaffoldInput } from './scaffold.ts';
 export const OUTLINE_MAX_TOKENS = 16_000;
 
 /**
- * The outline retry's ceiling when thinking, not the plan, filled the first
- * reply: at least half of what it spent was reasoning.
+ * The outline retry's ceiling when thinking took a real share of the first
+ * reply (`thinkingTookRoom`), whether that reply was cut off or came back
+ * in the wrong shape.
  *
  * Output and reasoning share one ceiling. Asking again at low effort makes a
  * model think less, not nothing: DeepSeek Flash on the North Star replay
  * (try-generation run 36646479455) spent all 16,000 of its first reply
  * thinking, and 10,070 of its low-effort retry, so the plan it had started
  * was cut off about 6,000 tokens in. A plan is a few thousand tokens, so
- * the retry needs room for the thinking, not a shorter plan. A reply that
- * ran out on the plan itself is asked again at the first ceiling, more
- * briefly, as before. Still bounded by `callCeilingFor` and by what is left
- * of the run's output budget.
+ * the retry needs room for the thinking, not a shorter plan.
+ *
+ * Nor only when thinking was most of the reply: on clean-clone run
+ * 36744936999 DeepSeek Flash's first outline came back unusable at 14,667
+ * tokens, 6,500 of them thinking, and its low-effort retry thought for
+ * 7,126 and was cut off at 16,000 with a plan of about 8,900 unfinished.
+ * A reply with no thinking in it that ran out on the plan itself is asked
+ * again at the first ceiling, more briefly, as before. Still bounded by
+ * `callCeilingFor` and by what is left of the run's output budget.
  */
 export const OUTLINE_RETRY_MAX_TOKENS = 2 * OUTLINE_MAX_TOKENS;
 
-/** Whether reasoning, rather than the answer, used most of a reply. */
-export function thinkingFilled(usage: PlanUsage): boolean {
+/**
+ * Whether reasoning took a real share of a reply: a quarter of it or more.
+ * The outline retry then gets room for the thinking as well as the plan.
+ */
+export function thinkingTookRoom(usage: PlanUsage): boolean {
   return (
     usage.reasoningTokens !== undefined &&
     usage.outputTokens > 0 &&
-    usage.reasoningTokens * 2 >= usage.outputTokens
+    usage.reasoningTokens * 4 >= usage.outputTokens
   );
 }
 
@@ -1619,10 +1628,9 @@ export async function runBoundedBuild(
     outlined.outcome === 'failed' &&
     (outlined.stop === 'model-truncated' || outlined.stop === 'model-shape')
   ) {
-    const retryCeiling =
-      outlined.stop === 'model-truncated' && thinkingFilled(outlined.usage)
-        ? callCeilingFor(builder.model, OUTLINE_RETRY_MAX_TOKENS)
-        : outlineCeiling;
+    const retryCeiling = thinkingTookRoom(outlined.usage)
+      ? callCeilingFor(builder.model, OUTLINE_RETRY_MAX_TOKENS)
+      : outlineCeiling;
     outlined = await call(
       'outline.again',
       OUTLINE_LABEL,
