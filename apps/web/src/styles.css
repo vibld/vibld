@@ -2857,3 +2857,25 @@ a.projectlist__name:hover {
 .shared__code {
   min-height: 20rem;
 }
+
+/* The owner's password form on a self-hosted copy (D123). */
+.owner-sign-in {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: min(100%, 22rem);
+}
+
+.owner-sign-in input {
+  font: inherit;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: inherit;
+}
+
+.owner-sign-in__error {
+  margin: 0;
+  color: var(--error);
+}

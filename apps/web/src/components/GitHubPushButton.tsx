@@ -23,7 +23,7 @@ import type {
   PreviewPhase,
   PushPhase,
 } from '../github/push-view.ts';
-import { clerkConfigured } from '../auth/clerk-token.ts';
+import { signInConfigured } from '../auth/mode.ts';
 
 /**
  * Send an accepted checkpoint to the connected repository.
@@ -221,7 +221,7 @@ export function GitHubPushButton({
     setPhase({ at: 'done', to, pushed: pushed.pushed });
   }
 
-  if (!clerkConfigured || !projectId) return null;
+  if (!signInConfigured || !projectId) return null;
   const view = decidePush(phase, status);
   if (!view.show) return null;
   const previewView = decidePreview(

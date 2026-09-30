@@ -9,10 +9,14 @@ import { DEFAULT_PROJECT_NAME, sleep } from '@vibld/core';
 import type { RunRefusal } from '@vibld/core';
 
 import {
-  clerkConfigured,
+  signInConfigured,
+  signInMode,
   resolvePrincipal,
   type Principal,
+  type PrincipalEnv,
 } from './principal.ts';
+import { handleOwnerSession } from './owner-auth.ts';
+import { accountDirectoryFor } from './account-directory.ts';
 import { UserBudget } from './budget.ts';
 import type { Reservation } from './budget.ts';
 import { GenerationWorkflow } from './generation-workflow.ts';
@@ -78,13 +82,7 @@ import {
   topupKeyFor,
 } from './reserve.ts';
 import { whenClientGone } from './client-gone.ts';
-import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
-import {
-  clerkLookupConfigured,
-  fetchClerkUser,
-  findClerkUserIdByEmail,
-  setClerkBan,
-} from './clerk-lookup.ts';
+import { isPlatformAdmin, platformAdminsFor } from './platform-admins.ts';
 import {
   FREE_PLAN_MODELS_NOTE,
   decideModel,
@@ -234,7 +232,7 @@ import {
   refusal,
 } from './access-handlers.ts';
 
-export interface Env {
+export interface Env extends PrincipalEnv {
   /** Worker secret. Never reaches the browser. */
   ANTHROPIC_API_KEY?: string;
   /** Worker secret. Never reaches the browser. */
@@ -483,8 +481,8 @@ export interface Env {
   /**
    * Worker secret. Lets `/api/admin/*` resolve an email an admin typed into
    * the Clerk user id the ledger actually keys on -- see clerk-lookup.ts.
-   * `/api/admin/*` is unavailable, not open, when this or
-   * `VIBLD_PLATFORM_ADMINS` is unset, the same fail-closed rule
+   * `/api/admin/*` is unavailable, not open, when this is unset, or when
+   * `VIBLD_PLATFORM_ADMINS` is and there is no owner, the same fail-closed rule
    * `isConfigured` already applies to generation.
    */
   CLERK_SECRET_KEY?: string;
@@ -544,7 +542,7 @@ async function tierOrRefusal(
 }
 
 /**
- * Generation is available only when the key AND Clerk are configured.
+ * Generation is available only when the key AND sign-in are configured.
  * Missing configuration means unavailable, never "open" -- an
  * unauthenticated endpoint on a public URL lets anyone spend the account's
  * model budget, so the failure has to be closed.
@@ -554,7 +552,7 @@ function isConfigured(env: Env): boolean {
     // Any provider's key configures the endpoint. Which one it selects is
     // `selectProvider`'s business, not this gate's.
     (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY || env.OPENAI_API_KEY) &&
-    clerkConfigured(env) &&
+    signInConfigured(env) &&
     // The ledger is part of the grant, not an optimisation: a deployment
     // that cannot account for spend must not be able to spend.
     env.USER_BUDGET &&
@@ -764,7 +762,9 @@ async function handleBillingStatus(
  * reports that Clerk was not asked.
  */
 function adminConfigured(env: Env): boolean {
-  return Boolean(env.VIBLD_PLATFORM_ADMINS && env.DB);
+  // VIBLD_PLATFORM_ADMINS, or the owner of an owner-password copy, who is
+  // an admin without being listed (D123; Codex review of internal PR 337).
+  return platformAdminsFor(env).size > 0 && Boolean(env.DB);
 }
 
 /**
@@ -773,7 +773,7 @@ function adminConfigured(env: Env): boolean {
  * configured is not something an anonymous caller needs told.
  */
 function creditToolDenial(env: Env): Response | null {
-  return clerkLookupConfigured(env)
+  return accountDirectoryFor(env).configured
     ? null
     : json(
         {
@@ -809,7 +809,7 @@ async function requireAdmin(
   if (
     !isPlatformAdmin(
       { email: principal.email, emailVerified: principal.emailVerified },
-      parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+      platformAdminsFor(env),
     )
   ) {
     return { denied: json({ error: 'Not authorized.' }, 403) };
@@ -834,7 +834,7 @@ async function handleAdminUser(request: Request, env: Env): Promise<Response> {
   if (!email)
     return json({ error: 'A "email" query parameter is required.' }, 400);
 
-  const lookup = await findClerkUserIdByEmail(env, email);
+  const lookup = await accountDirectoryFor(env).lookupByEmail(email);
   if (!lookup.ok) return json({ error: lookup.error }, 404);
 
   const billing = new BillingStore(env.DB!);
@@ -877,7 +877,7 @@ async function handleAdminLiftSuspension(
     request,
     env,
     admin.adminEmail,
-    (email) => findClerkUserIdByEmail(env, email),
+    (email) => accountDirectoryFor(env).lookupByEmail(email),
   );
   return withAudit(env.DB!, response, (body) =>
     typeof body.userId === 'string'
@@ -913,7 +913,9 @@ async function handleAdminTopup(request: Request, env: Env): Promise<Response> {
   const parsed = parseAdminTopupRequest(body);
   if (!parsed.ok) return json({ error: parsed.error }, parsed.status);
 
-  const lookup = await findClerkUserIdByEmail(env, parsed.value.email);
+  const lookup = await accountDirectoryFor(env).lookupByEmail(
+    parsed.value.email,
+  );
   if (!lookup.ok) return json({ error: lookup.error }, 404);
 
   const billing = new BillingStore(env.DB!);
@@ -2889,9 +2891,11 @@ function stopDeps(env: Env) {
 function adminUsersDeps(env: Env): AdminUsersDeps {
   return {
     authorize: (req) => requireAdmin(req, env),
-    lookupByEmail: (email) => findClerkUserIdByEmail(env, email),
-    clerkUser: (userId) => fetchClerkUser(env, userId),
-    setClerkBan: (userId, banned) => setClerkBan(env, userId, banned),
+    // Clerk under Clerk; the owner, or the invite list under Access (D123).
+    lookupByEmail: (email) => accountDirectoryFor(env).lookupByEmail(email),
+    clerkUser: (userId) => accountDirectoryFor(env).user(userId),
+    setClerkBan: (userId, banned) =>
+      accountDirectoryFor(env).setBan(userId, banned),
     usage: env.USER_BUDGET
       ? async (userId, now) => {
           const [month, topup] = await Promise.all([
@@ -3408,6 +3412,22 @@ async function route(
     if (!decision.allowed) return refusal();
   }
 
+  // Signing in with the owner's password (D123). Not behind the gate, and
+  // resolving no principal: it is how a principal comes to exist. Counted
+  // per address, since a wrong password is the one thing it can be asked
+  // for over and over.
+  if (pathname === '/api/owner/session') {
+    if (signInMode(env) !== 'owner') {
+      return json({ error: 'Not found.' }, 404);
+    }
+    const limiter = env.IP_BURST;
+    return handleOwnerSession(request, env, {
+      ...(limiter
+        ? { limit: async (key) => (await limiter.limit({ key })).success }
+        : {}),
+    });
+  }
+
   if (pathname === '/api/access/status') {
     const resolved = await resolvePrincipal(request, env);
     if (resolved.denied) return resolved.denied;
@@ -3487,7 +3507,7 @@ async function route(
       // (ADR-0006), the same as every other grant this endpoint reports.
       isAdmin: isPlatformAdmin(
         { email: principal.email, emailVerified: principal.emailVerified },
-        parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+        platformAdminsFor(env),
       ),
     });
   }

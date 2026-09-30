@@ -112,12 +112,33 @@ export default function SelfHosting() {
           key is enough. Without any, generation refuses rather than degrading.
         </li>
         <li>
-          <strong>Clerk</strong>, for sign-in. Without it every protected
-          endpoint refuses. There is no “no auth” mode, on purpose: the
-          endpoints spend money. The session token has to carry the user’s{' '}
-          <code>email</code> and a boolean <code>email_verified</code> claim,
-          which Clerk does not add by default. Without them nobody’s email
-          counts as verified, so no admin and no invite matches anybody.
+          <strong>A way to sign in</strong>, one of three. There is no “no auth”
+          mode, on purpose: the endpoints spend money.
+          <ul>
+            <li>
+              <strong>An owner password</strong>: one person, nothing to sign up
+              for. Set <code>VIBLD_AUTH</code> to <code>owner</code> and the{' '}
+              <code>VIBLD_OWNER_PASSWORD</code> secret to 12 characters or more.
+              The owner is the admin.
+            </li>
+            <li>
+              <strong>Cloudflare Access</strong> in front of the builder, for a
+              few people, on the same Cloudflare account (Zero Trust is free for
+              up to 50 users). Set <code>VIBLD_AUTH</code> to{' '}
+              <code>access</code>, <code>VIBLD_ACCESS_TEAM_DOMAIN</code> and{' '}
+              <code>VIBLD_ACCESS_AUD</code>, and put your own Access email in{' '}
+              <code>VIBLD_PLATFORM_ADMINS</code>. Admins find people by the
+              invite they took.
+            </li>
+            <li>
+              <strong>Clerk</strong>, for sign-ups from the public, as
+              app.vibld.com uses. Its session token has to carry the user’s{' '}
+              <code>email</code> and a boolean <code>email_verified</code>{' '}
+              claim, which Clerk does not add by default. Without them nobody’s
+              email counts as verified, so no admin and no invite matches
+              anybody.
+            </li>
+          </ul>
         </li>
       </ul>
 
@@ -135,7 +156,8 @@ export default function SelfHosting() {
         account deletions, publish takedowns and an audit log. Invites need only
         the admin list and the database. Looking an account up by email,
         banning, and deleting the sign-in account also need{' '}
-        <code>CLERK_SECRET_KEY</code>.
+        <code>CLERK_SECRET_KEY</code>, on a copy that uses Clerk. On an owner
+        copy the owner is the only account and already an admin.
       </p>
 
       <h2>Accounts you probably do not need</h2>

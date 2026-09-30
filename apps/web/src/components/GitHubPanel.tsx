@@ -1,4 +1,3 @@
-import { Show } from '@clerk/react';
 import {
   useEffect,
   useId,
@@ -30,7 +29,8 @@ import {
 } from '../github/connect-actions.ts';
 import { repositoryNameFor } from '../github/repo-name.ts';
 import { useProjectStatus } from '../github/use-project-status.ts';
-import { clerkConfigured } from '../auth/clerk-token.ts';
+import { SignedIn } from '../auth/clerk.tsx';
+import { signInConfigured } from '../auth/mode.ts';
 
 /**
  * Connecting a repository, and the receiving half of the callback handoff
@@ -64,11 +64,11 @@ export function GitHubPanel({
   projectId?: string | null;
   projectName?: string;
 }) {
-  if (!clerkConfigured) return null;
+  if (!signInConfigured) return null;
   return (
-    <Show when="signed-in">
+    <SignedIn>
       <GitHubConnection projectId={projectId} projectName={projectName} />
-    </Show>
+    </SignedIn>
   );
 }
 

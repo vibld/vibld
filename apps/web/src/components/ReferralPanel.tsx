@@ -1,6 +1,6 @@
-import { Show } from '@clerk/react';
 import { useEffect, useId, useRef, useState } from 'react';
-import { clerkConfigured } from '../auth/clerk-token.ts';
+import { SignedIn } from '../auth/clerk.tsx';
+import { signInConfigured } from '../auth/mode.ts';
 import {
   capNotice,
   claimStoredReferral,
@@ -24,14 +24,13 @@ import type { ReferralStatus } from '../referral/referral-client.ts';
  * referrals shows no empty heading.
  */
 export function ReferralSection() {
-  // `Show` needs a ClerkProvider above it, which only a configured
-  // deployment has. Without one the Worker refuses the status request, so
+  // Without sign-in configured the Worker refuses the status request, so
   // the fetch below answers null and the section stays empty all the same.
-  if (!clerkConfigured) return <ReferralFetched />;
+  if (!signInConfigured) return <ReferralFetched />;
   return (
-    <Show when="signed-in">
+    <SignedIn>
       <ReferralFetched />
-    </Show>
+    </SignedIn>
   );
 }
 
@@ -146,7 +145,7 @@ export function ReferralPanel({
  */
 export function ReferralClaim() {
   useEffect(() => {
-    if (!clerkConfigured) return;
+    if (!signInConfigured) return;
     void claimOnce();
   }, []);
   return null;

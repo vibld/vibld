@@ -59,7 +59,10 @@ export function adminUserIdFromPath(pathname: string): string | null {
   if (!match) return null;
   try {
     const id = decodeURIComponent(match[1]!);
-    return /^user_[A-Za-z0-9]+$/.test(id) ? id : null;
+    // Any provider's account id: Clerk's `user_...`, an owner copy's
+    // `owner`, an Access UUID (D123). The same shape the Worker's
+    // `isUserId` accepts.
+    return /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
   } catch {
     return null;
   }

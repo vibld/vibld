@@ -396,6 +396,10 @@ describe('what an admin route requires', () => {
     );
     assert.match(body, /VIBLD_PLATFORM_ADMINS/);
     assert.match(body, /env\.DB/);
+    // An owner copy has no list and is still administered by its owner
+    // (Codex review of internal PR 337): the gate reads the same list the admin check
+    // does.
+    assert.match(body, /platformAdminsFor\(env\)/);
   });
 
   it('tells an admin they are one even where nothing can be generated', async () => {

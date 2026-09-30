@@ -1,8 +1,10 @@
 /**
  * Principal resolution for the Worker's protected endpoints.
  *
- * docs/decisions.md L5: Cloudflare Access is off. Clerk is the only gate now
- * -- verified the same way access.ts verified Access tokens (ADR-0006: prove
+ * docs/decisions.md L5: Cloudflare Access is off for app.vibld.com, and
+ * Clerk is its gate. A self-hosted copy may use one of two others instead
+ * (D123, `signInMode`): one owner's password, or Cloudflare Access in front
+ * of the copy. Clerk's token is verified the same way access.ts verified Access tokens (ADR-0006: prove
  * a raw URL cannot bypass access control, rather than trusting a header), but
  * against Clerk's JWKS instead of Access's, and via `Authorization: Bearer`
  * instead of a cookie: the browser's session cookie is scoped to Clerk's own
@@ -20,6 +22,19 @@
  */
 
 import { fetchClerkKeys, verifyClerkJwt } from './clerk-auth.ts';
+import {
+  accessToken,
+  fetchAccessKeys,
+  verifyAccessJwt,
+} from './access-auth.ts';
+import {
+  OWNER_USER_ID,
+  ownerConfigured,
+  ownerIdentity,
+  ownerSignedIn,
+  sameOrigin,
+  type OwnerEnv,
+} from './owner-auth.ts';
 import { AccountDeletionStore } from './account-deletion-store.ts';
 import { AdminStore } from './admin-store.ts';
 import type { RunRefusal } from '@vibld/core';
@@ -54,9 +69,20 @@ function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 }
 
-export interface PrincipalEnv {
+export interface PrincipalEnv extends OwnerEnv {
   /** Clerk's Frontend API URL -- both the JWT issuer and the JWKS base. */
   CLERK_FRONTEND_API_URL?: string;
+  /**
+   * Which sign-in this deployment uses (docs/decisions.md D123): `clerk`,
+   * `owner` (one password, VIBLD_OWNER_PASSWORD) or `access` (Cloudflare
+   * Access). Unset means Clerk when CLERK_FRONTEND_API_URL is set, which is
+   * how app.vibld.com and every deployment before D123 are configured.
+   */
+  VIBLD_AUTH?: string;
+  /** Cloudflare Access: `<team>.cloudflareaccess.com`. */
+  VIBLD_ACCESS_TEAM_DOMAIN?: string;
+  /** Cloudflare Access: the application's audience (AUD) tag. */
+  VIBLD_ACCESS_AUD?: string;
   /**
    * Where a deletion request is recorded (`0031_account_deletions.sql`).
    * Absent means no request can have been made, so there is nothing to
@@ -117,14 +143,33 @@ export function accountBanned(): Response {
   );
 }
 
+export type SignInMode = 'clerk' | 'owner' | 'access';
+
 /**
- * Generation is available only when Clerk is configured. Missing
- * configuration means unavailable, never "open" -- an unauthenticated
- * endpoint on a public URL lets anyone spend the account's model budget, so
- * the failure has to be closed.
+ * The sign-in this deployment is configured for, or undefined when it is
+ * configured for none. Undefined means every protected endpoint refuses,
+ * never "open" -- an unauthenticated endpoint on a public URL lets anyone
+ * spend the account's model budget, so the failure has to be closed. A
+ * VIBLD_AUTH naming a mode that is not fully configured, or no mode at all,
+ * is undefined too: a typo is not a way to switch sign-in off.
  */
-export function clerkConfigured(env: PrincipalEnv): boolean {
-  return Boolean(env.CLERK_FRONTEND_API_URL);
+export function signInMode(env: PrincipalEnv): SignInMode | undefined {
+  const named = env.VIBLD_AUTH?.trim().toLowerCase();
+  if (!named) return env.CLERK_FRONTEND_API_URL ? 'clerk' : undefined;
+  if (named === 'clerk') {
+    return env.CLERK_FRONTEND_API_URL ? 'clerk' : undefined;
+  }
+  if (named === 'owner') return ownerConfigured(env) ? 'owner' : undefined;
+  if (named === 'access') {
+    return env.VIBLD_ACCESS_TEAM_DOMAIN?.trim() && env.VIBLD_ACCESS_AUD?.trim()
+      ? 'access'
+      : undefined;
+  }
+  return undefined;
+}
+
+export function signInConfigured(env: PrincipalEnv): boolean {
+  return signInMode(env) !== undefined;
 }
 
 function bearerToken(request: Request): string | undefined {
@@ -137,7 +182,8 @@ export async function resolvePrincipal(
   env: PrincipalEnv,
   options: ResolveOptions = {},
 ): Promise<PrincipalDenied | PrincipalGranted> {
-  if (!clerkConfigured(env)) {
+  const mode = signInMode(env);
+  if (!mode) {
     return {
       denied: json(
         {
@@ -149,44 +195,14 @@ export async function resolvePrincipal(
     };
   }
 
-  const token = bearerToken(request);
-  if (!token) {
-    return {
-      denied: json(
-        { error: 'Sign in required.', reason: 'not-signed-in' },
-        401,
-      ),
-    };
-  }
-
-  let principal: Principal;
-  try {
-    const issuer = env.CLERK_FRONTEND_API_URL!;
-    const keys = await fetchClerkKeys(issuer);
-    const claims = await verifyClerkJwt(token, { keys, issuer });
-    const verifiedEmail =
-      claims.email && claims.emailVerified === true ? claims.email : undefined;
-    principal = {
-      userId: claims.sub,
-      email: claims.email,
-      emailVerified: claims.emailVerified,
-      policyIdentity: verifiedEmail ?? 'unknown',
-    };
-  } catch {
-    // Deliberately opaque: a verification failure should not tell a caller
-    // which check failed. The reason is the same identifier the missing-token
-    // case carries, for that reason: one machine-readable value for "this
-    // request has no usable identity", not two that split it apart again.
-    return {
-      denied: json(
-        {
-          error: 'Sign-in verification failed.',
-          reason: 'not-signed-in' satisfies RunRefusal,
-        },
-        403,
-      ),
-    };
-  }
+  const identified =
+    mode === 'owner'
+      ? await ownerPrincipal(request, env)
+      : mode === 'access'
+        ? await accessPrincipal(request, env)
+        : await clerkPrincipal(request, env);
+  if (identified.denied) return identified;
+  const principal = identified.principal;
 
   // Here rather than in each route, so that no route can be the one that
   // forgets: every authenticated request comes through this function, and
@@ -228,4 +244,111 @@ export async function resolvePrincipal(
   }
 
   return { denied: null, principal };
+}
+
+function notSignedIn(): PrincipalDenied {
+  return {
+    denied: json({ error: 'Sign in required.', reason: 'not-signed-in' }, 401),
+  };
+}
+
+// Deliberately opaque: a verification failure should not tell a caller
+// which check failed. The reason is the same identifier the missing-token
+// case carries, for that reason: one machine-readable value for "this
+// request has no usable identity", not two that split it apart again.
+function verificationFailed(): PrincipalDenied {
+  return {
+    denied: json(
+      {
+        error: 'Sign-in verification failed.',
+        reason: 'not-signed-in' satisfies RunRefusal,
+      },
+      403,
+    ),
+  };
+}
+
+async function clerkPrincipal(
+  request: Request,
+  env: PrincipalEnv,
+): Promise<PrincipalDenied | PrincipalGranted> {
+  const token = bearerToken(request);
+  if (!token) return notSignedIn();
+  try {
+    const issuer = env.CLERK_FRONTEND_API_URL!;
+    const keys = await fetchClerkKeys(issuer);
+    const claims = await verifyClerkJwt(token, { keys, issuer });
+    const verifiedEmail =
+      claims.email && claims.emailVerified === true ? claims.email : undefined;
+    return {
+      denied: null,
+      principal: {
+        userId: claims.sub,
+        email: claims.email,
+        emailVerified: claims.emailVerified,
+        policyIdentity: verifiedEmail ?? 'unknown',
+      },
+    };
+  } catch {
+    return verificationFailed();
+  }
+}
+
+/**
+ * The owner, from the session cookie (owner-auth.ts). A cookie rides along
+ * on any request the browser makes to this origin, so a request that
+ * changes something must also say it came from the builder's own origin.
+ */
+async function ownerPrincipal(
+  request: Request,
+  env: PrincipalEnv,
+): Promise<PrincipalDenied | PrincipalGranted> {
+  if (!sameOrigin(request)) return verificationFailed();
+  if (!(await ownerSignedIn(request, env))) return notSignedIn();
+  const identity = ownerIdentity(env);
+  return {
+    denied: null,
+    principal: {
+      userId: OWNER_USER_ID,
+      email: identity,
+      emailVerified: true,
+      policyIdentity: identity,
+    },
+  };
+}
+
+/**
+ * The person Cloudflare Access let through, from the token it signed
+ * (access-auth.ts). Access only issues one once the identity provider has
+ * verified the address, so the address counts as verified. The same
+ * origin rule as the owner's applies, since Access's own cookie also rides
+ * along on any request to this origin.
+ */
+async function accessPrincipal(
+  request: Request,
+  env: PrincipalEnv,
+): Promise<PrincipalDenied | PrincipalGranted> {
+  if (!sameOrigin(request)) return verificationFailed();
+  const token = accessToken(request);
+  if (!token) return notSignedIn();
+  try {
+    const teamDomain = env.VIBLD_ACCESS_TEAM_DOMAIN!;
+    const keys = await fetchAccessKeys(teamDomain);
+    const claims = await verifyAccessJwt(token, {
+      keys,
+      teamDomain,
+      audience: env.VIBLD_ACCESS_AUD!.trim(),
+    });
+    return {
+      denied: null,
+      principal: {
+        userId: claims.sub,
+        email: claims.email,
+        emailVerified: true,
+        policyIdentity: claims.email.toLowerCase(),
+      },
+    };
+  } catch {
+    return verificationFailed();
+  }
 }

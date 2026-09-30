@@ -1,4 +1,3 @@
-import { Show } from '@clerk/react';
 import { useEffect, useId, useState } from 'react';
 import {
   TIER_LABELS,
@@ -10,7 +9,8 @@ import {
   startCheckout,
 } from '../billing/billing-client.ts';
 import type { BillingStatus, Tier } from '../billing/billing-client.ts';
-import { clerkConfigured } from '../auth/clerk-token.ts';
+import { SignedIn } from '../auth/clerk.tsx';
+import { signInConfigured } from '../auth/mode.ts';
 import { SignupCreditOffer } from './SignupCreditOffer.tsx';
 
 /**
@@ -20,16 +20,16 @@ import { SignupCreditOffer } from './SignupCreditOffer.tsx';
  * Portal, and the portal's cancel page opened directly. `/api/billing/*` has
  * worked since it shipped; nothing in the shell called it until now.
  *
- * Wrapped in `Show when="signed-in"` the same way `AuthStatus` is: mounting
+ * Wrapped in `SignedIn`, which is Clerk's `Show` under Clerk (D123): mounting
  * only while signed in means a fresh mount is always a fresh fetch, so
  * there is no separate re-fetch-on-sign-in wiring to keep in step with it.
  */
 export function BillingStatusWidget() {
-  if (!clerkConfigured) return null;
+  if (!signInConfigured) return null;
   return (
-    <Show when="signed-in">
+    <SignedIn>
       <BillingStatusPanel />
-    </Show>
+    </SignedIn>
   );
 }
 

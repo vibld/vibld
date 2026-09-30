@@ -34,6 +34,13 @@ describe('the account page’s address', () => {
     assert.equal(adminUserIdFromPath(`/admin/users/${USER}`), USER);
     assert.equal(adminUserIdFromPath(`/admin/users/${USER}/`), USER);
     assert.equal(adminUserIdFromPath('/admin/users/someone@example.com'), null);
+    // A self-hosted copy's ids (D123): the owner, and a Cloudflare Access id.
+    assert.equal(adminUserIdFromPath('/admin/users/owner'), 'owner');
+    assert.equal(
+      adminUserIdFromPath('/admin/users/7335d417-61da-459d-899c-0a01c76a2f94'),
+      '7335d417-61da-459d-899c-0a01c76a2f94',
+    );
+    assert.equal(adminUserIdFromPath('/admin/users/%3Cscript%3E'), null);
     assert.equal(adminUserIdFromPath('/admin/users/'), null);
     assert.equal(adminUserIdFromPath(`/admin/users/${USER}/x`), null);
   });

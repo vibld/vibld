@@ -18,11 +18,11 @@ import {
   parseAccessMode,
 } from './access.ts';
 import type { AccessDecision } from './access.ts';
-import { isPlatformAdmin, parsePlatformAdmins } from './platform-admins.ts';
-import type { Principal } from './principal.ts';
+import { isPlatformAdmin, platformAdminsFor } from './platform-admins.ts';
+import { signInMode, type Principal, type PrincipalEnv } from './principal.ts';
 import type { RunRefusal } from '@vibld/core';
 
-export interface AccessEnv {
+export interface AccessEnv extends PrincipalEnv {
   DB?: D1Database;
   /** "open" opens the deployment. Anything else, including unset, is invite-only. */
   VIBLD_ACCESS_MODE?: string;
@@ -62,7 +62,7 @@ export async function decideAccessFor(
   const mode = parseAccessMode(env.VIBLD_ACCESS_MODE);
   const isAdmin = isPlatformAdmin(
     { email: principal.email, emailVerified: principal.emailVerified },
-    parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS),
+    platformAdminsFor(env),
   );
 
   // Answered before the invite list is touched, because neither answer
@@ -131,6 +131,26 @@ export async function handleAccessStatus(
 ): Promise<Response> {
   if (request.method !== 'GET') return json({ error: 'Use GET.' }, 405);
   const decision = await decideAccessFor(env, principal);
+  // Behind Cloudflare Access there is no directory to find people in but
+  // this one (D123; Codex review of internal PR 337). The builder asks this route on
+  // every load, so everyone it lets in is recorded, invited or not. A
+  // failure to record is not a reason to refuse them.
+  if (
+    decision.allowed &&
+    env.DB &&
+    principal.email &&
+    signInMode(env) === 'access'
+  ) {
+    await new AccessStore(env.DB)
+      .recordAccessAccount(
+        principal.email,
+        principal.userId,
+        new Date().toISOString(),
+      )
+      .catch((error: unknown) =>
+        console.error('could not record the Access account', error),
+      );
+  }
   return json({
     allowed: decision.allowed,
     mode: parseAccessMode(env.VIBLD_ACCESS_MODE),

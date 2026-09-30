@@ -139,6 +139,62 @@ export class AccessStore {
     return { exists: true, userId: row.redeemed_by_user_id ?? null };
   }
 
+  /**
+   * The address whose invite an account took, or null. The reverse of
+   * `redeemedUserId`, for a copy signed in by Cloudflare Access, where
+   * there is no Clerk to ask who an account is (D123).
+   */
+  async emailForUser(userId: string): Promise<string | null> {
+    const row = await this.#db
+      .prepare(
+        `SELECT email FROM access_invites WHERE redeemed_by_user_id = ?1 LIMIT 1`,
+      )
+      .bind(userId)
+      .first<{ email: string }>();
+    return row?.email ?? null;
+  }
+
+  /**
+   * Note a person Cloudflare Access let in (0040, D123), so an admin can
+   * find them by address whether or not they took an invite.
+   */
+  async recordAccessAccount(
+    rawEmail: string,
+    userId: string,
+    at: string,
+  ): Promise<void> {
+    const email = normaliseEmail(rawEmail);
+    if (email === null) return;
+    await this.#db
+      .prepare(
+        `INSERT INTO access_accounts (email, user_id, first_seen_at, last_seen_at)
+         VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT (email) DO UPDATE SET user_id = ?2, last_seen_at = ?3`,
+      )
+      .bind(email, userId, at)
+      .run();
+  }
+
+  /** The Access account an address signs in as, from 0040. */
+  async accessAccountFor(rawEmail: string): Promise<string | null> {
+    const email = normaliseEmail(rawEmail);
+    if (email === null) return null;
+    const row = await this.#db
+      .prepare(`SELECT user_id FROM access_accounts WHERE email = ?1`)
+      .bind(email)
+      .first<{ user_id: string }>();
+    return row?.user_id ?? null;
+  }
+
+  /** The address an Access account signs in with, from 0040. */
+  async accessEmailFor(userId: string): Promise<string | null> {
+    const row = await this.#db
+      .prepare(`SELECT email FROM access_accounts WHERE user_id = ?1 LIMIT 1`)
+      .bind(userId)
+      .first<{ email: string }>();
+    return row?.email ?? null;
+  }
+
   /** Put a withdrawn invite back, which is a separate act from issuing one. */
   async reinstate(rawEmail: string): Promise<boolean> {
     const email = normaliseEmail(rawEmail);

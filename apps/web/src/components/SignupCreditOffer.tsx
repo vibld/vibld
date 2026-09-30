@@ -1,4 +1,3 @@
-import { Show } from '@clerk/react';
 import { useEffect, useState } from 'react';
 import {
   fetchBillingStatus,
@@ -6,7 +5,8 @@ import {
   startCardSetup,
 } from '../billing/billing-client.ts';
 import type { BillingStatus } from '../billing/billing-client.ts';
-import { clerkConfigured } from '../auth/clerk-token.ts';
+import { SignedIn } from '../auth/clerk.tsx';
+import { signInConfigured } from '../auth/mode.ts';
 
 /**
  * The welcome credit, as somebody new to the builder meets it.
@@ -84,11 +84,11 @@ export function SignupCreditOffer({
  * account the offer does not apply to.
  */
 export function SignupCreditBanner() {
-  if (!clerkConfigured) return null;
+  if (!signInConfigured) return null;
   return (
-    <Show when="signed-in">
+    <SignedIn>
       <SignupCreditFetched />
-    </Show>
+    </SignedIn>
   );
 }
 

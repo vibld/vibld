@@ -402,6 +402,32 @@ builder, and whether the repository should move to his account.
   dates are en-US.
 - **D121. The legal pages get the spelling change and nothing else.** No
   wording, meaning or structure changes.
+- **D122. The Reddit launch waits for self-hosting checked end to end.**
+  The post leads with open source, so its readers try the self-host path
+  first. The Self-host check is extended to sign in on a copy and run one
+  real build on it, on Cloudflare and under Docker, before the post goes up.
+- **D123. A self-hosted copy needs no sign-in service beyond Cloudflare.**
+  Beside Clerk, a copy can sign in with one owner's password
+  (`VIBLD_AUTH=owner`) or with Cloudflare Access in front of the builder
+  (`VIBLD_AUTH=access`). Chris: "Cloudflare access AND one-owner password
+  mode. There should be no dependencies on any paid services." Clerk stays
+  for app.vibld.com. There is still no mode without sign-in.
+- **D124. A copy can build with a local model.** Ollama, LM Studio or
+  llama.cpp through their OpenAI-compatible endpoint, set by the owner as a
+  base URL and a model name. Paid keys stay supported. A small model that
+  cannot finish a build says so plainly.
+- **D125. Without Containers, the preview bundles in the viewer's
+  browser.** On Cloudflare's free plan nothing can run npm or Vite, so a
+  copy without the sandbox previews with esbuild-wasm in a Web Worker,
+  packages from an ES-module CDN and Tailwind compiled in the page. Chris
+  chose it over WebContainers, Sandpack and building in GitHub Actions,
+  whose facts were put to him.
+- **D126. Docker, and the order of the work.** The whole builder runs under
+  docker compose with no Cloudflare account: the Workers under workerd with
+  local storage, previews in a sibling container. Built in this order, one
+  pull request each: sign-in (D123), Docker, local models (D124), the
+  in-browser preview (D125), then the end-to-end check (D122). One-click
+  deploy templates for hosts that run containers come after Docker.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

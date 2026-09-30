@@ -1316,6 +1316,7 @@ describe('the purge', () => {
       'referral_attributions.referrer_user_id',
       'billing_admin_credits.user_id',
       'access_invites.redeemed_by_user_id',
+      'access_accounts.user_id',
       'published_projects.user_id',
       // D73: deleted in `deleteAccountRows`, and the audit log re-keyed to
       // the tombstone in `tombstoneCreditRows`.

@@ -134,16 +134,18 @@ export function isAdminUserRoute(pathname: string): pathname is AdminUserRoute {
 }
 
 /**
- * A Clerk user id, by shape. Not proof the account exists, only that the
- * string is one this code will put in a query and a log: Clerk's ids are
- * `user_` and letters and digits.
+ * An account id, by shape. Not proof the account exists, only that the
+ * string is one this code will put in a query and a log. Clerk's ids are
+ * `user_` and letters and digits; a self-hosted copy's are the owner's
+ * `owner` or a Cloudflare Access id, a UUID (D123; Codex review of internal PR 337).
+ * Letters, digits, `_` and `-` cover all three and admit nothing that
+ * reads as an address, a path or markup. `src/admin/route.ts` accepts the
+ * same shape.
  */
+export const ACCOUNT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 function isUserId(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length <= 64 &&
-    /^user_[A-Za-z0-9]+$/.test(value)
-  );
+  return typeof value === 'string' && ACCOUNT_ID.test(value);
 }
 
 /** A reason as the log stores it: trimmed, bounded, or null for none. */

@@ -29,7 +29,7 @@ export default function Deploying() {
       <p>
         The configuration in the repository deploys vibld’s own service: its
         Worker names, its D1 database and R2 bucket, its Workflow, its
-        rate-limit namespaces, its domains and its Clerk. Deployed unchanged
+        rate-limit namespaces, its domains and its sign-in. Deployed unchanged
         into another account it fails. Deployed into an account that also runs
         vibld, it would replace vibld’s Workers and write into its database.
       </p>
@@ -38,7 +38,7 @@ export default function Deploying() {
         <code>{`{
   "prefix": "acme",
   "d1DatabaseId": "<the id wrangler d1 create printed>",
-  "clerkFrontendApiUrl": "https://<your instance>.clerk.accounts.dev",
+  "auth": "owner",
   "provider": "deepseek",
   "rateLimitNamespaceBase": 5001
 }`}</code>
@@ -59,6 +59,13 @@ export default function Deploying() {
         across a Cloudflare account, so <code>rateLimitNamespaceBase</code> is
         required, and the script refuses vibld’s own. The optional settings are
         listed at the top of the script.
+      </p>
+      <p>
+        <code>auth</code> is how people sign in: <code>owner</code> (one
+        password), <code>access</code> (Cloudflare Access, with{' '}
+        <code>accessTeamDomain</code> and <code>accessAud</code>) or{' '}
+        <code>clerk</code> (with <code>clerkFrontendApiUrl</code>). See{' '}
+        <a href="/docs/self-hosting">Self-hosting</a> for which to pick.
       </p>
       <p>
         Pass <code>-c wrangler.self-host.jsonc</code> to every{' '}
@@ -102,18 +109,26 @@ export default function Deploying() {
         <li>
           <strong>Deploy the builder</strong> last: its service bindings name
           the other two Workers, and Cloudflare refuses the deploy until both
-          exist. Build it with <code>VITE_CLERK_PUBLISHABLE_KEY</code> set, and
-          give it a provider key and <code>VIBLD_PLATFORM_ADMINS</code> as
-          secrets.
+          exist. Build it after running the script, which writes the sign-in it
+          is built for into <code>apps/web/.env.production.local</code>. Give it
+          a provider key as a secret, and for the sign-in you chose:{' '}
+          <code>VIBLD_OWNER_PASSWORD</code> for <code>owner</code>; for{' '}
+          <code>access</code>, put the Access application in front of the
+          builder’s address and set <code>VIBLD_PLATFORM_ADMINS</code> to the
+          email you sign in to Access with, or nobody gets past the invite gate
+          to invite anybody else; for <code>clerk</code>, build with{' '}
+          <code>VITE_CLERK_PUBLISHABLE_KEY</code> and set{' '}
+          <code>VIBLD_PLATFORM_ADMINS</code>.
         </li>
       </ol>
       <p>
         Migrations are idempotent. Make applying them a step in your deploy.
       </p>
 
-      <h2>The domain problem</h2>
+      <h2>The domain problem, with Clerk</h2>
       <p>
-        A <strong>live</strong> Clerk instance is bound to a domain, and Clerk’s
+        Only a copy signed in with Clerk has this problem. A{' '}
+        <strong>live</strong> Clerk instance is bound to a domain, and Clerk’s
         Frontend API refuses any request whose origin is not that domain or a
         subdomain of it. A deployment reachable only at a{' '}
         <code>workers.dev</code> URL will therefore not load Clerk at all, which

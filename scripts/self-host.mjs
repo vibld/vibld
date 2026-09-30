@@ -21,7 +21,11 @@
  *     "prefix": "acme",                        // Worker, database, bucket and
  *                                              // Workflow names start with it
  *     "d1DatabaseId": "…",                     // from `wrangler d1 create <prefix>-control-plane`
- *     "clerkFrontendApiUrl": "https://….clerk.accounts.dev",
+ *     "auth": "owner",                         // owner | access | clerk (D123)
+ *     "ownerEmail": "you@example.com",         // owner: optional
+ *     "accessTeamDomain": "acme.cloudflareaccess.com", // access: required
+ *     "accessAud": "…",                        // access: the application's AUD tag
+ *     "clerkFrontendApiUrl": "https://….clerk.accounts.dev", // clerk: required
  *     "provider": "deepseek",                  // anthropic | deepseek | openai
  *     "model": "deepseek-v4-flash",            // optional: the provider's default otherwise
  *     "builderDomain": "build.example.com",    // optional: a custom domain;
@@ -32,6 +36,14 @@
  *                                              // ids are account-wide, so a
  *                                              // copy beside vibld needs its own
  *   }
+ *
+ * `auth` is how people sign in to the copy. `owner` is one password, set
+ * afterwards with `wrangler secret put VIBLD_OWNER_PASSWORD` (12 characters
+ * or more); `access` is Cloudflare Access in front of the builder; `clerk`
+ * is a Clerk instance of your own. Left out, it is `clerk` when
+ * `clerkFrontendApiUrl` is given and `owner` otherwise. The builder's page
+ * has to be built knowing which, so this also writes
+ * `apps/web/.env.production.local` (ignored by git) with `VITE_VIBLD_AUTH`.
  *
  * Without a `previewDomain` the builder is not bound to the publish Worker,
  * so publishing reports itself unavailable: the publish Worker would
@@ -89,6 +101,12 @@ export function parseJsonc(text) {
 
 const PREFIX = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/;
 const PROVIDERS = ['anthropic', 'deepseek', 'openai'];
+const AUTH_MODES = ['owner', 'access', 'clerk'];
+
+/** The sign-in a copy uses: named, or inferred from what is given. */
+export function authFor(settings) {
+  return settings.auth ?? (settings.clerkFrontendApiUrl ? 'clerk' : 'owner');
+}
 
 /** The settings, checked, or an error naming what is wrong. */
 export function checkSettings(settings) {
@@ -107,10 +125,39 @@ export function checkSettings(settings) {
       `"d1DatabaseId" is the id \`wrangler d1 create ${settings.prefix ?? '<prefix>'}-control-plane\` prints`,
     );
   }
-  if (!/^https:\/\/[^/]+$/.test(settings.clerkFrontendApiUrl ?? '')) {
+  const auth = authFor(settings);
+  if (!AUTH_MODES.includes(auth)) {
+    problems.push(`"auth" is one of ${AUTH_MODES.join(', ')}`);
+  }
+  if (
+    auth === 'clerk' &&
+    !/^https:\/\/[^/]+$/.test(settings.clerkFrontendApiUrl ?? '')
+  ) {
     problems.push(
       '"clerkFrontendApiUrl" is your Clerk instance\'s Frontend API URL, https:// and no path',
     );
+  }
+  if (auth === 'access') {
+    if (
+      !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(
+        settings.accessTeamDomain ?? '',
+      )
+    ) {
+      problems.push(
+        '"accessTeamDomain" is your Zero Trust team domain, such as acme.cloudflareaccess.com',
+      );
+    }
+    if (!/^[0-9a-f]{64}$/.test(settings.accessAud ?? '')) {
+      problems.push(
+        '"accessAud" is the Access application\'s Application Audience (AUD) tag, 64 hex characters',
+      );
+    }
+  }
+  if (
+    settings.ownerEmail !== undefined &&
+    !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(settings.ownerEmail)
+  ) {
+    problems.push('"ownerEmail" is an email address');
   }
   if (!PROVIDERS.includes(settings.provider)) {
     problems.push(`"provider" is one of ${PROVIDERS.join(', ')}`);
@@ -195,7 +242,18 @@ export function selfHostConfig(app, base, settings) {
     if (s.builderDomain) {
       config.routes = [{ pattern: s.builderDomain, custom_domain: true }];
     } else config.workers_dev = true;
-    vars.CLERK_FRONTEND_API_URL = s.clerkFrontendApiUrl;
+    const auth = authFor(s);
+    vars.VIBLD_AUTH = auth;
+    delete vars.CLERK_FRONTEND_API_URL;
+    delete vars.VIBLD_ACCESS_TEAM_DOMAIN;
+    delete vars.VIBLD_ACCESS_AUD;
+    delete vars.VIBLD_OWNER_EMAIL;
+    if (auth === 'clerk') vars.CLERK_FRONTEND_API_URL = s.clerkFrontendApiUrl;
+    if (auth === 'access') {
+      vars.VIBLD_ACCESS_TEAM_DOMAIN = s.accessTeamDomain;
+      vars.VIBLD_ACCESS_AUD = s.accessAud;
+    }
+    if (auth === 'owner' && s.ownerEmail) vars.VIBLD_OWNER_EMAIL = s.ownerEmail;
     vars.VIBLD_PROVIDER = s.provider;
     if (s.model) vars.VIBLD_MODEL = s.model;
     else delete vars.VIBLD_MODEL;
@@ -243,6 +301,20 @@ function writeConfig(app, config) {
   return file;
 }
 
+/** What the builder's page is built with: which sign-in it shows. */
+export function buildEnvFor(auth) {
+  return (
+    '# Written by scripts/self-host.mjs. Vite reads it on `vite build`.\n' +
+    `VITE_VIBLD_AUTH=${auth}\n`
+  );
+}
+
+function writeBuildEnv(auth) {
+  const file = join(ROOT, 'apps', 'web', '.env.production.local');
+  writeFileSync(file, buildEnvFor(auth));
+  return file;
+}
+
 function main([settingsPath]) {
   if (!settingsPath) {
     console.error('usage: node scripts/self-host.mjs <settings.json>');
@@ -256,6 +328,17 @@ function main([settingsPath]) {
     );
     console.log(
       `wrote ${writeConfig(app, selfHostConfig(app, base, settings))}`,
+    );
+  }
+  console.log(`wrote ${writeBuildEnv(authFor(settings))}`);
+  if (authFor(settings) === 'access') {
+    console.log(
+      'Set your admin before signing in: cd apps/web && npx wrangler secret put VIBLD_PLATFORM_ADMINS -c wrangler.self-host.jsonc (the email you sign in to Access with)',
+    );
+  }
+  if (authFor(settings) === 'owner') {
+    console.log(
+      'Set the password before signing in: cd apps/web && npx wrangler secret put VIBLD_OWNER_PASSWORD -c wrangler.self-host.jsonc',
     );
   }
   console.log(

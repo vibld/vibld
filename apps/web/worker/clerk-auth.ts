@@ -1,30 +1,25 @@
+import {
+  checkTokenTimes,
+  verifyRs256Signature,
+  type Rs256Jwk,
+} from './rs256.ts';
+
 /**
  * Clerk session token verification.
  *
- * The same shape as access.ts's Cloudflare Access verification, and for the
+ * The same shape as access-auth.ts's Cloudflare Access verification, and for the
  * same reason: ADR-0006 requires proving a raw URL cannot bypass access
  * control, so the Worker verifies the token itself rather than trusting
  * that some earlier layer already checked it.
  *
- * Not wired into request handling yet -- see docs/decisions.md L5. Access
- * stays authoritative until Clerk sign-in and the L29 abuse controls are
- * both live, and both land in the same deploy. This module exists so that
- * deploy is a cutover, not a rewrite.
- *
  * Clerk's session token has no fixed "audience" claim naming an application
  * the way Access's does. Its equivalent is `azp` (authorized party): the
  * origin the token's request came from. Everything else -- RS256 pinning,
- * JWKS caching, the expiry/not-before checks -- mirrors access.ts exactly,
+ * JWKS caching, the expiry/not-before checks -- is shared with it (rs256.ts),
  * because it is the same problem with a different token shape.
  */
 
-export interface ClerkJwk {
-  kid: string;
-  kty: string;
-  alg?: string;
-  n: string;
-  e: string;
-}
+export type ClerkJwk = Rs256Jwk;
 
 export interface ClerkClaims {
   /** The user id, e.g. "user_2abc...". This is the ledger key -- see L3. */
@@ -74,20 +69,6 @@ export class ClerkVerificationError extends Error {
   }
 }
 
-function base64UrlToBytes(value: string): Uint8Array {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function decodeJsonSegment(segment: string): unknown {
-  return JSON.parse(new TextDecoder().decode(base64UrlToBytes(segment)));
-}
-
 function asStringArray(value: unknown): string[] {
   if (typeof value === 'string') return [value];
   if (
@@ -109,64 +90,8 @@ export async function verifyClerkJwt(
   token: string,
   options: VerifyClerkOptions,
 ): Promise<ClerkClaims> {
-  const parts = token.split('.');
-  if (parts.length !== 3) {
-    throw new ClerkVerificationError('Malformed token');
-  }
-  const [encodedHeader, encodedPayload, encodedSignature] = parts as [
-    string,
-    string,
-    string,
-  ];
-
-  let header: { alg?: unknown; kid?: unknown };
-  let payload: Record<string, unknown>;
-  try {
-    header = decodeJsonSegment(encodedHeader) as typeof header;
-    payload = decodeJsonSegment(encodedPayload) as Record<string, unknown>;
-  } catch {
-    throw new ClerkVerificationError('Token segments are not valid JSON');
-  }
-
-  // Pin the algorithm. Accepting whatever the token declares is how "alg: none"
-  // and HMAC-for-RSA confusion attacks work.
-  if (header.alg !== 'RS256') {
-    throw new ClerkVerificationError(
-      `Unsupported signing algorithm: ${String(header.alg)}`,
-    );
-  }
-  if (typeof header.kid !== 'string') {
-    throw new ClerkVerificationError('Token has no key id');
-  }
-
-  const jwk = options.keys.find((key) => key.kid === header.kid);
-  if (!jwk) {
-    throw new ClerkVerificationError('Token was signed by an unknown key');
-  }
-
-  const key = await crypto.subtle.importKey(
-    'jwk',
-    { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  );
-
-  const signed = new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`);
-  const signatureBytes = base64UrlToBytes(encodedSignature);
-  const signature = signatureBytes.buffer.slice(
-    signatureBytes.byteOffset,
-    signatureBytes.byteOffset + signatureBytes.byteLength,
-  ) as ArrayBuffer;
-  const valid = await crypto.subtle.verify(
-    'RSASSA-PKCS1-v1_5',
-    key,
-    signature,
-    signed as unknown as ArrayBuffer,
-  );
-  if (!valid) {
-    throw new ClerkVerificationError('Token signature is invalid');
-  }
+  const fail = (message: string) => new ClerkVerificationError(message);
+  const payload = await verifyRs256Signature(token, options.keys, fail);
 
   if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
     throw new ClerkVerificationError('Token has no subject');
@@ -190,25 +115,21 @@ export async function verifyClerkJwt(
     throw new ClerkVerificationError('Token was issued for a different origin');
   }
 
-  const now = options.now ?? Math.floor(Date.now() / 1000);
-  const leeway = options.leewaySeconds ?? 60;
-  if (typeof payload.exp !== 'number' || payload.exp + leeway < now) {
-    throw new ClerkVerificationError('Token has expired');
-  }
-  if (typeof payload.iat !== 'number' || payload.iat - leeway > now) {
-    throw new ClerkVerificationError('Token is not valid yet');
-  }
-  if (typeof payload.nbf === 'number' && payload.nbf - leeway > now) {
-    throw new ClerkVerificationError('Token is not valid yet');
-  }
+  checkTokenTimes(
+    payload,
+    options.now ?? Math.floor(Date.now() / 1000),
+    options.leewaySeconds ?? 60,
+    fail,
+  );
 
   return {
     sub: payload.sub,
     sid: typeof payload.sid === 'string' ? payload.sid : undefined,
-    iss: payload.iss,
+    iss: payload.iss as string,
     azp: azp.length > 0 ? azp : undefined,
-    exp: payload.exp,
-    iat: payload.iat,
+    // Both checked by checkTokenTimes above.
+    exp: payload.exp as number,
+    iat: payload.iat as number,
     email: typeof payload.email === 'string' ? payload.email : undefined,
     emailVerified:
       typeof payload.email_verified === 'boolean'

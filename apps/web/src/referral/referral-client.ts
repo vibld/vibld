@@ -1,5 +1,6 @@
 import { isSignUpPath, getClerkToken } from '../auth/clerk-token.ts';
 import { formatCredit } from '../billing/billing-client.ts';
+import { AUTH_MODE } from '../auth/mode.ts';
 
 /**
  * The builder's half of referrals: reading a code off an arriving link,
@@ -142,7 +143,10 @@ export async function claimStoredReferral(
   }
 
   const token = await getToken();
-  if (!token) return 'kept';
+  // Under Clerk no token means not signed in yet. Under the owner's
+  // password or Cloudflare Access there never is one: the session is a
+  // cookie the request carries on its own (D123).
+  if (!token && AUTH_MODE !== 'owner' && AUTH_MODE !== 'access') return 'kept';
 
   let response: Response;
   try {
@@ -150,7 +154,7 @@ export async function claimStoredReferral(
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ code }),
     });

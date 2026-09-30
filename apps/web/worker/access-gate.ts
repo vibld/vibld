@@ -295,6 +295,12 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/account/delete': 'leaving is not something an invite buys',
   '/api/account/delete/cancel':
     'keeping an account already made, which grants nothing new',
+  // Signing in with the owner's password on a copy that uses it (D123). It
+  // is how a caller gets an identity, so it cannot ask for one, and there
+  // is nobody but the owner to invite. It grants a session only for the
+  // right password, counts attempts per address, and answers 404 on any
+  // deployment signed in some other way.
+  '/api/owner/session': 'signing in, which comes before any identity',
   // Already behind the stricter platform-admin check, which an invite does
   // not confer and which an admin passes without one.
   '/api/admin/deletions': 'behind the platform-admin check instead',

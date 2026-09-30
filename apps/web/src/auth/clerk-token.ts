@@ -32,7 +32,20 @@ export const PUBLISHABLE_KEY =
  * renders without Clerk on purpose, but a provider that cannot mint a
  * session, on a deployment whose Worker refuses every request without one.
  */
-export const clerkConfigured = PUBLISHABLE_KEY !== undefined;
+export const clerkConfigured =
+  PUBLISHABLE_KEY !== undefined &&
+  clerkModeFor(import.meta.env?.VITE_VIBLD_AUTH);
+
+/**
+ * Whether a build names Clerk as its sign-in, or names none (D123). A copy
+ * built for the owner's password or for Cloudflare Access shows none of
+ * Clerk's UI even if a Clerk key is still in its build environment (Codex
+ * review of internal PR 337), since its Worker would refuse every Clerk session.
+ */
+export function clerkModeFor(named: string | undefined): boolean {
+  const mode = named?.trim().toLowerCase();
+  return !mode || mode === 'clerk';
+}
 
 /**
  * Where a signed-out visitor finds the sign-up form rather than the sign-in

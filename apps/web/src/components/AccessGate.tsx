@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { fetchAccess } from '../access/access-client.ts';
 import { AuthStatus } from '../auth/clerk.tsx';
-import { clerkConfigured } from '../auth/clerk-token.ts';
+import { signInConfigured } from '../auth/mode.ts';
 import {
   fetchBillingStatus,
   formatUsd,
@@ -51,7 +51,7 @@ export function AccessGate({
    * cannot reach it is not testing it. The harness builds these components
    * with a key present, so nothing else could drive this branch.
    */
-  configured = clerkConfigured,
+  configured = signInConfigured,
   /**
    * The sign-out control. A prop for the same reason `configured` is: the
    * real one is Clerk's `UserButton`, which throws without a provider above

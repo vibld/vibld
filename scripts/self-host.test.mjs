@@ -5,6 +5,8 @@ import { describe, it } from 'node:test';
 import {
   APPS,
   VIBLD_OWN,
+  authFor,
+  buildEnvFor,
   namesFor,
   parseJsonc,
   selfHostConfig,
@@ -154,5 +156,56 @@ describe("a self-hosted copy's configuration (D115)", () => {
     ]) {
       assert.throws(() => selfHostConfig('web', base.web, bad), /not usable/);
     }
+  });
+
+  describe('how people sign in to it (D123)', () => {
+    const { clerkFrontendApiUrl: _clerk, ...noClerk } = SETTINGS;
+    const AUD = 'a'.repeat(64);
+
+    it('is the owner password unless Clerk or Access is given', () => {
+      assert.equal(authFor(noClerk), 'owner');
+      assert.equal(authFor(SETTINGS), 'clerk');
+      const vars = selfHostConfig('web', base.web, {
+        ...noClerk,
+        ownerEmail: 'me@example.com',
+      }).vars;
+      assert.equal(vars.VIBLD_AUTH, 'owner');
+      assert.equal(vars.VIBLD_OWNER_EMAIL, 'me@example.com');
+      // vibld's own Clerk is not left behind for a copy without one.
+      assert.equal(vars.CLERK_FRONTEND_API_URL, undefined);
+      assert.equal(
+        buildEnvFor('owner').split('\n')[1],
+        'VITE_VIBLD_AUTH=owner',
+      );
+    });
+
+    it('carries the Access team and audience, and refuses them half given', () => {
+      const vars = selfHostConfig('web', base.web, {
+        ...noClerk,
+        auth: 'access',
+        accessTeamDomain: 'acme.cloudflareaccess.com',
+        accessAud: AUD,
+      }).vars;
+      assert.equal(vars.VIBLD_AUTH, 'access');
+      assert.equal(vars.VIBLD_ACCESS_TEAM_DOMAIN, 'acme.cloudflareaccess.com');
+      assert.equal(vars.VIBLD_ACCESS_AUD, AUD);
+      assert.throws(
+        () =>
+          selfHostConfig('web', base.web, {
+            ...noClerk,
+            auth: 'access',
+            accessTeamDomain: 'acme.cloudflareaccess.com',
+          }),
+        /accessAud/,
+      );
+      assert.throws(
+        () => selfHostConfig('web', base.web, { ...noClerk, auth: 'clerk' }),
+        /clerkFrontendApiUrl/,
+      );
+      assert.throws(
+        () => selfHostConfig('web', base.web, { ...noClerk, auth: 'nobody' }),
+        /"auth" is one of/,
+      );
+    });
   });
 });

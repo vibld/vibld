@@ -1,3 +1,6 @@
+import { ownerIdentity } from './owner-auth.ts';
+import { signInMode, type PrincipalEnv } from './principal.ts';
+
 /**
  * Platform admin grants (docs/decisions.md L4).
  *
@@ -33,4 +36,18 @@ export function isPlatformAdmin(
 ): boolean {
   if (!claims.email || claims.emailVerified !== true) return false;
   return admins.has(claims.email.trim().toLowerCase());
+}
+
+/**
+ * The admin list this deployment answers to: `VIBLD_PLATFORM_ADMINS`, plus
+ * the owner on a copy signed in by owner password (D123). There is nobody
+ * else on such a copy to administer it, and no verified email to list,
+ * so the owner's identity is added rather than asked for.
+ */
+export function platformAdminsFor(
+  env: PrincipalEnv & { VIBLD_PLATFORM_ADMINS?: string },
+): Set<string> {
+  const admins = parsePlatformAdmins(env.VIBLD_PLATFORM_ADMINS);
+  if (signInMode(env) === 'owner') admins.add(ownerIdentity(env));
+  return admins;
 }

@@ -15,6 +15,13 @@ import {
 } from './clerk-token.ts';
 import { usePathname } from '../admin/use-pathname.ts';
 import { Mark, WORDMARK } from '../components/Mark.tsx';
+import { ACCESS_SIGN_OUT_PATH, AUTH_MODE } from './mode.ts';
+import {
+  OwnerGate,
+  OwnerSignInForm,
+  OwnerSignOut,
+  useOwnerSignedIn,
+} from './owner.tsx';
 
 export {
   clerkConfigured,
@@ -24,7 +31,7 @@ export {
 
 /** Wraps the app in `ClerkProvider` only when a key is actually present. */
 export function ClerkRoot({ children }: { children: ReactNode }) {
-  if (!PUBLISHABLE_KEY) return children;
+  if (!clerkConfigured || !PUBLISHABLE_KEY) return children;
   return (
     <ClerkProvider
       publishableKey={PUBLISHABLE_KEY}
@@ -53,6 +60,9 @@ export function ClerkRoot({ children }: { children: ReactNode }) {
  * deterministic fake rather than answering for real.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
+  // A copy signed in by owner password shows its own form; one behind
+  // Cloudflare Access was signed in before the page loaded (D123).
+  if (AUTH_MODE === 'owner') return <OwnerGate>{children}</OwnerGate>;
   if (!clerkConfigured) return children;
   return (
     <>
@@ -98,6 +108,22 @@ function SignInLanding() {
  * signed-in-only widget in the header uses.
  */
 export function AuthStatus() {
+  if (AUTH_MODE === 'owner') {
+    return (
+      <div className="shell__auth">
+        <OwnerSignOut />
+      </div>
+    );
+  }
+  if (AUTH_MODE === 'access') {
+    return (
+      <div className="shell__auth">
+        <a className="button" href={ACCESS_SIGN_OUT_PATH}>
+          Sign out
+        </a>
+      </div>
+    );
+  }
   if (!clerkConfigured) return null;
   return (
     <div className="shell__auth">
@@ -118,12 +144,26 @@ export function AuthStatus() {
  * two functions this is is fixed when the module loads, so a component
  * calls the same hooks on every render.
  */
-export const useSignedIn: () => boolean | null = clerkConfigured
-  ? () => {
-      const { isLoaded, isSignedIn } = useAuth();
-      return isLoaded ? Boolean(isSignedIn) : null;
-    }
-  : () => true;
+export const useSignedIn: () => boolean | null =
+  AUTH_MODE === 'owner'
+    ? () => useOwnerSignedIn()
+    : clerkConfigured
+      ? () => {
+          const { isLoaded, isSignedIn } = useAuth();
+          return isLoaded ? Boolean(isSignedIn) : null;
+        }
+      : () => true;
+
+/**
+ * Renders `children` only while somebody is signed in. Under Clerk that is
+ * its own `Show`; under the owner's password and Cloudflare Access the
+ * whole builder is already behind sign-in (D123), so nothing more to wait
+ * for.
+ */
+export function SignedIn({ children }: { children: ReactNode }) {
+  if (AUTH_MODE === 'clerk') return <Show when="signed-in">{children}</Show>;
+  return children;
+}
 
 /**
  * Sign in without leaving the page, and come back to `returnTo` after,
@@ -133,6 +173,11 @@ export const useSignedIn: () => boolean | null = clerkConfigured
  * (`/s/<token>`) and Clerk's steps must not replace it.
  */
 export function SignInToContinue({ returnTo }: { returnTo: string }) {
+  if (AUTH_MODE === 'owner') {
+    return (
+      <OwnerSignInForm onSignedIn={() => window.location.assign(returnTo)} />
+    );
+  }
   if (!clerkConfigured) return null;
   return (
     <SignIn

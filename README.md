@@ -78,7 +78,7 @@
 |                    | ☁️ **Hosted**                                                                          | ⌨️ **Your key, your terminal**                                                         | 🛠️ **Self-hosted**                                                                                                  |
 | ------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | **What you get**   | The whole builder: chat, previews, projects, sharing, GitHub and publishing.           | The same bounded build, from the command line, writing a project to disk.              | Your own copy of the hosted service on your Cloudflare account.                                                     |
-| **What you need**  | A browser. [Sign up](https://app.vibld.com/sign-up).                                   | Node 24, pnpm and one Anthropic, OpenAI or DeepSeek key.                               | Cloudflare (Workers Paid for previews), Clerk, a model key; Stripe and a GitHub App only if you want them.          |
+| **What you need**  | A browser. [Sign up](https://app.vibld.com/sign-up).                                   | Node 24, pnpm and one Anthropic, OpenAI or DeepSeek key.                               | Cloudflare (Workers Paid for previews) and a model key; Clerk, Stripe and a GitHub App only if you want them.       |
 | **What it costs**  | Free plan, or a paid plan with more model spend. [Pricing](https://vibld.com/pricing). | What your provider bills. The weekly proof run costs about $0.15 to $0.31 on DeepSeek. | Your Cloudflare and provider bills.                                                                                 |
 | **Where to start** | [Getting started](https://vibld.com/docs/getting-started)                              | [Quick start](#generate-a-real-project-with-your-own-key)                              | [Self-hosting](https://vibld.com/docs/self-hosting) (documented and checked by the project, not yet by anyone else) |
 
@@ -208,7 +208,7 @@ Ask for an aurora, a starfield, a smoky gradient or any "animated background", a
 
 **Accounts and operations**
 
-- Sign-in with Clerk; projects in Cloudflare D1, R2 and a per-user Durable Object; builds as Cloudflare Workflows.
+- Sign-in with Clerk, or on a copy of your own with an owner password or Cloudflare Access; projects in Cloudflare D1, R2 and a per-user Durable Object; builds as Cloudflare Workflows.
 - Plans and model-spend credit with Stripe, referrals, an access gate that is invite-only unless a deployment opens it, an admin panel with credit grants, bans and an audit log, and operator takedown for abuse reports.
 - An evaluation suite ([`packages/eval`](packages/eval)) and a model bakeoff, so model choices are measured, not guessed.
 
@@ -318,8 +318,8 @@ Self-hosting is possible, and still needs validation outside the project: a work
 
 - **Cloudflare**, for three Workers (the builder, the sandbox and the publish service) plus D1, R2, a Durable Object and a Workflow behind the builder. Live previews and publishing run generated code in [Containers](https://developers.cloudflare.com/containers/), which need the Workers Paid plan, and building the sandbox image needs Docker.
 - **A model provider API key.** Without one, generation refuses rather than degrading. The builder's configuration ships `VIBLD_MODEL` as `gpt-6-sol`: set it to a model your key serves, or a copy with only another provider's key falls back to whichever of that provider's models the catalog lists first.
-- **Clerk**, for sign-in. There is no hosted mode without authentication, because the endpoints spend money.
-- **An open door.** A deployment is invite-only until `VIBLD_ACCESS_MODE` is `open`: before that, only the verified emails in `VIBLD_PLATFORM_ADMINS` and the people they invite get in, so list your own. Clerk's session token has to carry `email` and `email_verified` for that match to work.
+- **A way to sign in**, one of three: an owner password (`VIBLD_AUTH=owner`, one person), Cloudflare Access in front of the builder (`VIBLD_AUTH=access`, free for up to 50 users), or Clerk (for sign-ups from the public, as app.vibld.com uses). There is no mode without sign-in, because the endpoints spend money.
+- **An open door.** A deployment is invite-only until `VIBLD_ACCESS_MODE` is `open`: before that, only the verified emails in `VIBLD_PLATFORM_ADMINS` and the people they invite get in, so list your own. The owner of an owner-password copy is always let in. Under Clerk, its session token has to carry `email` and `email_verified` for that match to work.
 - **Your own names.** The Worker names, database, bucket, Workflow, routes and Clerk domain in the `wrangler.jsonc` files are vibld's. `node scripts/self-host.mjs <settings.json>` writes a `wrangler.self-host.jsonc` beside each with all of them derived from a prefix of yours, and refuses to write one that still names vibld's ([Deploying](https://vibld.com/docs/deploying)).
 - **Stripe** only if you intend to charge anybody, **a GitHub App** only if you want push-to-repository, and **Resend** only for email. Each optional piece left unset reports itself unavailable rather than running without its check.
 

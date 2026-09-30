@@ -60,6 +60,7 @@ import {
   deletePrefix,
 } from './storage-purge.ts';
 import type { PurgeBucket } from './storage-purge.ts';
+import { signInMode, type PrincipalEnv } from './principal.ts';
 
 // Where they have always been imported from. The functions moved to
 // `storage-purge.ts` when deleting one project needed them too.
@@ -113,7 +114,7 @@ export interface DeletionDeps {
 }
 
 export interface DeletionEnv
-  extends StripeEnv, PreviewServiceEnv, ClerkLookupEnv {
+  extends StripeEnv, PreviewServiceEnv, ClerkLookupEnv, PrincipalEnv {
   DB?: D1Database;
   PROJECT_CONTENT?: R2Bucket;
   USER_BUDGET?: DurableObjectNamespace<{ forget(): void }>;
@@ -167,6 +168,8 @@ export async function deleteClerkUser(
   };
 }
 
+const SKIPS_CLERK = new Set(['owner', 'access']);
+
 /** The dependencies as a deployed Worker has them. */
 export function deletionDepsFor(env: DeletionEnv): DeletionDeps {
   const db = env.DB!;
@@ -184,7 +187,21 @@ export function deletionDepsFor(env: DeletionEnv): DeletionDeps {
     // `cloudflare.d.ts` declares them.
     bucket: bucket ?? null,
     ledger: ledger ? (name) => ledger.getByName(name) : null,
-    deleteClerkUser: (userId) => deleteClerkUser(env, userId),
+    // Only a Clerk deployment holds a sign-in account anywhere to delete.
+    // An owner copy's sign-in is its password, and Access's people live in
+    // the owner's identity provider, not here (D123). Asking Clerk on those
+    // failed for want of a key, after everything else was gone, and left
+    // the request pending and the identity refused for good (Codex review
+    // of internal PR 337).
+    //
+    // Only a copy configured for one of those skips it. One whose sign-in
+    // is not configured at all (a missing CLERK_FRONTEND_API_URL, a typo in
+    // VIBLD_AUTH) still asks Clerk, which fails and keeps the step pending,
+    // rather than calling a Clerk account that may exist deleted (Codex
+    // review of internal PR 337).
+    deleteClerkUser: SKIPS_CLERK.has(signInMode(env) ?? '')
+      ? async () => ({ ok: true })
+      : (userId) => deleteClerkUser(env, userId),
     now: () => new Date(),
   };
 }
