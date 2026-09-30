@@ -164,7 +164,7 @@ Two hand-built starter templates ship alongside, each under its own MIT licence:
 
 ## Status
 
-**What runs today.** Everything in the list above, deployed at [app.vibld.com](https://app.vibld.com) as a public beta. Paid plans are live, and a new account gets $1.00 of build credit once it adds a card, which is saved and not charged.
+**What runs today.** Everything in the list above, deployed at [app.vibld.com](https://app.vibld.com) as a public beta. Paid plans are live, and a new account gets $1.00 of build credit once it adds a card, which is saved and not charged. From a checkout, `pnpm generate` builds a real project with your own provider key (see [Quick start](#quick-start)).
 
 **What does not exist yet.**
 
@@ -172,6 +172,7 @@ Two hand-built starter templates ship alongside, each under its own MIT licence:
 - A bakeoff result strong enough to recommend one model over another. The harness exists and has run; the evidence does not settle it yet.
 - Sandbox output in the builder's own panes. The console shows generation events, and install, build and type errors from a sandbox run are not reported under Problems.
 - A validated self-hosting path. The pieces are documented (see below), but nobody outside the project has deployed their own copy yet.
+- The builder's interface against a real model on your own machine. Locally it runs the fake provider; its model path needs sign-in, D1, R2 and a Workflow, which only a Cloudflare deployment has. `pnpm generate` is the local way to a real build today.
 
 **What to be careful of.** It is a beta, not a place for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
 
@@ -189,7 +190,24 @@ pnpm install --frozen-lockfile
 pnpm --filter @vibld/web dev   # the builder, at http://localhost:5173
 ```
 
-Without any keys set, the builder runs with no sign-in and the deterministic fake provider, so you can go through the whole flow at no cost. [`apps/web/README.md`](apps/web/README.md) covers adding a real model provider, the sandbox and the rest.
+Locally, the builder runs with no sign-in and the deterministic fake provider, so you can go through the whole flow at no cost and no model is called. [`apps/web/README.md`](apps/web/README.md) covers deploying it with a real model provider, sign-in, the sandbox and the rest.
+
+### Generate a real project with your own key
+
+One provider key is all this needs: no account, database or Cloudflare. It runs the same bounded build as [app.vibld.com](https://app.vibld.com), prints each step and what it cost in tokens, and writes the project it built.
+
+```bash
+export DEEPSEEK_API_KEY=...   # or ANTHROPIC_API_KEY, or OPENAI_API_KEY
+
+pnpm generate "A one-page site for a neighbourhood bakery, with opening hours and a menu" --out ./my-site --build
+
+cd my-site
+npm run dev                   # the generated project, with no vibld dependency
+```
+
+`--build` installs and builds what it wrote with npm and, when it does not build, asks the model for one repair with the compiler's output, as the hosted builder does. With one key set, that provider answers with its default model; `VIBLD_MODEL` names another from [the catalogue](packages/ai/src/model-catalogue.ts). `--style <preset>` picks one of the style presets, and `--base <dir>` makes the prompt a follow-up to a project already on disk. The calls are billed to your key. On the proof run below, a one-page bakery site on DeepSeek's default model took 17 minutes and cost about $0.31 (250,000 output tokens, most of them the model's reasoning); a larger request or a costlier model costs more. [`packages/ai/README.md`](packages/ai/README.md) has the details.
+
+[A workflow](.github/workflows/clean-clone.yml) proves this path every week: it clones this repository, gives it one key, runs exactly the command above, and builds the result again with plain npm.
 
 Before you open a pull request:
 

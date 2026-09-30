@@ -1,0 +1,142 @@
+name: Clean clone generates
+
+# The v0.1.0 bar (docs/decisions.md, L49; Chris, D80 and D82): a clean
+# checkout of the public repository installs, generates a real project with
+# one provider key and nothing else, and the project it wrote builds with
+# plain npm.
+#
+# By default the tree is a fresh clone of github.com/vibld/vibld, anonymously,
+# exactly as a reader gets it. On a pull request that changes the path it
+# proves, it is the tree this commit would export (scripts/public-export.mjs),
+# since the public copy does not have the change yet.
+#
+# Only the chosen provider's key is in the environment, and no model is
+# named, so what runs is the default a reader with that one key gets. It
+# runs with --build, as the README says to: the CLI builds what it wrote and
+# asks for one repair when it does not, as the hosted builder does. The step
+# after it builds the result again, on its own, with plain npm. The prompt is
+# small and fixed; the first run on DeepSeek's default model took 17 minutes
+# and about $0.31.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Whose key the clone is given (the only one it gets)
+        type: choice
+        options: [deepseek, openai, anthropic]
+        default: deepseek
+      source:
+        description: >-
+          public: a fresh clone of github.com/vibld/vibld. this-commit: the
+          tree this commit would export.
+        type: choice
+        options: [public, this-commit]
+        default: public
+  schedule:
+    # Mondays, so a week of merges is proven against a real model once.
+    - cron: '23 6 * * 1'
+  pull_request:
+    paths:
+      - .github/workflows/clean-clone.yml
+      - packages/ai/bin/plan.ts
+      - packages/ai/src/cli-args.ts
+      - packages/ai/src/select-client.ts
+      - package.json
+      - pnpm-lock.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clean-clone-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    name: Clone, generate with one key, build
+    if: github.repository == 'vibld/vibld-internal'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: preview
+    env:
+      PROVIDER: ${{ inputs.provider || 'deepseek' }}
+      SOURCE: ${{ inputs.source || (github.event_name == 'pull_request' && 'this-commit' || 'public') }}
+      PROMPT: >-
+        A one-page site for a neighbourhood bakery: what they bake, opening
+        hours, a short menu with prices, and how to find them.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: The tree to prove
+        run: |
+          if [ "$SOURCE" = public ]; then
+            git clone --depth 1 https://github.com/vibld/vibld.git "$RUNNER_TEMP/clone"
+            echo "Tree: github.com/vibld/vibld at $(git -C "$RUNNER_TEMP/clone" rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            # The export formats the files its rewrite changes, with this
+            # repository's Prettier.
+            pnpm install --frozen-lockfile
+            node scripts/public-export.mjs "$RUNNER_TEMP/clone" "$GITHUB_SHA"
+            echo "Tree: the public export of ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # What the README's quick start says, with no key anywhere near it.
+      - name: Install
+        working-directory: ${{ runner.temp }}/clone
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate with one key
+        working-directory: ${{ runner.temp }}/clone
+        env:
+          # Only the chosen one is set; the other two expressions are empty.
+          ANTHROPIC_API_KEY: ${{ (inputs.provider || 'deepseek') == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ (inputs.provider || 'deepseek') == 'openai' && secrets.OPENAI_API_KEY || '' }}
+          DEEPSEEK_API_KEY: ${{ (inputs.provider || 'deepseek') == 'deepseek' && secrets.DEEPSEEK_API_KEY || '' }}
+        run: |
+          set -o pipefail
+          {
+            echo "## Generate"
+            echo
+            echo "Provider key given: $PROVIDER (no model named)"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          pnpm generate "$PROMPT" --out ./site --build 2>&1 | tee "$RUNNER_TEMP/generate.log" || status=$?
+          { tail -40 "$RUNNER_TEMP/generate.log"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      # ADR-0002: the output builds with ordinary npm commands, no Vibld
+      # package, account or service, and no key.
+      - name: Build what it wrote
+        working-directory: ${{ runner.temp }}/clone/site
+        run: |
+          set -o pipefail
+          status=0
+          { npm install --no-audit --no-fund && npm run build; } > "$RUNNER_TEMP/build.log" 2>&1 || status=$?
+          tail -30 "$RUNNER_TEMP/build.log"
+          {
+            echo
+            if [ $status -eq 0 ]; then
+              echo '## Build: passed'
+              echo
+              echo 'The generated project installed and built with plain npm.'
+            else
+              echo '## Build: FAILED'
+              echo
+              echo '```'
+              tail -40 "$RUNNER_TEMP/build.log"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status

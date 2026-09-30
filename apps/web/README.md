@@ -40,8 +40,12 @@ into newer state.
   sandbox" button (see "Sandbox previews" below) starts the real thing --
   the mock is what shows before that button is pressed, and for a
   model-generated project, which has no mock to build in the first place.
-- **There is no model provider.** Plans come from a deterministic local
-  function so CI needs no credentials (ADR-0007).
+- **Locally there is no model provider.** `pnpm dev` runs plain Vite with
+  nothing serving `/api`, so plans come from a deterministic local function
+  and CI needs no credentials (ADR-0007). A deployed Worker with a provider
+  key, sign-in and storage uses a real model (see "Model generation" below),
+  and `pnpm generate` at the repository root runs a real build from a
+  checkout with only a key.
 - **Console and Problems are placeholders** beyond the lifecycle log and
   validation findings. `@vibld/preview` reports install/start success or
   failure as a whole (see "Sandbox previews" below), but nothing pipes a
@@ -334,7 +338,7 @@ cannot outlive its request.
 ### Fail closed
 
 `/api/plan` and `/api/config` serve a generation only when a provider key
-(`ANTHROPIC_API_KEY` or `DEEPSEEK_API_KEY`), `USER_BUDGET`,
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`), `USER_BUDGET`,
 `CLERK_FRONTEND_API_URL`, `GENERATION_WORKFLOW`, `DB` and `PROJECT_CONTENT`
 are **all** present. Missing configuration means refused, never open: an
 unauthenticated endpoint on a public URL would let anyone spend the account's

@@ -205,6 +205,27 @@ exactly this path.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
 
+### Resolved 2026-09-30 (later)
+
+**The open-source launch, smallest credible version first.** Chris decided on
+2026-09-30 to pause new product work and get the open-source version live
+(D79). "Live" means all four of: a clean clone generates a real project with
+only a provider key, proven in CI; a validated self-hosting path on
+Cloudflare; a tagged v0.1.0 release; and an announcement (D80). They ship in
+that order as each is proven, not held for the slowest (D81, "Smallest
+credible launch").
+
+**The first bar is met by the command line, not the builder's interface.**
+Taken on Chris's behalf on 2026-09-30 while he was away (D82), to be
+confirmed. The builder's interface cannot reach a real model locally: `pnpm
+dev` is Vite with nothing serving `/api`, and the Worker's model path needs
+sign-in, D1, R2, a Durable Object and a Workflow, none with a local
+substitute. The bounded build itself needs only a key, so `pnpm generate`
+(the `@vibld/ai` CLI) is the documented local path, and
+`.github/workflows/clean-clone.yml` proves it on a fresh anonymous clone of
+the public repository each week. A local builder against a real model (L46,
+L47) belongs with the self-hosting work.
+
 ### Resolved 2026-09-30
 
 **What vibld takes from designs-v1, and how.** Chris decided on 2026-09-30

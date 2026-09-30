@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseMockupArgs, parsePlanArgs } from '../src/cli-args.ts';
+import {
+  buildEnvironment,
+  parseMockupArgs,
+  parsePlanArgs,
+} from '../src/cli-args.ts';
 
 describe('parsePlanArgs', () => {
   it('takes an unquoted prompt as the words before any flag', () => {
@@ -27,6 +31,22 @@ describe('parsePlanArgs', () => {
     const args = parsePlanArgs(['x', '--out', 'o']);
     assert.equal('base' in args, false);
     assert.equal(args.out, 'o');
+  });
+
+  it('reads --build, which takes no value, wherever it comes', () => {
+    const expected = { prompt: 'a bakery site', build: true, out: 'site' };
+    for (const argv of [
+      ['a', 'bakery', 'site', '--build', '--out', 'site'],
+      ['a', 'bakery', 'site', '--out', 'site', '--build'],
+    ]) {
+      assert.deepEqual(parsePlanArgs(argv), expected, argv.join(' '));
+    }
+    // The prompt ends at --build too, and --build swallows no value.
+    assert.deepEqual(parsePlanArgs(['a', 'site', '--build', 'more']), {
+      prompt: 'a site',
+      build: true,
+    });
+    assert.equal('build' in parsePlanArgs(['a', 'site']), false);
   });
 
   it('reports an empty prompt when there is only a flag', () => {
@@ -106,6 +126,29 @@ describe('parseMockupArgs', () => {
     assert.equal(
       parseMockupArgs(['a', 'bakery', '--base', './generated']).prompt,
       'a bakery --base ./generated',
+    );
+  });
+});
+
+describe('buildEnvironment', () => {
+  it('passes a build everything but the credentials', () => {
+    assert.deepEqual(
+      buildEnvironment({
+        PATH: '/usr/bin',
+        HOME: '/home/me',
+        NODE_ENV: 'production',
+        ANTHROPIC_API_KEY: 'a',
+        DEEPSEEK_API_KEY: 'b',
+        OPENAI_API_KEY: 'c',
+        GITHUB_TOKEN: 'd',
+        npm_config__authToken: 'e',
+        CLOUDFLARE_API_TOKEN: 'f',
+        SOME_SECRET: 'g',
+        DB_PASSWORD: 'h',
+        GOOGLE_APPLICATION_CREDENTIALS: 'i',
+        UNSET: undefined,
+      }),
+      { PATH: '/usr/bin', HOME: '/home/me', NODE_ENV: 'production' },
     );
   });
 });

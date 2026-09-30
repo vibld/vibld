@@ -74,7 +74,16 @@ export function readCompletion<T>(
     );
   }
 
-  if (completion.stopReason === 'max_tokens') {
+  // A reply with nothing in it that spent its whole ceiling was cut off,
+  // whatever the finish reason said. DeepSeek Flash spent all 16,000 of an
+  // outline's ceiling (14,146 of it thinking) and came back empty without a
+  // `length` finish on the clean-clone proof run of 2026-09-30; read as a
+  // shape error, it was asked again in the same room and was cut off again,
+  // where a truncation whose thinking filled the reply is given twice the
+  // room (OUTLINE_RETRY_MAX_TOKENS).
+  const spentCeiling =
+    completion.plan == null && completion.usage.outputTokens >= maxTokens;
+  if (completion.stopReason === 'max_tokens' || spentCeiling) {
     throw new ProviderTruncationError(maxTokens, subject);
   }
 

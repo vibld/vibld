@@ -21,6 +21,12 @@ export interface PlanArgs {
    * quietly building unstyled.
    */
   style?: string;
+  /**
+   * Install and build what was written, and when it does not build, ask
+   * for one repair with the compiler's output, as the hosted builder does.
+   * Needs `out`.
+   */
+  build?: boolean;
 }
 
 export interface MockupArgs {
@@ -59,10 +65,19 @@ function parse(
   return { prompt: argv.slice(0, promptEnd).join(' ').trim(), values };
 }
 
+const PLAN_FLAGS = ['--out', '--base', '--style'] as const;
+
 export function parsePlanArgs(argv: string[]): PlanArgs {
-  const { prompt, values } = parse(argv, ['--out', '--base', '--style']);
+  // `--build` takes no value, so it is read on its own and the valued flags
+  // from what is left. The prompt still ends at the first flag of either
+  // kind: everything before `--build`, parsed, ends at whichever came first.
+  const at = argv.indexOf('--build');
+  const rest = at === -1 ? argv : [...argv.slice(0, at), ...argv.slice(at + 1)];
+  const { values } = parse(rest, PLAN_FLAGS);
+  const { prompt } = parse(at === -1 ? argv : argv.slice(0, at), PLAN_FLAGS);
   return {
     prompt,
+    ...(at === -1 ? {} : { build: true }),
     ...(values['--out'] === undefined ? {} : { out: values['--out'] }),
     ...(values['--base'] === undefined ? {} : { base: values['--base'] }),
     ...(values['--style'] === undefined ? {} : { style: values['--style'] }),
@@ -79,4 +94,31 @@ export function parseMockupArgs(argv: string[]): MockupArgs {
       ? {}
       : { maxTokens: values['--max-tokens'] }),
   };
+}
+
+/**
+ * A variable's name that says it holds a credential: an API key, a token, a
+ * secret or a password, under any provider's prefix.
+ */
+const SECRET_NAME = /(KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS?)$/i;
+
+/**
+ * The environment `--build` gives `npm install` and `npm run build`: the
+ * caller's own, less every variable named as a credential.
+ *
+ * The project being built was written by a model, and so were its
+ * dependencies and its build config; either can run code, and the
+ * provider key that paid for the generation is in the CLI's environment.
+ * Nothing a build of a generated site does needs that key, so it is not
+ * passed on.
+ */
+export function buildEnvironment(
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || SECRET_NAME.test(name)) continue;
+    kept[name] = value;
+  }
+  return kept;
 }

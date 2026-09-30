@@ -12,6 +12,7 @@
     "dev": "turbo run dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "generate": "pnpm --filter @vibld/ai plan",
     "test": "turbo run test",
     "test:scripts": "node --test scripts/*.test.mjs",
     "typecheck": "turbo run typecheck"

@@ -449,6 +449,38 @@ describe('the output ceiling', () => {
       },
     );
   });
+  it('names an empty reply that spent its whole ceiling as truncation', async () => {
+    // No `length` finish reason: what DeepSeek sent on the clean-clone run
+    // of 2026-09-30. Read as a shape error, the retry got no more room.
+    const empty = (outputTokens: number) =>
+      new PlanProvider(
+        {
+          id: 'stub',
+          createPlan: async () => ({
+            plan: null,
+            stopReason: null,
+            emptyBody: true,
+            usage: {
+              inputTokens: 10,
+              outputTokens,
+              reasoningTokens: outputTokens - 100,
+              cacheReadInputTokens: 0,
+              cacheWriteInputTokens: 0,
+            },
+          }),
+        },
+        { maxTokens: 16_000 },
+      ).generate({ prompt: 'a landing page' });
+    await assert.rejects(
+      () => empty(16_000),
+      (error: Error) => error.name === 'ProviderTruncationError',
+    );
+    // Short of the ceiling, an empty reply is still what it was: no plan.
+    await assert.rejects(
+      () => empty(15_999),
+      (error: Error) => error.name === 'ProviderShapeError',
+    );
+  });
 });
 
 describe('progress reporting', () => {

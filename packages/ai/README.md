@@ -70,37 +70,49 @@ whole orchestration can be exercised with no network and no key.
 
 ## Trying it
 
-Nothing else in the repository makes a live model call. This CLI is the only
-path, and it needs a key you supply:
+`pnpm generate` at the repository root runs one real build with a key you
+supply and nothing else: no account, database or Cloudflare. It is
+`pnpm --filter @vibld/ai plan`, and relative paths are read from the
+repository root.
 
 ```bash
-ANTHROPIC_API_KEY=... pnpm --filter @vibld/ai plan "a landing page for a cybersecurity SaaS with pricing, an FAQ, heavy motion graphics, and a navy / dark purple / neon yellow palette"
+DEEPSEEK_API_KEY=... pnpm generate "a landing page for a cybersecurity SaaS with pricing, an FAQ, heavy motion graphics, and a navy / dark purple / neon yellow palette"
 
 # write the generated project out and build it like any npm project
-ANTHROPIC_API_KEY=... pnpm --filter @vibld/ai plan "..." --out /tmp/generated
-cd /tmp/generated && npm install && npm run build
+DEEPSEEK_API_KEY=... pnpm generate "..." --out ./generated
+cd generated && npm install && npm run build
+
+# or let it build, and repair once with the compiler's output if it fails,
+# as the hosted builder does (repairPromptFor, keepingRecordOf)
+DEEPSEEK_API_KEY=... pnpm generate "..." --out ./generated --build
 
 # with a style preset, as the builder sends one
-ANTHROPIC_API_KEY=... pnpm --filter @vibld/ai plan "..." --style glassmorphism
+DEEPSEEK_API_KEY=... pnpm generate "..." --style glassmorphism
+
+# a follow-up to a project already on disk
+DEEPSEEK_API_KEY=... pnpm generate "add a pricing page" --base ./generated --out ./generated-2
 ```
 
+With exactly one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
+`DEEPSEEK_API_KEY` set, that provider answers with its default model
+(`DEFAULT_MODELS` in `src/select-client.ts`). `VIBLD_MODEL` names another from
+the catalogue, and `VIBLD_PROVIDER` chooses when more than one key is set.
+
 Each step of the bounded build is printed as it starts, with the second it
-started at.
+started at, and the run ends with its token use per step.
 
-That second form is the portability check from ADR-0002: the output must build
+The `--out` form is the portability check from ADR-0002: the output must build
 with ordinary npm commands and no Vibld anything.
+`.github/workflows/clean-clone.yml` runs it weekly on a fresh clone of the
+public repository with one key.
 
-## Not wired into the builder yet -- and why
+## In the builder
 
-The builder shell is a **static SPA served from a public URL**. A model key
-placed in it would be readable by anyone who opens the page, which ADR-0006
-forbids: provider credentials belong to a trusted service, never to code the
-browser can read.
-
-So using this from the deployed builder needs a server hop -- an endpoint that
-holds the key and calls this adapter. That endpoint also needs an access
-control decision before it exists, because an unauthenticated endpoint on a
-public URL lets anyone spend the account's model budget.
+The builder shell is a static SPA served from a public URL, so it never holds
+a model key (ADR-0006). A deployed builder reaches this package through its
+Worker: `/api/plan` checks sign-in and the spend ledger, then runs the bounded
+build as a durable Workflow, one step per call. Locally, `pnpm dev` serves no
+`/api`, so the builder runs the deterministic fake instead.
 
 ## Design intelligence
 
