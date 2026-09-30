@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { FakeModelProvider } from '@vibld/core';
+import { MAX_CHAT_BRIEF_CHARS } from '@vibld/ai/limits';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import { BuilderSession } from '../src/generation/session.ts';
 import type {
@@ -183,6 +184,19 @@ describe('talking to the agent', () => {
     await session.send('a bakery site');
     assert.deepEqual(asked, []);
     assert.equal(session.getState().transcript[0]?.status, 'accepted');
+  });
+
+  it('builds a message longer than its own brief could be, as written', async () => {
+    // A template's brief from vibld.com is twice what the agent may write
+    // back (D111); asking it would have built a summary of the template.
+    const { session, asked } = createSession([]);
+    const brief = `A bakery site. ${'Every section as specified. '.repeat(200)}`;
+    assert.ok(brief.length > MAX_CHAT_BRIEF_CHARS);
+    await session.send(brief);
+    assert.deepEqual(asked, []);
+    const turn = session.getState().transcript[0];
+    assert.equal(turn?.status, 'accepted');
+    assert.equal(turn?.prompt, brief.trim());
   });
 
   it('keeps a forced failure a test of the build path', async () => {

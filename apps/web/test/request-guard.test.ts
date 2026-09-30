@@ -16,6 +16,7 @@ import {
   parseReferenceUrl,
   parseStylePreset,
 } from '../worker/request-guard.ts';
+import { MAX_BRIEF_CHARS } from '../src/templates/template-brief.ts';
 import { MAX_CHOSEN_MOCKUP_CHARS } from '@vibld/ai/limits';
 
 const SELF = 'https://vibld-web-preview.example.workers.dev';
@@ -123,6 +124,17 @@ describe('generation request validation', () => {
     ]) {
       assert.equal(parseGenerationRequest(body).ok, false);
     }
+  });
+
+  it('accepts the longest brief a template link can fill the composer with', () => {
+    // D111: at 4,000 the Worker refused every template brief vibld.com
+    // sent (6,700 to 8,400 characters), so "Start from this template"
+    // filled a message that could not be sent.
+    assert.equal(DEFAULT_LIMITS.maxPromptChars, MAX_BRIEF_CHARS);
+    const brief = parseGenerationRequest({
+      prompt: 'x'.repeat(MAX_BRIEF_CHARS),
+    });
+    assert.equal(brief.ok, true);
   });
 
   it('rejects an over-long prompt', () => {

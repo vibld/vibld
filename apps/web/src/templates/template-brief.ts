@@ -14,11 +14,15 @@
  * takes it. The fragment is then removed, so a reload does not bring the
  * brief back after it was sent.
  */
+import { MAX_PROMPT_CHARS } from '@vibld/ai/limits';
 
 export const TEMPLATE_BRIEF_KEY = 'vibld.template-brief';
 
-/** More than any catalog brief, and far less than a reasonable store. */
-export const MAX_BRIEF_CHARS = 40_000;
+/**
+ * The longest message the Worker accepts (D111), so a brief the composer is
+ * filled with can always be sent.
+ */
+export const MAX_BRIEF_CHARS = MAX_PROMPT_CHARS;
 
 export interface TemplateBrief {
   template: string;

@@ -412,10 +412,18 @@ describe('who a chat turn refuses, before anything is reserved', () => {
       [
         'a conversation past its total',
         {
-          messages: Array.from({ length: 7 }, (_, index) => ({
-            role: index % 2 === 0 ? 'user' : 'assistant',
-            text: 'x'.repeat(MAX_CHAT_MESSAGE_CHARS),
-          })),
+          // Enough longest messages to pass the total, and no more, so
+          // it is the total that refuses them and not the body size.
+          messages: Array.from(
+            {
+              length:
+                Math.floor(MAX_CHAT_TOTAL_CHARS / MAX_CHAT_MESSAGE_CHARS) + 1,
+            },
+            (_, index) => ({
+              role: index % 2 === 0 ? 'user' : 'assistant',
+              text: 'x'.repeat(MAX_CHAT_MESSAGE_CHARS),
+            }),
+          ),
         },
         413,
       ],

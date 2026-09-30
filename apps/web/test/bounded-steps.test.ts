@@ -33,6 +33,7 @@ import type {
 import { D1GenerationStore } from '../worker/generation-store.ts';
 import {
   BOUNDED_BUILD_INPUT_CHARS,
+  BUILD_INPUT_CHARS,
   runCeilingFor,
 } from '../worker/run-ceiling.ts';
 import { stageFor, stepFor } from '../worker/run-stage.ts';
@@ -630,8 +631,8 @@ describe('what a bounded build may spend', () => {
       0,
     );
     // It stops with its budget named rather than sending past what was
-    // reserved for it.
-    assert.ok(sent <= 256_500, `sent ${sent}`);
+    // reserved for it: one single-call build's input.
+    assert.ok(sent <= BUILD_INPUT_CHARS, `sent ${sent}`);
     assert.equal(outcome.result.stop, 'run-budget-exceeded');
   });
 

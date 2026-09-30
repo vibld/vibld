@@ -293,6 +293,45 @@ look alike, no filtering, and an exact count where his rule rounds.
   type (homepage, screen, section) on every entry, ready for the next batch;
   and a share image of each template's mocked homepage.
 
+### Resolved 2026-09-30 (night)
+
+Chris asked for Drummond-IT/designs-v1's SaaS screen patterns
+(`saas-screen-patterns/`, 237 entries: 149 app screens, 60 marketing sites
+and 28 starter apps) to be folded into the template catalog and the
+inspiration gallery, keeping names, guardrails and build prompts, merging
+duplicates, and re-checking every colour pair against WCAG AA.
+
+- **D107. Duplicates.** Six entries are the same product as a design
+  already in the catalog and are shown on it as another design for it,
+  rather than listed twice: cuetide and dawnlist on queueline (a dark
+  pre-launch waitlist page), coquill and chorusdesk on plainwrite (a
+  collaborative documents editor), hexledger on nightvault (a dark fintech
+  marketing site) and gildway on tallyway (a payments startup's site). No
+  name or id clashes with any existing one.
+- **D108. Typefaces.** The 88 marketing sites and starters each get their
+  own set, unique across both batches, as D103 did for the first. The 149
+  screen patterns keep the faces the catalog drew them in: composed into a
+  template, a screen is drawn in the template's type.
+- **D109. Inspiration.** Every entry's palette and type pairing joins
+  /inspiration as a style to borrow, as D83 did. The builder's style
+  presets are unchanged.
+- **D110. Screens compose into templates.** /templates filters by screen
+  type; a template's page lets a reader pick screens to add, and the
+  builder has a screen picker of its own. A composed screen brings its
+  patterns, layout, states and guardrails, and is built in the template's
+  design system.
+- **D111. A template's brief can be sent.** The Worker capped a message at
+  4,000 characters, and every template brief is 6,700 to 8,400, so "Start
+  from this template" (D106) filled the composer with a message the Worker
+  refused. The cap on a build prompt and a chat message is now 40,000, the
+  most the builder accepts from a template link; the conversation a chat
+  turn carries is 60,000 (one such message and 20,000 before it). A
+  message longer than the 4,000 characters the agent may write back as a
+  brief is built as written rather than rewritten by the agent. A build's
+  worst-case input reservation rises from 260,500 to 296,500 characters,
+  about 14%; the smallest build a Free account can start on the default
+  model now needs $0.86 set aside, from $0.81.
+
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 
 Chris asked for the design prompt catalog in Drummond-IT/designs-v1

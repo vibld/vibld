@@ -19,6 +19,7 @@ import type {
 import type { ModelProvider } from '@vibld/core';
 import type { StylePresetId } from '@vibld/ai/style-presets';
 import {
+  MAX_CHAT_BRIEF_CHARS,
   MAX_CHAT_MESSAGE_CHARS,
   MAX_CHAT_PATH_CHARS,
   MAX_CHAT_PROJECT_FILES,
@@ -1294,6 +1295,12 @@ export class BuilderSession {
       return;
     }
     if (this.#state.generation !== 'model' || mode !== 'succeed') {
+      return this.submit(trimmed, mode, style, referenceUrl);
+    }
+    // Longer than the brief the agent may write back: a specification, such
+    // as a template's brief from vibld.com (D111), and asking the agent
+    // would cut it to that length. It is built as written.
+    if (trimmed.length > MAX_CHAT_BRIEF_CHARS) {
       return this.submit(trimmed, mode, style, referenceUrl);
     }
 

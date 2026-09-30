@@ -343,18 +343,31 @@ export const MAX_MEDIA_SECTION_CHARS = 24_000;
 export const MAX_CHAT_MESSAGES = 24;
 
 /**
- * The longest single message a chat turn carries. The same figure as the
- * build prompt cap (`maxPromptChars` in the Worker's request guard): it is
- * the same person typing into the same box.
+ * The longest message the composer sends, as a build prompt (the Worker's
+ * `maxPromptChars`) or as a chat message: it is the same person typing into
+ * the same box.
+ *
+ * 40,000 (docs/decisions.md, D111), up from 4,000: a template's brief from
+ * vibld.com (D106) is 6,700 to 8,400 characters, and one with screen
+ * patterns composed into it (D110) is up to this, which is also the most the
+ * builder accepts from a template link (`MAX_BRIEF_CHARS` in
+ * apps/web/src/templates). At 4,000 the Worker refused every one.
  */
-export const MAX_CHAT_MESSAGE_CHARS = 4_000;
+export const MAX_PROMPT_CHARS = 40_000;
+
+/** The longest single message a chat turn carries: `MAX_PROMPT_CHARS`. */
+export const MAX_CHAT_MESSAGE_CHARS = MAX_PROMPT_CHARS;
 
 /**
  * Every message a chat turn carries, together. Refused past this rather
  * than trimmed by the Worker, so a caller always knows what was sent; the
  * browser client trims oldest-first to fit before it asks.
+ *
+ * One longest message and 20,000 characters of the conversation before it
+ * (D111): below `MAX_PROMPT_CHARS`, a template's brief could not be sent at
+ * all.
  */
-export const MAX_CHAT_TOTAL_CHARS = 24_000;
+export const MAX_CHAT_TOTAL_CHARS = MAX_PROMPT_CHARS + 20_000;
 
 /** The current checkpoint's summary, as a chat turn carries it. */
 export const MAX_CHAT_SUMMARY_CHARS = 1_000;

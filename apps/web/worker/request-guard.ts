@@ -9,6 +9,7 @@ import {
   MAX_CHAT_TOTAL_PATH_CHARS,
   MAX_CHOSEN_MOCKUP_CHARS,
   MAX_KNOWLEDGE_CHARS,
+  MAX_PROMPT_CHARS,
   MAX_REFERENCE_URL_CHARS,
 } from '@vibld/ai/limits';
 import { canonicalModelId, findModel, isKnownModel } from '@vibld/ai';
@@ -45,7 +46,7 @@ export interface GuardLimits {
 
 export const DEFAULT_LIMITS: GuardLimits = {
   maxBodyBytes: 256 * 1024,
-  maxPromptChars: 4000,
+  maxPromptChars: MAX_PROMPT_CHARS,
   maxFiles: 50,
   maxPathChars: 256,
   // The base snapshot's paths are sent to the model, so this is the real
