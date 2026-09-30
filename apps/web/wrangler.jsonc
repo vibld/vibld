@@ -87,6 +87,11 @@
     // packages/ai/src/select-client.ts, which is a different model.
     "VIBLD_MODEL": "gpt-6-sol",
 
+    // Where referral links send people: vibld.com, where a friend sees what
+    // vibld is before being asked to sign up (Chris, 2026-09-28). A copy
+    // that leaves this unset sends them to its own address (D97).
+    "VIBLD_REFERRAL_ORIGIN": "https://vibld.com",
+
     // Clerk's Frontend API URL -- a public identifier, not a secret. Used as
     // both the JWT issuer to match and the base for the JWKS fetch
     // (clerk-auth.ts appends /.well-known/jwks.json). CLERK_SECRET_KEY and

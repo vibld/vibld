@@ -25,6 +25,6 @@ ADRs record consequential decisions and the reasoning behind them. They compleme
 - [ADR-0011: Hold the dangerous primitives rather than granting them](0011-capability-manifests-and-escalation.md)
 - [ADR-0012: Serve agent instructions, version-stamped, rather than vendoring them](0012-served-agent-instructions.md)
 - [ADR-0013: Keep preview and publish separate, and never let a run publish](0013-preview-and-publish-as-separate-verbs.md)
-- [ADR-0014: Generate on Tailwind v4, shadcn/ui, Lucide and Motion, with expressive motion by default](0014-generated-project-stack.md) -- **Proposed**, awaiting the decision owner
+- [ADR-0014: Generate on Tailwind v4, shadcn/ui, Lucide and Motion, with expressive motion by default](0014-generated-project-stack.md) -- **Accepted** 2026-09-30 (D92)
 
 ADRs 0001-0004 remain unchanged. ADRs 0005-0008 record the founder's accepted [D1-D30 choices](../decisions.md); acceptance of architecture is separate from implementation status and review of the documentation PR. ADRs 0011-0013 were accepted on 2026-09-17 and refine D14-D16, D22 and the publishing milestone; none of the three is implemented, and accepting them is what the work is built against rather than a claim that it exists. The archived blueprint's suggested ADR filenames were proposals, not assigned numbers.

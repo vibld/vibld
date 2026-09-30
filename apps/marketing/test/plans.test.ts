@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { dollars, priceLabel, readPlans } from '../app/plans.ts';
+import { countWord, dollars, priceLabel, readPlans } from '../app/plans.ts';
 
 /**
  * The pricing page's figures, held to the builder that enforces them and to
@@ -24,6 +24,7 @@ const sources = {
   entitlement: readFileSync(join(WORKER, 'entitlement.ts'), 'utf8'),
   signupCredit: readFileSync(join(WORKER, 'signup-credit.ts'), 'utf8'),
   stripeClient: readFileSync(join(WORKER, 'stripe-client.ts'), 'utf8'),
+  modelAccess: readFileSync(join(WORKER, 'model-access.ts'), 'utf8'),
 };
 const DECISIONS = readFileSync(join(ROOT, 'docs', 'decisions.md'), 'utf8');
 
@@ -185,6 +186,7 @@ describe('the plans the pricing page states', () => {
         entitlement: 'nothing here',
         signupCredit: '',
         stripeClient: '',
+        modelAccess: '',
       }),
     );
     assert.throws(() =>
@@ -199,5 +201,35 @@ describe('the plans the pricing page states', () => {
         ),
       }),
     );
+  });
+});
+
+describe('the Free plan, as the pages state it (D98b)', () => {
+  it("reads its models and its project limit from the builder's source", () => {
+    const { free } = readPlans(sources);
+    const models = /TIER_MODELS[\s\S]*?free:\s*\[([^\]]*)\]/.exec(
+      sources.modelAccess,
+    )?.[1];
+    assert.ok(models, 'model-access.ts no longer declares the Free models');
+    assert.deepEqual(
+      free.modelIds,
+      [...models.matchAll(/'([^']+)'/g)].map((match) => match[1]),
+    );
+    const limit = /ACTIVE_PROJECT_LIMIT[\s\S]*?free:\s*(\d+)/.exec(
+      sources.entitlement,
+    )?.[1];
+    assert.equal(free.activeProjects, Number(limit));
+  });
+
+  it('refuses to build a page from a source it cannot read', () => {
+    assert.throws(
+      () => readPlans({ ...sources, modelAccess: '' }),
+      /Free plan's models/,
+    );
+  });
+
+  it('writes a small count as a word', () => {
+    assert.equal(countWord(3), 'three');
+    assert.equal(countWord(12), '12');
   });
 });

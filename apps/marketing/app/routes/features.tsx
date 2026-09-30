@@ -5,6 +5,7 @@ import { FeatureBento, SectionHead } from '../components/Sections';
 import { PageHead } from '../components/SiteChrome';
 import { faqSchema } from '../schema';
 import { SITE, metaFor } from '../site';
+import { FREE_PLAN } from '../plan-sources';
 
 export function meta() {
   return [...metaFor('/features'), faqSchema(QUESTIONS)];
@@ -55,7 +56,7 @@ const COMPOSER: Feature[] = [
   },
   {
     title: 'A choice of model',
-    body: 'Which models are offered depends on the deployment and your plan; Free builds with GPT-6 Luna. The settings menu reports which one actually served the last run.',
+    body: `Which models are offered depends on the deployment and your plan; Free builds with ${FREE_PLAN.models}. The settings menu reports which one actually served the last run.`,
   },
 ];
 
@@ -103,7 +104,7 @@ const PANES: Feature[] = [
 const PROJECTS: Feature[] = [
   {
     title: 'Saved as you go',
-    body: 'The code, the whole conversation and the settings. Open, rename, duplicate, archive or delete from the Projects list. Free keeps three active projects; Build and Ship have no limit.',
+    body: `The code, the whole conversation and the settings. Open, rename, duplicate, archive or delete from the Projects list. Free keeps ${FREE_PLAN.activeProjects} active projects; Build and Ship have no limit.`,
   },
   {
     title: 'Builds that outlast the page',

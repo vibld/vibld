@@ -15,7 +15,7 @@ The first versioned template uses React Router framework mode with static preren
 
 Provide conventional install, development, build, lint, typecheck and test commands, a lockfile, README and `.env.example`. Prerender each declared marketing route with page-specific titles, descriptions and social metadata. Validate rendered HTML and keyboard/mobile behavior; do not treat a passing compiler as a complete website quality check. Forms must state whether submission is functional or a demonstration. M1 does not imply a live email or database integration.
 
-Generated projects must build outside Vibld without a Vibld account, broker, runtime package or `.vibld/` directory. Optional metadata stores template version and provenance without becoming required app logic. Check static hosting behavior for deep links and missing routes.
+Generated projects must build outside Vibld without a Vibld account, broker or runtime package, and without their optional `.vibld/` metadata (ADR-0002; D94). Optional metadata stores template version and provenance without becoming required app logic. Check static hosting behavior for deep links and missing routes.
 
 Core code stays Apache-2.0. Reusable starter-template source receives an explicit MIT license at its own boundary when added. Preserve upstream notices and mark any copied core code under its original license. User-created application code may use the user's selected license, subject to third-party obligations. This policy does not relicense existing repository files or guarantee rights in arbitrary generated content.
 

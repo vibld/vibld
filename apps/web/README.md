@@ -1283,8 +1283,9 @@ started a purchase.
 
 - `GET /api/referral/status` -- authenticated. Issues the caller's code on
   first look and returns `{ code, url, referred, paid, earnedCents,
-rewardCents, maxPaidReferrals }`. `url` is `https://vibld.com/?ref=<code>`
-  (`VIBLD_REFERRAL_ORIGIN` overrides the origin), so a friend sees the site
+rewardCents, maxPaidReferrals }`. `url` is `<VIBLD_REFERRAL_ORIGIN>/?ref=<code>`,
+  or the builder's own origin when that is unset. The hosted service sets it
+  to `https://vibld.com` in `wrangler.jsonc`, so a friend sees the site
   before signing up. `earnedCents` is summed from the
   caller's referral grants net of clawbacks, not worked out from `paid`.
 - `POST /api/referral/claim` -- authenticated, body `{ "code": "..." }`.

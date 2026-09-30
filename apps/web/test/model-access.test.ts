@@ -6,6 +6,7 @@ import {
   FREE_PLAN_MODELS_NOTE,
   TIER_MODELS,
   decideModel,
+  unservableConfiguredModel,
   draftModelFor,
   grantedFor,
   planWithholdsModels,
@@ -388,5 +389,64 @@ describe('a Free account (D66)', () => {
       MODEL_CATALOGUE.length,
     );
     assert.equal(planWithholdsModels(env, 'anyone@example.com', null), false);
+  });
+});
+
+describe('a VIBLD_MODEL the deployment cannot serve (D91)', () => {
+  const anthropicOnly = { ANTHROPIC_API_KEY: 'a', VIBLD_MODEL: 'gpt-6-sol' };
+
+  it('refuses rather than falling back to the first model it can serve', () => {
+    // It used to run on Claude Fable 5.1, the dearest Anthropic model.
+    const decision = decideModel(
+      anthropicOnly,
+      'me@example.com',
+      null,
+      null,
+      'gpt-6-sol',
+    );
+    assert.equal(decision.ok, false);
+    if (!decision.ok) {
+      assert.equal(decision.status, 503);
+      assert.match(decision.error, /no OPENAI_API_KEY/);
+      assert.match(decision.error, /VIBLD_MODEL/);
+    }
+  });
+
+  it('refuses a model the catalogue does not know', () => {
+    assert.match(
+      unservableConfiguredModel({ ...ALL_KEYED, VIBLD_MODEL: 'gpt-99' }) ?? '',
+      /not a model vibld knows/,
+    );
+  });
+
+  it('says nothing when the model is served, or none is named', () => {
+    assert.equal(
+      unservableConfiguredModel({ ...ALL_KEYED, VIBLD_MODEL: 'gpt-6-sol' }),
+      null,
+    );
+    assert.equal(unservableConfiguredModel({ ANTHROPIC_API_KEY: 'a' }), null);
+    assert.equal(
+      unservableConfiguredModel({ ANTHROPIC_API_KEY: 'a', VIBLD_MODEL: ' ' }),
+      null,
+    );
+    const decision = decideModel(
+      { ANTHROPIC_API_KEY: 'a' },
+      'me@example.com',
+      null,
+      null,
+      'claude-opus-5-5',
+    );
+    assert.equal(decision.ok, true);
+  });
+
+  it('still honours a model the person chose, whatever VIBLD_MODEL says', () => {
+    const decision = decideModel(
+      anthropicOnly,
+      'me@example.com',
+      null,
+      'claude-opus-5-5',
+      'gpt-6-sol',
+    );
+    assert.equal(decision.ok, true);
   });
 });

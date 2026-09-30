@@ -134,9 +134,9 @@ describe('handleReferralStatus', () => {
     ).json()) as { code: string };
 
     assert.equal(first.code, second.code);
-    // vibld.com, not the builder the request came from (Chris, 2026-09-28):
-    // a friend sees the site first, and it carries the code to sign-up.
-    assert.equal(first.url, `https://vibld.com/?ref=${first.code}`);
+    // Unset, the deployment's own address (D97): a self-hosted copy's links
+    // point at itself. The hosted service sets vibld.com in wrangler.jsonc.
+    assert.equal(first.url, `https://app.vibld.com/?ref=${first.code}`);
   });
 
   it('points links wherever a deployment says its site is', async () => {

@@ -470,7 +470,7 @@ describe('crawler-facing files', () => {
 
   it('publishes llms.txt naming the product and disambiguating the name', () => {
     const body = readFileSync(join(CLIENT, 'llms.txt'), 'utf8');
-    assert.match(body, /^# Vibld$/m);
+    assert.match(body, /^# vibld$/m);
     // The brand is read by search engines as a misspelling of "Bible"; the
     // file has to say plainly what the word means.
     assert.match(body, /vibe/i);
@@ -825,6 +825,7 @@ describe('the product pages', () => {
       entitlement: worker('entitlement.ts'),
       signupCredit: worker('signup-credit.ts'),
       stripeClient: worker('stripe-client.ts'),
+      modelAccess: worker('model-access.ts'),
     });
     for (const path of ['/pricing', '/']) {
       // Text only: the figures sit in separate elements.
@@ -1025,6 +1026,7 @@ describe('structured data a search engine or an assistant reads', () => {
     entitlement: worker('entitlement.ts'),
     signupCredit: worker('signup-credit.ts'),
     stripeClient: worker('stripe-client.ts'),
+    modelAccess: worker('model-access.ts'),
   });
 
   it('gives every page below the home page a breadcrumb that ends at its canonical URL', () => {

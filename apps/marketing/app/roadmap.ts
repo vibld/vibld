@@ -75,13 +75,6 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
       'Opening the builder to anyone who signs up, rather than by invitation only.',
   },
   {
-    id: 'build-and-repair',
-    status: 'in-progress',
-    title: 'Build-and-repair reliability',
-    description:
-      'Every generated project is installed and built, and a build that fails on its own code gets one repair turn that is sent the exact error.',
-  },
-  {
     id: 'component-stack',
     status: 'in-progress',
     title: 'Modern component stack',
@@ -263,6 +256,13 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
     title: 'Animated backgrounds',
     description:
       'Four moving backgrounds drawn in code from the project’s colours, used when a request asks for one.',
+  },
+  {
+    id: 'build-and-repair',
+    status: 'shipped',
+    title: 'Build-and-repair reliability',
+    description:
+      'Every generated project is installed and built, and a build that fails on its own code gets one repair turn that is sent the exact error.',
   },
 ];
 

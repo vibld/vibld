@@ -1,0 +1,120 @@
+name: Public release
+
+# Tags github.com/vibld/vibld's main and publishes a GitHub release there,
+# with the notes in docs/releases/<version>.md. The public repository is
+# written only from here (public-export.yml), so its tags are too.
+#
+# Dispatch only: Chris decides each release (D89 for v0.1.0). Run it from
+# main after the Public export for the same commit has finished; it refuses
+# when the public main is not yet that commit's export, so a release always
+# names the tree it says it does.
+#
+# Uses the export's secret, PUBLIC_EXPORT_TOKEN (Contents read and write on
+# vibld/vibld), which covers pushing a tag and creating a release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The tag, such as v0.1.0. docs/releases/<version>.md must exist.
+        required: true
+        type: string
+
+concurrency:
+  group: public-export
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  release:
+    if: github.repository == 'vibld/vibld-internal' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check the version and its notes
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::A version is v, then three numbers: v0.1.0. Got '$VERSION'."
+            exit 1
+          fi
+          if [ ! -f "docs/releases/$VERSION.md" ]; then
+            echo "::error::docs/releases/$VERSION.md does not exist. Write the notes first."
+            exit 1
+          fi
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # The export runs Prettier on the files it changes.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: List this repository's issue and pull request numbers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --paginate
+          "repos/${GITHUB_REPOSITORY}/issues?state=all&per_page=100"
+          --jq '.[] | [.number, has("pull_request")] | @tsv'
+          > "$RUNNER_TEMP/refs.tsv"
+
+      # What the public main should hold for this commit, and the notes as
+      # the public repository has them (links rewritten on the way out).
+      - name: Export this commit
+        run: >-
+          node scripts/public-export.mjs "$RUNNER_TEMP/export" "$GITHUB_SHA"
+          --refs "$RUNNER_TEMP/refs.tsv"
+
+      - name: Clone the public repository
+        env:
+          TOKEN: ${{ secrets.PUBLIC_EXPORT_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::PUBLIC_EXPORT_TOKEN is not set. See public-export.yml."
+            exit 1
+          fi
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          echo "PUBLIC_AUTH=AUTHORIZATION: basic $auth" >> "$GITHUB_ENV"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            clone --depth 1 --branch main https://github.com/vibld/vibld.git "$RUNNER_TEMP/public"
+
+      - name: Check the public main is this commit's export
+        run: |
+          if ! diff -rq --exclude .git "$RUNNER_TEMP/export" "$RUNNER_TEMP/public" > "$RUNNER_TEMP/drift.txt"; then
+            head -20 "$RUNNER_TEMP/drift.txt"
+            echo "::error::The public main is not ${GITHUB_SHA::7}'s export yet. Wait for Public export to finish, then run this again."
+            exit 1
+          fi
+
+      - name: Tag and publish the release
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.PUBLIC_EXPORT_TOKEN }}
+        run: |
+          cd "$RUNNER_TEMP/public"
+          if git -c "http.https://github.com/.extraheader=$PUBLIC_AUTH" ls-remote --exit-code --tags origin "refs/tags/$VERSION" > /dev/null; then
+            echo "::error::$VERSION is already tagged in vibld/vibld."
+            exit 1
+          fi
+          git -c user.name=vibld -c user.email=hello@vibld.com tag -a "$VERSION" -m "vibld $VERSION"
+          git -c "http.https://github.com/.extraheader=$PUBLIC_AUTH" push origin "refs/tags/$VERSION"
+          gh release create "$VERSION" --repo vibld/vibld --verify-tag \
+            --title "vibld $VERSION" \
+            --notes-file "$RUNNER_TEMP/export/docs/releases/$VERSION.md"
+          echo "Released $VERSION at $(git rev-parse --short HEAD): https://github.com/vibld/vibld/releases/tag/$VERSION"

@@ -25,6 +25,8 @@ export interface PlanSources {
   signupCredit: string;
   /** The text of `apps/web/worker/stripe-client.ts`. */
   stripeClient: string;
+  /** The text of `apps/web/worker/model-access.ts`. */
+  modelAccess: string;
 }
 
 export interface Plan {
@@ -49,6 +51,12 @@ export interface Plans {
   signupRequiresCard: boolean;
   /** A one-time top-up: what it costs and the model spend it adds. */
   topup: { priceCents: number; creditCents: number };
+  /**
+   * What the Free plan is held to (D66, D98b): the model ids it builds with,
+   * from `TIER_MODELS` in model-access.ts, and how many active projects it
+   * keeps, from `ACTIVE_PROJECT_LIMIT` in entitlement.ts.
+   */
+  free: { modelIds: string[]; activeProjects: number };
 }
 
 /** A numeric literal as written in TypeScript, underscores and all. */
@@ -106,6 +114,23 @@ export function readPlans(sources: PlanSources): Plans {
       "Could not read whether the new-account grant needs a card from the builder's source",
     );
   }
+  const freeModels = /TIER_MODELS[\s\S]*?\bfree:\s*\[([^\]]*)\]/.exec(
+    sources.modelAccess,
+  )?.[1];
+  const modelIds = (freeModels ?? '')
+    .split(',')
+    .map((id) => id.trim().replace(/^['"]|['"]$/g, ''))
+    .filter((id) => id.length > 0);
+  if (modelIds.length === 0) {
+    throw new Error(
+      "Could not read the Free plan's models from the builder's source",
+    );
+  }
+  const activeProjects = find(
+    sources.entitlement,
+    /ACTIVE_PROJECT_LIMIT[\s\S]*?\bfree:\s*([\d_]+)/,
+    "the Free plan's active projects",
+  );
   const s = sources.stripeClient;
   const cents = (microUsd: number) => Math.round(microUsd / 10_000);
   return {
@@ -140,7 +165,27 @@ export function readPlans(sources: PlanSources): Plans {
         'the top-up credit',
       ),
     },
+    free: { modelIds, activeProjects },
   };
+}
+
+const NUMBER_WORDS = [
+  'no',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+];
+
+/** "three", the way the guide writes a small count, or the digits past ten. */
+export function countWord(count: number): string {
+  return NUMBER_WORDS[count] ?? String(count);
 }
 
 /** "$10.00", the way the guide writes an amount of credit. */

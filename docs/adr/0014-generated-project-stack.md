@@ -1,10 +1,11 @@
 # ADR-0014: Generate on Tailwind v4, shadcn/ui, Lucide and Motion, with expressive motion by default
 
-- Status: Proposed
+- Status: Accepted (Chris, 2026-09-30, D92). Generated projects are a Vite single-page app, and this supersedes D29's React Router framework mode and static prerendering for them.
 - Date: 2026-09-26
 - Decision owners: maintainers
 - Supersedes: the "only when the generated site needs them" clause of ADR-0008
-- Refines: ADR-0002, D15, D29
+- Refines: ADR-0002, D15
+- Supersedes: D29, for generated projects
 
 ## Context
 

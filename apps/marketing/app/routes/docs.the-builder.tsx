@@ -1,5 +1,6 @@
 import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, metaFor } from '../site';
+import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'the-builder')!;
 const CHECKED = '2026-09-30';
@@ -92,8 +93,8 @@ export default function TheBuilder() {
         style, the model, your instructions and preferences. The{' '}
         <strong>Projects</strong> list opens, renames, duplicates, archives and
         deletes projects. Deleting is permanent and asks first. A Free account
-        can have three active projects, and archived ones do not count; Build
-        and Ship have no limit.
+        can have {FREE_PLAN.activeProjects} active projects, and archived ones
+        do not count; Build and Ship have no limit.
       </p>
       <p>
         With the same project open in two tabs, the one left behind is told

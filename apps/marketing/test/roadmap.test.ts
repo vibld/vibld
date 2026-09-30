@@ -89,7 +89,6 @@ describe('the roadmap data', () => {
       );
     assert.deepEqual(titles('in-progress'), [
       'Public beta',
-      'Build-and-repair reliability',
       'Modern component stack',
     ]);
     assert.deepEqual(titles('upcoming'), [
@@ -122,6 +121,7 @@ describe('the roadmap data', () => {
       'Media uploads',
       'Style moods and suggestions',
       'Animated backgrounds',
+      'Build-and-repair reliability',
     ]);
   });
 

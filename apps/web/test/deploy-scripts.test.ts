@@ -157,6 +157,16 @@ describe('the secrets file this deployment tells you to create', () => {
     );
   });
 
+  it('leaves every value empty, as its header says (D98a)', async () => {
+    // The header promises each value is empty with its shape in the comment.
+    // A sample admin address or `invite` read as values to keep.
+    const example = await read('../.env.example');
+    const filled = example
+      .split('\n')
+      .filter((line) => /^[A-Z][A-Z0-9_]*=./.test(line));
+    assert.deepEqual(filled, []);
+  });
+
   it('is the file the example tells you to write secrets into', async () => {
     // The pairing is the point: an example that named some other path would
     // leave the ignore rule above guarding a file nobody creates.

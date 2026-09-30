@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 
 import { FLOW } from '../flow.ts';
-import { PLANS } from '../plan-sources.ts';
+import { FREE_PLAN, PLANS } from '../plan-sources.ts';
 import { dollars, priceLabel } from '../plans.ts';
 import { SITE } from '../site';
 
@@ -326,7 +326,7 @@ export function PlanCards({ headingLevel = 3 }: { headingLevel?: 2 | 3 }) {
           <p className="lb-plan__d">
             {plan.price
               ? 'Upgrading starts a Stripe Checkout session. Cancel plan is in the builder’s settings menu; cards and invoices are in Stripe’s billing portal.'
-              : 'An account with no active subscription is Free. It builds with GPT-6 Luna and keeps up to three active projects.'}
+              : `An account with no active subscription is Free. It builds with ${FREE_PLAN.models} and keeps up to ${FREE_PLAN.activeProjects} active projects.`}
           </p>
         </li>
       ))}

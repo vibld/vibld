@@ -7,8 +7,8 @@ import type { ProjectSnapshot } from '@vibld/core';
  * ADR-0002 makes portability a property of the output, not a promise in the
  * README, so it has to be checked on the artefact. These are checks a person
  * could not run by eye across thirty snapshots, and they are the ones that
- * quietly stop being true: a `.vibld/` directory creeping in, a dependency on
- * a Vibld package, a lockfile that never got written.
+ * quietly stop being true: a file that needs `.vibld/` metadata, a dependency
+ * on a Vibld package, a lockfile that never got written.
  *
  * Deliberately separate from the builder's own staged-file validator. That one
  * asks "is this snapshot safe to promote"; this one asks "is this project
@@ -22,8 +22,12 @@ export interface PortabilityProblem {
 
 const REQUIRED_FILES = ['package.json', 'README.md'];
 
-/** Paths that would make the project depend on Vibld to build or run. */
-const FORBIDDEN_PREFIXES = ['.vibld/'];
+/**
+ * Where optional Vibld metadata lives. ADR-0002 allows it (D94, Chris,
+ * 2026-09-30) on one condition: nothing else in the project may need it, so
+ * deleting it breaks nothing.
+ */
+const METADATA_DIR = '.vibld/';
 
 function parsePackageJson(
   content: string,
@@ -760,14 +764,13 @@ export function checkPortability(
     }
   }
 
-  for (const path of paths) {
-    for (const prefix of FORBIDDEN_PREFIXES) {
-      if (path.startsWith(prefix)) {
-        problems.push({
-          check: 'no-vibld-directory',
-          detail: `${path} ties the exported project to Vibld`,
-        });
-      }
+  for (const file of snapshot.files) {
+    if (file.path.startsWith(METADATA_DIR)) continue;
+    if (file.content.includes(METADATA_DIR)) {
+      problems.push({
+        check: 'vibld-metadata-optional',
+        detail: `${file.path} refers to ${METADATA_DIR}, so deleting that metadata would break the project`,
+      });
     }
   }
 

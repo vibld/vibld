@@ -204,23 +204,24 @@ describe('the composer, as it is actually wired', () => {
     view.unmount();
   });
 
-  it('empties the composer and the reference, so the next turn starts clean', async () => {
+  it('empties the message but keeps the reference, which the project remembers', async () => {
+    // D93 (Chris, 2026-09-30): every build reads the reference page until
+    // it is cleared, so sending a message does not clear it.
     const view = await mount(builder());
     await view.type('A landing page');
     await view.reference_('https://example.com');
     await view.send();
 
     assert.equal(view.prompt().value, '');
-    assert.equal(view.reference().value, '');
+    assert.equal(view.reference().value, 'https://example.com');
     view.unmount();
   });
 
   it('empties the composer for a run this form did not start', async () => {
     // Choosing a direction submits through the session, not through this
     // form, so its cleanup never ran (internal PR 189 review). The composer then asked
-    // "What should change?" over the original build request and its
-    // reference page, and submitting that repeated the build and refetched
-    // the reference.
+    // "What should change?" over the original build request, and submitting
+    // that repeated the build.
     const view = await mount(builder());
     await view.type('A landing page');
     await view.reference_('https://example.com');
@@ -230,7 +231,8 @@ describe('the composer, as it is actually wired', () => {
     await view.render(builder({ runId: 'run-1', running: true }));
 
     assert.equal(view.prompt().value, '');
-    assert.equal(view.reference().value, '');
+    // The reference stays: the project remembers it (D93).
+    assert.equal(view.reference().value, 'https://example.com');
     view.unmount();
   });
 

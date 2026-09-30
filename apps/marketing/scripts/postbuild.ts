@@ -54,6 +54,7 @@ function plans(): Plans {
     entitlement: worker('entitlement.ts'),
     signupCredit: worker('signup-credit.ts'),
     stripeClient: worker('stripe-client.ts'),
+    modelAccess: worker('model-access.ts'),
   });
 }
 
@@ -252,7 +253,7 @@ function llms(): string {
   const questions = answers(plans())
     .map((item) => `### ${item.question}\n\n${item.answer}`)
     .join('\n\n');
-  return `# Vibld
+  return `# vibld
 
 > ${SITE.summary}
 

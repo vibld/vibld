@@ -1,5 +1,6 @@
 import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, metaFor } from '../site';
+import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'credits-and-plans')!;
 const CHECKED = '2026-09-30';
@@ -41,9 +42,10 @@ export default function CreditsAndPlans() {
         every month as the monthly one.
       </p>
       <p>
-        A Free account builds, chats and sketches with GPT-6 Luna only; the paid
-        plans unlock the other models. It can have three active projects at once
-        (archived ones do not count), and Build and Ship have no limit.
+        A Free account builds, chats and sketches with {FREE_PLAN.models} only;
+        the paid plans unlock the other models. It can have{' '}
+        {FREE_PLAN.activeProjects} active projects at once (archived ones do not
+        count), and Build and Ship have no limit.
       </p>
       <p>
         An account with no active subscription is Free. The monthly allowance

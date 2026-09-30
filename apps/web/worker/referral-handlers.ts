@@ -29,15 +29,17 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * Where a referral link should send people: vibld.com, where a friend sees
- * what vibld is before being asked to sign up (Chris, 2026-09-28). The site
- * keeps the code for the visit and carries it onto its sign-up links, and
- * the builder claims it once the account exists.
+ * Where a referral link should send people. The hosted service sets
+ * `VIBLD_REFERRAL_ORIGIN` to vibld.com, where a friend sees what vibld is
+ * before being asked to sign up (Chris, 2026-09-28); the site keeps the code
+ * for the visit and carries it onto its sign-up links, and the builder
+ * claims it once the account exists.
+ *
+ * Unset, it is the deployment's own address (D97, Chris, 2026-09-30), so a
+ * self-hosted copy's links point at itself rather than at vibld.com.
  */
-export const DEFAULT_REFERRAL_ORIGIN = 'https://vibld.com';
-
-function referralOrigin(env: ReferralEnv): string {
-  return env.VIBLD_REFERRAL_ORIGIN?.trim() || DEFAULT_REFERRAL_ORIGIN;
+function referralOrigin(env: ReferralEnv, request: Request): string {
+  return env.VIBLD_REFERRAL_ORIGIN?.trim() || new URL(request.url).origin;
 }
 
 /**
@@ -64,7 +66,7 @@ export async function handleReferralStatus(
 
   return json({
     code,
-    url: referralUrl(referralOrigin(env), code),
+    url: referralUrl(referralOrigin(env, request), code),
     referred: summary.referred,
     paid: summary.paid,
     // What the builder shows as earned. Sent rather than left to the client

@@ -1,5 +1,6 @@
 import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
+import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'configuration')!;
 const CHECKED = '2026-09-30';
@@ -74,9 +75,10 @@ export default function Configuration() {
           <code>VIBLD_MODEL_POLICY</code>, JSON naming which models each
           identity may use. A secret rather than a var because it names people.
           Absent means no policy: everyone may use whatever the deployment can
-          serve. Where billing is configured, a Free account is held to GPT-6
-          Luna whatever the policy grants, so a deployment that charges needs an
-          OpenAI key for its Free accounts to build at all.
+          serve. Where billing is configured, a Free account is held to{' '}
+          {FREE_PLAN.models} whatever the policy grants, so a deployment that
+          charges needs a key that serves it for its Free accounts to build at
+          all.
         </li>
       </ul>
       <p>
@@ -193,7 +195,7 @@ export default function Configuration() {
         </li>
         <li>
           <code>VIBLD_REFERRAL_ORIGIN</code>: where a referral link points.
-          Defaults to <code>https://vibld.com</code>.
+          Unset, it is your builder’s own address.
         </li>
       </ul>
 

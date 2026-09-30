@@ -6,38 +6,38 @@ This register records the choices approved during the Phase 0 review. Letters re
 
 The [charter](../VIBLD.md), [roadmap](../ROADMAP.md), and [ADRs](adr/README.md) apply these decisions. The [original blueprint](archive/README.md) is historical context. Later accepted decisions take precedence over its tentative technology choices and conflicting milestone sequences. Change accepted decisions through a new ADR and an explicit register update.
 
-| ID  | Choice        | Accepted direction                                                                                                                                                                                                                                     |
-| --- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1  | a, then b/c/d | Start with technical founders and small agencies. Expand to nontechnical business owners, developers working in existing repositories, designers and marketing users. Allow for other project types and audiences without implementing them all in M1. |
-| D2  | b             | Generate marketing sites and landing pages first. Business applications and CRUD workflows follow.                                                                                                                                                     |
-| D3  | a             | M1 combines generated files and working preview, with bounded initial repair, a saved checkpoint and export. M2 adds dependable conversational editing and recovery. M1 is a technical alpha; M1 plus M2 proves the usable build/edit loop.            |
-| D4  | b             | Run an invitation-only hosted alpha. Identity, tenant authorization, quotas, private previews, secrets and basic operations are release requirements.                                                                                                  |
-| D5  | b             | Use Cloudflare Sandbox SDK for the first execution adapter. Preserve an interface for other runtimes.                                                                                                                                                  |
-| D6  | c             | Use a React/TypeScript/Vite builder UI, Hono on Workers, Workflows for long-running jobs, Sandbox for execution, PostgreSQL metadata via Hyperdrive, and R2 artifacts. Add Durable Objects for coordination/live connections where needed.             |
-| D7  | b             | Keep metadata in PostgreSQL and durable project content outside disposable sandboxes. Git records accepted code history; remote GitHub is optional for project survival.                                                                               |
-| D8  | c             | Include GitHub connection, branches and pull requests in M1. Prove this on Vibld-generated projects first; arbitrary existing-repository import/editing comes later.                                                                                   |
-| D9  | a             | Use AI SDK behind a small Vibld-owned model contract. Configure providers deliberately and keep SDK types out of domain interfaces.                                                                                                                    |
-| D10 | a             | Select initial models through a measured bakeoff. No provider winner or paid evaluation allowance is implied by this decision.                                                                                                                         |
-| D11 | a             | Persist a controlled workflow with one active implementation agent, bounded repairs/retries and explicit cancellation and recovery. Logical prompt roles need not be autonomous agents.                                                                |
-| D12 | a             | Stage edits against a known base revision, validate them, then promote an accepted revision. Enforce one writer per project and surface conflicts without overwriting user work.                                                                       |
-| D13 | c             | Include repository indexing and semantic search early. Combine exact/symbol retrieval with semantic retrieval, scoped by tenant, project and revision.                                                                                                 |
-| D14 | c             | Offer selectable autonomy modes through explicit project/action/destination/budget/time permissions. The service enforces permissions; the model cannot grant itself authority.                                                                        |
-| D15 | a, then b/c   | Begin with curated dependencies, then approved additions, then a broader install mode. Keep isolation, network and resource restrictions in every mode.                                                                                                |
-| D16 | d             | Use a hybrid, broker-first credential design. Keep provider and control-plane credentials in trusted services; allow narrow runtime injection only where an integration requires it.                                                                   |
-| D17 | b             | Make hosted previews private by default, with explicit, revocable, time-limited sharing on an isolated origin.                                                                                                                                         |
-| D18 | a             | Use a versioned evaluation set covering functionality, portability and failure recovery. Report initial success and success after repair separately.                                                                                                   |
-| D19 | a             | Enforce run budgets and expose usage, elapsed time and cost, including failed attempts. Bound sandbox lifetime and concurrency as well as model usage.                                                                                                 |
-| D20 | b             | Enable minimal operational telemetry by default with an easy opt-out. Exclude source code, prompts and secrets. Do not describe linkable identifiers as anonymous.                                                                                     |
-| D21 | a             | Keep a complete single-user builder in OSS. Cloud sells managed operations and team capabilities. Saving, Git, BYOK and export are not artificial paid gates.                                                                                          |
-| D22 | a             | After the build/edit loop, deliver publishing, then one full-stack integration, then advanced visual targeting.                                                                                                                                        |
-| D23 | a             | Evaluate Supabase first for generated applications' database, auth and storage. Customer application services remain separate from Vibld's own platform.                                                                                               |
-| D24 | a             | Keep core Apache-2.0; license reusable starter-template source MIT. Users choose their application license subject to upstream obligations.                                                                                                            |
-| D25 | a             | Founder-led governance, human-reviewed PRs and DCO sign-off. No copyright assignment and no permanent dependence on one coding-agent vendor.                                                                                                           |
-| D26 | a             | Enforce a small quality baseline before feature code. Use locked installs, formatting and meaningful lint/type/test/build checks as code appears.                                                                                                      |
-| D27 | a             | Preserve the original blueprint, maintain this register, and keep ADRs, roadmap, issues and real GitHub milestones aligned.                                                                                                                            |
-| D28 | c             | Keep the repository informal until the product works. Defer brand work and extensive community templates; keep essential ownership, quality and security controls.                                                                                     |
-| D29 | a             | Use React Router framework mode with static prerendering for generated marketing sites, alongside TypeScript, Vite, Tailwind and selected UI components. The builder UI remains a separate Vite SPA.                                                   |
-| D30 | a             | Use Supabase PostgreSQL and Supabase Auth for the hosted platform, with Hyperdrive for direct PostgreSQL access from Workers.                                                                                                                          |
+| ID  | Choice        | Accepted direction                                                                                                                                                                                                                                        |
+| --- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | a, then b/c/d | Start with technical founders and small agencies. Expand to nontechnical business owners, developers working in existing repositories, designers and marketing users. Allow for other project types and audiences without implementing them all in M1.    |
+| D2  | b             | Generate marketing sites and landing pages first. Business applications and CRUD workflows follow.                                                                                                                                                        |
+| D3  | a             | M1 combines generated files and working preview, with bounded initial repair, a saved checkpoint and export. M2 adds dependable conversational editing and recovery. M1 is a technical alpha; M1 plus M2 proves the usable build/edit loop.               |
+| D4  | b             | Run an invitation-only hosted alpha. Identity, tenant authorization, quotas, private previews, secrets and basic operations are release requirements.                                                                                                     |
+| D5  | b             | Use Cloudflare Sandbox SDK for the first execution adapter. Preserve an interface for other runtimes.                                                                                                                                                     |
+| D6  | c             | Use a React/TypeScript/Vite builder UI, Hono on Workers, Workflows for long-running jobs, Sandbox for execution, PostgreSQL metadata via Hyperdrive, and R2 artifacts. Add Durable Objects for coordination/live connections where needed.                |
+| D7  | b             | Keep metadata in PostgreSQL and durable project content outside disposable sandboxes. Git records accepted code history; remote GitHub is optional for project survival.                                                                                  |
+| D8  | c             | Include GitHub connection, branches and pull requests in M1. Prove this on Vibld-generated projects first; arbitrary existing-repository import/editing comes later.                                                                                      |
+| D9  | a             | Use AI SDK behind a small Vibld-owned model contract. Configure providers deliberately and keep SDK types out of domain interfaces.                                                                                                                       |
+| D10 | a             | Select initial models through a measured bakeoff. No provider winner or paid evaluation allowance is implied by this decision.                                                                                                                            |
+| D11 | a             | Persist a controlled workflow with one active implementation agent, bounded repairs/retries and explicit cancellation and recovery. Logical prompt roles need not be autonomous agents.                                                                   |
+| D12 | a             | Stage edits against a known base revision, validate them, then promote an accepted revision. Enforce one writer per project and surface conflicts without overwriting user work.                                                                          |
+| D13 | c             | Include repository indexing and semantic search early. Combine exact/symbol retrieval with semantic retrieval, scoped by tenant, project and revision.                                                                                                    |
+| D14 | c             | Offer selectable autonomy modes through explicit project/action/destination/budget/time permissions. The service enforces permissions; the model cannot grant itself authority.                                                                           |
+| D15 | a, then b/c   | Begin with curated dependencies, then approved additions, then a broader install mode. Keep isolation, network and resource restrictions in every mode.                                                                                                   |
+| D16 | d             | Use a hybrid, broker-first credential design. Keep provider and control-plane credentials in trusted services; allow narrow runtime injection only where an integration requires it.                                                                      |
+| D17 | b             | Make hosted previews private by default, with explicit, revocable, time-limited sharing on an isolated origin.                                                                                                                                            |
+| D18 | a             | Use a versioned evaluation set covering functionality, portability and failure recovery. Report initial success and success after repair separately.                                                                                                      |
+| D19 | a             | Enforce run budgets and expose usage, elapsed time and cost, including failed attempts. Bound sandbox lifetime and concurrency as well as model usage.                                                                                                    |
+| D20 | b             | Enable minimal operational telemetry by default with an easy opt-out. Exclude source code, prompts and secrets. Do not describe linkable identifiers as anonymous.                                                                                        |
+| D21 | a             | Keep a complete single-user builder in OSS. Cloud sells managed operations and team capabilities. Saving, Git, BYOK and export are not artificial paid gates.                                                                                             |
+| D22 | a             | After the build/edit loop, deliver publishing, then one full-stack integration, then advanced visual targeting.                                                                                                                                           |
+| D23 | a             | Evaluate Supabase first for generated applications' database, auth and storage. Customer application services remain separate from Vibld's own platform.                                                                                                  |
+| D24 | a             | Keep core Apache-2.0; license reusable starter-template source MIT. Users choose their application license subject to upstream obligations.                                                                                                               |
+| D25 | a             | Founder-led governance, human-reviewed PRs and DCO sign-off. No copyright assignment and no permanent dependence on one coding-agent vendor.                                                                                                              |
+| D26 | a             | Enforce a small quality baseline before feature code. Use locked installs, formatting and meaningful lint/type/test/build checks as code appears.                                                                                                         |
+| D27 | a             | Preserve the original blueprint, maintain this register, and keep ADRs, roadmap, issues and real GitHub milestones aligned.                                                                                                                               |
+| D28 | c             | Keep the repository informal until the product works. Defer brand work and extensive community templates; keep essential ownership, quality and security controls.                                                                                        |
+| D29 | a             | Use React Router framework mode with static prerendering for generated marketing sites, alongside TypeScript, Vite, Tailwind and selected UI components. The builder UI remains a separate Vite SPA. Superseded for generated projects by D92 (ADR-0014). |
+| D30 | a             | Use Supabase PostgreSQL and Supabase Auth for the hosted platform, with Hyperdrive for direct PostgreSQL access from Workers.                                                                                                                             |
 
 ## Launch decisions (accepted 2026-09-09)
 
@@ -204,6 +204,46 @@ exactly this path.
 - **Legal pages to draft:** Terms of Service, Privacy Policy, Acceptable Use, Security & Vulnerability Disclosure + `security.txt`, Subprocessors, Cookie Notice, Refund Policy, Open-Source Notices.
 - **Paid infrastructure approved:** Workers Paid, Containers, R2, D1, the preview domain, Clerk, Stripe, Resend, Sentry -- all nine lines from L27.
 - **Abuse controls required before Access comes off:** Turnstile, per-IP WAF rate limit, disposable-domain blocking, the existing per-user ceiling, a new account-wide ceiling.
+
+### Resolved 2026-09-30 (afternoon)
+
+Chris answered the open questions from the overnight work and the docs audit
+on 2026-09-30.
+
+- **D89. Tag v0.1.0 now.** The first launch bar is met (D80, D82), and D81
+  ships each step as it is proven. The public repository is written only from
+  here, so its tags are too: `.github/workflows/public-release.yml`, dispatched
+  from main after the export, tags the public main and publishes a release
+  with the notes in `docs/releases/<version>.md`. It refuses when the public
+  main is not yet that commit's export.
+- **D90. The announcement is drafted, and Chris posts it.** Show HN and
+  LinkedIn copy against v0.1.0, for his review.
+- **D91. A `VIBLD_MODEL` the deployment cannot serve is refused.** It used to
+  fall back to the first model in catalogue order: a copy with the shipped
+  `gpt-6-sol` and only an Anthropic key ran on Claude Fable 5.1. A run with no
+  chosen model is now refused with the setting to change
+  (`unservableConfiguredModel`); a model the person chose still runs.
+- **D92. The Vite single-page app stands.** ADR-0014 is accepted and
+  supersedes D29's React Router framework mode and static prerendering for
+  generated projects. `templates/marketing` keeps its own stack.
+- **D93. A project remembers its reference page.** Every build reads it until
+  the field is cleared; sending a message no longer clears it, and a remix
+  copies it with the other settings.
+- **D94. Optional `.vibld/` metadata is allowed,** as ADR-0002 says, on its
+  condition: nothing else in the project may need it. The evaluation's
+  portability check refuses a file that refers to it rather than the
+  directory itself.
+- **D95. Hosted bring-your-own-key stays under consideration** on the
+  roadmap, behind a credential vault (L31). A self-hosted copy already uses
+  its own keys (L45).
+- **D96. `llms.txt` opens `# vibld`,** the lowercase wordmark.
+- **D97. Referral links default to the deployment's own address.** The hosted
+  service sets `VIBLD_REFERRAL_ORIGIN` to vibld.com in `wrangler.jsonc`, so
+  its links are unchanged; a copy that leaves it unset points at itself.
+- **D98. Three tidy-ups.** `apps/web/.env.example` leaves every value empty,
+  as its header says (a). vibld.com reads the Free plan's model and project
+  limit from the builder's source, as it reads prices (b). The roadmap shows
+  build-and-repair reliability as shipped (c).
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

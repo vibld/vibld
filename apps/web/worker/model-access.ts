@@ -174,6 +174,14 @@ export function decideModel(
     return { ok: true, model: wanted, granted };
   }
 
+  // A deployment that names its model and cannot serve it is misconfigured,
+  // and says so (D91, Chris, 2026-09-30). It used to fall through to the
+  // first granted model in catalogue order: a copy that kept the shipped
+  // `gpt-6-sol` with only an Anthropic key ran on Claude Fable 5.1, the
+  // dearest model it had, with nothing to say why.
+  const unservable = unservableConfiguredModel(env);
+  if (unservable) return { ok: false, status: 503, error: unservable };
+
   const wanted = canonicalModelId(fallback);
   const preferred =
     granted.find((model) => model.id === wanted)?.id ??
@@ -211,4 +219,27 @@ export function draftModelFor(
   )
     ? DRAFT_MODEL
     : null;
+}
+
+/** The environment variable that holds each provider's key. */
+const KEY_NAME = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  openai: 'OPENAI_API_KEY',
+} as const;
+
+/**
+ * Why the model `VIBLD_MODEL` names cannot run on this deployment, or null
+ * when it can or none is named. Two ways it cannot: the catalogue does not
+ * know it, or no key for its provider is set.
+ */
+export function unservableConfiguredModel(env: ModelAccessEnv): string | null {
+  const named = env.VIBLD_MODEL?.trim();
+  if (!named) return null;
+  const model = findModel(canonicalModelId(named));
+  if (!model) {
+    return `VIBLD_MODEL is ${named}, which is not a model vibld knows. Set it to one from the model catalogue, or leave it unset for the default of the provider whose key is set.`;
+  }
+  if (configuredProviders(env)[model.provider]) return null;
+  return `VIBLD_MODEL is ${model.label}, and this deployment has no ${KEY_NAME[model.provider]}. Set VIBLD_MODEL to a model your keys serve, or leave it unset for the default of the provider whose key is set.`;
 }

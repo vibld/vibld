@@ -1,5 +1,6 @@
 import { DocPage } from '../components/SiteChrome';
 import { DOC_GUIDES, SITE, metaFor } from '../site';
+import { FREE_PLAN } from '../plan-sources';
 
 const GUIDE = DOC_GUIDES.find((g) => g.slug === 'getting-started')!;
 const CHECKED = '2026-09-30';
@@ -86,7 +87,7 @@ export default function GettingStarted() {
       <p>
         The model is the dropdown beside the send button. Which models are
         offered depends on the deployment and on your plan: a Free account
-        builds with GPT-6 Luna only. The settings menu, under{' '}
+        builds with {FREE_PLAN.models} only. The settings menu, under{' '}
         <strong>This deployment</strong>, reports which model actually served
         the last run rather than which one was requested.
       </p>

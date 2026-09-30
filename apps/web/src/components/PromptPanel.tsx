@@ -176,9 +176,11 @@ export function PromptPanel({
    *   quietly spends every later run on a checkpoint designed to be
    *   rejected.
    */
+  // The message and the test switch belong to one turn. The reference page
+  // does not: a project remembers it, and every build reads it until it is
+  // cleared (D93, Chris, 2026-09-30).
   function clearPerRequestFields() {
     setPrompt('');
-    setReferenceUrl('');
     setFailNext(false);
   }
 
@@ -281,7 +283,7 @@ export function PromptPanel({
       label: 'Reference',
       value: referenceHost,
       about:
-        "vibld reads this page's text, colours, fonts and spacing and uses them as a starting point. It adapts rather than copies. Used for this message only.",
+        "vibld reads this page's text, colours, fonts and spacing and uses them as a starting point. It adapts rather than copies. This project remembers it: every build reads it until you clear the field.",
       body: (
         <>
           <label className="option-panel__label" htmlFor={referenceId}>

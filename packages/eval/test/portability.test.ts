@@ -50,7 +50,7 @@ describe('portability', () => {
     assert.equal(problems[0]?.check, 'no-vibld-dependency');
   });
 
-  it('rejects a .vibld directory', () => {
+  it('accepts a .vibld directory that nothing needs (ADR-0002, D94)', () => {
     const problems = checkPortability(
       snapshot([
         { path: 'package.json', content: MANIFEST },
@@ -59,8 +59,27 @@ describe('portability', () => {
       ]),
     );
     assert.ok(
-      problems.some((problem) => problem.check === 'no-vibld-directory'),
+      !problems.some((problem) => problem.check === 'vibld-metadata-optional'),
     );
+  });
+
+  it('rejects a project file that needs the .vibld metadata', () => {
+    const problems = checkPortability(
+      snapshot([
+        { path: 'package.json', content: MANIFEST },
+        { path: 'README.md', content: '# site\n' },
+        { path: '.vibld/state.json', content: '{}' },
+        {
+          path: 'src/main.tsx',
+          content: "import state from '../.vibld/state.json';\n",
+        },
+      ]),
+    );
+    const found = problems.filter(
+      (problem) => problem.check === 'vibld-metadata-optional',
+    );
+    assert.equal(found.length, 1);
+    assert.match(found[0]!.detail, /src\/main\.tsx/);
   });
 
   it('names every missing required file, not just the first', () => {

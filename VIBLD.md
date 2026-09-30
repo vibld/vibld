@@ -10,7 +10,7 @@ Start with technical founders and small agencies creating marketing sites and la
 
 ## Product promise
 
-Users control and can export their projects. A generated project must remain a normal application that can be cloned, edited, built, and deployed without Vibld. Generated projects carry no `.vibld/` directory, and the evaluation's portability check refuses one (`packages/eval/src/portability.ts`). Third-party licenses still apply; Vibld does not guarantee exclusive ownership of arbitrary generated content.
+Users control and can export their projects. A generated project must remain a normal application that can be cloned, edited, built, and deployed without Vibld. A generated project may carry optional `.vibld/` metadata, but nothing else in it may need that metadata, so deleting it breaks nothing; the evaluation's portability check enforces this (`packages/eval/src/portability.ts`, D94). Third-party licenses still apply; Vibld does not guarantee exclusive ownership of arbitrary generated content.
 
 ## MVP
 
@@ -27,9 +27,9 @@ The MVP proves this loop well:
 
 M1 delivers the initial build, private preview, bounded repair, durable checkpoint and export. The hosted service runs as a public beta with open sign-up, which replaced the invitation-only alpha of D4 (docs/decisions.md, 2026-09-27). GitHub branches/PRs and repository indexing are included early. M2 completes the conversational editing loop.
 
-The first generated-application standard is React Router framework mode with static prerendering, React, TypeScript, Vite and Tailwind CSS. Add selected shadcn/ui, Radix primitives or Lucide icons where useful. Generated projects support familiar install, development, build, lint, typecheck and test commands. Validate crawlable route HTML, page metadata, responsive behavior and accessibility alongside the build. The separate builder UI uses React/TypeScript/Vite as a SPA.
+The generated-application standard is a Vite single-page app with React, TypeScript, Tailwind CSS v4, shadcn/ui on Radix, Lucide and Motion (ADR-0014; D92 superseded D29's React Router framework mode and static prerendering for generated projects). Generated projects support familiar install, development, build, lint, typecheck and test commands. Validate page metadata, responsive behavior and accessibility alongside the build. The separate builder UI uses React/TypeScript/Vite as a SPA.
 
-Today's generator does not yet meet the routing half of that standard. A generated project is a Vite single-page app with React, TypeScript, Tailwind CSS v4, shadcn/ui on Radix, Lucide and Motion, with no React Router and no prerendering (ADR-0014; `packages/ai/src/stack.ts` and `scaffold.ts`). `templates/marketing` follows the React Router standard; generated projects do not.
+The stack is pinned in `packages/ai/src/stack.ts` and `scaffold.ts`. `templates/marketing`, a hand-built starter, uses React Router with prerendering; generated projects do not.
 
 ## Architecture boundaries
 
