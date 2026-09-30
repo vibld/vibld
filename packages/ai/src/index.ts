@@ -124,14 +124,16 @@ export type {
 } from './plan-schema.ts';
 export {
   DESIGN_MD_PATH,
+  DesignSpecReadSchema,
   DesignSpecSchema,
+  MotionEntrySchema,
   MAX_MOCKUP_MEASURE_CHARS,
   measureDesign,
   measureMockup,
   readDesignSpec,
   renderDesignMd,
 } from './design-spec.ts';
-export type { DesignSpec } from './design-spec.ts';
+export type { DesignSpec, MotionEntry } from './design-spec.ts';
 export {
   MAX_FINDINGS_IN_PROMPT,
   checkDesign,

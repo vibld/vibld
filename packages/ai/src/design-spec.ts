@@ -34,6 +34,30 @@ const Named = z.object({
   value: z.string().min(1),
 });
 
+/**
+ * One thing that moves: what it is, what starts it, what it does, and the
+ * numbers it does it with (D75). A table rather than a sentence because
+ * "the headline rises in" is a different animation on every file step,
+ * while "h1 words, load, rise 110% with a 70ms stagger, spring stiffness
+ * 120 damping 20" is one animation, and one `design-checks.ts` can look
+ * for.
+ */
+export const MotionEntrySchema = z.object({
+  /** What moves: "hero h1, per word", "pricing cards", "background". */
+  element: z.string().min(1),
+  /** What starts it: load, in view, hover, press, scroll, always. */
+  trigger: z.string().min(1),
+  /** What it does, in values: "rise 40px and fade in, 80ms stagger". */
+  behaviour: z.string().min(1),
+  /**
+   * The numbers: "spring stiffness 120 damping 20", "200ms ease-out",
+   * "8s linear loop".
+   */
+  timing: z.string().min(1),
+});
+
+export type MotionEntry = z.infer<typeof MotionEntrySchema>;
+
 export const DesignSpecSchema = z.object({
   /** The subject, the audience and the page's single job, in one sentence. */
   intent: z.string().min(1),
@@ -99,6 +123,11 @@ export const DesignSpecSchema = z.object({
       changes: z.array(z.string().min(1)).min(1),
     }),
   ),
+  /**
+   * Everything that moves, one row each; empty for a still page. Every
+   * row's reduced-motion form is the finished state (UX BASELINE).
+   */
+  motion: z.array(MotionEntrySchema),
   /** Rules that name a real token or value. */
   do: z.array(z.string().min(1)),
   /** What this design must not add, and what each would break. */
@@ -108,6 +137,16 @@ export const DesignSpecSchema = z.object({
 });
 
 export type DesignSpec = z.infer<typeof DesignSpecSchema>;
+
+/**
+ * What a spec is read with: `DesignSpecSchema`, but a spec written before
+ * the motion table (D75), or with one that does not parse, reads with an
+ * empty one rather than as no spec at all. A project's colours and copy
+ * are still worth checking against when its motion rows are missing.
+ */
+export const DesignSpecReadSchema = DesignSpecSchema.extend({
+  motion: z.array(MotionEntrySchema).catch([]),
+});
 
 export const DESIGN_MD_PATH = 'DESIGN.md';
 
@@ -192,6 +231,24 @@ function compactSpec(
   return cut(spec) as DesignSpec;
 }
 
+/** The motion rows as a table for a person reading DESIGN.md, or nothing. */
+function motionTable(motion: readonly MotionEntry[]): string {
+  if (motion.length === 0) return '';
+  const cell = (text: string) =>
+    text.replace(/\|/g, '\\|').replace(/\s+/g, ' ');
+  const rows = motion.map(
+    (entry) =>
+      `| ${cell(entry.element)} | ${cell(entry.trigger)} | ${cell(entry.behaviour)} | ${cell(entry.timing)} |`,
+  );
+  return `
+## Motion
+
+| Element | Trigger | Behaviour | Timing |
+| --- | --- | --- | --- |
+${rows.join('\n')}
+`;
+}
+
 function renderWith(spec: DesignSpec, indent: number): string {
   const list = (items: string[]) =>
     items.length > 0 ? items.map((item) => `- ${item}`).join('\n') : '- None.';
@@ -202,7 +259,7 @@ ${JSON.stringify(spec, null, indent)}
 # Design
 
 ${spec.intent}
-
+${motionTable(spec.motion)}
 The frontmatter above is this project's design spec: every colour, font, type step, space, radius and effect it uses, each section's copy verbatim, and what changes at each breakpoint. Change the spec and the code together.
 
 ## Do
@@ -236,7 +293,7 @@ export function readDesignSpec(markdown: string): DesignSpec | undefined {
   } catch {
     return undefined;
   }
-  const parsed = DesignSpecSchema.safeParse(data);
+  const parsed = DesignSpecReadSchema.safeParse(data);
   return parsed.success ? parsed.data : undefined;
 }
 

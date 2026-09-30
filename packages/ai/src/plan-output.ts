@@ -102,6 +102,7 @@ const SPEC_JSON_EXAMPLE = `{
       }
     ],
     "breakpoints": [{ "maxWidth": 650, "changes": ["what changes at this width"] }],
+    "motion": [{ "element": "hero h1, per word", "trigger": "load", "behaviour": "rise 110% and fade in, 70ms stagger", "timing": "spring stiffness 120 damping 20" }],
     "do": ["a rule naming a real token"],
     "avoid": ["what not to add, and what it would break"],
     "checks": ["an observable fact a reviewer can confirm"]

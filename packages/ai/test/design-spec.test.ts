@@ -582,3 +582,53 @@ h1 { font-size: 4rem; }
     assert.ok(measured.length > MAX_MOCKUP_MEASURE_CHARS / 2);
   });
 });
+
+describe('the motion table (D75)', () => {
+  const moving = {
+    ...SPEC,
+    motion: [
+      {
+        element: 'hero heading, per word',
+        trigger: 'load',
+        behaviour: 'rise 110% and fade in, 70ms stagger',
+        timing: 'spring stiffness 120 damping 20',
+      },
+      {
+        element: 'cards | pricing',
+        trigger: 'in view',
+        behaviour: 'fade and rise 40px',
+        timing: '200ms ease-out',
+      },
+    ],
+  };
+
+  it('is shown to a person as a table, and reads back exactly', () => {
+    const md = renderDesignMd(moving);
+    assert.ok(md.includes('## Motion'));
+    assert.ok(
+      md.includes(
+        '| hero heading, per word | load | rise 110% and fade in, 70ms stagger | spring stiffness 120 damping 20 |',
+      ),
+    );
+    // A pipe in a cell does not split the row.
+    assert.ok(md.includes('| cards \\| pricing | in view |'));
+    assert.deepEqual(readDesignSpec(md), moving);
+  });
+
+  it('is left out of the prose for a still page', () => {
+    assert.ok(!renderDesignMd(SPEC).includes('## Motion'));
+  });
+
+  it('reads a DESIGN.md from before the table as a spec with no motion', () => {
+    const { motion: _motion, ...older } = SPEC;
+    const md = `---\n${JSON.stringify(older)}\n---\n\n# Design\n`;
+    assert.deepEqual(readDesignSpec(md), { ...older, motion: [] });
+    const malformed = `---\n${JSON.stringify({ ...older, motion: 'fast' })}\n---\n`;
+    assert.deepEqual(readDesignSpec(malformed)?.motion, []);
+  });
+
+  it('is required of a model, so every new spec states its motion', () => {
+    const { motion: _motion, ...older } = SPEC;
+    assert.equal(DesignSpecSchema.safeParse(older).success, false);
+  });
+});

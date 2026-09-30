@@ -1490,6 +1490,7 @@ describe('judging a design repair', () => {
             },
             sections: [{ id: 'hero', purpose: 'p', layout: 'l', copy: [] }],
             breakpoints: [],
+            motion: [],
             do: [],
             avoid: [],
             checks: [],

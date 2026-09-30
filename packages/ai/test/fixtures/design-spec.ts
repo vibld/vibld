@@ -54,6 +54,9 @@ export const SPEC: DesignSpec = {
   breakpoints: [
     { maxWidth: 650, changes: ['hide Sign Up', 'content at 12vh'] },
   ],
+  // Still, so the projects other tests build are not also held to motion;
+  // design-checks.test.ts gives the motion rows their own spec.
+  motion: [],
   do: ['Keep the hero scrim at rgba(2,10,18,.57) at the top'],
   avoid: ['A floating arrow button: it competes with the one form'],
   checks: ['The headline stays on one line at 1440px'],

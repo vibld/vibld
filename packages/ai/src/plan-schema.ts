@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { DesignSpecSchema } from './design-spec.ts';
+import { DesignSpecReadSchema, DesignSpecSchema } from './design-spec.ts';
 import { SCAFFOLD_SECTION } from './scaffold.ts';
 import { stackVersionLine } from './stack.ts';
 
@@ -40,7 +40,7 @@ export const GenerationPlanSchema = z.object({
  */
 export const GenerationPlanReadSchema = z.object({
   summary: z.string().min(1),
-  spec: DesignSpecSchema.optional().catch(undefined),
+  spec: DesignSpecReadSchema.optional().catch(undefined),
   files: z.array(ProjectFileSchema).min(1),
 });
 
@@ -345,6 +345,12 @@ pill, blur(18px)" is. Every value in it is one the files actually use.
   there. Use Tailwind's (sm 640, md 768, lg 1024, xl 1280, 2xl 1536) or
   declare your own as --breakpoint-<name> in @theme. Design for 375 and
   1440px as well as the widths between.
+- motion: one row for everything that moves, in the order a visitor meets
+  it: element (what moves), trigger (load, in view, hover, press, scroll,
+  always), behaviour in values (rise 40px and fade in, 80ms stagger), and
+  timing as numbers (spring stiffness 120 damping 20, or 200ms ease-out).
+  Every row's reduced-motion form is its finished state. Empty only for a
+  page with no motion at all. Build each row with exactly its numbers.
 - do: four or five rules, each naming a real token or value.
 - avoid: four or five things this design must not add, each with what it
   would break ("a second call to action: the email form is the page's one
@@ -804,7 +810,7 @@ export const BuildOutlineReadSchema = z.object({
   summary: z.string().min(1),
   title: z.string().optional().catch(undefined),
   description: z.string().optional().catch(undefined),
-  spec: DesignSpecSchema.optional().catch(undefined),
+  spec: DesignSpecReadSchema.optional().catch(undefined),
   manifest: z.array(
     z.object({
       path: z.string().min(1),

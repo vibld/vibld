@@ -7,6 +7,7 @@ import {
   colorSpellings,
   cssRuleMatches,
   describeFindings,
+  motionFindings,
   normalizeCssValue,
 } from '../src/design-checks.ts';
 import { renderDesignMd } from '../src/design-spec.ts';
@@ -9822,5 +9823,81 @@ describe('reading CSS rules', () => {
     );
     const elapsed = performance.now() - started;
     assert.ok(elapsed < 2_000, `took ${elapsed.toFixed(0)}ms`);
+  });
+});
+
+describe('the motion table in the code (D75)', () => {
+  const row = (timing: string, behaviour = 'rises in') => ({
+    element: 'hero heading',
+    trigger: 'load',
+    behaviour,
+    timing,
+  });
+
+  it('finds a spring by its stiffness and damping', () => {
+    const code = `<motion.h1 transition={{ type: 'spring', stiffness: 120, damping: 20 }} />`;
+    assert.deepEqual(
+      motionFindings([row('spring stiffness 120 damping 20')], code),
+      [],
+    );
+    const other = motionFindings(
+      [row('spring stiffness 120 damping 20')],
+      `transition={{ type: 'spring', stiffness: 300, damping: 20 }}`,
+    );
+    assert.equal(other.length, 1);
+    assert.equal(other[0]!.severity, 'warning');
+    assert.equal(other[0]!.check, 'motion');
+    assert.match(other[0]!.detail, /stiffness 120/);
+    assert.doesNotMatch(other[0]!.detail, /damping/);
+  });
+
+  it('finds a duration in CSS, in a Tailwind class, or in Motion seconds', () => {
+    const wanted = [row('200ms ease-out', 'fade in, 70ms stagger')];
+    for (const code of [
+      '.card { transition: opacity 200ms ease-out; animation-delay: 70ms; }',
+      '<div className="duration-200 delay-70" />',
+      'transition={{ duration: 0.2, staggerChildren: 0.07 }}',
+      'transition={{ duration: .2, delay: i * .07 }}',
+    ]) {
+      assert.deepEqual(motionFindings(wanted, code), [], code);
+    }
+    const missing = motionFindings(wanted, 'transition={{ duration: 0.5 }}');
+    assert.equal(missing.length, 1);
+    assert.match(missing[0]!.detail, /200ms, 70ms/);
+  });
+
+  it('does not hold the code to a bound on a whole sequence', () => {
+    // Try-generation run 36650410531 (gpt-6-luna): "450ms ease-out per
+    // item, sequence completes within 810ms". 810 is a sum, not a value.
+    const code = 'transition={{ duration: 0.45, staggerChildren: 0.09 }}';
+    assert.deepEqual(
+      motionFindings(
+        [
+          row(
+            '450ms ease-out per item, sequence completes within 810ms',
+            'fade in, 90ms child stagger',
+          ),
+        ],
+        code,
+      ),
+      [],
+    );
+  });
+
+  it('has nothing to check in a row that names no number', () => {
+    assert.deepEqual(
+      motionFindings([row('8s linear loop', 'follows the cursor')], ''),
+      [],
+    );
+  });
+
+  it('warns, and only warns, about a spec motion the build left out', () => {
+    const spec = {
+      ...SPEC,
+      motion: [row('spring stiffness 120 damping 20')],
+    };
+    const report = checkDesign(project({ 'DESIGN.md': renderDesignMd(spec) }));
+    assert.deepEqual(report.errors, []);
+    assert.deepEqual(checks(report, 'warnings'), ['motion']);
   });
 });

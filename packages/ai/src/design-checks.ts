@@ -1,6 +1,6 @@
 import { blockTracker, compareLayers, oklchToRgb } from './contrast.ts';
 import { DESIGN_MD_PATH, readDesignSpec } from './design-spec.ts';
-import type { DesignSpec } from './design-spec.ts';
+import type { DesignSpec, MotionEntry } from './design-spec.ts';
 import { motionCoverage } from './motion-syntax.ts';
 import type { MotionBindings } from './motion-syntax.ts';
 import { dialectOf, expressionEnds, scriptSyntax } from './script-syntax.ts';
@@ -1288,6 +1288,8 @@ function specFindings(
     }
   }
 
+  findings.push(...motionFindings(spec.motion, `${css}\n${source}`));
+
   for (const section of spec.sections) {
     for (const copy of section.copy) {
       const wanted = normalizeText(copy.text);
@@ -1302,6 +1304,90 @@ function specFindings(
     }
   }
 
+  return findings;
+}
+
+/** A number as JavaScript would print it: `0.2`, never `0.20000000000000001`. */
+function printed(value: number): string {
+  return String(Number(value.toPrecision(12)));
+}
+
+/**
+ * Whether `code` carries a duration of `ms` milliseconds in any of the
+ * spellings a build uses: CSS (`200ms`), a Tailwind class (`duration-200`,
+ * `delay-200`), or Motion's seconds (`0.2`, `.2`). Loose on purpose: a
+ * number that happens to match for another reason costs a missed warning,
+ * never a false one.
+ */
+function hasDuration(code: string, ms: number): boolean {
+  const whole = printed(ms);
+  if (new RegExp(`(?<![\\d.])${escapeRegExp(whole)}\\s*ms\\b`).test(code)) {
+    return true;
+  }
+  if (
+    new RegExp(`\\b(?:duration|delay)-${escapeRegExp(whole)}(?![\\d])`).test(
+      code,
+    )
+  ) {
+    return true;
+  }
+  const seconds = printed(ms / 1000);
+  const bare = seconds.startsWith('0.') ? seconds.slice(1) : seconds;
+  return new RegExp(
+    `(?<![\\w.])(?:${escapeRegExp(seconds)}|${escapeRegExp(bare)})(?![\\d])`,
+  ).test(code);
+}
+
+/**
+ * The spec's motion rows whose numbers the code does not carry (D75).
+ *
+ * Only the numbers a row names are looked for: a spring's stiffness and
+ * damping, and every duration in milliseconds. A row that names none
+ * ("8s linear loop", "follows the cursor") has nothing checkable and
+ * passes. Warnings, never errors: motion is written many ways, and a
+ * build that animates the same thing with other numbers still builds.
+ */
+export function motionFindings(
+  motion: readonly MotionEntry[],
+  code: string,
+): DesignFinding[] {
+  const findings: DesignFinding[] = [];
+  for (const entry of motion) {
+    const missing: string[] = [];
+    for (const key of ['stiffness', 'damping', 'mass'] as const) {
+      const named = new RegExp(`${key}\\D{0,4}?(\\d+(?:\\.\\d+)?)`, 'i').exec(
+        entry.timing,
+      );
+      if (!named) continue;
+      const value = printed(Number(named[1]));
+      const used = new RegExp(
+        `${key}["']?\\s*[:=]\\s*\\{?\\s*${escapeRegExp(value)}(?![\\d.])`,
+      ).test(code);
+      if (!used) missing.push(`${key} ${value}`);
+    }
+    const texts = [entry.timing, entry.behaviour];
+    for (const text of texts) {
+      for (const match of text.matchAll(/(\d+(?:\.\d+)?)\s*ms\b/gi)) {
+        // A bound on a sequence ("completes within 810ms", "under 1000ms
+        // in total") is a sum of the other numbers, not one the code
+        // writes down (measured on a gpt-6-luna build, try-generation run
+        // 36650410531).
+        const before = text.slice(Math.max(0, match.index - 24), match.index);
+        if (/\b(?:within|under|total|up to|at most)\b/i.test(before)) continue;
+        const ms = Number(match[1]);
+        if (ms > 0 && !hasDuration(code, ms) && !missing.includes(`${ms}ms`)) {
+          missing.push(`${ms}ms`);
+        }
+      }
+    }
+    if (missing.length > 0) {
+      findings.push({
+        severity: 'warning',
+        check: 'motion',
+        detail: `The spec's motion for "${entry.element}" (${entry.trigger}) names ${missing.join(', ')}, and the code does not use ${missing.length === 1 ? 'it' : 'them'}.`,
+      });
+    }
+  }
   return findings;
 }
 
