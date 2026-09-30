@@ -8,7 +8,7 @@ Decided 2026-09-30: new product work pauses until the open-source version is liv
 
 - A clean clone generates a real project with only a provider key, proven in CI. **Done:** `pnpm generate`, proven weekly on a fresh clone of the public repository by `.github/workflows/clean-clone.yml` (D82).
 - A validated self-hosting path on Cloudflare. Not yet: the pieces are documented, and nobody outside the project has deployed a copy.
-- A tagged v0.1.0 release. Not yet.
+- A tagged release. **Done:** v0.1.0 was tagged by hand on 2026-09-27; releases now go through `.github/workflows/public-release.yml`, starting with v0.2.0 (D89, D99).
 - An announcement. Not yet.
 
 ## M0: Foundation

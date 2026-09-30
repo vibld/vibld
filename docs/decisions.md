@@ -244,6 +244,15 @@ on 2026-09-30.
   as its header says (a). vibld.com reads the Free plan's model and project
   limit from the builder's source, as it reads prices (b). The roadmap shows
   build-and-repair reliability as shipped (c).
+- **D99. The first release from this repository is v0.2.0.** vibld/vibld
+  already had a v0.1.0 tag and release, made by hand on 2026-09-27 at that
+  day's export and before `pnpm generate` existed, so `public-release.yml`
+  refused to tag v0.1.0 again. Chris chose a new version over moving a
+  published tag or rewriting its notes: v0.1.0 stays as it is, and
+  `docs/releases/v0.2.0.md` says what changed since it.
+- **D100. The template gallery is shipped.** It is the catalog at
+  vibld.com/templates (D83, internal PR 323), and the roadmap says so. Picking a design
+  inside the builder is not built, and the roadmap does not claim it.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

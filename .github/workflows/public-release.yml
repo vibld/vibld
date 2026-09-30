@@ -4,7 +4,7 @@ name: Public release
 # with the notes in docs/releases/<version>.md. The public repository is
 # written only from here (public-export.yml), so its tags are too.
 #
-# Dispatch only: Chris decides each release (D89 for v0.1.0). Run it from
+# Dispatch only: Chris decides each release (D89, D99). Run it from
 # main after the Public export for the same commit has finished; it refuses
 # when the public main is not yet that commit's export, so a release always
 # names the tree it says it does.
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: The tag, such as v0.1.0. docs/releases/<version>.md must exist.
+        description: The tag, such as v0.2.0. docs/releases/<version>.md must exist.
         required: true
         type: string
 
@@ -43,7 +43,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::A version is v, then three numbers: v0.1.0. Got '$VERSION'."
+            echo "::error::A version is v, then three numbers: v0.2.0. Got '$VERSION'."
             exit 1
           fi
           if [ ! -f "docs/releases/$VERSION.md" ]; then

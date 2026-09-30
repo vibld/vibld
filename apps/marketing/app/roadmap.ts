@@ -103,13 +103,6 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
       'Start from a mockup or a picture of a page, measured the way a reference URL already is.',
   },
   {
-    id: 'template-gallery',
-    status: 'upcoming',
-    title: 'Template gallery',
-    description:
-      'Pick a starter template in the builder, beginning with the marketing and Luminous templates.',
-  },
-  {
     id: 'figma-import',
     status: 'considering',
     title: 'Figma import',
@@ -256,6 +249,15 @@ export const ROADMAP_ITEMS: readonly RoadmapItem[] = [
     title: 'Animated backgrounds',
     description:
       'Four moving backgrounds drawn in code from the project’s colours, used when a request asks for one.',
+  },
+  {
+    // Shipped as a gallery on vibld.com (internal PR 323, D100); picking a design inside
+    // the builder is not built, so the description does not claim it.
+    id: 'template-gallery',
+    status: 'shipped',
+    title: 'Template gallery',
+    description:
+      'Browse designs by use case at vibld.com/templates, each with its palette, its type and a build prompt to copy into the builder.',
   },
   {
     id: 'build-and-repair',

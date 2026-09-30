@@ -95,7 +95,6 @@ describe('the roadmap data', () => {
       'Checkpoint history and rollback',
       'Custom domains',
       'Screenshot and image import',
-      'Template gallery',
     ]);
     assert.deepEqual(titles('considering'), [
       'Figma import',
@@ -121,6 +120,7 @@ describe('the roadmap data', () => {
       'Media uploads',
       'Style moods and suggestions',
       'Animated backgrounds',
+      'Template gallery',
       'Build-and-repair reliability',
     ]);
   });
