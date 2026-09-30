@@ -11,6 +11,7 @@ import {
   MAX_PLANNED_FILES,
   OUTLINE_LABEL,
   OUTLINE_MAX_TOKENS,
+  OUTLINE_RETRY_MAX_TOKENS,
   applyBoundedPatch,
   buildOutputBudgetFor,
   callCeilingFor,
@@ -24,6 +25,7 @@ import {
   rankOf,
   runBoundedBuild,
   splitGroup,
+  thinkingFilled,
   uiApiLine,
 } from '../src/bounded-build.ts';
 import type {
@@ -739,6 +741,8 @@ describe('the outline', () => {
     const { result, hooks, client } = await build(huge);
     assert.deepEqual(hooks.names, ['outline', 'outline.again']);
     assert.equal(client.requests[1]!.effort, 'low');
+    // The plan, not thinking, filled it: asked again in the same room.
+    assert.equal(client.requests[1]!.maxTokens, client.requests[0]!.maxTokens);
     assert.equal(result.failure?.stop, 'model-truncated');
     assert.match(result.failure!.message, /Ask for fewer pages/);
   });
@@ -757,6 +761,42 @@ describe('the outline', () => {
     assert.deepEqual(hooks.names.slice(0, 2), ['outline', 'outline.again']);
     assert.equal(client.requests[0]!.effort, 'high');
     assert.equal(client.requests[1]!.effort, 'low');
+  });
+
+  it('gives the retry room to think when thinking filled the first reply', async () => {
+    // Try-generation run 36646479455, after DeepSeek began honouring
+    // effort: DeepSeek Flash thought through all 16,000 of the first reply
+    // and 10,070 of the low-effort retry, and the plan it had begun was cut
+    // off. Low effort thinks less, not nothing, so the same plan needs the
+    // room its thinking takes.
+    const script = { summary: 'A site.', spec: SPEC, files: requiredFiles() };
+    const thinking = {
+      high: OUTLINE_MAX_TOKENS,
+      low: OUTLINE_MAX_TOKENS - 500,
+    };
+    const { result, hooks, client } = await build(script, inProcess(), {
+      thinking,
+    });
+    assert.equal(result.ok, true, result.failure?.message ?? '');
+    assert.deepEqual(hooks.names.slice(0, 2), ['outline', 'outline.again']);
+    assert.equal(client.requests[0]!.maxTokens, OUTLINE_MAX_TOKENS);
+    assert.equal(client.requests[1]!.maxTokens, OUTLINE_RETRY_MAX_TOKENS);
+    assert.equal(client.requests[1]!.effort, 'low');
+  });
+
+  it('counts a reply as filled by thinking only when reasoning is at least half of it', () => {
+    const usage = (outputTokens: number, reasoningTokens?: number) => ({
+      inputTokens: 1,
+      outputTokens,
+      cacheReadInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    });
+    assert.equal(thinkingFilled(usage(16_000, 16_000)), true);
+    assert.equal(thinkingFilled(usage(16_000, 8_000)), true);
+    assert.equal(thinkingFilled(usage(16_000, 7_999)), false);
+    assert.equal(thinkingFilled(usage(16_000)), false);
+    assert.equal(thinkingFilled(usage(0, 0)), false);
   });
 
   it('refuses a plan with more files than a project may hold, before writing any', async () => {

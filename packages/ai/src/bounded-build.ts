@@ -118,6 +118,31 @@ import type { ExtraDependency, ScaffoldInput } from './scaffold.ts';
 export const OUTLINE_MAX_TOKENS = 16_000;
 
 /**
+ * The outline retry's ceiling when thinking, not the plan, filled the first
+ * reply: at least half of what it spent was reasoning.
+ *
+ * Output and reasoning share one ceiling. Asking again at low effort makes a
+ * model think less, not nothing: DeepSeek Flash on the North Star replay
+ * (try-generation run 36646479455) spent all 16,000 of its first reply
+ * thinking, and 10,070 of its low-effort retry, so the plan it had started
+ * was cut off about 6,000 tokens in. A plan is a few thousand tokens, so
+ * the retry needs room for the thinking, not a shorter plan. A reply that
+ * ran out on the plan itself is asked again at the first ceiling, more
+ * briefly, as before. Still bounded by `callCeilingFor` and by what is left
+ * of the run's output budget.
+ */
+export const OUTLINE_RETRY_MAX_TOKENS = 2 * OUTLINE_MAX_TOKENS;
+
+/** Whether reasoning, rather than the answer, used most of a reply. */
+export function thinkingFilled(usage: PlanUsage): boolean {
+  return (
+    usage.reasoningTokens !== undefined &&
+    usage.outputTokens > 0 &&
+    usage.reasoningTokens * 2 >= usage.outputTokens
+  );
+}
+
+/**
  * The output ceiling for one file-group call.
  *
  * Big enough that a group sized at `GROUP_ESTIMATE_TOKENS` has more than
@@ -1594,10 +1619,14 @@ export async function runBoundedBuild(
     outlined.outcome === 'failed' &&
     (outlined.stop === 'model-truncated' || outlined.stop === 'model-shape')
   ) {
+    const retryCeiling =
+      outlined.stop === 'model-truncated' && thinkingFilled(outlined.usage)
+        ? callCeilingFor(builder.model, OUTLINE_RETRY_MAX_TOKENS)
+        : outlineCeiling;
     outlined = await call(
       'outline.again',
       OUTLINE_LABEL,
-      outlineCeiling,
+      retryCeiling,
       ask('low'),
     );
   }

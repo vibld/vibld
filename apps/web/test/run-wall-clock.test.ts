@@ -5,6 +5,7 @@ import {
   GROUP_MAX_TOKENS,
   MODEL_CATALOGUE,
   OUTLINE_MAX_TOKENS,
+  OUTLINE_RETRY_MAX_TOKENS,
   callCeilingFor,
   RUN_ABANDONED_AFTER_MS,
   RUN_STEP_TIMEOUT_MS,
@@ -84,7 +85,11 @@ describe('how long one run is allowed to take', () => {
     // being reclaimed is per call now: every call fits one step, and one
     // step fits inside the reclaim window.
     for (const model of MODEL_CATALOGUE) {
-      for (const ceiling of [OUTLINE_MAX_TOKENS, GROUP_MAX_TOKENS]) {
+      for (const ceiling of [
+        OUTLINE_MAX_TOKENS,
+        OUTLINE_RETRY_MAX_TOKENS,
+        GROUP_MAX_TOKENS,
+      ]) {
         const tokens = callCeilingFor(model.id, ceiling);
         const halfRate = outputTokensPerSecondFor(model.id) / 2;
         assert.ok(
