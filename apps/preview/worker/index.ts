@@ -473,7 +473,9 @@ export default {
     // A published site, `<slug>.vibld-preview.dev`, before anything else:
     // its paths are its own, `/internal/` included, which apps/publish
     // answers (and gates with its own secret) for the examples script.
-    if (env.PUBLISH && isPublishedHost(url.hostname, env.PREVIEW_HOSTNAME)) {
+    // `host`, not `hostname`, here and below: under Docker the preview host
+    // carries a port (`localhost:8788`); on Cloudflare the two are the same.
+    if (env.PUBLISH && isPublishedHost(url.host, env.PREVIEW_HOSTNAME)) {
       return env.PUBLISH.fetch(request);
     }
 
@@ -484,10 +486,10 @@ export default {
     // The reserved subdomain share links are served from (L10) -- checked
     // before `proxyToSandbox`, which never recognises it as a preview URL
     // in the first place (it has no port/token, only a share id).
-    if (url.hostname === shareHostname(env)) {
+    if (url.host === shareHostname(env)) {
       return handleSharedPreview(request, env);
     }
-    const shareId = shareIdFromHost(url.hostname, env.PREVIEW_HOSTNAME);
+    const shareId = shareIdFromHost(url.host, env.PREVIEW_HOSTNAME);
     if (shareId) return handleShareHost(request, env, shareId);
 
     // Public preview traffic: `*.vibld-preview.dev` requests for an exposed

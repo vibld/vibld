@@ -1,3 +1,5 @@
+import { subdomainOrigin } from '@vibld/core';
+
 import { verifyShare } from './share-token.ts';
 
 /**
@@ -53,7 +55,7 @@ export function shareLink(
   signature: string,
 ): string {
   const url = new URL(
-    `https://sh-${shareId}.${previewHostname}${SHARE_REDEEM_PATH}`,
+    `${subdomainOrigin(`sh-${shareId}`, previewHostname)}${SHARE_REDEEM_PATH}`,
   );
   url.searchParams.set('s', sandboxId);
   url.searchParams.set('exp', String(expiresAt));

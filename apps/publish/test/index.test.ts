@@ -117,6 +117,30 @@ describe('apps/publish Worker: internal API', () => {
     assert.equal(body.url, 'https://acme.vibld-preview.dev/');
   });
 
+  it('publishes and serves on this machine under Docker, over plain HTTP (D126)', async () => {
+    const env = newEnv({ PUBLISH_HOSTNAME: 'localhost:8789' });
+    const published = await worker.fetch(
+      internalRequest('internal/publish', {
+        userId: 'u1',
+        projectId: 'p1',
+        slug: 'acme',
+        files: [{ path: 'index.html', content: '<h1>Acme</h1>' }],
+      }),
+      env,
+    );
+    const body = (await published.json()) as { url: string };
+    assert.equal(body.url, 'http://acme.localhost:8789/');
+    const served = await worker.fetch(new Request(body.url), env);
+    assert.equal(served.status, 200);
+    assert.match(await served.text(), /<h1>Acme<\/h1>/);
+    // A different port is a different host, not this one.
+    const elsewhere = await worker.fetch(
+      new Request('http://acme.localhost:9999/'),
+      env,
+    );
+    assert.equal(elsewhere.status, 404);
+  });
+
   it('rejects a first publish with no slug', async () => {
     const env = newEnv();
     const response = await worker.fetch(

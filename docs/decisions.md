@@ -465,6 +465,12 @@ builder, and whether the repository should move to his account.
 - **D136. A per-person setting adds models to the plan's.** An account gets
   its plan's models plus the extras an admin grants it; removing the extras
   returns it to the plan.
+- **D137. Under Docker, previews run on the host's Docker.** The compose
+  file mounts the host's Docker socket into the vibld container, so workerd
+  starts each preview's and each build check's sandbox as a sibling
+  container, the same code path as on Cloudflare. Anything in control of
+  the vibld container can control the host's Docker; Chris chose this over
+  one shared sandbox container and over no sandbox at all.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

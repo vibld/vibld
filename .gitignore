@@ -21,3 +21,4 @@ test-results/
 
 # Your own copy's Worker configuration, written by scripts/self-host.mjs.
 apps/*/wrangler.self-host.jsonc
+apps/*/wrangler.docker.jsonc

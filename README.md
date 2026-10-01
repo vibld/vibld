@@ -323,6 +323,24 @@ Self-hosting is possible, and still needs validation outside the project: a work
 - **Your own names.** The Worker names, database, bucket, Workflow, routes and Clerk domain in the `wrangler.jsonc` files are vibld's. `node scripts/self-host.mjs <settings.json>` writes a `wrangler.self-host.jsonc` beside each with all of them derived from a prefix of yours, and refuses to write one that still names vibld's ([Deploying](https://vibld.com/docs/deploying)).
 - **Stripe** only if you intend to charge anybody, **a GitHub App** only if you want push-to-repository, and **Resend** only for email. Each optional piece left unset reports itself unavailable rather than running without its check.
 
+### Run it with Docker
+
+The whole builder also runs on one machine under Docker, with no Cloudflare account (docs/decisions.md D126). It needs Docker with Compose, a model key, and a password to sign in with.
+
+```sh
+cp .env.example .env    # set VIBLD_OWNER_PASSWORD and a model key
+docker compose up --build
+```
+
+Then open http://localhost:8787 and sign in with that password. Previews open at `http://<...>.localhost:8788` and published sites at `http://<slug>.localhost:8789`; browsers send any `*.localhost` name to this machine.
+
+- **What runs.** The builder, previews and publishing are three Workers under workerd (`wrangler dev`), with their database, files, Durable Objects and Workflow in the `vibld-data` volume. Secrets they share are made on first start and kept there.
+- **Previews run on your Docker (D137).** Each preview's sandbox is its own container, started through the Docker socket the compose file mounts, the same way it runs on Cloudflare. Anything in control of the vibld container can control your Docker.
+- **Host networking.** The vibld container uses the host's network, so the sandboxes it starts can reach it and it can reach them. On Docker Desktop (macOS, Windows), turn on host networking first: Settings, Resources, Network, "Enable host networking".
+- **Sign-in** is the owner's password (`VIBLD_AUTH=owner`); Clerk and Cloudflare Access are services outside the box.
+- **Keys** can be set in `.env` or later on the admin page under Provider keys.
+- **Not under Docker:** the nightly jobs (scheduled cleanups and the billing pass), which `wrangler dev` does not run on a schedule; and Stripe, GitHub push and email, whose keys the Docker setup does not pass on.
+
 Read next: [what self-hosting involves](https://vibld.com/docs/self-hosting), [every setting and secret](https://vibld.com/docs/configuration), [deploying your own copy](https://vibld.com/docs/deploying) and [hosted or self-hosted](https://vibld.com/docs/hosted-vs-self-hosted). The exact commands are in [`apps/web/README.md`](apps/web/README.md), [`apps/preview/README.md`](apps/preview/README.md) and [`apps/publish/README.md`](apps/publish/README.md), beside the code they deploy. The workflows that deploy vibld's own hosted service run only in the maintainers' working repository, since a copy has none of their secrets.
 
 ## Documentation

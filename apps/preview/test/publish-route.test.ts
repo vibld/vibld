@@ -39,3 +39,17 @@ describe('which hosts go to a published site', () => {
     assert.equal(isPublishedHost(`acme.${HOST}`, undefined), false);
   });
 });
+
+describe('published hosts on this machine under Docker (D126)', () => {
+  it('match with the port, as the request’s host carries it', () => {
+    assert.equal(
+      isPublishedHost('acme.localhost:8788', 'localhost:8788'),
+      true,
+    );
+    assert.equal(
+      isPublishedHost('5173-owner-tok.localhost:8788', 'localhost:8788'),
+      false,
+    );
+    assert.equal(isPublishedHost('acme.localhost', 'localhost:8788'), false);
+  });
+});

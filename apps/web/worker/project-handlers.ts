@@ -7,6 +7,7 @@ import {
   cleanProjectName,
   copyName,
   parseTranscript,
+  subdomainOrigin,
 } from '@vibld/core';
 import type { TranscriptTurn } from '@vibld/core';
 
@@ -210,7 +211,7 @@ export function projectView(project: ProjectRecord, links?: ProjectLinks) {
       ? {
           slug: project.site.slug,
           state: project.site.state,
-          url: `https://${project.site.slug}.${hostname}/`,
+          url: `${subdomainOrigin(project.site.slug, hostname)}/`,
         }
       : null,
   };

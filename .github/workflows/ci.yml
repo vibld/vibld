@@ -108,6 +108,42 @@ jobs:
           [ "$minutes" -ge 1 ] || minutes=1
           node --experimental-strip-types packages/eval/bin/build-candidates.ts "$RUNNER_TEMP/eval-stub" "$minutes" --container node:24-bookworm-slim
 
+  # vibld under docker compose, with no Cloudflare account (D126): the
+  # image builds, the three Workers start under workerd, and the owner
+  # signs in. A preview's sandbox is a container on the runner's Docker
+  # (D137); starting one is left to the end-to-end check (D122).
+  docker:
+    name: Docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Start it
+        env:
+          # Not a secret: this copy lives for the length of the job.
+          VIBLD_OWNER_PASSWORD: ci-owner-password-123
+        run: |
+          printf 'VIBLD_OWNER_PASSWORD=%s\nOPENAI_API_KEY=sk-not-a-real-key\nVIBLD_PROVIDER=openai\n' "$VIBLD_OWNER_PASSWORD" > .env
+          docker compose up --build --detach
+
+      - name: Sign in
+        env:
+          VIBLD_OWNER_PASSWORD: ci-owner-password-123
+        run: node docker/smoke.mjs 900
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color | tail -n 300
+
   # The marketing template is deliberately outside the pnpm workspace: it has
   # to install and build on its own, with npm and no Vibld packages, because
   # that is what a user who exports it will do. Building it here is the only

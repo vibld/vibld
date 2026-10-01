@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/.wrangler
+**/.dev.vars
+**/wrangler.docker.jsonc
+**/wrangler.self-host.jsonc
+.env
+.git

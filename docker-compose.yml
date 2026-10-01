@@ -1,0 +1,31 @@
+# vibld on your own machine, with no Cloudflare account (docs/decisions.md
+# D126). Copy .env.example to .env, set a password and a model key, then:
+#
+#   docker compose up
+#
+# and open http://localhost:8787. README.md, "Run it with Docker", has the
+# rest.
+services:
+  vibld:
+    build: .
+    image: vibld
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    # The host's network, not a compose one: each preview's sandbox is a
+    # container on the host's Docker, which reaches vibld through the
+    # Docker gateway and is reached through a port published on the host
+    # (D137). The builder is then on http://localhost:8787, previews on
+    # http://<...>.localhost:8788 and published sites on
+    # http://<slug>.localhost:8789.
+    network_mode: host
+    volumes:
+      # Projects, accounts, spend and the secrets made on first start.
+      - vibld-data:/data
+      # Each preview runs in its own container on this machine's Docker
+      # (D137). Anything in control of this container can control the
+      # host's Docker.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  vibld-data:

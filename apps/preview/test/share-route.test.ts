@@ -227,3 +227,17 @@ describe('the cookie', () => {
     assert.equal(withoutGrantCookie(null), null);
   });
 });
+
+describe('share links on this machine under Docker (D126)', () => {
+  it('are plain HTTP on the preview port, and read back with it', () => {
+    const id = '0123abcd-4567-89ab-cdef-0123456789ab';
+    const link = new URL(shareLink('localhost:8788', 'sandbox', id, 1, 'sig'));
+    assert.equal(link.protocol, 'http:');
+    assert.equal(link.host, `sh-${id}.localhost:8788`);
+    assert.equal(shareIdFromHost(link.host, 'localhost:8788'), id);
+    assert.equal(
+      new URL(shareLink('vibld-preview.dev', 'sandbox', id, 1, 'sig')).protocol,
+      'https:',
+    );
+  });
+});

@@ -7,7 +7,7 @@ import { contentTypeFor } from './content-type.ts';
 import { isAuthorizedInternalCaller } from './internal-auth.ts';
 import { PublishStore } from './publish-store.ts';
 import { candidatePaths, fallbackPaths, isNavigation } from './resolve-path.ts';
-import { isMediaPath } from '@vibld/core';
+import { isMediaPath, subdomainOrigin } from '@vibld/core';
 import {
   MEDIA_MANIFEST_PATH,
   readMediaManifest,
@@ -180,7 +180,7 @@ async function handlePublish(request: Request, env: Env): Promise<Response> {
   const hostname = env.PUBLISH_HOSTNAME ?? 'vibld-preview.dev';
   return json({
     slug: resolvedSlug,
-    url: `https://${resolvedSlug}.${hostname}/`,
+    url: `${subdomainOrigin(resolvedSlug, hostname)}/`,
   });
 }
 
@@ -498,7 +498,9 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
 
   const hostname = env.PUBLISH_HOSTNAME ?? 'vibld-preview.dev';
-  const slug = slugFromHost(url.hostname, hostname);
+  // `host`, not `hostname`: under Docker the published host carries a
+  // port (`localhost:8789`), and on Cloudflare the two are the same.
+  const slug = slugFromHost(url.host, hostname);
   if (!slug) {
     return json({ error: 'Not found.' }, 404);
   }

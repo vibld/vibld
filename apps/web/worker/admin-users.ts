@@ -30,6 +30,8 @@
  * were asked.
  */
 
+import { subdomainOrigin } from '@vibld/core';
+
 import { AdminStore } from './admin-store.ts';
 import type { AuditAction, AuditEntry } from './admin-store.ts';
 import { AccountDeletionStore } from './account-deletion-store.ts';
@@ -808,9 +810,10 @@ async function detail(
       site: project.site
         ? {
             ...project.site,
-            url: `https://${project.site.slug}.${
-              env.PUBLISH_HOSTNAME || DEFAULT_PUBLISH_HOSTNAME
-            }/`,
+            url: `${subdomainOrigin(
+              project.site.slug,
+              env.PUBLISH_HOSTNAME || DEFAULT_PUBLISH_HOSTNAME,
+            )}/`,
           }
         : null,
     })),

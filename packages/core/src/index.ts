@@ -131,3 +131,4 @@ export type {
   TranscriptStatus,
   TranscriptTurn,
 } from './project.ts';
+export { isLocalHost, subdomainOrigin } from './site-host.ts';
