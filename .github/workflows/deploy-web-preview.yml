@@ -433,6 +433,39 @@ jobs:
           printf 'invite' | pnpm dlx wrangler@4.137.0 secret put VIBLD_ACCESS_MODE
           echo "Access: INVITE ONLY. Admins can issue invites from the builder." >> "$GITHUB_STEP_SUMMARY"
 
+      # The key the admin panel's provider keys are encrypted under in D1
+      # (D127, D132). Created once, here, and never replaced: a new one
+      # would leave every stored key unreadable, so this writes only when
+      # the Worker has none, and fails rather than guesses when it cannot
+      # tell. Only secret names are listed; no value is ever readable.
+      - name: Create the provider-key encryption key, once
+        shell: bash
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          listed="$(pnpm dlx wrangler@4.137.0 secret list --format json)"
+          # 0: present, 1: absent, anything else: the list could not be read.
+          set +e
+          printf '%s' "$listed" | node scripts/has-secret.mjs VIBLD_KEY_ENCRYPTION_KEY
+          found=$?
+          set -e
+          case "$found" in
+            0)
+              echo "VIBLD_KEY_ENCRYPTION_KEY is set; left as it is." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            1)
+              openssl rand -base64 32 | tr -d '\n' | pnpm dlx wrangler@4.137.0 secret put VIBLD_KEY_ENCRYPTION_KEY
+              echo "Created VIBLD_KEY_ENCRYPTION_KEY: the panel can store provider keys." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::Could not read the Worker's secret names, so VIBLD_KEY_ENCRYPTION_KEY was left alone."
+              exit 1
+              ;;
+          esac
+
       # Idempotent -- wrangler tracks applied migrations in the database's own
       # `d1_migrations` table and only runs what is new. Runs before the
       # deploy itself so a Worker never goes live expecting a table a

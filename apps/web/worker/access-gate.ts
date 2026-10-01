@@ -312,6 +312,8 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   '/api/admin/accounts/import': 'behind the platform-admin check instead',
   '/api/admin/admins': 'behind the platform-admin check instead',
   '/api/admin/overview': 'behind the platform-admin check instead',
+  '/api/admin/keys': 'behind the platform-admin check instead',
+  '/api/admin/keys/remove': 'behind the platform-admin check instead',
   '/api/admin/invites': 'behind the platform-admin check instead',
   '/api/admin/invite': 'behind the platform-admin check instead',
   '/api/admin/invite/revoke': 'behind the platform-admin check instead',

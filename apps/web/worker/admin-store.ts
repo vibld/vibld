@@ -35,6 +35,9 @@ export const AUDIT_ACTIONS = [
   'accounts-import',
   // Stopping an account's running builds from its page (D128).
   'stop-builds',
+  // Setting and removing a model provider key in the panel (D127).
+  'provider-key-set',
+  'provider-key-remove',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

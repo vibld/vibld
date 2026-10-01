@@ -4,6 +4,7 @@ import { AdminPanel } from './AdminPanel.tsx';
 import { DeletionsPanel } from './DeletionsPanel.tsx';
 import { InvitePanel } from './InvitePanel.tsx';
 import { ParkedQueuePanel } from './ParkedQueuePanel.tsx';
+import { ProviderKeysPanel } from './ProviderKeysPanel.tsx';
 import { SiteTakedown } from './SiteTakedown.tsx';
 import { ADMIN_OVERVIEW_PATH, adminPageView } from '../admin/route.ts';
 import { navigate } from '../admin/use-pathname.ts';
@@ -82,6 +83,7 @@ export function AdminSettings({ isAdmin }: { isAdmin: boolean | null }) {
 
       <div className="adminpage__tools">
         <AdminAccounts />
+        <ProviderKeysPanel />
         <AdminPanel />
         <InvitePanel />
         <ParkedQueuePanel />

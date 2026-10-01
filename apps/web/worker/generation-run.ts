@@ -602,6 +602,8 @@ export interface GenerationWorkflowEnv {
   ANTHROPIC_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  /** The panel's provider keys are read under this (D127, `provider-keys.ts`). */
+  VIBLD_KEY_ENCRYPTION_KEY?: string;
   VIBLD_PROVIDER?: string;
   VIBLD_MODEL?: string;
 }

@@ -172,6 +172,12 @@ import {
   reconcileSubscriptions,
 } from './billing-handlers.ts';
 import { checkProviderBalances } from './provider-balance.ts';
+import {
+  handleProviderKeys,
+  isKeyRoute,
+  panelKeyQueries,
+  withPanelKeys,
+} from './provider-keys.ts';
 import { BillingStore } from './billing-store.ts';
 import { ReferralStore } from './referral-store.ts';
 import {
@@ -476,6 +482,12 @@ export interface Env extends PrincipalEnv {
    * the same exception `VIBLD_MODEL_POLICY` is.
    */
   VIBLD_PLATFORM_ADMINS?: string;
+  /**
+   * 32 random bytes, base64: the key the admin panel's provider keys are
+   * encrypted under in D1 (D127, D132). The deploy workflow creates it once
+   * and never replaces it; unset, the panel stores no keys.
+   */
+  VIBLD_KEY_ENCRYPTION_KEY?: string;
   /**
    * D1 queries the nightly billing replay may spend in one invocation.
    *
@@ -3030,10 +3042,14 @@ export default {
      * pass.
      */
     const queryBudget = Number(env.VIBLD_REPLAY_QUERY_BUDGET);
-    const allowance =
-      Number.isFinite(queryBudget) && queryBudget > 0
+    // Less the read of the panel's provider keys for the balance check
+    // below, which spends from the same invocation's allowance.
+    const allowance = Math.max(
+      0,
+      (Number.isFinite(queryBudget) && queryBudget > 0
         ? queryBudget
-        : DEFAULT_QUERY_BUDGET;
+        : DEFAULT_QUERY_BUDGET) - panelKeyQueries(env),
+    );
 
     /*
      * Account deletion (docs/decisions.md L32): retrying immediate steps
@@ -3385,14 +3401,18 @@ export default {
     }
 
     ctx.waitUntil(
-      checkProviderBalances(env).then(
-        (result) =>
-          console.log(
-            JSON.stringify({ event: 'provider_balance.checked', ...result }),
-          ),
-        (error: unknown) =>
-          console.error('provider balance check failed', error),
-      ),
+      // With the panel's keys (D131): a key set there is the one in use,
+      // so it is the balance worth checking.
+      withPanelKeys(env)
+        .then(checkProviderBalances)
+        .then(
+          (result) =>
+            console.log(
+              JSON.stringify({ event: 'provider_balance.checked', ...result }),
+            ),
+          (error: unknown) =>
+            console.error('provider balance check failed', error),
+        ),
     );
   },
 };
@@ -3406,6 +3426,19 @@ async function route(
   // (`/api/projects/:id`) before anything compares against them. Every
   // other path is its own name and comes through unchanged.
   const pathname = routeKeyFor(new URL(request.url).pathname);
+
+  // The panel's provider keys (D127) are managed against the Worker's own
+  // environment, so "the secret" there means the secret. Every other route
+  // sees the panel's keys laid over it (D131).
+  if (isKeyRoute(pathname)) {
+    const guard = await requireAdmin(request, env);
+    if (guard.denied) return guard.denied;
+    return handleProviderKeys(request, env, {
+      adminEmail: guard.adminEmail,
+      audit: (entry) => appendAudit(env.DB!, entry),
+    });
+  }
+  env = await withPanelKeys(env);
 
   /*
    * The invite gate, before dispatch rather than inside each handler.

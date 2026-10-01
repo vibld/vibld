@@ -544,6 +544,8 @@ const ACTION_NAMES: Record<string, string> = {
   'share-release': 'Released a share link',
   'accounts-import': 'Imported accounts from Clerk',
   'stop-builds': 'Stopped running builds',
+  'provider-key-set': 'Set a provider key',
+  'provider-key-remove': 'Removed a provider key',
 };
 
 /** One audit row, as a sentence an admin reads down a list. */
@@ -575,6 +577,13 @@ export function describeAuditEntry(entry: AdminAuditEntry): string {
         ? `${detail.stopped} stopped, ${detail.stillRunning} still running`
         : `${detail.stopped} stopped`,
     );
+  }
+  if (
+    (entry.action === 'provider-key-set' ||
+      entry.action === 'provider-key-remove') &&
+    typeof detail.last4 === 'string'
+  ) {
+    facts.push(`ending ${detail.last4.slice(-4)}`);
   }
   if (entry.action === 'topup' && typeof detail.creditUsdCents === 'number') {
     facts.push(formatUsd(detail.creditUsdCents * 10_000));

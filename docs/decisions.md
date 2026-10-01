@@ -444,6 +444,21 @@ builder, and whether the repository should move to his account.
   secret, which no session can make (L4).
 - **D130. The admin tools come before Docker.** Built now, one pull request
   per piece, then the D126 order resumes.
+- **D131. A key set in the panel is used ahead of the secret.** Where a
+  provider has both a panel key and a Worker secret synced by the deploy,
+  the panel's key builds; removing it goes back to the secret.
+- **D132. The deploy creates the key-encryption key once.** The deploy
+  workflow generates `VIBLD_KEY_ENCRYPTION_KEY` when the Worker has none
+  and never replaces it, since a new one would leave every stored key
+  unreadable.
+- **D133. The panel controls model access per plan and per person.**
+  Which models each plan includes, and extra models for one account, are
+  set in the panel, stored in D1 and audited. D66 (Free builds with GPT-6
+  Luna) is the starting setting; `VIBLD_MODEL_POLICY` applies only until a
+  panel policy is saved.
+- **D134. Plan limits are editable in the panel.** Active projects and the
+  monthly allowance per plan are set in the panel and audited. vibld.com's
+  pricing copy is updated by hand to match.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

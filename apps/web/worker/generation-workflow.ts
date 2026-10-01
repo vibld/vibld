@@ -1,3 +1,4 @@
+import { withPanelKeys } from './provider-keys.ts';
 import { derivePalette, seedFromHex } from '@vibld/ai';
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import type { DurableGenerationResult } from '@vibld/core';
@@ -110,6 +111,10 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
     step: WorkflowStep,
   ): Promise<DurableGenerationResult & { check?: CheckVerdict }> {
     const params = event.payload;
+    // The provider keys this run's model calls use: the panel's where it
+    // holds one, else the Worker's own (D131). Read again on each resume,
+    // so a key replaced mid-run is the one the next step calls with.
+    const env = await withPanelKeys(this.env);
     const openStore = () =>
       new D1GenerationStore(this.env.DB, this.env.PROJECT_CONTENT);
 
@@ -206,7 +211,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
         ? undefined
         : await buildInSteps(
             {
-              client: createPlanClient(this.env, params.model),
+              client: createPlanClient(env, params.model),
               store: openStore,
               ledger: this.env.USER_BUDGET,
               ...(report ? { report } : {}),
@@ -303,7 +308,7 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
             outcome = await runGeneration(
               openStore(),
               new SanitizingModelProvider(
-                new PlanProvider(createPlanClient(this.env, params.model), {
+                new PlanProvider(createPlanClient(env, params.model), {
                   model: params.model,
                   maxTokens: ceilingForRun(params),
                   onUsage: (reported) => {
@@ -474,52 +479,42 @@ export class GenerationWorkflow extends WorkflowEntrypoint<
       },
       async () => {
         const verifyStartedAt = Date.now();
-        const verified = await verifyAndRepair(
-          this.env,
-          params,
-          generation.result,
-          {
-            build: buildProject,
-            reserve: reserveBudget,
-            settle: settleBudget,
-            store: openStore(),
-            generate: (provider, request) =>
-              runGeneration(openStore(), provider, request),
-            onPhase: (phase) => enter(phase),
-            // A provider of its own, with its own usage capture: the run's
-            // was settled above. A repair is a follow-up, so it is a patch in
-            // bounded steps like any other, made in this step rather than as
-            // steps of its own, and held to the run's own budgets.
-            // No progress channel, deliberately. The meter's clock stopped
-            // when the model steps finished, and reopening it here would show
-            // a run that had already reported its result still writing.
-            providerFor: (onUsage, onSteps) =>
-              new SanitizingModelProvider(
-                new BoundedPlanProvider(
-                  createPlanClient(this.env, params.model),
-                  {
-                    model: params.model,
-                    maxTokens: ceilingForRun(params),
-                    maxInputChars: inputBudgetForRun(params),
-                    // A repair fixes the project against the spec it has, and
-                    // its DESIGN.md is put back whatever it says, so it is not
-                    // asked to write one.
-                    keepSpec: true,
-                    onUsage: (usage: PlanUsage) => onUsage(usage),
-                    onSteps: (steps: RunStepTrace[]) => onSteps?.(steps),
-                    ...(params.style ? { style: params.style } : {}),
-                    ...(params.knowledge
-                      ? { knowledge: params.knowledge }
-                      : {}),
-                    ...(params.media ? { media: params.media } : {}),
-                    onUnexpectedError: (error) => {
-                      console.error('repair generation failed', error);
-                    },
-                  },
-                ),
-              ),
-          },
-        );
+        const verified = await verifyAndRepair(env, params, generation.result, {
+          build: buildProject,
+          reserve: reserveBudget,
+          settle: settleBudget,
+          store: openStore(),
+          generate: (provider, request) =>
+            runGeneration(openStore(), provider, request),
+          onPhase: (phase) => enter(phase),
+          // A provider of its own, with its own usage capture: the run's
+          // was settled above. A repair is a follow-up, so it is a patch in
+          // bounded steps like any other, made in this step rather than as
+          // steps of its own, and held to the run's own budgets.
+          // No progress channel, deliberately. The meter's clock stopped
+          // when the model steps finished, and reopening it here would show
+          // a run that had already reported its result still writing.
+          providerFor: (onUsage, onSteps) =>
+            new SanitizingModelProvider(
+              new BoundedPlanProvider(createPlanClient(env, params.model), {
+                model: params.model,
+                maxTokens: ceilingForRun(params),
+                maxInputChars: inputBudgetForRun(params),
+                // A repair fixes the project against the spec it has, and
+                // its DESIGN.md is put back whatever it says, so it is not
+                // asked to write one.
+                keepSpec: true,
+                onUsage: (usage: PlanUsage) => onUsage(usage),
+                onSteps: (steps: RunStepTrace[]) => onSteps?.(steps),
+                ...(params.style ? { style: params.style } : {}),
+                ...(params.knowledge ? { knowledge: params.knowledge } : {}),
+                ...(params.media ? { media: params.media } : {}),
+                onUnexpectedError: (error) => {
+                  console.error('repair generation failed', error);
+                },
+              }),
+            ),
+        });
         // Stored with the step's result, so the trace written after it
         // reads the time the checks and any repair took, not a replay's.
         return { ...verified, elapsedMs: Date.now() - verifyStartedAt };

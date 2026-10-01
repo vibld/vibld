@@ -1450,6 +1450,24 @@ clears it. See "Refunds and disputes" above.
    preview" → "Deploying" above) picks up any pending migration
    automatically on the next deploy.
 
+## Admin: provider keys (D127, D131, D132)
+
+The Anthropic, DeepSeek and OpenAI keys a deployment builds with can be set,
+replaced and removed on the admin page, under **Provider keys**. A key set
+there is used ahead of the Worker secret of the same name, and removing it
+goes back to that secret.
+
+- Keys are stored in D1 (`provider_keys`, migration 0042) only as their
+  AES-GCM encryption under `VIBLD_KEY_ENCRYPTION_KEY`, and shown only by
+  their last four characters. Every change is in the audit log.
+- `deploy-web-preview.yml` creates `VIBLD_KEY_ENCRYPTION_KEY` the first time
+  it deploys a Worker without one, and never replaces it. On a copy
+  deployed another way, set it yourself, once:
+  `openssl rand -base64 32 | npx wrangler secret put VIBLD_KEY_ENCRYPTION_KEY`.
+  Without it the panel lists keys but stores none.
+- Each Worker isolate reads the stored keys at most every 30 seconds, so a
+  change reaches every request within that time.
+
 ## Admin: accounts (D73)
 
 Each account has an admin page in the builder, `/admin/users/<Clerk user
