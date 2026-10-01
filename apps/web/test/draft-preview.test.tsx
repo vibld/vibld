@@ -62,6 +62,8 @@ function sandboxWith(
     status,
     ranRevision: status ? 'r1' : null,
     ranProjectId: null,
+    mode: 'sandbox',
+    page: null,
     pending: false,
     run(_files, revision) {
       ran.push(revision);

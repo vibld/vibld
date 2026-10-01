@@ -47,7 +47,7 @@ import {
   parseStylePreset,
 } from './request-guard.ts';
 import { fetchReferenceContext } from './reference-fetch.ts';
-import { handleMedia } from './media-handlers.ts';
+import { handleMedia, handleMediaFile } from './media-handlers.ts';
 import { handleChat } from './chat-handler.ts';
 import {
   DEFAULT_PUBLISH_HOSTNAME,
@@ -3595,6 +3595,10 @@ async function route(
         { email: principal.email, emailVerified: principal.emailVerified },
         platformAdminsFor(env),
       ),
+      // Where the Preview pane runs a project: in a sandbox container where
+      // this deployment has one, and otherwise in the viewer's own browser
+      // (D125).
+      preview: previewConfigured(env) ? 'sandbox' : 'browser',
     });
   }
 
@@ -3636,6 +3640,9 @@ async function route(
 
   if (pathname === '/api/media') {
     return handleMedia(request, env, (req) => resolvePrincipal(req, env));
+  }
+  if (pathname === '/api/media/file') {
+    return handleMediaFile(request, env, (req) => resolvePrincipal(req, env));
   }
 
   if (pathname === '/api/runs') {

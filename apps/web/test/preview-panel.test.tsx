@@ -48,6 +48,8 @@ function sandboxWith(
     status,
     ranRevision,
     ranProjectId: null,
+    mode: 'sandbox',
+    page: null,
     pending: false,
     run(files, revision) {
       ran.push({ revision, paths: files.map((file) => file.path) });
@@ -328,5 +330,123 @@ describe('a stop that did not happen', () => {
       ),
     );
     assert.doesNotMatch(view.text(), /may still be running/i);
+  });
+});
+
+describe('the preview in this browser (D125)', () => {
+  /** A message as if `source` had posted it. */
+  function message(data: unknown, source: unknown): MessageEvent {
+    // The page's own MessageEvent: Node has one too, which the page's
+    // `dispatchEvent` refuses.
+    const PageMessageEvent = (
+      window as unknown as { MessageEvent: typeof MessageEvent }
+    ).MessageEvent;
+    const event = new PageMessageEvent('message', { data });
+    Object.defineProperty(event, 'source', { value: source });
+    return event;
+  }
+  const blob = new Blob(['x'], { type: 'image/png' });
+  function inBrowser(status: PreviewStatus | null): PreviewSandbox {
+    return {
+      ...sandboxWith(status, status ? 'r1' : null),
+      mode: 'browser',
+      page:
+        status?.status === 'ready'
+          ? {
+              document: '<!doctype html><p>the app</p>',
+              assets: [{ path: 'media/hero.png', kind: 'media', blob }],
+              key: 1,
+            }
+          : null,
+    };
+  }
+  const READY_HERE: PreviewStatus = {
+    status: 'ready',
+    url: 'about:srcdoc',
+    expiresAt: 0,
+    revision: 'r1',
+  };
+
+  it('shows the page in a frame with no origin of its own, and no share links', async () => {
+    const view = await mount(stateWith('r1'), inBrowser(READY_HERE));
+    const frame = view.container.querySelector('iframe');
+    assert.ok(frame);
+    assert.equal(frame.getAttribute('srcdoc'), '<!doctype html><p>the app</p>');
+    const sandbox = frame.getAttribute('sandbox') ?? '';
+    assert.match(sandbox, /allow-scripts/);
+    assert.doesNotMatch(sandbox, /allow-same-origin/);
+    assert.match(
+      view.text(),
+      /Running in this browser, with packages from esm\.sh/,
+    );
+    assert.equal(view.button(/^Share$/), undefined);
+    assert.doesNotMatch(view.text(), /Expires around/);
+    view.unmount();
+  });
+
+  it('says it is bundling, not installing, while it runs', async () => {
+    const view = await mount(
+      stateWith('r1'),
+      inBrowser({ status: 'starting' }),
+    );
+    assert.match(view.text(), /Bundling your app in this browser/);
+    assert.match(view.text(), /loads the bundler/);
+    view.unmount();
+  });
+
+  it('offers to bundle in this browser rather than in a sandbox', async () => {
+    const view = await mount(stateWith('r1'), inBrowser(null));
+    assert.match(view.text(), /Bundles your app in this browser/);
+    assert.doesNotMatch(view.text(), /private sandbox/);
+    view.unmount();
+  });
+
+  it('hands the page its files when it asks, and shows what the app throws', async () => {
+    const view = await mount(stateWith('r1'), inBrowser(READY_HERE));
+    const frame = view.container.querySelector('iframe')!;
+    const target = frame.contentWindow;
+    assert.ok(target, 'the frame has a window to talk to');
+    const sent: unknown[] = [];
+    target.postMessage = ((message: unknown) => {
+      sent.push(message);
+    }) as typeof target.postMessage;
+
+    await act(async () => {
+      window.dispatchEvent(
+        message({ source: 'vibld-preview', kind: 'assets' }, target),
+      );
+    });
+    assert.deepEqual(sent, [
+      {
+        source: 'vibld-builder',
+        assets: [{ path: 'media/hero.png', kind: 'media', blob }],
+      },
+    ]);
+
+    // Another window saying the same thing is not the page.
+    await act(async () => {
+      window.dispatchEvent(
+        message(
+          { source: 'vibld-preview', kind: 'error', message: 'forged' },
+          window,
+        ),
+      );
+    });
+    assert.doesNotMatch(view.text(), /forged/);
+
+    await act(async () => {
+      window.dispatchEvent(
+        message(
+          {
+            source: 'vibld-preview',
+            kind: 'error',
+            message: 'x is not defined',
+          },
+          target,
+        ),
+      );
+    });
+    assert.match(view.text(), /The app reported an error: x is not defined/);
+    view.unmount();
   });
 });

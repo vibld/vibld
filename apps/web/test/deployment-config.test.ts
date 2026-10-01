@@ -33,6 +33,7 @@ const ANSWER: DeploymentConfig = {
   defaultModel: 'deepseek-flash',
   modelsNote: null,
   isAdmin: true,
+  preview: 'sandbox',
 };
 
 describe('applying the deployment probe', () => {

@@ -96,10 +96,12 @@ export default function SelfHosting() {
           <strong>Cloudflare, on Workers Paid</strong> for previews and
           publishing. Both run generated code in Containers, which the Workers
           free plan does not include, and the container image is built at deploy
-          time, so the machine you deploy from needs Docker. Whether the builder
-          alone runs on the free plan has not been tried: that plan allows 10 ms
-          of CPU per request and per Workflow step, and the builder’s
-          configuration asks for five minutes, which is a Paid setting.
+          time, so the machine you deploy from needs Docker. Without Containers,
+          the Preview pane bundles the project in the viewer’s browser instead,
+          with packages from esm.sh. Whether the builder alone runs on the free
+          plan has not been tried: that plan allows 10 ms of CPU per request and
+          per Workflow step, and the builder’s configuration asks for five
+          minutes, which is a Paid setting.
         </li>
         <li>
           <strong>Two domains on that account.</strong> One for the builder, and

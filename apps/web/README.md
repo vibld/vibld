@@ -816,6 +816,56 @@ content policy Explore's tiles use, so the draft cannot touch the builder.
 - **Fake mode** asks for no draft, since `/api/mockups` cannot answer a
   deployment without model generation; the pane behaves as before.
 
+### Without Containers: the preview in the viewer's browser (D125)
+
+A copy with no sandbox (no `PREVIEW` binding, as on Cloudflare's free
+plan, where nothing can run npm or Vite) runs the Preview pane in the
+viewer's own browser instead. `/api/config` says which with `"preview":
+"sandbox"` or `"browser"`, and `Workspace` picks `usePreviewSandbox` or
+`useBrowserPreview` (`src/generation/use-browser-preview.ts`); the panel
+draws either.
+
+- **Bundling.** `src/browser-preview/bundle-worker.ts` runs esbuild-wasm in
+  a Web Worker over the project's files from index.html's module script,
+  resolving the `@/` alias, `public/` paths and `?raw`/`?url` imports the
+  way Vite would. The code is only transformed there, never run.
+- **Packages.** Every bare import is left as written, and the page's
+  import map sends it to esm.sh at the range package.json declares
+  (`import-map.ts`). Every package but React is fetched with React
+  external, so the page has one React.
+- **Styles.** Tailwind's own compiler (the `tailwindcss` package, plain
+  JavaScript) compiles src/styles.css in the same Worker, against the
+  class names in the project's files (`styles.ts`). Tailwind's stylesheets
+  and tw-animate-css ship with the builder; another package's stylesheet
+  is fetched from esm.sh as text. A `@plugin` or `@config` is refused by
+  name.
+- **The page.** The project's index.html with the import map, the bundle
+  and the stylesheet (`document.ts`), shown as the `srcdoc` of an iframe
+  with `sandbox="allow-scripts allow-forms allow-modals allow-popups"` and
+  no `allow-same-origin`: the code runs in an opaque origin, with no
+  access to the builder's storage, and the builder's cookies are not sent
+  on its requests (checked in Chromium, SameSite Strict and Lax both).
+- **No origin, no URL.** The browser refuses such a page storage and any
+  change of its URL, so the page's bootstrap keeps `localStorage` and
+  `sessionStorage` in memory while it is open (an app that uses IndexedDB,
+  itself or through `idb`, `idb-keyval`, `dexie` or `localforage`, is given
+  fake-indexeddb from esm.sh, also in memory), keeps a history entry's
+  state without its URL, and keeps a link to one of the app's own paths
+  in the frame. React Router's browser and hash routers are mapped to its
+  memory router (`import-map.ts`), so routes and `<Link>`s work; a
+  router of the app's own that reads `location.pathname` shows its first
+  page.
+- **Media.** The page asks the builder for the media its code references
+  and the project's `public/` files by message; the builder reads media
+  from `GET /api/media/file?path=media/<name>` (the caller's own library)
+  and the page serves each from an object URL written over its path.
+- **Updates.** A new revision is bundled again and replaces the page (D74
+  without a server); a revision that does not bundle leaves the page that
+  was showing and says why. What the app throws is shown below the frame.
+- **Not here.** Share links and the expiry belong to a sandbox, so the
+  panel offers neither. A shared project's page still needs a sandbox for
+  its live preview.
+
 ### Setup
 
 1. Deploy `@vibld/preview` first (see its own README) -- apps/web's service

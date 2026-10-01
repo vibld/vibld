@@ -4,7 +4,10 @@ import {
   MEDIA_VIDEO_MAX_BYTES,
   maxBytesFor,
   cleanAlt,
+  isMediaPath,
+  mediaObjectKey,
   mediaPathFor,
+  mediaResponse,
   sniffMedia,
 } from '@vibld/core';
 
@@ -115,6 +118,60 @@ function hex(buffer: ArrayBuffer): string {
 }
 
 const MB = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
+
+/**
+ * One of the caller's own media files, by the path a page names it with:
+ * `GET /api/media/file?path=media/hero.jpg`.
+ *
+ * For the in-browser preview (D125), which has no sandbox to serve
+ * `/media/<name>` from: the builder reads each file the project's code
+ * references and hands it to the preview page. The caller's own library
+ * only, which the media panel already lists; private, because it is
+ * served to a signed-in person rather than to a site's visitors.
+ */
+export async function handleMediaFile(
+  request: Request,
+  env: MediaEnv,
+  resolve: Resolve,
+): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return json({ error: 'Use GET.' }, 405);
+  }
+  if (!env.DB || !env.PROJECT_CONTENT) {
+    return json({ error: 'Media is not configured for this deployment.' }, 503);
+  }
+  const path = new URL(request.url).searchParams.get('path') ?? '';
+  if (!isMediaPath(path)) {
+    return json({ error: '"path" must be a media path, media/<name>.' }, 400);
+  }
+  const resolved = await resolve(request);
+  if (resolved.denied) return resolved.denied;
+  const { userId } = resolved.principal;
+  const row = await env.DB.prepare(
+    `SELECT id, content_type FROM project_media
+      WHERE user_id = ?1 AND path = ?2`,
+  )
+    .bind(userId, path)
+    .first<{ id: string; content_type: string }>();
+  // Streamed, not read whole: a video can be tens of megabytes, and a
+  // HEAD needs only its size.
+  const key = row ? mediaObjectKey(userId, row.id) : null;
+  const head = request.method === 'HEAD';
+  const stored = key && !head ? await env.PROJECT_CONTENT.get(key) : null;
+  const object = key && head ? await env.PROJECT_CONTENT.head(key) : stored;
+  if (!row || !object) return json({ error: 'No such media file.' }, 404);
+  const response = mediaResponse({
+    body: stored?.body ?? null,
+    size: object.size,
+    contentType: row.content_type,
+    range: null,
+    method: request.method,
+  });
+  // A path can be freed and reused for another file, so the bytes are
+  // never kept.
+  response.headers.set('cache-control', 'private, no-store');
+  return response;
+}
 
 export async function handleMedia(
   request: Request,

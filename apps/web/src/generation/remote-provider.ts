@@ -424,7 +424,14 @@ export interface DeploymentConfig {
    * way (ADR-0006), same as the model grants this same response reports.
    */
   isAdmin: boolean;
+  /**
+   * Where the Preview pane runs a project: a sandbox container, or the
+   * viewer's own browser on a deployment without one (D125).
+   */
+  preview: PreviewMode;
 }
+
+export type PreviewMode = 'sandbox' | 'browser';
 
 /**
  * Ask the deployment what it can serve. Cached, because the answer cannot
@@ -441,6 +448,7 @@ const UNCONFIGURED: DeploymentConfig = {
   defaultModel: null,
   modelsNote: null,
   isAdmin: false,
+  preview: 'sandbox',
 };
 
 let probe: Promise<DeploymentConfig> | undefined;
@@ -481,6 +489,7 @@ export function detectDeploymentConfig(
         defaultModel?: unknown;
         modelsNote?: unknown;
         isAdmin?: unknown;
+        preview?: unknown;
       };
       // Every field is checked. This is the deployment's own endpoint, but a
       // shape that drifted would otherwise put `undefined` in a <select> and
@@ -504,6 +513,7 @@ export function detectDeploymentConfig(
             ? body.modelsNote
             : null,
         isAdmin: body.isAdmin === true,
+        preview: body.preview === 'browser' ? 'browser' : 'sandbox',
       };
     } catch {
       return UNCONFIGURED;

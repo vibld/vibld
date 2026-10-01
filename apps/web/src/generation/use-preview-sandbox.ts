@@ -16,6 +16,7 @@ import type {
 } from './preview-client.ts';
 import { createStatusGate } from '../github/panel-view.ts';
 import { POLL_INTERVAL_MS } from './runs-client.ts';
+import type { BrowserPreviewPage } from './use-browser-preview.ts';
 
 /** How often to re-check a preview that has not yet settled (matches `handlePlan`'s own poll interval, `worker/run-stage.ts`'s `POLL_INTERVAL_MS`). */
 export { POLL_INTERVAL_MS };
@@ -23,6 +24,13 @@ export { POLL_INTERVAL_MS };
 const SETTLED = new Set(['ready', 'failed']);
 
 export interface PreviewSandbox {
+  /**
+   * Where the project runs: a sandbox container, or the viewer's own
+   * browser on a deployment without one (D125, `use-browser-preview.ts`).
+   */
+  mode: 'sandbox' | 'browser';
+  /** The page a ready in-browser preview shows; null in a sandbox. */
+  page: BrowserPreviewPage | null;
   status: PreviewStatus | null;
   pending: boolean;
   /**
@@ -580,6 +588,8 @@ export function usePreviewSandbox(): PreviewSandbox {
   }
 
   return {
+    mode: 'sandbox',
+    page: null,
     status,
     ranRevision,
     ranProjectId,

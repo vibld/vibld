@@ -1,6 +1,12 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BuilderState, DraftPreview } from '../generation/session.ts';
 import { buildPreviewDocument } from '../generation/preview.ts';
+import {
+  PREVIEW_MESSAGE,
+  PREVIEW_SANDBOX,
+} from '../browser-preview/document.ts';
+import { PACKAGE_CDN } from '../browser-preview/import-map.ts';
+import type { BrowserPreviewPage } from '../generation/use-browser-preview.ts';
 import { servingOlderThan } from '../generation/use-preview-sandbox.ts';
 import type { PreviewSandbox } from '../generation/use-preview-sandbox.ts';
 import {
@@ -12,8 +18,14 @@ import { BuildCheckBadge } from './BuildCheckBadge.tsx';
 import { LifecycleBar } from './LifecycleBar.tsx';
 import { ProgressMeter } from './ProgressMeter.tsx';
 
-function describeStatus(status: PreviewSandbox['status']): string | null {
+function describeStatus(
+  status: PreviewSandbox['status'],
+  mode: PreviewSandbox['mode'] = 'sandbox',
+): string | null {
   if (!status) return null;
+  if (mode === 'browser' && status.status === 'starting') {
+    return 'Bundling your app in this browser…';
+  }
   switch (status.status) {
     case 'queued':
       return `Queued for a sandbox (position ${status.position})…`;
@@ -58,7 +70,8 @@ export function PreviewPanel({
     return buildPreviewDocument(state.acceptedBrief, state.acceptedSnapshot);
   }, [state.acceptedBrief, state.acceptedSnapshot]);
 
-  const statusMessage = describeStatus(sandbox.status);
+  const inBrowser = sandbox.mode === 'browser';
+  const statusMessage = describeStatus(sandbox.status, sandbox.mode);
   const running = sandbox.status !== null && sandbox.status.status !== 'failed';
   // The code on screen: a build's own while it is being checked (D69, shown
   // early with a badge), and otherwise the accepted checkpoint.
@@ -136,6 +149,8 @@ export function PreviewPanel({
           <LifecycleBar status={state.status} phase={state.progress?.phase} />
           <ProgressMeter progress={state.progress} announce={false} />
         </DraftView>
+      ) : sandbox.status?.status === 'ready' && sandbox.page ? (
+        <BrowserFrame key={sandbox.page.key} page={sandbox.page} />
       ) : sandbox.status?.status === 'ready' ? (
         <iframe
           className="preview__frame"
@@ -166,7 +181,10 @@ export function PreviewPanel({
         <>
           <p className="preview__notice">
             <strong>Quick mock.</strong> Static HTML from the plan, with no code
-            run. Run it in the sandbox for the real app.
+            run.{' '}
+            {inBrowser
+              ? 'Run the live preview for the real app.'
+              : 'Run it in the sandbox for the real app.'}
           </p>
           <iframe
             className="preview__frame"
@@ -209,9 +227,11 @@ export function PreviewPanel({
                 {statusMessage}
               </p>
               <p className="preview__empty-text">
-                {sandbox.updating
-                  ? "This change touches the project's dependencies, so they are installed before the preview comes back."
-                  : 'The first start installs the project, which takes a minute or two.'}
+                {inBrowser
+                  ? 'The first run loads the bundler, which takes a few seconds.'
+                  : sandbox.updating
+                    ? "This change touches the project's dependencies, so they are installed before the preview comes back."
+                    : 'The first start installs the project, which takes a minute or two.'}
               </p>
               <span className="preview__working" aria-hidden="true" />
             </>
@@ -219,8 +239,9 @@ export function PreviewPanel({
             <>
               <p className="preview__empty-title">Ready to run</p>
               <p className="preview__empty-text">
-                Installs and starts your app in a private sandbox, so you can
-                click through it.
+                {inBrowser
+                  ? 'Bundles your app in this browser, so you can click through it.'
+                  : 'Installs and starts your app in a private sandbox, so you can click through it.'}
               </p>
               <button
                 type="button"
@@ -260,7 +281,12 @@ export function PreviewPanel({
                 Stop
               </button>
             ) : null}
-            {sandbox.status?.status === 'ready' ? (
+            {sandbox.status?.status === 'ready' && inBrowser ? (
+              <span className="preview__expiry">
+                Running in this browser, with packages from{' '}
+                {new URL(PACKAGE_CDN).host}
+              </span>
+            ) : sandbox.status?.status === 'ready' ? (
               <span className="preview__expiry">
                 Expires around{' '}
                 {new Date(sandbox.status.expiresAt).toLocaleTimeString()}
@@ -338,10 +364,69 @@ export function PreviewPanel({
         </>
       ) : null}
 
-      {sandbox.status?.status === 'ready' ? (
+      {sandbox.status?.status === 'ready' && !inBrowser ? (
         <SharePanel sandbox={sandbox} />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The in-browser preview's page (D125), in an iframe with no origin of its
+ * own (`PREVIEW_SANDBOX`). It asks for its media and public files by
+ * message once it has loaded, and reports what the app throws, which is
+ * said below the frame: the frame itself has no console anybody sees.
+ */
+function BrowserFrame({ page }: { page: BrowserPreviewPage }) {
+  const frame = useRef<HTMLIFrameElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      const data = event.data as {
+        source?: unknown;
+        kind?: unknown;
+        message?: unknown;
+      } | null;
+      if (
+        !frame.current ||
+        event.source !== frame.current.contentWindow ||
+        data?.source !== PREVIEW_MESSAGE.fromPage
+      ) {
+        return;
+      }
+      if (data.kind === 'assets') {
+        frame.current.contentWindow?.postMessage(
+          {
+            source: PREVIEW_MESSAGE.fromBuilder,
+            assets: page.assets,
+          },
+          // The page has no origin to name, which is the point of it.
+          '*',
+        );
+      } else if (data.kind === 'error' && typeof data.message === 'string') {
+        setError(data.message);
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [page]);
+
+  return (
+    <>
+      <iframe
+        ref={frame}
+        className="preview__frame"
+        title="In-browser preview of the generated application"
+        srcDoc={page.document}
+        sandbox={PREVIEW_SANDBOX}
+      />
+      {error ? (
+        <p className="pane-note pane-note--error" role="alert">
+          The app reported an error: {error}
+        </p>
+      ) : null}
+    </>
   );
 }
 

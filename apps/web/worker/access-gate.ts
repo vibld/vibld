@@ -168,6 +168,11 @@ export const UNGATED_PATHS: Readonly<Record<string, string>> = {
   // description -- the writes happen in the Workflow, behind `/api/plan`,
   // which stays gated.
   '/api/runs': "a read of the caller's own run history",
+  // One file of the caller's own media library, for the in-browser preview
+  // (D125). A read, like GET on `/api/media`, which lists the same library:
+  // a revoked account can still see what it uploaded, and the preview it
+  // feeds runs in the caller's browser and spends nothing here.
+  '/api/media/file': "one file of the caller's own media library",
   // One of the caller's own builds: what became of it (GET), and stopping
   // it (DELETE), which is the only thing that stops one now that a build
   // outlives the page that started it (docs/decisions.md, "Resolved

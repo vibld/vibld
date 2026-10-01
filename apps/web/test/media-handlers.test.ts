@@ -9,7 +9,7 @@ import {
   mediaObjectKey,
 } from '@vibld/core';
 
-import { handleMedia } from '../worker/media-handlers.ts';
+import { handleMedia, handleMediaFile } from '../worker/media-handlers.ts';
 import type { MediaEnv } from '../worker/media-handlers.ts';
 import type { PrincipalGranted } from '../worker/principal.ts';
 import { InMemoryR2Bucket } from './fakes/memory-r2.ts';
@@ -435,6 +435,85 @@ describe('removing when storage fails', () => {
 describe('a deployment without media', () => {
   it('says so rather than failing', async () => {
     const response = await handleMedia(upload(PNG), {}, as('user_a'), options);
+    assert.equal(response.status, 503);
+  });
+});
+
+describe('one file of the library, for the in-browser preview (D125)', () => {
+  const file = (path: string, method = 'GET') =>
+    new Request(`${ORIGIN}/api/media/file?path=${encodeURIComponent(path)}`, {
+      method,
+    });
+
+  it("serves the caller's own file by its path, privately", async () => {
+    const e = env();
+    await handleMedia(upload(PNG), e, as('user_a'), options);
+    const response = await handleMediaFile(
+      file('media/hero-shot.png'),
+      e,
+      as('user_a'),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'image/png');
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.deepEqual(
+      [...new Uint8Array(await response.arrayBuffer())],
+      [...PNG],
+    );
+  });
+
+  it('answers HEAD with the size alone', async () => {
+    const e = env();
+    await handleMedia(upload(PNG), e, as('user_a'), options);
+    const response = await handleMediaFile(
+      file('media/hero-shot.png', 'HEAD'),
+      e,
+      as('user_a'),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-length'), String(PNG.length));
+    assert.equal(response.body, null);
+  });
+
+  it("never serves another account's file", async () => {
+    const e = env();
+    await handleMedia(upload(PNG), e, as('user_a'), options);
+    const response = await handleMediaFile(
+      file('media/hero-shot.png'),
+      e,
+      as('user_b'),
+    );
+    assert.equal(response.status, 404);
+  });
+
+  it('refuses a path that is not a media path, before asking who is calling', async () => {
+    let asked = false;
+    for (const path of ['../media/x.png', 'media/x.svg', 'src/App.tsx', '']) {
+      const response = await handleMediaFile(file(path), env(), async () => {
+        asked = true;
+        return as('user_a')();
+      });
+      assert.equal(response.status, 400, path);
+    }
+    assert.equal(asked, false);
+  });
+
+  it('answers only GET and HEAD', async () => {
+    const response = await handleMediaFile(
+      file('media/hero-shot.png', 'DELETE'),
+      env(),
+      as('user_a'),
+    );
+    assert.equal(response.status, 405);
+  });
+
+  it('says so on a deployment without media', async () => {
+    const response = await handleMediaFile(
+      file('media/hero-shot.png'),
+      {},
+      as('user_a'),
+    );
     assert.equal(response.status, 503);
   });
 });

@@ -84,9 +84,13 @@ interface D1Database {
 /** The `r2_buckets` binding, narrowed to plain text get/put. */
 interface R2Bucket {
   get(key: string): Promise<{
+    size: number;
+    body: ReadableStream<Uint8Array>;
     text(): Promise<string>;
     arrayBuffer(): Promise<ArrayBuffer>;
   } | null>;
+  /** An object's size without its bytes, for a HEAD request. */
+  head(key: string): Promise<{ size: number } | null>;
   /**
    * Text for project snapshots; bytes, with the type they are served as,
    * for the media library (`media-store.ts`).

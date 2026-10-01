@@ -94,6 +94,7 @@ describe('a re-probe of the deployment', () => {
     defaultModel: 'gpt-6-sol',
     modelsNote: null,
     isAdmin: false,
+    preview: 'sandbox',
   };
 
   function session(): {
@@ -149,6 +150,7 @@ describe('a re-probe of the deployment', () => {
       defaultModel: 'gpt-6-luna',
       modelsNote: note,
       isAdmin: false,
+      preview: 'sandbox',
     };
     const storage = memoryStorage();
     saveModelChoice('gpt-6-sol', storage);

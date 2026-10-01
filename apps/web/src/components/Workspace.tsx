@@ -10,6 +10,10 @@ import {
   shouldUpdateLive,
   usePreviewSandbox,
 } from '../generation/use-preview-sandbox.ts';
+import { useBrowserPreview } from '../generation/use-browser-preview.ts';
+import { onClerkSessionChange } from '../auth/clerk-token.ts';
+import { detectDeploymentConfig } from '../generation/remote-provider.ts';
+import type { PreviewMode } from '../generation/remote-provider.ts';
 import { CodeViewer } from './CodeViewer.tsx';
 import { FileList } from './FileList.tsx';
 import { PreviewPanel } from './PreviewPanel.tsx';
@@ -46,7 +50,36 @@ export function Workspace({
   // Owned here, not by PreviewPanel: this component does not unmount when a
   // tab switch hides PreviewPanel, so a running sandbox survives switching
   // to Code and back (see use-preview-sandbox.ts's own doc comment).
-  const sandbox = usePreviewSandbox();
+  // A deployment without sandbox containers runs the preview in this
+  // browser instead (D125). Both hooks are always called, since hooks
+  // cannot be chosen between; the one not in use is never asked to run.
+  // Asked again on signing in: the probe is refused signed out, and a
+  // sign-in from the header's modal does not reload the page.
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('sandbox');
+  useEffect(() => {
+    let live = true;
+    const ask = () =>
+      detectDeploymentConfig().then(
+        (config) => {
+          if (live) setPreviewMode(config.preview);
+        },
+        () => undefined,
+      );
+    void ask();
+    let wasSignedIn: boolean | undefined;
+    const unsubscribe = onClerkSessionChange((signedIn) => {
+      if (signedIn === wasSignedIn) return;
+      wasSignedIn = signedIn;
+      if (signedIn) void ask();
+    });
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, []);
+  const containerSandbox = usePreviewSandbox();
+  const browserPreview = useBrowserPreview();
+  const sandbox = previewMode === 'browser' ? browserPreview : containerSandbox;
 
   // A new revision reaches the running preview by itself (D74): an accepted
   // checkpoint, or a build's code shown early while it is checked (D69), is

@@ -56,6 +56,8 @@ function sandbox(ran: string[] = []): PreviewSandbox {
     status: null,
     ranRevision: null,
     ranProjectId: null,
+    mode: 'sandbox',
+    page: null,
     pending: false,
     run(_files, revision) {
       ran.push(revision);

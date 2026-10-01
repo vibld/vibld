@@ -6,6 +6,8 @@ export class InMemoryR2Bucket implements R2Bucket {
   >();
 
   async get(key: string): Promise<{
+    size: number;
+    body: ReadableStream<Uint8Array>;
     text(): Promise<string>;
     arrayBuffer(): Promise<ArrayBuffer>;
   } | null> {
@@ -15,9 +17,23 @@ export class InMemoryR2Bucket implements R2Bucket {
     const bytes =
       typeof value === 'string' ? new TextEncoder().encode(value) : value;
     return {
+      size: bytes.byteLength,
+      body: new Blob([bytes.slice()]).stream(),
       text: async () =>
         typeof value === 'string' ? value : new TextDecoder().decode(value),
       arrayBuffer: async () => bytes.slice().buffer,
+    };
+  }
+
+  async head(key: string): Promise<{ size: number } | null> {
+    const stored = this.#objects.get(key);
+    if (stored === undefined) return null;
+    const { value } = stored;
+    return {
+      size:
+        typeof value === 'string'
+          ? new TextEncoder().encode(value).byteLength
+          : value.byteLength,
     };
   }
 

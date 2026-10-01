@@ -33,6 +33,12 @@ import { diffProjects, readProject } from '../src/read-project.ts';
 import type { PlanUsage } from '../src/client.ts';
 import type { ProjectFile, RunStepTrace } from '@vibld/core';
 
+/**
+ * The most of a failed build's output a repair is shown: its end. Above
+ * the run, which reaches the repair before the rest of this file is read.
+ */
+const BUILD_OUTPUT_CHARS = 12_000;
+
 const args = parsePlanArgs(process.argv.slice(2));
 const { prompt, style } = args;
 
@@ -226,9 +232,6 @@ async function writeProject(
     await writeFile(target, file.content, 'utf8');
   }
 }
-
-/** The most of a failed build's output a repair is shown: its end. */
-const BUILD_OUTPUT_CHARS = 12_000;
 
 /**
  * `npm install` then `npm run build` in `root`, with their output, and with
