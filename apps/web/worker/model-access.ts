@@ -6,6 +6,7 @@ import {
   familyOf,
   findModel,
   groupByFamily,
+  localModelSettings,
   parseModelPolicy,
 } from '@vibld/ai';
 import type { ModelChoice } from '@vibld/ai';
@@ -29,6 +30,9 @@ export interface ModelAccessEnv {
   ANTHROPIC_API_KEY?: string | undefined;
   DEEPSEEK_API_KEY?: string | undefined;
   OPENAI_API_KEY?: string | undefined;
+  VIBLD_LOCAL_BASE_URL?: string | undefined;
+  VIBLD_LOCAL_MODEL?: string | undefined;
+  VIBLD_LOCAL_API_KEY?: string | undefined;
   VIBLD_PROVIDER?: string | undefined;
   VIBLD_MODEL?: string | undefined;
   VIBLD_MODEL_POLICY?: string | undefined;
@@ -354,11 +358,38 @@ export function draftModelFor(
     : null;
 }
 
+/** One model as `/api/config` sends it to the picker. */
+export interface PickerEntry {
+  id: string;
+  label: string;
+  note: string;
+  provider: string;
+}
+
+/**
+ * The picker's list. The local model is whichever one the owner runs
+ * (D124), so it is shown by that model's name, "Local: qwen3-coder:30b",
+ * rather than the catalog's "Local model".
+ */
+export function pickerEntries(
+  env: ModelAccessEnv,
+  models: readonly ModelChoice[],
+): PickerEntry[] {
+  const local = localModelSettings(env)?.model;
+  return models.map(({ id, label, note, provider }) => ({
+    id,
+    label: provider === 'local' && local ? `Local: ${local}` : label,
+    note,
+    provider,
+  }));
+}
+
 /** The environment variable that holds each provider's key. */
 const KEY_NAME = {
   anthropic: 'ANTHROPIC_API_KEY',
   deepseek: 'DEEPSEEK_API_KEY',
   openai: 'OPENAI_API_KEY',
+  local: 'VIBLD_LOCAL_BASE_URL and VIBLD_LOCAL_MODEL',
 } as const;
 
 /**
@@ -368,6 +399,17 @@ const KEY_NAME = {
  */
 export function unservableConfiguredModel(env: ModelAccessEnv): string | null {
   const named = env.VIBLD_MODEL?.trim();
+  // A copy told to build on the owner's own machine, with nothing saying
+  // where that is (D124). Falling through to the first hosted model would
+  // spend money on a provider the owner chose not to use (Codex review of
+  // internal PR 346), so it is refused like an unservable VIBLD_MODEL.
+  if (
+    !named &&
+    env.VIBLD_PROVIDER?.trim().toLowerCase() === 'local' &&
+    !configuredProviders(env).local
+  ) {
+    return 'VIBLD_PROVIDER is local, and VIBLD_LOCAL_BASE_URL and VIBLD_LOCAL_MODEL are not both set. Set both to your model server and the model on it, or set VIBLD_PROVIDER to a provider whose key is set.';
+  }
   if (!named) return null;
   const model = findModel(canonicalModelId(named));
   if (!model) {

@@ -43,6 +43,10 @@ export const PASSED = {
     'ANTHROPIC_API_KEY',
     'DEEPSEEK_API_KEY',
     'OPENAI_API_KEY',
+    // A model on the owner's own machine (D124, D138).
+    'VIBLD_LOCAL_BASE_URL',
+    'VIBLD_LOCAL_MODEL',
+    'VIBLD_LOCAL_API_KEY',
   ],
   preview: [],
   publish: [],
@@ -105,9 +109,19 @@ export function settingsProblems(env) {
       'VIBLD_OWNER_PASSWORD is the password you sign in with: set it in .env, 12 characters or more.',
     );
   }
-  if (!env.ANTHROPIC_API_KEY && !env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) {
+  // Trimmed, as `localModelSettings` in @vibld/ai reads them: a quoted
+  // blank would pass here and leave the builder with no model at all.
+  const local = Boolean(
+    env.VIBLD_LOCAL_BASE_URL?.trim() && env.VIBLD_LOCAL_MODEL?.trim(),
+  );
+  if (
+    !env.ANTHROPIC_API_KEY &&
+    !env.DEEPSEEK_API_KEY &&
+    !env.OPENAI_API_KEY &&
+    !local
+  ) {
     problems.push(
-      'No model key: set ANTHROPIC_API_KEY, DEEPSEEK_API_KEY or OPENAI_API_KEY in .env, or sign in and add one under Provider keys on the admin page.',
+      'No model: set ANTHROPIC_API_KEY, DEEPSEEK_API_KEY or OPENAI_API_KEY in .env, or VIBLD_LOCAL_BASE_URL and VIBLD_LOCAL_MODEL for a model on your own machine, or sign in and add a key under Provider keys on the admin page.',
     );
   }
   return problems;

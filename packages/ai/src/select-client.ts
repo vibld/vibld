@@ -1,5 +1,10 @@
 import { createAnthropicPlanClient } from './anthropic-client.ts';
 import { createDeepseekPlanClient } from './deepseek-client.ts';
+import {
+  LOCAL_MODEL_ID,
+  createLocalPlanClient,
+  localModelSettings,
+} from './local-client.ts';
 import { createOpenaiPlanClient } from './openai-client.ts';
 import { findModel } from './model-catalogue.ts';
 import type { PlanClient } from './client.ts';
@@ -14,13 +19,15 @@ import type { PlanClient } from './client.ts';
  * keys are set and nothing says which, Anthropic stays the default rather
  * than the cheaper option quietly taking over a run someone is measuring.
  */
-export type ProviderName = 'anthropic' | 'deepseek' | 'openai';
+export type ProviderName = 'anthropic' | 'deepseek' | 'openai' | 'local';
 
 /** Defaults per provider. Each is that provider's own current fast model. */
 export const DEFAULT_MODELS: Record<ProviderName, string> = {
   anthropic: 'claude-opus-5-5',
   deepseek: 'deepseek-flash',
   openai: 'gpt-5.6-terra',
+  // Whichever model the owner runs (D124): `VIBLD_LOCAL_MODEL` names it.
+  local: LOCAL_MODEL_ID,
 };
 
 export interface ProviderEnv {
@@ -29,6 +36,10 @@ export interface ProviderEnv {
   ANTHROPIC_API_KEY?: string | undefined;
   DEEPSEEK_API_KEY?: string | undefined;
   OPENAI_API_KEY?: string | undefined;
+  /** The owner's own model server and model (D124, `local-client.ts`). */
+  VIBLD_LOCAL_BASE_URL?: string | undefined;
+  VIBLD_LOCAL_MODEL?: string | undefined;
+  VIBLD_LOCAL_API_KEY?: string | undefined;
 }
 
 /** Every provider name, so a check over all of them cannot miss a new one. */
@@ -36,6 +47,7 @@ export const PROVIDER_NAMES = [
   'anthropic',
   'deepseek',
   'openai',
+  'local',
 ] as const satisfies readonly ProviderName[];
 
 function isProviderName(value: string): value is ProviderName {
@@ -50,13 +62,14 @@ export function selectProvider(env: ProviderEnv): ProviderName {
       `VIBLD_PROVIDER must be one of ${PROVIDER_NAMES.join(', ')}, not "${named}".`,
     );
   }
-  // Inference only when exactly one key is present. With none, or with more
-  // than one and nothing saying which, Anthropic stays the default rather
-  // than a cheaper provider quietly taking over a run someone is measuring.
-  if (!env.ANTHROPIC_API_KEY) {
-    if (env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) return 'deepseek';
-    if (env.OPENAI_API_KEY && !env.DEEPSEEK_API_KEY) return 'openai';
-  }
+  // Inference only when exactly one provider is configured. With none, or
+  // with more than one and nothing saying which, Anthropic stays the default
+  // rather than a cheaper provider quietly taking over a run someone is
+  // measuring. A local model counts as one (D124): a copy given only a
+  // model server builds with it.
+  const configured = configuredProviders(env);
+  const only = PROVIDER_NAMES.filter((name) => configured[name]);
+  if (only.length === 1 && only[0] !== undefined) return only[0];
   return 'anthropic';
 }
 
@@ -88,6 +101,7 @@ export function configuredProviders(
     anthropic: Boolean(env.ANTHROPIC_API_KEY),
     deepseek: Boolean(env.DEEPSEEK_API_KEY),
     openai: Boolean(env.OPENAI_API_KEY),
+    local: localModelSettings(env) !== null,
   };
 }
 
@@ -111,6 +125,16 @@ export function createPlanClient(
   modelId?: string | null,
 ): PlanClient {
   const provider = providerForRequest(env, modelId);
+  if (provider === 'local') {
+    const settings = localModelSettings(env);
+    if (!settings) {
+      throw new Error(
+        'VIBLD_LOCAL_BASE_URL and VIBLD_LOCAL_MODEL are not both set, so ' +
+          'no local model request can be made.',
+      );
+    }
+    return createLocalPlanClient(settings);
+  }
   if (provider === 'deepseek') {
     return createDeepseekPlanClient(
       env.DEEPSEEK_API_KEY ? { apiKey: env.DEEPSEEK_API_KEY } : {},

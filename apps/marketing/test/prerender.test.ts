@@ -267,6 +267,9 @@ describe('legal pages', () => {
     };
     const html = read('/legal/subprocessors');
     for (const provider of PROVIDER_NAMES) {
+      // A local model is a server the owner of a self-hosted copy runs
+      // (D124). The hosted service sets none, so nothing is sent to one.
+      if (provider === 'local') continue;
       const name = shown[provider];
       assert.ok(name, `no display name for the ${provider} provider`);
       assert.ok(

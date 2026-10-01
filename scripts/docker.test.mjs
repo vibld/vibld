@@ -51,6 +51,10 @@ describe('the Workers’ configuration under Docker', () => {
     assert.equal(new Set(Object.values(PORTS)).size, 3);
   });
 
+  it('leaves the provider to .env, so a copy with only a local model uses it', () => {
+    assert.equal(configs.web.vars.VIBLD_PROVIDER, undefined);
+  });
+
   it('serves previews and published sites under localhost', () => {
     assert.equal(configs.preview.vars.PREVIEW_HOSTNAME, 'localhost:8788');
     assert.equal(configs.web.vars.PUBLISH_HOSTNAME, 'localhost:8789');
@@ -163,6 +167,34 @@ describe('starting vibld in its container', () => {
         .length,
       1,
     );
+  });
+
+  it('takes a model on the owner’s own machine in place of a key (D124)', () => {
+    const local = {
+      VIBLD_OWNER_PASSWORD: 'twelve chars',
+      VIBLD_LOCAL_BASE_URL: 'http://localhost:11434/v1',
+      VIBLD_LOCAL_MODEL: 'qwen3-coder:30b',
+    };
+    assert.deepEqual(settingsProblems(local), []);
+    // An address with no model is no model, and a blank is no model either.
+    for (const blank of ['', '  ']) {
+      assert.equal(
+        settingsProblems({ ...local, VIBLD_LOCAL_MODEL: blank }).length,
+        1,
+      );
+      assert.equal(
+        settingsProblems({ ...local, VIBLD_LOCAL_BASE_URL: blank }).length,
+        1,
+      );
+    }
+    const web = devVars('web', local, {
+      PREVIEW_INTERNAL_SECRET: 'p',
+      PUBLISH_INTERNAL_SECRET: 'q',
+      PREVIEW_SHARE_SECRET: 's',
+      VIBLD_KEY_ENCRYPTION_KEY: 'k',
+    });
+    assert.match(web, /^VIBLD_LOCAL_BASE_URL="http:\/\/localhost:11434\/v1"$/m);
+    assert.match(web, /^VIBLD_LOCAL_MODEL="qwen3-coder:30b"$/m);
   });
 
   it('migrates first, then runs the three Workers on their ports and one state', () => {

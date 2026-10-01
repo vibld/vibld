@@ -30,6 +30,7 @@ import {
   MAX_BASE_CONTENT_CHARS,
   projectChars,
 } from './limits.ts';
+import { LOCAL_MODEL_ADVICE } from './local-client.ts';
 import { findModel } from './model-catalogue.ts';
 import {
   FILE_GROUP_OUTPUT,
@@ -1517,6 +1518,31 @@ export function stepOf(
  * input budget is not made. So what the run spends stays inside what was
  * reserved for it, however many calls it takes.
  */
+/**
+ * The stops a model too small for the work ends a build on: a reply that is
+ * not the shape asked for, and one cut off at the ceiling.
+ */
+const OUT_OF_ITS_DEPTH: ReadonlySet<RunStop> = new Set<RunStop>([
+  'model-shape',
+  'model-truncated',
+]);
+
+/**
+ * A failure's message, with a sentence saying so plainly when the model is
+ * the owner's own and the failure is the kind a small one makes (D124).
+ * Without it, a 1.5B model that cannot write the project reads exactly like
+ * a hosted one having a bad day, and the remedy is not to try again.
+ */
+export function withLocalAdvice(
+  model: string,
+  stop: RunStop,
+  message: string,
+): string {
+  if (findModel(model)?.provider !== 'local') return message;
+  if (!OUT_OF_ITS_DEPTH.has(stop)) return message;
+  return `${message} ${LOCAL_MODEL_ADVICE}`;
+}
+
 export async function runBoundedBuild(
   builder: BoundedBuilder,
   input: BoundedBuildInput,
@@ -1547,7 +1573,7 @@ export async function runBoundedBuild(
 
   const failed = (stop: RunStop, message: string): BoundedBuildResult => ({
     ok: false,
-    failure: { stop, message },
+    failure: { stop, message: withLocalAdvice(builder.model, stop, message) },
     usage,
     calls,
     measured,

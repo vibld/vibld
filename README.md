@@ -222,7 +222,7 @@ Ask for an aurora, a starfield, a smoky gradient or any "animated background", a
 - A bakeoff result strong enough to recommend one model over another. The harness exists and has run; the evidence does not settle it yet.
 - Sandbox output in the builder's own panes. The console shows generation events, and Problems shows the design checks and the verification build, not the install, build and type errors from a live preview.
 - A self-hosting path validated outside the project. A workflow deploys a separately named copy from the docs and checks it comes up and refuses a signed-out caller, but nobody outside the project has deployed their own copy yet, and sign-in and generation on a copy are not checked.
-- The builder's interface against a real model on your own machine. Locally it runs the fake provider; its model path needs sign-in, D1, R2 and a Workflow, which only a Cloudflare deployment has. `pnpm generate` is the local way to a real build today.
+- The builder's interface against a real model from `pnpm dev`, which runs the fake provider. Its model path needs sign-in, D1, R2 and a Workflow, which a Cloudflare deployment has and so does [the Docker setup](#run-it-with-docker), with a key or [a local model](#local-models).
 
 **What to be careful of.** It is a beta, not a place for work you cannot afford to lose. Very little of it has been used by anyone other than its author, which is a different kind of risk from a missing feature and not one a feature list shows.
 
@@ -251,13 +251,14 @@ cd my-site
 npm run dev                   # the generated project, with no vibld dependency
 ```
 
-| Option             | What it does                                                                                                                                                                            |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--out <dir>`      | Where the project is written, relative to where you ran the command.                                                                                                                    |
-| `--build`          | Installs and builds the result with npm and, when it does not build, asks for one repair with the compiler's output. The build gets no credential from your environment.                |
-| `--style <id>`     | One of the style presets, by id: `editorial`, `brutalism`, `liquidGlass`, `bentoGrid`, `warmPaper`, `cinematic` and the rest in [`style-presets.ts`](packages/ai/src/style-presets.ts). |
-| `--base <dir>`     | Makes the prompt a follow-up to a project already on disk.                                                                                                                              |
-| `VIBLD_MODEL=<id>` | Another model from [the catalog](packages/ai/src/model-catalogue.ts). With one key set, that provider's default answers: `deepseek-flash`, `gpt-5.6-terra` or `claude-opus-5-5`.        |
+| Option                 | What it does                                                                                                                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--out <dir>`          | Where the project is written, relative to where you ran the command.                                                                                                                    |
+| `--build`              | Installs and builds the result with npm and, when it does not build, asks for one repair with the compiler's output. The build gets no credential from your environment.                |
+| `--style <id>`         | One of the style presets, by id: `editorial`, `brutalism`, `liquidGlass`, `bentoGrid`, `warmPaper`, `cinematic` and the rest in [`style-presets.ts`](packages/ai/src/style-presets.ts). |
+| `--base <dir>`         | Makes the prompt a follow-up to a project already on disk.                                                                                                                              |
+| `VIBLD_MODEL=<id>`     | Another model from [the catalog](packages/ai/src/model-catalogue.ts). With one key set, that provider's default answers: `deepseek-flash`, `gpt-5.6-terra` or `claude-opus-5-5`.        |
+| `VIBLD_PROVIDER=local` | A model on your own machine instead of a key, with `VIBLD_LOCAL_BASE_URL` and `VIBLD_LOCAL_MODEL` set ([Local models](#local-models)).                                                  |
 
 The calls are billed to your key. The weekly proof run, a one-page bakery site on DeepSeek's default model, has taken 7 to 17 minutes and cost $0.15 to $0.31, most of it the model's reasoning. A larger request or a costlier model costs more: Claude Opus 5.5, Anthropic's default here, costs many times what DeepSeek Flash does. [`packages/ai/README.md`](packages/ai/README.md) has the details.
 
@@ -325,10 +326,10 @@ Self-hosting is possible, and still needs validation outside the project: a work
 
 ### Run it with Docker
 
-The whole builder also runs on one machine under Docker, with no Cloudflare account (docs/decisions.md D126). It needs Docker with Compose, a model key, and a password to sign in with.
+The whole builder also runs on one machine under Docker, with no Cloudflare account (docs/decisions.md D126). It needs Docker with Compose, a model key or [a local model](#local-models), and a password to sign in with.
 
 ```sh
-cp .env.example .env    # set VIBLD_OWNER_PASSWORD and a model key
+cp .env.example .env    # set VIBLD_OWNER_PASSWORD and a model key or a local model
 docker compose up --build
 ```
 
@@ -338,8 +339,25 @@ Then open http://localhost:8787 and sign in with that password. Previews open at
 - **Previews run on your Docker (D137).** Each preview's sandbox is its own container, started through the Docker socket the compose file mounts, the same way it runs on Cloudflare. Anything in control of the vibld container can control your Docker.
 - **Host networking.** The vibld container uses the host's network, so the sandboxes it starts can reach it and it can reach them. On Docker Desktop (macOS, Windows), turn on host networking first: Settings, Resources, Network, "Enable host networking".
 - **Sign-in** is the owner's password (`VIBLD_AUTH=owner`); Clerk and Cloudflare Access are services outside the box.
-- **Keys** can be set in `.env` or later on the admin page under Provider keys.
+- **Keys** can be set in `.env` or later on the admin page under Provider keys. A [local model](#local-models) is set in `.env`.
 - **Not under Docker:** the nightly jobs (scheduled cleanups and the billing pass), which `wrangler dev` does not run on a schedule; and Stripe, GitHub push and email, whose keys the Docker setup does not pass on.
+
+### Local models
+
+A copy can build with a model running on your own machine instead of, or as well as, a provider key (docs/decisions.md D124). Anything that answers OpenAI's chat completions API works: [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai) or llama.cpp's server. Set two settings, in `.env` under Docker or as Worker variables on Cloudflare:
+
+| Setting                | What it is                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VIBLD_LOCAL_BASE_URL` | The server's address, ending in `/v1`: `http://localhost:11434/v1` for Ollama, `http://localhost:1234/v1` for LM Studio, `http://localhost:8080/v1` for llama.cpp. |
+| `VIBLD_LOCAL_MODEL`    | The model's name on that server, as it lists it: `qwen2.5-coder:7b`, for example.                                                                                  |
+| `VIBLD_LOCAL_API_KEY`  | Only for a server started with an API key.                                                                                                                         |
+
+The builder then offers it as "Local: <name>", and with no provider key set it is the default. It costs nothing per token, so it does not draw on anybody's allowance. `pnpm generate` uses it too, with `VIBLD_PROVIDER=local`.
+
+- **Give it a context window of 32,768 tokens or more.** Ollama's default is smaller, and Ollama cuts a longer prompt without saying so. When it cuts a fifth or more, vibld notices and stops the build with a message saying so; a smaller cut it cannot tell from the difference between tokenizers. Start Ollama with `OLLAMA_CONTEXT_LENGTH=32768`, or set the context length in LM Studio's model settings.
+- **Size matters more than anything else.** A model too small for the work writes files that do not build, or replies that are not the shape asked for, and vibld says so plainly. On a 4-core CPU with no GPU, Qwen2.5 Coder 1.5B planned and wrote a one-page bakery site in 6 minutes, and most of its files were a single line of markup with no imports, which does not build.
+- **Speed is your machine's.** Each step is sized for a model that writes about 12 tokens a second, and is given twice the time that needs. A slower machine can run out of time on a large step.
+- **Under Docker**, vibld uses your machine's network, so `localhost` in these settings is your machine. **On Cloudflare**, the Worker can only reach an address on the public internet, so the server has to be reachable from there.
 
 Read next: [what self-hosting involves](https://vibld.com/docs/self-hosting), [every setting and secret](https://vibld.com/docs/configuration), [deploying your own copy](https://vibld.com/docs/deploying) and [hosted or self-hosted](https://vibld.com/docs/hosted-vs-self-hosted). The exact commands are in [`apps/web/README.md`](apps/web/README.md), [`apps/preview/README.md`](apps/preview/README.md) and [`apps/publish/README.md`](apps/publish/README.md), beside the code they deploy. The workflows that deploy vibld's own hosted service run only in the maintainers' working repository, since a copy has none of their secrets.
 

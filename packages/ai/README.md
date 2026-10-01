@@ -131,6 +131,12 @@ With exactly one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
 the catalog, and `VIBLD_PROVIDER` chooses when more than one key is set;
 with more than one and no `VIBLD_PROVIDER`, Anthropic answers.
 
+A model on your own machine works the same way (D124): set
+`VIBLD_LOCAL_BASE_URL` to its server's OpenAI-compatible address and
+`VIBLD_LOCAL_MODEL` to its name there, and with no key set, or with
+`VIBLD_PROVIDER=local`, it answers. `src/local-client.ts` says what differs
+from the hosted clients, and the root README's "Local models" what to expect.
+
 Anthropic's default is `claude-opus-5-5`, whose catalog rates
 (`src/model-catalogue.ts`) are about 13 times DeepSeek Flash's for input and
 17 times for output, so a run on it costs far more than one on DeepSeek's

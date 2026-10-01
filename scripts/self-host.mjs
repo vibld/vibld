@@ -26,8 +26,11 @@
  *     "accessTeamDomain": "acme.cloudflareaccess.com", // access: required
  *     "accessAud": "…",                        // access: the application's AUD tag
  *     "clerkFrontendApiUrl": "https://….clerk.accounts.dev", // clerk: required
- *     "provider": "deepseek",                  // anthropic | deepseek | openai
+ *     "provider": "deepseek",                  // anthropic | deepseek | openai | local
  *     "model": "deepseek-v4-flash",            // optional: the provider's default otherwise
+ *     "localBaseUrl": "https://llm.example.com/v1", // local: a model server the
+ *                                              // Worker can reach (D124)
+ *     "localModel": "qwen2.5-coder:7b",        // local: the model's name there
  *     "builderDomain": "build.example.com",    // optional: a custom domain;
  *                                              // workers.dev otherwise
  *     "previewDomain": "example-preview.dev",  // optional: a zone for the
@@ -100,7 +103,7 @@ export function parseJsonc(text) {
 }
 
 const PREFIX = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/;
-const PROVIDERS = ['anthropic', 'deepseek', 'openai'];
+const PROVIDERS = ['anthropic', 'deepseek', 'openai', 'local'];
 const AUTH_MODES = ['owner', 'access', 'clerk'];
 
 /** The sign-in a copy uses: named, or inferred from what is given. */
@@ -161,6 +164,24 @@ export function checkSettings(settings) {
   }
   if (!PROVIDERS.includes(settings.provider)) {
     problems.push(`"provider" is one of ${PROVIDERS.join(', ')}`);
+  }
+  // A model on a server of your own (D124): both or neither, and both when
+  // it is the provider. A Worker reaches only the public internet, so the
+  // address is an http(s) URL, never a path.
+  const local =
+    settings.localBaseUrl !== undefined || settings.localModel !== undefined;
+  if (local || settings.provider === 'local') {
+    if (!/^https?:\/\/\S+$/.test(settings.localBaseUrl ?? '')) {
+      problems.push(
+        '"localBaseUrl" is your model server\'s OpenAI-compatible address, such as https://llm.example.com/v1',
+      );
+    }
+    if (
+      typeof settings.localModel !== 'string' ||
+      !settings.localModel.trim()
+    ) {
+      problems.push('"localModel" is the model\'s name on that server');
+    }
   }
   const base = settings.rateLimitNamespaceBase;
   if (!Number.isInteger(base) || base < 1 || base > 1_000_000) {
@@ -257,6 +278,13 @@ export function selfHostConfig(app, base, settings) {
     vars.VIBLD_PROVIDER = s.provider;
     if (s.model) vars.VIBLD_MODEL = s.model;
     else delete vars.VIBLD_MODEL;
+    if (s.localBaseUrl && s.localModel) {
+      vars.VIBLD_LOCAL_BASE_URL = s.localBaseUrl;
+      vars.VIBLD_LOCAL_MODEL = s.localModel;
+    } else {
+      delete vars.VIBLD_LOCAL_BASE_URL;
+      delete vars.VIBLD_LOCAL_MODEL;
+    }
     if (s.builderDomain)
       vars.VIBLD_REFERRAL_ORIGIN = `https://${s.builderDomain}`;
     else delete vars.VIBLD_REFERRAL_ORIGIN;

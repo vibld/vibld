@@ -360,6 +360,9 @@ export function affordableOutputTokens(
     outputMicroUsd > 0
       ? outputMicroUsd
       : known.outputMicroUsd;
+  // A model nobody bills (D124) is held by its own maximum and the clock,
+  // which `maxTokensFor` and `buildOutputBudgetFor` apply, and not by money.
+  if (price <= 0) return Number.POSITIVE_INFINITY;
   const affordable = Math.floor(RUN_OUTPUT_RESERVE_MICRO_USD / price);
   // A carry that is not a usable count adds nothing, rather than taking the
   // money bound somewhere nobody chose.

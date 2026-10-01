@@ -70,10 +70,26 @@ export const CHECK_FAILED =
 export const CHECK_UNFINISHED =
   'The build check did not finish, so this version has not been checked.';
 
+/**
+ * Said after a failed check when the build ran on a model on the copy's own
+ * machine (D124), the same advice @vibld/ai's `LOCAL_MODEL_ADVICE` gives
+ * when such a model cannot finish at all. A small local model writes code
+ * that does not build far more often than a hosted one, and asking it for
+ * a fix is rarely what helps.
+ */
+export const LOCAL_CHECK_ADVICE =
+  'It was written by a model running on this copy’s own machine, and a larger model usually writes code that builds. README.md, "Local models", says what to try.';
+
 export function checkProblem(
   verdict: CheckVerdict | undefined,
+  /** The model the build ran on, where known. */
+  model?: string | null,
 ): string | undefined {
-  if (verdict === 'failed') return CHECK_FAILED;
+  if (verdict === 'failed') {
+    return model === 'local'
+      ? `${CHECK_FAILED} ${LOCAL_CHECK_ADVICE}`
+      : CHECK_FAILED;
+  }
   if (verdict === 'unchecked') return CHECK_UNFINISHED;
   return undefined;
 }

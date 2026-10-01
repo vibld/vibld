@@ -4,6 +4,7 @@ import { InMemoryGenerationStore } from '@vibld/core';
 import {
   BoundedPlanProvider,
   DEFAULT_EFFORT,
+  configuredProviders,
   createPlanClient,
   findModel,
 } from '@vibld/ai';
@@ -59,6 +60,9 @@ export interface LiveEnv {
   ANTHROPIC_API_KEY?: string | undefined;
   DEEPSEEK_API_KEY?: string | undefined;
   OPENAI_API_KEY?: string | undefined;
+  VIBLD_LOCAL_BASE_URL?: string | undefined;
+  VIBLD_LOCAL_MODEL?: string | undefined;
+  VIBLD_LOCAL_API_KEY?: string | undefined;
   VIBLD_PROVIDER?: string | undefined;
   VIBLD_MODEL?: string | undefined;
 }
@@ -219,8 +223,10 @@ export function liveProblems(options: LiveOptions, env: LiveEnv): string[] {
       anthropic: 'ANTHROPIC_API_KEY',
       deepseek: 'DEEPSEEK_API_KEY',
       openai: 'OPENAI_API_KEY',
+      // A model on the owner's own machine needs both (D124).
+      local: 'VIBLD_LOCAL_BASE_URL and VIBLD_LOCAL_MODEL',
     }[model.provider];
-    if (!env[variable as keyof LiveEnv]) {
+    if (!configuredProviders(env)[model.provider]) {
       problems.push(`${id} needs ${variable}, and it is not set.`);
     }
   }

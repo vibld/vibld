@@ -48,6 +48,10 @@ const ALL_KEYED = {
 /** A policy that gives everybody Flash only, which the panel replaces. */
 const POLICY = JSON.stringify({ default: ['deepseek-flash'] });
 const EVERY = MODEL_CATALOGUE.map((model) => model.id);
+/** What ALL_KEYED can serve: everything but the local model (D124). */
+const EVERY_KEYED = MODEL_CATALOGUE.filter(
+  (model) => model.provider !== 'local',
+).map((model) => model.id);
 
 const panel = (
   plans: Partial<Record<'free' | 'build' | 'ship', string[]>>,
@@ -129,7 +133,10 @@ describe('which models a caller has, once the panel decides (D133)', () => {
     assert.deepEqual(ids(grantedFor(ALL_KEYED, 'a', 'free', source)), [
       'gpt-6-luna',
     ]);
-    assert.deepEqual(ids(grantedFor(ALL_KEYED, 'a', 'ship', source)), EVERY);
+    assert.deepEqual(
+      ids(grantedFor(ALL_KEYED, 'a', 'ship', source)),
+      EVERY_KEYED,
+    );
   });
 
   it('holds a deployment that sells no plans to the Free row (D135)', () => {

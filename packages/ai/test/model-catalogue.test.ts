@@ -15,6 +15,9 @@ import {
 import { DEFAULT_MODELS, PROVIDER_NAMES } from '../src/select-client.ts';
 import { DEFAULT_MAX_TOKENS } from '../src/plan-provider.ts';
 
+/** Every model a service sells, which is all but the owner's own (D124). */
+const HOSTED = MODEL_CATALOGUE.filter((model) => model.provider !== 'local');
+
 describe('the model catalogue', () => {
   it('has distinct ids and a provider for each', () => {
     const ids = MODEL_CATALOGUE.map((model) => model.id);
@@ -25,11 +28,13 @@ describe('the model catalogue', () => {
     }
   });
 
-  it('can produce a whole project on every model it offers', () => {
+  it('can produce a whole project on every hosted model it offers', () => {
     // DEFAULT_MAX_TOKENS is what a multi-file project needs. A model that
     // cannot reach it truncates every run, which is a worse outcome than not
-    // offering it at all.
-    for (const model of MODEL_CATALOGUE) {
+    // offering it at all. The local model is not one model (D124): its
+    // limits are what the README asks the owner to give it, and one that
+    // cannot finish says so (`LOCAL_MODEL_ADVICE`).
+    for (const model of HOSTED) {
       assert.ok(
         model.maxOutputTokens >= DEFAULT_MAX_TOKENS,
         `${model.id} caps output at ${model.maxOutputTokens}, below the ${DEFAULT_MAX_TOKENS} a project needs`,
@@ -41,7 +46,7 @@ describe('the model catalogue', () => {
     // Prompt, base project, standing instructions and reference text, plus
     // the output ceiling, all have to fit inside the context window.
     const LARGEST_INPUT_TOKENS = Math.ceil((160_000 + 2_000 + 6_000) / 4);
-    for (const model of MODEL_CATALOGUE) {
+    for (const model of HOSTED) {
       assert.ok(
         model.contextWindow >= LARGEST_INPUT_TOKENS + DEFAULT_MAX_TOKENS,
         `${model.id} cannot hold the largest request plus its own output`,
@@ -49,8 +54,10 @@ describe('the model catalogue', () => {
     }
   });
 
-  it('prices every model above zero, since the budget gate divides by these', () => {
-    for (const model of MODEL_CATALOGUE) {
+  it('prices every hosted model above zero, since the budget gate divides by these', () => {
+    // The local model is free, and priced as free on purpose
+    // (`parsePrices` in apps/web/worker/spend.ts).
+    for (const model of HOSTED) {
       assert.ok(model.inputMicroUsd > 0, model.id);
       assert.ok(model.outputMicroUsd > model.inputMicroUsd, model.id);
     }
@@ -121,6 +128,7 @@ describe('availableModels', () => {
       anthropic: true,
       deepseek: false,
       openai: false,
+      local: false,
     });
     assert.ok(anthropicOnly.length >= 4);
     assert.ok(anthropicOnly.every((m) => m.provider === 'anthropic'));
@@ -129,11 +137,17 @@ describe('availableModels', () => {
       anthropic: false,
       deepseek: true,
       openai: false,
+      local: false,
     });
     assert.ok(deepseekOnly.every((m) => m.provider === 'deepseek'));
 
     assert.deepEqual(
-      availableModels({ anthropic: false, deepseek: false, openai: false }),
+      availableModels({
+        anthropic: false,
+        deepseek: false,
+        openai: false,
+        local: false,
+      }),
       [],
     );
   });

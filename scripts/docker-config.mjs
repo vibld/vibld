@@ -70,6 +70,10 @@ export function dockerConfig(app, base) {
   if (app === 'web' || app === 'publish') {
     vars.PUBLISH_HOSTNAME = `localhost:${PORTS.publish}`;
   }
+  // `.env` decides the provider, and left blank there the only key or local
+  // model set does (D124). The placeholder here would otherwise name OpenAI
+  // on a copy with no OpenAI key.
+  if (app === 'web') delete vars.VIBLD_PROVIDER;
   config.vars = vars;
   const text = JSON.stringify(config);
   if (text.includes('localhost.invalid')) {

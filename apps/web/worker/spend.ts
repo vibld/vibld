@@ -48,6 +48,14 @@ export const DEFAULT_PRICES: TokenPrices = {
   cacheWriteMicroUsd: 6.25,
 };
 
+/** What a model the owner runs costs per token: nothing (D124). */
+export const FREE_PRICES: TokenPrices = {
+  inputMicroUsd: 0,
+  outputMicroUsd: 0,
+  cachedInputMicroUsd: 0,
+  cacheWriteMicroUsd: 0,
+};
+
 /**
  * Per-provider list prices, in micro-USD per token, used when the deployment
  * does not set them explicitly.
@@ -88,6 +96,11 @@ export function parsePrices(
   provider = 'anthropic',
   modelPrices?: TokenPrices,
 ): TokenPrices {
+  // A model the owner runs on their own machine is billed by nobody (D124),
+  // so an operator's VIBLD_USD_MICRO_PER_* does not reach it: those say
+  // what a provider charges, and none does here. The zero is real, not a
+  // misconfiguration, which is why it does not go through `parsePrice`.
+  if (provider === 'local') return FREE_PRICES;
   // The fallback follows the selected provider. Without that, switching to
   // DeepSeek would price its runs at Anthropic's rates -- an over-estimate,
   // so safe, but a dollar figure that is wrong by forty times is not a

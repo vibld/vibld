@@ -131,13 +131,17 @@ jobs:
         env:
           # Not a secret: this copy lives for the length of the job.
           VIBLD_OWNER_PASSWORD: ci-owner-password-123
+          # A local model (D124) with no server behind it: listing it needs
+          # none, and building with it is not what this job checks.
+          VIBLD_LOCAL_MODEL: ci-local-model
         run: |
-          printf 'VIBLD_OWNER_PASSWORD=%s\nOPENAI_API_KEY=sk-not-a-real-key\nVIBLD_PROVIDER=openai\n' "$VIBLD_OWNER_PASSWORD" > .env
+          printf 'VIBLD_OWNER_PASSWORD=%s\nOPENAI_API_KEY=sk-not-a-real-key\nVIBLD_PROVIDER=openai\nVIBLD_LOCAL_BASE_URL=http://localhost:11434/v1\nVIBLD_LOCAL_MODEL=%s\n' "$VIBLD_OWNER_PASSWORD" "$VIBLD_LOCAL_MODEL" > .env
           docker compose up --build --detach
 
       - name: Sign in
         env:
           VIBLD_OWNER_PASSWORD: ci-owner-password-123
+          VIBLD_LOCAL_MODEL: ci-local-model
         run: node docker/smoke.mjs 900
 
       - name: Logs

@@ -153,9 +153,27 @@ describe("a self-hosted copy's configuration (D115)", () => {
       { ...SETTINGS, clerkFrontendApiUrl: 'http://acme.clerk.accounts.dev' },
       { ...SETTINGS, provider: 'mistral' },
       { ...SETTINGS, builderDomain: 'https://build.example.com' },
+      { ...SETTINGS, provider: 'local' },
+      { ...SETTINGS, localModel: 'qwen2.5-coder:7b' },
+      { ...SETTINGS, localBaseUrl: 'llm.example.com', localModel: 'm' },
     ]) {
       assert.throws(() => selfHostConfig('web', base.web, bad), /not usable/);
     }
+  });
+
+  it('builds with a model server of your own when given one (D124)', () => {
+    const local = selfHostConfig('web', base.web, {
+      ...SETTINGS,
+      provider: 'local',
+      localBaseUrl: 'https://llm.example.com/v1',
+      localModel: 'qwen2.5-coder:7b',
+    });
+    assert.equal(local.vars.VIBLD_PROVIDER, 'local');
+    assert.equal(local.vars.VIBLD_LOCAL_BASE_URL, 'https://llm.example.com/v1');
+    assert.equal(local.vars.VIBLD_LOCAL_MODEL, 'qwen2.5-coder:7b');
+    const hosted = selfHostConfig('web', base.web, SETTINGS);
+    assert.equal(hosted.vars.VIBLD_LOCAL_BASE_URL, undefined);
+    assert.equal(hosted.vars.VIBLD_LOCAL_MODEL, undefined);
   });
 
   describe('how people sign in to it (D123)', () => {

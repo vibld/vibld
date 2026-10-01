@@ -42,10 +42,15 @@ export default function Configuration() {
       <ul>
         <li>
           <code>ANTHROPIC_API_KEY</code>, <code>DEEPSEEK_API_KEY</code> or{' '}
-          <code>OPENAI_API_KEY</code>. Any one makes generation available;
-          without any, generation refuses. Setting more than one makes each of
-          those providers’ models available to choose from, within whatever{' '}
-          <code>VIBLD_MODEL_POLICY</code> below allows.
+          <code>OPENAI_API_KEY</code>. Any one makes generation available, and
+          so does a local model (below); without any, generation refuses.
+          Setting more than one makes each of those providers’ models available
+          to choose from, within whatever <code>VIBLD_MODEL_POLICY</code> below
+          allows.
+        </li>
+        <li>
+          <code>VIBLD_LOCAL_API_KEY</code>: only for a local model server
+          started with an API key.
         </li>
         <li>
           <code>VIBLD_PLATFORM_ADMINS</code>, comma-separated email addresses.
@@ -132,9 +137,20 @@ export default function Configuration() {
       <ul>
         <li>
           <code>VIBLD_PROVIDER</code>: <code>anthropic</code>,{' '}
-          <code>deepseek</code> or <code>openai</code>, the provider that
-          answers when no model is named. Set it rather than relying on which
-          key is present. Any other value is an error.
+          <code>deepseek</code>, <code>openai</code> or <code>local</code>, the
+          provider that answers when no model is named. Set it rather than
+          relying on which key is present. Any other value is an error.
+        </li>
+        <li>
+          <code>VIBLD_LOCAL_BASE_URL</code> and <code>VIBLD_LOCAL_MODEL</code>:
+          a model on a server of your own, such as Ollama, LM Studio or
+          llama.cpp. The first is the server’s OpenAI-compatible address, ending
+          in <code>/v1</code>, and the second the model’s name there. Both are
+          needed. The builder offers it as “Local: ” and its name, and it costs
+          nothing against anybody’s allowance. A Worker on Cloudflare reaches
+          only the public internet, so the server has to be reachable from
+          there; under Docker it can be on your own machine. Give the model a
+          context window of 32,768 tokens or more.
         </li>
         <li>
           <code>VIBLD_MODEL</code>: the default model, which beats{' '}

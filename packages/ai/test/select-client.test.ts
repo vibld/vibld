@@ -158,11 +158,13 @@ describe('configuredProviders', () => {
       anthropic: false,
       deepseek: true,
       openai: false,
+      local: false,
     });
     assert.deepEqual(configuredProviders({}), {
       anthropic: false,
       deepseek: false,
       openai: false,
+      local: false,
     });
   });
 });

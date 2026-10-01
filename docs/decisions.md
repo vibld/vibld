@@ -471,6 +471,12 @@ builder, and whether the repository should move to his account.
   container, the same code path as on Cloudflare. Anything in control of
   the vibld container can control the host's Docker; Chris chose this over
   one shared sandbox container and over no sandbox at all.
+- **D138. A local model is set in the environment.** Its base URL and model
+  name are `VIBLD_LOCAL_BASE_URL` and `VIBLD_LOCAL_MODEL` (and
+  `VIBLD_LOCAL_API_KEY` for a server that wants one): `.env` under Docker,
+  Worker variables on Cloudflare, the same place as `VIBLD_PROVIDER` and
+  `VIBLD_MODEL`. Chris chose this over the admin panel and over both with
+  the panel first.
 
 ### Taken on Chris's behalf, 2026-09-30 overnight, confirmed the same day
 

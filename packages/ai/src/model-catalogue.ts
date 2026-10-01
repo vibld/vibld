@@ -165,6 +165,8 @@ export const PROVIDER_CACHE_RATES: Readonly<Record<ProviderName, CacheRates>> =
     // this rate only when a write actually happened.
     openai: { read: 0.1, write: 1.25 },
     deepseek: { read: 0.1, write: 1 },
+    // Nothing is billed for a model the owner runs (D124).
+    local: { read: 0, write: 0 },
   };
 
 /** This model's cache rates, in micro-USD per token. */
@@ -392,6 +394,28 @@ export const MODEL_CATALOGUE: readonly ModelChoice[] = [
     supportsEffort: false,
     // Peak: $0.044 a million, a thirtieth of input rather than a tenth.
     cacheReadMicroUsd: 0.044,
+  },
+  {
+    // Whichever model the owner runs on their own machine (D124), named by
+    // `VIBLD_LOCAL_MODEL` and offered only where `VIBLD_LOCAL_BASE_URL` is
+    // set too (`local-client.ts`). Free per token, so it costs nothing
+    // against an allowance. The limits are what the README asks the owner
+    // to give it, not facts about any one model: a context window of
+    // 32,768 tokens, and replies held to 16,384 of them.
+    id: 'local',
+    provider: 'local',
+    label: 'Local model',
+    note: 'Runs on your own machine, at no cost per token.',
+    inputMicroUsd: 0,
+    outputMicroUsd: 0,
+    contextWindow: 32_768,
+    maxOutputTokens: 16_384,
+    supportsEffort: false,
+    // Measured on a 4-core CPU with a 1.5B model through Ollama, 2026-10-01:
+    // 18 a second on a short prompt, 7 on a build's 6,400-token one. The
+    // step timeout allows a model half the rate it was sized at, so a call
+    // sized at 12 finishes on that machine; one with a GPU is faster.
+    outputTokensPerSecond: 12,
   },
 ] as const;
 

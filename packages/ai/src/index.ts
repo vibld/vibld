@@ -320,6 +320,19 @@ export {
 } from './openai-client.ts';
 export type { OpenaiPlanClientOptions } from './openai-client.ts';
 export {
+  LOCAL_MODEL_ADVICE,
+  LOCAL_MODEL_ID,
+  LOCAL_PROMPT_READ_FLOOR,
+  LocalContextError,
+  createLocalPlanClient,
+  localModelSettings,
+} from './local-client.ts';
+export type {
+  LocalModelEnv,
+  LocalModelSettings,
+  LocalPlanClientOptions,
+} from './local-client.ts';
+export {
   DEFAULT_MODELS,
   configuredProviders,
   createPlanClient,

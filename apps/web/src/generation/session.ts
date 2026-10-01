@@ -1003,7 +1003,7 @@ export class BuilderSession {
       }
       // What its check found (D69): nothing to say for code that passed,
       // and the rest said on screen and in the conversation.
-      const problem = checkProblem(run.check);
+      const problem = checkProblem(run.check, this.#state.model);
       this.#patch(epoch, (state) => ({
         ...state,
         status: 'accepted',
@@ -1566,8 +1566,14 @@ export class BuilderSession {
         : null;
     // Only against a real model. `/api/mockups` cannot answer a
     // deployment in `fake` mode, which is why Explore is hidden there too.
+    // Not on a local model either (D124): its server answers one request
+    // at a time, so a draft would hold the build back by as long as the
+    // draft takes to write.
     let wantsQuickDraft =
-      firstBuild && !mockup && this.#state.generation === 'model';
+      firstBuild &&
+      !mockup &&
+      this.#state.generation === 'model' &&
+      this.#state.model !== 'local';
 
     this.#patch(epoch, (state) => ({
       ...state,
@@ -1817,7 +1823,7 @@ export class BuilderSession {
       // to say for code that passed, and the rest said on screen, in the
       // conversation and in the console.
       const verdict = checked.verdict;
-      const problem = checkProblem(verdict);
+      const problem = checkProblem(verdict, this.#state.model);
       this.#patch(epoch, (state) => ({
         ...state,
         status: 'accepted',
@@ -2174,7 +2180,7 @@ export class BuilderSession {
     if (verdict === 'passed') {
       return this.#append(timeline, 'info', 'Build check passed');
     }
-    const problem = checkProblem(verdict);
+    const problem = checkProblem(verdict, this.#state.model);
     return problem ? this.#append(timeline, 'warn', problem) : timeline;
   }
 

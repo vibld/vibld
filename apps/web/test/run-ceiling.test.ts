@@ -143,7 +143,10 @@ describe('what one run may ask for', () => {
     // catalogue and the effective price are the same figure and this
     // asserts nothing at all. Sixty times, so that even the cheapest model
     // is priced into a ceiling below its own maximum at the $3.20 reserve.
+    // Not the local model: nobody bills it, so no override reaches it
+    // (D124, local-model.test.ts).
     for (const model of MODEL_CATALOGUE) {
+      if (model.provider === 'local') continue;
       const override = model.outputMicroUsd * 60;
       const { maxTokens, prices } = runCeilingFor(
         { VIBLD_USD_MICRO_PER_OUTPUT_TOKEN: `${override}` },

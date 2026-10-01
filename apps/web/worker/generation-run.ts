@@ -602,6 +602,10 @@ export interface GenerationWorkflowEnv {
   ANTHROPIC_API_KEY?: string;
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  /** The owner's own model (D124), read by `createPlanClient`. */
+  VIBLD_LOCAL_BASE_URL?: string;
+  VIBLD_LOCAL_MODEL?: string;
+  VIBLD_LOCAL_API_KEY?: string;
   /** The panel's provider keys are read under this (D127, `provider-keys.ts`). */
   VIBLD_KEY_ENCRYPTION_KEY?: string;
   VIBLD_PROVIDER?: string;

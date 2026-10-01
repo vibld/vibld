@@ -354,7 +354,8 @@ cannot outlive its request.
 ### Fail closed
 
 `/api/plan` and `/api/config` serve a generation only when a provider key
-(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`), `USER_BUDGET`,
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `DEEPSEEK_API_KEY`) or a local
+model (`VIBLD_LOCAL_BASE_URL` with `VIBLD_LOCAL_MODEL`, D124), `USER_BUDGET`,
 `CLERK_FRONTEND_API_URL`, `GENERATION_WORKFLOW`, `DB` and `PROJECT_CONTENT`
 are **all** present. Missing configuration means refused, never open: an
 unauthenticated endpoint on a public URL would let anyone spend the account's

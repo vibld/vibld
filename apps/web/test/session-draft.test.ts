@@ -162,6 +162,23 @@ describe('the draft a first build shows', () => {
     assert.equal(session.getState().draft?.label, 'Warm bakery');
   });
 
+  it('asks for none on a local model, whose server answers one at a time (D124)', async () => {
+    const draft = gatedDraft();
+    const build = gatedBuild();
+    const session = createSession({
+      resolveProvider: build.resolveProvider,
+      requestMockupsImpl: draft.impl,
+    });
+    session.setModel('local');
+    const done = session.submit('a bakery', 'succeed');
+    await build.reported;
+    await settle();
+    assert.equal(draft.asked.length, 0);
+    build.release();
+    await done;
+    assert.equal(session.getState().status, 'accepted');
+  });
+
   it('asks only once the build has been admitted', async () => {
     // Asking earlier could take the caller's last in-flight slot and have
     // the build refused as already running.

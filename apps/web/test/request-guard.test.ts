@@ -534,7 +534,7 @@ describe('parseAdminTopupRequest', () => {
 });
 
 describe('parseModel', () => {
-  const both = { anthropic: true, deepseek: true, openai: true };
+  const both = { anthropic: true, deepseek: true, openai: true, local: true };
 
   it('accepts no choice at all', () => {
     for (const body of [
@@ -593,7 +593,7 @@ describe('parseModel', () => {
     // Resolving an alias must not bypass the credential check that follows.
     const result = parseModel(
       { prompt: 'x', model: 'deepseek-v4-flash' },
-      { anthropic: true, deepseek: false, openai: true },
+      { anthropic: true, deepseek: false, openai: true, local: false },
     );
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /no deepseek credential/);
@@ -603,7 +603,7 @@ describe('parseModel', () => {
     // Otherwise the run fails after the user has already waited for it.
     const result = parseModel(
       { prompt: 'x', model: 'claude-opus-5' },
-      { anthropic: false, deepseek: true, openai: false },
+      { anthropic: false, deepseek: true, openai: false, local: false },
     );
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.error, /no anthropic credential/);

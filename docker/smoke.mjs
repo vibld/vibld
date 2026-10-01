@@ -6,6 +6,9 @@
  *
  *   VIBLD_OWNER_PASSWORD=... node docker/smoke.mjs [seconds to wait]
  *
+ * With VIBLD_LOCAL_MODEL set as it is in .env, it also checks that the
+ * local model is offered (D124).
+ *
  * Starting a preview is not checked here: the end-to-end check does that
  * with a real build (D122).
  */
@@ -74,6 +77,19 @@ async function main(seconds = 600) {
   console.log(
     `the builder answers signed in: generation "${body.generation}", ${body.models.length} models`,
   );
+
+  // A local model set in .env reaches the builder, offered by its own name
+  // (D124). No server needs to answer for it to be listed.
+  const local = process.env.VIBLD_LOCAL_MODEL;
+  if (local) {
+    const listed = body.models.find((model) => model.id === 'local');
+    if (listed?.label !== `Local: ${local}`) {
+      throw new Error(
+        `the local model ${local} is not offered: ${JSON.stringify(body.models)}`,
+      );
+    }
+    console.log(`the local model is offered as "${listed.label}"`);
+  }
 }
 
 main(Number(process.argv[2]) || undefined).catch((error) => {

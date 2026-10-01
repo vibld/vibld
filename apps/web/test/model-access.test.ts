@@ -12,6 +12,12 @@ import {
   planWithholdsModels,
 } from '../worker/model-access.ts';
 
+/**
+ * Every model a key serves. The local model is configured by an address
+ * rather than a key (D124), and is tested in local-model.test.ts.
+ */
+const KEYED_MODELS = MODEL_CATALOGUE.filter((m) => m.provider !== 'local');
+
 /** Every provider keyed, so "everything configured" really means everything. */
 const ALL_KEYED = {
   ANTHROPIC_API_KEY: 'a',
@@ -29,7 +35,7 @@ describe('grantedFor', () => {
     // Asserted against the catalogue rather than a literal: the count moves
     // whenever a model is added, and a hard-coded number turns that into a
     // failure that says nothing about what actually changed.
-    assert.equal(granted.length, MODEL_CATALOGUE.length);
+    assert.equal(granted.length, KEYED_MODELS.length);
     assert.ok(granted.length >= 6);
   });
 
@@ -152,10 +158,8 @@ describe('decideModel', () => {
     const broken = { ...ALL_KEYED, VIBLD_MODEL_POLICY: '{not json' };
     // Which model is cheapest moves whenever the catalogue does, so this
     // computes it the way allowedModels does rather than pinning an id.
-    const lowestOutput = Math.min(
-      ...MODEL_CATALOGUE.map((m) => m.outputMicroUsd),
-    );
-    const cheapest = MODEL_CATALOGUE.filter(
+    const lowestOutput = Math.min(...KEYED_MODELS.map((m) => m.outputMicroUsd));
+    const cheapest = KEYED_MODELS.filter(
       (m) => m.outputMicroUsd === lowestOutput,
     ).sort((a, b) => a.inputMicroUsd - b.inputMicroUsd)[0]!;
     for (const who of ['sam@example.com', 'stranger@x.com']) {
@@ -365,7 +369,7 @@ describe('a Free account (D66)', () => {
     for (const tier of ['build', 'ship'] as const) {
       assert.equal(
         grantedFor(env, 'anyone@example.com', tier).length,
-        MODEL_CATALOGUE.length,
+        KEYED_MODELS.length,
         tier,
       );
       const decision = decideModel(
@@ -386,7 +390,7 @@ describe('a Free account (D66)', () => {
     // `tierOf` answers null there: no paid plan exists to unlock anything.
     assert.equal(
       grantedFor(env, 'anyone@example.com', null).length,
-      MODEL_CATALOGUE.length,
+      KEYED_MODELS.length,
     );
     assert.equal(planWithholdsModels(env, 'anyone@example.com', null), false);
   });

@@ -95,6 +95,7 @@ import {
   decideModel,
   draftModelFor,
   grantedFor,
+  pickerEntries,
   planModelsNote,
 } from './model-access.ts';
 import type { ModelGrantSource } from './model-access.ts';
@@ -268,7 +269,15 @@ export interface Env extends PrincipalEnv {
   /** Worker secret. Never reaches the browser. */
   DEEPSEEK_API_KEY?: string;
   OPENAI_API_KEY?: string;
-  /** "anthropic", "deepseek" or "openai". Explicit beats inferred; see selectProvider. */
+  /**
+   * A model the owner runs on their own machine (D124, D138): the server's
+   * OpenAI-compatible base URL, the model's name on it, and a key only for a
+   * server started with one. See `local-client.ts` in @vibld/ai.
+   */
+  VIBLD_LOCAL_BASE_URL?: string;
+  VIBLD_LOCAL_MODEL?: string;
+  VIBLD_LOCAL_API_KEY?: string;
+  /** "anthropic", "deepseek", "openai" or "local". Explicit beats inferred; see selectProvider. */
   VIBLD_PROVIDER?: string;
   /**
    * Worker secret. Which models each principal may use, as JSON -- see
@@ -593,9 +602,10 @@ async function tierOrRefusal(
  */
 function isConfigured(env: Env): boolean {
   return Boolean(
-    // Any provider's key configures the endpoint. Which one it selects is
-    // `selectProvider`'s business, not this gate's.
-    (env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY || env.OPENAI_API_KEY) &&
+    // Any provider's key configures the endpoint, and so does a local model
+    // (D124). Which one it selects is `selectProvider`'s business, not this
+    // gate's.
+    Object.values(configuredProviders(env)).some(Boolean) &&
     signInConfigured(env) &&
     // The ledger is part of the grant, not an optimisation: a deployment
     // that cannot account for spend must not be able to spend.
@@ -3570,12 +3580,7 @@ async function route(
       : { ok: false as const, error: 'not configured' };
     return json({
       generation: configured ? 'model' : 'fake',
-      models: models.map(({ id, label, note, provider }) => ({
-        id,
-        label,
-        note,
-        provider,
-      })),
+      models: pickerEntries(env, models),
       defaultModel: decided.ok ? decided.model : null,
       // Said where the picker would be, when the plan is what keeps the
       // other models out of it; null otherwise, including for a Free
