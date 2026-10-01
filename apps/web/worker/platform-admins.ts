@@ -1,5 +1,6 @@
 import { ownerIdentity } from './owner-auth.ts';
-import { signInMode, type PrincipalEnv } from './principal.ts';
+import { signInMode } from './sign-in-mode.ts';
+import type { PrincipalEnv } from './principal.ts';
 
 /**
  * Platform admin grants (docs/decisions.md L4).

@@ -29,7 +29,6 @@ import {
 } from './access-auth.ts';
 import {
   OWNER_USER_ID,
-  ownerConfigured,
   ownerIdentity,
   ownerSignedIn,
   sameOrigin,
@@ -143,30 +142,11 @@ export function accountBanned(): Response {
   );
 }
 
-export type SignInMode = 'clerk' | 'owner' | 'access';
-
-/**
- * The sign-in this deployment is configured for, or undefined when it is
- * configured for none. Undefined means every protected endpoint refuses,
- * never "open" -- an unauthenticated endpoint on a public URL lets anyone
- * spend the account's model budget, so the failure has to be closed. A
- * VIBLD_AUTH naming a mode that is not fully configured, or no mode at all,
- * is undefined too: a typo is not a way to switch sign-in off.
- */
-export function signInMode(env: PrincipalEnv): SignInMode | undefined {
-  const named = env.VIBLD_AUTH?.trim().toLowerCase();
-  if (!named) return env.CLERK_FRONTEND_API_URL ? 'clerk' : undefined;
-  if (named === 'clerk') {
-    return env.CLERK_FRONTEND_API_URL ? 'clerk' : undefined;
-  }
-  if (named === 'owner') return ownerConfigured(env) ? 'owner' : undefined;
-  if (named === 'access') {
-    return env.VIBLD_ACCESS_TEAM_DOMAIN?.trim() && env.VIBLD_ACCESS_AUD?.trim()
-      ? 'access'
-      : undefined;
-  }
-  return undefined;
-}
+// The mode itself lives in sign-in-mode.ts, which imports nothing heavy:
+// the deploy's access preflight reaches it before dependencies are
+// installed (via platform-admins.ts).
+import { signInMode, type SignInMode } from './sign-in-mode.ts';
+export { signInMode, type SignInMode };
 
 export function signInConfigured(env: PrincipalEnv): boolean {
   return signInMode(env) !== undefined;

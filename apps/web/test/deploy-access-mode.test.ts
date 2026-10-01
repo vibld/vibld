@@ -224,6 +224,49 @@ describe('who the deploy thinks can get in', () => {
     assert.doesNotMatch(step, /secret put/, 'the check writes a secret itself');
   });
 
+  it('reaches no package, since it runs before dependencies are installed', async () => {
+    // The workflow runs this script before `pnpm install`. A runtime import
+    // that leads to a package fails there with ERR_MODULE_NOT_FOUND, while
+    // every test here (run where node_modules exists) passes. That is how
+    // internal PR 337 broke every deploy: platform-admins.ts began importing
+    // principal.ts, which reaches @vibld/core. Walk the runtime imports,
+    // static and `import()` alike (`import type` is erased), and require
+    // every one to be relative or a Node builtin. An `import()` of anything
+    // but a string literal cannot be followed, so it fails the walk too.
+    const { dirname, resolve } = await import('node:path');
+    const start = fileURLToPath(
+      new URL('../scripts/access-preflight.ts', import.meta.url),
+    );
+    const seen = new Set<string>();
+    const packages: string[] = [];
+    const queue = [start];
+    while (queue.length > 0) {
+      const file = queue.pop()!;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      const source = await readFile(file, 'utf8');
+      const declarations =
+        /^\s*(?:import|export)\s+(?!type\b)(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/gm;
+      const expressions = /\bimport\s*\(\s*(?:['"]([^'"]+)['"]\s*\))?/g;
+      const specifiers = [
+        ...[...source.matchAll(declarations)].map((match) => match[1]),
+        ...[...source.matchAll(expressions)].map(
+          (match) => match[1] ?? `(an import() that is not a string literal)`,
+        ),
+      ];
+      for (const specifier of specifiers) {
+        if (specifier!.startsWith('node:')) continue;
+        if (specifier!.startsWith('.')) {
+          queue.push(resolve(dirname(file), specifier!));
+        } else {
+          packages.push(`${specifier} (from ${file})`);
+        }
+      }
+    }
+    assert.deepEqual(packages, []);
+    assert.ok(seen.size > 3, 'the walk found the modules it should have');
+  });
+
   it('runs as a program, not just as a function', async () => {
     // The wiring, end to end: the same command the workflow runs, with the
     // secrets of a deployment that would admit nobody.
